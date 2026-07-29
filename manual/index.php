@@ -1,6 +1,6 @@
 <?php
 /**
- * MyInvoice.cz — HTML manuál (route handler).
+ * MyÚčto.cz — HTML manuál (route handler).
  *
  * URL: /manual                    → INDEX.html (rozcestník)
  * URL: /manual?ch=01_Uvod         → kapitola

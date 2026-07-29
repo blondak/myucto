@@ -34,8 +34,8 @@ Na Linuxu nainstaluj **Docker Engine + compose-plugin** z balíčkovacího syst�
 ## 2.2 Spuštění
 
 ```bash
-git clone https://github.com/radekhulan/myucto.git myinvoice
-cd myinvoice
+git clone https://github.com/radekhulan/myucto.git myucto
+cd myucto
 
 # Linux / macOS
 cmd/docker-ghcr.sh

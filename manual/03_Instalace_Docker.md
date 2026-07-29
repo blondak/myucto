@@ -7,8 +7,8 @@ Předpoklady: **Docker Desktop** (Windows / macOS) nebo **Docker Engine
 Klon repa je společný krok pro většinu variant:
 
 ```bash
-git clone https://github.com/radekhulan/myucto.git myinvoice
-cd myinvoice
+git clone https://github.com/radekhulan/myucto.git myucto
+cd myucto
 ```
 
 Pak si vyber variantu podle toho, jestli chceš stavět image lokálně, nebo
@@ -106,7 +106,7 @@ Skript `docker-install` postupně:
 2. Vygeneruje `cfg.docker.php` z `cfg.sample.php` (host=db / redis,
    randomized `app.pepper` + `secret_encryption_key`, dev-friendly cookies pro
    HTTP loopback)
-3. Postaví image `myinvoice:latest` (multi-stage: Vue build → composer →
+3. Postaví image `myucto:latest` (multi-stage: Vue build → composer →
    PHP 8.5 + nginx + php-fpm z `Dockerfile.alpine`)
 4. Spustí stack: **app** (nginx:80 → host:8080) + **db** (MariaDB 11.8)
 5. Počká, až bude DB healthy, a spustí migrace
@@ -123,7 +123,7 @@ Stáhne si i instalační skript a chová se stejně jako Varianta A
 (random hesla, vygenerovaný `cfg.docker.php`, pull image, migrace):
 
 ```bash
-mkdir myinvoice && cd myinvoice
+mkdir myucto && cd myucto
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-ghcr.sh
@@ -144,13 +144,13 @@ docker compose -f docker-compose.production.yml up -d
 Když chceš plnou kontrolu nad `cfg.docker.php` a `.env`:
 
 ```bash
-mkdir myinvoice && cd myinvoice
+mkdir myucto && cd myucto
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
 mv docker-compose.production.yml docker-compose.yml
 cp cfg.sample.php cfg.docker.php
 # uprav cfg.docker.php — minimálně:
-#   db.host => 'db', db.user => 'myinvoice', db.pass => '<heslo z .env níže>'
+#   db.host => 'db', db.user => 'myucto', db.pass => '<heslo z .env níže>'
 #   app.pepper a secret_encryption_key (oboje: openssl rand -base64 32)
 
 cat > .env <<EOF
@@ -301,7 +301,7 @@ Ověření, že běží single-volume layout:
 ```bash
 docker compose exec app sh -c 'echo $MYINVOICE_DATA_DIR'   # → /data
 docker compose exec app ls /data                            # → log  storage  private  cfg.local.php (po setupu)
-docker volume ls | grep myinvoice                           # vidíš pouze app-data + db-data
+docker volume ls | grep myucto                           # vidíš pouze app-data + db-data
 ```
 
 #### Pro existující 3-volume instalaci (upgrade z ≤ 3.5.x)
@@ -321,7 +321,7 @@ přes dočasný `alpine` sidecar a obnoví `cfg.local.php`. Staré volumes nesma
 docker run --rm \
   -v myinvoice_app-data:/data:ro \
   -v "$PWD":/backup \
-  alpine tar czf /backup/myinvoice-data-$(date +%F).tar.gz -C /data .
+  alpine tar czf /backup/myucto-data-$(date +%F).tar.gz -C /data .
 ```
 
 Plus dump MariaDB (viz [§ 75.7 Záloha a obnova](75_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
@@ -446,13 +446,13 @@ Než ho udělej daemon, otestuj ho v běžícím okně:
 
 ```bash
 # Linux / macOS
-cd /opt/myinvoice
+cd /opt/myucto
 bash cmd/docker-update-watcher.sh
 ```
 
 ```powershell
 # Windows — spusť tím PowerShellem, který máš (uprav cd na SVOU instalační cestu)
-cd C:\inetpub\myinvoice
+cd C:\inetpub\myucto
 pwsh -NoProfile -ExecutionPolicy Bypass -File cmd\docker-update-watcher.ps1
 # nemáš-li PowerShell 7, použij místo `pwsh` příkaz `powershell` (Windows PS 5.1)
 ```
@@ -470,15 +470,15 @@ container every 30s` — od té chvíle hlídá flag. Klikni v UI
 #### Linux — systemd unit (produkce)
 
 ```bash
-sudo tee /etc/systemd/system/myinvoice-update-watcher.service <<'EOF'
+sudo tee /etc/systemd/system/myucto-update-watcher.service <<'EOF'
 [Unit]
-Description=MyInvoice update watcher
+Description=MyUcto update watcher
 After=docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/myinvoice
-ExecStart=/opt/myinvoice/cmd/docker-update-watcher.sh
+WorkingDirectory=/opt/myucto
+ExecStart=/opt/myucto/cmd/docker-update-watcher.sh
 Restart=always
 
 [Install]
@@ -486,27 +486,27 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now myinvoice-update-watcher
+sudo systemctl enable --now myucto-update-watcher
 ```
 
-Logy: `journalctl -u myinvoice-update-watcher -f`.
+Logy: `journalctl -u myucto-update-watcher -f`.
 
 #### Windows — Scheduled Task (produkce)
 
 ```powershell
 # Uprav cestu k SVÉ instalaci. Máš-li jen Windows PowerShell 5.1, nahraď
 # `pwsh.exe` za `powershell.exe`.
-schtasks /create /tn "MyInvoice Update Watcher" `
-  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myinvoice\cmd\docker-update-watcher.ps1" `
+schtasks /create /tn "MyUcto Update Watcher" `
+  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myucto\cmd\docker-update-watcher.ps1" `
   /sc onstart /ru SYSTEM /rl HIGHEST
-schtasks /run /tn "MyInvoice Update Watcher"
+schtasks /run /tn "MyUcto Update Watcher"
 ```
 
 > 🛈 `pwsh.exe` musí být v PATH (dává ji tam instalátor PowerShell 7). Pokud ji
 > Scheduled Task nenajde, zadej plnou cestu `C:\Program Files\PowerShell\7\pwsh.exe`,
 > nebo použij `powershell.exe` (PS 5.1).
 
-Stav úlohy: `schtasks /query /tn "MyInvoice Update Watcher" /v /fo list`.
+Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
 
 #### Daily check pro detekci nové verze
 
@@ -555,7 +555,7 @@ zůstává v repu, CI ho jen nepublikuje):
 #   v docker-compose.production.yml změň :latest na :4.31.0, pak pull + up -d
 
 # source: postav Debian image lokálně z původního Dockerfile
-docker build -f Dockerfile -t myinvoice:latest .
+docker build -f Dockerfile -t myucto:latest .
 docker compose up -d
 ```
 
@@ -620,7 +620,7 @@ Nejjednodušší cesta. Přidej katalog šablon a nasaď z formuláře:
    https://raw.githubusercontent.com/radekhulan/myucto/master/portainer-template.json
    ```
    a ulož.
-2. **App Templates** → najdi dlaždici **MyInvoice.cz** → klikni.
+2. **App Templates** → najdi dlaždici **MyÚčto.cz** → klikni.
 3. Vyplň proměnné (povinné DB hesla + pepper; ostatní mají rozumný default) →
    **Deploy the stack**.
 4. Otevři **http://&lt;host&gt;:8080** → doběhne [setup wizard](07_Setup_wizard.md).
@@ -647,7 +647,7 @@ Compose path `docker-compose.portainer.yml`.
 
 Dockge drží stacky jako reálné soubory na disku, takže pasuje na compose 1:1:
 
-1. **+ Compose** → název stacku (např. `myinvoice`).
+1. **+ Compose** → název stacku (např. `myucto`).
 2. Do editoru vlož `docker-compose.portainer.yml`.
 3. Do `.env` panelu doplň proměnné:
    ```env

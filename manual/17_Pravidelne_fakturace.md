@@ -274,7 +274,7 @@ Skript `api/bin/cron-generate-recurring-invoices.php` — spouštěj ho **jednou
 denně**:
 
 ```cron
-0 6 * * * cd /var/www/myinvoice.cz && php api/bin/cron-generate-recurring-invoices.php
+0 6 * * * cd /var/www/myucto.cz && php api/bin/cron-generate-recurring-invoices.php
 ```
 
 Pro testy se hodí `--dry-run` (vypíše, co by se vygenerovalo, ale nic

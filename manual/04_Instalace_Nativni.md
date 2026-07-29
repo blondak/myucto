@@ -22,8 +22,8 @@ Předpoklady (pro build ze zdrojáků):
 ## 4.1 Klon a konfigurace
 
 ```bash
-git clone https://github.com/radekhulan/myucto.git myinvoice
-cd myinvoice
+git clone https://github.com/radekhulan/myucto.git myucto
+cd myucto
 cp cfg.sample.php cfg.php
 ```
 
@@ -45,7 +45,7 @@ domény vyžaduje TOTP nebo administrátorskou recovery cestu.
 ## 4.2 Vytvoř databázi
 
 ```bash
-mysql -u root -p -e "CREATE DATABASE myinvoice CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p -e "CREATE DATABASE myucto CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
 ## 4.3 Backend + migrace
@@ -88,9 +88,9 @@ potřeba** (přeskočíš sekce 4.3 frontend/manuál i 4.4).
 
 ```bash
 TAG=4.30.1
-curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myinvoice-$TAG.tar.gz
-sha256sum -c myinvoice-$TAG.tar.gz.sha256   # ověř integritu
-tar -xzf myinvoice-$TAG.tar.gz --strip-components=1 \
+curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
+sha256sum -c myucto-$TAG.tar.gz.sha256   # ověř integritu
+tar -xzf myucto-$TAG.tar.gz --strip-components=1 \
   --exclude='cfg.php' --exclude='cfg.local.php' \
   --exclude='storage' --exclude='private' --exclude='log'
 ```
@@ -131,9 +131,9 @@ php api/bin/migrate.php
 
 ```bash
 TAG=4.30.1
-curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myinvoice-$TAG.tar.gz
-sha256sum -c myinvoice-$TAG.tar.gz.sha256
-tar -xzf myinvoice-$TAG.tar.gz --strip-components=1 \
+curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
+sha256sum -c myucto-$TAG.tar.gz.sha256
+tar -xzf myucto-$TAG.tar.gz --strip-components=1 \
   --exclude='cfg.php' --exclude='cfg.local.php' \
   --exclude='storage' --exclude='private' --exclude='log'
 php api/bin/migrate.php

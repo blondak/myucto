@@ -441,7 +441,7 @@ sdílených dokladů, nakonfiguruj **inbox adresář** v `cfg.php`:
 
 ```php
 'purchase_invoice' => [
-    'inbox_dir'         => 'C:/inetpub/wwwroot/myinvoice.cz/inbox',
+    'inbox_dir'         => 'C:/inetpub/wwwroot/myucto.cz/inbox',
     'inbox_recursive'   => true,
     'allowed_exts'      => ['pdf', 'isdoc', 'isdocx', 'xml'],
     'archive_storage'   => __DIR__ . '/storage/purchase-invoices',

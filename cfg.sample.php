@@ -184,15 +184,15 @@ return [
         // Anti-spam / deliverability — DKIM podpis odchozí pošty
         //
         // Klíče dej do /private/dkim/ (gitignored). Doména DKIM = doména z from_email.
-        // Selector: myinvoice → DNS hostname:  myinvoice._domainkey.{domain}
+        // Selector: myucto → DNS hostname:  myucto._domainkey.{domain}
         // Po publikaci DNS TXT záznamu přepnout enabled => true.
         'dkim' => [
             'enabled'         => false,
             'domain'          => 'example.com',
-            'selector'        => 'myinvoice',
+            'selector'        => 'myucto',
             'passphrase'      => '',                                          // pokud je private key šifrovaný
-            'private_key_path'=> __DIR__ . '/private/dkim/myinvoice.pem',
-            'public_key_path' => __DIR__ . '/private/dkim/myinvoice.pub',
+            'private_key_path'=> __DIR__ . '/private/dkim/myucto.pem',
+            'public_key_path' => __DIR__ . '/private/dkim/myucto.pub',
             'dns_doc_path'    => __DIR__ . '/private/dkim/dns.txt',           // návod na DNS nastavení (SPF/DKIM/DMARC)
         ],
 

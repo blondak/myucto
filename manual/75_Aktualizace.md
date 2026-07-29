@@ -34,9 +34,9 @@ blocking síťový call při každém načtení stránky.
 
 | Prostředí | Příklad |
 |-----------|---------|
-| Linux/cron | `0 6 * * * cd /opt/myinvoice && php api/bin/cron-version-check.php` |
-| Docker (host cron) | `0 6 * * * docker compose -f /opt/myinvoice/docker-compose.production.yml exec -T app php api/bin/cron-version-check.php` |
-| Windows Scheduler | Daily, akce: `php.exe C:\inetpub\myinvoice\api\bin\cron-version-check.php` |
+| Linux/cron | `0 6 * * * cd /opt/myucto && php api/bin/cron-version-check.php` |
+| Docker (host cron) | `0 6 * * * docker compose -f /opt/myucto/docker-compose.production.yml exec -T app php api/bin/cron-version-check.php` |
+| Windows Scheduler | Daily, akce: `php.exe C:\inetpub\myucto\api\bin\cron-version-check.php` |
 
 Pokud cron nenastavíš, kontrola se nikdy nespustí — admin musí kliknout
 **„Zkontrolovat teď"** v UI.
@@ -68,20 +68,20 @@ bash okně:
 
 ```bash
 # Linux / macOS
-cd /opt/myinvoice
+cd /opt/myucto
 bash cmd/docker-update-watcher.sh
 ```
 
 ```powershell
 # Windows — spusť tím PowerShellem, který máš (uprav cd na SVOU instalační cestu)
-cd C:\inetpub\myinvoice
+cd C:\inetpub\myucto
 pwsh -NoProfile -ExecutionPolicy Bypass -File cmd\docker-update-watcher.ps1
 # nemáš-li PowerShell 7, použij místo `pwsh` příkaz `powershell` (Windows PS 5.1)
 ```
 
 > 🛈 Watcher si vlastní update spouští **tímtéž** PowerShell hostem, pod kterým
 > běží (`pwsh` i `powershell`), a cesty řeší z umístění skriptu — funguje tedy
-> i z jiného adresáře než `C:\inetpub\myinvoice` a na strojích, kde je jen
+> i z jiného adresáře než `C:\inetpub\myucto` a na strojích, kde je jen
 > PowerShell 7 (`pwsh`).
 
 Vidíš `[watcher] start, polling storage/upgrade-requested.json inside
@@ -94,15 +94,15 @@ do kontejneru. Watcher zastav `Ctrl+C`.
 #### Linux — systemd unit
 
 ```bash
-sudo tee /etc/systemd/system/myinvoice-update-watcher.service <<'EOF'
+sudo tee /etc/systemd/system/myucto-update-watcher.service <<'EOF'
 [Unit]
-Description=MyInvoice update watcher
+Description=MyUcto update watcher
 After=docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/myinvoice
-ExecStart=/opt/myinvoice/cmd/docker-update-watcher.sh
+WorkingDirectory=/opt/myucto
+ExecStart=/opt/myucto/cmd/docker-update-watcher.sh
 Restart=always
 User=root
 
@@ -111,30 +111,30 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now myinvoice-update-watcher
+sudo systemctl enable --now myucto-update-watcher
 ```
 
-Logy: `journalctl -u myinvoice-update-watcher -f`.
+Logy: `journalctl -u myucto-update-watcher -f`.
 
 #### Windows — Scheduled Task
 
 ```powershell
 # Uprav cestu k SVÉ instalaci. Máš-li jen Windows PowerShell 5.1, nahraď
 # `pwsh.exe` za `powershell.exe`.
-schtasks /create /tn "MyInvoice Update Watcher" `
-  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myinvoice\cmd\docker-update-watcher.ps1" `
+schtasks /create /tn "MyUcto Update Watcher" `
+  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myucto\cmd\docker-update-watcher.ps1" `
   /sc onstart /ru SYSTEM /rl HIGHEST
 
 # Spusť hned (ne až po restartu)
-schtasks /run /tn "MyInvoice Update Watcher"
+schtasks /run /tn "MyUcto Update Watcher"
 ```
 
 > 🛈 `pwsh.exe` musí být v PATH (PowerShell 7 instalátor ji tam dává). Pokud
 > Scheduled Task hlásí, že příkaz nenašel, zadej plnou cestu
 > `C:\Program Files\PowerShell\7\pwsh.exe`, nebo použij `powershell.exe` (PS 5.1).
 
-Stav úlohy: `schtasks /query /tn "MyInvoice Update Watcher" /v /fo list`.
-Stop: `schtasks /end /tn "MyInvoice Update Watcher"`.
+Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
+Stop: `schtasks /end /tn "MyUcto Update Watcher"`.
 
 ### Co watcher dělá
 
@@ -149,8 +149,8 @@ Stop: `schtasks /end /tn "MyInvoice Update Watcher"`.
 4. Po restartu kontejneru počká až 60 s, než bude zase responzivní
    (`docker compose exec true`), pak zapíše výsledek (success / fail)
    přes `cat > storage/upgrade-result.json` zpět do kontejneru.
-5. Plný log běhu na host: `/tmp/myinvoice-upgrade-YYYYMMDDTHHMMSSZ.log`
-   (Linux) nebo `%TEMP%\myinvoice-upgrade-...log` (Windows).
+5. Plný log běhu na host: `/tmp/myucto-upgrade-YYYYMMDDTHHMMSSZ.log`
+   (Linux) nebo `%TEMP%\myucto-upgrade-...log` (Windows).
 6. UI v **Systém → Aktualizace** každých 5 s pollne `/api/admin/update/
    status`, který načte `upgrade-result.json` z kontejneru a zobrazí
    „Upgrade úspěšně dokončen" nebo „Upgrade selhal" s message.
@@ -162,14 +162,14 @@ ve stavu „Upgrade probíhá…"). Spusť na hostu ručně:
 
 ```bash
 # Linux / macOS
-cd /opt/myinvoice
+cd /opt/myucto
 bash cmd/docker-update.sh
 docker compose -f docker-compose.production.yml exec app rm -f storage/upgrade-requested.json
 ```
 
 ```powershell
 # Windows
-cd C:\inetpub\myinvoice
+cd C:\inetpub\myucto
 .\cmd\docker-update.ps1
 docker compose -f docker-compose.production.yml exec app rm -f storage/upgrade-requested.json
 ```
@@ -213,14 +213,14 @@ updaty jsou bezpečné.
 
 ```bash
 # Linux / macOS
-cd /opt/myinvoice
+cd /opt/myucto
 git pull --ff-only                # přinese nový docker-compose.yml (single-volume)
 bash cmd/docker-migrate-volumes.sh  # snapshotne cfg.local.php, zkopíruje data, up -d
 ```
 
 ```powershell
 # Windows
-cd C:\inetpub\myinvoice
+cd C:\inetpub\myucto
 git pull --ff-only
 .\cmd\docker-migrate-volumes.ps1
 ```
@@ -269,12 +269,12 @@ Node nemáš (typicky sdílený hosting), je nejjednodušší cesta:
 
 1. Stáhni **production bundle** z release page:
    `https://github.com/radekhulan/myucto/releases/tag/vX.Y.Z` →
-   asset `myinvoice-X.Y.Z.tar.gz`. Tarball má všechno potřebné už
+   asset `myucto-X.Y.Z.tar.gz`. Tarball má všechno potřebné už
    vyrobené (vendor, web/dist, manual). SHA-256 checksum je v
-   `myinvoice-X.Y.Z.tar.gz.sha256`.
+   `myucto-X.Y.Z.tar.gz.sha256`.
 2. Rozbal přes web rozhraní hostingu nebo SSH:
    ```bash
-   tar -xzf myinvoice-X.Y.Z.tar.gz --strip-components=1 \
+   tar -xzf myucto-X.Y.Z.tar.gz --strip-components=1 \
      --exclude='cfg.php' --exclude='cfg.local.php' \
      --exclude='storage' --exclude='private' --exclude='log'
    ```

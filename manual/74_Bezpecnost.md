@@ -50,7 +50,7 @@ Passkey se používá:
 - jako čerstvé potvrzení citlivé operace, například vytvoření API tokenu.
 
 Systémový dialog může podle zařízení použít otisk, obličej, PIN, gesto, heslo
-zařízení nebo externí bezpečnostní klíč. MyInvoice konkrétní metodu nezjišťuje,
+zařízení nebo externí bezpečnostní klíč. MyÚčto konkrétní metodu nezjišťuje,
 biometrická data neopouštějí zařízení a server ukládá pouze veřejný klíč.
 Poskytovatel platformy nebo password manager může passkey end-to-end šifrovaně
 synchronizovat mezi zařízeními.
@@ -541,8 +541,8 @@ Reálnou IP přečte aplikace z hlavičky `X-Forwarded-For` **pouze tehdy**, kdy
 Pro **deliverabilitu** (aby gmail / o365 / seznam tvé maily nepoznačily jako
 spam) doporučujeme aktivovat DKIM:
 
-1. Vygeneruj RSA klíč: `openssl genrsa -out private/dkim/myinvoice.pem 2048`
-2. Public key → DNS TXT záznam `myinvoice._domainkey.tvoje-domena.cz`
+1. Vygeneruj RSA klíč: `openssl genrsa -out private/dkim/myucto.pem 2048`
+2. Public key → DNS TXT záznam `myucto._domainkey.tvoje-domena.cz`
 3. V `cfg.php → smtp.dkim.enabled => true`
 4. Restart služby
 
