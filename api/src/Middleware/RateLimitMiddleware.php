@@ -397,6 +397,30 @@ final class RateLimitMiddleware implements MiddlewareInterface
      *
      * @return array{count:int,ttl:int,redis:bool}
      */
+    /**
+     * Šířka `rate_limit_counters.bucket_key`. Tabulka je ENGINE=MEMORY, kde se
+     * VARCHAR paduje na plnou délku, takže sloupec nelze rozšiřovat od oka —
+     * platí se za to pamětí u každého řádku.
+     */
+    private const DB_KEY_MAX = 120;
+
+    /**
+     * Klíč pro DB větev. Redis unese libovolnou délku, MEMORY tabulka ne:
+     * `rl:session-poll:` + sha1(path) + `:session:` + sha256(session id) dá 129
+     * znaků a INSERT skončil na `1406 Data too long` → 500 na každém pollu
+     * session. Projevilo se to jen bez Redisu, tedy přesně na výchozím Dockeru.
+     *
+     * Delší klíč proto zkrátíme na čitelnou předponu + sha1 celého klíče. Kolize
+     * je tím pořád vyloučená a v tabulce zůstane poznat, o jaký bucket šlo.
+     */
+    private static function dbKey(string $key): string
+    {
+        if (strlen($key) <= self::DB_KEY_MAX) {
+            return $key;
+        }
+        return substr($key, 0, self::DB_KEY_MAX - 41) . ':' . sha1($key);
+    }
+
     private function dbState(string $key, int $window): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -404,7 +428,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
                FROM rate_limit_counters
               WHERE bucket_key = ? AND created_at >= NOW() - INTERVAL ? SECOND'
         );
-        $stmt->execute([$key, $window]);
+        $stmt->execute([self::dbKey($key), $window]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['c' => 0, 'age' => 0];
 
         $ttl = $window - (int) $row['age'];
@@ -421,7 +445,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO rate_limit_counters (bucket_key) VALUES (?)'
         );
-        $stmt->execute([$key]);
+        $stmt->execute([self::dbKey($key)]);
     }
 
     /** Public kvůli ForgotPasswordAction — potřebuje stejné /24 (resp. /64) bucketování. */

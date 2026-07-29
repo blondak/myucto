@@ -128,6 +128,53 @@ final class RateLimitDbFallbackTest extends TestCase
             'Limit 3/min musí propustit 3 pokusy a zbytek odmítnout — dřív prošlo všech 5');
     }
 
+    /**
+     * Poll session je nejdelší bucket, jaký limiter skládá:
+     * `rl:session-poll:` + sha1(path) + `:session:` + sha256(session id) = 129 znaků,
+     * kdežto `rate_limit_counters.bucket_key` je VARCHAR(120). INSERT proto padal
+     * na `1406 Data too long` a /api/auth/session/status vracel 500 při KAŽDÉM
+     * pollu — jenže jen bez Redisu, takže to trefilo přesně výchozí Docker
+     * instalaci a session se hned po setup wizardu nedala ověřit.
+     */
+    public function testLongSessionPollBucketFitsDbColumn(): void
+    {
+        $mw = $this->middleware();
+        $handler = $this->handler();
+
+        // STRICT_TRANS_TABLES natvrdo: bez něj MariaDB dlouhou hodnotu jen tiše
+        // ořízne a test by prošel i s rozbitým kódem. Docker MariaDB 11.8 striktní
+        // režim ve výchozím stavu má — právě proto se chyba projevila jen tam.
+        $pdo = $this->db->pdo();
+        $previousSqlMode = (string) $pdo->query('SELECT @@session.sql_mode')->fetchColumn();
+        $pdo->exec("SET SESSION sql_mode = CONCAT(@@session.sql_mode, ',STRICT_TRANS_TABLES')");
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', 'http://localhost/api/auth/session/status', ['REMOTE_ADDR' => self::TEST_IP])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 1])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_TOKEN, str_repeat('a', 64));
+
+        try {
+            $code = $mw->process($request, $handler)->getStatusCode();
+        } finally {
+            $restore = $pdo->prepare('SET SESSION sql_mode = ?');
+            $restore->execute([$previousSqlMode]);
+        }
+
+        self::assertSame(200, $code, 'Poll session nesmí spadnout na délce bucket_key.');
+
+        $stored = $this->db->pdo()
+            ->query("SELECT bucket_key FROM rate_limit_counters WHERE bucket_key LIKE 'rl:session-poll:%'")
+            ->fetchAll(\PDO::FETCH_COLUMN);
+
+        self::assertNotEmpty($stored,
+            'Test musí opravdu projít větví session-poll, jinak nic neověřuje.');
+
+        foreach ($stored as $key) {
+            self::assertLessThanOrEqual(120, strlen((string) $key),
+                'Uložený bucket_key se musí vejít do VARCHAR(120).');
+        }
+    }
+
     public function testRejectionCarriesRetryAfter(): void
     {
         $mw = $this->middleware();
