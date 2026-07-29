@@ -690,5 +690,17 @@ Nová verze = pull novějšího image + recreate, migrace doběhnou při startu:
 > jsou pro Portainer/Dockge zbytečné — update je tu otázkou jednoho tlačítka.
 
 > 🛈 **Redis (volitelné):** stack má `redis` službu pod profilem `redis`.
-> Pro zapnutí přidej do proměnných `MYINVOICE_REDIS_ENABLED=true` a
-> `MYINVOICE_REDIS_HOST=redis` a nasaď s aktivním profilem.
+> Profil se aktivuje proměnnou `COMPOSE_PROFILES=redis`, kterou **formulář App
+> Template nenabízí** — přes one-click šablonu (§ 3.11.1) tedy Redis nasadit
+> nejde. Použij ruční stack (§ 3.11.2) nebo Dockge (§ 3.11.3) a doplň proměnné:
+>
+> ```env
+> COMPOSE_PROFILES=redis
+> MYINVOICE_REDIS_ENABLED=true
+> MYINVOICE_REDIS_HOST=redis
+> ```
+>
+> Bez Redisu appka jede na databázovém fallbacku (sessiony v `sessions`,
+> rate limit v `rate_limit_counters`), takže je to čistě volitelné.
+> Pozor: samotné `MYINVOICE_REDIS_ENABLED=true` bez aktivního profilu znamená,
+> že se aplikace pokouší spojit s neexistujícím hostem.

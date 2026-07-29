@@ -3,11 +3,11 @@
   "templates": [
     {
       "type": 3,
-      "title": "MyUcto.cz",
+      "title": "MyÚčto.cz",
       "name": "myucto",
-      "description": "Český fakturační systém (PHP 8.5 + Vue 3 + MariaDB). Vydané i přijaté faktury, DPH/kontrolní/souhrnné hlášení, daň z příjmů, banka, upomínky, AI extrakce dokladů, multi-supplier. Self-hosted, jeden veřejný image z GHCR.",
-      "note": "Vyplň povinné proměnné (DB_PASSWORD, DB_ROOT_PASSWORD, MYINVOICE_PEPPER) — hesla vygeneruj přes <code>openssl rand -base64 28</code> a pepper/secret přes <code>openssl rand -base64 32</code>. Po nasazení otevři http://&lt;host&gt;:&lt;APP_PORT&gt; a doběhne setup wizard. Migrace DB se spustí automaticky při startu. Pro produkci za HTTPS reverse proxy nastav navíc MYINVOICE_APP_URL, MYINVOICE_SESSION_COOKIE_SECURE=true a MYINVOICE_SESSION_COOKIE_NAME=__Host-myinvoice_session.",
-      "categories": ["Finance", "Invoicing", "Accounting"],
+      "description": "České účetnictví a fakturace (PHP 8.5 + Vue 3 + MariaDB). Vydané i přijaté faktury, DPH/kontrolní/souhrnné hlášení, banka, upomínky, AI extrakce dokladů, multi-supplier — a nad tím podvojné účetnictví i daňová evidence: účetní deník, hlavní kniha, obratová předvaha, rozvaha a výsledovka, saldokonto, majetek a odpisy, mzdy, sklad, pokladna, uzávěrka včetně přílohy podle § 18 ZoÚ, daň z příjmů a podání přes EPO. Self-hosted, jeden veřejný image z GHCR.",
+      "note": "<p>Vyplň povinné proměnné (DB_PASSWORD, DB_ROOT_PASSWORD, MYINVOICE_PEPPER) — hesla vygeneruj přes <code>openssl rand -base64 28</code> a pepper/secret přes <code>openssl rand -base64 32</code>. Po nasazení otevři http://&lt;host&gt;:&lt;APP_PORT&gt; a doběhne setup wizard. Migrace DB se spustí automaticky při startu.</p><p>Pro produkci za HTTPS reverse proxy nastav navíc MYINVOICE_APP_URL, MYINVOICE_SESSION_COOKIE_SECURE=true a MYINVOICE_SESSION_COOKIE_NAME=__Host-myinvoice_session; proxy musí posílat hlavičku <code>X-Forwarded-Proto: https</code>.</p><p>Funkce zděděné z MyInvoice zůstávají zdarma navždy. Účetní nadstavba (podvojné účetnictví, uzávěrky, sklad a e-shop, evidence majetku, EPO podání, rozšířené opravy DPH) běží na komerční licenci s 60denním bezplatným vyzkoušením.</p><p>SMTP lze nechat prázdné a nastavit později v aplikaci (Nastavení). Volitelný Redis je v compose pod profilem <code>redis</code>, který App Template neumí aktivovat — pokud ho chceš, nasaď stack ručně (Stacks → Add stack) s <code>COMPOSE_PROFILES=redis</code>. Bez Redisu jedou sessiony i rate limit z databáze.</p>",
+      "categories": ["Finance", "Accounting", "Invoicing"],
       "platform": "linux",
       "logo": "https://raw.githubusercontent.com/radekhulan/myucto/master/styles/logo.svg",
       "repository": {
@@ -63,6 +63,37 @@
           "default": "myinvoice_session"
         },
         {
+          "name": "MYINVOICE_ENABLE_CRON",
+          "label": "Cron v kontejneru",
+          "description": "Naplánované úlohy (upomínky, bankovní scan, AI worker, zálohy, kontrola integrity deníku). Vypni jen tehdy, když je pouštíš zvenčí.",
+          "select": [
+            { "text": "1 — zapnuto (doporučené)", "value": "1", "default": true },
+            { "text": "0 — vypnuto", "value": "0" }
+          ]
+        },
+        {
+          "name": "MYINVOICE_AUTH_REQUIRE_MFA",
+          "label": "Vyžadovat dvoufázové ověření",
+          "description": "Vynutí MFA všem uživatelům. Prázdné = ponechat nastavení z aplikace.",
+          "select": [
+            { "text": "— ponechat nastavení z aplikace (default)", "value": "", "default": true },
+            { "text": "true — MFA povinné pro všechny", "value": "true" },
+            { "text": "false — MFA dobrovolné", "value": "false" }
+          ]
+        },
+        {
+          "name": "MYINVOICE_AUTH_MFA_METHODS",
+          "label": "Povolené metody MFA (volitelné)",
+          "description": "Čárkou oddělený seznam z: passkey, totp. Prázdné = obě.",
+          "default": ""
+        },
+        {
+          "name": "MYINVOICE_SESSION_LOCK_AFTER_MINUTES",
+          "label": "Zámek session po nečinnosti (volitelné)",
+          "description": "Počet minut do zamčení obrazovky; 0 nebo prázdné = vypnuto.",
+          "default": ""
+        },
+        {
           "name": "MYINVOICE_SMTP_HOST",
           "label": "SMTP host (volitelné)",
           "description": "Lze nechat prázdné a nastavit později v aplikaci (Nastavení).",
@@ -71,8 +102,29 @@
         {
           "name": "MYINVOICE_SMTP_PORT",
           "label": "SMTP port (volitelné)",
-          "description": "25 plain | 465 SSL | 587 STARTTLS",
+          "description": "25 plain | 465 SSL | 587 STARTTLS — nastav podle něj i šifrování níže.",
           "default": ""
+        },
+        {
+          "name": "MYINVOICE_SMTP_ENCRYPTION",
+          "label": "SMTP šifrování (volitelné)",
+          "description": "Musí odpovídat portu: 465 → ssl, 587 → tls, 25 → none. Prázdné = ponechat nastavení z aplikace.",
+          "select": [
+            { "text": "— ponechat nastavení z aplikace (default)", "value": "", "default": true },
+            { "text": "tls — STARTTLS (port 587)", "value": "tls" },
+            { "text": "ssl — implicitní TLS (port 465)", "value": "ssl" },
+            { "text": "none — bez šifrování (port 25)", "value": "none" }
+          ]
+        },
+        {
+          "name": "MYINVOICE_SMTP_AUTH",
+          "label": "SMTP přihlašování (volitelné)",
+          "description": "Zapni, když server vyžaduje uživatele a heslo. Prázdné = ponechat nastavení z aplikace.",
+          "select": [
+            { "text": "— ponechat nastavení z aplikace (default)", "value": "", "default": true },
+            { "text": "true — přihlašovat uživatelem a heslem", "value": "true" },
+            { "text": "false — bez přihlašování", "value": "false" }
+          ]
         },
         {
           "name": "MYINVOICE_SMTP_USER",
@@ -87,6 +139,12 @@
         {
           "name": "MYINVOICE_SMTP_FROM_EMAIL",
           "label": "Odesílatel — e-mail (volitelné)",
+          "default": ""
+        },
+        {
+          "name": "MYINVOICE_SMTP_FROM_NAME",
+          "label": "Odesílatel — jméno (volitelné)",
+          "description": "Zobrazované jméno v odchozích e-mailech, např. název firmy.",
           "default": ""
         },
         {
