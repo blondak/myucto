@@ -15,7 +15,7 @@ REM  Volitelne argumenty:
 REM    --dry-run       jen vypise, co by se vygenerovalo
 REM
 REM  Task Scheduler (kazdy den 06:30):
-REM    schtasks /create /tn "MyInvoice Recurring" ^
+REM    schtasks /create /tn "MyUcto Recurring" ^
 REM      /tr "%~f0" /sc daily /st 06:30 /ru SYSTEM
 REM ============================================================================
 setlocal

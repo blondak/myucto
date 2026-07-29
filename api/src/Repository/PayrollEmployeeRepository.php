@@ -1,0 +1,139 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Repository;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use PDO;
+
+/**
+ * Identifikace zaměstnance/jednatele-společníka pro mzdový list (§38j ZDP).
+ *
+ * Záměrně jednoduchá evidence — jméno, rodné číslo/datum narození, adresa a prohlášení
+ * poplatníka (sleva na poplatníka, počet dětí). Neduplikuje `PayrollCalculator::types()`
+ * (typ poplatníka řídí kontaci 521/331 vs. 522/366), jen ho eviduje spolu s identifikací.
+ */
+final class PayrollEmployeeRepository
+{
+    private const COLS = 'id, supplier_id, full_name, birth_date, birth_number, address,
+        taxpayer_type, employment_type, tax_declaration_signed,
+        tax_credit_taxpayer, child_count, is_active, created_at, updated_at';
+
+    public function __construct(private readonly Connection $db) {}
+
+    /** @return list<array<string,mixed>> */
+    public function listForTenant(int $supplierId, ?bool $active = null): array
+    {
+        $sql = 'SELECT ' . self::COLS . ' FROM payroll_employees WHERE supplier_id = ?';
+        $params = [$supplierId];
+        if ($active !== null) {
+            $sql .= ' AND is_active = ?';
+            $params[] = $active ? 1 : 0;
+        }
+        $sql .= ' ORDER BY is_active DESC, full_name ASC, id ASC';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return array<string,mixed>|null */
+    public function find(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLS . ' FROM payroll_employees WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
+    /** @param array<string,mixed> $data */
+    public function insert(int $supplierId, array $data): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, birth_date, birth_number, address,
+                 taxpayer_type, employment_type, tax_declaration_signed,
+                 tax_credit_taxpayer, child_count, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $supplierId,
+            $data['full_name'],
+            $data['birth_date'] ?? null,
+            $data['birth_number'] ?? null,
+            $data['address'] ?? null,
+            $data['taxpayer_type'],
+            $data['employment_type'] ?? 'hpp',
+            array_key_exists('tax_declaration_signed', $data) ? (int) (bool) $data['tax_declaration_signed'] : 1,
+            (int) (bool) $data['tax_credit_taxpayer'],
+            $data['child_count'],
+            array_key_exists('is_active', $data) ? (int) (bool) $data['is_active'] : 1,
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Částečný update — jen předané klíče. Vrací true při zásahu do řádku tenanta.
+     * @param array<string,mixed> $fields
+     */
+    public function update(int $supplierId, int $id, array $fields): bool
+    {
+        $allowed = [
+            'full_name', 'birth_date', 'birth_number', 'address',
+            'taxpayer_type', 'employment_type', 'tax_declaration_signed',
+            'tax_credit_taxpayer', 'child_count', 'is_active',
+        ];
+        $sets = [];
+        $params = [];
+        foreach ($allowed as $col) {
+            if (array_key_exists($col, $fields)) {
+                $sets[] = "{$col} = ?";
+                // `tax_declaration_signed` MUSÍ být v seznamu boolean sloupců — jinak by
+                // do TINYINT šlo syrové "false"/"0" z JSONu a MariaDB by z něj udělala 1.
+                $params[] = in_array($col, ['tax_credit_taxpayer', 'is_active', 'tax_declaration_signed'], true)
+                    ? (int) (bool) $fields[$col]
+                    : $fields[$col];
+            }
+        }
+        if ($sets === []) {
+            return false;
+        }
+        $params[] = $id;
+        $params[] = $supplierId;
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_employees SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute($params);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** Zaměstnanec s historií mzdových záznamů se nesmí smazat — jen deaktivovat. */
+    public function hasMonthlyRecords(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_monthly_records WHERE employee_id = ? AND supplier_id = ? LIMIT 1'
+        );
+        $stmt->execute([$id, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function delete(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('DELETE FROM payroll_employees WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$id, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** @param array<string,mixed> $r @return array<string,mixed> */
+    private function cast(array $r): array
+    {
+        $r['id'] = (int) $r['id'];
+        $r['supplier_id'] = (int) $r['supplier_id'];
+        $r['tax_credit_taxpayer'] = (bool) $r['tax_credit_taxpayer'];
+        $r['child_count'] = (int) $r['child_count'];
+        $r['is_active'] = (bool) $r['is_active'];
+        return $r;
+    }
+}

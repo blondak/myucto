@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Admin\Import;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\AnthropicClient;
@@ -39,7 +41,7 @@ final class AnthropicCredentialsAction
     public function status(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!RequestAuthorization::allows($request, 'settings.ai_provider', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         $supplierId = SupplierGuard::currentId($request);
         $creds = $this->anthropic->getCredentials($supplierId);
 
@@ -59,7 +61,7 @@ final class AnthropicCredentialsAction
     public function update(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!RequestAuthorization::allows($request, 'settings.ai_provider', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         $supplierId = SupplierGuard::currentId($request);
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -112,7 +114,7 @@ final class AnthropicCredentialsAction
     public function delete(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!RequestAuthorization::allows($request, 'settings.ai_provider', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         $supplierId = SupplierGuard::currentId($request);
         $this->anthropic->setCredentials($supplierId, '', 'claude-haiku-4-5');
         $userId = (int) ($user['id'] ?? 0);

@@ -41,7 +41,9 @@ final class PreviewVarsymbolAction
         $date     = (string) ($params['issue_date'] ?? date('Y-m-d'));
         $clientId = (int) ($params['client_id'] ?? 0);
 
-        if (!in_array($type, ['invoice', 'proforma', 'credit_note'], true)) {
+        // Kalendář (§ 31) se čísluje v řadě faktur — VarsymbolGenerator si typ normalizuje
+        // sám, takže náhled ukáže číslo, které doklad při vystavení opravdu dostane.
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'payment_calendar'], true)) {
             return Json::error($response, 'invalid_type', 'Neplatný typ.', 400);
         }
 

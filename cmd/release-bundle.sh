@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# cmd/release-bundle.sh — produkční bundle myinvoice-X.Y.Z.tar.gz (+ .sha256).
+# cmd/release-bundle.sh — produkční bundle myucto-X.Y.Z.tar.gz (+ .sha256).
 #
 # Co dělá:
 #   1. Verze čte z VERSION (root).
 #   2. Build web/dist (pnpm install + build) — přeskočí, pokud existuje a není --rebuild.
 #   3. Build manual HTML + PDF — přeskočí, pokud existuje a není --rebuild.
 #   4. Composer install --no-dev s VENDOR DIR mimo api/vendor (nepoškodí dev vendor).
-#   5. Sbalí všechno do dist/myinvoice-X.Y.Z.tar.gz (top-level = "myinvoice-X.Y.Z/").
+#   5. Sbalí všechno do dist/myucto-X.Y.Z.tar.gz (top-level = "myucto-X.Y.Z/").
 #   6. Vypočítá SHA256 sidecar.
 #
 # Použití:
@@ -14,7 +14,7 @@
 #   bash cmd/release-bundle.sh --rebuild # vždy rebuild všeho
 #
 # Upload do GitHub release (po vytvoření v Issue):
-#   gh release upload vX.Y.Z dist/myinvoice-X.Y.Z.tar.gz dist/myinvoice-X.Y.Z.tar.gz.sha256
+#   gh release upload vX.Y.Z dist/myucto-X.Y.Z.tar.gz dist/myucto-X.Y.Z.tar.gz.sha256
 #
 # Spouští se z gitbashe na Windows i z Linuxu. Žádný stav lokálního dev vendoru
 # neměníme — composer install --no-dev cílí do dist/_vendor.prod přes COMPOSER_VENDOR_DIR.
@@ -36,7 +36,7 @@ VERSION="$(tr -d '[:space:]' < VERSION)"
 if [ -z "$VERSION" ]; then
   echo "[release-bundle] VERSION soubor je prázdný"; exit 1
 fi
-NAME="myinvoice-${VERSION}"
+NAME="myucto-${VERSION}"
 OUT_DIR="dist"
 OUT_TGZ="${OUT_DIR}/${NAME}.tar.gz"
 STAGE_DIR="${OUT_DIR}/_stage/${NAME}"
@@ -44,7 +44,7 @@ PROD_VENDOR="${OUT_DIR}/_vendor.prod"
 
 mkdir -p "${OUT_DIR}"
 
-echo "=== MyInvoice.cz release bundle ${VERSION} ==="
+echo "=== MyUcto.cz release bundle ${VERSION} ==="
 
 # 1. web/dist
 if [ ${REBUILD} -eq 1 ] || [ ! -d web/dist ] || [ ! -f web/dist/index.html ]; then

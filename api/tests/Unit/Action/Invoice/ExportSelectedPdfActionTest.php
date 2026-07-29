@@ -32,7 +32,7 @@ final class ExportSelectedPdfActionTest extends TestCase
         $exporter = $this->createMock(MergedInvoicePdfExporter::class);
         $exporter->expects(self::once())
             ->method('export')
-            ->with([12, 11], ['id' => 7], 3, true)
+            ->with([12, 11], ['id' => 7], 3, true, true)
             ->willReturn(['path' => $path, 'signed' => true]);
 
         try {

@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbol'
-import BrandingProfilesSettings from '@/components/settings/BrandingProfilesSettings.vue'
+import { useDemoMode } from '@/composables/useDemoMode'
+import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from '@/utils/varsymbol'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
+const router = useRouter()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 
 // Po uložení propsat změny do supplier store (brief z /me) — jinak editor faktur
 // čte stale is_vat_payer/defaulty až do hard refreshe (issue #94).
@@ -29,11 +37,15 @@ function syncSupplierStore(s: Supplier) {
     auto_send_reminders: s.auto_send_reminders,
     payment_thanks_enabled: s.payment_thanks_enabled,
     payment_thanks_default_checked: s.payment_thanks_default_checked,
+    stock_enabled: s.stock_enabled ?? false,
   })
 }
 
 const supplier = ref<Supplier | null>(null)
 const loading = ref(true)
+type SettingsTab = 'company' | 'documents' | 'accounting' | 'advanced'
+const tab = ref<SettingsTab>('company')
+const tabs: SettingsTab[] = ['company', 'documents', 'accounting', 'advanced']
 
 // Práh dní pro první upomínku — preset (3 / týden / měsíc) + „vlastní". Stejný „sticky custom"
 // idiom jako dueSelectValue níže: flag drží „vlastní" i když hodnota náhodou odpovídá presetu,
@@ -55,6 +67,7 @@ const reminderDaysSelect = computed<number | 'custom'>({
 // ARES → spisová značka (commercial_register) podle IČ
 const crLoading = ref(false)
 async function loadCommercialRegister() {
+  if (blockDemoMutation()) return
   const ic = (supplier.value?.ic || '').replace(/\D/g, '')
   if (!/^\d{8}$/.test(ic)) { toast.error(t('supplier.ares_invalid_ic')); return }
   crLoading.value = true
@@ -131,6 +144,59 @@ const creditNoteFormatError = computed(() => validateAndPreview(supplier.value?.
 const purchasePreview       = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).preview)
 const purchaseFormatError   = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).error)
 
+// Featura G (private/REAL_data_followup_UX.md) — preventivní varování na kolizi VS
+// mezi číselnými řadami. Dva zdroje:
+//   1) ŽIVÁ kontrola supplier-wide šablon (invoice/proforma/credit_note) nad AKTUÁLNĚ
+//      rozepsanou hodnotou formuláře — vidí kolizi ještě PŘED uložením.
+//   2) `supplier.number_series_collisions` z backendu (VarsymbolSeriesCollisionChecker) —
+//      navíc pokrývá per-client přepsání (ClientForm), která tenhle formulář nevidí.
+// Sloučeno a odduplikováno podle (typ/klient) páru, ať se stejná kolize neukáže dvakrát.
+interface SeriesWarning { key: string; aLabel: string; bLabel: string }
+
+function numberSeriesTypeLabel(type: 'invoice' | 'proforma' | 'credit_note'): string {
+  return t(`settings.numbering_type_${type}`)
+}
+
+function numberSeriesSideLabel(side: NumberSeriesSide): string {
+  const typeLabel = numberSeriesTypeLabel(side.type)
+  return side.client_name ? `${typeLabel} (${side.client_name})` : typeLabel
+}
+
+const numberSeriesWarnings = computed<SeriesWarning[]>(() => {
+  const seen = new Set<string>()
+  const warnings: SeriesWarning[] = []
+  const push = (aLabel: string, bLabel: string) => {
+    const key = [aLabel, bLabel].sort().join(' | ')
+    if (seen.has(key)) return
+    seen.add(key)
+    warnings.push({ key, aLabel, bLabel })
+  }
+
+  const fb = supplier.value?.cfg_varsymbol_fallback
+  const effective = (tpl: string | null | undefined, fallback: string | undefined): string => {
+    const trimmed = (tpl ?? '').trim()
+    return trimmed !== '' ? trimmed : (fallback ?? '')
+  }
+  const live: Array<{ type: 'invoice' | 'proforma' | 'credit_note'; template: string }> = [
+    { type: 'invoice', template: effective(supplier.value?.invoice_number_format, fb?.invoice) },
+    { type: 'proforma', template: effective(supplier.value?.proforma_number_format, fb?.proforma) },
+    { type: 'credit_note', template: effective(supplier.value?.credit_note_number_format, fb?.credit_note) },
+  ]
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      if (live[i].template && live[j].template && templatesCollide(live[i].template, live[j].template)) {
+        push(numberSeriesTypeLabel(live[i].type), numberSeriesTypeLabel(live[j].type))
+      }
+    }
+  }
+
+  for (const c of supplier.value?.number_series_collisions ?? []) {
+    push(numberSeriesSideLabel(c.a), numberSeriesSideLabel(c.b))
+  }
+
+  return warnings
+})
+
 // Kopie odchozích e-mailů dodavateli (migrace 0102) — UI stav 'inherit' znamená
 // „klíč v self_copy chybí" = živý fallback na cfg flagy (vzor číslování faktur).
 // Explicitní volba klíč zapíše; zpět na 'inherit' ho smaže. Prázdný objekt → null.
@@ -162,11 +228,58 @@ function selfCopyFallbackLabel(ct: SelfCopyType): string {
   return lbl(fb[ct])
 }
 
+// Audit 2026-07 (G5): stav accounting_mode při načtení — potřeba k detekci
+// přechodu tax_evidence → double_entry v saveSupplier() (confirm dialog).
+const originalAccountingMode = ref<'tax_evidence' | 'double_entry' | null>(null)
+const originalVatPayer = ref<boolean | null>(null)
+const vatStatusEffectiveFrom = ref(new Date().toISOString().slice(0, 10))
+
+// ── CZ-NACE našeptávač nad číselníkem ČINNOSTI ─────────────────────────────
+const naceItems = ref<NaceCode[]>([])
+const naceLoading = ref(false)
+const naceResolved = ref<NaceResolved | null>(null)
+
+const naceOptions = computed(() =>
+  naceItems.value.map(i => ({ value: i.code, label: `${i.display} — ${i.name}` })))
+
+// Vybraná hodnota bývá mimo aktuální výsledky hledání (načtení stránky, po filtru),
+// proto ji SearchableSelect dostává zvlášť — jinak by pole vypadalo prázdné.
+const naceSelected = computed(() => {
+  const code = supplier.value?.cz_nace_code
+  if (!code) return null
+  const r = naceResolved.value
+  return { value: code, label: r?.name ? `${r.display} — ${r.name}` : code }
+})
+
+async function searchNace(q: string) {
+  naceLoading.value = true
+  try {
+    naceItems.value = await settingsApi.searchNaceCodes(q, 25)
+  } catch {
+    naceItems.value = []
+  } finally { naceLoading.value = false }
+}
+
+function pickNace(code: string | null) {
+  if (!supplier.value) return
+  supplier.value.cz_nace_code = code
+  const hit = code !== null ? naceItems.value.find(i => i.code === code) : undefined
+  // Našeptávač nabízí jen kódy platné k dnešku, takže vybraný je vždy `active`.
+  // Stav ručně uloženého kódu dopočítá backend a vrátí ho v `cz_nace_resolved`.
+  naceResolved.value = code === null || !hit
+    ? null
+    : { code, display: hit.display, name: hit.name, status: 'active', valid_to: null }
+}
+
 async function load() {
   loading.value = true
   try {
     supplier.value = await settingsApi.getSupplier()
-    bumpPreview()
+    // Stav uloženého CZ-NACE proti číselníku počítá backend — expirovaný kód je
+    // tak vidět hned při načtení, ne až z náhledu přiznání.
+    naceResolved.value = supplier.value.cz_nace_resolved ?? null
+    originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
+    originalVatPayer.value = supplier.value.is_vat_payer
   } finally { loading.value = false }
   loadSampleStatus()
 }
@@ -198,6 +311,7 @@ const sampleSummaryLine = computed(() => {
 })
 
 async function removeSampleData() {
+  if (blockDemoMutation()) return
   sampleDeleting.value = true
   try {
     await adminApi.deleteSampleData()
@@ -212,6 +326,7 @@ async function removeSampleData() {
 }
 
 async function saveSupplier() {
+  if (blockDemoMutation()) return
   if (!supplier.value) return
   // Klient-side guard pro varsymbol formáty — stejná pravidla jako backend, ale uživatel
   // dostane okamžitou zpětnou vazbu (hláška u pole) místo toastu, který zmizí.
@@ -219,6 +334,21 @@ async function saveSupplier() {
   if (errs.length > 0) {
     toast.error(errs[0])
     return
+  }
+  // E2: firma s historií musí přejít řízeným průvodcem, který režim přepne až
+  // po úspěšném dry-runu a doúčtování.
+  if (originalAccountingMode.value === 'tax_evidence' && supplier.value.accounting_mode === 'double_entry') {
+    try {
+      const preview = await settingsApi.getModeSwitchPreview()
+      if (preview.total > 0) {
+        toast.info(t('activation.error.backfill_required'))
+        await router.push({ name: 'accounting-activation' })
+        return
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
+      return
+    }
   }
   try {
     supplier.value = await settingsApi.updateSupplier({
@@ -230,6 +360,9 @@ async function saveSupplier() {
       ic: supplier.value.ic,
       dic: supplier.value.dic,
       is_vat_payer: supplier.value.is_vat_payer,
+      ...(originalVatPayer.value !== supplier.value.is_vat_payer
+        ? { vat_status_effective_from: vatStatusEffectiveFrom.value }
+        : {}),
       is_identified: supplier.value.is_identified ?? false,
       email: supplier.value.email,
       phone: supplier.value.phone,
@@ -258,10 +391,14 @@ async function saveSupplier() {
       credit_note_number_format: supplier.value.credit_note_number_format,
       purchase_invoice_number_format: supplier.value.purchase_invoice_number_format,
       invoice_number_period: supplier.value.invoice_number_period,
-      email_branding_enabled: supplier.value.email_branding_enabled,
-      email_accent_color: supplier.value.email_accent_color,
-      branding_profiles_enabled: supplier.value.branding_profiles_enabled,
+      // Sklad (Epic SKLAD) — nezávislé na accounting_mode.
+      stock_enabled: supplier.value.stock_enabled ?? false,
+      stock_auto_issue: supplier.value.stock_auto_issue ?? true,
       // Tax settings (EPO výkazy DPH/KH)
+      accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
+      // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
+      auto_post_invoices: supplier.value.auto_post_invoices ?? false,
+      auto_post_purchases: supplier.value.auto_post_purchases ?? false,
       taxpayer_type: (supplier.value as any).taxpayer_type ?? null,
       vat_period: (supplier.value as any).vat_period ?? null,
       flat_tax_band: (supplier.value as any).flat_tax_band ?? 'none',
@@ -274,6 +411,7 @@ async function saveSupplier() {
       workplace_code: (supplier.value as any).workplace_code ?? null,
       cz_nace_code: (supplier.value as any).cz_nace_code ?? null,
       data_box_id: (supplier.value as any).data_box_id ?? null,
+      data_box_type: (supplier.value as any).data_box_type ?? null,
       sest_jmeno: (supplier.value as any).sest_jmeno ?? null,
       sest_prijmeni: (supplier.value as any).sest_prijmeni ?? null,
       sest_telefon: (supplier.value as any).sest_telefon ?? null,
@@ -285,100 +423,69 @@ async function saveSupplier() {
       opr_jmeno: (supplier.value as any).opr_jmeno ?? null,
       opr_prijmeni: (supplier.value as any).opr_prijmeni ?? null,
       opr_postaveni: (supplier.value as any).opr_postaveni ?? null,
+      cssz_vsdp: (supplier.value as any).cssz_vsdp ?? null,
+      cssz_ossz_code: (supplier.value as any).cssz_ossz_code ?? null,
+      health_insurance_number: (supplier.value as any).health_insurance_number ?? null,
     })
     syncSupplierStore(supplier.value)
+    originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
+    originalVatPayer.value = supplier.value.is_vat_payer
     toast.success(t('common.saved'))
-    bumpPreview()
   } catch (e: any) {
+    if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'backfill_required') {
+      toast.info(t('activation.error.backfill_required'))
+      await router.push({ name: 'accounting-activation' })
+      return
+    }
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
 }
 
-const previewLocale = ref<'cs' | 'en'>('cs')
-const previewHtml = ref('')
-const logoFileInput = ref<HTMLInputElement | null>(null)
-const logoUploading = ref(false)
-
-async function bumpPreview() {
-  if (!supplier.value || supplier.value.branding_profiles_enabled) return
-  try {
-    previewHtml.value = await settingsApi.emailPreviewHtml(previewLocale.value)
-  } catch (e: any) {
-    previewHtml.value = `<pre style="color:red">${e?.message || 'Preview failed'}</pre>`
-  }
-}
-
-async function saveBranding(silent = false) {
+async function saveAutoPostFlags(): Promise<void> {
+  if (blockDemoMutation()) return
   if (!supplier.value) return
-  if (!/^#[0-9A-Fa-f]{6}$/.test(supplier.value.email_accent_color || '')) {
-    if (!silent) toast.error(t('settings.branding_color_invalid'))
-    return
-  }
-  try {
-    const updated = await settingsApi.updateSupplier({
-      email_branding_enabled: supplier.value.email_branding_enabled,
-      email_accent_color: supplier.value.email_accent_color,
-      pdf_logo_show_name: supplier.value.pdf_logo_show_name,
-    })
-    supplier.value = { ...supplier.value, ...updated }
-    syncSupplierStore(supplier.value)
-    if (!silent) toast.success(t('common.saved'))
-    bumpPreview()
-  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
-}
-
-watch(previewLocale, bumpPreview)
-
-function pickLogo() { logoFileInput.value?.click() }
-async function onLogoSelected(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (!file || !supplier.value) return
-  if (file.size > 1_048_576) {
-    toast.error(t('settings.branding_logo_too_large'))
-    if (logoFileInput.value) logoFileInput.value.value = ''
-    return
-  }
-  logoUploading.value = true
-  try {
-    const result = await settingsApi.uploadEmailLogo(file)
-    supplier.value.logo_path = result.logo_path
-    supplier.value.has_email_logo = true
-    toast.success(t('settings.branding_logo_uploaded'))
-    bumpPreview()
-  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
-  finally {
-    logoUploading.value = false
-    if (logoFileInput.value) logoFileInput.value.value = ''
-  }
-}
-
-async function removeLogo() {
-  if (!supplier.value || !window.confirm(t('settings.branding_logo_remove_confirm'))) return
-  try {
-    await settingsApi.deleteEmailLogo()
-    supplier.value.logo_path = null
-    supplier.value.has_email_logo = false
-    toast.success(t('settings.branding_logo_removed'))
-    bumpPreview()
-  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+  const updated = await settingsApi.updateSupplier({
+    auto_post_invoices: supplier.value.auto_post_invoices ?? false,
+    auto_post_purchases: supplier.value.auto_post_purchases ?? false,
+  })
+  supplier.value.auto_post_invoices = updated.auto_post_invoices ?? false
+  supplier.value.auto_post_purchases = updated.auto_post_purchases ?? false
 }
 
 </script>
 
 <template>
-  <div>
+  <div class="max-w-5xl">
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('settings.title') }}</h1>
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('settings.subtitle') }}</p>
     </div>
 
+    <nav class="flex flex-wrap gap-1 border-b border-neutral-200 mb-5" :aria-label="t('settings.tabs_label')">
+      <button
+        v-for="item in tabs"
+        :key="item"
+        type="button"
+        class="cursor-pointer px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors"
+        :class="tab === item
+          ? 'border-primary-600 text-primary-700'
+          : 'border-transparent text-neutral-600 hover:text-neutral-900 hover:border-neutral-300'"
+        @click="tab = item"
+      >
+        {{ t(`settings.tab_${item}`) }}
+      </button>
+    </nav>
+
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <div v-else-if="supplier" class="space-y-6">
       <!-- Supplier -->
-      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.supplier') }}</h2>
+      <section v-if="tab === 'company' || tab === 'documents'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">
+          {{ tab === 'company' ? t('settings.supplier') : t('settings.documents_section') }}
+        </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <template v-if="tab === 'company'">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.company_name') }} *</label>
             <input v-model="supplier.company_name" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
@@ -423,6 +530,12 @@ async function removeLogo() {
             <p v-if="!supplier.is_vat_payer && supplier.is_identified" class="text-xs text-neutral-500 mt-1 ml-6">
               {{ t('settings.is_identified_hint') }}
             </p>
+            <div v-if="originalVatPayer !== supplier.is_vat_payer" class="mt-3">
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status_effective_from') }}</label>
+              <input v-model="vatStatusEffectiveFrom" type="date"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_status_effective_from_hint') }}</p>
+            </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.email') }} *</label>
@@ -444,7 +557,8 @@ async function removeLogo() {
             <div class="flex items-center justify-between mb-1 gap-2">
               <label class="block text-sm font-medium text-neutral-700">{{ t('settings.commercial_register') }}</label>
               <button type="button" @click="loadCommercialRegister" :disabled="crLoading || !supplier.ic"
-                class="cursor-pointer h-7 px-2.5 text-xs bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-50 disabled:opacity-50 shrink-0">
+                :class="[btnOutline('primary'), 'shrink-0']">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
                 {{ crLoading ? '…' : t('settings.commercial_register_load_ares') }}
               </button>
             </div>
@@ -453,6 +567,8 @@ async function removeLogo() {
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.commercial_register_hint') }}</p>
           </div>
+          </template>
+          <template v-else>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.default_due_label') }}</label>
             <div class="flex gap-2">
@@ -573,14 +689,13 @@ async function removeLogo() {
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.embed_isdoc_hint') }}</p>
           </div>
+          </template>
         </div>
 
       </section>
 
-      <BrandingProfilesSettings v-model:enabled="supplier.branding_profiles_enabled" @changed="load" />
-
       <!-- Číslování faktur — samostatný box -->
-      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'documents'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.numbering_section') }}</h2>
         <div>
           <h3 class="sr-only">{{ t('settings.numbering_section') }}</h3>
@@ -592,6 +707,15 @@ async function removeLogo() {
             <li><code class="bg-neutral-100 px-1 rounded">{CC}</code>, <code class="bg-neutral-100 px-1 rounded">{CCC}</code>&hellip; &mdash; {{ t('settings.numbering_hint_c') }} <span class="text-neutral-400">(01, 001…)</span></li>
             <li><code class="bg-neutral-100 px-1 rounded">{PP}</code> &mdash; {{ t('settings.numbering_hint_pp') }} <span class="text-neutral-400">(PF/PN/KU/KN/NU/NN)</span></li>
           </ul>
+          <div v-if="numberSeriesWarnings.length" class="mb-3 rounded-md border border-warning-300 bg-warning-50 px-3 py-2">
+            <p class="text-xs font-medium text-warning-700">{{ t('settings.numbering_collision_warning') }}</p>
+            <ul class="text-xs text-warning-700 mt-1 space-y-0.5">
+              <li v-for="w in numberSeriesWarnings" :key="w.key">
+                <strong>{{ w.aLabel }}</strong> &times; <strong>{{ w.bLabel }}</strong>
+              </li>
+            </ul>
+            <p class="text-xs text-warning-600 mt-1">{{ t('settings.numbering_collision_hint') }}</p>
+          </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.invoice_number_format') }}</label>
@@ -607,7 +731,7 @@ async function removeLogo() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.invoice_number_period') }}</label>
-              <select v-model="supplier.invoice_number_period" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm">
+              <select v-model="supplier.invoice_number_period" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
                 <option value="year">{{ t('settings.numbering_period_year') }}</option>
                 <option value="month">{{ t('settings.numbering_period_month') }}</option>
                 <option value="none">{{ t('settings.numbering_period_none') }}</option>
@@ -656,13 +780,68 @@ async function removeLogo() {
 
       </section>
 
+      <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode -->
+      <section v-if="tab === 'accounting' && auth.hasCommercialFeatures" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('stock.settings.enable_label') }}</h2>
+        <div class="space-y-3">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input v-model="supplier.stock_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+            <span>
+              <span class="font-medium">{{ t('stock.settings.enable_label') }}</span>
+              <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.enable_hint') }}</p>
+            </span>
+          </label>
+          <label v-if="supplier.stock_enabled" class="flex items-start gap-2 cursor-pointer ml-6">
+            <input v-model="supplier.stock_auto_issue" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+            <span>
+              <span class="font-medium">{{ t('stock.settings.auto_issue_label') }}</span>
+              <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.auto_issue_hint') }}</p>
+            </span>
+          </label>
+        </div>
+      </section>
+
       <!-- Daňové nastavení (EPO výkazy DPH/KH/DPFO/DPPO) — samostatný box -->
-      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.tax_section') }}</h2>
         <div>
           <h3 class="sr-only">{{ t('settings.tax_section') }}</h3>
           <p class="text-xs text-neutral-500 mb-3">{{ t('settings.tax_hint') }}</p>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.accounting_mode') }}</label>
+              <select v-model="supplier.accounting_mode" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="tax_evidence">{{ t('settings.accounting_mode_tax_evidence') }}</option>
+                <option v-if="auth.hasCommercialFeatures || supplier.accounting_mode === 'double_entry'" value="double_entry">{{ t('settings.accounting_mode_double_entry') }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.accounting_mode_hint') }}</p>
+              <p v-if="originalAccountingMode === 'tax_evidence' && supplier.accounting_mode === 'double_entry'"
+                 class="text-xs text-warning-600 mt-1">
+                {{ t('settings.accounting_mode_switch_backfill_hint') }}
+              </p>
+            </div>
+            <!-- Auto-post hook (A2) — jen v podvojném účetnictví (jinak se doklady neúčtují) -->
+            <div v-if="auth.hasCommercialFeatures && supplier.accounting_mode === 'double_entry'" class="md:col-span-2 space-y-2">
+              <label class="flex items-start gap-2 cursor-pointer">
+                <input v-model="(supplier as any).auto_post_invoices" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>
+                  <span class="text-sm text-neutral-800">{{ t('settings.auto_post_invoices') }}</span>
+                  <span class="block text-xs text-neutral-500">{{ t('settings.auto_post_invoices_hint') }}</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-2 cursor-pointer">
+                <input v-model="(supplier as any).auto_post_purchases" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>
+                  <span class="text-sm text-neutral-800">{{ t('settings.auto_post_purchases') }}</span>
+                  <span class="block text-xs text-neutral-500">{{ t('settings.auto_post_purchases_hint') }}</span>
+                </span>
+              </label>
+            </div>
+            <AutomationPolicyBox
+              v-if="auth.hasCommercialFeatures && supplier.accounting_mode === 'double_entry'"
+              class="md:col-span-2"
+              :save-additional="saveAutoPostFlags"
+            />
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.taxpayer_type') }}</label>
               <select v-model="supplier.taxpayer_type" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
@@ -731,15 +910,62 @@ async function removeLogo() {
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cz_nace_code') }}</label>
-              <input v-model="supplier.cz_nace_code" type="text" maxlength="8" placeholder="62.01"
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_vsdp') }}</label>
+              <input v-model="supplier.cssz_vsdp" type="text" maxlength="20"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.cz_nace_hint') }}</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_ossz_code') }}</label>
+              <input v-model="supplier.cssz_ossz_code" type="text" maxlength="3" inputmode="numeric"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.health_insurance_number') }}</label>
+              <input v-model="supplier.health_insurance_number" type="text" maxlength="20"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cz_nace_code') }}</label>
+              <!-- Našeptávač nad číselníkem ČINNOSTI: nabízí jen kódy platné k dnešku.
+                   ARES eviduje klasifikaci ještě podle NACE rev. 2, kdežto číselník EPO
+                   je od 1. 1. 2026 na rev. 2.1 — prefill z ARES tak často přinese kód,
+                   na který portál hlásí propustnou chybu 30, a tady se najde nástupce. -->
+              <SearchableSelect
+                :model-value="supplier.cz_nace_code ?? null"
+                remote
+                :loading="naceLoading"
+                :options="naceOptions"
+                :selected-option="naceSelected"
+                :placeholder="t('settings.cz_nace_placeholder')"
+                :no-results-label="t('settings.cz_nace_no_results')"
+                @search="searchNace"
+                @update:model-value="pickNace"
+              />
+              <!-- Stav uloženého kódu proti číselníku. Nic z toho neblokuje uložení
+                   ani podání — snapshot číselníku může zestárnout. -->
+              <p v-if="naceResolved?.status === 'expired'" class="text-xs text-amber-600 mt-1">
+                {{ t('settings.cz_nace_expired', { code: naceResolved.display, date: naceResolved.valid_to }) }}
+              </p>
+              <p v-else-if="naceResolved?.status === 'unknown'" class="text-xs text-amber-600 mt-1">
+                {{ t('settings.cz_nace_unknown', { code: naceResolved.code }) }}
+              </p>
+              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('settings.cz_nace_hint') }}</p>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.data_box_id') }}</label>
               <input v-model="supplier.data_box_id" type="text" maxlength="16"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.data_box_type') }}</label>
+              <select v-model="supplier.data_box_type" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option :value="null">{{ t('settings.data_box_type_none') }}</option>
+                <option value="FO">{{ t('settings.data_box_type_fo') }}</option>
+                <option value="PFO">{{ t('settings.data_box_type_pfo') }}</option>
+                <option value="PO">{{ t('settings.data_box_type_po') }}</option>
+                <option value="OVM">{{ t('settings.data_box_type_ovm') }}</option>
+              </select>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.data_box_type_hint') }}</p>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.street_number_pop') }}</label>
@@ -810,7 +1036,7 @@ async function removeLogo() {
       </section>
 
       <!-- Pohoda XML export config (volitelné) — samostatný box -->
-      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'advanced'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.pohoda_section') }}</h2>
         <div>
           <h3 class="sr-only">{{ t('settings.pohoda_section') }}</h3>
@@ -835,84 +1061,26 @@ async function removeLogo() {
           </div>
         </div>
 
-        <div class="mt-4 flex justify-end">
-          <button @click="saveSupplier" class="cursor-pointer px-4 h-10 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
-            {{ t('settings.save_supplier') }}
-          </button>
-        </div>
-      </section>
-
-      <section v-if="!supplier.branding_profiles_enabled" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <div class="flex items-center justify-between mb-1">
-          <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('settings.branding_title') }}</h2>
-          <label class="inline-flex items-center gap-2 cursor-pointer">
-            <input v-model="supplier.email_branding_enabled" type="checkbox" class="h-4 w-4 accent-primary-600" />
-            <span class="text-sm text-neutral-700">{{ t('settings.branding_enabled') }}</span>
-          </label>
-        </div>
-        <p class="text-xs text-neutral-500 mb-4">{{ t('settings.branding_subtitle') }}</p>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.branding_logo') }}</label>
-              <p class="text-xs text-neutral-500 mb-2">{{ t('settings.branding_logo_hint') }}</p>
-              <div class="flex items-center gap-3">
-                <button type="button" :disabled="logoUploading || !supplier.email_branding_enabled"
-                  class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50" @click="pickLogo">
-                  {{ logoUploading ? t('common.loading') : (supplier.has_email_logo ? t('settings.branding_logo_replace') : t('settings.branding_logo_upload')) }}
-                </button>
-                <button v-if="supplier.has_email_logo" type="button" class="text-sm text-danger-600" @click="removeLogo">{{ t('common.remove') }}</button>
-                <input ref="logoFileInput" type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml" class="hidden" @change="onLogoSelected" />
-              </div>
-              <label class="inline-flex items-center gap-2 mt-3 cursor-pointer">
-                <input v-model="supplier.pdf_logo_show_name" type="checkbox"
-                  :disabled="!supplier.email_branding_enabled || !supplier.has_email_logo" class="h-4 w-4 accent-primary-600 disabled:opacity-50" />
-                <span class="text-sm text-neutral-700">{{ t('settings.branding_logo_show_name') }}</span>
-              </label>
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.branding_logo_show_name_hint') }}</p>
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.branding_accent_color') }}</label>
-              <p class="text-xs text-neutral-500 mb-2">{{ t('settings.branding_accent_color_hint') }}</p>
-              <div class="flex items-center gap-3">
-                <input v-model="supplier.email_accent_color" type="color" :disabled="!supplier.email_branding_enabled"
-                  class="h-10 w-14 cursor-pointer rounded border border-neutral-300 disabled:opacity-50" />
-                <input v-model="supplier.email_accent_color" type="text" placeholder="#3B2D83" pattern="^#[0-9A-Fa-f]{6}$"
-                  :disabled="!supplier.email_branding_enabled" class="h-10 w-32 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:opacity-50" />
-                <button type="button" :disabled="!supplier.email_branding_enabled" class="text-xs text-neutral-500 disabled:opacity-50"
-                  @click="supplier.email_accent_color = '#3B2D83'">{{ t('settings.branding_accent_reset') }}</button>
-              </div>
-            </div>
-            <button class="px-4 h-10 bg-primary-600 text-white text-sm font-medium rounded-md" @click="saveBranding(false)">{{ t('settings.branding_save') }}</button>
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="text-sm font-medium text-neutral-700">{{ t('settings.branding_preview') }}</label>
-              <div class="flex items-center gap-2 text-xs">
-                <button :class="previewLocale === 'cs' ? 'font-semibold text-primary-600' : 'text-neutral-500'" @click="previewLocale = 'cs'">CS</button>
-                <button :class="previewLocale === 'en' ? 'font-semibold text-primary-600' : 'text-neutral-500'" @click="previewLocale = 'en'">EN</button>
-                <button class="text-neutral-500" :title="t('common.refresh')" @click="bumpPreview">↻</button>
-              </div>
-            </div>
-            <iframe :srcdoc="previewHtml" sandbox="allow-same-origin" class="w-full h-[420px] border border-neutral-200 rounded-md bg-neutral-50" />
-          </div>
-        </div>
       </section>
 
       <!-- Ukázková data — jen pokud nějaká evidovaná existují (issue #162) -->
-      <section v-if="sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'advanced' && sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-warning-600 mb-2">{{ t('settings.sample_data.title') }}</h2>
         <p class="text-sm text-neutral-600 mb-1">{{ t('settings.sample_data.description') }}</p>
         <p v-if="sampleSummaryLine" class="text-xs text-neutral-500 mb-4">{{ t('settings.sample_data.contains') }}: {{ sampleSummaryLine }}</p>
         <button type="button" @click="showSampleConfirm = true"
-          class="cursor-pointer h-10 px-4 text-sm font-medium rounded-md border border-danger-500/50 text-danger-600 hover:bg-danger-50 inline-flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          :class="btnOutline('danger')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('settings.sample_data.remove_button') }}
         </button>
       </section>
+
+      <div class="flex justify-end border-t border-neutral-200 pt-4">
+        <button type="button" @click="saveSupplier" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+          {{ t('settings.save_supplier') }}
+        </button>
+      </div>
     </div>
 
     <!-- Potvrzení odebrání ukázkových dat -->
@@ -930,11 +1098,13 @@ async function removeLogo() {
         </div>
         <div class="flex justify-end gap-2">
           <button type="button" @click="showSampleConfirm = false" :disabled="sampleDeleting"
-            class="cursor-pointer h-10 px-4 text-sm rounded-md border border-neutral-300 text-neutral-700 hover:bg-neutral-50">
+            :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
           <button type="button" @click="removeSampleData" :disabled="sampleDeleting"
-            class="cursor-pointer h-10 px-4 text-sm font-medium rounded-md bg-danger-600 hover:bg-danger-700 disabled:opacity-60 text-white">
+            :class="btnFilled('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ sampleDeleting ? '…' : t('settings.sample_data.confirm_button') }}
           </button>
         </div>

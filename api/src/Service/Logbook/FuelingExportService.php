@@ -112,7 +112,7 @@ final class FuelingExportService
             'tempDir' => $tmpDir, 'autoPageBreak' => true, ...MpdfFontConfig::options(),
         ]);
         $mpdf->SetTitle('Tankování' . ($period !== '' ? ' ' . $period : ''));
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->WriteHTML($this->pdfHtml($rows, $period, $supplier));
         return $mpdf->Output('', 'S');
     }

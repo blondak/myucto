@@ -11,7 +11,7 @@ REM    3. PDF bez ISDOC + tenant ma AI nakonfigurovanou -> AI extract
 REM    4. Jinak skip
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice ScanPurchaseInbox" ^
+REM    schtasks /create /tn "MyUcto ScanPurchaseInbox" ^
 REM      /tr "%~f0" /sc minute /mo 10 /ru SYSTEM
 REM
 REM  Vystup: tee-style — log + konzole (interaktivni run vidi pokrok live).

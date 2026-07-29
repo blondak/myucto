@@ -138,6 +138,70 @@ final class PohodaExporterSchemaTest extends TestCase
             $xml, '//inv:invoiceHeader/inv:partnerIdentity/typ:address/typ:ico'));
     }
 
+    public function testPartnerAddressFieldsAreTruncatedForIssuedAndReceivedExports(): void
+    {
+        $partner = [
+            'company_name' => str_repeat('Ž', 260),
+            'street' => str_repeat('Ř', 70),
+            'city' => str_repeat('Č', 50),
+            'zip' => str_repeat('1', 20),
+            'ic' => str_repeat('2', 20),
+            'dic' => 'CZ' . str_repeat('3', 20),
+            'country_iso2' => 'CZ',
+            'main_email' => str_repeat('e', 100) . '@example.test',
+            'phone' => str_repeat('4', 45),
+        ];
+
+        $issued = $this->issuedInvoice();
+        $issued['client_snapshot'] = $partner;
+        $issued['project_number'] = str_repeat('P', 40);
+        $issued['items'] = [$this->item(['unit' => str_repeat('U', 15)])];
+        $received = $this->receivedInvoice();
+        $received['supplier_snapshot'] = $partner;
+        $received['project_number'] = str_repeat('P', 40);
+        $received['items'] = [$this->item(['unit' => str_repeat('U', 15)])];
+        $longCfg = [
+            'ic' => str_repeat('9', 20),
+            'pohoda_account_code' => str_repeat('A', 25),
+            'pohoda_centre_code' => str_repeat('C', 25),
+            'pohoda_activity_code' => str_repeat('T', 25),
+            'pohoda_contract_code' => str_repeat('K', 25),
+        ];
+
+        foreach ([
+            $this->exporter->buildXml([$issued], array_merge($this->issuedCfg(), $longCfg)),
+            $this->exporter->buildXml([$received], array_merge($this->purchaseCfg(), $longCfg)),
+        ] as $xml) {
+            $this->assertValidPohoda($xml);
+            $fields = [
+                'company' => 255,
+                'street' => 64,
+                'city' => 45,
+                'zip' => 15,
+                'ico' => 15,
+                'dic' => 18,
+                'email' => 98,
+                'phone' => 40,
+            ];
+            foreach ($fields as $element => $maxLength) {
+                $value = $this->xpathOne(
+                    $xml,
+                    "//inv:invoiceHeader/inv:partnerIdentity/typ:address/typ:{$element}",
+                );
+                self::assertNotNull($value);
+                self::assertSame($maxLength, mb_strlen($value), "typ:{$element} musí být oříznut na limit Pohoda XSD");
+            }
+            self::assertSame(32, mb_strlen((string) $this->xpathOne($xml, '//inv:invoiceHeader/inv:numberOrder')));
+            self::assertSame(10, mb_strlen((string) $this->xpathOne($xml, '//inv:invoiceItem/inv:unit')));
+            foreach (['account', 'centre', 'activity', 'contract'] as $reference) {
+                self::assertSame(19, mb_strlen((string) $this->xpathOne(
+                    $xml,
+                    "//inv:invoiceHeader/inv:{$reference}/typ:ids",
+                )));
+            }
+        }
+    }
+
     public function testReceivedClassificationVatHasNoOutputSideCodeButCorrectType(): void
     {
         // U přijaté faktury NEposíláme výstupní členění (UDA5…) — to je špatný směr

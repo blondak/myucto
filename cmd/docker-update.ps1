@@ -1,4 +1,4 @@
-# Update a running MyInvoice.cz Docker stack to the latest code.
+# Update a running MyUcto.cz Docker stack to the latest code.
 #
 #   1. Pulls (registry mode) or rebuilds (source mode) the app image
 #   2. Restarts the stack
@@ -33,22 +33,68 @@ Get-Content .env | ForEach-Object {
     if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envVars[$Matches[1]] = $Matches[2] }
 }
 
+function Get-ComposeProjectName([string]$root) {
+    if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
+    return ((Split-Path -Leaf $root).ToLower() -replace '[^a-z0-9_-]', '')
+}
+
+# Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner nebo proces.
+# Vlastni myucto kontejner na tomtez portu je OK (up ho prevezme).
+function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
+    $lines = & docker ps --format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>$null
+    foreach ($ln in $lines) {
+        $parts = $ln -split '\|', 4
+        if ($parts.Count -lt 4) { continue }
+        if ($parts[3] -notmatch ":$Port->") { continue }
+        $name = $parts[0]; $image = $parts[1]; $proj = $parts[2]
+        if (($proj -eq $OurProject) -or ($name -match 'myucto') -or ($image -match 'myucto')) {
+            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) — OK."
+            return $false
+        }
+        Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
+        Write-Host    "    Reseni: 'docker stop $name' nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        return $true
+    }
+    $conn = $null
+    try { $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1 } catch {}
+    if ($conn) {
+        $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        $pname = if ($proc) { $proc.ProcessName } else { "PID $($conn.OwningProcess)" }
+        if ($pname -match 'docker|vpnkit|wslrelay|com\.docker') {
+            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni — stale endpoint. 'up --force-recreate app' ho uvolni."
+            return $false
+        }
+        Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
+        Write-Host    "    Reseni: ukonci proces nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        return $true
+    }
+    return $false
+}
+
+function Get-AppLogTail([string[]]$ComposeArgs = @(), [int]$Lines = 40) {
+    return (& docker compose @ComposeArgs logs --no-color --tail $Lines app 2>&1 | Out-String)
+}
+
+function Test-AppNetworkBroken([string]$Logs) {
+    return [bool]($Logs -match 'getaddrinfo (for )?db failed|getaddrinfo failed|php_network_getaddresses|Temporary failure in name resolution|Name or service not known')
+}
+
 # Detect mode z IMAGE bezicho app kontejneru (autoritativni - nezavisi na tom, ktery
 # compose file je po ruce; stara detekce podle compose souboru byla krehka, protoze
 # git klon ma oba soubory + kolidujici nazev projektu). Prebiti: MYINVOICE_UPDATE_MODE.
 #   - bezici registry image (ghcr.io/...) -> registry mode -> docker compose pull
-#   - bezici lokalni build (myinvoice:latest)  -> source mode -> git pull + build
+#   - bezici lokalni build (myucto:latest)  -> source mode -> git pull + build
 #   - nic nebezi + lokalne GHCR image -> registry (byls GHCR deploy, jen zhasnuty)
 #   - nic nebezi + .git + build: -> source, jinak registry
 $mode = $env:MYINVOICE_UPDATE_MODE
 
 $runningImage = (& docker ps --filter 'label=com.docker.compose.service=app' --format '{{.Image}}' 2>$null |
-    Where-Object { $_ -match 'myinvoice' } | Select-Object -First 1)
+    Where-Object { $_ -match 'myucto' } | Select-Object -First 1)
 
 if (-not $mode) {
     if ($runningImage) {
         $mode = if ($runningImage -match '/') { 'registry' } else { 'source' }
-    } elseif (& docker images --format '{{.Repository}}' 2>$null | Select-String -Quiet -Pattern 'ghcr\.io/.*myinvoice') {
+    } elseif (& docker images --format '{{.Repository}}' 2>$null | Select-String -Quiet -Pattern 'ghcr\.io/.*myucto') {
         # Stack nebezi, ALE lokalne je stazeny GHCR image -> drive se pullovalo = registry deploy.
         $mode = 'registry'
     } elseif ((Test-Path .git) -and (Select-String -Path docker-compose.yml -Pattern '^\s*build:' -Quiet)) {
@@ -140,46 +186,76 @@ if ($hasOld -and (-not $hasNew)) {
     Write-Host ""
 }
 
-# --- 2. restart ----------------------------------------------------------
-Write-Host "==> Restarting stack..."
-& docker compose @composeArgs up -d db app
-if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up failed" }
+# --- pre-flight: hostovy port aplikace -----------------------------------
+$ourProject = Get-ComposeProjectName $ProjectRoot
+$appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
+if ($appPort -le 0) { $appPort = 8080 }
+Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort…"
+if (Test-ForeignPortHolder $appPort $ourProject) {
+    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+}
 
-# --- 3. wait for DB + migrate -------------------------------------------
+# --- 2. restart ----------------------------------------------------------
+# --remove-orphans: uklidi stale kontejnery z jineho compose souboru; jinak
+# zbyly app kontejner drzi port a novy se nepripoji k siti ('port already
+# allocated' -> app nepreklada 'db' -> migrace v cyklu padaji).
+Write-Host "==> Restarting database..."
+& docker compose @composeArgs up -d --remove-orphans db
+if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (db) failed" }
+
+# --- 3. wait for DB health ----------------------------------------------
 Write-Host "==> Waiting for database to become healthy..."
 $ready = $false
-for ($i = 1; $i -le 30; $i++) {
+for ($i = 1; $i -le 45; $i++) {
     $json = & docker compose @composeArgs ps --format json db 2>$null
     if ($json -match '"Health":"healthy"') { $ready = $true; Write-Host "    DB ready."; break }
+    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' — cekam dal (attempt $i/45)…" }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
-    Write-Error "DB failed to become healthy in 60s. Check 'docker compose logs db'."
+    Write-Error "DB failed to become healthy in ~90s. Check 'docker compose logs db'."
 }
 
-# Migrace bezi automaticky z docker-entrypoint.sh pred apache2-foreground.
-# Misto druheho explicitniho migrate (= race condition s entrypointem) cekame,
-# az app odpovi na /api/health (v ALLOWED_PATHS pro FirstRunLockMiddleware).
+# App az po zdrave DB. Novy image -> compose app tak jako tak rekreuje; s
+# --remove-orphans + auto-recovery nize je restart odolny proti kolizi portu/site.
+Write-Host "==> Restarting app..."
+& docker compose @composeArgs up -d --remove-orphans app
+if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
+
+# --- 3b. wait for app (+ auto-recovery pri chybejici siti) ---------------
 $curl = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
 if (-not $curl) { $curl = 'C:\Windows\System32\curl.exe' }
 if (-not (Test-Path $curl)) {
     Write-Error "curl.exe nenalezen (potreba na Win 10/11+). Updatuj OS nebo doinstaluj curl."
 }
 
-$port = $envVars.APP_PORT
-if (-not $port) { $port = '8080' }
+$port = $appPort
 Write-Host "==> Waiting for app to become available (entrypoint runs migrations)..."
 $appReady = $false
 $lastErr = ''
-for ($i = 1; $i -le 60; $i++) {
+$recovered = $false
+for ($i = 1; $i -le 90; $i++) {
     $out = & $curl -fsS -m 3 -o NUL "http://localhost:$port/api/health" 2>&1
     if ($LASTEXITCODE -eq 0) { $appReady = $true; Write-Host "    App ready."; break }
     $lastErr = ($out | Out-String).Trim()
+    if (($i % 5) -eq 0) {
+        $logs = Get-AppLogTail -ComposeArgs $composeArgs -Lines 40
+        if (-not $recovered -and (Test-AppNetworkBroken $logs)) {
+            Write-Warning "App bezi, ale nema compose sit (DNS 'db' selhava) -> auto-recovery: force-recreate app."
+            & docker compose @composeArgs up -d --remove-orphans --force-recreate app 2>&1 | Out-Null
+            $recovered = $true
+            Start-Sleep -Seconds 3
+            continue
+        }
+        elseif ($logs -match 'Migration attempt') { Write-Host "    …migrace bezi (attempt $i/90)" }
+    }
     Start-Sleep -Seconds 2
 }
 if (-not $appReady) {
     Write-Host "    Last curl error: $lastErr" -ForegroundColor Yellow
-    Write-Error "App failed to respond in 120s. Check 'docker compose @composeArgs logs app'."
+    Write-Host "    --- posledni radky 'docker compose logs app' ---" -ForegroundColor Yellow
+    Write-Host (Get-AppLogTail -ComposeArgs $composeArgs -Lines 25)
+    Write-Error "App failed to respond in time. Check 'docker compose logs app'."
 }
 
 # --- 3c. uklid osirelych vrstev po updatu (bezpecne - jen dangling) -------

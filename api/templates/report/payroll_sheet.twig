@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Mzdový list</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .legal-note { font-size: 7pt; color: #555; margin-bottom: 3mm; }
+    .employee-table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; border: 0.3pt solid #ccc; }
+    .employee-table td { padding: 1.3mm 2mm; font-size: 8pt; }
+    .employee-label { color: #777; width: 28mm; }
+    .warning-note {
+        font-size: 7.5pt; color: #92400e; background: #fef3c7; border: 0.3pt solid #f59e0b;
+        padding: 1.5mm 2mm; margin-bottom: 3mm;
+    }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.2mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.2mm;
+        font-size: 7.5pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+        text-align: right;
+    }
+    table.book tbody td.thl { text-align: left; }
+    table.book tbody tr.no-data td { color: #aaa; }
+    table.book tfoot td {
+        font-weight: bold;
+        font-size: 7.5pt;
+        padding: 1.5mm 1.2mm;
+        border-top: 0.5pt solid #333;
+        border-bottom: 0.5pt solid #333;
+        text-align: right;
+    }
+    table.book tfoot td.thl { text-align: left; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">{{ entity.name }}</div>
+            <div class="header-meta">IČO: {{ entity.ico }}</div>
+            <div class="header-meta">{{ entity.address }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Mzdový list</div>
+            <div class="header-period">za rok {{ year }}</div>
+            <div class="header-sub">Sestaveno: {{ entity.prepared_at }}</div>
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="legal-note">
+    Povinná evidence dle §38j zákona č. 586/1992 Sb., o daních z příjmů. Základ pro zálohu na daň =
+    hrubá mzda (od 1. 1. 2021 zrušena superhrubá mzda). Sleva na poplatníka a daňové zvýhodnění na děti
+    se uplatňují měsíčně jako 1/12 roční částky dle podepsaného prohlášení poplatníka (§38k ZDP);
+    záloha na daň se slevami nikdy neklesne pod nulu (nemodeluje se daňový bonus §35c odst. 3 ZDP).
+</div>
+
+<table class="employee-table">
+    <tr>
+        <td class="employee-label">Jméno a příjmení</td>
+        <td><strong>{{ employee.full_name }}</strong></td>
+        <td class="employee-label">Typ poplatníka</td>
+        <td>{{ employee.taxpayer_type == 'managing_partner' ? 'Jednatel-společník' : 'Zaměstnanec' }}</td>
+    </tr>
+    <tr>
+        <td class="employee-label">{{ employee.birth_id_label }}</td>
+        <td>{{ employee.birth_id_value }}</td>
+        <td class="employee-label">Sleva na poplatníka</td>
+        <td>{{ employee.tax_credit_taxpayer ? 'ano' : 'ne' }}</td>
+    </tr>
+    <tr>
+        <td class="employee-label">Adresa</td>
+        <td>{{ employee.address }}</td>
+        <td class="employee-label">Daňové zvýhodnění</td>
+        <td>{{ employee.child_count }} {{ employee.child_count == 1 ? 'dítě' : (employee.child_count >= 2 and employee.child_count <= 4 ? 'děti' : 'dětí') }}</td>
+    </tr>
+</table>
+
+{% if missing_months is not empty %}
+<div class="warning-note">
+    Evidence za rok {{ year }} není úplná — mzdová rekapitulace nebyla s tímto zaměstnancem svázaná
+    za měsíce: {{ missing_months|join(', ') }}. Roční úhrn níže počítá jen se zaznamenanými měsíci.
+</div>
+{% endif %}
+
+{% set monthNames = ['Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen', 'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec'] %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl">Měsíc</th>
+            <th>Hrubá mzda</th>
+            <th>SP zaměstnanec</th>
+            <th>ZP zaměstnanec</th>
+            <th>Záloha před slevou</th>
+            <th>Sleva poplatník</th>
+            <th>Daň. zvýhodnění</th>
+            <th>Záloha sražená</th>
+            <th>Čistá mzda</th>
+            <th>Pojistné zaměstnavatel</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+            {% if row.has_data %}
+                <tr>
+                    <td class="thl">{{ monthNames[row.month - 1] }}</td>
+                    <td>{{ row.gross|cz_money }}</td>
+                    <td>{{ row.employee_social|cz_money }}</td>
+                    <td>{{ (row.employee_health + row.health_min_topup)|cz_money }}</td>
+                    <td>{{ row.advance_tax|cz_money }}</td>
+                    <td>{{ row.tax_credit_taxpayer|cz_money }}</td>
+                    <td>{{ row.tax_credit_children|cz_money }}</td>
+                    <td>{{ row.advance_tax_final|cz_money }}</td>
+                    <td>{{ row.net_final|cz_money }}</td>
+                    <td>{{ row.employer_total|cz_money }}</td>
+                </tr>
+            {% else %}
+                <tr class="no-data">
+                    <td class="thl">{{ monthNames[row.month - 1] }}</td>
+                    <td colspan="9">— bez zaúčtované mzdové rekapitulace —</td>
+                </tr>
+            {% endif %}
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td class="thl">CELKEM</td>
+            <td>{{ totals.gross|cz_money }}</td>
+            <td>{{ totals.employee_social|cz_money }}</td>
+            <td>{{ (totals.employee_health + totals.health_min_topup)|cz_money }}</td>
+            <td>{{ totals.advance_tax|cz_money }}</td>
+            <td>{{ totals.tax_credit_taxpayer|cz_money }}</td>
+            <td>{{ totals.tax_credit_children|cz_money }}</td>
+            <td>{{ totals.advance_tax_final|cz_money }}</td>
+            <td>{{ totals.net_final|cz_money }}</td>
+            <td>{{ totals.employer_total|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+
+</body>
+</html>

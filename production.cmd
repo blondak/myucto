@@ -1,6 +1,7 @@
 @echo off
 REM ============================================================================
-REM production.cmd  ?  produkcni deploy
+REM production.cmd  ?  sdileny deploy engine (default: production)
+REM demo.cmd ho vola s parametry: remote=demo, label=demo
 REM
 REM Workflow:
 REM   1. pnpm build (Vue produkcni build do web/dist/)
@@ -9,7 +10,7 @@ REM        - cache hit (api/vendor.prod existuje, hash composer.lock sedi) = ren
 REM        - cache miss = composer install --no-dev (30-60s) + ulozit hash
 REM   3. php tools/generateManualHtml.php (HTML manu?l do manual/generated/)
 REM      pwsh tools/export-pdf.ps1         (PDF manu?l do manual/manual.pdf, MD2PDF combine)
-REM   4. push na production remote vc. web/dist + manual/generated + manual/manual.pdf + api/vendor
+REM   4. push na cilovy remote vc. web/dist + manual/generated + manual/manual.pdf + api/vendor
 REM   5. cachovat: rename api/vendor -^> api/vendor.prod (pro pristi deploy)
 REM      stash web/dist + manual/generated + manual/manual.pdf do *.bak (preserve pres `git checkout master`)
 REM   6. restore lokalniho stavu (rename vendor.dev.bak + dist.bak + generated.bak zpet)
@@ -24,8 +25,13 @@ REM ============================================================================
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
+set "DEPLOY_REMOTE=%~1"
+set "DEPLOY_NAME=%~2"
+if not defined DEPLOY_REMOTE set "DEPLOY_REMOTE=production"
+if not defined DEPLOY_NAME set "DEPLOY_NAME=production"
+
 echo.
-echo === MyInvoice.cz production deploy ===
+echo === MyUcto.cz !DEPLOY_NAME! deploy ===
 echo.
 
 REM Safety check: pokud vendor.dev.bak existuje, predchozi beh selhal pred restore.
@@ -39,7 +45,7 @@ if exist api\vendor.dev.bak (
 
 REM Auto-generated commit message (production rebuild nepotrebuje commit text,
 REM produkcni server typicky ma post-receive hook a nezajima ho historie deploy commitu).
-set MSG=Production rebuild %DATE% %TIME%
+set MSG=!DEPLOY_NAME! rebuild %DATE% %TIME%
 
 REM ====== 1. Frontend build ======
 echo === Smazani stareho web/dist (fresh build, zadne starsi hashed assety) ===
@@ -136,12 +142,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ====== 4. Push na production (s built artefakty) ======
+REM ====== 4. Push na cilovy deploy remote (s built artefakty) ======
 REM `-c core.autocrlf=false` = vypne CRLF konverzi pro tyto prikazy:
 REM   - zadne "LF will be replaced by CRLF" warningy
 REM   - rychlejsi `git add` (zadny hash-rewrite) na ~4000 souborech vendor + dist
 echo.
-echo === Push na production ^(s web/dist + manual/generated + api/vendor^) ===
+echo === Push na !DEPLOY_REMOTE! ^(s web/dist + manual/generated + api/vendor^) ===
 set TMP_BRANCH=deploy-temp
 set GITQ=-c core.autocrlf=false -c core.safecrlf=false
 git !GITQ! branch -D !TMP_BRANCH! 2>nul
@@ -151,18 +157,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Force-add gitignored artefakty (na origin nepujdou, jen na production).
+REM Force-add gitignored artefakty (na origin nepujdou, jen na cilovy deploy remote).
 REM -q na commitu = bez "create mode" listu pro vsechny vendor soubory.
 git !GITQ! add -f web/dist manual/generated manual/manual.pdf api/vendor
 
-REM Jednorazovy externi migracni nastroj (Money S3) nepatri na produkci.
-REM export-ignore plati jen pro `git archive`, ne pro `git push` ? odstranime z indexu
-REM throwaway vetve (--cached = working tree zustava, master netknuty).
-git !GITQ! rm -r --cached -q tools/money-s3-import 2>nul
-
 git !GITQ! commit -q -m "Build artifacts: !MSG!" --allow-empty
 
-git !GITQ! push --quiet production !TMP_BRANCH!:master --force
+git !GITQ! push --quiet !DEPLOY_REMOTE! !TMP_BRANCH!:master --force
 set PUSH_RC=!errorlevel!
 
 REM Cache produkcni vendor pred `git checkout master` (jinak by ho checkout smazal ?
@@ -191,13 +192,6 @@ if exist manual\generated.bak rmdir /s /q manual\generated.bak
 if exist manual\generated robocopy manual\generated manual\generated.bak /MOVE /E /R:15 /W:1 /NFL /NDL /NJH /NJS /NP >nul
 if exist manual\manual.pdf.bak del /q manual\manual.pdf.bak
 if exist manual\manual.pdf move manual\manual.pdf manual\manual.pdf.bak >nul
-
-REM tools/money-s3-import: na deploy-temp jsme ho odebrali z indexu (nema jit na
-REM produkci), cimz se ve working tree stal untracked. Na master je ale TRACKED,
-REM takze `git checkout master` by jinak selhal ("untracked working tree files
-REM would be overwritten") a nechal by nas trcet na deploy-temp. Smazat working
-REM copy; checkout master ji obnovi z master HEAD (committed, nic se neztrati).
-if exist tools\money-s3-import rmdir /s /q tools\money-s3-import
 
 REM Vzdy se vratit zpet na master + cleanup.
 REM POZN.: vse co bylo committed v deploy-temp ale netracked v master uz neni v
@@ -235,16 +229,16 @@ if exist manual\manual.pdf.bak (
 )
 
 if not !PUSH_RC!==0 (
-    echo [ABORT] push na production selhal.
+    echo [ABORT] push na !DEPLOY_REMOTE! selhal.
     exit /b 1
 )
 
 echo.
 echo ============================================================
 echo  HOTOVO
-echo  - build pushnut na production ^(vc. web/dist + manual/generated + manual.pdf + api/vendor^)
+echo  - build pushnut na !DEPLOY_REMOTE! ^(vc. web/dist + manual/generated + manual.pdf + api/vendor^)
 echo  - lokalni stav restored ^(dev composer + fresh build^)
 echo.
-echo  Na produkci jeste musis: cp cfg.sample.php cfg.php + vyplnit + php api/bin/migrate.php
+echo  Na !DEPLOY_NAME! jeste musis: cp cfg.sample.php cfg.php + vyplnit + php api/bin/migrate.php
 echo ============================================================
 exit /b 0

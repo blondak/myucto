@@ -1,6 +1,6 @@
 <?php
 /**
- * md2pdf.config.php — MyInvoice.cz uživatelský manuál
+ * md2pdf.config.php — MyÚčto.cz uživatelský manuál
  * ===================================================
  *
  * Lokální konfigurace pro sdílený MD2PDF engine (c:\work\MD2PDF). Sloučí všechny
@@ -27,15 +27,16 @@ return [
         'enabled'  => true,
         'output'   => 'manual.pdf',              // jeden výsledný PDF
         'index'    => 'INDEX.md',                // pořadí kapitol; soubory mimo index na konec
-        'title'    => 'MyInvoice.cz',
-        'subtitle' => 'Český fakturační systém pro freelancery, OSVČ a malé firmy — '
-                    . 'instalace, vystavování dokladů, banka, exporty, multi-supplier.',
+        'title'    => 'MyÚčto.cz',
+        'subtitle' => 'Kompletní moderní účetní systém automatizující vše od dokladů a banky po daně '
+                    . 'a uzávěrku. Spojuje chytré křížové kontroly, AI, online reporting a mobilní přístup. '
+                    . 'Flexibilní self-hosted řešení lze proměnit ve vlastní účetní software přizpůsobený '
+                    . 'procesům, integracím i značce.',
         // Vlastní řádky titulky (HTML/odkazy povoleny; token {date} = datum generování)
         'meta_rows' => [
-            ['Dokument', 'MyInvoice.cz — uživatelský manuál'],
+            ['Dokument', 'MyÚčto.cz — uživatelský manuál'],
             ['Datum',    '{date}'],
-            ['Web',      '<a href="https://myinvoice.cz/" style="color:#fff;">myinvoice.cz</a>'],
-            ['GitHub',   '<a href="https://github.com/radekhulan/myinvoice" style="color:#fff;">github.com/radekhulan/myinvoice</a>'],
+            ['Web',      '<a href="https://myucto.cz/" style="color:#fff;">myucto.cz</a>'],
             ['Vyvíjí',   '<a href="https://mywebdesign.cz/" style="color:#fff;">MyWebdesign.cz s.r.o.</a>'],
         ],
     ],
@@ -53,7 +54,7 @@ return [
     // --- Identita / branding ---------------------------------------------
     'author'      => 'MyWebdesign.cz s.r.o.',
     'company'     => 'MyWebdesign.cz s.r.o.',
-    'brand'       => 'MyInvoice.cz',
+    'brand'       => 'MyÚčto.cz',
     'doc_kind'    => 'Uživatelský manuál',
     'date_format' => 'j. n. Y',
 
@@ -68,7 +69,7 @@ return [
 
     // --- Texty UI (čeština) ----------------------------------------------
     'strings' => [
-        'default_title' => 'MyInvoice.cz',
+        'default_title' => 'MyÚčto.cz',
         'toc_title'     => 'Obsah',
         'page_label'    => 'Strana',
         'meta' => [

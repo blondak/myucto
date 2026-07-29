@@ -1,4 +1,4 @@
-# Build (or rebuild) the MyInvoice.cz Docker image.
+# Build (or rebuild) the MyUcto.cz Docker image.
 #
 # Usage:  .\cmd\docker-build.ps1 [-NoCache] [-Pull]
 [CmdletBinding()]
@@ -24,7 +24,7 @@ if ($NoCache) { $buildArgs += '--no-cache' }
 if ($Pull)    { $buildArgs += '--pull' }
 $buildArgs += 'app'
 
-Write-Host "==> Building MyInvoice.cz image (this can take a few minutes on first run)…"
+Write-Host "==> Building MyUcto.cz image (this can take a few minutes on first run)…"
 & docker @buildArgs
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose build failed" }
 

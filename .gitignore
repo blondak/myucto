@@ -1,4 +1,5 @@
 .vscode/
+.playwright-mcp/
 .claude/
 CLAUDE.md
 aspnet_client/

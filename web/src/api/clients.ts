@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { PaymentMethod } from './invoices'
 
 // E-mailové kontakty odběratele dle účelu (#86)
 export type EmailContactUsageCode = 'communication' | 'documents' | 'reminders' | 'approvals'
@@ -15,6 +16,21 @@ export interface ClientEmailContact {
   is_active: boolean
   sort_order?: number
   usages: EmailContactUsage[]
+}
+
+export interface ClientBankAccount {
+  id: number
+  client_id: number
+  account_number: string
+  bank_code: string | null
+  iban: string | null
+  source_manual: boolean
+  source_vat_registry: boolean
+  source_bank_statement: boolean
+  last_bank_transaction_id: number | null
+  is_active: boolean
+  first_seen_at: string
+  last_seen_at: string
 }
 
 export interface Client {
@@ -39,6 +55,10 @@ export interface Client {
   currency_default_id: number
   currency_default: string
   reverse_charge: boolean
+  /** § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba (označuje uživatel, z dat to nejde). */
+  related_party?: boolean
+  related_party_type?: 'capital' | 'otherwise' | 'close_person' | 'employment' | null
+  related_party_note?: string | null
   /** Plátce DPH (ARES/VIES). U dodavatele řídí nárok na odpočet — neplátce ⇒ vat_deduction='none'. */
   is_vat_payer?: boolean
   is_customer?: boolean
@@ -48,6 +68,8 @@ export interface Client {
   auto_send_reminders: boolean
   payment_due_default?: number | null
   payment_due_unit?: 'days' | 'month' | null
+  /** Předvolená forma úhrady faktur od tohoto dodavatele (migrace 1128); null = neurčeno. */
+  default_payment_method?: PaymentMethod | null
   hourly_rate: number
   note?: string | null
   default_expense_category_id?: number | null
@@ -83,8 +105,11 @@ export interface Client {
   last_invoice_date?: string | null
   invoice_count?: number
   email_contacts?: ClientEmailContact[]
+  bank_accounts?: ClientBankAccount[]
   created_at?: string
   updated_at?: string
+  /** Jen v odpovědi POST/PUT — non-blocking varování (IČO mod 11 / DIČ formát — audit 2026-07). */
+  _warnings?: string[]
 }
 
 export interface ProjectSummary {
@@ -190,6 +215,10 @@ export interface ClientPayload {
   language: 'cs' | 'en'
   currency_default_id: number
   reverse_charge: boolean
+  /** § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba (označuje uživatel, z dat to nejde). */
+  related_party?: boolean
+  related_party_type?: 'capital' | 'otherwise' | 'close_person' | 'employment' | null
+  related_party_note?: string | null
   is_vat_payer?: boolean
   is_customer?: boolean
   is_vendor?: boolean
@@ -198,6 +227,8 @@ export interface ClientPayload {
   auto_send_reminders: boolean
   payment_due_default?: number | null
   payment_due_unit?: 'days' | 'month' | null
+  /** Předvolená forma úhrady faktur od tohoto dodavatele (migrace 1128); null = neurčeno. */
+  default_payment_method?: PaymentMethod | null
   hourly_rate?: number
   note?: string | null
   default_expense_category_id?: number | null
@@ -266,4 +297,12 @@ export const clientsApi = {
   /** Zveřejněné bankovní účty z registru plátců DPH podle DIČ. */
   lookupBank: (dic: string) =>
     api.post<BankLookupResult>('/clients/lookup-bank', { dic }).then((r) => r.data),
+  listBankAccounts: (id: number) =>
+    api.get<ClientBankAccount[]>(`/clients/${id}/bank-accounts`).then((r) => r.data),
+  addBankAccount: (id: number, data: { account_number: string; bank_code?: string | null; iban?: string | null }) =>
+    api.post<ClientBankAccount>(`/clients/${id}/bank-accounts`, data).then((r) => r.data),
+  deleteBankAccount: (id: number, accountId: number) =>
+    api.delete(`/clients/${id}/bank-accounts/${accountId}`).then((r) => r.data),
+  syncBankAccountsFromRegistry: (id: number) =>
+    api.post<{ found: boolean; source: string; synced: number; accounts: ClientBankAccount[] }>(`/clients/${id}/bank-accounts/sync-registry`).then((r) => r.data),
 }

@@ -1,0 +1,309 @@
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
+import { stockApi, type StockItem, type StockItemType, type Warehouse } from '@/api/stock'
+import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { formatMoney } from '@/composables/useFormat'
+import { useRowLink } from '@/composables/useRowLink'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+
+const { t } = useI18n()
+const auth = useAuthStore()
+const toast = useToast()
+const route = useRoute()
+const navigate = useRowLink()
+
+const PER_PAGE = 50
+
+const items = ref<StockItem[]>([])
+const loading = ref(false)
+const loadingMore = ref(false)
+const page = ref(1)
+const pages = ref(1)
+const total = ref(0)
+const warehouses = ref<Warehouse[]>([])
+// stock_item_id => souhrn napříč sklady (nebo jen vybraný sklad, viz filters.warehouse_id)
+// — dopočteno jen pro karty na (dosud) načtených stránkách, viz load().
+const levelsByItem = ref<Record<number, { qty: number; value: number }>>({})
+
+const filters = reactive({
+  type: '' as StockItemType | '',
+  warehouse_id: '' as number | '',
+  only_below_min: false,
+  active: true,
+  q: '',
+})
+
+async function load(reset = true) {
+  if (reset) {
+    loading.value = true
+    page.value = 1
+  } else {
+    loadingMore.value = true
+    page.value++
+  }
+  try {
+    const res = await stockApi.listItems({
+      type: filters.type || undefined,
+      active: filters.active || undefined,
+      q: filters.q || undefined,
+      only_below_min: filters.only_below_min || undefined,
+      page: page.value,
+      per_page: PER_PAGE,
+    })
+    items.value = reset ? res.data : items.value.concat(res.data)
+    total.value = res.meta.total
+    pages.value = res.meta.pages ?? 1
+
+    // Stav zásob jen pro karty na právě načtené stránce (scoped přes item_ids) —
+    // ať /stock/levels netahá celý sklad, jen řádky relevantní pro zobrazené karty.
+    const map = reset ? {} : { ...levelsByItem.value }
+    if (res.data.length > 0) {
+      const lvl = await stockApi.levels({
+        warehouse_id: filters.warehouse_id || undefined,
+        item_ids: res.data.map(i => i.id),
+        per_page: 200,
+      })
+      for (const l of lvl.data) {
+        const cur = map[l.stock_item_id] ?? { qty: 0, value: 0 }
+        cur.qty += Number(l.qty)
+        cur.value += Number(l.value_total)
+        map[l.stock_item_id] = cur
+      }
+    }
+    levelsByItem.value = map
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    loading.value = false
+    loadingMore.value = false
+  }
+}
+
+function applyFilters() { load(true) }
+function resetFilters() {
+  filters.type = ''
+  filters.warehouse_id = ''
+  filters.only_below_min = false
+  filters.active = true
+  filters.q = ''
+  applyFilters()
+}
+
+function buildQuery(): Record<string, string> {
+  const q: Record<string, string> = {}
+  if (filters.type) q.type = filters.type
+  if (filters.warehouse_id !== '') q.warehouse_id = String(filters.warehouse_id)
+  if (filters.only_below_min) q.only_below_min = '1'
+  if (!filters.active) q.active = '0'
+  if (filters.q) q.q = filters.q
+  return q
+}
+function applyQueryToPage(q: Record<string, string>) {
+  filters.type = (q.type as StockItemType) || ''
+  filters.warehouse_id = q.warehouse_id ? Number(q.warehouse_id) : ''
+  filters.only_below_min = q.only_below_min === '1'
+  filters.active = q.active !== '0'
+  filters.q = q.q ?? ''
+  applyFilters()
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'sku', labelKey: 'stock.items.col_sku', required: true, sortable: true },
+  { key: 'name', labelKey: 'stock.items.col_name', required: true, sortable: true },
+  { key: 'type', labelKey: 'stock.items.col_type', sortable: true },
+  { key: 'unit', labelKey: 'stock.items.col_unit' },
+  { key: 'qty', labelKey: 'stock.items.col_qty', sortable: true },
+  { key: 'value', labelKey: 'stock.items.col_value', sortable: true },
+  { key: 'avg_cost', labelKey: 'stock.items.col_avg_cost' },
+  { key: 'sale_price', labelKey: 'stock.items.col_sale_price', defaultHidden: true },
+  { key: 'min_qty', labelKey: 'stock.items.col_min_qty', defaultHidden: true },
+  { key: 'active', labelKey: 'stock.items.col_active', defaultHidden: true },
+]
+const tbl = useTablePrefs('stock-items', COLUMNS)
+const saved = useSavedFilters('stock-items', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+
+watch(() => tbl.sort.value, () => load())
+
+function qty(i: StockItem): number { return levelsByItem.value[i.id]?.qty ?? 0 }
+function value(i: StockItem): number { return levelsByItem.value[i.id]?.value ?? 0 }
+function avgCost(i: StockItem): number { const q = qty(i); return q !== 0 ? value(i) / q : 0 }
+function belowMin(i: StockItem): boolean { return i.min_qty != null && qty(i) < Number(i.min_qty) }
+
+const sortedItems = computed<StockItem[]>(() => {
+  const s = tbl.sort.value
+  if (!s) return items.value
+  const dir = s.dir === 'desc' ? -1 : 1
+  const arr = items.value.slice()
+  arr.sort((a, b) => {
+    let av: string | number = ''
+    let bv: string | number = ''
+    switch (s.key) {
+      case 'sku': av = a.sku; bv = b.sku; break
+      case 'name': av = a.name; bv = b.name; break
+      case 'type': av = a.item_type; bv = b.item_type; break
+      case 'qty': av = qty(a); bv = qty(b); break
+      case 'value': av = value(a); bv = value(b); break
+      default: return 0
+    }
+    if (av < bv) return -1 * dir
+    if (av > bv) return 1 * dir
+    return 0
+  })
+  return arr
+})
+
+const TYPE_BADGE: Record<StockItemType, string> = {
+  material: 'bg-neutral-100 text-neutral-600',
+  goods: 'bg-primary-50 text-primary-700',
+  product: 'bg-success-50 text-success-600',
+}
+
+function openDetail(i: StockItem, e?: MouseEvent) {
+  navigate(`/stock/items/${i.id}`, e)
+}
+
+onMounted(async () => {
+  try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  await load()
+})
+</script>
+
+<template>
+  <div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <h1 class="text-2xl font-semibold">{{ t('stock.items.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('stock.items.subtitle') }}</p>
+      </div>
+      <RouterLink v-if="auth.canWrite('stock')" to="/stock/items/new" :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+        {{ t('stock.items.new') }}
+      </RouterLink>
+    </div>
+
+    <!-- Filtry -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.items.filter_type') }}</label>
+          <select v-model="filters.type" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="material">{{ t('stock.item_type.material') }}</option>
+            <option value="goods">{{ t('stock.item_type.goods') }}</option>
+            <option value="product">{{ t('stock.item_type.product') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.documents.filter_warehouse') }}</label>
+          <select v-model="filters.warehouse_id" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+          </select>
+        </div>
+        <div class="flex items-end pb-2 gap-4">
+          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <input v-model="filters.only_below_min" type="checkbox" @change="applyFilters" class="rounded border-neutral-300 text-primary-600" />
+            {{ t('stock.items.filter_below_min') }}
+          </label>
+          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <input v-model="filters.active" type="checkbox" @change="applyFilters" class="rounded border-neutral-300 text-primary-600" />
+            {{ t('stock.items.filter_active') }}
+          </label>
+        </div>
+        <div class="sm:col-span-2 lg:col-span-2">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.items.filter_q') }}</label>
+          <input v-model="filters.q" type="text" :placeholder="t('stock.items.filter_q_placeholder')"
+            @keyup.enter="applyFilters" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+        <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('stock.items.reset_filters') }}</button>
+        <SavedFiltersMenu :ctrl="saved" />
+        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <DensityToggle class="hidden md:block" :ctrl="tbl" />
+      </div>
+    </div>
+
+    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.items.empty') }}</div>
+
+    <!-- Desktop -->
+    <div v-else class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" :class="tbl.densityClass.value">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+            <tr>
+              <SortableTh v-if="tbl.isVisible('sku')" :label="t('stock.items.col_sku')" sort-key="sku" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <SortableTh v-if="tbl.isVisible('name')" :label="t('stock.items.col_name')" sort-key="name" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <SortableTh v-if="tbl.isVisible('type')" :label="t('stock.items.col_type')" sort-key="type" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <th v-if="tbl.isVisible('unit')" class="px-3 py-2 text-left font-medium w-16">{{ t('stock.items.col_unit') }}</th>
+              <SortableTh v-if="tbl.isVisible('qty')" :label="t('stock.items.col_qty')" sort-key="qty" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
+              <SortableTh v-if="tbl.isVisible('value')" :label="t('stock.items.col_value')" sort-key="value" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
+              <th v-if="tbl.isVisible('avg_cost')" class="px-3 py-2 text-right font-medium w-28">{{ t('stock.items.col_avg_cost') }}</th>
+              <th v-if="tbl.isVisible('sale_price')" class="px-3 py-2 text-right font-medium w-28">{{ t('stock.items.col_sale_price') }}</th>
+              <th v-if="tbl.isVisible('min_qty')" class="px-3 py-2 text-right font-medium w-24">{{ t('stock.items.col_min_qty') }}</th>
+              <th v-if="tbl.isVisible('active')" class="px-3 py-2 text-center font-medium w-20">{{ t('stock.items.col_active') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="i in sortedItems" :key="i.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-50': !i.is_active }"
+              @click="openDetail(i, $event)" @auxclick.prevent="openDetail(i, $event)">
+              <td v-if="tbl.isVisible('sku')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ i.sku }}</td>
+              <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ i.name }}</td>
+              <td v-if="tbl.isVisible('type')" class="px-3 py-2">
+                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
+              </td>
+              <td v-if="tbl.isVisible('unit')" class="px-3 py-2">{{ i.unit }}</td>
+              <td v-if="tbl.isVisible('qty')" class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="belowMin(i) ? 'text-danger-500 font-semibold' : ''">
+                {{ qty(i) }}
+              </td>
+              <td v-if="tbl.isVisible('value')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(value(i)) }}</td>
+              <td v-if="tbl.isVisible('avg_cost')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(avgCost(i)) }}</td>
+              <td v-if="tbl.isVisible('sale_price')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—' }}</td>
+              <td v-if="tbl.isVisible('min_qty')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ i.min_qty ?? '—' }}</td>
+              <td v-if="tbl.isVisible('active')" class="px-3 py-2 text-center">
+                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="i.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
+                  {{ i.is_active ? t('common.yes') : t('common.no') }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Mobile card list -->
+    <div v-if="!loading && items.length > 0" class="md:hidden space-y-2">
+      <div v-for="i in sortedItems" :key="`m-${i.id}`" @click="openDetail(i, $event)"
+        class="cursor-pointer bg-surface border border-neutral-200 rounded-lg shadow-sm p-3" :class="{ 'opacity-50': !i.is_active }">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-mono text-xs text-neutral-500">{{ i.sku }}</span>
+          <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
+        </div>
+        <div class="font-medium mt-0.5">{{ i.name }}</div>
+        <div class="flex items-center justify-between mt-1.5 text-sm">
+          <span :class="belowMin(i) ? 'text-danger-500 font-semibold' : 'text-neutral-600'">{{ qty(i) }} {{ i.unit }}</span>
+          <span class="font-mono text-neutral-700">{{ formatMoney(value(i)) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="!loading && items.length > 0 && page < pages" class="text-center mt-3">
+      <button @click="load(false)" :disabled="loadingMore"
+        class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
+        {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+      </button>
+    </div>
+  </div>
+</template>

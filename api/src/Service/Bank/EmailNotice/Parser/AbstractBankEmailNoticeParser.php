@@ -47,33 +47,8 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
      */
     protected function foldDiacritics(string $text): string
     {
-        if ($text === '') {
-            return $text;
-        }
-        static $map = null;
-        if ($map === null) {
-            $lower = [
-                'á' => 'a', 'à' => 'a', 'â' => 'a', 'ä' => 'a', 'ã' => 'a', 'å' => 'a',
-                'č' => 'c', 'ć' => 'c', 'ç' => 'c',
-                'ď' => 'd', 'đ' => 'd',
-                'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e', 'ě' => 'e',
-                'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
-                'ĺ' => 'l', 'ľ' => 'l', 'ł' => 'l',
-                'ň' => 'n', 'ń' => 'n', 'ñ' => 'n',
-                'ó' => 'o', 'ò' => 'o', 'ô' => 'o', 'ö' => 'o', 'õ' => 'o', 'ø' => 'o',
-                'ŕ' => 'r', 'ř' => 'r',
-                'š' => 's', 'ś' => 's', 'ß' => 'ss',
-                'ť' => 't',
-                'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u', 'ů' => 'u',
-                'ý' => 'y', 'ÿ' => 'y',
-                'ž' => 'z', 'ź' => 'z', 'ż' => 'z',
-            ];
-            $map = $lower;
-            foreach ($lower as $from => $to) {
-                $map[mb_strtoupper($from, 'UTF-8')] = mb_strtoupper($to, 'UTF-8');
-            }
-        }
-        return strtr($text, $map);
+        // Sdílená transliterace (superset původní mapy) — jeden zdroj pravdy.
+        return $text === '' ? $text : \MyInvoice\Support\Slugifier::transliterate($text);
     }
 
     protected function compact(string $value): string

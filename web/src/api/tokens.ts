@@ -19,9 +19,13 @@ export interface ApiToken {
 
 export interface CreateTokenPayload {
   name: string
+  /** Re-auth současným heslem — backend ho vyžaduje vždy (step-up, CreateTokenAction). */
+  password: string
   supplier_id?: number | null
   scope: 'read' | 'read_write'
   expires_at?: string | null
+  /** Bez expirace — jen vědomá volba, pro read_write navíc jen superadmin. */
+  never_expires?: boolean
   totp_code?: string
   step_up_token?: string
 }

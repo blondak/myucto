@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Rozvaha</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-title { font-size: 14pt; font-weight: bold; }
+    .header-scope { font-size: 9pt; margin-top: 1mm; }
+    .header-meta { font-size: 8pt; color: #555; margin-top: 0.5mm; }
+    .entity-info { text-align: right; font-size: 9pt; }
+    .section-title {
+        font-size: 10pt;
+        font-weight: bold;
+        margin-top: 4mm;
+        margin-bottom: 1mm;
+        padding: 1mm 0;
+        border-bottom: 0.5pt solid #999;
+    }
+    table.statement { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.statement thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.statement thead th.thl { text-align: left; }
+    table.statement tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.statement tbody tr.row-strong td {
+        font-weight: bold;
+        border-bottom: 0.3pt solid #ccc;
+    }
+    .num { text-align: right; }
+    .col-code { width: 18mm; }
+    .col-num { width: 24mm; }
+    .checks-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
+    .check-line { font-size: 8pt; margin-top: 0.5mm; }
+    .check-ok { color: #166534; }
+    .check-fail { color: #b91c1c; font-weight: bold; }
+</style>
+</head>
+<body>
+
+{% set scope_label = scope == 'full'
+    ? 'v plném rozsahu'
+    : (scope == 'small' ? 've zkráceném rozsahu (malá účetní jednotka)' : 've zkráceném rozsahu (mikro účetní jednotka)') %}
+
+<table class="header-table">
+    <tr>
+        <td style="width:55%;">
+            <div class="header-title">ROZVAHA</div>
+            <div class="header-scope">{{ scope_label }}</div>
+            <div class="header-meta">k rozvahovému dni {{ as_of|cz_date }} (v celých tisících Kč)</div>
+            <div class="header-meta">Fiskální rok {{ period.fiscal_year }}{% if prev_period %}, minulé období: fiskální rok {{ prev_period.fiscal_year }}{% endif %}</div>
+            <div class="header-meta">Okamžik sestavení: {{ entity.prepared_at }} · verze výkazu: {{ version_code }}</div>
+        </td>
+        <td style="width:45%;" class="entity-info">
+            <strong>{{ entity.name }}</strong><br>
+            IČO: {{ entity.ico }}<br>
+            {{ entity.address }}
+        </td>
+    </tr>
+</table>
+
+<div class="section-title">AKTIVA</div>
+<table class="statement">
+    <thead>
+        <tr>
+            <th class="thl col-code">Označení</th>
+            <th class="thl">Položka</th>
+            <th class="col-num">Brutto</th>
+            <th class="col-num">Korekce</th>
+            <th class="col-num">Netto</th>
+            <th class="col-num">Minulé obd.</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in assets %}
+            <tr class="{{ row.row_type != 'detail' ? 'row-strong' : '' }}">
+                <td>{{ row.display_code }}</td>
+                <td style="padding-left: {{ 1.5 + row.level * 4 }}mm;">{{ row.label }}</td>
+                <td class="num">{{ row.gross|number_format(0, ',', ' ') }}</td>
+                <td class="num">{{ row.correction|number_format(0, ',', ' ') }}</td>
+                <td class="num">{{ row.net|number_format(0, ',', ' ') }}</td>
+                <td class="num">{{ row.prev_net|number_format(0, ',', ' ') }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="section-title">PASIVA</div>
+<table class="statement">
+    <thead>
+        <tr>
+            <th class="thl col-code">Označení</th>
+            <th class="thl">Položka</th>
+            <th class="col-num">Běžné obd.</th>
+            <th class="col-num">Minulé obd.</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in liabilities %}
+            <tr class="{{ row.row_type != 'detail' ? 'row-strong' : '' }}">
+                <td>{{ row.display_code }}</td>
+                <td style="padding-left: {{ 1.5 + row.level * 4 }}mm;">{{ row.label }}</td>
+                <td class="num">{{ row.amount|number_format(0, ',', ' ') }}</td>
+                <td class="num">{{ row.prev_amount|number_format(0, ',', ' ') }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="checks-title">Kontrola</div>
+<div class="check-line {{ checks.balanced ? 'check-ok' : 'check-fail' }}">
+    {{ checks.balanced ? '✓' : '✗' }} AKTIVA netto {{ checks.assets_net|number_format(0, ',', ' ') }} = PASIVA {{ checks.liabilities_total|number_format(0, ',', ' ') }}
+</div>
+<div class="check-line">
+    Hodnoty jsou v celých tisících Kč, zaokrouhleny po řádcích (§4 odst. 3 vyhl. č. 500/2002 Sb.);
+    součtové řádky se počítají z hodnot v Kč — proti součtu zaokrouhlených položek může vzniknout rozdíl ±1 tis. Kč.
+</div>
+
+</body>
+</html>

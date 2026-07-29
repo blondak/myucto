@@ -1,0 +1,695 @@
+<script setup lang="ts">
+import { ref, onMounted, reactive, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router'
+import {
+  accountingApi,
+  type JournalEntry,
+  type JournalEntryDetail,
+  type AccountingPeriod,
+} from '@/api/accounting'
+import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { formatDate, formatMoney } from '@/composables/useFormat'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import JournalEntryExtras from '@/components/accounting/JournalEntryExtras.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AutomationBadge from '@/components/automation/AutomationBadge.vue'
+import WhyPanel from '@/components/automation/WhyPanel.vue'
+import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
+import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+
+const { t } = useI18n()
+const auth = useAuthStore()
+const toast = useToast()
+const route = useRoute()
+
+const entries = ref<JournalEntry[]>([])
+const periods = ref<AccountingPeriod[]>([])
+const loading = ref(false)
+
+const page = ref(1)
+const total = ref(0)
+const perPage = ref(50)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const rangeFrom = computed(() => (total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1))
+const rangeTo = computed(() => Math.min(page.value * perPage.value, total.value))
+
+const filters = reactive({
+  document_no: '',
+  period_id: '' as number | '',
+  date_from: '',
+  date_to: '',
+  source_type: '' as '' | (typeof SOURCE_TYPES)[number],
+  posted: '' as '' | 'posted' | 'draft',
+  automation: '' as '' | 'auto' | 'approved' | 'manual',
+  // Featura D (audit 2026-07 follow-up) — fulltext + rozsah účtu/částky.
+  q: '',
+  account_from: '',
+  account_to: '',
+  amount_from: '' as number | '',
+  amount_to: '' as number | '',
+})
+
+const SOURCE_TYPES = [
+  'manual', 'invoice', 'purchase_invoice', 'bank', 'cash',
+  'depreciation', 'asset', 'asset_disposal',
+  'closing', 'opening', 'fx_revaluation', 'stock',
+  'offset', 'settlement',
+] as const
+
+// Drill-down z detailu dokladu (FV/PF): ?source_type=&source_id= → filtruje deník na
+// zápis(y) přesně tohoto dokladu. Deep-link, ne uživatelský ovladač → mimo saved filters;
+// jakmile uživatel sáhne na filtry, omezení se uvolní (viz applyFilters/resetFilters).
+const sourceIdFilter = ref<number | ''>('')
+
+// Totéž pro ?entry_id= — odskok na JEDEN konkrétní zápis. Dřív se místo filtru jen
+// zúžilo datum na entry_date, takže se vedle hledaného zápisu vypsal celý ten den;
+// u prokliku z nálezu integrity deníku to mate, protože nesouvisející zápisy vypadají
+// jako součást nálezu.
+const entryIdFilter = ref<number | ''>('')
+
+async function load() {
+  loading.value = true
+  try {
+    const r = await accountingApi.listJournal({
+      page: page.value,
+      document_no: filters.document_no || undefined,
+      period_id: filters.period_id || undefined,
+      date_from: filters.date_from || undefined,
+      date_to: filters.date_to || undefined,
+      source_type: filters.source_type || undefined,
+      source_id: sourceIdFilter.value || undefined,
+      entry_id: entryIdFilter.value || undefined,
+      posted: filters.posted === '' ? undefined : filters.posted === 'posted',
+      automation: filters.automation || undefined,
+      q: filters.q || undefined,
+      account_from: filters.account_from || undefined,
+      account_to: filters.account_to || undefined,
+      amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
+      amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
+    })
+    entries.value = r.items
+    total.value = r.total
+    perPage.value = r.per_page
+  } finally {
+    loading.value = false
+  }
+}
+
+function applyFilters() {
+  // Uživatel sáhl na filtry → uvolni drill-down omezení na konkrétní doklad i zápis.
+  sourceIdFilter.value = ''
+  entryIdFilter.value = ''
+  page.value = 1
+  load()
+}
+function resetFilters() {
+  filters.document_no = ''
+  filters.period_id = ''
+  filters.date_from = ''
+  filters.date_to = ''
+  filters.source_type = ''
+  filters.posted = ''
+  filters.automation = ''
+  filters.q = ''
+  filters.account_from = ''
+  filters.account_to = ''
+  filters.amount_from = ''
+  filters.amount_to = ''
+  sourceIdFilter.value = ''
+  entryIdFilter.value = ''
+  applyFilters()
+}
+
+function goToPage(p: number) {
+  const np = Math.min(Math.max(1, p), totalPages.value)
+  if (np !== page.value) { page.value = np; load(); expandedId.value = null }
+}
+
+function buildQuery(): Record<string, string> {
+  const q: Record<string, string> = {}
+  if (filters.document_no) q.document_no = filters.document_no
+  if (filters.period_id !== '') q.period_id = String(filters.period_id)
+  if (filters.date_from) q.date_from = filters.date_from
+  if (filters.date_to) q.date_to = filters.date_to
+  if (filters.source_type) q.source_type = filters.source_type
+  if (filters.posted) q.posted = filters.posted
+  if (filters.automation) q.automation = filters.automation
+  if (filters.q) q.q = filters.q
+  if (filters.account_from) q.account_from = filters.account_from
+  if (filters.account_to) q.account_to = filters.account_to
+  if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
+  if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
+  return q
+}
+
+function applyQueryToPage(q: Record<string, string>) {
+  filters.document_no = q.document_no ?? ''
+  filters.period_id = q.period_id ? Number(q.period_id) : ''
+  filters.date_from = q.date_from ?? ''
+  filters.date_to = q.date_to ?? ''
+  filters.source_type = (SOURCE_TYPES as readonly string[]).includes(q.source_type ?? '')
+    ? (q.source_type as typeof filters.source_type) : ''
+  filters.posted = q.posted === 'posted' || q.posted === 'draft' ? q.posted : ''
+  filters.automation = q.automation === 'auto' || q.automation === 'approved' || q.automation === 'manual'
+    ? q.automation : ''
+  filters.q = q.q ?? ''
+  filters.account_from = q.account_from ?? ''
+  filters.account_to = q.account_to ?? ''
+  filters.amount_from = q.amount_from ? Number(q.amount_from) : ''
+  filters.amount_to = q.amount_to ? Number(q.amount_to) : ''
+  applyFilters()
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'date', labelKey: 'accounting.journal.entry_date', required: true },
+  { key: 'document_no', labelKey: 'accounting.journal.document_no' },
+  { key: 'document_date', labelKey: 'accounting.journal.col_document_date', defaultHidden: true },
+  { key: 'description', labelKey: 'accounting.journal.description', required: true },
+  { key: 'source', labelKey: 'accounting.journal.source_col' },
+  { key: 'amount', labelKey: 'accounting.journal.col_amount' },
+  { key: 'status', labelKey: 'accounting.journal.status_col' },
+  { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
+  { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
+]
+const tbl = useTablePrefs('journal', COLUMNS)
+const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+
+// ── Export PDF/XLSX (audit 2026-07) — respektuje AKTUÁLNĚ aplikované filtry ────
+const exporting = ref(false)
+function exportQueryParams(): Record<string, string | number> {
+  const q: Record<string, string | number> = {}
+  if (filters.document_no) q.document_no = filters.document_no
+  if (filters.period_id !== '') q.period_id = filters.period_id
+  if (filters.date_from) q.date_from = filters.date_from
+  if (filters.date_to) q.date_to = filters.date_to
+  if (filters.source_type) q.source_type = filters.source_type
+  if (sourceIdFilter.value) q.source_id = sourceIdFilter.value
+  if (filters.posted) q.posted = filters.posted === 'posted' ? '1' : '0'
+  if (filters.automation) q.automation = filters.automation
+  if (filters.q) q.q = filters.q
+  if (filters.account_from) q.account_from = filters.account_from
+  if (filters.account_to) q.account_to = filters.account_to
+  if (filters.amount_from !== '') q.amount_from = filters.amount_from
+  if (filters.amount_to !== '') q.amount_to = filters.amount_to
+  return q
+}
+async function exportFile(format: 'pdf' | 'xlsx') {
+  exporting.value = true
+  try {
+    const r = await accountingApi.exportReport('/accounting/reports/journal/export', { ...exportQueryParams(), format })
+    downloadBlob(r.data as unknown as Blob, `ucetni-denik.${format}`)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    exporting.value = false
+  }
+}
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+}
+
+onMounted(async () => {
+  try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  // Předvyplnění filtrů z query (drill-down z uzávěrky / sestav).
+  const qPeriod = Number(route.query.period_id || 0)
+  if (qPeriod > 0) filters.period_id = qPeriod
+  const qSource = String(route.query.source_type || '')
+  if ((SOURCE_TYPES as readonly string[]).includes(qSource)) {
+    filters.source_type = qSource as typeof filters.source_type
+  }
+  const qSourceId = Number(route.query.source_id || 0)
+  if (qSourceId > 0) sourceIdFilter.value = qSourceId
+  const entryId = Number(route.query.entry_id || 0)
+  if (entryId > 0) {
+    try {
+      const d = await accountingApi.getEntry(entryId)
+      // Filtruj přímo na ten zápis. Datum se nastavuje jen jako viditelný kontext
+      // (uživatel hned vidí, kde v čase je); samotné omezení dělá entry_id, takže
+      // se vedle hledaného zápisu neukážou nesouvisející zápisy z téhož dne.
+      entryIdFilter.value = entryId
+      filters.date_from = d.entry_date
+      filters.date_to = d.entry_date
+      await load()
+      expandedId.value = entryId
+      detail.value = d
+      return
+    } catch {
+      /* neexistující/cizí zápis — pokračuje běžné načtení */
+    }
+  }
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  await load()
+})
+
+// ── Expand / detail ────────────────────────────────────────────────────────
+const expandedId = ref<number | null>(null)
+const detail = ref<JournalEntryDetail | null>(null)
+const detailLoading = ref(false)
+
+async function toggleExpand(entry: JournalEntry) {
+  if (expandedId.value === entry.id) { expandedId.value = null; detail.value = null; return }
+  expandedId.value = entry.id
+  detail.value = null
+  detailLoading.value = true
+  try {
+    detail.value = await accountingApi.getEntry(entry.id)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    expandedId.value = null
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const detailTotal = computed(() => {
+  if (!detail.value) return 0
+  return detail.value.lines
+    .filter(l => l.side === 'debit')
+    .reduce((sum, l) => sum + l.amount, 0)
+})
+
+// ── Drawer se zdrojovým dokladem ───────────────────────────────────────────
+// Akordeon (řádky, historie, přílohy, poznámky) zůstává; drawer je navíc a visí
+// na ikoně ve sloupci ZDROJ. Drží se ID ZÁPISU, ne source_type/source_id.
+const sourceDrawerEntryId = ref<number | null>(null)
+
+function openSourceDrawer(entry: JournalEntry) {
+  sourceDrawerEntryId.value = entry.id
+}
+
+async function reverse(entry: JournalEntryDetail) {
+  if (!confirm(t('accounting.journal.reverse_confirm', { id: entry.id }))) return
+  try {
+    await accountingApi.reverseEntry(entry.id)
+    toast.success(t('accounting.journal.reversed'))
+    expandedId.value = null
+    detail.value = null
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+function canDeleteEntry(entry: JournalEntryDetail): boolean {
+  if (entry.reversed_by) return false
+  if (!['manual', 'invoice', 'purchase_invoice', 'bank', 'depreciation'].includes(entry.source_type)) return false
+  if (entry.source_type !== 'manual' && !entry.source_id) return false
+  return periods.value.find(period => period.id === entry.period_id)?.status === 'open'
+}
+
+async function deleteEntry(entry: JournalEntryDetail) {
+  const confirmKey = entry.source_type === 'depreciation'
+    ? 'accounting.journal.delete_depreciation_confirm'
+    : entry.source_type === 'bank'
+      ? 'accounting.journal.delete_bank_confirm'
+      : entry.source_type === 'manual'
+        ? 'accounting.journal.delete_manual_confirm'
+        : 'accounting.journal.delete_confirm'
+  if (!confirm(t(confirmKey, { id: entry.id }))) return
+  try {
+    await accountingApi.deleteEntry(entry.id)
+    const successKey = entry.source_type === 'depreciation'
+      ? 'accounting.journal.depreciation_deleted'
+      : entry.source_type === 'bank'
+        ? 'accounting.journal.bank_deleted'
+        : entry.source_type === 'manual'
+          ? 'accounting.journal.manual_deleted'
+          : 'accounting.journal.deleted'
+    toast.success(t(successKey))
+    expandedId.value = null
+    detail.value = null
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+/** Sync editovaného description zpět do řádku listu i do detailu (Epic F7). */
+function onDescriptionUpdated(entryId: number, description: string, rowVersion: number) {
+  if (detail.value && detail.value.id === entryId) {
+    detail.value.description = description
+    detail.value.row_version = rowVersion
+  }
+  const row = entries.value.find(e => e.id === entryId)
+  if (row) { row.description = description; row.row_version = rowVersion }
+}
+
+/** Proklik na stornující zápis (deep-link ?entry_id= v rámci téže stránky). */
+async function openReversal(id: number) {
+  try {
+    const d = await accountingApi.getEntry(id)
+    filters.date_from = d.entry_date
+    filters.date_to = d.entry_date
+    // Kolizní filtry pryč — stornující zápis by jinak nemusel projít filtrem a proklik by „nefungoval"
+    filters.period_id = ''
+    filters.source_type = ''
+    filters.posted = ''
+    filters.automation = ''
+    page.value = 1
+    await load()
+    expandedId.value = id
+    detail.value = d
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+function sourceLabel(type: string): string {
+  const key = `accounting.journal.source.${type}`
+  const v = t(key)
+  return v === key ? type : v
+}
+
+/**
+ * Cíl drill-down odkazu na zdrojový doklad (audit 2026-07: rozšířeno o banku/pokladnu,
+ * dále o majetek — FEATURA C). Banka: source_id je bank_transactions.id, ale existující
+ * stránka detailu výpisu (`bank-detail`) čeká ID VÝPISU — proklikneme na výpis obohacený
+ * BE o statement_id (source_statement_id). Pokladna: nemá samostatnou detail-stránku, jen
+ * seznam (`accounting-cash`) filtrovatelný přes `q` (prefix na doc_number) — nejbližší
+ * smysluplný cíl bez vymýšlení nové routy.
+ *
+ * Majetek: 'asset' (zařazení) a 'asset_disposal' (vyřazení) mají source_id = ID karty
+ * majetku přímo. 'depreciation' (odpis) má source_id = ID řádku depreciation_entries,
+ * NE ID karty — proto se pro tenhle typ používá BE-obohacené `source_asset_id`
+ * (JOIN přes depreciation_entries.asset_id, viz JournalEntryRepository::paginate()).
+ */
+function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
+  if (entry.source_type === 'invoice' && entry.source_id) {
+    return { name: 'invoice-detail', params: { id: entry.source_id } }
+  }
+  if (entry.source_type === 'purchase_invoice' && entry.source_id) {
+    return { name: 'purchase-invoice-detail', params: { id: entry.source_id } }
+  }
+  if (entry.source_type === 'bank' && entry.source_statement_id) {
+    return { name: 'bank-detail', params: { id: entry.source_statement_id } }
+  }
+  if (entry.source_type === 'cash' && entry.source_doc_number) {
+    return {
+      name: 'accounting-cash',
+      query: {
+        ...(entry.source_register_id ? { register_id: String(entry.source_register_id) } : {}),
+        q: entry.source_doc_number,
+      },
+    }
+  }
+  if ((entry.source_type === 'asset' || entry.source_type === 'asset_disposal') && entry.source_id) {
+    return { name: 'accounting-asset-detail', params: { id: entry.source_id } }
+  }
+  if (entry.source_type === 'depreciation' && entry.source_asset_id) {
+    return { name: 'accounting-asset-detail', params: { id: entry.source_asset_id } }
+  }
+  // Zápočet: source_id je ID zápočtu, proklik vede na vyrovnanou fakturu.
+  if (entry.source_type === 'settlement' && entry.source_settlement_doc_id) {
+    return entry.source_settlement_doc_type === 'invoice'
+      ? { name: 'invoice-detail', params: { id: entry.source_settlement_doc_id } }
+      : { name: 'purchase-invoice-detail', params: { id: entry.source_settlement_doc_id } }
+  }
+  return null
+}
+</script>
+
+<template>
+  <div>
+    <ActivationBanner />
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h1 class="text-2xl font-semibold">{{ t('accounting.journal.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.journal.subtitle') }}</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" :disabled="exporting" :class="btnOutline('primary')" @click="exportFile('pdf')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+          {{ t('accounting.journal.export_pdf') }}
+        </button>
+        <button type="button" :disabled="exporting" :class="btnOutline('primary')" @click="exportFile('xlsx')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+          {{ t('accounting.journal.export_xlsx') }}
+        </button>
+        <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('accounting.journal.new') }}
+        </RouterLink>
+      </div>
+    </div>
+
+    <!-- Filtry -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_document_no') }}</label>
+          <input v-model.trim="filters.document_no" type="search" @keyup.enter="applyFilters" @search="applyFilters"
+            :placeholder="t('accounting.journal.filter_document_no_placeholder')"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_period') }}</label>
+          <select v-model="filters.period_id" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.fiscal_year }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_date_from') }}</label>
+          <input v-model="filters.date_from" type="date" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_date_to') }}</label>
+          <input v-model="filters.date_to" type="date" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_source') }}</label>
+          <select v-model="filters.source_type" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="s in SOURCE_TYPES" :key="s" :value="s">{{ sourceLabel(s) }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_posted') }}</label>
+          <select v-model="filters.posted" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="posted">{{ t('accounting.journal.posted') }}</option>
+            <option value="draft">{{ t('accounting.journal.draft') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('automation.journal_origin') }}</label>
+          <select v-model="filters.automation" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('automation.origin_all') }}</option>
+            <option value="auto">{{ t('automation.origin_auto') }}</option>
+            <option value="approved">{{ t('automation.origin_approved') }}</option>
+            <option value="manual">{{ t('automation.origin_manual') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_q') }}</label>
+          <input v-model.trim="filters.q" type="search" @keyup.enter="applyFilters" @search="applyFilters"
+            :placeholder="t('accounting.journal.filter_q_placeholder')"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
+          <input v-model.trim="filters.account_from" type="text" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_to') }}</label>
+          <input v-model.trim="filters.account_to" type="text" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_amount_from') }}</label>
+          <input v-model.number="filters.amount_from" type="number" step="0.01" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_amount_to') }}</label>
+          <input v-model.number="filters.amount_to" type="number" step="0.01" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+        <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
+        <SavedFiltersMenu :ctrl="saved" />
+        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <DensityToggle class="hidden md:block" :ctrl="tbl" />
+      </div>
+    </div>
+
+    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+
+    <div v-else-if="entries.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.journal.empty') }}</div>
+
+    <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" :class="tbl.densityClass.value">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+            <tr>
+              <th class="px-3 py-2 w-8"></th>
+              <th v-if="tbl.isVisible('date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.entry_date') }}</th>
+              <th v-if="tbl.isVisible('document_no')" class="px-3 py-2 text-left font-medium w-32">{{ t('accounting.journal.document_no') }}</th>
+              <th v-if="tbl.isVisible('document_date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_document_date') }}</th>
+              <th v-if="tbl.isVisible('description')" class="px-3 py-2 text-left font-medium">{{ t('accounting.journal.description') }}</th>
+              <th v-if="tbl.isVisible('source')" class="px-3 py-2 text-left font-medium w-48">{{ t('accounting.journal.source_col') }}</th>
+              <th v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.journal.col_amount') }}</th>
+              <th v-if="tbl.isVisible('status')" class="px-3 py-2 text-center font-medium w-24">{{ t('accounting.journal.status_col') }}</th>
+              <th v-if="tbl.isVisible('posted_at')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.journal.col_posted_at') }}</th>
+              <th v-if="tbl.isVisible('posted_by')" class="px-3 py-2 text-left font-medium w-36">{{ t('accounting.journal.col_posted_by') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <template v-for="e in entries" :key="e.id">
+              <tr class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-60': e.reversed_by }" @click="toggleExpand(e)">
+                <td class="px-3 py-2 text-neutral-400">
+                  <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === e.id }">▸</span>
+                </td>
+                <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
+                <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">{{ e.document_no || '—' }}</td>
+                <td v-if="tbl.isVisible('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
+                <td v-if="tbl.isVisible('description')" class="px-3 py-2">
+                  {{ e.description || '—' }}
+                  <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+                </td>
+                <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <!--
+                      Ikona zdroje otevírá náhledový drawer místo přímé navigace —
+                      účetní tak vidí doklad bez ztráty pozice v deníku. Odkaz na
+                      plný detail je uvnitř draweru. @click.stop, ať se nepřepne akordeon.
+                    -->
+                    <button v-if="sourceLink(e)" type="button" @click.stop="openSourceDrawer(e)"
+                      class="cursor-pointer text-primary-600 hover:text-primary-700 inline-flex items-center gap-1"
+                      :title="t('accounting.journal.source_drawer.open')">
+                      {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                      </svg>
+                    </button>
+                    <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
+                    <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+                  </div>
+                </td>
+                <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono">{{ formatMoney(e.amount ?? 0) }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-3 py-2 text-center">
+                  <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
+                  <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>
+                </td>
+                <td v-if="tbl.isVisible('posted_at')" class="px-3 py-2 whitespace-nowrap">{{ e.posted_at ? formatDate(e.posted_at) : '—' }}</td>
+                <td v-if="tbl.isVisible('posted_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ e.posted_by_name || '—' }}</td>
+              </tr>
+              <!-- Detail (rozbalený) -->
+              <tr v-if="expandedId === e.id">
+                <td :colspan="visibleColCount" class="px-3 py-3 bg-neutral-50">
+                  <div v-if="detailLoading" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
+                  <div v-else-if="detail">
+                    <table class="w-full text-sm mb-3">
+                      <thead class="text-xs text-neutral-500 uppercase tracking-wide">
+                        <tr>
+                          <th class="px-2 py-1 text-left font-medium">{{ t('accounting.journal.account') }}</th>
+                          <th class="px-2 py-1 text-left font-medium">{{ t('accounting.journal.cost_center') }}</th>
+                          <th class="px-2 py-1 text-right font-medium w-32">{{ t('accounting.journal.side.debit') }}</th>
+                          <th class="px-2 py-1 text-right font-medium w-32">{{ t('accounting.journal.side.credit') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-neutral-200">
+                        <tr v-for="l in detail.lines" :key="l.id">
+                          <td class="px-2 py-1">
+                            <span class="font-mono">{{ l.account_code }}</span>
+                            <span class="text-neutral-600 ml-1">{{ l.account_name }}</span>
+                          </td>
+                          <td class="px-2 py-1 text-neutral-500 text-xs">{{ l.cost_center || '—' }}</td>
+                          <td class="px-2 py-1 text-right font-mono">
+                            <template v-if="l.side === 'debit'">
+                              {{ formatMoney(l.amount) }}
+                              <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400">
+                                {{ formatMoney(l.amount_foreign, l.currency_code) }}
+                              </div>
+                            </template>
+                          </td>
+                          <td class="px-2 py-1 text-right font-mono">
+                            <template v-if="l.side === 'credit'">
+                              {{ formatMoney(l.amount) }}
+                              <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400">
+                                {{ formatMoney(l.amount_foreign, l.currency_code) }}
+                              </div>
+                            </template>
+                          </td>
+                        </tr>
+                      </tbody>
+                      <tfoot>
+                        <tr class="border-t-2 border-neutral-300 font-semibold">
+                          <td class="px-2 py-1" colspan="2">{{ t('accounting.journal.total') }}</td>
+                          <td class="px-2 py-1 text-right font-mono" colspan="2">{{ formatMoney(detailTotal) }}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    <WhyPanel v-if="detail.automation" class="mb-3" :provenance="detail.automation" />
+                    <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
+                    <JournalEntryExtras :entry="detail"
+                      @description-updated="(desc, rv) => onDescriptionUpdated(detail!.id, desc, rv)" />
+                    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
+                    <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
+                      <div class="text-xs text-neutral-500">
+                        <span v-if="detail.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(detail.created_at) }}</span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <RouterLink v-if="auth.canWrite('accounting')" :to="{ path: '/accounting/journal/new', query: { copy_from: String(detail.id) } }" :class="btnOutline('neutral')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+                          <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
+                        </RouterLink>
+                        <button v-if="auth.canWrite('accounting') && !detail.reversed_by" @click="reverse(detail)" :class="btnOutline('danger')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+                          {{ t('accounting.journal.reverse') }}
+                        </button>
+                        <button v-if="auth.canWrite('accounting') && canDeleteEntry(detail)" @click="deleteEntry(detail)" :class="btnOutline('danger')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                          {{ t('accounting.journal.delete') }}
+                        </button>
+                        <button v-else-if="detail.reversed_by" type="button" @click="openReversal(detail.reversed_by)"
+                          class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline">
+                          {{ t('accounting.journal.reversal_entry') }} #{{ detail.reversed_by }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <nav v-if="!loading && total > perPage" class="mt-4 flex items-center justify-between gap-3 text-sm">
+      <span class="text-neutral-500">{{ t('common.pagination_range', { from: rangeFrom, to: rangeTo, total }) }}</span>
+      <div class="flex items-center gap-1">
+        <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"
+          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
+        <span class="px-2 text-neutral-600">{{ page }} / {{ totalPages }}</span>
+        <button type="button" :disabled="page >= totalPages" @click="goToPage(page + 1)"
+          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+      </div>
+    </nav>
+
+    <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
+      @close="sourceDrawerEntryId = null" />
+  </div>
+</template>

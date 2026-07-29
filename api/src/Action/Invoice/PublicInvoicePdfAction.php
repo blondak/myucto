@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
@@ -63,7 +64,7 @@ final class PublicInvoicePdfAction
         ob_end_clean();
 
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
-        if (!is_array($user) || empty($user['id'])) {
+        if ((!is_array($user) || empty($user['id'])) && !DemoReadOnlyMiddleware::enabled($request)) {
             $this->repo->markPublicViewed($id);
             $this->logger->log('invoice.public_pdf_downloaded', null, 'invoice', $id, [],
                 $this->ipMatcher->clientIpFromRequest($request->getServerParams()),

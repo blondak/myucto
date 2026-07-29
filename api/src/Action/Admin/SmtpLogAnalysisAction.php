@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Admin;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mail\LogAnalysis\SmtpLogAnalyzer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,7 +26,7 @@ final class SmtpLogAnalysisAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 

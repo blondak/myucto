@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type SmtpLogAnalysis } from '@/api/admin'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 
@@ -194,7 +195,8 @@ function toggleStatus(s: string) {
         <input v-model="filter.date_from" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
         <span class="text-neutral-400 text-sm">–</span>
         <input v-model="filter.date_to" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
-        <button @click="load" class="cursor-pointer h-9 px-3 border border-neutral-300 rounded-md text-sm hover:bg-neutral-50">
+        <button @click="load" :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
           {{ t('smtp_logs.refresh') }}
         </button>
         <span class="ml-auto text-xs text-neutral-500">{{ t('smtp_logs.total', { n: data.total, p: currentPage, tp: totalPages }) }}</span>

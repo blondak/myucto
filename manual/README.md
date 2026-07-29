@@ -47,7 +47,9 @@ php tools/exportManualToPdf.php
 
 1. Vytvoř `manual/NN_Nazev.md` (NN = pořadové dvojcifré číslo).
 2. Přidej řádek do `manual/INDEX.md` ve správné grupě (### Instalace a start /
-   ### Prodej / ### Nákup / ### Finance / ### Dokumenty / ### Daně / ### Systém).
+   ### Grafy / ### Prodej / ### Nákup / ### Peníze / ### Dokumenty /
+   ### Sklad / ### Daně / ### Účetnictví / ### Nástroje /
+   ### Daňová evidence / ### Firma / ### Systém).
 3. `php tools/generateManualHtml.php && php tools/exportManualToPdf.php`.
 
 ### Reorganizace pořadí
@@ -69,7 +71,7 @@ zachytí.)
   - `> 💡 Tip: ...` — užitečný tip
   - `> 🛈 Pozn: ...` — poznámka (info)
   - `> ⚠️ Pozor: ...` — varování / důležité
-- **Cross-reference**: `[Detail klienta](13_Klienti.md)` — generátor přepíše na
+- **Cross-reference**: `[Detail klienta](18_Klienti.md)` — generátor přepíše na
   `?ch=14_Klienti`
 
 ## Servírování

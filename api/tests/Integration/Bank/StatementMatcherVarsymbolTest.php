@@ -7,7 +7,10 @@ namespace MyInvoice\Tests\Integration\Bank;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Bank\Match\MatchSuggestionException;
+use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -27,6 +30,7 @@ final class StatementMatcherVarsymbolTest extends TestCase
 {
     private Connection $db;
     private StatementMatcher $matcher;
+    private MatchSuggestionService $matchV2;
     private int $supplierId = 0;
     private int $clientId = 0;
     private int $currencyId = 0;
@@ -41,7 +45,7 @@ final class StatementMatcherVarsymbolTest extends TestCase
 
     private const FILE_MARKER = '__vs58_test__';
     /** Konkrétní VS používané testy — deterministický úklid (i po spadnutém běhu). */
-    private const TEST_VARSYMBOLS = ['2099-00042', '2099-00077', '2099000099', '2099000123', '2099000260', '2099000261'];
+    private const TEST_VARSYMBOLS = ['2099-00042', '209900042', 'A209900042', 'B209900042', '2099-00077', '2099000099', '2099000123', '2099000260', '2099000261'];
 
     protected function setUp(): void
     {
@@ -53,7 +57,13 @@ final class StatementMatcherVarsymbolTest extends TestCase
             $c = Bootstrap::buildApp()->getContainer();
             $this->db = $c->get(Connection::class);
             // Mailer null: párování nesmí v testu posílat reálné e-maily.
-            $this->matcher = new StatementMatcher($this->db, $c->get(FinalFromProformaCreator::class), null);
+            $this->matcher = new StatementMatcher(
+                $this->db,
+                $c->get(FinalFromProformaCreator::class),
+                null,
+                $c->get(InvoicePaymentService::class),
+            );
+            $this->matchV2 = $c->get(MatchSuggestionService::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -108,7 +118,7 @@ final class StatementMatcherVarsymbolTest extends TestCase
     /**
      * @param numeric-string $varsymbol
      */
-    private function seed(string $varsymbol, string $txVs, float $amount, string $status = 'issued', float $paidTotal = 0.0): void
+    private function seed(string $varsymbol, string $txVs, float $amount, string $status = 'issued', float $paidTotal = 0.0, ?float $txAmount = null): void
     {
         $pdo = $this->db->pdo();
         $d = $this->date->format('Y-m-d');
@@ -139,7 +149,7 @@ final class StatementMatcherVarsymbolTest extends TestCase
             "INSERT INTO bank_transactions
                 (statement_id, posted_at, amount, currency, variable_symbol)
              VALUES (?, ?, ?, 'CZK', ?)"
-        )->execute([$this->statementId, $d, $amount, $txVs]);
+        )->execute([$this->statementId, $d, $txAmount ?? $amount, $txVs]);
         $this->transactionId = (int) $pdo->lastInsertId();
     }
 
@@ -177,6 +187,21 @@ final class StatementMatcherVarsymbolTest extends TestCase
 
         self::assertSame('auto_exact', $res['status'] ?? null);
         self::assertSame($this->invoiceId, $res['invoice_id'] ?? null);
+    }
+
+    public function testSmallIncomingOverpaymentIsCappedAtRemaining(): void
+    {
+        $this->seed('2099000099', '2099000099', 1000.00, txAmount: 1000.50);
+
+        $res = $this->matcher->match($this->transactionId);
+
+        self::assertSame('auto_exact', $res['status'] ?? null);
+        self::assertEqualsWithDelta(1000.00, (float) $this->db->pdo()->query(
+            "SELECT amount FROM invoice_payments WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchColumn(), 0.001, 'Na 311 se alokuje jen otevřený zůstatek; 0,50 Kč zůstane pro 648.');
+        self::assertEqualsWithDelta(1000.00, (float) $this->db->pdo()->query(
+            "SELECT paid_total FROM invoices WHERE id = {$this->invoiceId}"
+        )->fetchColumn(), 0.001);
     }
 
     public function testAlreadyPaidInvoiceStillLinks(): void
@@ -276,5 +301,50 @@ final class StatementMatcherVarsymbolTest extends TestCase
 
         self::assertNotSame('auto_exact', $res['status'] ?? null);
         self::assertNotSame($this->invoiceId, $res['invoice_id'] ?? null);
+    }
+
+    public function testNormalizedDuplicateVsIsNeverAutoMatched(): void
+    {
+        $this->seed('A209900042', '209900042', 1234.50);
+        $pdo = $this->db->pdo();
+        $d = $this->date->format('Y-m-d');
+        $pdo->prepare(
+            "INSERT INTO invoices
+                (invoice_type, varsymbol, client_id, supplier_id, issue_date, tax_date, due_date,
+                 currency_id, status, total_without_vat, total_with_vat, paid_total, created_by)
+             VALUES ('invoice', 'B209900042', ?, ?, ?, ?, ?, ?, 'issued', 1234.50, 1234.50, 0, ?)"
+        )->execute([$this->clientId, $this->supplierId, $d, $d, $d, $this->currencyId, $this->userId]);
+        $secondInvoiceId = (int) $pdo->lastInsertId();
+
+        $result = $this->matcher->match($this->transactionId);
+
+        self::assertSame('unmatched', $result['status'] ?? null);
+        self::assertSame('ambiguous_vs', $result['reason'] ?? null);
+        self::assertSame('unmatched', $pdo->query(
+            "SELECT match_status FROM bank_transactions WHERE id = {$this->transactionId}"
+        )->fetchColumn());
+
+        $augmented = $this->matchV2->afterMatch($this->transactionId, $result);
+        self::assertArrayHasKey('match_suggestion_id', $augmented);
+        $suggestions = $this->matchV2->listForStatement($this->statementId, $this->supplierId);
+        self::assertCount(1, $suggestions);
+        self::assertGreaterThanOrEqual(2, count($suggestions[0]['candidates']));
+        $candidateIds = array_map(static fn (array $candidate): int => (int) ($candidate['invoice_id'] ?? 0), $suggestions[0]['candidates']);
+        self::assertContains($this->invoiceId, $candidateIds);
+        self::assertContains($secondInvoiceId, $candidateIds);
+        self::assertSame('pending', $suggestions[0]['status']);
+
+        try {
+            $this->matchV2->reject((int) $suggestions[0]['id'], $this->supplierId + 100000, $this->userId, null);
+            self::fail('Cizí supplier nesmí návrh vyřídit.');
+        } catch (MatchSuggestionException $e) {
+            self::assertSame('not_found', $e->errorCode);
+        }
+        $this->matchV2->reject((int) $suggestions[0]['id'], $this->supplierId, $this->userId, 'ambiguózní VS');
+        self::assertSame('rejected', $pdo->query(
+            'SELECT status FROM bank_match_suggestions WHERE id = ' . (int) $suggestions[0]['id']
+        )->fetchColumn());
+        $this->expectException(MatchSuggestionException::class);
+        $this->matchV2->reject((int) $suggestions[0]['id'], $this->supplierId, $this->userId, null);
     }
 }

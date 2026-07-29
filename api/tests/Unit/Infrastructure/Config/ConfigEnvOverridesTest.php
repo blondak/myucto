@@ -105,6 +105,24 @@ PHP);
         self::assertSame(3306, $cfg->get('db.port'));
     }
 
+    public function testEpoTestDefaultsOffAndCanBeEnabledByEnvironment(): void
+    {
+        $cfg = Config::load($this->tmpDir);
+        self::assertFalse($cfg->get('epo_test'));
+
+        $this->setEnv('MYINVOICE_EPO_TEST', 'true');
+        $this->setEnv(
+            'MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256',
+            str_repeat('a', 64) . ', ' . str_repeat('b', 64),
+        );
+        $cfg = Config::load($this->tmpDir);
+        self::assertTrue($cfg->get('epo_test'));
+        self::assertSame(
+            [str_repeat('a', 64), str_repeat('b', 64)],
+            $cfg->get('epo.test_receipt_signer_fingerprints_sha256'),
+        );
+    }
+
     public function testWebAuthnPolicyEnvironmentOverridesApply(): void
     {
         $this->setEnv('MYINVOICE_SESSION_LOCK_AFTER_MINUTES', '30');

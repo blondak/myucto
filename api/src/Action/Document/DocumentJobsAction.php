@@ -105,7 +105,11 @@ final class DocumentJobsAction
             return Json::error($response, 'no_ids', 'Nebyly vybrány žádné položky.', 400);
         }
 
-        $jobId = $this->jobs->create($sid, 'document_zip_export', ['ids' => $ids, 'folder_ids' => $folderIds], $userId ?? 0);
+        // Zachyť admin status tvůrce pro scope-aware export (§4.2) — job běží na pozadí
+        // později, takže viewer kontext se persistuje do params (userId = created_by).
+        $isAdmin = $this->viewer($request)->isAdmin;
+        $jobId = $this->jobs->create($sid, 'document_zip_export',
+            ['ids' => $ids, 'folder_ids' => $folderIds, 'viewer_is_admin' => $isAdmin], $userId ?? 0);
         if ($this->jobSourceMissing($jobId, $sid, 'document_zip_export')) {
             return $this->migrationError($response);
         }
@@ -248,12 +252,30 @@ final class DocumentJobsAction
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued']);
     }
 
+    /**
+     * Vlastnická osa jobu (Epic F7, §4.2): job patří svému tvůrci (import_jobs.created_by).
+     * Admin tenanta vidí vše; jinak jen vlastní joby. Export ZIP může obsahovat cizí
+     * user-scoped doklady (admin balí složku), takže bez téhle brány by kterýkoli
+     * non-admin téhož dodavatele stáhl cizí osobní dokumenty přes list/download.
+     *
+     * @param array<string,mixed> $job
+     */
+    private function canAccessJob(array $job, Request $request): bool
+    {
+        $viewer = $this->viewer($request);
+        if ($viewer->isAdmin) return true;
+        return $viewer->userId !== null && (int) ($job['created_by'] ?? 0) === $viewer->userId;
+    }
+
     /** GET /api/documents/jobs */
     public function list(Request $request, Response $response): Response
     {
         $sid = $this->supplierId($request);
         $all = $this->jobs->listForTenant($sid, null, 30);
-        $jobs = array_values(array_filter($all, static fn($j) => in_array($j['source'], self::SOURCES, true)));
+        $jobs = array_values(array_filter(
+            $all,
+            fn($j) => in_array($j['source'], self::SOURCES, true) && $this->canAccessJob($j, $request),
+        ));
         return Json::ok($response, ['jobs' => array_map([$this, 'jobView'], $jobs)]);
     }
 
@@ -262,7 +284,7 @@ final class DocumentJobsAction
     {
         $sid = $this->supplierId($request);
         $job = $this->jobs->find((int) ($args['id'] ?? 0), $sid);
-        if ($job === null || !in_array($job['source'], self::SOURCES, true)) {
+        if ($job === null || !in_array($job['source'], self::SOURCES, true) || !$this->canAccessJob($job, $request)) {
             return Json::error($response, 'not_found', 'Job nenalezen.', 404);
         }
         return Json::ok($response, $this->jobView($job));
@@ -274,7 +296,8 @@ final class DocumentJobsAction
         ini_set('display_errors', '0');
         $sid = $this->supplierId($request);
         $job = $this->jobs->find((int) ($args['id'] ?? 0), $sid);
-        if ($job === null || ($job['status'] ?? '') !== 'completed' || empty($job['result_path'])) {
+        if ($job === null || ($job['status'] ?? '') !== 'completed' || empty($job['result_path'])
+            || !$this->canAccessJob($job, $request)) {
             return Json::error($response, 'not_found', 'Výsledek není k dispozici.', 404);
         }
         $base = RuntimePaths::storage('documents');
@@ -301,7 +324,11 @@ final class DocumentJobsAction
     public function cancel(Request $request, Response $response, array $args): Response
     {
         $sid = $this->supplierId($request);
-        $ok = $this->jobs->requestCancel((int) ($args['id'] ?? 0), $sid);
+        $job = $this->jobs->find((int) ($args['id'] ?? 0), $sid);
+        if ($job === null || !in_array($job['source'], self::SOURCES, true) || !$this->canAccessJob($job, $request)) {
+            return Json::error($response, 'not_found', 'Job nenalezen.', 404);
+        }
+        $ok = $this->jobs->requestCancel((int) $job['id'], $sid);
         return Json::ok($response, ['ok' => $ok, 'cancel_requested' => true]);
     }
 
@@ -310,7 +337,7 @@ final class DocumentJobsAction
     {
         $sid = $this->supplierId($request);
         $job = $this->jobs->find((int) ($args['id'] ?? 0), $sid);
-        if ($job === null || !in_array($job['source'], self::SOURCES, true)) {
+        if ($job === null || !in_array($job['source'], self::SOURCES, true) || !$this->canAccessJob($job, $request)) {
             return Json::error($response, 'not_found', 'Job nenalezen.', 404);
         }
         if (!empty($job['result_path'])) {

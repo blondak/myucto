@@ -1,0 +1,19 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Měsíční přehled — {{ period_label }}
+------------
+
+Dobrý den,
+
+v příloze zasíláme měsíční přehled hospodaření za {{ period_label }} (výsledovka, rozvaha, pohledávky a závazky po splatnosti{% if has_vat %}, DPH{% endif %}).
+{% if note_text is defined and note_text|length %}
+
+Komentář účetní:
+{{ note_text }}
+{% endif %}
+
+Kompletní přehled je v příloze tohoto emailu ve formátu PDF.
+
+Děkujeme za spolupráci.
+{% endblock %}

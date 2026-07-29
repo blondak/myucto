@@ -1,0 +1,125 @@
+<OSVC xmlns="http://schemas.cssz.cz/OSVC2025" xmlns:ns3="urn:cz:isvs:cssz:schemas:IkrePredejDatovouZpravu:v1" xmlns:ns2="urn:cz:isvs:cssz:schemas:IkreMessages:v1" version="1.0">
+  <VENDOR productName="FormApps Server" productVersion="1.4.0" />
+  <SENDER EmailNotifikace="" ISDSreport="3" VerzeProtokolu="1" />
+  <prehledosvc vsdp="55574467" for="prehledosvc" dep="122" rok="2025" typ="N" dat="">
+    <client>
+      <name fir="Michal" sur="Hajn" tit="" />
+      <birth bno="7203212676" den="1972-03-21" />
+      <adr cit="Litomerice" cnt="CZ" num="1868/28" pnu="41201" str="Heydukova" />
+      <idds>rsscfmb</idds>
+      <email />
+      <tel>777777777</tel>
+      <druc>H</druc>
+      <hlavc>
+        <m1>A</m1>
+        <m2 />
+        <m3 />
+        <m4 />
+        <m5 />
+        <m6 />
+        <m7 />
+        <m8 />
+        <m9 />
+        <m10 />
+        <m11 />
+        <m12 />
+        <m13 />
+      </hlavc>
+      <vedc>
+        <m1 />
+        <m2 />
+        <m3 />
+        <m4 />
+        <m5 />
+        <m6 />
+        <m7 />
+        <m8 />
+        <m9 />
+        <m10 />
+        <m11 />
+        <m12 />
+        <m13 />
+        <zam />
+        <duchod />
+        <pdite />
+        <ppm />
+        <pece />
+        <ndite />
+      </vedc>
+      <narok>
+        <m1 />
+        <m2 />
+        <m3 />
+        <m4 />
+        <m5 />
+        <m6 />
+        <m7 />
+        <m8 />
+        <m9 />
+        <m10 />
+        <m11 />
+        <m12 />
+        <m13 />
+      </narok>
+	  <sleva>
+        <m1>n</m1>
+        <m2 />
+        <m3 />
+        <m4 />
+        <m5 />
+        <m6 />
+        <m7 />
+        <m8 />
+        <m9 />
+        <m10 />
+        <m11 />
+        <m12 />
+        <m13>a</m13>
+      </sleva>
+    </client>
+    <pvv pri="1">
+      <mesc h="1" v="" />
+      <mesv h="1" v="" />
+      <mesp>1</mesp>
+      <rdza h="0" v="0" />
+      <vvz h="1" v="0" />
+      <dvz h="0" v="0" />
+      <mvz>8861</mvz>
+      <uvz>8861</uvz>
+      <vzza />
+      <vzsu>8861</vzsu>
+      <vzsvc>8861</vzsvc>
+      <poj>2788</poj>
+	  <slev>200</slev>
+	  <pojposlev>2588</pojposlev>
+      <zal>0</zal>
+      <ned>2588</ned>
+    </pvv>
+    <prihldp />
+    <zal ved="" pau="A" vz="0" dp="0" np="0" duch=""/>
+    <pre vra="0" kam="">
+      <rok />
+      <iban />
+      <bs pu="" cu="" kb="" ss="" vs="" />
+      <adr str="" num="" pnu="" cit="" cnt="" />
+    </pre>
+    <prizn>
+      <pau>H</pau>
+      <pov>A</pov>
+      <elektr>N</elektr>
+      <por>N</por>
+      <meldat />
+    </prizn>
+    <opr datopr="" duvod="" />
+    <spo bno="" den="">
+      <name sur="" fir="" tit="" />
+      <adr str="" num="" pnu="" cit="" cnt="" />
+    </spo>
+    <dat dre="2025-10-25" />
+    <prilo coun="3" plnamoc="A" jina="A" >
+          <img nazev="priloha1.txt" base64data="cHJpbG9oYTEudHh0" />
+          <img nazev="priloha2.txt" base64data="cHJpbG9oYTIudHh0" />
+          <img nazev="priloha3.txt" base64data="cHJpbG9oYTMudHh0" />
+    </prilo>
+  </prehledosvc>
+</OSVC>

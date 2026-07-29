@@ -13,6 +13,7 @@ use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Pdf\PdfArchiveService;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 
 /**
@@ -41,6 +42,7 @@ final class AutoIssueAndSendService
         private readonly StatsRecomputer $stats,
         private readonly PdfArchiveService $pdfArchive,
         private readonly RecipientResolver $recipients,
+        private readonly StockIssueService $stockIssue,
     ) {}
 
     /**
@@ -72,9 +74,35 @@ final class AutoIssueAndSendService
             // VS + snapshoty — pokud už nebyly alokované předem (request-approval flow),
             // alokuj teď.
             $invoice = $this->allocateVarsymbolAndSnapshots($invoiceId);
-            $this->db->pdo()->prepare(
-                'UPDATE invoices SET status = "issued" WHERE id = ? AND status = "draft"'
-            )->execute([$invoiceId]);
+            $supplierId = (int) $invoice['supplier_id'];
+            if ($this->stockIssue->isStockEnabled($supplierId)) {
+                // Sklad zapnutý (Epic SKLAD §5.2): flip statusu + auto-výdejka = JEDNA
+                // transakce v READ COMMITTED (FOR UPDATE zámky StockDocumentService
+                // nesmí číst stale RR snapshot; SET bez SESSION platí pro příští tx).
+                $pdo = $this->db->pdo();
+                $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+                $pdo->beginTransaction();
+                try {
+                    $pdo->prepare(
+                        'UPDATE invoices SET status = "issued" WHERE id = ? AND status = "draft"'
+                    )->execute([$invoiceId]);
+                    $this->stockIssue->issueForInvoice($supplierId, $invoice, $userId);
+                    $pdo->commit();
+                } catch (\Throwable $e) {
+                    // Typicky StockException insufficient_stock — rollback nechá
+                    // fakturu v draftu, chybu si ošetří volající (approval flow /
+                    // RecurringInvoiceGenerator).
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $e;
+                }
+            } else {
+                // Sklad vypnutý — PŮVODNÍ cesta beze změny (žádná transakce).
+                $this->db->pdo()->prepare(
+                    'UPDATE invoices SET status = "issued" WHERE id = ? AND status = "draft"'
+                )->execute([$invoiceId]);
+            }
             $issued = true;
             $this->logger->log('invoice.issued', $userId, 'invoice', $invoiceId, [
                 'varsymbol'   => $invoice['varsymbol'],

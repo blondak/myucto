@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type RelatedBankTransaction } from '@/api/invoices'
+import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
 import {
   settingsApi,
   type PdfSignatureDocumentEntityType,
@@ -13,6 +14,7 @@ import {
 } from '@/api/settings'
 import { adminApi, type InvoiceSmtpLog } from '@/api/admin'
 import { apiErrorMessage } from '@/api/errors'
+import { stockApi, type StockDocument } from '@/api/stock'
 import { formatMoney, formatDate, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -20,15 +22,22 @@ import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import LockedBadge from '@/components/ui/LockedBadge.vue'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
+import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
 
 const auth = useAuthStore()
-const isAdmin = computed(() => auth.user?.role === 'admin')
+const isAdmin = computed(() => auth.isSuperadmin)
 
 const supplierStore = useSupplierStore()
 const supplierIsVatPayer = computed(() => supplierStore.currentSupplier?.is_vat_payer ?? true)
+// Podvojné účetnictví → deník existuje (badge „Zaúčtováno" + proklik do deníku). V daňové
+// evidenci se doklady „neúčtují", proto se účetní badge ani proklik nezobrazují.
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
 
 function formatRate(rate: number): string {
   const tag = locale.value === 'cs' ? 'cs-CZ' : 'en-US'
@@ -39,6 +48,9 @@ const route = useRoute()
 const router = useRouter()
 
 const invoice = ref<Invoice | null>(null)
+// Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
+// nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
+const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
 const wrModalOpen = ref(false)
 const loading = ref(true)
 const busy = ref<string | null>(null)
@@ -129,7 +141,7 @@ const hasPdfSigningProfiles = computed(() => signingProfiles.value.some(
 // Kartu „Elektronický podpis dokumentu" ukážeme jen když je podepisování pro
 // tohoto dodavatele skutečně nastavené (existuje aktivní profil s PDF využitím).
 // Jinak by ji u každé faktury viděl i uživatel, který nikdy nepodepisuje (balast).
-const canManageSignatureSelection = computed(() => auth.canWrite && hasPdfSigningProfiles.value)
+const canManageSignatureSelection = computed(() => auth.canWrite('invoices') && hasPdfSigningProfiles.value)
 const adminSigningProfiles = computed(() => signingProfiles.value.filter(
   profile => profile.owner_user_id === null && profile.is_active && profile.allowed_usages.includes('pdf'),
 ))
@@ -149,7 +161,7 @@ async function load() {
   loading.value = true
   invoice.value = await invoicesApi.get(Number(route.params.id))
   loading.value = false
-  if (auth.canWrite) {
+  if (auth.canWrite('invoices')) {
     await loadSignatureProfiles()
     if (hasPdfSigningProfiles.value) loadSignatureSelection('invoice')
   }
@@ -176,13 +188,20 @@ async function load() {
     .then(items => { attachments.value = items })
     .catch(() => {})
   loadPayments()
+  // Sklad (Epic SKLAD) — karta „Sklad" s výdejkami/vratkami; jen když je modul zapnutý.
+  if (stockEnabled.value) {
+    stockApi.documentsForInvoice(Number(route.params.id))
+      .then(docs => { stockDocuments.value = docs })
+      .catch(() => { stockDocuments.value = [] })
+  }
 }
+
+// ───── Sklad (Epic SKLAD) — karta „Sklad" ──────────────────────────────
+const stockDocuments = ref<StockDocument[]>([])
 
 // ───── Evidence plateb / částečné úhrady (#89) ─────────────────────────
 const payments = ref<InvoicePayment[]>([])
 const bankTransactions = ref<RelatedBankTransaction[]>([])
-// Rozlišuje „ještě nenačteno / načtení selhalo" od „opravdu nemá platby" — jinak by
-// informační hláška o chybějících detailech probliknutí i při chybě endpointu.
 const paymentsLoaded = ref(false)
 
 function paymentsRelevant(): boolean {
@@ -194,17 +213,23 @@ function paymentsRelevant(): boolean {
 
 function loadPayments() {
   paymentsLoaded.value = false
-  if (!invoice.value || !paymentsRelevant()) { payments.value = []; bankTransactions.value = []; return }
+  if (!invoice.value || !paymentsRelevant()) {
+    payments.value = []
+    bankTransactions.value = []
+    return
+  }
   invoicesApi.listPayments(invoice.value.id)
     .then(r => {
       payments.value = r.payments
       bankTransactions.value = r.bank_transactions ?? []
       paymentsLoaded.value = true
     })
-    .catch(() => { payments.value = []; bankTransactions.value = [] })
+    .catch(() => {
+      payments.value = []
+      bankTransactions.value = []
+    })
 }
 
-/** Popisek zdroje výpisu; neznámou hodnotu ENUMu radši ukáže syrově než jako holý i18n klíč. */
 function bankSourceLabel(source: RelatedBankTransaction['statement_source']): string {
   const key = `invoice.payments.bank_sources.${source}`
   return te(key) ? t(key) : source
@@ -241,7 +266,8 @@ const canPartialPayment = computed(() =>
   && ['invoice', 'proforma'].includes(invoice.value.invoice_type)
   && ['issued', 'sent', 'reminded'].includes(invoice.value.status)
   && remainingToPay.value > 0
-  && auth.canWrite)
+  && auth.canWrite('invoices')
+  && !lockedForMe.value)
 
 function openPartialPayment() {
   partialAmount.value = ''
@@ -631,8 +657,23 @@ async function issue() {
     toast.success( t('invoice.issued_as', { varsymbol: invoice.value.varsymbol }))
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
     invoicesApi.listPdfs(invoice.value.id).then(items => { pdfHistory.value = items }).catch(() => {})
+    // Sklad (Epic SKLAD, B5): auto-výdejka vznikla v téže transakci co issue —
+    // dotáhni ji, ať uživatel vidí číslo výdejky rovnou po vystavení.
+    if (stockEnabled.value) {
+      stockApi.documentsForInvoice(invoice.value.id).then(docs => {
+        const issueDoc = docs.find(d => d.doc_type === 'issue' && d.status === 'posted')
+        if (issueDoc?.doc_number) toast.success(t('invoice.issued_stock_document', { number: issueDoc.doc_number }))
+      }).catch(() => {})
+    }
   } catch (e: any) {
-    toast.error( e?.response?.data?.error?.message || t('invoice.issue_failed'))
+    const code = e?.response?.data?.error?.code
+    if (code === 'stock.error.insufficient_stock') {
+      const items = (e?.response?.data?.error?.items ?? []) as Array<{ sku: string; name: string; requested: string; available: string }>
+      const lines = items.map(it => t('stock.documents.insufficient_stock_line', it)).join('; ')
+      toast.error(`${t('invoice.insufficient_stock_toast')} ${lines}`)
+    } else {
+      toast.error( e?.response?.data?.error?.message || t('invoice.issue_failed'))
+    }
   } finally {
     busy.value = null
   }
@@ -678,6 +719,35 @@ async function markPaid() {
     else if (pt?.status === 'skipped' && pt.reason === 'no_recipient') toast.warning(t('invoice.payment_thanks_no_recipient'))
   } catch (e: any) {
     toast.error( e?.response?.data?.error?.message || t('invoice.operation_failed'))
+  } finally {
+    busy.value = null
+  }
+}
+
+// Evidenční označení z modalu — modal drží datum i volbu děkovného e-mailu,
+// vlastní markPaid() (vč. hlášek o odeslání díků) zůstává tady.
+function onPlainMarkPaid(payload: { date: string; sendThanks: boolean }) {
+  paidAtInput.value = payload.date
+  sendThanks.value = payload.sendThanks
+  markPaid()
+}
+
+// Pokladna/zápočet proběhly v modalu — jen dotáhnout aktuální stav faktury.
+async function onAltPayDone() {
+  markPaidOpen.value = false
+  await load()
+  loadPayments()
+}
+
+async function rebuildSnapshots() {
+  if (!invoice.value) return
+  if (!window.confirm(t('invoice.rebuild_snapshots_confirm'))) return
+  busy.value = 'rebuild-snapshots'
+  try {
+    invoice.value = await invoicesApi.rebuildSnapshots(invoice.value.id)
+    toast.success(t('invoice.rebuild_snapshots_done'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
   }
@@ -766,14 +836,16 @@ const canPairAdvance = computed(() =>
   && invoice.value.invoice_type === 'invoice'
   && !invoice.value.parent_invoice
   && invoice.value.has_advance_candidates === true
-  && auth.canWrite)
+  && auth.canWrite('invoices')
+  && !lockedForMe.value)
 // Nepropojená proforma → lze spárovat s daňovým dokladem (opačný směr).
 const canPairFinal = computed(() =>
   !!invoice.value
   && invoice.value.invoice_type === 'proforma'
   && !invoice.value.final_invoice
   && invoice.value.has_final_candidates === true
-  && auth.canWrite)
+  && auth.canWrite('invoices')
+  && !lockedForMe.value)
 // Propojeno se zálohou (proforma) → lze odpojit. Rodič storna/dobropisu (non-proforma) ne.
 const linkedProforma = computed(() =>
   invoice.value?.parent_invoice?.invoice_type === 'proforma' ? invoice.value.parent_invoice : null)
@@ -1122,6 +1194,47 @@ async function sendReminder() {
   }
 }
 
+// Penalizace — úrok z prodlení (NV č. 351/2013 Sb.)
+const canCreatePenalty = computed(() => {
+  if (!invoice.value) return false
+  if (invoice.value.invoice_type !== 'invoice') return false
+  if (!['issued', 'sent', 'reminded'].includes(invoice.value.status)) return false
+  if (Number(invoice.value.amount_to_pay ?? 0) <= 0) return false
+  return daysOverdue.value > 0
+})
+
+const penaltyOpen = ref(false)
+const penaltyPreview = ref<PenaltyPreview | null>(null)
+
+async function openPenaltyModal() {
+  if (!invoice.value) return
+  penaltyPreview.value = null
+  busy.value = 'penalty-preview'
+  try {
+    penaltyPreview.value = await invoicesApi.penaltyPreview(invoice.value.id)
+    penaltyOpen.value = true
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = null
+  }
+}
+
+async function createPenalty() {
+  if (!invoice.value) return
+  busy.value = 'penalty'
+  try {
+    const created = await invoicesApi.createPenalty(invoice.value.id)
+    penaltyOpen.value = false
+    toast.success(t('invoice.penalty.created'))
+    router.push(`/invoices/${created.id}`)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = null
+  }
+}
+
 // ───── Schvalování výkazu zákazníkem ─────────────────────────────────
 const requiresApproval = computed(() =>
   !!invoice.value?.project_requires_approval && !!workReport.value
@@ -1217,56 +1330,103 @@ async function updateApprovalStatus() {
   }
 }
 
+// Zaúčtování do deníku (podvojné účetnictví). BE je idempotentní (source_type+source_id),
+// po úspěchu přenačteme detail (booked_at → badge „Zaúčtováno" + proklik do deníku).
+const canPostToJournal = computed(() =>
+  !!invoice.value
+  && isDoubleEntry.value
+  && !invoice.value.booked_at
+  && invoice.value.status !== 'draft'
+  && invoice.value.status !== 'cancelled'
+  && auth.canWrite('invoices'))
+
+async function postToJournal() {
+  if (!invoice.value || !canPostToJournal.value) return
+  if (!confirm(t('common.post_document_confirm'))) return
+  busy.value = 'post'
+  try {
+    const posted = await accountingApi.postInvoice(invoice.value.id)
+    await load()
+    if (posted._warnings?.includes('entry_date_outside_document_year')) {
+      toast.warning(t('accounting.posting_warnings.entry_date_outside_document_year'))
+    } else {
+      toast.success(t('common.post_document_success'))
+    }
+  } catch (e: any) {
+    toast.error(t(postingErrorI18nKey(e?.response?.data?.error?.code)))
+  } finally {
+    busy.value = null
+  }
+}
+
 // ─── Lišta akcí (sdílená ActionBar) — primary se mění dle lifecyclu dokladu ───
 // Pravidlo „1 primární akce": je-li doklad po splatnosti, primární = Upomínka a Uhradit klesá
 // na sekundární; jinak je primární Uhradit.
 const invoiceActions = computed<ActionItem[]>(() => {
   const inv = invoice.value
   if (!inv) return []
-  const w = auth.canWrite
+  const w = auth.canWrite('invoices')
+  const canIssue = auth.canWrite('invoices.issue')
+  const canSend = auth.canWrite('invoices.send')
+  const canRemind = auth.canWrite('invoices.reminder')
+  const canMarkPaidPermission = auth.canWrite('invoices.mark_paid')
+  const canCancelPermission = auth.canWrite('invoices.cancel')
+  const canClonePermission = auth.canWrite('invoices.clone')
+  const canDeletePermission = auth.canWrite('invoices.delete')
+  const canApprovalPermission = auth.canWrite('invoices.approval')
   const b = busy.value !== null
   const approvalPending = requiresApproval.value && approvalStatus.value !== 'approved'
   const markPaidPrimary = !canSendReminder.value
   return [
     // ── primary (1 dle stavu) ──
     { key: 'issue', label: t('invoice.issue'), icon: 'check', tier: 'primary', variant: 'primary',
-      show: isDraft.value && canIssueDraft.value && w,
+      show: isDraft.value && canIssueDraft.value && canIssue && !lockedForMe.value,
       disabled: b || approvalPending, loading: busy.value === 'issue',
       title: approvalPending ? (t('invoice.approval.issue_blocked') as string) : undefined,
       run: issue },
     { key: 'issue-final', label: t('invoice.issue_final'), icon: 'doc', tier: 'primary', variant: 'primary',
-      show: canIssueFinal.value && w, disabled: b, loading: busy.value === 'issue-final', run: issueFinalFromProforma },
+      show: canIssueFinal.value && canIssue, disabled: b, loading: busy.value === 'issue-final', run: issueFinalFromProforma },
     { key: 'mark-paid', label: t('invoice.mark_paid'), icon: 'checkCircle',
       tier: markPaidPrimary ? 'primary' : 'secondary', variant: 'success',
-      show: isIssued.value && canMarkPaid.value && w, disabled: b, run: openMarkPaid },
+      show: isIssued.value && canMarkPaid.value && canMarkPaidPermission && !lockedForMe.value, disabled: b, run: openMarkPaid },
     { key: 'reminder', label: t('invoice.send_reminder'), icon: 'bell', tier: 'primary', variant: 'warning',
-      show: canSendReminder.value && w, disabled: b,
+      show: canSendReminder.value && canRemind, disabled: b,
       title: t('invoice.reminder_tooltip', { days: daysOverdue.value }) as string, run: openReminderModal },
+    { key: 'penalty', label: t('invoice.penalty.action'), icon: 'coin', tier: 'secondary', variant: 'warning',
+      show: canCreatePenalty.value && w, disabled: b, loading: busy.value === 'penalty-preview',
+      title: t('invoice.penalty.tooltip', { days: daysOverdue.value }) as string, run: openPenaltyModal },
     // ── secondary ──
     { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
-      show: isDraft.value && w, to: `/invoices/${inv.id}/edit` },
+      show: isDraft.value && w && !lockedForMe.value, to: `/invoices/${inv.id}/edit` },
     { key: 'send', label: t('invoice.send_to_client'), icon: 'send', tier: 'secondary', variant: 'primary',
-      show: canSendEmail.value && w, disabled: b, run: openSendModal },
+      show: canSendEmail.value && canSend, disabled: b, run: openSendModal },
     { key: 'approval', label: t('invoice.approval.send_request'), icon: 'send', tier: 'secondary', variant: 'primary',
-      show: canRequestApproval.value && w, disabled: b, loading: busy.value === 'approval-request', run: requestApproval },
+      show: canRequestApproval.value && canApprovalPermission, disabled: b, loading: busy.value === 'approval-request', run: requestApproval },
     { key: 'partial', label: t('invoice.partial_payment'), icon: 'coin', tier: 'secondary', variant: 'warning',
       show: canPartialPayment.value, disabled: b, run: openPartialPayment },
     { key: 'wr', label: t('invoice.wr_btn'), icon: 'chart', tier: 'secondary', variant: 'primary',
-      show: isDraft.value && inv.invoice_type !== 'tax_document' && w,
+      show: isDraft.value && inv.invoice_type !== 'tax_document' && w && !lockedForMe.value,
       title: t('invoice.wr_btn') as string, run: () => { wrModalOpen.value = true } },
+    // ── zaúčtování (podvojné účetnictví) — sekundární, ať nekoliduje s primární
+    // platební/upomínkovou akcí (pravidlo „1 primární akce dle stavu" výše) ──
+    { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
+      show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
+    { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
+      show: isDoubleEntry.value && !!inv.booked_at,
+      to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
     // ── overflow ──
     { key: 'public-link', label: t('invoice.public_link.btn'), icon: 'link', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && w, disabled: b,
       title: t('invoice.public_link.btn_title') as string, run: openPublicLink },
     { key: 'clone', label: t('invoice.clone'), icon: 'copy', tier: 'overflow', variant: 'primary',
-      show: !isDraft.value && !['cancellation', 'credit_note'].includes(inv.invoice_type) && w,
+      show: !isDraft.value && !['cancellation', 'credit_note'].includes(inv.invoice_type) && canClonePermission,
       disabled: b, loading: busy.value === 'clone', run: cloneInvoice },
     { key: 'pdf', label: t('invoice.download_pdf'), icon: 'doc', tier: 'overflow', variant: 'neutral',
       show: !isDraft.value || inv.items.length > 0,
       title: invoiceWillBeSigned.value ? (t('invoice.download_pdf_tooltip_signed') as string) : undefined,
       run: downloadPdf },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-      show: isDraft.value && w, disabled: b, run: deleteInvoice },
+      show: isDraft.value && canDeletePermission && !lockedForMe.value, disabled: b, run: deleteInvoice },
     // ── spodní panel „Více akcí" → pod „Pokročilé" (test/odeslání, admin, storno/destrukce) ──
     { key: 'client', label: t('invoice.client_detail'), icon: 'user', tier: 'advanced', variant: 'neutral',
       to: `/clients/${inv.client_id}` },
@@ -1283,11 +1443,14 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canAdminEdit.value, disabled: b, run: editIssued },
     { key: 'unmark-paid', label: t('invoice.unmark_paid'), icon: 'uturn', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && inv.status === 'paid', disabled: b, loading: busy.value === 'unmark-paid', run: unmarkPaid },
+    { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
+      show: isAdmin.value && !isDraft.value && inv.status !== 'cancelled',
+      disabled: b, loading: busy.value === 'rebuild-snapshots', run: rebuildSnapshots },
     { key: 'cancel', label: isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
       icon: 'trash', tier: 'advanced', variant: 'danger',
-      show: canCancel.value, disabled: b, run: openCancelModal },
+      show: canCancel.value && canCancelPermission && !lockedForMe.value, disabled: b, run: openCancelModal },
     { key: 'delete-cancelled', label: t('invoice.delete_cancelled'), icon: 'trash', tier: 'advanced', variant: 'danger',
-      show: isAdmin.value && (inv.status === 'cancelled' || (inv.invoice_type === 'cancellation' && !!inv.parent_invoice_id)),
+      show: isAdmin.value && canDeletePermission && (inv.status === 'cancelled' || (inv.invoice_type === 'cancellation' && !!inv.parent_invoice_id)),
       disabled: b, loading: busy.value === 'delete', run: deleteInvoice },
   ]
 })
@@ -1308,6 +1471,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
         <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
           {{ typeLabel(invoice.invoice_type) }}
         </span>
+        <PostingBadge v-if="invoice.locked?.journal_entry_id"
+          :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" />
+        <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
         <span v-if="invoice.income_tax_exempt"
           class="text-xs px-2 py-0.5 rounded font-normal bg-amber-100 text-amber-800 border border-amber-200"
           :title="invoice.income_tax_exempt_reason || ''">
@@ -1362,28 +1528,13 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <!-- Mark paid modal -->
-    <div v-if="markPaidOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-sm w-full p-5">
-        <h3 class="text-lg font-semibold mb-3">{{ t('invoice.modals.mark_paid_title') }}</h3>
-        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.modals.mark_paid_date') }}</label>
-        <input v-model="paidAtInput" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4" />
-        <label v-if="thanksEnabled" class="flex items-start gap-2 text-sm text-neutral-700 mb-4 cursor-pointer">
-          <input v-model="sendThanks" type="checkbox" :disabled="!thanksHasRecipient" class="mt-0.5 rounded border-neutral-300 text-primary-600 disabled:opacity-50" />
-          <span>
-            {{ t('invoice.send_payment_thanks') }}
-            <span v-if="!thanksHasRecipient" class="block text-xs text-warning-600">{{ t('invoice.send_payment_thanks_no_recipient') }}</span>
-          </span>
-        </label>
-        <div class="flex justify-end gap-2">
-          <button @click="markPaidOpen = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button @click="markPaid" :disabled="busy !== null"
-            class="cursor-pointer px-4 h-9 text-sm bg-success-500 hover:bg-success-600 disabled:bg-neutral-300 text-white font-medium rounded-md">
-            {{ busy === 'paid' ? '…' : t('common.confirm') }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
+    <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="invoice"
+      :doc-id="invoice.id" :doc-number="invoice.varsymbol || `#${invoice.id}`"
+      :amount="remainingToPay" :partner-name="invoice.client_company_name"
+      :thanks="{ enabled: thanksEnabled, hasRecipient: thanksHasRecipient, defaultChecked: sendThanks }"
+      :busy="busy === 'paid'"
+      @close="markPaidOpen = false" @done="onAltPayDone" @mark-paid="onPlainMarkPaid" />
 
     <!-- Modal web faktury (trvalý veřejný odkaz) -->
     <div v-if="publicLinkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -1604,6 +1755,60 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
+    <!-- Penalizace — úrok z prodlení (NV 351/2013) -->
+    <div v-if="penaltyOpen && penaltyPreview" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-lg w-full p-5">
+        <h3 class="text-lg font-semibold mb-1">{{ t('invoice.penalty.modal_title') }}</h3>
+        <p class="text-sm text-neutral-600 mb-3">{{ t('invoice.penalty.modal_body') }}</p>
+        <p v-if="penaltyPreview.previously_covered_through" class="text-xs text-primary-600 bg-primary-50 border border-primary-200 rounded-md px-3 py-2 mb-3">
+          {{ t('invoice.penalty.continues_from', { date: formatDate(penaltyPreview.previously_covered_through) }) }}
+        </p>
+
+        <dl class="text-sm bg-neutral-50 border border-neutral-200 rounded-md px-3 py-2 mb-3 space-y-1">
+          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.penalty.principal') }}</dt>
+            <dd class="font-mono">{{ formatMoney(penaltyPreview.principal, penaltyPreview.currency) }}</dd></div>
+          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.penalty.days') }}</dt>
+            <dd class="font-mono">{{ penaltyPreview.total_days }}</dd></div>
+          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.penalty.due_date') }}</dt>
+            <dd class="font-mono">{{ formatDate(penaltyPreview.due_date) }}</dd></div>
+        </dl>
+
+        <div v-if="penaltyPreview.segments.length" class="overflow-x-auto mb-3">
+          <table class="w-full text-xs">
+            <thead class="text-neutral-500 border-b border-neutral-200">
+              <tr>
+                <th class="px-2 py-1 text-left font-medium">{{ t('invoice.penalty.period') }}</th>
+                <th class="px-2 py-1 text-right font-medium">{{ t('invoice.penalty.days') }}</th>
+                <th class="px-2 py-1 text-right font-medium">{{ t('invoice.penalty.rate') }}</th>
+                <th class="px-2 py-1 text-right font-medium">{{ t('invoice.penalty.interest') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="(s, i) in penaltyPreview.segments" :key="i">
+                <td class="px-2 py-1 whitespace-nowrap">{{ formatDate(s.from) }} – {{ formatDate(s.to) }}</td>
+                <td class="px-2 py-1 text-right font-mono">{{ s.days }}</td>
+                <td class="px-2 py-1 text-right font-mono">{{ s.annual_rate }} % <span class="text-neutral-400">({{ s.repo_rate }}+{{ penaltyPreview.surcharge_points }})</span></td>
+                <td class="px-2 py-1 text-right font-mono">{{ formatMoney(s.interest, penaltyPreview.currency) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex justify-between items-baseline border-t border-neutral-200 pt-2 mb-4">
+          <span class="text-sm font-medium">{{ t('invoice.penalty.total') }}</span>
+          <span class="text-lg font-semibold text-warning-600 font-mono">{{ formatMoney(penaltyPreview.total_interest, penaltyPreview.currency) }}</span>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button @click="penaltyOpen = false" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+          <button @click="createPenalty" :disabled="busy !== null || penaltyPreview.total_interest <= 0"
+            class="cursor-pointer px-4 h-9 text-sm bg-warning-500 hover:bg-warning-600 disabled:bg-neutral-300 text-white font-medium rounded-md">
+            {{ busy === 'penalty' ? '…' : t('invoice.penalty.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Cross-link na související doklad: proforma → vystavený daňový doklad; doklad → rodič -->
     <!-- Proforma propojená s daňovým dokladem → odkaz + zrušení propojení -->
     <div v-if="isProforma && invoice.final_invoice"
@@ -1614,7 +1819,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
           {{ invoice.final_invoice.varsymbol || `#${invoice.final_invoice.id}` }}
         </RouterLink>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkAdvance(invoice.final_invoice.id)" :disabled="linkingAdvance"
+      <button v-if="auth.canWrite('invoices') && !lockedForMe" type="button" @click="unlinkAdvance(invoice.final_invoice.id)" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('invoice.advance_link.unlink') }}
       </button>
@@ -1657,7 +1862,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </span>
       <!-- Daňový doklad k přijaté platbě (#89) má vazbu strukturální (drží § 37a
            odpočty finálu i vazbu na platbu) — rozpojit nelze, backend to odmítá. -->
-      <button v-if="auth.canWrite && invoice.invoice_type !== 'tax_document'" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
+      <button v-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('invoice.advance_link.unlink') }}
       </button>
@@ -1913,7 +2118,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
                   {{ p.tax_document_varsymbol || `#${p.tax_document_invoice_id}` }}
                   <span v-if="p.tax_document_status === 'draft'" class="text-neutral-400">({{ t('status.draft') }})</span>
                 </RouterLink>
-                <button v-else-if="taxDocApplicable && auth.canWrite" @click="createTaxDocForPayment(p.id)"
+                <button v-else-if="taxDocApplicable && auth.canWrite('invoices') && !lockedForMe" @click="createTaxDocForPayment(p.id)"
                   :disabled="busy !== null"
                   class="cursor-pointer text-xs px-2 py-0.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded">
                   {{ t('invoice.payments.create_tax_doc') }}
@@ -1921,7 +2126,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
                 <span v-else class="text-xs text-neutral-400">—</span>
               </td>
               <td class="px-4 py-2.5 text-right">
-                <button v-if="auth.canWrite && !p.bank_transaction_id && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
+                <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
                   @click="deletePayment(p)" :disabled="busy !== null"
                   class="cursor-pointer text-xs text-danger-500 hover:text-danger-700"
                   :title="t('common.delete')">✕</button>
@@ -1945,7 +2150,6 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <!-- Přímé bankovní vazby bez invoice_payments — typicky historický import iDoklad. -->
     <div v-if="paymentsRelevant() && unrecordedBankTransactions.length > 0"
       class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="px-5 py-3 border-b border-neutral-200">
@@ -1969,9 +2173,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
               <td class="px-4 py-2.5">{{ formatDate(tx.posted_at) }}</td>
               <td class="px-4 py-2.5 text-right font-mono font-medium">{{ formatMoney(tx.amount, tx.currency ?? invoice.currency) }}</td>
               <td class="px-4 py-2.5">
-                <span class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
-                  {{ bankSourceLabel(tx.statement_source) }}
-                </span>
+                <span class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ bankSourceLabel(tx.statement_source) }}</span>
               </td>
               <td class="px-4 py-2.5 text-xs">
                 <div v-if="tx.counterparty_account" class="font-mono text-neutral-700">
@@ -2004,9 +2206,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
             <span class="font-mono font-medium">{{ formatMoney(tx.amount, tx.currency ?? invoice.currency) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
-              {{ bankSourceLabel(tx.statement_source) }}
-            </span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ bankSourceLabel(tx.statement_source) }}</span>
             <RouterLink :to="`/bank/${tx.statement_id}`" class="text-xs text-primary-700 hover:underline">
               {{ t('invoice.payments.statement_link') }}
             </RouterLink>
@@ -2117,7 +2317,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
                 <select
                   :value="signatureSelection(row.entityType)?.selection_source || 'inherit'"
                   @change="setSignatureSelectionSource(row.entityType, ($event.target as HTMLSelectElement).value as PdfSignatureDocumentSelectionSource)"
-                  class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs">
+                  class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
                   <option value="inherit">{{ t('invoice.signing.source_inherit') }}</option>
                   <option value="logged_in_user">{{ t('settings.signing_output_source_logged_in_user') }}</option>
                   <option value="admin_profile_settings">{{ t('settings.signing_output_source_admin_profile_settings') }}</option>
@@ -2128,7 +2328,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
                   v-if="isAdmin && signatureSelection(row.entityType)?.selection_source === 'admin_profile_settings'"
                   :value="signatureSelection(row.entityType)?.admin_profile_id || ''"
                   @change="setSignatureAdminProfile(row.entityType, ($event.target as HTMLSelectElement).value ? Number(($event.target as HTMLSelectElement).value) : null)"
-                  class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs">
+                  class="h-8 w-48 px-2 border border-neutral-300 rounded-md text-xs bg-surface">
                   <option value="">{{ t('invoice.signing.admin_profile_inherited') }}</option>
                   <option v-for="profile in adminSigningProfiles" :key="profile.id" :value="profile.id">
                     {{ profile.name }} ({{ profile.code }})
@@ -2420,7 +2620,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
             </svg>
             {{ t('common.download') }}
           </a>
-          <button @click="deleteAttachment(a)" type="button"
+          <button v-if="!lockedForMe" @click="deleteAttachment(a)" type="button"
                   class="text-xs text-danger-500 hover:text-danger-600 cursor-pointer inline-flex items-center gap-1">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round"
@@ -2631,6 +2831,27 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
+
+    <!-- Karta Sklad (Epic SKLAD) — výdejky/vratky vzniklé z této faktury -->
+    <div v-if="invoice && stockEnabled && stockDocuments.length > 0"
+      class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
+      <div class="px-5 py-3 border-b border-neutral-200">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.invoice_card.title') }}</h3>
+      </div>
+      <div class="divide-y divide-neutral-100">
+        <RouterLink v-for="d in stockDocuments" :key="d.id" :to="`/stock/documents/${d.id}`"
+          class="flex items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
+          <span class="flex items-center gap-2">
+            <span class="font-mono text-xs text-neutral-500">{{ d.doc_number || '—' }}</span>
+            <span>{{ t(`stock.doc_type.${d.doc_type}`) }}</span>
+          </span>
+          <span class="text-xs px-2 py-0.5 rounded font-medium"
+            :class="d.status === 'posted' ? 'bg-success-50 text-success-600' : d.status === 'reversed' ? 'bg-danger-50 text-danger-500' : 'bg-neutral-100 text-neutral-600'">
+            {{ t(`stock.doc_status.${d.status}`) }}
+          </span>
+        </RouterLink>
+      </div>
+    </div>
 
     <!-- Work report modal (jen pro draft + workflow projekty) -->
     <WorkReportModal v-if="invoice"

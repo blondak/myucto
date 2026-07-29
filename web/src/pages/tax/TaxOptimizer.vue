@@ -5,6 +5,7 @@ import { taxApi, type TaxAnalysis, type TaxProfile } from '@/api/tax'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatMonth } from '@/composables/useFormat'
 import { compare as engineCompare, predict as enginePredict, regular as engineRegular, pausalPeriods, pausalRateChange, type EngineProfile } from '@/composables/useTaxEngine'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -19,7 +20,10 @@ const lastMonthOpen = ref(false)
 const profile = reactive<TaxProfile>({
   activity_rate: 60, use_actual_expenses: false, actual_expenses: 0,
   flat_tax_band: 'none', is_secondary: false, spouse_credit: false,
-  children_count: 0, mortgage_interest: 0, pension_contrib: 0, life_insurance: 0, donations: 0,
+  children_count: 0, mortgage_interest: 0, mortgage_pre_2021: false, mortgage_months: 12,
+  pension_contrib: 0, life_insurance: 0, dip_contrib: 0, long_term_care: 0,
+  disability_12_months: 0, disability_3_months: 0, ztpp_months: 0, donations: 0,
+  activities: [], children: [], spouse_claim: null, osvc_months: [],
 })
 
 async function load(y: number) {
@@ -79,14 +83,25 @@ const yoyNetPct = computed(() => {
   return (cmp.value.regular.net - prevNet.value.net) / Math.abs(prevNet.value.net) * 100
 })
 
-// Teploměr — škála a pozice (procenta)
-const SCALE = 2_700_000
-const pct = (v: number) => Math.min(100, Math.max(0, v / SCALE * 100))
-const ticks = computed(() => [
-  { v: 1_500_000, l: '1,5 M' },
-  { v: 2_000_000, l: '2 M' },
-  { v: 2_536_500, l: '2,54 M' },
-])
+// Registrační limity DPH (§ 4a ZDPH) z ROČNÍKOVÝCH konstant, ne natvrdo: do 2024 platil
+// jediný limit 2 000 000 Kč, od 2025 přibyl druhý (2 536 500 Kč). Zadrátovaná čísla by
+// při přepnutí roku v přepínači nahoře ukazovala práh, který v tom roce neplatil.
+const vatLimitLow = computed(() => Number(analysis.value?.constants?.vat_limit_low ?? 2_000_000))
+const vatLimitHigh = computed(() => Number(analysis.value?.constants?.vat_limit_high ?? vatLimitLow.value))
+
+// Teploměr — škála a pozice (procenta). Škála má nad horním limitem rezervu,
+// aby značka nesplývala s koncem stupnice.
+const SCALE = computed(() => Math.round(vatLimitHigh.value * 1.065))
+const pct = (v: number) => Math.min(100, Math.max(0, v / SCALE.value * 100))
+const millions = (v: number) => (v / 1_000_000).toLocaleString('cs-CZ', { maximumFractionDigits: 2 }) + ' M'
+const ticks = computed(() => {
+  const low = vatLimitLow.value
+  const high = vatLimitHigh.value
+  const out = [{ v: Math.round(low * 0.75), l: millions(Math.round(low * 0.75)) }, { v: low, l: millions(low) }]
+  // Do 2024 byly oba limity shodné — druhou značku pak nemá smysl kreslit dvakrát.
+  if (high > low) out.push({ v: high, l: millions(high) })
+  return out
+})
 
 function incKids(d: number) {
   profile.children_count = Math.max(0, Math.min(10, profile.children_count + d))
@@ -214,6 +229,10 @@ async function save() {
             <input v-model.number="profile.mortgage_interest" type="number" min="0" step="1000"
               class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm text-right">
             <p class="text-[11px] text-neutral-400 mt-1">{{ t('tax.mortgage_hint') }}</p>
+            <label class="flex items-center gap-2 mt-2 text-xs text-neutral-700">
+              <input v-model="profile.mortgage_pre_2021" type="checkbox" class="rounded border-neutral-300">
+              {{ t('tax.mortgage_pre_2021') }}
+            </label>
           </div>
 
           <div>
@@ -224,7 +243,8 @@ async function save() {
           </div>
 
           <button @click="save" :disabled="saving"
-            class="w-full h-9 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
+            :class="[btnFilled('primary'), 'w-full justify-center']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ saving ? t('common.saving') : t('tax.save') }}
           </button>
         </div>
@@ -375,7 +395,7 @@ async function save() {
             </div>
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
               <div class="text-[11px] uppercase tracking-wide text-neutral-500 font-medium">{{ t('tax.kpi_projection') }}</div>
-              <div class="text-xl font-bold mt-1 font-mono" :class="pred.proj > 2_000_000 ? 'text-danger-600' : ''">{{ formatMoney(pred.proj, 'CZK') }}</div>
+              <div class="text-xl font-bold mt-1 font-mono" :class="pred.proj > vatLimitLow ? 'text-danger-600' : ''">{{ formatMoney(pred.proj, 'CZK') }}</div>
             </div>
           </div>
 

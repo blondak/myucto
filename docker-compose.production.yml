@@ -1,12 +1,12 @@
-# MyInvoice.cz — Docker Compose pro produkci s pre-built image z GHCR
+# MyUcto.cz — Docker Compose pro produkci s pre-built image z GHCR
 #
 # Použití (žádné klonování repa potřeba):
 #
-#   curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/docker-compose.production.yml
-#   curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/cfg.sample.php
+#   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
+#   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
 #   mv docker-compose.production.yml docker-compose.yml
 #   cp cfg.sample.php cfg.docker.php
-#   # uprav cfg.docker.php: db.host=db, db.user=myinvoice, db.pass=…,
+#   # uprav cfg.docker.php: db.host=db, db.user=myucto, db.pass=…,
 #   # app.pepper, secret_encryption_key (oboje openssl rand -base64 32)
 #   echo "DB_PASSWORD=$(openssl rand -base64 28)" > .env
 #   echo "DB_ROOT_PASSWORD=$(openssl rand -base64 28)" >> .env
@@ -25,7 +25,7 @@
 
 services:
   app:
-    image: ghcr.io/radekhulan/myinvoice:latest   # pin na konkrétní verzi v produkci, např. :3.6.0
+    image: ghcr.io/radekhulan/myucto:latest   # pin na konkrétní verzi v produkci, např. :3.6.0
     restart: unless-stopped
     depends_on:
       db:
@@ -59,9 +59,17 @@ services:
       MYINVOICE_SMTP_PASS: ${MYINVOICE_SMTP_PASS:-}
       MYINVOICE_SMTP_FROM_EMAIL: ${MYINVOICE_SMTP_FROM_EMAIL:-}
       MYINVOICE_SMTP_FROM_NAME: ${MYINVOICE_SMTP_FROM_NAME:-}
+      # Redis (profil `redis`). Bez ENABLED=1 jede aplikace na DB fallbacku:
+      # sessiony v `sessions`, rate limit v `rate_limit_counters`.
+      MYINVOICE_REDIS_ENABLED: ${MYINVOICE_REDIS_ENABLED:-0}
+      MYINVOICE_REDIS_HOST: ${MYINVOICE_REDIS_HOST:-redis}
+      MYINVOICE_REDIS_PORT: ${MYINVOICE_REDIS_PORT:-6379}
+      MYINVOICE_REDIS_AUTH: ${MYINVOICE_REDIS_AUTH:-}
+      MYINVOICE_REDIS_DB: ${MYINVOICE_REDIS_DB:-0}
+      MYINVOICE_REDIS_PREFIX: ${MYINVOICE_REDIS_PREFIX:-myinvoice:}
 
   db:
-    image: mariadb:11
+    image: mariadb:11.8
     restart: unless-stopped
     # Tuning pro hosting s málo pamětí/diskem:
     #   - performance_schema OFF → ~100–200 MB méně RAM
@@ -76,8 +84,8 @@ services:
       # Fail-closed: bez .env se stack nespustí (žádný předvídatelný default).
       # Vytvoř .env s DB_PASSWORD a DB_ROOT_PASSWORD (viz hlavička výše).
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD required — vytvoř .env (viz hlavička souboru)}
-      MARIADB_DATABASE: ${DB_NAME:-myinvoice}
-      MARIADB_USER: ${DB_USER:-myinvoice}
+      MARIADB_DATABASE: ${DB_NAME:-myucto}
+      MARIADB_USER: ${DB_USER:-myucto}
       MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required — vytvoř .env (viz hlavička souboru)}
       TZ: Europe/Prague
     volumes:
@@ -95,9 +103,24 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     profiles: ["redis"]
-    command: ["redis-server", "--appendonly", "yes"]
+    # maxmemory + policy jsou povinné: bez limitu si Redis s AOF vezme veškerou
+    # RAM a nechá se OOM-killnout místo evikce. `volatile-lru` navíc evikuje jen
+    # klíče s TTL — sessiony (SETEX) ano, ale nic bez TTL se nezahodí.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - volatile-lru
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db-data:

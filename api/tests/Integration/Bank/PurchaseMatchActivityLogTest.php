@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Bank;
 
+use MyInvoice\Action\Bank\BankStatementAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Regrese: ODCHOZÍ platba spárovaná s přijatou fakturou musí
@@ -29,6 +34,7 @@ final class PurchaseMatchActivityLogTest extends TestCase
 {
     private Connection $db;
     private StatementMatcher $matcher;
+    private BankStatementAction $action;
     private int $supplierId = 0;
     private int $vendorId = 0;
     private int $currencyId = 0;
@@ -61,6 +67,7 @@ final class PurchaseMatchActivityLogTest extends TestCase
                 null,
                 $c->get(ActivityLogger::class),
             );
+            $this->action = $c->get(BankStatementAction::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -175,26 +182,61 @@ final class PurchaseMatchActivityLogTest extends TestCase
         self::assertSame(1, $logCount, 'Auto-spárování platby musí zapsat aktivitu purchase_invoice.payment_matched.');
     }
 
-    public function testOutgoingCardPaymentMatchesPaidPurchaseByAmountAndDate(): void
+    public function testUnmatchRemovesPurchaseAllocationAndRestoresInvoice(): void
     {
-        // Karetní platba (BEZ VS) k faktuře, která je už PAID — fuzzy ji vynechá (jen
-        // received/booked), takže dřív zůstala unmatched, i když ruční nabídka kandidátů
-        // ji podle částky+data našla. Nová amount+date záchrana (zahrnuje paid, právě jeden
-        // kandidát) ji musí spárovat automaticky — bez změny statusu faktury.
+        $this->seed(2500.00);
+        self::assertSame('auto_exact', $this->matcher->match($this->transactionId)['status'] ?? null);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/bank-transactions/' . $this->transactionId . '/unmatch')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId]);
+        $response = $this->action->unmatch($request, new Response(), ['id' => $this->transactionId]);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchColumn());
+        self::assertSame('received', $this->db->pdo()->query(
+            "SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}"
+        )->fetchColumn());
+        self::assertSame('unmatched', $this->db->pdo()->query(
+            "SELECT match_status FROM bank_transactions WHERE id = {$this->transactionId}"
+        )->fetchColumn());
+    }
+
+    public function testOutgoingCardPaymentByAmountAndDateRequiresReview(): void
+    {
+        // Samotná částka+datum bez VS/názvu je jen kandidát k ruční kontrole.
         $this->seed(2500.00, 'paid', null);
 
         $res = $this->matcher->match($this->transactionId);
 
-        self::assertSame('auto_partial', $res['status'] ?? null, 'Karetní platba k paid faktuře se musí spárovat dle částky+data.');
+        self::assertSame('unmatched', $res['status'] ?? null);
+        self::assertSame('amount_date_requires_review', $res['reason'] ?? null);
+        self::assertTrue($res['requires_review'] ?? false);
         self::assertSame($this->purchaseId, $res['purchase_invoice_id'] ?? null);
-        self::assertTrue($res['amount_date'] ?? false, 'Match má proběhnout přes amount+date záchranu.');
+        self::assertTrue($res['amount_date'] ?? false);
 
-        // Vazba je zapsaná do payment_matches; status paid faktury zůstává.
         $pmCount = (int) $this->db->pdo()->query(
             "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId} AND purchase_invoice_id = {$this->purchaseId}"
         )->fetchColumn();
-        self::assertSame(1, $pmCount, 'Musí vzniknout jeden payment_matches záznam.');
+        self::assertSame(0, $pmCount, 'Návrh nesmí před potvrzením založit účetní alokaci.');
         self::assertSame('paid', $this->db->pdo()->query("SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}")->fetchColumn());
+    }
+
+    public function testOutgoingPaymentToAlreadyPaidPurchaseRequiresReview(): void
+    {
+        $this->seed(2500.00, 'paid', self::TEST_VS);
+
+        $res = $this->matcher->match($this->transactionId);
+
+        self::assertSame('unmatched', $res['status'] ?? null);
+        self::assertSame('already_paid_verify', $res['reason'] ?? null);
+        self::assertTrue($res['requires_review'] ?? false);
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchColumn(), 'Druhá platba nesmí vytvořit duplicitní alokaci ani 321/221.');
     }
 
     public function testAmbiguousAmountDateStaysUnmatched(): void

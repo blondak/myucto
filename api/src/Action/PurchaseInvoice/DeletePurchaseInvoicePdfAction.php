@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -26,12 +28,15 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class DeletePurchaseInvoicePdfAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly Connection $db,
         private readonly Config $config,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -48,6 +53,11 @@ final class DeletePurchaseInvoicePdfAction
         }
         if (empty($invoice['pdf_path'])) {
             return Json::error($response, 'no_pdf', 'Faktura nemá archivované PDF.', 404);
+        }
+
+        // Zámek dokladu (Epic F6): smazání zdrojového dokumentu = zásah do auditní stopy.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($invoice), 'purchase_invoice', $id)) {
+            return $deny;
         }
 
         $hash = (string) $invoice['pdf_hash'];

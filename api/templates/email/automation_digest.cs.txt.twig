@@ -1,0 +1,13 @@
+{% extends '_layout.txt.twig' %}
+{% block content %}
+RANNÍ PŘEHLED AUTOMATIKY
+=======================
+
+Dnes máte {{ totals.pending }} návrhů k potvrzení a {{ totals.needs }} položek, které potřebují váš zásah.
+
+{% for company in companies %}{{ company.name }}: {{ company.auto }} samo · {{ company.pending }} potvrdit · {{ company.needs }} potřebuje vás
+Potvrdit: {{ company.pending_link }}
+Potřebuje mě: {{ company.needs_link }}
+
+{% endfor %}Otevřít Automat: {{ automation_link }}
+{% endblock %}

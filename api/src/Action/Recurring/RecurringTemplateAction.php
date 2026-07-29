@@ -19,6 +19,7 @@ use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
 use MyInvoice\Service\Invoice\RecurringPriceListService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
+use MyInvoice\Support\Pagination;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -200,13 +201,24 @@ final class RecurringTemplateAction
             return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
         }
 
+        $p = Pagination::fromQuery($request->getQueryParams());
+
+        $stmtTotal = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM invoices i WHERE i.recurring_template_id = ?'
+        );
+        $stmtTotal->execute([$id]);
+        $total = (int) $stmtTotal->fetchColumn();
+
+        $limit = (int) $p['per_page'];
+        $offset = (int) $p['offset'];
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, i.varsymbol, i.invoice_type, i.status, i.issue_date, i.due_date, i.paid_at,
                     i.total_with_vat, i.amount_to_pay, cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.recurring_template_id = ?
-              ORDER BY i.issue_date DESC, i.id DESC"
+              ORDER BY i.issue_date DESC, i.id DESC
+              LIMIT $limit OFFSET $offset"
         );
         $stmt->execute([$id]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -219,7 +231,7 @@ final class RecurringTemplateAction
         }
         unset($r);
 
-        return Json::ok($response, ['data' => $rows]);
+        return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
     }
 
     public function create(Request $request, Response $response): Response

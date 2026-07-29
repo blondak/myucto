@@ -1,0 +1,338 @@
+MYÚČTO.CZ — LICENČNÍ UJEDNÁNÍ A OZNÁMENÍ O PRÁVECH
+Verze 1.2, účinná od 29. července 2026
+
+Copyright © 2026 MyWebdesign.cz s.r.o. Všechna práva vyhrazena, s výjimkou
+práv výslovně poskytnutých licencí MIT k MIT části produktu.
+
+Tento dokument popisuje kombinovaný licenční režim produktu MyÚčto.cz.
+MyÚčto.cz je nástupcem Původního projektu MyInvoice. Všechny Bezplatné funkce
+Původního projektu lze v Produktu používat bez časového omezení a bez komerční
+licence. MyÚčto.cz jako celek však není open-source software. Vyjmenovanou
+Proprietární část lze po šedesátidenním zkušebním období užívat na základě
+Předplatného zakoupeného online (článek 5), nebo individuální Komerční smlouvy.
+
+1. VYMEZENÍ POJMŮ
+
+1.1 „Produkt“ znamená software MyÚčto.cz, jeho zdrojový a strojový kód,
+databázová schémata, dokumentaci, grafické prvky, instalační a provozní
+skripty, aktualizace a další související materiály dodávané pod značkou
+MyÚčto.cz.
+
+1.2 „Původní projekt“ znamená projekt MyInvoice dostupný na adrese:
+https://github.com/radekhulan/myinvoice
+
+1.3 „MIT část“ znamená části Produktu převzaté nebo odvozené z Původního
+projektu v rozsahu, v jakém pocházejí z Původního projektu nebo jsou v Produktu
+výslovně označeny jako licencované pod licencí MIT.
+
+1.4 „Proprietární část“ znamená další moduly, funkce, zdrojový kód,
+databázové struktury, dokumentaci, integrace, uživatelské rozhraní a jiné
+autorské výstupy vytvořené pro MyÚčto.cz, které nejsou MIT částí. Komerční
+funkční nadstavbu tvoří zejména:
+
+a) podvojné účetnictví včetně účetního deníku, hlavní knihy, účetních výkazů,
+   automatického účtování a souvisejících účetních nastavení;
+b) účetní nástroje, účetní období, uzávěrky a závěrkové balíčky;
+c) skladové hospodářství a napojení e-shopu;
+d) evidence a účetní zpracování majetku;
+e) EPO podání, přímé EPO napojení a archív podání;
+f) rozšířené opravy DPH podle § 74b, § 43, § 46 a § 79 zákona o DPH.
+
+1.5 „Držitel práv“ znamená MyWebdesign.cz s.r.o., není-li u konkrétní části
+Produktu nebo komponenty třetí strany uveden jiný držitel práv.
+
+1.6 „Komerční smlouva“ znamená platnou písemnou licenční, implementační,
+partnerskou nebo jinou smlouvu uzavřenou s Držitelem práv, která výslovně
+stanoví rozsah oprávnění k Proprietární části.
+
+1.7 „Předplatné“ znamená úplatnou, časově omezenou licenci k Proprietární
+části sjednanou online podle Obchodních podmínek (článek 5). Předplatné je
+Komerční smlouvou.
+
+1.8 „Obchodní podmínky“ znamená obchodní podmínky prodeje Předplatného
+dostupné na adrese:
+https://myucto.cz/obchodni-podminky
+
+1.9 „Instalace“ znamená jedno provozované nasazení Produktu označené
+jedinečným identifikátorem instalace vytvořeným při prvním spuštění.
+
+1.10 „Aktivní uživatel“ znamená uživatelský účet Instalace, který není
+deaktivován a má jinou roli než pouze pro čtení (readonly).
+
+1.11 „Licenční mechanismus“ znamená technické prostředky aktivace, vazby
+licence na Instalaci a pravidelného online ověřování popsané v článku 6.
+
+1.12 „Bezplatné funkce“ znamenají veškeré koncové funkce, které byly dostupné
+v Původním projektu MyInvoice, zejména fakturaci, přijaté doklady, kontakty,
+banku a pokladnu, základní daňovou evidenci, běžné výkazy DPH a související
+provozní funkce. Bezplatné funkce lze v Produktu používat bez časového omezení
+a bez Komerční smlouvy. Toto funkční oprávnění samo o sobě nemění licenční
+režim zdrojového kódu, který se určuje podle článků 2 a 3.
+
+2. PŮVOD PRODUKTU A LICENCE MIT
+
+2.1 MyÚčto.cz je vybudováno na technickém základu Původního projektu
+MyInvoice. Původní projekt je poskytován pod licencí MIT. Úplné znění licence
+MIT je uvedeno v článku 13 tohoto dokumentu.
+
+2.2 MIT část zůstává dostupná za podmínek licence MIT. Nic v tomto dokumentu
+neomezuje práva, která příjemci k MIT části přímo poskytuje licence MIT, ani
+nepřevádí MIT část na proprietární licenci.
+
+2.3 Zdrojový kód funkcí pocházejících z Původního projektu je součástí MIT
+části pouze v rozsahu, v jakém pochází z Původního projektu nebo byl výslovně
+uvolněn pod licencí MIT. Samotná podobnost názvu, obrazovky, API nebo účelu
+funkce neznamená, že později vytvořené rozšíření MyÚčto.cz je MIT částí.
+
+2.4 Pokud jeden soubor nebo distribuovaný celek obsahuje MIT část i
+Proprietární část, použije se licence MIT na identifikovatelné původní nebo
+výslovně MIT licencované části a tento komerční licenční režim na oddělitelné
+proprietární doplňky. Historie verzovacího systému, původní copyrightová
+oznámení a případný licenční manifest mohou sloužit k určení původu konkrétní
+části.
+
+2.5 Při kopírování nebo redistribuci MIT části musí být zachováno příslušné
+copyrightové oznámení a úplné znění licence MIT, jak tato licence vyžaduje.
+
+2.6 Bezplatné funkce zůstávají v běžícím Produktu plně použitelné i po
+skončení zkušebního období nebo Komerční smlouvy, včetně zobrazování, vytváření,
+změn a exportu dat v rozsahu těchto funkcí.
+
+3. PROPRIETÁRNÍ ČÁST MYÚČTO.CZ
+
+3.1 Proprietární část je chráněna autorským právem a dalšími právy duševního
+vlastnictví. Držitel práv si k ní vyhrazuje veškerá práva, která nejsou
+výslovně poskytnuta Komerční smlouvou.
+
+3.2 Bez platné Komerční smlouvy nebo předchozího písemného souhlasu Držitele
+práv není dovoleno Proprietární část zejména:
+
+a) instalovat, provozovat nebo zpřístupňovat uživatelům;
+b) kopírovat, rozmnožovat nebo archivovat nad rámec zákonných výjimek;
+c) měnit, překládat, adaptovat nebo vytvářet z ní odvozená díla;
+d) distribuovat, publikovat, pronajímat, prodávat, sublicencovat nebo jinak
+   poskytovat třetím osobám;
+e) nabízet jako službu, hostovanou aplikaci, white-label řešení nebo součást
+   jiné komerční nabídky;
+f) odstraňovat nebo měnit copyrightová, licenční či vlastnická oznámení;
+g) obcházet licenční, přístupové nebo technické ochranné mechanismy;
+h) provádět reverzní inženýrství, dekompilaci nebo jiné zjišťování zdrojového
+   kódu, s výjimkou rozsahu, v němž takové omezení nepřipouští kogentní právní
+   předpis.
+
+3.3 Konkrétní Komerční smlouva může povolit zejména určitý počet instalací,
+firemních agend a uživatelů, provoz na vlastní infrastruktuře, úpravy workflow,
+integrace, branding, white-label použití, vývoj odvozených funkcí, podporu,
+aktualizace nebo další služby. Oprávnění, které není ve smlouvě výslovně
+uvedeno, se nepovažuje za poskytnuté.
+
+3.4 Přístup ke zdrojovému kódu Proprietární části, instalačnímu balíčku,
+kontejnerovému obrazu, dokumentaci nebo aktualizaci sám o sobě nepředstavuje
+udělení licence ani souhlas s dalším šířením.
+
+4. KOMERČNÍ DOSTUPNOST
+
+4.1 MyÚčto.cz a Proprietární část jsou dostupné na komerční bázi. Informace o
+licenci, implementaci, provozu, úpravách, partnerství a podpoře jsou dostupné
+na webu:
+https://myucto.cz/
+
+4.2 Cena, rozsah licence, počet instalací a uživatelů, rozsah podpory,
+aktualizace, SLA, implementace a případné individuální úpravy se řídí konkrétní
+nabídkou a Komerční smlouvou.
+
+4.3 Není-li písemně sjednáno jinak, licence k Proprietární části je
+nevýhradní, nepřevoditelná a nesublicencovatelná a platí pouze pro zákazníka,
+účel, dobu a prostředí určené Komerční smlouvou.
+
+4.4 Standardní varianty licence lze zakoupit přímo online formou Předplatného
+(článek 5); individuální rozsah nad rámec standardních variant se sjednává
+Komerční smlouvou.
+
+5. PŘEDPLATNÉ A ROZSAH LICENCE
+
+5.1 Standardní komerční licenci k Proprietární části lze získat formou
+Předplatného sjednaného online na webu myucto.cz podle Obchodních podmínek.
+Předplatné je Komerční smlouvou ve smyslu čl. 1.6 uzavíranou na dálku;
+potvrzení o uzavření a licenční klíč se zasílají e-mailem.
+
+5.2 Předplatné se nabízí ve variantách lišících se počtem firemních agend:
+
+a) „Jedna firma“ — 1 firemní agenda;
+b) „Účetní kancelář“ — až 10 firemních agend;
+c) „Neomezeně“ — bez omezení počtu firemních agend.
+
+Cena je stanovena za jednoho Aktivního uživatele a kalendářní měsíc; celková
+cena Předplatného je násobkem ceny varianty a počtu Aktivních uživatelů.
+Rozhodná je cena podle aktuálního ceníku na myucto.cz v okamžiku objednávky.
+
+5.3 Licence platí pro jednu Instalaci a pro zaplacený počet Aktivních
+uživatelů a firemních agend. Uživatelské účty s rolí pouze pro čtení a
+deaktivované účty se do počtu Aktivních uživatelů nezapočítávají a nejsou
+zpoplatněny.
+
+5.4 Roční Předplatné zahrnuje 12 měsíců za cenu 10 měsíčních plateb.
+
+5.5 Při překročení zaplaceného počtu Aktivních uživatelů nebo firemních agend
+Licenční mechanismus na překročení upozorní a poskytne lhůtu 14 dnů k rozšíření
+Předplatného, nebo uvedení počtů do souladu. Po marném uplynutí lhůty se obnova
+licence pozastaví (čl. 7.2).
+
+5.6 Nasazení nad rámec standardních variant (enterprise, white-label,
+individuální podmínky, SLA) se sjednává samostatnou Komerční smlouvou podle
+článku 4.
+
+6. ZKUŠEBNÍ OBDOBÍ, AKTIVACE A LICENČNÍ MECHANISMUS
+
+6.1 Produkt lze po dobu 60 dnů od prvního spuštění Instalace užívat v plném
+rozsahu bezplatně, bez registrace i platby (zkušební období). Po jeho uplynutí
+vyžaduje Komerční funkční nadstavba podle čl. 1.4 aktivaci platným licenčním
+klíčem. Bezplatné funkce podle čl. 1.12 zůstávají plně dostupné.
+
+6.2 Aktivací se licence váže na jedinečný identifikátor konkrétní Instalace.
+Jeden licenční klíč smí být v jednom okamžiku aktivní pouze na jedné Instalaci.
+
+6.3 Instalace platnost licence pravidelně ověřuje online vůči licenčnímu
+serveru myucto.cz, zpravidla při prvním použití v daném dni, a získává
+kryptograficky podepsané potvrzení s platností 14 dnů. Krátkodobá nedostupnost
+internetového připojení proto provoz neomezuje.
+
+6.4 Při ověření se předávají výhradně: identifikátor Instalace, licenční klíč,
+verze Produktu a souhrnné počty Aktivních uživatelů a firemních agend. Účetní
+data, obsah dokladů ani osobní údaje uživatelů se licenčnímu serveru
+nepředávají.
+
+6.5 Licenci lze přenést na jinou Instalaci deaktivací na stávající Instalaci a
+novou aktivací, nejvýše však dvakrát za 30 dnů. Častější přenos schválí Držitel
+práv na žádost zaslanou na licenční kontakt.
+
+6.6 Obcházení, vyřazení nebo podvržení Licenčního mechanismu, stejně jako
+vykazování nepravdivých počtů Aktivních uživatelů či firemních agend, je
+podstatným porušením tohoto licenčního ujednání (čl. 3.2).
+
+7. TRVÁNÍ, OBNOVA A ZÁNIK LICENCE
+
+7.1 Licence z Předplatného trvá po zaplacené období a prodlužuje se dalšími
+platbami podle Obchodních podmínek, včetně automatických opakovaných plateb,
+jsou-li sjednány.
+
+7.2 Není-li Předplatné prodlouženo, běží ochranná lhůta 14 dnů. Po jejím
+marném uplynutí se Komerční funkční nadstavba podle čl. 1.4 stane v Produktu
+zcela nedostupnou, a to i pro zobrazení, export nebo přístup přes API.
+Bezplatné funkce podle čl. 1.12 zůstávají plně funkční včetně vytváření a změn
+dat.
+
+7.3 Data vytvořená Komerční funkční nadstavbou zůstávají po skončení licence
+beze změny v databázi provozovatele. Produkt k nim bez aktivní Komerční smlouvy
+neposkytuje přístup prostřednictvím Komerční funkční nadstavby. Zaplacením
+dalšího období se plný rozsah funkcí a přístup k těmto datům obnoví bez dalších
+úkonů.
+
+7.4 Zánikem Předplatného nejsou dotčena práva k MIT části podle licence MIT
+ani oprávnění používat Bezplatné funkce.
+
+8. ODDĚLENÍ LICENČNÍCH VRSTEV
+
+8.1 Licence MIT k MIT části nezakládá právo používat, kopírovat, upravovat nebo
+šířit Proprietární část.
+
+8.2 Komerční licence k Proprietární části neruší ani neomezuje oprávnění k MIT
+části udělená licencí MIT.
+
+8.3 Oprávnění používat Bezplatné funkce je oprávněním k jejich provozu
+v Produktu. Neuděluje další práva ke zdrojovému kódu Proprietární části nad
+rámec licence MIT nebo výslovné Komerční smlouvy.
+
+8.4 Samostatně distribuované knihovny, frameworky, fonty, schémata, nástroje a
+jiné komponenty třetích stran se řídí vlastními licencemi. Jejich licenční a
+copyrightová oznámení musí být zachována. Tento dokument jejich licence
+nenahrazuje ani nerozšiřuje.
+
+8.5 Příjemce, který redistribuuje povolenou část Produktu, odpovídá za
+zachování všech příslušných licenčních oznámení a za to, že k redistribuci
+Proprietární části má výslovné smluvní oprávnění.
+
+9. ZNAČKY A OBCHODNÍ OZNAČENÍ
+
+9.1 Názvy MyÚčto.cz a MyWebdesign.cz, loga, domény, grafická identita a další
+obchodní označení nejsou licencí MIT ani Komerční smlouvou poskytována, pokud
+Komerční smlouva výslovně nestanoví jinak.
+
+9.2 Povolení upravit software nebo branding nezakládá automatické právo
+vystupovat jménem Držitele práv, používat jeho ochranné známky nebo tvrdit, že
+upravený produkt je Držitelem práv schválen, certifikován či podporován.
+
+10. DATA, PROVOZ A SLUŽBY TŘETÍCH STRAN
+
+10.1 Provozovatel instalace odpovídá za zákonnost zpracování dat, správu
+uživatelských oprávnění, zabezpečení infrastruktury, zálohování, obnovu,
+archivaci a nastavení externích služeb.
+
+10.2 Integrace a služby třetích stran, zejména poskytovatelé AI, e-mailu,
+bankovních dat, registrů a cloudových služeb, se řídí vlastními podmínkami,
+cenami a pravidly ochrany dat. Licence k Produktu nezahrnuje jejich služby,
+není-li písemně sjednáno jinak.
+
+11. ZÁRUKY A ODPOVĚDNOST
+
+11.1 Na MIT část se použije vyloučení záruk a odpovědnosti obsažené v licenci
+MIT uvedené v článku 13.
+
+11.2 Záruky, odpovědnost, dostupnost, podpora a nápravná opatření vztahující se
+k Proprietární části se řídí Komerční smlouvou. Není-li výslovně písemně
+sjednáno jinak, poskytuje se Proprietární část „TAK JAK JE“ a „JAK JE
+DOSTUPNÁ“, bez záruk v maximálním rozsahu dovoleném právními předpisy.
+
+11.3 Produkt je nástrojem pro zpracování účetních a daňových dat. Nenahrazuje
+odborný úsudek účetní, auditora, daňového poradce ani právníka. Provozovatel a
+uživatel odpovídají za kontrolu vstupů, nastavení, výpočtů, výkazů a podání.
+
+12. PŘEDNOST UJEDNÁNÍ A ZMĚNY
+
+12.1 Pokud je mezi tímto dokumentem a podepsanou Komerční smlouvou rozpor, má
+pro Proprietární část přednost Komerční smlouva. Licence MIT má vždy přednost
+pro MIT část a nelze ji tímto dokumentem zpětně odejmout nebo omezit.
+
+12.2 Neplatnost nebo nevymahatelnost jednoho ustanovení nemá vliv na ostatní
+ustanovení v rozsahu dovoleném právními předpisy.
+
+12.3 Nové verze Proprietární části mohou být poskytovány podle aktualizovaného
+licenčního oznámení nebo nové Komerční smlouvy. Již poskytnutá práva k MIT
+části zůstávají nedotčena.
+
+13. ÚPLNÉ ZNĚNÍ LICENCE MIT PRO PŮVODNÍ ČÁSTI
+
+MIT License
+
+Copyright (c) 2026 MyWebdesign.cz s.r.o.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+14. KONTAKT
+
+MyWebdesign.cz s.r.o.
+Kardinála Berana 1104/36, 301 00 Plzeň
+IČ: 21370362, DIČ: CZ21370362
+Licenční a obchodní kontakt: info@myucto.cz
+Web produktu: https://myucto.cz/
+Obchodní podmínky: https://myucto.cz/obchodni-podminky
+
+Tento soubor musí zůstat součástí každé distribuce Produktu. U distribuce
+obsahující MIT část musí být vždy zachováno také úplné znění licence MIT a
+příslušná copyrightová oznámení.

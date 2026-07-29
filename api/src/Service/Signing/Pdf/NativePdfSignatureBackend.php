@@ -69,7 +69,7 @@ final class NativePdfSignatureBackend implements PdfSignatureBackendInterface
         }
 
         $certPath = $profile->pdfConfig->certPath;
-        if ($certPath === '' || !is_file($certPath)) {
+        if ($profile->pdfConfig->certBytes === null && ($certPath === '' || !is_file($certPath))) {
             return new PdfSignerHealth($this->id(), false, 'Certifikát není dostupný.');
         }
 

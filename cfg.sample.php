@@ -1,6 +1,6 @@
 <?php
 /**
- * MyInvoice.cz — VZOROVÁ konfigurace.
+ * MyÚčto.cz — VZOROVÁ konfigurace.
  *
  * Postup:
  *   1. Zkopíruj tento soubor jako cfg.php (`cp cfg.sample.php cfg.php`)
@@ -22,19 +22,42 @@
  */
 
 return [
+    // true = všechny EPO operace používají volné zkušební prostředí
+    // https://zkus.mojedane.gov.cz; zkušební potvrzení nikdy neoznačí snapshot
+    // jako skutečně podaný. V produkční konfiguraci ponechte false.
+    'epo_test' => false,
     'app' => [
         'env'    => 'production',                    // 'development' | 'production' (řídí debug výpisy, error reporting). Nikdy nedávat 'development' na veřejně dostupný server.
         'debug'  => false,                           // false v produkci — skryje stack trace v API odpovědích
         'url'    => 'https://dev.example.com',       // veřejná URL aplikace, používá se v emailech (odkazy na faktury, reset hesla)
         'pepper' => 'CHANGE-ME',                     // doplňková sůl k password_hash, 32B base64: openssl rand -base64 32
         'secret_encryption_key' => '',               // 32B base64 pro AES-256-GCM (TOTP secrets); openssl rand -base64 32. Pokud prázdné, fallback HKDF z pepperu.
+        'secret_encryption_previous_keys' => [],      // při rotaci sem dočasně vlož staré 32B base64 klíče; nové zápisy používají pouze aktuální klíč
         'timezone' => 'Europe/Prague',               // PHP date_default_timezone_set
         'locale_default' => 'cs',                    // jazyk UI při prvním načtení (před přihlášením)
+    ],
+    'epo' => [
+        // Volitelný spravovaný PEM bundle pro ověřování pečeti dodejek EPO.
+        // Je-li vyplněn a soubor chybí, ověření selže uzavřeně; jinak se použije systémový CA store.
+        'ca_bundle_path' => '',
+        // SHA-256 otisky právě platných podpisových certifikátů dodejek EPO.
+        // Při vyplnění musí sedět jak identita GFŘ v certifikátu, tak jeden z otisků.
+        'receipt_signer_fingerprints_sha256' => [],
+        // Sandbox nemá produkční důvěryhodný řetězec, proto je zde shoda s konkrétním
+        // SHA-256 otiskem povinná. Bez otisku zůstane testovací dodejka neověřená.
+        'test_receipt_signer_fingerprints_sha256' => [],
+    ],
+    // Licencování a aktivace (E4). Ed25519 podepsané tokeny se ověřují zabudovaným
+    // veřejným klíčem a jednou denně se obnovují u licenčního serveru.
+    'license' => [
+        'server_url'  => 'https://myucto.cz',   // licenční server (aktivace/obnova/deaktivace)
+        'public_key'  => '',                    // base64 Ed25519 veřejný klíč; prázdné = zabudovaný default
+        'verify_tls'  => true,                  // ověřovat TLS certifikát serveru (false jen pro lokální .web dev doménu)
     ],
     'db' => [
         'host'    => '127.0.0.1',
         'port'    => 3306,
-        'name'    => 'myinvoice',
+        'name'    => 'myucto',
         'user'    => 'root',
         'pass'    => 'CHANGE-ME',
         'charset' => 'utf8mb4',
@@ -129,7 +152,7 @@ return [
 
         // Sender identity
         'from_email'     => 'noreply@example.com',   // adresa v hlavičce From: (musí být na doméně, kde máš DKIM/SPF)
-        'from_name'      => 'MyInvoice',             // zobrazované jméno odesílatele
+        'from_name'      => 'MyÚčto.cz',             // zobrazované jméno odesílatele
         'reply_to_email' => '',                      // pokud prázdné, použije se from_email
         'reply_to_name'  => '',
 
@@ -249,6 +272,29 @@ return [
         //   [profile_code]
         //   passphrase=heslo
         'passphrase_file' => '',
+
+        // SEC-04 — administrátorský allowlist hostů pro TSA (RFC 3161 časové razítko).
+        // Prázdné pole = allowlist vypnutý, platí jen obecná anti-SSRF pravidla
+        // (jen https, jen veřejné IP, bez userinfo/fragmentu, bez redirectů).
+        // Vyplněné = TSA URL projde jen při PŘESNÉ shodě hostu (bez wildcardů,
+        // subdoména se nepočítá). Kontroluje se při ukládání profilu i před odesláním.
+        // Lze zadat i jako string oddělený čárkami/mezerami.
+        // Např.: ['freetsa.org', 'tsa.example.org']
+        'tsa_allowed_hosts' => [],
+    ],
+
+    // Importy z externích služeb.
+    'import' => [
+        'fakturoid' => [
+            // SEC-13 — přesné hosty, ze kterých se smí stáhnout příloha výdaje
+            // (URL přílohy určuje Fakturoid, ne my). Vestavěné jsou vždy
+            // 'app.fakturoid.cz' a 'files.fakturoid.cz'; tady se jen DOPLŇUJÍ další.
+            // Použij, když Fakturoid začne servírovat přílohy z jiného storage hostu
+            // (typicky podepsaná S3 URL) — jinak se stahování fail-closed odmítne.
+            // Authorization hlavička na doplněné hosty NEODCHÁZÍ (jen na app.fakturoid.cz).
+            // Lze zadat i jako string oddělený čárkami/mezerami.
+            'attachment_hosts' => [],
+        ],
     ],
     'qr' => [
         'czk_constant_symbol' => '0308',             // KS pro CZK platby (0308 = běžný platební styk)
@@ -287,6 +333,8 @@ return [
         'setup_per_hour_per_ip'     => 5,            // /setup wizard endpoint
         'approval_per_min_per_ip'   => 30,           // veřejné schvalování výkazu /api/public/approval/* (anon DoS)
         'invoice_public_per_min_per_ip' => 60,       // veřejná web faktura /api/public/invoice/* (anon DoS: náhled + PDF + přílohy)
+        'work_report_public_per_min_per_ip' => 60,       // veřejný náhled výkazu práce (anon DoS)
+        'work_report_public_post_per_min_per_ip' => 10,  // request-code (ODESÍLÁ e-mail) + verify (brute force OTP)
     ],
     'brute_force' => [
         // Progresivní obrana login formuláře. Počítá selhání per (email, IP) v posuvných oknech.
@@ -358,7 +406,7 @@ return [
     // přes SHA-256 (proti purchase_invoices.pdf_hash), z ISDOC vytvoří draft.
     // Plain PDF (bez embedded ISDOC) se ve fázi 1 přeskakují — AI extrakce v fázi 2c je doplní.
     'purchase_invoice' => [
-        'inbox_dir'         => '',                   // absolutní cesta (např. 'C:/inetpub/wwwroot/myinvoice.cz/inbox' nebo '/var/lib/myinvoice/inbox'); prázdné = scan vypnutý
+        'inbox_dir'         => '',                   // absolutní cesta (např. 'C:/inetpub/wwwroot/myucto.cz/inbox' nebo '/var/lib/myucto/inbox'); prázdné = scan vypnutý
         'inbox_recursive'   => true,                 // procházet i podadresáře
         'allowed_exts'      => ['pdf', 'isdoc', 'xml'],  // jen tyto přípony se zpracují (.xml = ISDOC payload bez wrapping PDF)
         'move_processed_to' => '',                   // volitelný podadresář (např. 'processed'); prázdné = soubory zůstanou na místě a budou skipnuté při dalším scanu díky pdf_hash dedup

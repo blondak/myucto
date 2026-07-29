@@ -1,10 +1,57 @@
 import { api } from './client'
+import type { DocumentLock } from './locks'
+import type { DocItem } from './documents'
+import type { CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
-export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance'
+export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
+
+/**
+ * Druhy dokladů přijaté faktury pro výběr v editoru (pořadí = pořadí v dropdownu).
+ * `tax_document` = DDKP „daňový doklad k poskytnuté záloze" (§28 ZDPH) — účtuje jen DPH
+ * (343/314), do nákladů nevstupuje, váže se na uhrazenou zálohu přes `parent_purchase_invoice_id`.
+ * Label se bere přes i18n `purchase_invoice.document_kind.<kind>`.
+ */
+export const PURCHASE_DOCUMENT_KINDS: PurchaseDocumentKind[] =
+  ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document']
 export type ExchangeRateSource = 'cnb' | 'manual' | 'idoklad' | 'fakturoid'
 /** Provenience platebního účtu pro QR platbu (viz migrace 0107). */
 export type PaymentAccountSource = 'isdoc' | 'ai' | 'ai_reextract' | 'qr_image' | 'manual'
+
+/**
+ * §DM — druh nákladu na položce. Řídí nákladový účet i evidenci majetku:
+ * service=518, material=501 (vč. PHM), small_asset=501 + karta drobného majetku,
+ * fixed_asset=042 + odpisy. NULL = neurčeno (chová se jako dosud → 518).
+ */
+export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'fixed_asset'
+
+/** Odkud návrh přišel: pravidlo tenanta / klíčové slovo / práh §26/2 ZDP / AI. */
+export type ExpenseKindSuggestionSource = 'rule' | 'keyword' | 'threshold' | 'ai'
+
+/**
+ * §DM — návrh druhu nákladu pro JEDNU položku + PROČ. Důvod není kosmetika: bez něj
+ * uživatel nepozná, jestli se návrhu dá věřit, a klikal by naslepo.
+ *
+ * Návrh nic nemění — `expense_kind` na řádek zapíše až uživatel.
+ */
+export interface ExpenseKindSuggestion {
+  expense_kind: ExpenseKind
+  /** 0..1. */
+  confidence: number
+  /** Lidský důvod, např. „text obsahuje „tablet" ⇒ drobný majetek". */
+  reason: string
+  source: ExpenseKindSuggestionSource
+  /** false → slabý důkaz, patří do fronty „ke kontrole". Nikdy se neaplikuje samo. */
+  auto: boolean
+  /** Co je na řádku teď — aby UI nenabízelo „použít" tam, kde se nic nezmění. */
+  current_expense_kind: ExpenseKind | null
+}
+
+export interface ExpenseSuggestionsResponse {
+  purchase_invoice_id: number
+  /** Klíč = id položky (`PurchaseInvoiceItem.id`). Nové neuložené řádky tu nejsou. */
+  items: Record<string, ExpenseKindSuggestion>
+}
 
 /** Strukturovaný platební účet dodavatele (pro QR platbu / ruční editaci). */
 export interface PaymentQrAccount {
@@ -46,6 +93,16 @@ export interface PurchaseInvoiceItem {
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
+  /** §DM — druh nákladu. Autoritativní klasifikace, BE z ní odvozuje `is_fixed_asset`. */
+  expense_kind?: ExpenseKind | null
+  /** §DČR — časové rozlišení nákladu (381): období od–do, do kterého náklad věcně patří. NULL = bez rozlišení. */
+  accrual_from?: string | null
+  accrual_to?: string | null
+  /** Vazba na skladovou kartu (Epic SKLAD) — FE MUSÍ posílat zpět v round-tripu, jinak se DELETE+INSERT tiše smaže. */
+  stock_item_id?: number | null
+  /** Joined (read-only, jen v GET odpovědi) — pro label vybrané karty po reloadu. */
+  stock_sku?: string | null
+  stock_name?: string | null
 }
 
 export interface PurchaseVatBreakdownRow {
@@ -63,6 +120,26 @@ export interface PurchaseVatOverride {
   rate: number
   base: number
   vat: number
+}
+
+export type PurchaseVatAllocationUsage = 'business' | 'personal' | 'mixed' | 'non_deductible'
+export type PurchaseVatAllocationTaxTreatment = 'deductible' | 'non_deductible' | 'not_expense'
+
+export interface PurchaseVatAllocation {
+  id?: number
+  purchase_invoice_id?: number
+  description: string
+  usage_type: PurchaseVatAllocationUsage
+  vat_rate: number
+  base_amount: number
+  vat_amount: number
+  total_amount: number
+  vat_deduction: VatDeduction
+  vat_deduction_percent: number
+  tax_treatment: PurchaseVatAllocationTaxTreatment
+  account_code: string
+  vat_classification_code?: string | null
+  order_index: number
 }
 
 export interface PurchaseInvoiceTotals {
@@ -93,7 +170,7 @@ export interface VendorSnapshot {
 }
 
 /** Nárok na odpočet DPH: plný / bez nároku / krácený (poměrný §75, viz vat_deduction_percent). */
-export type VatDeduction = 'full' | 'none' | 'proportional'
+export type VatDeduction = 'full' | 'none' | 'proportional' | 'reduced'
 
 /** Stručné shrnutí navázané přijaté faktury (záloha ↔ vyúčtovací). */
 export interface PurchaseInvoiceBrief {
@@ -105,6 +182,55 @@ export interface PurchaseInvoiceBrief {
   issue_date: string | null
   total_with_vat: number
   currency: string
+}
+
+export interface AiPostingSuggestion {
+  id: number
+  source: 'knn' | 'llm'
+  payload: {
+    debit_account_code: string
+    credit_account_code?: string | null
+    expense_category_id?: number | null
+  }
+  confidence: number
+  reasoning: string | null
+}
+
+/** Bankovní úhrada přijaté faktury — proklik z detailu na příslušný bankovní výpis. */
+export interface PurchaseInvoiceBankPayment {
+  bank_transaction_id: number
+  statement_id: number
+  amount: number
+  posted_at: string
+  counterparty: string | null
+  currency: string
+  /** Zaúčtování úhrady (deník) — proklik na řádek deníku. */
+  journal_entry_id: number
+}
+
+/** Hotovostní úhrada přijaté faktury — pokladní doklad (PPD/VPD) POSTED přes journal_entry_id. */
+export interface PurchaseInvoiceCashPayment {
+  cash_document_id: number
+  doc_number: string | null
+  amount: number
+  date: string
+  register_id: number
+  register_name: string | null
+  /** Zaúčtování úhrady (deník) — proklik na řádek deníku. */
+  journal_entry_id: number
+  currency: string
+}
+
+/** Úhrada zápočtem proti zvolenému účtu (invoice_settlements, migrace 1126). */
+export interface PurchaseInvoiceSettlementPayment {
+  settlement_id: number
+  amount: number
+  date: string
+  account_code: string
+  account_name: string
+  note: string | null
+  /** Zaúčtování zápočtu (deník); NULL v daňové evidenci. */
+  journal_entry_id: number | null
 }
 
 export interface PurchaseInvoice {
@@ -164,6 +290,9 @@ export interface PurchaseInvoice {
   payment_bic: string | null
   payment_variable_symbol: string | null
   payment_account_source: PaymentAccountSource | null
+  /** Forma úhrady (migrace 1128). `direct_debit` = inkaso → netvoří se platební příkaz. */
+  payment_method: PaymentMethod
+  payment_method_source: PaymentMethodSource
   status: PurchaseInvoiceStatus
   booked_at: string | null
   paid_at: string | null
@@ -185,16 +314,36 @@ export interface PurchaseInvoice {
   /** Název + kód kategorie nákladu (join z expense_categories, jen v detailu). */
   expense_category_label?: string | null
   expense_category_code?: string | null
+  ai_posting_suggestion?: AiPostingSuggestion | null
   /** Záloha (advance), kterou tato finální faktura vyúčtovává (vazba uložená na finální). */
   advance_purchase_invoice_id: number | null
   /** AI návrh propojení se zálohou (čeká na potvrzení uživatelem). */
   advance_link_suggested_id: number | null
   /** Shrnutí navázané zálohy (pokud advance_purchase_invoice_id != null). */
   linked_advance?: PurchaseInvoiceBrief | null
+  /** Dobropis (credit_note): opravovaná přijatá faktura (migrace 1096). */
+  parent_purchase_invoice_id?: number | null
+  /** Shrnutí opravované faktury (pokud parent_purchase_invoice_id != null). */
+  linked_parent?: PurchaseInvoiceBrief | null
+  /** Dobropis bez vazby: existuje faktura téhož dodavatele k propojení? */
+  has_parent_candidates?: boolean
+  /** Reverzní pohled: dobropisy, které tuto fakturu opravují (migrace 1096). */
+  corrected_by?: PurchaseInvoiceBrief[] | null
   /** Shrnutí AI-navržené zálohy (suggest & confirm). */
   advance_link_suggestion?: PurchaseInvoiceBrief | null
   /** U zálohy (advance): finální faktura, která ji vyúčtovává (reverzní pohled). */
   settled_by?: PurchaseInvoiceBrief | null
+  /** Bankovní úhrady dokladu (POSTED bank zápisy) — proklik na bankovní výpis. */
+  bank_payments?: PurchaseInvoiceBankPayment[] | null
+  /** Hotovostní úhrady dokladu (POSTED pokladní doklady) — proklik na pokladnu + deník. */
+  cash_payments?: PurchaseInvoiceCashPayment[] | null
+  /** Úhrady zápočtem proti účtu (355/365 apod.) — proklik na zaúčtování zápočtu. */
+  settlement_payments?: PurchaseInvoiceSettlementPayment[] | null
+  /**
+   * Ručně/legacy uhrazeno (status='paid') BEZ zaúčtované úhrady (banka, pokladna ani
+   * zápočet) → závazek 321 zůstává v deníku otevřený. FE zobrazí výrazné upozornění.
+   */
+  mark_paid_unposted?: boolean
   /** Vyúčtovací faktura bez vazby: existuje nespárovaná záloha téhož dodavatele? */
   has_advance_candidates?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */
@@ -214,6 +363,10 @@ export interface PurchaseInvoice {
    * = dobropis má kladný součet (dvojí negace znaménka). Viz issue #35.
    */
   _warnings?: string[]
+  /** Detaily k vybraným `_warnings` kódům pro interpolaci v UI (§C kurz vs ČNB). */
+  _warning_meta?: {
+    exchange_rate_cnb_deviation?: CnbRateDeviationMeta
+  }
   // Joined fields
   vendor_company_name?: string
   vendor_ic?: string | null
@@ -222,10 +375,14 @@ export interface PurchaseInvoice {
   vendor_language?: 'cs' | 'en'
   /** Ruční rekapitulace DPH dle dokladu (§ 73). NULL = počítá se standardně. */
   vat_overrides: PurchaseVatOverride[] | null
+  /** Volitelné rozdělení rekapitulace DPH na účetní a odpočtové režimy. */
+  vat_allocations: PurchaseVatAllocation[]
   // Related
   items: PurchaseInvoiceItem[]
   vat_breakdown: PurchaseVatBreakdownRow[]
   totals: PurchaseInvoiceTotals
+  /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
+  locked?: DocumentLock
 }
 
 export interface PurchaseInvoiceListItem {
@@ -254,11 +411,22 @@ export interface PurchaseInvoiceListItem {
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
+  /** Nárok na odpočet DPH (full/none/proportional) — pro doplňkový sloupec listu. */
+  vat_deduction?: VatDeduction
+  vat_deduction_percent?: number
+  tax_deductible?: boolean
+  /** Název + kód kategorie nákladu (LEFT JOIN expense_categories v list SELECTu). */
+  expense_category_label?: string | null
+  expense_category_code?: string | null
   vendor_company_name: string
   vendor_ic: string | null
   month_bucket: string
+  /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
+  has_small_asset?: boolean
   extraction_warning: string | null
   payment_ordered_at: string | null
+  /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
+  locked?: DocumentLock
 }
 
 export interface PurchaseMonthGroup {
@@ -306,8 +474,12 @@ export interface PurchaseInvoicePayload {
   exchange_diff_base?: number | null
   vat_classification_code?: string | null
   expense_category_id?: number | null
+  /** Dobropis (credit_note): ID opravované přijaté faktury (migrace 1096). */
+  parent_purchase_invoice_id?: number | null
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
   vat_overrides?: PurchaseVatOverride[] | null
+  /** Prázdné pole = použít hlavičkový režim faktury. */
+  vat_allocations?: PurchaseVatAllocation[]
   /** Platební účet dodavatele pro QR platbu (migrace 0107). */
   payment?: {
     account_number?: string | null
@@ -317,6 +489,11 @@ export interface PurchaseInvoicePayload {
     variable_symbol?: string | null
     source?: PaymentAccountSource
   }
+  /**
+   * Forma úhrady (migrace 1128). Backend jí u téhle cesty vždy nastaví
+   * `payment_method_source = 'manual'` — volba v editoru je vědomý úkon účetní.
+   */
+  payment_method?: PaymentMethod
   items: Array<{
     description: string
     quantity: number
@@ -325,6 +502,10 @@ export interface PurchaseInvoicePayload {
     vat_rate_id: number
     order_index: number
     vat_classification_code?: string | null
+    expense_kind?: ExpenseKind | null
+    accrual_from?: string | null
+    accrual_to?: string | null
+    stock_item_id?: number | null
   }>
 }
 
@@ -339,9 +520,13 @@ export interface PurchaseListFilters {
   currency?: string
   unpaid_only?: boolean
   overdue?: boolean
+  /** Bez zaúčtované úhrady (banka ani pokladna) — odhalí ručně/legacy uhrazené doklady. */
+  unmatched?: boolean
   needs_review?: boolean
   /** '1' = předané k úhradě, '0' = nepředané (odvozeno z payment_ordered_at). */
   payment_ordered?: '1' | '0'
+  /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
+  booked?: '1' | '0'
   /** Filtr na dávku hromadného AI importu (#232). */
   import_batch_id?: string
   q?: string
@@ -400,8 +585,10 @@ export const purchaseInvoicesApi = {
     if (filters.currency)    params['filter[currency]']    = filters.currency
     if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
     if (filters.overdue)      params['filter[overdue]']      = 1
+    if (filters.unmatched)    params['filter[unmatched]']    = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
+    if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
@@ -412,6 +599,20 @@ export const purchaseInvoicesApi = {
   },
 
   get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
+  acceptAiPostingSuggestion: (id: number, override?: Partial<AiPostingSuggestion['payload']>) =>
+    api.post<{ status: 'accepted'; applied: AiPostingSuggestion['payload'] }>(
+      `/ai/suggestions/${id}/accept`, override ? { override } : {},
+    ).then(r => r.data),
+  rejectAiPostingSuggestion: (id: number) =>
+    api.post<{ status: 'rejected' }>(`/ai/suggestions/${id}/reject`, {}).then(r => r.data),
+  /**
+   * §DM — návrhy druhu nákladu pro položky dokladu (read-only, nic neúčtuje).
+   * Jen podvojné účetnictví; u daňové evidence vrací BE 4xx → volající to smí ignorovat.
+   */
+  expenseSuggestions: (id: number) =>
+    api.get<ExpenseSuggestionsResponse>(
+      `/accounting/purchase-invoices/${id}/expense-suggestions`,
+    ).then(r => r.data),
   create: (payload: PurchaseInvoicePayload) =>
     api.post<PurchaseInvoice>('/purchase-invoices', payload).then(r => r.data),
   update: (id: number, payload: PurchaseInvoicePayload, force = false) =>
@@ -545,6 +746,18 @@ export const purchaseInvoicesApi = {
     return `/api/purchase-invoices/${id}/pohoda${qs ? '?' + qs : ''}`
   },
 
+  // ── Přílohy: link/unlink DMS dokumentů (Epic F7) ──
+  // Vazba přes document_links(entity_type='purchase_invoice'); fixní pdf_*/source_*
+  // sloupce PF netknuté (subsystém B).
+  listDmsDocuments: (id: number) =>
+    api.get<{ documents: DocItem[] }>(`/purchase-invoices/${id}/documents`).then(r => r.data.documents ?? []),
+  linkDmsDocument: (id: number, documentId: number) =>
+    api.post<{ documents: DocItem[] }>(`/purchase-invoices/${id}/documents`, { document_id: documentId })
+      .then(r => r.data.documents ?? []),
+  unlinkDmsDocument: (id: number, documentId: number) =>
+    api.delete<{ documents: DocItem[] }>(`/purchase-invoices/${id}/documents`, { params: { document_id: documentId } })
+      .then(r => r.data.documents ?? []),
+
   scanInbox: (dryRun = false) =>
     api.post<InboxScanResult>('/purchase-invoices/scan-inbox', { dry_run: dryRun }).then(r => r.data),
 
@@ -555,7 +768,7 @@ export const purchaseInvoicesApi = {
   exportUrl: (
     period: { type: 'monthly'; year: number; month: number } | { type: 'quarterly'; year: number; quarter: number },
     dateBy: 'tax' | 'issue' | 'received' = 'tax',
-    format: 'pdf-zip' | 'pohoda' | 'isdoc' = 'pdf-zip',
+    format: 'pdf-zip' | 'pohoda' | 'isdoc' | 'csv' = 'pdf-zip',
   ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({

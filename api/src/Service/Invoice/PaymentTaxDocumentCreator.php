@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Currency\ExchangeRateApplier;
 use PDO;
 
 /**
@@ -34,6 +35,7 @@ final class PaymentTaxDocumentCreator
         private readonly Connection $db,
         private readonly InvoiceRepository $repo,
         private readonly InvoiceCalculator $calc,
+        private readonly ExchangeRateApplier $rateApplier,
     ) {}
 
     /**
@@ -171,9 +173,20 @@ final class PaymentTaxDocumentCreator
             ? "Payment received {$payment['paid_on']} (advance invoice {$proforma['varsymbol']})"
             : "Přijatá platba {$paidOnCz} (zálohová faktura {$proforma['varsymbol']})";
 
+        $currency = strtoupper((string) ($proforma['currency'] ?? 'CZK'));
+        $resolvedRate = $this->rateApplier->resolveFor(
+            (int) $proforma['supplier_id'],
+            $currency,
+            (string) $payment['paid_on'],
+        );
+
         $ownsTransaction = !$pdo->inTransaction();
+        $savepoint = null;
         if ($ownsTransaction) {
             $pdo->beginTransaction();
+        } else {
+            $savepoint = 'payment_tax_document_create';
+            $pdo->exec("SAVEPOINT {$savepoint}");
         }
         try {
             $stmt = $pdo->prepare(
@@ -232,20 +245,77 @@ final class PaymentTaxDocumentCreator
                 ]);
             }
 
-            $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE id = ?')
-                ->execute([$taxDocId, $paymentId]);
+            $claim = $pdo->prepare(
+                'UPDATE invoice_payments
+                    SET tax_document_invoice_id = ?
+                  WHERE id = ?
+                    AND (tax_document_invoice_id IS NULL OR tax_document_invoice_id = ?)'
+            );
+            $claim->execute([
+                $taxDocId,
+                $paymentId,
+                !empty($payment['tax_document_invoice_id']) ? (int) $payment['tax_document_invoice_id'] : null,
+            ]);
+            if ($claim->rowCount() !== 1) {
+                throw new PaymentTaxDocumentRaceException($paymentId);
+            }
+
+            $this->calc->recompute($taxDocId);
+            if ($resolvedRate !== null) {
+                $this->repo->setExchangeRate(
+                    $taxDocId,
+                    $resolvedRate['rate'],
+                    $resolvedRate['rate_date'],
+                );
+            } elseif ($currency !== 'CZK' && isset($proforma['exchange_rate'])) {
+                $this->repo->setExchangeRate(
+                    $taxDocId,
+                    (float) $proforma['exchange_rate'],
+                    isset($proforma['exchange_rate_date']) ? (string) $proforma['exchange_rate_date'] : null,
+                );
+            } else {
+                $this->repo->setExchangeRate($taxDocId, null, null);
+            }
 
             if ($ownsTransaction) {
                 $pdo->commit();
+            } elseif ($savepoint !== null) {
+                $pdo->exec("RELEASE SAVEPOINT {$savepoint}");
             }
+        } catch (PaymentTaxDocumentRaceException $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif ($savepoint !== null && $pdo->inTransaction()) {
+                $pdo->exec("ROLLBACK TO SAVEPOINT {$savepoint}");
+                $pdo->exec("RELEASE SAVEPOINT {$savepoint}");
+            }
+            $winner = $pdo->prepare(
+                'SELECT tax_document_invoice_id FROM invoice_payments WHERE id = ? FOR UPDATE'
+            );
+            $winner->execute([$e->paymentId]);
+            $winnerId = $winner->fetchColumn();
+            if ($winnerId !== false && $winnerId !== null) {
+                return (int) $winnerId;
+            }
+            throw new \RuntimeException('Daňový doklad k platbě se nepodařilo atomicky vytvořit.');
         } catch (\Throwable $e) {
             if ($ownsTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();
+            } elseif ($savepoint !== null && $pdo->inTransaction()) {
+                $pdo->exec("ROLLBACK TO SAVEPOINT {$savepoint}");
+                $pdo->exec("RELEASE SAVEPOINT {$savepoint}");
             }
             throw $e;
         }
 
-        $this->calc->recompute($taxDocId);
         return $taxDocId;
+    }
+}
+
+final class PaymentTaxDocumentRaceException extends \RuntimeException
+{
+    public function __construct(public readonly int $paymentId)
+    {
+        parent::__construct('Souběžné vytvoření daňového dokladu k platbě.');
     }
 }

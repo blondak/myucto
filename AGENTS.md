@@ -1,15 +1,14 @@
 # AGENTS.md — pravidla pro AI agenty a přispěvatele
 
 Pokyny pro práci s tímto repozitářem (Claude Code, Codex, Cursor, Copilot a další).
-Platí pro celý repozitář. Obecný popis projektu je v [README.md](README.md),
-vývojářská spec v [`source/`](source/00-README.md).
+Platí pro celý repozitář. Obecný popis projektu je v [README.md](README.md).
 
 ## O projektu
 
-MyInvoice.cz — český self-hosted fakturační a účetní systém (vystavené + přijaté
+MyUcto.cz — český self-hosted fakturační a účetní systém (vystavené + přijaté
 faktury, multi-supplier, DPH/KH/SH výkazy, EPO XML, CRM, REST API).
 Backend PHP 8.5 + Slim 4, frontend Vue 3 + TypeScript + Vite + Tailwind,
-databáze MariaDB 10.6+ (doporučeno 11.x).
+databáze MariaDB 11.8+.
 
 ## Layout repozitáře
 
@@ -18,9 +17,31 @@ databáze MariaDB 10.6+ (doporučeno 11.x).
 - `dist/` — produkční build frontendu (commitovaný — uživatelé testují přes něj)
 - `db/migrations/` — SQL migrace (číslované, idempotentní)
 - `manual/` — uživatelský manuál (Markdown, česky); `manual/generated/` = vyrenderované HTML
-- `source/` — vývojářská spec a plány
 - `tools/` — pomocné skripty (generování manuálu, převody obrázků)
 - `cmd/` — cron/deploy wrappery (`.sh` + `.cmd`/`.ps1`)
+
+## Fork MyÚčto.cz — pravidla portování
+
+- Upstream: `git@github.com:radekhulan/myinvoice.git` (remote `upstream`, VEŘEJNÉ) —
+  merguj `upstream/master` pravidelně.
+- Repozitáře:
+  - **`radekhulan/myucto`** — veřejné, **tady běží vývoj i PR přispěvatelů**.
+    Jeho historie začíná veřejnou historií MyInvoice po `7dd51638` (4.51.0) a nad
+    ní je jeden commit s celým stromem MyÚčta. Díky tomu **sdílí merge base
+    s upstreamem**, takže `git merge upstream/master` jde spustit přímo tady.
+  - **`radekhulan/myucto-dev`** — privátní ARCHIV původní historie (1600+ commitů,
+    reálná data zákazníků). Vývoj proti němu neběží, nepushuje se do něj.
+- Proč to takhle: MyInvoice je velmi živý (~1000 commitů/90 dnů), takže ztráta
+  merge base by znamenala ruční portování stovek commitů. Squash vlastní historie
+  do jednoho commitu skryje interní data, ale předka s upstreamem zachová.
+- Kód piš **aditivně**: nové moduly do nových souborů; sdílené soubory jen doplňuj
+  malými lokalizovanými změnami, ať zůstane merge z upstreamu levný.
+- MyÚčto-specifické migrace čísluj od `1000_` — range `0125`–`0999` je rezervovaný
+  pro upstream.
+- Namespace `MyInvoice\` a interní identifikátory (env vary, cookie/localStorage/Redis
+  klíče) se **NEpřejmenovávají** — mění se jen user-visible branding (UI texty,
+  e-maily, dokumentace, loga).
+- DB baseline a minimální podporovaná verze je **MariaDB 11.8 LTS**.
 
 ## Příkazy
 
@@ -37,9 +58,8 @@ cd api && php vendor/bin/phpunit --filter Xyz     # podmnožina
 php api/bin/migrate.php
 php api/bin/migrate.php --status
 
-# Manuál — regenerovat po každé změně manual/*.md
+# Manuál — po změně manual/*.md regenerovat pouze HTML
 php tools/generateManualHtml.php
-php tools/exportManualToPdf.php
 ```
 
 ## Tvrdá pravidla
@@ -47,7 +67,7 @@ php tools/exportManualToPdf.php
 ### Migrace
 - Nová migrace = nový číslovaný soubor v `db/migrations/`, spouští se **výhradně** přes `php api/bin/migrate.php`.
 - Každá migrace musí být **idempotentní** (opakovatelně spustitelná): používej nativní MariaDB `IF [NOT] EXISTS` (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, …), ne PREPARE/EXECUTE triky.
-- Cílová DB je MariaDB 10.6+: v SQL preferuj **window functions a CTE** před vnořenými subselecty; nepoužívej `SQL_CALC_FOUND_ROWS`.
+- Cílová DB je MariaDB 11.8+: v SQL preferuj **window functions a CTE** před vnořenými subselecty; nepoužívej `SQL_CALC_FOUND_ROWS`.
 
 ### i18n
 - Veškeré nové UI texty přes `t()` z vue-i18n — **nikdy** natvrdo česky/anglicky v šablonách. Vždy doplň **obě** locale (`web/src/i18n/cs.json` i `en.json`).
@@ -81,19 +101,49 @@ php tools/exportManualToPdf.php
 ### Frontend
 - Po každé změně ve `web/src` spusť `pnpm build` — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí.
 - Drž se existujícího design language (sjednocené boxy, status badges, mobile cards) — před vymýšlením nového vzoru se podívej, jak to dělají sousední stránky.
+- **Akční tlačítka — jednotný koncept** (vzor detail faktury): každá akce má **ikonu + sémantickou barvu** dle smyslu (`primary` = hlavní krok, `success` = potvrzení/úhrada, `warning` = upomínka/admin zásah, `danger` = destrukce, `neutral` = utility). Na detailních stránkách přes sdílený `ActionBar`/`ActionItem` (`web/src/components/ui/ActionBar.vue`: 1 plná primární akce dle stavu, sekundární outline, utility/destrukce v „…"). Samostatná tlačítka mimo ActionBar přebírají stejné FILLED/OUTLINE styly a ikony — žádná ad-hoc tlačítka bez ikony a sémantické barvy. Platí i pro sekci Účetnictví a všechny nové stránky.
+- Toolbary a skupiny tlačítek vždy s `flex-wrap` (+ `whitespace-nowrap` na tlačítkách) — obsah se při zúžení nesmí mačkat ani přetékat.
 
 ## Testy
 
-- PHPUnit 13, testy v `api/tests/{Unit,Integration,Architecture}`. Nové chování pokrývej testem; PR nesmí rozbít existující testy.
+- PHPUnit 13, testy v `api/tests/{Unit,Integration,Architecture,Invariants}`. Nové chování pokrývej testem; PR nesmí rozbít existující testy.
 - **Pouze syntetická testovací data** — repo je veřejné. Žádné reálné doklady, výpisy, IBANy, čísla dokladů ani identifikátory skutečných protistran.
 - České bankovní účty v testech musí projít mod-11 validací; ověřený placeholder: `1000000005 / 0100`.
 - ISDOC export se validuje proti oficiálnímu XSD (`api/xsd/isdoc-invoice-6.0.2.xsd`).
+
+### Účetní a daňová vrstva — dvě tvrdá pravidla
+
+Obojí si vynutil audit účetního jádra; obojí bylo v repu předtím jako prozaický text
+a **stejně se porušilo**. Proto ke každému existuje spustitelná brána.
+
+1. **Nález se neuzavírá bez testu, u kterého jsi OVĚŘIL, že bez opravy padá.**
+   Vzniklo tu opakovaně tvrzení, které svítilo zeleně a nekontrolovalo nic (guard
+   hledající řetězec, který se vyskytoval i v komentáři; test skipující kvůli prázdné
+   testovací DB; křížová kontrola vracející tiše nulu, když nenašla řádek výkazu).
+   Zelená bez tohohle kroku není důkaz.
+2. **U každého fixu v daňové/účetní vrstvě si polož otázku „kde jinde žije stejný
+   koncept?"** → grep → buď sjednotit na SSOT, nebo odlišnost zdůvodnit v komentáři
+   u kódu. Pravidlo implementované na jedné větvi a nepropagované na druhou je
+   nejčastější třída chyb tohoto jádra.
+
+Praktické důsledky:
+
+- **Výjimku v guardu uděluj SYMBOLU (metodě), nikdy souboru.** Allowlist na úrovni
+  souboru vypne kontrolu i pro kód, který s výjimkou nesouvisí.
+- **SSOT musí jít ZAVOLAT.** Pravidlo schované jako `private` helper uvnitř jedné akce
+  se okopíruje rychleji, než kdyby neexistovalo — vytváří totiž dojem, že existuje.
+- **Před commitem do účetní/daňové vrstvy pusť auditní bránu:**
+  `pwsh -File cmd/audit-gate.ps1` (Linux: `cmd/audit-gate.sh`). Kroky nad daty jsou
+  read-only, takže je lze pustit i proti produkci; `-SkipData` je vynechá.
+- **Ne každá odlišnost je drift.** `formatAmount` v EPO výkazech a § 46 vs § 74b jsou
+  záměr — guard je má chránit před „sjednocením", ne je slučovat.
 
 ## Manuál
 
 - Zdroj v `manual/*.md` (česky). Při změně funkcionality viditelné uživatelem aktualizuj příslušnou kapitolu.
 - Piš **jen aktuální stav** — žádné „od verze X.Y.Z", žádné odkazy na historii vývoje.
-- Po změně Markdownu regeneruj výstupy: `php tools/generateManualHtml.php` + `php tools/exportManualToPdf.php`.
+- Po změně Markdownu regeneruj pouze HTML přes `php tools/generateManualHtml.php`.
+  PDF generuj jen na výslovnou žádost uživatele.
 - Vzhled manuálu (`manual/manual.css`) zrcadlí design tokeny aplikace (`web/src/styles/main.css`) včetně dark mode — při změně tokenů udržuj synchronizaci.
 
 ## Konvence

@@ -3,7 +3,7 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { clientsApi, TAX_NUMBER_LABELS, type Client, type BankLookupResult, type ViesLookupResult } from '@/api/clients'
+import { clientsApi, TAX_NUMBER_LABELS, type Client, type ClientBankAccount, type BankLookupResult, type ViesLookupResult } from '@/api/clients'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
 import { purchaseInvoicesApi, type PurchaseInvoice } from '@/api/purchaseInvoices'
 import { recurringApi, type RecurringTemplate } from '@/api/recurring'
@@ -14,6 +14,8 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import SendWorkReportLinkModal from '@/components/modals/SendWorkReportLinkModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { formatAccountNumber } from '@/utils/bankAccount'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -34,6 +36,15 @@ const invoicesPages = ref(1)
 const recurringTemplates = ref<RecurringTemplate[]>([])
 const purchaseInvoices = ref<PurchaseInvoice[]>([])
 const purchaseInvoicesLoading = ref(false)
+const bankAccountNumber = ref('')
+const bankCode = ref('')
+const bankAccountSaving = ref(false)
+const bankRegistrySyncing = ref(false)
+const deletingBankAccountIds = ref<Set<number>>(new Set())
+const canSyncCzechBankRegistry = computed(() => {
+  const dic = (client.value?.dic ?? '').toUpperCase().replace(/[\s-]/g, '')
+  return client.value?.country_iso2 === 'CZ' && /^(?:CZ)?\d{8,10}$/.test(dic)
+})
 
 // Detaily plátce DPH — CZ DIČ jde do registru plátců DPH (CRPDPH/MFČR: účty + nespolehlivost),
 // zahraniční EU DIČ (SK…) do VIES; CRPDPH je jen český registr a cizí DIČ by vždy
@@ -63,6 +74,68 @@ async function loadVatPayerDetails() {
     vatInfoError.value = e?.response?.data?.error?.message || t('client.vat_payer_details_failed')
   } finally {
     vatInfoLoading.value = false
+  }
+}
+
+function bankAccountLabel(account: ClientBankAccount): string {
+  if (account.iban) return account.iban.replace(/(.{4})/g, '$1 ').trim()
+  return formatAccountNumber(account.account_number, account.bank_code)
+}
+
+async function addBankAccount() {
+  if (!client.value || !bankAccountNumber.value.trim()) return
+  bankAccountSaving.value = true
+  try {
+    const account = await clientsApi.addBankAccount(client.value.id, {
+      account_number: bankAccountNumber.value.trim(),
+      bank_code: bankCode.value.trim() || null,
+    })
+    client.value.bank_accounts = [
+      ...(client.value.bank_accounts ?? []).filter(a => a.id !== account.id),
+      account,
+    ]
+    bankAccountNumber.value = ''
+    bankCode.value = ''
+    toast.success(t('client.bank_accounts.added'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('client.bank_accounts.add_failed'))
+  } finally {
+    bankAccountSaving.value = false
+  }
+}
+
+async function removeBankAccount(account: ClientBankAccount) {
+  if (!client.value || deletingBankAccountIds.value.has(account.id)
+    || !confirm(t('client.bank_accounts.delete_confirm', { account: bankAccountLabel(account) }))) return
+  deletingBankAccountIds.value = new Set([...deletingBankAccountIds.value, account.id])
+  try {
+    await clientsApi.deleteBankAccount(client.value.id, account.id)
+    client.value.bank_accounts = (client.value.bank_accounts ?? []).filter(a => a.id !== account.id)
+    toast.success(t('client.bank_accounts.deleted'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('client.bank_accounts.delete_failed'))
+  } finally {
+    const ids = new Set(deletingBankAccountIds.value)
+    ids.delete(account.id)
+    deletingBankAccountIds.value = ids
+  }
+}
+
+async function syncBankAccountsFromRegistry() {
+  if (!client.value) return
+  bankRegistrySyncing.value = true
+  try {
+    const result = await clientsApi.syncBankAccountsFromRegistry(client.value.id)
+    client.value.bank_accounts = result.accounts
+    if (result.found && result.synced > 0) {
+      toast.success(t('client.bank_accounts.synced', { count: result.synced }))
+    } else {
+      toast.info(t('client.bank_accounts.sync_empty'))
+    }
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('client.bank_accounts.sync_failed'))
+  } finally {
+    bankRegistrySyncing.value = false
   }
 }
 
@@ -335,18 +408,18 @@ async function deleteClient() {
 const clientActions = computed<ActionItem[]>(() => {
   const c = client.value
   if (!c) return []
-  const w = auth.canWrite
+  const w = auth.canWrite('clients')
   return [
     { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'primary', variant: 'primary',
       show: w, to: `/clients/${c.id}/edit` },
     { key: 'vat', label: vatInfoLoading.value ? t('common.loading') : t('client.vat_payer_details'), icon: 'badgeCheck',
       tier: 'secondary', variant: 'primary', show: !!c.dic, disabled: vatInfoLoading.value, run: loadVatPayerDetails },
     { key: 'wr-link', label: t('workReportTracking.button'), icon: 'link', tier: 'secondary', variant: 'primary',
-      show: w, run: () => { showWrLinkModal.value = true } },
+      show: auth.canWrite('clients.public_links'), run: () => { showWrLinkModal.value = true } },
     { key: 'archive', label: t('common.archive'), icon: 'archive', tier: 'overflow', variant: 'warning',
-      show: w && !c.archived_at, run: archive },
+      show: auth.canWrite('clients.archive') && !c.archived_at, run: archive },
     { key: 'unarchive', label: t('common.restore'), icon: 'uturn', tier: 'overflow', variant: 'success',
-      show: w && !!c.archived_at, run: unarchive },
+      show: auth.canWrite('clients.archive') && !!c.archived_at, run: unarchive },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
       show: canDelete.value && w, run: deleteClient },
   ]
@@ -477,6 +550,53 @@ const clientActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
+    <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('client.bank_accounts.title') }}</h3>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('client.bank_accounts.hint') }}</p>
+        </div>
+        <button v-if="auth.canWrite('clients') && client.is_vendor && canSyncCzechBankRegistry" type="button"
+          @click="syncBankAccountsFromRegistry" :disabled="bankRegistrySyncing" :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+          {{ bankRegistrySyncing ? t('common.loading') : t('client.bank_accounts.sync_registry') }}
+        </button>
+      </div>
+
+      <div v-if="client.bank_accounts?.length" class="divide-y divide-neutral-200 border border-neutral-200 rounded-lg mb-4">
+        <div v-for="account in client.bank_accounts" :key="account.id"
+          class="flex flex-wrap items-center gap-2 px-3 py-3">
+          <span class="font-mono font-medium text-neutral-900 mr-auto">{{ bankAccountLabel(account) }}</span>
+          <span v-if="account.source_vat_registry" class="px-2 py-0.5 rounded-full bg-success-50 border border-success-200 text-success-700 text-xs">{{ t('client.bank_accounts.source_registry') }}</span>
+          <span v-if="account.source_bank_statement" class="px-2 py-0.5 rounded-full bg-primary-50 border border-primary-200 text-primary-700 text-xs">{{ t('client.bank_accounts.source_statement') }}</span>
+          <span v-if="account.source_manual" class="px-2 py-0.5 rounded-full bg-neutral-100 border border-neutral-200 text-neutral-600 text-xs">{{ t('client.bank_accounts.source_manual') }}</span>
+          <button v-if="auth.canWrite('clients')" type="button" @click="removeBankAccount(account)"
+            :disabled="deletingBankAccountIds.has(account.id)" :class="btnOutline('danger')" :title="t('common.delete')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('common.delete') }}
+          </button>
+        </div>
+      </div>
+      <div v-else class="text-sm text-neutral-500 mb-4">{{ t('client.bank_accounts.empty') }}</div>
+
+      <form v-if="auth.canWrite('clients')" class="flex flex-wrap items-end gap-2" @submit.prevent="addBankAccount">
+        <label class="min-w-64 flex-1">
+          <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('client.bank_accounts.account_number') }}</span>
+          <input v-model="bankAccountNumber" required :placeholder="t('client.bank_accounts.account_placeholder')"
+            class="h-9 w-full px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
+        </label>
+        <label class="w-32">
+          <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('client.bank_accounts.bank_code') }}</span>
+          <input v-model="bankCode" inputmode="numeric" maxlength="11" placeholder="0100"
+            class="h-9 w-full px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
+        </label>
+        <button type="submit" :disabled="bankAccountSaving || !bankAccountNumber.trim()" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ bankAccountSaving ? t('common.loading') : t('client.bank_accounts.add') }}
+        </button>
+      </form>
+    </section>
+
     <!-- KPI: nezaplaceno + po splatnosti -->
     <div v-if="(client.unpaid_summary?.length ?? 0) > 0" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -577,9 +697,10 @@ const clientActions = computed<ActionItem[]>(() => {
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="r in projectsTable" :key="`p-${r.project_id ?? 'none'}-${r.currency}`">
                 <td class="py-2 truncate max-w-[220px]">
-                  <RouterLink v-if="r.project_id" :to="`/projects/${r.project_id}`" class="text-primary-700 hover:underline">
+                  <RouterLink v-if="r.project_id && !auth.isClientRole" :to="`/projects/${r.project_id}`" class="text-primary-700 hover:underline">
                     {{ r.project_name }}
                   </RouterLink>
+                  <span v-else-if="r.project_id">{{ r.project_name }}</span>
                   <span v-else class="text-neutral-400 italic">{{ t('client.no_project') }}</span>
                 </td>
                 <td class="py-2 text-right font-mono">{{ formatMoney(r.total, r.currency) }}</td>
@@ -591,12 +712,12 @@ const clientActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <!-- Zakázky — visible pokud is_customer NEBO existují zakázky -->
-    <div v-if="client.is_customer !== false || (client.projects?.length ?? 0) > 0"
+    <!-- Zakázky — visible pokud is_customer NEBO existují zakázky; role client (F6) zakázky nevidí -->
+    <div v-if="!auth.isClientRole && (client.is_customer !== false || (client.projects?.length ?? 0) > 0)"
          class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
         <h3 class="font-semibold">{{ t('client.projects') }}</h3>
-        <RouterLink v-if="auth.canWrite" :to="`/projects/new?client_id=${client.id}`"
+        <RouterLink v-if="auth.canWrite('projects.create')" :to="`/projects/new?client_id=${client.id}`"
           class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md inline-flex items-center">
           {{ t('client.new_project') }}
         </RouterLink>
@@ -676,7 +797,7 @@ const clientActions = computed<ActionItem[]>(() => {
     <div v-if="client.is_customer !== false || invoices.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
         <h3 class="font-semibold">{{ t('client.issued_invoices') }} <span v-if="invoicesTotal" class="text-neutral-400 font-normal">({{ invoicesTotal }})</span></h3>
-        <RouterLink v-if="auth.canWrite" :to="`/invoices/new?client_id=${client.id}`"
+        <RouterLink v-if="auth.canWrite('invoices.create')" :to="`/invoices/new?client_id=${client.id}`"
           class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md inline-flex items-center">
           {{ t('invoice.new') }}
         </RouterLink>
@@ -771,7 +892,7 @@ const clientActions = computed<ActionItem[]>(() => {
     <div v-if="client.is_vendor === true || purchaseInvoices.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
         <h3 class="font-semibold">{{ t('client.received_invoices') }} <span v-if="purchaseInvoices.length" class="text-neutral-400 font-normal">({{ purchaseInvoices.length }})</span></h3>
-        <RouterLink v-if="auth.canWrite" :to="`/purchase-invoices/new?vendor_id=${client.id}`"
+        <RouterLink v-if="auth.canWrite('purchase_invoices.create')" :to="`/purchase-invoices/new?vendor_id=${client.id}`"
           class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md inline-flex items-center">
           {{ t('purchase_invoice.actions.new') }}
         </RouterLink>
@@ -818,7 +939,7 @@ const clientActions = computed<ActionItem[]>(() => {
           {{ t('recurring.title') }}
           <span v-if="recurringTemplates.length" class="text-neutral-400 font-normal">({{ recurringTemplates.length }})</span>
         </h3>
-        <RouterLink v-if="auth.canWrite" :to="`/recurring/new?client_id=${client.id}`"
+        <RouterLink v-if="auth.canWrite('recurring.create')" :to="`/recurring/new?client_id=${client.id}`"
           class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md inline-flex items-center">
           {{ t('recurring.new') }}
         </RouterLink>

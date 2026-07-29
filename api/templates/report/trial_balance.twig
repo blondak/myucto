@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Obratová předvaha</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .draft-warning {
+        background-color: #fef3c7;
+        color: #92400e;
+        font-size: 8pt;
+        padding: 1.5mm 2mm;
+        margin-bottom: 3mm;
+    }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.book tfoot td {
+        font-weight: bold;
+        font-size: 8pt;
+        padding: 1.5mm 1.5mm;
+        border-top: 0.5pt solid #333;
+        border-bottom: 0.5pt solid #333;
+    }
+    .num { text-align: right; }
+    .col-account { width: 16mm; }
+    .col-name { width: 62mm; }
+    .checks-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
+    .check-line { font-size: 8pt; margin-top: 0.5mm; }
+    .check-ok { color: #166534; }
+    .check-fail { color: #b91c1c; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Obratová předvaha</div>
+            <div class="header-period">Fiskální rok {{ period.fiscal_year }}</div>
+            <div class="header-sub">Za období: {{ from|cz_date }} – {{ to|cz_date }}</div>
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+{% if draft_count > 0 %}
+    <div class="draft-warning">V rozsahu je {{ draft_count }} nezaúčtovaných konceptů — nejsou zahrnuty do obratů.</div>
+{% endif %}
+
+{% if rows is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">
+        Pro zvolené období nejsou v předvaze žádné pohyby ani počáteční stavy.
+    </p>
+{% else %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-account">Účet</th>
+            <th class="thl col-name">Název</th>
+            <th>PS MD</th>
+            <th>PS D</th>
+            <th>Obrat MD</th>
+            <th>Obrat D</th>
+            <th>KS MD</th>
+            <th>KS D</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+            <tr>
+                <td>{{ row.account_code }}</td>
+                <td>{{ row.name|slice(0, 55) }}</td>
+                <td class="num">{{ row.ps_md|cz_money }}</td>
+                <td class="num">{{ row.ps_d|cz_money }}</td>
+                <td class="num">{{ row.turnover_md|cz_money }}</td>
+                <td class="num">{{ row.turnover_d|cz_money }}</td>
+                <td class="num">{{ row.ks_md|cz_money }}</td>
+                <td class="num">{{ row.ks_d|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="2">SOUČTY</td>
+            <td class="num">{{ totals.ps_md|cz_money }}</td>
+            <td class="num">{{ totals.ps_d|cz_money }}</td>
+            <td class="num">{{ totals.turnover_md|cz_money }}</td>
+            <td class="num">{{ totals.turnover_d|cz_money }}</td>
+            <td class="num">{{ totals.ks_md|cz_money }}</td>
+            <td class="num">{{ totals.ks_d|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+
+<div class="checks-title">Kontroly</div>
+<div class="check-line {{ checks.turnover_balanced ? 'check-ok' : 'check-fail' }}">
+    {{ checks.turnover_balanced ? '✓' : '✗' }} Obraty vyrovnány (Σ obrat MD = Σ obrat D)
+</div>
+<div class="check-line {{ checks.matches_journal ? 'check-ok' : 'check-fail' }}">
+    {{ checks.matches_journal ? '✓' : '✗' }} Obrat předvahy odpovídá obratu deníku
+    (deník MD {{ checks.journal_turnover_md|cz_money }} / D {{ checks.journal_turnover_d|cz_money }})
+</div>
+<div class="check-line {{ checks.opening_balanced ? 'check-ok' : 'check-fail' }}">
+    {{ checks.opening_balanced ? '✓' : '✗' }} Bilanční kontinuita počátečních stavů (Σ PS MD = Σ PS D)
+</div>
+{% endif %}
+
+</body>
+</html>

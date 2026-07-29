@@ -8,7 +8,7 @@ REM  Vola GitHub Releases API a cachuje tag + release notes do tabulky
 REM  `app_meta`. UI footer + Systém -> Aktualizace pak cte z cache.
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice Version Check" ^
+REM    schtasks /create /tn "MyUcto Version Check" ^
 REM      /tr "%~f0" /sc daily /st 06:00 /ru SYSTEM
 REM ============================================================================
 setlocal

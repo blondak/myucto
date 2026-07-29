@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Skladová karta</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 1mm; }
+    .header-sub { text-align: center; font-size: 9pt; color: #555; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    .num { text-align: right; }
+</style>
+</head>
+<body>
+
+<div class="header-title">Skladová karta {{ item.sku }} — {{ item.name }}</div>
+<div class="header-sub">Počáteční stav: {{ movements.opening_balance|cz_money }} {{ item.unit }}</div>
+
+{% if movements.items is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">Žádné pohyby.</p>
+{% else %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl">Datum</th>
+            <th class="thl">Doklad</th>
+            <th class="thl">Typ</th>
+            <th class="thl">Sklad</th>
+            <th>Množství</th>
+            <th>Cena/MJ</th>
+            <th>Hodnota</th>
+            <th>Stav po pohybu</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in movements.items %}
+            <tr>
+                <td>{{ row.doc_date|cz_date }}</td>
+                <td>{{ row.doc_number ?: '—' }}</td>
+                <td>{{ row.doc_type }}</td>
+                <td>{{ row.warehouse_code }}</td>
+                <td class="num">{{ row.qty_signed|cz_money }}</td>
+                <td class="num">{{ row.unit_cost|cz_money }}</td>
+                <td class="num">{{ row.value_total|cz_money }}</td>
+                <td class="num">{{ row.balance_after|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+</body>
+</html>

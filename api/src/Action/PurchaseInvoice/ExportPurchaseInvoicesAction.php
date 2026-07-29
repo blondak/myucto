@@ -9,7 +9,10 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Export\CsvWriter;
 use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Export\ExportPeriod;
 use MyInvoice\Service\Export\ExportPeriodResolver;
@@ -22,8 +25,8 @@ use Slim\Psr7\Stream;
 use ZipArchive;
 
 /**
- * GET /api/purchase-invoices/export?month=YYYY-MM&format=pdf-zip[&date_by=tax|issue|received]
- * GET /api/purchase-invoices/export?period=quarterly&year=YYYY&quarter=1..4&format=pdf-zip
+ * GET /api/purchase-invoices/export?month=YYYY-MM&format=pdf-zip|isdoc|pohoda|csv[&date_by=tax|issue|received]
+ * GET /api/purchase-invoices/export?period=quarterly&year=YYYY&quarter=1..4&format=pdf-zip|isdoc|pohoda|csv
  *
  * Export přijatých faktur za měsíc nebo čtvrtletí jako ZIP s **vendor original PDF**.
  *
@@ -54,8 +57,9 @@ final class ExportPurchaseInvoicesAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        // readonly smí exportovat data (čtení), jen nesmí nic měnit
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        // readonly smí exportovat data (čtení), jen nesmí nic měnit; client exportuje
+        // výhradně vlastní data (membership scope řeší SupplierScopeMiddleware — F6 §8.1)
+        if (!RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 
@@ -70,7 +74,7 @@ final class ExportPurchaseInvoicesAction
             $dateBy = 'tax';
         }
         $format = (string) ($q['format'] ?? 'pdf-zip');
-        if (!in_array($format, ['pdf-zip', 'isdoc', 'pohoda'], true)) {
+        if (!in_array($format, ['pdf-zip', 'isdoc', 'pohoda', 'csv'], true)) {
             return Json::error($response, 'unsupported_format', "Neplatný format ({$format}).", 400);
         }
 
@@ -80,12 +84,15 @@ final class ExportPurchaseInvoicesAction
             return Json::error($response, 'no_invoices', "Za období {$period->label} nejsou žádné přijaté faktury.", 404);
         }
 
-        // ISDOC bulk ZIP nebo Pohoda dataPack → delegujeme do separate metod
+        // ISDOC bulk ZIP / Pohoda dataPack / CSV přehled → delegujeme do separate metod
         if ($format === 'isdoc') {
             return $this->exportIsdocZip($response, $request, $rows, $period, $sid);
         }
         if ($format === 'pohoda') {
             return $this->exportPohodaDataPack($response, $request, $rows, $period, $sid);
+        }
+        if ($format === 'csv') {
+            return $this->exportCsv($response, $request, $sid, $period, $dateBy);
         }
         // (pdf-zip pokračuje níže — original code)
 
@@ -227,6 +234,86 @@ final class ExportPurchaseInvoicesAction
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $period->dateFrom, $period->dateToExclusive]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * CSV přehled přijatých faktur za období (UTF-8 BOM, `;`) — jeden soubor pro
+     * účetní/Excel. Vlastní SELECT s plnými sloupci (findInvoices pro pdf-zip bere
+     * jen id/varsymbol/vendor).
+     */
+    private function exportCsv(Response $response, Request $request, int $supplierId, ExportPeriod $period, string $dateBy): Response
+    {
+        $dateExpr = match ($dateBy) {
+            'received' => 'pi.received_at',
+            'issue'    => 'pi.issue_date',
+            default    => 'COALESCE(pi.tax_date, pi.issue_date)',
+        };
+        $sql = "SELECT pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+                       c.company_name AS vendor_company_name,
+                       ec.label AS expense_category_label,
+                       pi.issue_date, pi.tax_date, pi.due_date,
+                       cur.code AS currency,
+                       pi.total_without_vat, pi.total_vat, pi.total_with_vat, pi.amount_to_pay,
+                       pi.status, pi.paid_at
+                  FROM purchase_invoices pi
+                  JOIN clients c ON c.id = pi.vendor_id
+                  JOIN currencies cur ON cur.id = pi.currency_id
+             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+                 WHERE pi.supplier_id = ?
+                   AND $dateExpr >= ?
+                   AND $dateExpr < ?
+                   AND pi.status IN ('received', 'booked', 'paid')
+              ORDER BY $dateExpr, pi.id";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, $period->dateFrom, $period->dateToExclusive]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $header = [
+            'Interní číslo', 'Číslo dokladu', 'Druh', 'Dodavatel', 'Kategorie',
+            'Vystaveno', 'DUZP', 'Splatnost', 'Měna', 'Bez DPH', 'DPH', 'Celkem',
+            'K úhradě', 'Stav', 'Zaplaceno',
+        ];
+        $csvRows = [];
+        foreach ($rows as $r) {
+            $csvRows[] = [
+                CsvWriter::safe($r['varsymbol'] ?? ''),
+                CsvWriter::safe($r['vendor_invoice_number'] ?? ''),
+                CsvWriter::safe($r['document_kind'] ?? ''),
+                CsvWriter::safe($r['vendor_company_name'] ?? ''),
+                CsvWriter::safe($r['expense_category_label'] ?? ''),
+                $r['issue_date'] ?? '',
+                $r['tax_date'] ?? '',
+                $r['due_date'] ?? '',
+                $r['currency'] ?? '',
+                number_format((float) ($r['total_without_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['total_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['total_with_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['amount_to_pay'] ?? 0), 2, '.', ''),
+                $r['status'] ?? '',
+                $r['paid_at'] ?? '',
+            ];
+        }
+        $csv = CsvWriter::build($header, $csvRows);
+
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $this->logger->log('purchase_invoices.exported', $user['id'] ?? null, null, null, [
+            'format' => 'csv',
+            'period' => $period->label,
+            'period_type' => $period->type,
+            'month' => $period->month,
+            'quarter' => $period->quarter,
+            'date_from' => $period->dateFrom,
+            'date_to_exclusive' => $period->dateToExclusive,
+            'date_by' => $dateBy,
+            'included' => count($csvRows),
+        ], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+
+        $response->getBody()->write($csv);
+        return $response
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', "attachment; filename=\"prijate-{$period->label}.csv\"")
+            ->withHeader('Content-Length', (string) strlen($csv))
+            ->withHeader('Cache-Control', 'no-store');
     }
 
     private function resolveArchiveRoot(): string

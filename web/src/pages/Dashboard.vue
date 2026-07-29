@@ -11,13 +11,16 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import SparklineChart from '@/components/charts/SparklineChart.vue'
 import TopClientsPieChart from '@/components/charts/TopClientsPieChart.vue'
 import TaxNetWidget from '@/components/dashboard/TaxNetWidget.vue'
+import TaxAdvancesWidget from '@/components/dashboard/TaxAdvancesWidget.vue'
+import TaxCalendarWidget from '@/components/dashboard/TaxCalendarWidget.vue'
 import ActionItemsWidget from '@/components/dashboard/ActionItemsWidget.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
-const isAdmin = computed(() => auth.user?.role === 'admin')
+const isAdmin = computed(() => auth.isSuperadmin)
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Onboarding gate (#151): bez dodavatele je dashboard prázdný a všechny zakládací akce
 // padají → místo dat ukážeme výzvu k vytvoření prvního dodavatele.
@@ -131,7 +134,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       </div>
       <h2 class="text-xl font-semibold mb-2">{{ t('dashboard.no_supplier.title') }}</h2>
       <p class="text-neutral-500 mb-6">{{ t('dashboard.no_supplier.intro') }}</p>
-      <RouterLink v-if="isAdmin" to="/admin/codebooks?create=supplier"
+      <RouterLink v-if="isAdmin" to="/admin/suppliers?create=supplier"
         class="px-5 h-10 inline-flex items-center bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
         {{ t('dashboard.no_supplier.cta_admin') }}
       </RouterLink>
@@ -149,10 +152,10 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       <h2 class="text-lg font-semibold mb-2">{{ t('dashboard.welcome') }}</h2>
       <p class="text-neutral-500 mb-6">{{ t('common.no_data') }}</p>
       <div class="flex justify-center gap-3">
-        <RouterLink v-if="auth.canWrite" to="/clients/new" class="px-4 h-10 inline-flex items-center bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
+        <RouterLink v-if="auth.canWrite('dashboard')" to="/clients/new" class="px-4 h-10 inline-flex items-center bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
           {{ t('client.new') }}
         </RouterLink>
-        <RouterLink v-if="auth.canWrite" to="/invoices/new" class="px-4 h-10 inline-flex items-center border border-neutral-300 text-neutral-700 hover:bg-neutral-50 text-sm font-medium rounded-md">
+        <RouterLink v-if="auth.canWrite('dashboard')" to="/invoices/new" class="px-4 h-10 inline-flex items-center border border-neutral-300 text-neutral-700 hover:bg-neutral-50 text-sm font-medium rounded-md">
           {{ t('invoice.new') }}
         </RouterLink>
       </div>
@@ -160,10 +163,10 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
 
     <div v-else-if="summary && summary.kpi" class="space-y-6">
       <!-- ═══ Akce pro tebe (přesunuto z CRM) — první část Přehledu (skryto pro readonly) ═══ -->
-      <ActionItemsWidget v-if="auth.canWrite" />
+      <ActionItemsWidget v-if="auth.canWrite('dashboard')" />
 
       <!-- ═══ Výkazy práce — rozpracované (draft) vystavené faktury k doplnění (skryto pro readonly) ═══ -->
-      <section v-if="auth.canWrite && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
+      <section v-if="auth.canWrite('dashboard') && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
         <h2 class="flex items-center gap-2 flex-wrap">
           <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-primary-50 text-primary-700">
             {{ t('dashboard.work_reports.title') }}
@@ -207,6 +210,12 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
 
       <!-- Daňový widget „co mi zbyde" — jen pro OSVČ (komponenta se sama skryje jinak) -->
       <TaxNetWidget />
+
+      <!-- Nadcházející zálohy na daň a pojistné (E9) — self-gating -->
+      <TaxAdvancesWidget />
+
+      <!-- Daňový kalendář (Fáze F, audit 2026-07) — DPH/KH/SH + zálohy + roční DP, self-gating -->
+      <TaxCalendarWidget />
 
       <!-- ═══ Sekce 1: VYSTAVENÉ FAKTURY ═══ -->
       <section class="space-y-3">
@@ -364,6 +373,58 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             </span>
             <span v-else>{{ t('dashboard.pending_approvals_hint') }}</span>
           </div>
+        </RouterLink>
+
+        <!-- Vyžádání chybějících dokladů od klienta (Fáze F, audit 2026-07) -->
+        <RouterLink
+          v-if="(summary.document_requests_open?.open ?? 0) > 0"
+          to="/document-requests"
+          class="bg-surface border rounded-lg p-5 shadow-sm hover:bg-primary-50 transition cursor-pointer"
+          :class="(summary.document_requests_open?.overdue ?? 0) > 0 ? 'border-danger-500/50' : 'border-neutral-200'">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('dashboard.document_requests_open') }}</div>
+          <div class="text-2xl font-semibold"
+            :class="(summary.document_requests_open?.overdue ?? 0) > 0 ? 'text-danger-500' : 'text-neutral-900'">
+            {{ summary.document_requests_open?.open ?? 0 }}
+          </div>
+          <div class="text-xs mt-1"
+            :class="(summary.document_requests_open?.overdue ?? 0) > 0 ? 'text-danger-500' : 'text-neutral-400'">
+            <span v-if="(summary.document_requests_open?.overdue ?? 0) > 0">
+              {{ t('dashboard.document_requests_overdue', { n: summary.document_requests_open?.overdue ?? 0 }) }}
+            </span>
+            <span v-else>{{ t('dashboard.document_requests_hint') }}</span>
+          </div>
+        </RouterLink>
+
+        <!-- Bank posting: platby čekající na zaúčtování (jen double_entry) -->
+        <RouterLink
+          v-if="isDoubleEntry && (summary.accounting_backfill_pending ?? 0) > 0"
+          :to="{ name: 'accounting-activation' }"
+          class="bg-surface border border-warning-500/50 rounded-lg p-5 shadow-sm hover:bg-warning-50 transition cursor-pointer">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('activation.title') }}</div>
+          <div class="text-2xl font-semibold text-warning-600">{{ summary.accounting_backfill_pending }}</div>
+          <div class="text-xs mt-1 text-neutral-400">
+            {{ t('activation.dashboard_card') }}
+          </div>
+        </RouterLink>
+
+        <RouterLink
+          v-if="isDoubleEntry && (summary.bank_posting_pending ?? 0) > 0"
+          to="/automation?tab=pending"
+          class="bg-surface border border-warning-500/50 rounded-lg p-5 shadow-sm hover:bg-warning-50 transition cursor-pointer">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('bank.posting.tab_suggestions') }}</div>
+          <div class="text-2xl font-semibold text-warning-600">{{ summary.bank_posting_pending }}</div>
+          <div class="text-xs mt-1 text-neutral-400">
+            {{ t('bank.posting.dashboard_card', { count: summary.bank_posting_pending }) }}
+          </div>
+        </RouterLink>
+
+        <RouterLink
+          v-if="isDoubleEntry && (summary.automation_auto_today ?? 0) > 0"
+          to="/automation?tab=auto"
+          class="bg-surface border border-success-500/40 rounded-lg p-5 shadow-sm hover:bg-success-50 transition cursor-pointer">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('automation.auto_today_card') }}</div>
+          <div class="text-2xl font-semibold text-success-600">{{ summary.automation_auto_today }}</div>
+          <div class="text-xs mt-1 text-neutral-400">{{ t('automation.tab_auto', { n: summary.automation_auto_today }) }}</div>
         </RouterLink>
       </div>
 

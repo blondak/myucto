@@ -27,7 +27,7 @@ final class MergedInvoicePdfExporter
      * @param array<string,mixed> $supplier
      * @return array{path:string,signed:bool}
      */
-    public function export(array $invoiceIds, array $supplier, ?int $userId, bool $sign): array
+    public function export(array $invoiceIds, array $supplier, ?int $userId, bool $sign, bool $persistRates = true): array
     {
         if ($invoiceIds === []) {
             throw new \InvalidArgumentException('Není vybrána žádná faktura.');
@@ -65,7 +65,7 @@ final class MergedInvoicePdfExporter
                     (string) ($invoice['currency'] ?? 'CZK') !== 'CZK'
                     && empty($invoice['exchange_rate'])
                 ) {
-                    $this->rateApplier->ensureRate($invoiceId);
+                    $this->rateApplier->ensureRate($invoiceId, persist: $persistRates);
                 }
 
                 $sourcePath = $this->temporaryPath($tmpDir, 'merged-invoice-source-');
@@ -117,7 +117,7 @@ final class MergedInvoicePdfExporter
         ]);
         $pdf->SetTitle('');
         $pdf->SetAuthor('');
-        $pdf->SetCreator('MyInvoice.cz');
+        $pdf->SetCreator('MyÚčto.cz');
 
         $firstPage = true;
         foreach ($sourcePaths as $sourcePath) {

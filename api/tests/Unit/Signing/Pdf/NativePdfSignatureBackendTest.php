@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Signing\Pdf;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundUrlGuard;
+use MyInvoice\Service\Http\TsaUrlPolicy;
 use MyInvoice\Service\Pdf\PdfSigner;
 use MyInvoice\Service\Signing\Pdf\NativePdfSignatureBackend;
 use PHPUnit\Framework\TestCase;
@@ -46,6 +48,9 @@ final class NativePdfSignatureBackendTest extends TestCase
             ],
         ]);
 
-        return new PdfSigner(new SecretEncryption($config));
+        return new PdfSigner(
+            new SecretEncryption($config),
+            new TsaUrlPolicy(new OutboundUrlGuard(), $config),
+        );
     }
 }

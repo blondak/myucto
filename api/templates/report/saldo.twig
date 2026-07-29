@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Saldokonto</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .acc-title { font-size: 10pt; font-weight: bold; margin-top: 5mm; margin-bottom: 1mm; }
+    .confront-table { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+    .confront-table td { padding: 1mm 2mm; font-size: 8pt; border: 0.2pt solid #ddd; }
+    .confront-label { color: #555; width: 55mm; }
+    .num { text-align: right; }
+    .diff-ok { color: #166534; font-weight: bold; }
+    .diff-fail { color: #b91c1c; font-weight: bold; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    .partner-row td { font-weight: bold; background-color: #f4f4f5; }
+    .col-doc { width: 26mm; }
+    .col-partner { width: 60mm; }
+    .overdue { color: #b91c1c; }
+    .empty { text-align: center; color: #888; padding: 8mm 0; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">{{ entity.name }}{% if entity.ico %} — IČO: {{ entity.ico }}{% endif %}</div>
+            <div class="header-meta">{{ entity.address }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">{{ report_title|default('Saldokonto') }}</div>
+            <div class="header-period">k rozvahovému dni {{ as_of|cz_date }}</div>
+            <div class="header-sub">Inventarizační protokol otevřených položek — fiskální rok {{ period.fiscal_year }}</div>
+        </td>
+        <td style="width:30%;" class="num">
+            <div class="header-meta">Sestaveno: {{ entity.prepared_at }}</div>
+        </td>
+    </tr>
+</table>
+
+{% if accounts is empty %}
+    <p class="empty">Pro zvolený rozvahový den nejsou na saldokontních účtech žádné zůstatky ani otevřené položky.</p>
+{% endif %}
+
+{% for acc in accounts %}
+    <div class="acc-title">Účet {{ acc.account.code }} — {{ acc.account.name }}</div>
+    {% if acc.note %}<div class="header-sub" style="text-align:left; margin-bottom:2mm;">{{ acc.note }}</div>{% endif %}
+
+    <table class="confront-table">
+        <tr>
+            <td class="confront-label">Zůstatek účtu z hlavní knihy</td>
+            <td class="num">{{ acc.gl_balance|cz_money }} Kč</td>
+            <td class="confront-label">Σ otevřených položek</td>
+            <td class="num">{{ acc.open_items_total|cz_money }} Kč</td>
+            <td class="confront-label">Rozdíl</td>
+            <td class="num {{ acc.matches ? 'diff-ok' : 'diff-fail' }}">
+                {{ acc.matches ? '✓ ' : '✗ ' }}{{ acc.difference|cz_money }} Kč
+            </td>
+        </tr>
+    </table>
+
+    {% if acc.partners is empty %}
+        <p class="empty" style="padding: 3mm 0;">Žádné otevřené položky na tomto účtu.</p>
+    {% else %}
+    <table class="book">
+        <thead>
+            <tr>
+                <th class="thl col-doc">Doklad</th>
+                <th class="thl">Vystaveno</th>
+                <th class="thl">Splatnost</th>
+                <th>Dní po spl.</th>
+                <th>Částka</th>
+                <th>Uhrazeno</th>
+                <th>Zbývá (Kč)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in acc.partners %}
+                <tr class="partner-row">
+                    <td colspan="6">{{ p.partner_name }}</td>
+                    <td class="num">{{ p.total_remaining|cz_money }}</td>
+                </tr>
+                {% for it in p.items %}
+                    <tr>
+                        <td>{{ it.doc_no }}</td>
+                        <td>{{ it.issue_date|cz_date }}</td>
+                        <td>{{ it.due_date|cz_date }}</td>
+                        <td class="num {{ it.days_overdue > 0 ? 'overdue' : '' }}">{{ it.days_overdue > 0 ? it.days_overdue : '' }}</td>
+                        <td class="num">{{ it.booked_czk|cz_money }}{% if it.currency_code != 'CZK' %} <span style="color:#888">({{ it.amount_foreign|cz_money }} {{ it.currency_code }})</span>{% endif %}</td>
+                        <td class="num">{{ it.paid_czk|cz_money }}</td>
+                        <td class="num">{{ it.remaining_czk|cz_money }}</td>
+                    </tr>
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+{% endfor %}
+
+</body>
+</html>

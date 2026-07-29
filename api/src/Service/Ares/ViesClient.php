@@ -29,10 +29,11 @@ final class ViesClient
         private readonly Connection $db,
         private readonly LoggerInterface $logger,
         private readonly AresClient $ares,
+        private readonly CrpDphClient $crpdph,
     ) {}
 
     /**
-     * @return array{valid:bool, name?:string, address?:string, country?:string, vat_number?:string, source:'cache'|'rest'|'soap'|'ares'|'error'}
+     * @return array{valid:bool, name?:string, address?:string, country?:string, vat_number?:string, group_registration?:bool, source:'cache'|'rest'|'soap'|'ares'|'crpdph'|'error'}
      */
     public function lookup(string $vatId): array
     {
@@ -42,6 +43,16 @@ final class ViesClient
         }
         $country = $m[1];
         $number  = $m[2];
+
+        // CZ skupinová registrace DPH (kmenová část 699xxxxxx): VIES DPH skupiny
+        // neeviduje → vracel by trvalý false-negative „DIČ není platné". Autoritativní
+        // je registr plátců DPH (CRPDPH). Délka 9 je součástí podmínky: DIČ skupiny má
+        // tvar CZ699xxxxxx, kdežto 8místné „69900012" je běžné IČO, které do registru
+        // skupin nepatří a musí dál chodit na ARES. Záměrně PŘED cache — dřív zacachované
+        // false-negativy z VIES nesmí výsledek přebít; vlastní TTL má CrpDphClient.
+        if ($country === 'CZ' && strlen($number) === 9 && str_starts_with($number, '699')) {
+            return $this->tryCrpDph($number, $vatId);
+        }
 
         $cached = $this->fromCache($vatId);
         if ($cached !== null) {
@@ -80,6 +91,42 @@ final class ViesClient
         }
 
         return ['valid' => false, 'source' => 'error'];
+    }
+
+    /**
+     * CZ skupinové DIČ (kmen 699*) — ověření přes registr plátců DPH (CRPDPH),
+     * protože VIES skupinové registrace DPH vůbec neobsahuje. Registr nevrací
+     * název ani adresu subjektu (jen status a zveřejněné účty), proto zůstávají
+     * prázdné. found = registrovaný plátce.
+     *
+     * Nedostupnost registru se mapuje stejně jako výpadek VIES (source 'error' =
+     * „služba nedostupná"), NIKDY na tvrdé invalid — jinak by výpadek služby
+     * označil platného plátce za neplatného.
+     *
+     * @return array{valid:bool, name?:string, address?:string, parsed?:null, country?:string, vat_number?:string, group_registration?:bool, source:'crpdph'|'error'}
+     */
+    private function tryCrpDph(string $number, string $vatId): array
+    {
+        try {
+            $r = $this->crpdph->lookup($number);
+        } catch (\Throwable $e) {
+            $this->logger->warning('CRPDPH ověření skupinového DIČ selhalo: ' . $e->getMessage(), ['vat' => $vatId]);
+            return ['valid' => false, 'source' => 'error'];
+        }
+        if (($r['source'] ?? '') === 'error') {
+            return ['valid' => false, 'source' => 'error'];
+        }
+
+        return [
+            'valid'              => (bool) ($r['found'] ?? false),
+            'name'               => '',
+            'address'            => '',
+            'parsed'             => null,
+            'country'            => 'CZ',
+            'vat_number'         => $vatId,
+            'source'             => 'crpdph',
+            'group_registration' => true,
+        ];
     }
 
     /**

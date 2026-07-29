@@ -10,7 +10,8 @@ const STORAGE_KEY = 'myinvoice.current_supplier_id'
  * - axios interceptor (api/client.ts) z něj plní hlavičku `X-Supplier-Id`
  * - po /me se naplní `availableSuppliers` (pro switcher v hlavičce)
  *
- * Po přepnutí volej `reloadAfterSwitch()` (router push na /, který re-fetchne).
+ * Přepínač po změně nejprve vyprázdní permission mapu a znovu načte `/auth/me`
+ * s novým `X-Supplier-Id`; teprve potom pustí další navigaci.
  */
 export const useSupplierStore = defineStore('supplier', () => {
   const initial = (() => {
@@ -37,6 +38,8 @@ export const useSupplierStore = defineStore('supplier', () => {
 
   function setSupplier(id: number) {
     currentSupplierId.value = id
+    if (id > 0) localStorage.setItem(STORAGE_KEY, String(id))
+    else localStorage.removeItem(STORAGE_KEY)
   }
 
   function setAvailable(list: SupplierBrief[], serverCurrent: number) {

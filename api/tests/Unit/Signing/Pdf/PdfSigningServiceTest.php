@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundUrlGuard;
+use MyInvoice\Service\Http\TsaUrlPolicy;
 use MyInvoice\Service\Pdf\PdfSigner;
 use MyInvoice\Service\Signing\Pdf\NativePdfSignatureBackend;
 use MyInvoice\Service\Signing\Pdf\PdfSignaturePolicy;
@@ -224,7 +226,10 @@ final class PdfSigningServiceTest extends TestCase
         return new PdfSigningService(
             $cfg,
             $activity,
-            new NativePdfSignatureBackend(new PdfSigner(new SecretEncryption($cfg))),
+            new NativePdfSignatureBackend(new PdfSigner(
+                new SecretEncryption($cfg),
+                new TsaUrlPolicy(new OutboundUrlGuard(), $cfg),
+            )),
         );
     }
 

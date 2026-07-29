@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Middleware;
 
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Service\IpMatcher;
@@ -60,6 +61,9 @@ final class RateLimitMiddlewareTest extends TestCase
             new RedisFactory($config),
             new ResponseFactory(),
             new IpMatcher($config),
+            // MyÚčto má DB fallback limiteru; ruleFor() na spojení nesahá.
+            // Stub, ne mock: nic se na něm neověřuje, jen dosazuje typ.
+            $this->createStub(Connection::class),
         );
         $method = new \ReflectionMethod($middleware, 'ruleFor');
         $rule = $method->invoke(
@@ -81,5 +85,58 @@ final class RateLimitMiddlewareTest extends TestCase
             ->createServerRequest($method, $path)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 17])
             ->withAttribute(AuthMiddleware::ATTR_TOKEN, $token);
+    }
+
+    /**
+     * Veřejný náhled výkazu práce běží BEZ přihlášení (userId = 0), takže generic
+     * per-user limit se na něj neuplatní a musí ho krýt vlastní IP pravidlo.
+     *
+     * @return array{0:string,1:int,2:int}
+     */
+    private function anonymousRule(string $method, string $path): array
+    {
+        $config = new Config([]);
+        $middleware = new RateLimitMiddleware(
+            $config,
+            new RedisFactory($config),
+            new ResponseFactory(),
+            new IpMatcher($config),
+            $this->createStub(Connection::class),
+        );
+        $request = (new ServerRequestFactory())->createServerRequest($method, $path);
+        $rule = (new \ReflectionMethod($middleware, 'ruleFor'))
+            ->invoke($middleware, $path, strtoupper($method), '198.51.100.7', 0, 0, $request);
+        self::assertIsArray($rule, "Veřejná cesta {$method} {$path} nemá rate limit — anonymní DoS.");
+        return $rule;
+    }
+
+    /**
+     * `request-code` ODESÍLÁ e-mail s ověřovacím kódem a `verify` je brute-force
+     * plocha na ten kód. Captcha to na běžném self-hostu nekryje: výchozí
+     * `captcha.provider = 'none'` nechá TurnstileVerifier vrátit true bez ověření.
+     */
+    public function testPublicWorkReportMutationsAreRateLimited(): void
+    {
+        foreach (['/api/public/work-report/abc123/request-code', '/api/public/work-report/abc123/verify'] as $path) {
+            [$key, $limit, $window] = $this->anonymousRule('POST', $path);
+            self::assertStringStartsWith('rl:pubwr-post:ip:', $key, $path);
+            self::assertSame(10, $limit, 'Mutace veřejného výkazu mají mít přísnější limit než čtení.');
+            self::assertSame(60, $window);
+        }
+    }
+
+    /** Čtení náhledu má vlastní, volnější bucket — legit návštěva je jeden GET. */
+    public function testPublicWorkReportReadIsRateLimited(): void
+    {
+        [$key, $limit] = $this->anonymousRule('GET', '/api/public/work-report/abc123');
+        self::assertStringStartsWith('rl:pubwr:ip:', $key);
+        self::assertSame(60, $limit);
+    }
+
+    /** Ostatní veřejné plochy limit mají už dřív — kontrola, že nezmizel. */
+    public function testOtherPublicSurfacesKeepTheirLimits(): void
+    {
+        self::assertStringStartsWith('rl:approval:ip:', $this->anonymousRule('GET', '/api/public/approval/abc123')[0]);
+        self::assertStringStartsWith('rl:pubinv:ip:', $this->anonymousRule('GET', '/api/public/invoice/abc123')[0]);
     }
 }

@@ -1,0 +1,21 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+MISSING DOCUMENT — WAITING ON YOU
+===================================
+
+Hello,
+
+for {{ supplier_name }} we're still waiting for a document we asked about
+{{ requested_days_ago }} day{{ requested_days_ago == 1 ? '' : 's' }} ago:
+
+Missing: {{ description }}
+{% if amount %}Amount:  {{ amount|number_format(2, '.', ' ') }} CZK
+{% endif %}{% if deadline %}Due:     {{ deadline|date('Y-m-d') }}
+{% endif %}
+{% if portal_link %}
+Upload document: {{ portal_link }}
+{% endif %}
+Just take a photo or scan the document and upload it via the client portal —
+we'll take it from there.
+{% endblock %}

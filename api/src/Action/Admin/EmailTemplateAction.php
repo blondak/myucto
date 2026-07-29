@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Admin;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\EmailTemplateRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\Mailer;
@@ -27,7 +28,7 @@ final class EmailTemplateAction
      * Známé kódy šablon — fix list, ne dynamický.
      * Při přidání nového typu emailu rozšířit zde a v api/templates/email/.
      */
-    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'recurring_draft_reminder', 'password_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code'];
+    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code'];
     private const LOCALES = ['cs', 'en'];
 
     public function __construct(
@@ -163,11 +164,12 @@ final class EmailTemplateAction
             'proforma_reminder' => 'Připomínka — záloha {{ invoice.varsymbol }} ({{ days_overdue }} dní po splatnosti)',
             'invoice_approval'  => 'Žádost o schválení výkazu práce ({{ invoice.varsymbol_or_id }})',
             'recurring_draft_reminder' => 'Koncept pravidelné faktury se brzy vystaví ({{ issue_date }})',
+            'document_request_reminder' => 'Chybí doklad — {{ description }}',
             'password_reset'    => 'Obnova hesla',
             'login_otp'         => 'Ověřovací kód pro přihlášení',
             'email_profile_test'=> 'Test odesílacího profilu',
-            'work_report_link'  => 'Náhled na výkaz práce — MyInvoice.cz',
-            'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — MyInvoice.cz',
+            'work_report_link'  => 'Náhled na výkaz práce — MyÚčto.cz',
+            'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — MyÚčto.cz',
         ];
         $en = [
             'invoice_send'      => 'Invoice {{ invoice.varsymbol }}',
@@ -176,11 +178,12 @@ final class EmailTemplateAction
             'proforma_reminder' => 'Reminder — proforma {{ invoice.varsymbol }} ({{ days_overdue }} days overdue)',
             'invoice_approval'  => 'Work report — please approve ({{ invoice.varsymbol_or_id }})',
             'recurring_draft_reminder' => 'Recurring invoice draft will be issued soon ({{ issue_date }})',
+            'document_request_reminder' => 'Missing document — {{ description }}',
             'password_reset'    => 'Password reset',
             'login_otp'         => 'Sign-in verification code',
             'email_profile_test'=> 'Sending profile test',
-            'work_report_link'  => 'Work report preview — MyInvoice.cz',
-            'work_report_access_code' => 'Verification code for work report preview — MyInvoice.cz',
+            'work_report_link'  => 'Work report preview — MyÚčto.cz',
+            'work_report_access_code' => 'Verification code for work report preview — MyÚčto.cz',
         ];
         return ($locale === 'en' ? $en : $cs)[$code] ?? '';
     }
@@ -188,7 +191,7 @@ final class EmailTemplateAction
     private function guard(Request $request, Response $response, ?Response &$err): bool
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             $err = Json::error($response, 'forbidden', 'Pouze admin.', 403);
             return false;
         }

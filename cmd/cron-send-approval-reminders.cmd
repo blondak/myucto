@@ -14,7 +14,7 @@ REM    --days=N    override reminder_after_days
 REM    --dry-run   jen vypise, co by se odeslalo
 REM
 REM  Task Scheduler (kazdy pracovni den 09:00):
-REM    schtasks /create /tn "MyInvoice Approval Reminders" ^
+REM    schtasks /create /tn "MyUcto Approval Reminders" ^
 REM      /tr "%~f0" /sc daily /st 09:00 /d MON,TUE,WED,THU,FRI /ru SYSTEM
 REM ============================================================================
 setlocal

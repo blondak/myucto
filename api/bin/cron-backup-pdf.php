@@ -54,32 +54,50 @@ if (($msg = BackupEncryption::unsupportedReason($zipPassword)) !== null) {
 $date = date('Y-m-d_H-i');
 $file = "$backupDir/$dbName-pdf-$date.zip";
 
+// Trojice [adresář, povolené přípony, prefix uvnitř ZIPu].
+//
+// Přípony: plochý filtr na `pdf` dřív tiše vynechával strojové originály přijatých
+// faktur (storage/purchase-invoices/sources/**.isdoc|isdocx|xml|json). Ty jsou dle
+// § 35 ZDPH a § 33 ZoÚ průkazný účetní záznam a do zálohy patří stejně jako PDF;
+// seznam přípon zrcadlí PurchaseInvoicePdfArchiver::SOURCE_EXT.
+//
+// Prefix: cesta uvnitř ZIPu se dřív počítala jako substr($abs, strlen($rootDir)),
+// což mlčky předpokládá, že KAŽDÝ zdroj leží pod kořenem aplikace. To u třetího
+// zdroje neplatí — `purchase_invoice.archive_storage` smí ukazovat kamkoli (jiný
+// disk, jiný kořen po přejmenování instance), a při nastaveném MYINVOICE_DATA_DIR
+// neplatí ani u prvních dvou. substr() pak uřízne špatný počet znaků a v ZIPu jsou
+// useknuté nebo posunuté cesty; po rozbalení je aplikace nenajde (file_missing).
+// Pevný logický prefix + ořez vlastním zdrojovým adresářem dělá tvar ZIPu nezávislý
+// na konfiguraci: rozbalovacím kořenem je vždy kořen aplikace.
 $sources = [
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices'),
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('work-reports'),
-    // Přijaté faktury — archive PDF od dodavatelů (fáze 1 integrace forku).
-    // Default storage/purchase-invoices; pokud user nastaví custom archive_storage
-    // v cfg.php, použijeme tu cestu.
-    (string) ($config->get('purchase_invoice.archive_storage', '') ?: \MyInvoice\Infrastructure\Config\RuntimePaths::storage('purchase-invoices')),
+    // Vydané faktury: vyrenderovaná PDF + PŘÍLOHY, které smí být i jiného typu
+    // (UploadAttachmentAction::ALLOWED_MIME). Plochý filtr na `pdf` je dřív tiše
+    // vynechával — příloha smlouvy v .docx nebo fotka v .jpg tedy nebyla v záloze.
+    [
+        \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices'),
+        ['pdf', 'doc', 'docx', 'odt', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp',
+         'csv', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'zip'],
+        'storage/invoices',
+    ],
+    [\MyInvoice\Infrastructure\Config\RuntimePaths::storage('work-reports'), ['pdf'], 'storage/work-reports'],
+    // Přijaté faktury — archive PDF od dodavatelů (fáze 1 integrace forku) + sources/
+    // se strojovými originály. Default storage/purchase-invoices; pokud user nastaví
+    // custom archive_storage v cfg.php, použijeme tu cestu.
+    [
+        (string) ($config->get('purchase_invoice.archive_storage', '') ?: \MyInvoice\Infrastructure\Config\RuntimePaths::storage('purchase-invoices')),
+        ['pdf', 'isdoc', 'isdocx', 'xml', 'json'],
+        'storage/purchase-invoices',
+    ],
 ];
 
-// Sesbírej všechny .pdf rekurzivně
-$pdfs = [];
-foreach ($sources as $src) {
-    if (!is_dir($src)) continue;
-    $it = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::LEAVES_ONLY
-    );
-    foreach ($it as $entry) {
-        if (!$entry->isFile()) continue;
-        if (strtolower($entry->getExtension()) !== 'pdf') continue;
-        $abs = $entry->getPathname();
-        // Relativní cesta uvnitř ZIPu (bez prefixu rootDir, s lomítky)
-        $rel = ltrim(str_replace('\\', '/', substr($abs, strlen($rootDir))), '/');
-        $pdfs[$abs] = $rel;
-    }
-}
+// Sesbírej všechny povolené soubory rekurzivně — sdílená logika s cron-backup-documents.php
+// (BackupFileCollector), ať se obě zálohy zase nerozejdou ve filtrech ani ve tvaru cest.
+$pdfs = \MyInvoice\Service\Backup\BackupFileCollector::collect(
+    $sources,
+    [],
+    [],
+    static fn (string $abs): int => fprintf(STDERR, "  ✗ soubor mimo zdrojový adresář, přeskočen: %s\n", $abs),
+);
 
 if (count($pdfs) === 0) {
     echo "[" . date('Y-m-d H:i:s') . "] backup-pdf: žádné PDF k záloze (storage/invoices/ ani storage/work-reports/ neobsahuje .pdf).\n";

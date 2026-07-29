@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Stav zásob</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 2mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    table.book tfoot td { font-weight: bold; font-size: 8pt; padding: 1.5mm 1.5mm; border-top: 0.5pt solid #333; }
+    .num { text-align: right; }
+    .below-min { color: #b91c1c; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div class="header-title">Stav zásob k {{ "now"|date("d.m.Y") }}</div>
+
+{% if items is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">Žádné skladové zásoby neodpovídají zvoleným filtrům.</p>
+{% else %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl">Sklad</th>
+            <th class="thl">SKU</th>
+            <th class="thl">Název</th>
+            <th class="thl">Typ</th>
+            <th class="thl">MJ</th>
+            <th>Množství</th>
+            <th>Prům. cena</th>
+            <th>Hodnota</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in items %}
+            <tr>
+                <td>{{ row.warehouse_code }}</td>
+                <td>{{ row.sku }}</td>
+                <td>{{ row.name|slice(0, 55) }}</td>
+                <td>{{ row.item_type }}</td>
+                <td>{{ row.unit }}</td>
+                <td class="num {{ row.min_qty and row.qty < row.min_qty ? 'below-min' : '' }}">{{ row.qty|cz_money }}</td>
+                <td class="num">{{ row.avg_unit_cost|cz_money }}</td>
+                <td class="num">{{ row.value_total|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="7">CELKEM ({{ totals.count }} položek)</td>
+            <td class="num">{{ totals.value_total|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+{% endif %}
+
+</body>
+</html>

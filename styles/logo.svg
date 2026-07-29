@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MyInvoice">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MyÚčto.cz">
   <defs>
     <linearGradient id="mi-bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#6753AE"/>
@@ -8,5 +8,5 @@
   <rect x="2" y="2" width="60" height="60" rx="12" fill="url(#mi-bg)"/>
   <path d="M14 46 V18 L24 18 L32 34 L40 18 L50 18 V46 H43 V28 L34 44 L30 44 L21 28 V46 Z" fill="#FFFFFF"/>
   <circle cx="50" cy="14" r="9" fill="#FFFFFF"/>
-  <path d="M46 14 L49 17 L54 11" fill="none" stroke="#3B2D83" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43.2 18.13V9.87H44.87V13.54L48.24 9.87H50.48L47.37 13.09L50.65 18.13H48.49L46.22 14.26L44.87 15.64V18.13ZM56.72 13.92 55.16 14.2Q55.08 13.73 54.8 13.5Q54.52 13.26 54.08 13.26Q53.49 13.26 53.13 13.67Q52.78 14.08 52.78 15.03Q52.78 16.1 53.14 16.54Q53.5 16.98 54.1 16.98Q54.55 16.98 54.84 16.72Q55.13 16.47 55.24 15.84L56.8 16.11Q56.56 17.18 55.87 17.72Q55.18 18.27 54.03 18.27Q52.71 18.27 51.93 17.44Q51.15 16.61 51.15 15.15Q51.15 13.66 51.94 12.84Q52.72 12.01 54.06 12.01Q55.15 12.01 55.79 12.48Q56.44 12.95 56.72 13.92ZM52.22 9.73H53.5L54.11 10.57L54.76 9.73H56.03L54.87 11.39H53.4Z" fill="#3B2D83"/>
 </svg>

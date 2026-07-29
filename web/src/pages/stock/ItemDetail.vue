@@ -1,0 +1,197 @@
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { stockApi, type StockItem, type StockLedgerRow } from '@/api/stock'
+import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { formatMoney, formatDate } from '@/composables/useFormat'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+
+const { t } = useI18n()
+const auth = useAuthStore()
+const toast = useToast()
+const route = useRoute()
+
+const id = computed(() => Number(route.params.id))
+const item = ref<StockItem | null>(null)
+const loading = ref(false)
+
+const movements = ref<StockLedgerRow[]>([])
+const openingBalance = ref('0')
+const movLoading = ref(false)
+const movOffset = ref(0)
+const movLimit = 50
+const movHasMore = ref(true)
+
+async function loadItem() {
+  loading.value = true
+  try {
+    item.value = await stockApi.getItem(id.value)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadMovements(reset = false) {
+  if (reset) { movements.value = []; movOffset.value = 0; movHasMore.value = true }
+  if (!movHasMore.value) return
+  movLoading.value = true
+  try {
+    const r = await stockApi.itemMovements(id.value, { limit: movLimit, offset: movOffset.value })
+    if (movOffset.value === 0) openingBalance.value = r.opening_balance
+    movements.value = movements.value.concat(r.items)
+    movOffset.value += r.items.length
+    movHasMore.value = r.items.length === movLimit
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    movLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadItem()
+  await loadMovements(true)
+})
+
+function exportFile(format: 'pdf' | 'xlsx') {
+  window.open(stockApi.itemMovementsExportUrl(id.value, format), '_blank', 'noopener')
+}
+
+async function deactivate() {
+  if (!item.value) return
+  if (!confirm(t('stock.items.deactivate_confirm', { name: item.value.name }))) return
+  try {
+    await stockApi.updateItem(item.value.id, { ...toPayload(item.value), is_active: false })
+    toast.success(t('common.saved'))
+    await loadItem()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+function toPayload(i: StockItem) {
+  return {
+    sku: i.sku, name: i.name, item_type: i.item_type, unit: i.unit, ean: i.ean,
+    vat_rate_id: i.vat_rate_id, sale_price_without_vat: i.sale_price_without_vat,
+    min_qty: i.min_qty, is_active: i.is_active, note: i.note,
+  }
+}
+
+const actions = computed<ActionItem[]>(() => [
+  {
+    key: 'new-issue', label: t('stock.item_detail.new_issue'), icon: 'send', tier: 'primary', variant: 'primary',
+    show: auth.canWrite('stock'),
+    to: { path: '/stock/documents/new', query: { doc_type: 'issue', stock_item_id: id.value } },
+  },
+  {
+    key: 'edit', label: t('stock.item_detail.edit'), icon: 'edit', tier: 'secondary', variant: 'warning',
+    show: auth.canWrite('stock'), to: `/stock/items/${id.value}/edit`,
+  },
+  {
+    key: 'export-pdf', label: t('stock.item_detail.export_pdf'), icon: 'download', tier: 'secondary', variant: 'neutral',
+    run: () => exportFile('pdf'),
+  },
+  {
+    key: 'export-xlsx', label: t('stock.item_detail.export_xlsx'), icon: 'download', tier: 'secondary', variant: 'neutral',
+    run: () => exportFile('xlsx'),
+  },
+  {
+    key: 'deactivate', label: t('stock.item_detail.deactivate'), icon: 'trash', tier: 'overflow', variant: 'danger',
+    show: auth.canWrite('stock') && item.value?.is_active, run: deactivate,
+  },
+])
+
+const num = (v: string) => Number(v)
+const openingBalanceNum = computed(() => Number(openingBalance.value))
+// L1: běžnou bilanci NEPOČÍTÁME ve floatu — backend vrací money-safe `balance_after`
+// per řádek (StockValuation, tisíciny), jen ho renderujeme.
+</script>
+
+<template>
+  <div>
+    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+    <template v-else-if="item">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-2xl font-semibold">{{ item.name }}</h1>
+            <span v-if="!item.is_active" class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('common.no') }}</span>
+          </div>
+          <p class="text-sm text-neutral-500 mt-0.5">
+            <span class="font-mono">{{ item.sku }}</span> · {{ t(`stock.item_type.${item.item_type}`) }} · {{ item.unit }}
+          </p>
+        </div>
+        <ActionBar :actions="actions" />
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.item_detail.opening_balance') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ openingBalanceNum }}</div>
+        </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.items.col_sale_price') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—' }}</div>
+        </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.items.col_min_qty') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ item.min_qty ?? '—' }}</div>
+        </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">EAN</div>
+          <div class="text-lg font-semibold font-mono">{{ item.ean ?? '—' }}</div>
+        </div>
+      </div>
+
+      <!-- Tab Pohyby -->
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="px-5 py-3 border-b border-neutral-200">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.item_detail.tab_movements') }}</h3>
+        </div>
+        <div v-if="movements.length === 0 && !movLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('stock.item_detail.empty_movements') }}</div>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_date') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_doc') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.item_detail.col_warehouse') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_qty') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_unit_cost') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_value') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.item_detail.col_balance') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="m in movements" :key="m.line_id" class="hover:bg-neutral-50" :class="{ 'opacity-50': m.status === 'reversed' }">
+                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(m.doc_date) }}</td>
+                <td class="px-3 py-2">
+                  <RouterLink v-if="m.document_id" :to="`/stock/documents/${m.document_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">
+                    {{ m.doc_number || `#${m.document_id}` }}
+                  </RouterLink>
+                  <span class="text-xs text-neutral-400 ml-1">{{ t(`stock.doc_type.${m.doc_type}`) }}</span>
+                </td>
+                <td class="px-3 py-2">{{ m.warehouse_code }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="num(m.qty_signed) < 0 ? 'text-danger-500' : 'text-success-600'">
+                  {{ num(m.qty_signed) > 0 ? '+' : '' }}{{ m.qty_signed }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(m.unit_cost)) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(m.value_total)) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ m.balance_after ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="movHasMore" class="px-5 py-3 border-t border-neutral-100 text-center">
+          <button type="button" @click="loadMovements()" :disabled="movLoading"
+            class="cursor-pointer text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50">
+            {{ movLoading ? t('common.loading') : t('stock.item_detail.load_more') }}
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

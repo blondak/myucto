@@ -1,0 +1,401 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Accounting;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\InvoiceSettlementRepository;
+use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
+
+/**
+ * Úhrada faktury ZÁPOČTEM proti zvolenému rozvahovému účtu (migrace 1126).
+ *
+ * Typický případ: faktura se nevyrovná penězi, ale zápočtem proti pohledávce nebo
+ * závazku za společníkem (355 / 365). Protistranou tedy není jiný doklad (to řeší
+ * {@see OffsetService} pro dvojice FV↔PF), ale JEDEN účet, který si účetní zvolí.
+ * Posting rules `payment.receivable.settlement` / `payment.payable.settlement`
+ * dávají jen PŘEDVOLBU protiúčtu do UI — závazný je účet z požadavku.
+ *
+ * Kontace:
+ *   vydaná faktura  → <zvolený účet> MD / 311 D   (zálohová proforma → 324)
+ *   přijatá faktura → 321 MD / <zvolený účet> D   (zálohová PF → 314)
+ *
+ * Vydaná faktura dostane řádek v `invoice_payments` (source='settlement'), takže
+ * částečné úhrady i `paid_total` fungují stejně jako u banky a pokladny. Přijatá
+ * faktura `paid_total` nemá → zápočet jen v PLNÉ výši a status přejde na 'paid'
+ * (stejné omezení jako úhrada PF pokladnou).
+ *
+ * V daňové evidenci (§6) se nic neúčtuje — `journal_entry_id` zůstane NULL, ale
+ * vyrovnání dokladu proběhne stejně (vzor {@see Cash\CashDocumentService}).
+ */
+final class InvoiceSettlementService
+{
+    private const TOLERANCE_CENTS = 1;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly InvoiceSettlementRepository $repo,
+        private readonly PostingService $posting,
+        private readonly InvoicePaymentService $invoicePayments,
+        private readonly PurchaseInvoiceRepository $purchaseInvoices,
+        private readonly PostingRuleRepository $rules,
+        private readonly ChartOfAccountsRepository $accounts,
+    ) {}
+
+    /**
+     * Předvolba protiúčtu pro UI (z posting rule, s hardcoded fallbackem).
+     *
+     * @return array{account_id:?int, account_code:string, account_name:?string}
+     */
+    public function defaultAccount(int $supplierId, string $docType): array
+    {
+        $this->assertDocType($docType);
+        $rule = $this->rules->resolve($supplierId, $this->ruleKey($docType));
+        $code = $docType === 'invoice'
+            ? (string) ($rule['debit_account_code'] ?? '355')
+            : (string) ($rule['credit_account_code'] ?? '365');
+        $account = $this->accounts->findByCode($supplierId, $code);
+        return [
+            'account_id'   => $account !== null ? (int) $account['id'] : null,
+            'account_code' => $code,
+            'account_name' => $account !== null ? (string) $account['name'] : null,
+        ];
+        // account_id === null → účet v osnově firmy chybí; UI si nechá účetní vybrat ručně.
+    }
+
+    /**
+     * Zápočet dokladu proti zvolenému účtu.
+     *
+     * @param array{settled_on?:string, amount?:float|string, account_id?:int, note?:?string} $data
+     * @return array<string,mixed> hlavička zápočtu (viz {@see get()})
+     */
+    public function create(int $supplierId, string $docType, int $docId, array $data, ?int $userId): array
+    {
+        $this->assertDocType($docType);
+        $settledOn = trim((string) ($data['settled_on'] ?? ''));
+        if (!self::isDate($settledOn)) {
+            throw new SettlementException('invalid_date', 'Datum úhrady musí být ve tvaru RRRR-MM-DD.');
+        }
+        $amount = round((float) ($data['amount'] ?? 0), 2);
+        if ($amount <= 0) {
+            throw new SettlementException('invalid_amount', 'Částka zápočtu musí být kladná.');
+        }
+        $accountId = (int) ($data['account_id'] ?? 0);
+        if ($accountId <= 0) {
+            throw new SettlementException('account_required', 'Vyberte protiúčet zápočtu.');
+        }
+        $note = self::nullableString($data['note'] ?? null);
+
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $account = $this->accounts->findById($supplierId, $accountId);
+            if ($account === null) {
+                throw new SettlementException('account_not_found', 'Protiúčet nebyl v účtovém rozvrhu nalezen.', 404);
+            }
+            if (!($account['is_active'] ?? true)) {
+                throw new SettlementException('account_inactive', 'Protiúčet je v účtovém rozvrhu neaktivní.');
+            }
+            $accountCode = (string) $account['account_code'];
+
+            $doc = $docType === 'invoice'
+                ? $this->prepareInvoice($supplierId, $docId, $amount)
+                : $this->preparePurchase($supplierId, $docId, $amount);
+
+            // Protiúčet nesmí být tatáž strana, kterou zápočet uzavírá — vznikl by
+            // zápis "311 MD / 311 D", který nic nevyrovná.
+            $docAccount = $doc['doc_account'];
+            if ($accountCode === $docAccount || str_starts_with($accountCode, $docAccount . '.')) {
+                throw new SettlementException(
+                    'account_same_as_document',
+                    'Protiúčet nemůže být tentýž účet, na kterém doklad visí (' . $docAccount . ').',
+                );
+            }
+
+            $settlementId = $this->repo->insert($supplierId, [
+                'doc_type'   => $docType,
+                'doc_id'     => $docId,
+                'settled_on' => $settledOn,
+                'amount'     => $amount,
+                'account_id' => $accountId,
+                'note'       => $note,
+                'created_by' => $userId,
+            ]);
+
+            // Daňová evidence (§6) nemá posting engine — vyrovnání dokladu ale platí i tam.
+            $entryId = null;
+            if ($this->supplierAccountingMode($supplierId) !== 'tax_evidence') {
+                $lines = $this->buildLines($docType, $accountCode, $doc['counter_account'], $amount);
+                $entryId = $this->posting->postDocument($supplierId, 'settlement', $settlementId, $lines, [
+                    'entry_date'  => $settledOn,
+                    'document_no' => $doc['number'],
+                    'description' => 'Zápočet ' . $doc['number'] . ' proti účtu ' . $accountCode
+                        . ($note !== null ? ' — ' . $note : ''),
+                    'posted_by'   => $userId,
+                    'user_id'     => $userId,
+                ]);
+            }
+
+            $paymentId = null;
+            if ($docType === 'invoice') {
+                $res = $this->invoicePayments->recordPayment($docId, $amount, $settledOn, [
+                    'source'     => 'settlement',
+                    'note'       => 'Zápočet — ' . $accountCode . ($note !== null ? ' (' . $note . ')' : ''),
+                    'created_by' => $userId,
+                ]);
+                $paymentId = (int) $res['payment_id'];
+            } else {
+                $this->purchaseInvoices->setStatus($docId, 'paid', $supplierId, $settledOn);
+            }
+
+            $this->repo->setPosted($settlementId, $entryId, $paymentId);
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $this->get($supplierId, $settlementId);
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Zruší zápočet: protizápis účetního zápisu + odvolání vyrovnání dokladu.
+     * Hlavička zůstává (status='cancelled') kvůli auditní stopě.
+     *
+     * @param array<string,mixed> $meta
+     * @return array<string,mixed>
+     */
+    public function cancel(int $supplierId, int $settlementId, array $meta = []): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $row = $this->repo->lockSettlement($supplierId, $settlementId);
+            if ($row === null) {
+                throw new SettlementException('not_found', 'Zápočet nenalezen.', 404);
+            }
+            if ((string) $row['status'] === 'cancelled') {
+                throw new SettlementException('already_cancelled', 'Zápočet je už zrušený.');
+            }
+
+            if ($row['invoice_payment_id'] !== null) {
+                $this->invoicePayments->deletePayment((int) $row['invoice_payment_id'], skipBankGuard: true);
+            }
+            if ((string) $row['doc_type'] === 'purchase_invoice') {
+                // Vrátit do stavu před úhradou dle tvaru zápočtu (zaúčtovaný → 'booked',
+                // journal-free v daňové evidenci → 'received') — vzor storna pokladny.
+                $this->purchaseInvoices->setStatus(
+                    (int) $row['doc_id'],
+                    $row['journal_entry_id'] !== null ? 'booked' : 'received',
+                    $supplierId,
+                    null,
+                );
+            }
+
+            $reversalId = null;
+            if ($row['journal_entry_id'] !== null) {
+                $reversalId = $this->posting->reverse($supplierId, (int) $row['journal_entry_id'], $meta + [
+                    'entry_date'  => $meta['entry_date'] ?? date('Y-m-d'),
+                    'description' => 'Storno zápočtu #' . $settlementId,
+                ]);
+            }
+            $this->repo->setCancelled($settlementId, $supplierId, $reversalId);
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $this->get($supplierId, $settlementId);
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    public function get(int $supplierId, int $settlementId): array
+    {
+        $row = $this->repo->find($supplierId, $settlementId);
+        if ($row === null) {
+            throw new SettlementException('not_found', 'Zápočet nenalezen.', 404);
+        }
+        return self::shape($row);
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listForDocument(int $supplierId, string $docType, int $docId): array
+    {
+        $this->assertDocType($docType);
+        return array_map(self::shape(...), $this->repo->listForDocument($supplierId, $docType, $docId));
+    }
+
+    /**
+     * Kontrola vydané faktury + účet, na kterém pohledávka visí.
+     *
+     * @return array{number:string, doc_account:string, counter_account:string}
+     */
+    private function prepareInvoice(int $supplierId, int $docId, float $amount): array
+    {
+        $inv = $this->repo->lockInvoice($supplierId, $docId);
+        if ($inv === null) {
+            throw new SettlementException('doc_not_found', 'Faktura nenalezena.', 404);
+        }
+        if (in_array($inv['status'], ['draft', 'cancelled'], true)) {
+            throw new SettlementException('doc_not_payable', 'Zápočet lze provést jen u vystavené faktury.');
+        }
+        if ($inv['currency'] !== 'CZK') {
+            throw new SettlementException('foreign_currency', 'Zápočet je zatím podporovaný jen u dokladů v CZK.');
+        }
+        if (self::cents($amount) > self::cents($inv['remaining']) + self::TOLERANCE_CENTS) {
+            throw new SettlementException(
+                'amount_over_remaining',
+                sprintf('Částka zápočtu (%.2f Kč) převyšuje zbytek k úhradě (%.2f Kč).', $amount, $inv['remaining']),
+            );
+        }
+        // Zálohová proforma visí na přijatých zálohách (324), běžná faktura na 311.
+        $counter = $inv['kind'] === 'proforma'
+            ? $this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324')
+            : $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
+        return ['number' => $inv['number'], 'doc_account' => $counter, 'counter_account' => $counter];
+    }
+
+    /**
+     * Kontrola přijaté faktury + účet, na kterém závazek visí.
+     *
+     * @return array{number:string, doc_account:string, counter_account:string}
+     */
+    private function preparePurchase(int $supplierId, int $docId, float $amount): array
+    {
+        $pf = $this->repo->lockPurchase($supplierId, $docId);
+        if ($pf === null) {
+            throw new SettlementException('doc_not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+        if (!in_array($pf['status'], ['received', 'booked'], true)) {
+            throw new SettlementException(
+                'doc_not_payable',
+                'Zápočet lze provést jen u přijaté faktury ve stavu Přijatá nebo Zaúčtovaná.',
+            );
+        }
+        if ($pf['currency'] !== 'CZK') {
+            throw new SettlementException('foreign_currency', 'Zápočet je zatím podporovaný jen u dokladů v CZK.');
+        }
+        // PF nemá paid_total → částečný zápočet by zůstal neevidovaný (stejné omezení
+        // jako úhrada PF pokladnou). Proto vynucujeme plnou výši.
+        if (self::cents($amount) !== self::cents($pf['total'])) {
+            throw new SettlementException(
+                'partial_not_supported',
+                sprintf(
+                    'Přijatou fakturu lze započíst jen v plné výši (%.2f Kč) — částečné úhrady u PF systém neeviduje.',
+                    $pf['total'],
+                ),
+            );
+        }
+        // Zálohová PF visí na poskytnutých zálohách (314), běžná na 321.
+        $counter = $pf['kind'] === 'advance'
+            ? $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314')
+            : $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321');
+        return ['number' => $pf['number'], 'doc_account' => $counter, 'counter_account' => $counter];
+    }
+
+    /**
+     * @return list<array{account_code:string, side:string, amount:float}>
+     */
+    private function buildLines(string $docType, string $accountCode, string $counterAccount, float $amount): array
+    {
+        $amount = round($amount, 2);
+        return $docType === 'invoice'
+            // Pohledávka se uzavírá: <zvolený účet> MD / 311 (resp. 324) D.
+            ? [
+                ['account_code' => $accountCode,    'side' => 'debit',  'amount' => $amount],
+                ['account_code' => $counterAccount, 'side' => 'credit', 'amount' => $amount],
+            ]
+            // Závazek se uzavírá: 321 (resp. 314) MD / <zvolený účet> D.
+            : [
+                ['account_code' => $counterAccount, 'side' => 'debit',  'amount' => $amount],
+                ['account_code' => $accountCode,    'side' => 'credit', 'amount' => $amount],
+            ];
+    }
+
+    private function ruleAccount(int $supplierId, string $ruleKey, string $side, string $fallback): string
+    {
+        $rule = $this->rules->resolve($supplierId, $ruleKey);
+        $code = $rule[$side . '_account_code'] ?? null;
+        return $code !== null && (string) $code !== '' ? (string) $code : $fallback;
+    }
+
+    private function ruleKey(string $docType): string
+    {
+        return $docType === 'invoice' ? 'payment.receivable.settlement' : 'payment.payable.settlement';
+    }
+
+    private function assertDocType(string $docType): void
+    {
+        if (!in_array($docType, ['invoice', 'purchase_invoice'], true)) {
+            throw new SettlementException('invalid_doc_type', 'Neplatný typ dokladu.');
+        }
+    }
+
+    /** Účetní režim firmy (Epic DE §2.1) — vzor CashDocumentService. */
+    private function supplierAccountingMode(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $mode = $stmt->fetchColumn();
+        return $mode === 'tax_evidence' ? 'tax_evidence' : 'double_entry';
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function shape(array $row): array
+    {
+        return [
+            'id'                 => (int) $row['id'],
+            'doc_type'           => (string) $row['doc_type'],
+            'doc_id'             => (int) $row['doc_id'],
+            'settled_on'         => (string) $row['settled_on'],
+            'amount'             => round((float) $row['amount'], 2),
+            'account_id'         => (int) $row['account_id'],
+            'account_code'       => (string) ($row['account_code'] ?? ''),
+            'account_name'       => (string) ($row['account_name'] ?? ''),
+            'note'               => $row['note'] !== null ? (string) $row['note'] : null,
+            'status'             => (string) $row['status'],
+            'journal_entry_id'   => $row['journal_entry_id'] !== null ? (int) $row['journal_entry_id'] : null,
+            'reversal_entry_id'  => $row['reversal_entry_id'] !== null ? (int) $row['reversal_entry_id'] : null,
+            'created_at'         => (string) $row['created_at'],
+        ];
+    }
+
+    private static function nullableString(mixed $v): ?string
+    {
+        if ($v === null) {
+            return null;
+        }
+        $s = trim((string) $v);
+        return $s === '' ? null : $s;
+    }
+
+    private static function isDate(string $v): bool
+    {
+        $d = \DateTimeImmutable::createFromFormat('Y-m-d', $v);
+        return $d !== false && $d->format('Y-m-d') === $v;
+    }
+
+    private static function cents(float $amount): int
+    {
+        return (int) round($amount * 100.0);
+    }
+}

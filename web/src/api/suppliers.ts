@@ -8,6 +8,7 @@ export interface SupplierListItem {
   dic: string | null
   is_vat_payer: boolean
   email: string
+  accounting_mode?: 'tax_evidence' | 'double_entry'
   country_iso: string
   clients_count: number
   invoices_count: number

@@ -11,6 +11,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Signing\Pdf\PdfSignaturePolicy;
 use MyInvoice\Service\Signing\SigningPassphraseProviderInterface;
+use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Crypto\SMimeSigner;
 use Symfony\Component\Mime\Email;
@@ -49,6 +50,7 @@ final class EmailSigningService
         private readonly SigningProfileRepository $profiles,
         private readonly SigningPassphraseProviderInterface $passphrases,
         private readonly SecretEncryption $secrets,
+        private readonly ?PersonalCertificateVaultService $certificateVault = null,
     ) {}
 
     /**
@@ -145,7 +147,7 @@ final class EmailSigningService
 
     /**
      * @param array<string,mixed> $outputSetting
-     * @return array{profile:array<string,mixed>,credential:array<string,mixed>,password_enc:string}|null
+     * @return array{profile:array<string,mixed>,credential:array<string,mixed>,password_enc:string,p12?:string}|null
      */
     private function selectProfile(int $supplierId, array $outputSetting, ?int $userId): ?array
     {
@@ -241,20 +243,43 @@ final class EmailSigningService
             return null;
         }
 
-        $passwordEnc = $this->passphrases->encryptedPassphraseForCredential($credential);
-        if ($passwordEnc === null) {
-            return null;
+        $p12 = null;
+        if (($credential['vault_credential_id'] ?? null) !== null) {
+            $ownerUserId = (int) ($profile['owner_user_id'] ?? 0);
+            if ($ownerUserId <= 0 || $this->certificateVault === null) {
+                return null;
+            }
+            try {
+                $resolved = $this->certificateVault->resolve(
+                    (int) $credential['vault_credential_id'],
+                    $ownerUserId,
+                    $supplierId,
+                );
+            } catch (\Throwable) {
+                return null;
+            }
+            $passwordEnc = $resolved['password_enc'];
+            $p12 = $resolved['pfx'];
+        } else {
+            $passwordEnc = $this->passphrases->encryptedPassphraseForCredential($credential);
+            if ($passwordEnc === null) {
+                return null;
+            }
         }
 
-        return [
+        $result = [
             'profile' => $profile,
             'credential' => $credential,
             'password_enc' => $passwordEnc,
         ];
+        if ($p12 !== null) {
+            $result['p12'] = $p12;
+        }
+        return $result;
     }
 
     /**
-     * @param array{profile:array<string,mixed>,credential:array<string,mixed>,password_enc:string} $profile
+     * @param array{profile:array<string,mixed>,credential:array<string,mixed>,password_enc:string,p12?:string} $profile
      */
     private function signWithProfile(Message $message, array $profile): Message
     {
@@ -264,14 +289,16 @@ final class EmailSigningService
             throw new \RuntimeException('S/MIME certifikát je expirovaný.');
         }
 
-        $p12Path = $this->credentialAbsPath((string) ($credential['certificate_path'] ?? ''));
-        if ($p12Path === '' || !is_file($p12Path) || !is_readable($p12Path)) {
-            throw new \RuntimeException('S/MIME certifikát nelze načíst.');
-        }
-
-        $p12 = @file_get_contents($p12Path);
-        if ($p12 === false || $p12 === '') {
-            throw new \RuntimeException('S/MIME certifikát nelze načíst.');
+        $p12 = $profile['p12'] ?? null;
+        if (!is_string($p12) || $p12 === '') {
+            $p12Path = $this->credentialAbsPath((string) ($credential['certificate_path'] ?? ''));
+            if ($p12Path === '' || !is_file($p12Path) || !is_readable($p12Path)) {
+                throw new \RuntimeException('S/MIME certifikát nelze načíst.');
+            }
+            $p12 = @file_get_contents($p12Path);
+            if ($p12 === false || $p12 === '') {
+                throw new \RuntimeException('S/MIME certifikát nelze načíst.');
+            }
         }
 
         $passphrase = $this->secrets->decrypt($profile['password_enc']);

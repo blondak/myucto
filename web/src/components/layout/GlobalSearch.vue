@@ -5,7 +5,15 @@ import { useI18n } from 'vue-i18n'
 import { searchApi, type SearchResults } from '@/api/search'
 
 interface MenuItem { to: string; label: string; icon: string; external?: boolean }
-const props = defineProps<{ menuItems: MenuItem[] }>()
+const props = withDefaults(defineProps<{
+  menuItems: MenuItem[]
+  placement?: 'above' | 'below'
+  compact?: boolean
+  shortcut?: string
+}>(), {
+  placement: 'below',
+  compact: false,
+})
 const emit = defineEmits<{ navigated: [] }>()
 
 const { t } = useI18n()
@@ -97,6 +105,12 @@ function reset() {
   inputEl.value?.blur()
 }
 
+function focus(): void {
+  inputEl.value?.focus()
+}
+
+defineExpose({ focus })
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
@@ -126,7 +140,7 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
 </script>
 
 <template>
-  <div class="relative px-0.5 pb-2">
+  <div class="relative" :class="compact ? '' : 'px-0.5 pb-2'">
     <div class="relative">
       <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -137,19 +151,28 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
         v-model="q"
         type="text"
         :placeholder="t('search.placeholder')"
-        class="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-neutral-200 bg-neutral-50 focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+        class="w-full pl-8 text-sm rounded-md border border-neutral-200 bg-neutral-50 focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+        :class="[
+          compact ? 'h-8 py-1' : 'py-1.5',
+          compact && shortcut ? 'pr-20' : 'pr-3',
+        ]"
         autocomplete="off"
         spellcheck="false"
         @focus="open = q.trim().length > 0"
         @blur="open = false"
         @keydown="onKeydown"
       />
+      <kbd
+        v-if="compact && shortcut"
+        class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-neutral-300 bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium leading-none text-neutral-500 shadow-sm"
+      >{{ shortcut }}</kbd>
     </div>
 
     <!-- Dropdown výsledků -->
     <div
       v-if="showDropdown"
-      class="absolute left-0 right-0 mt-1 z-40 bg-surface border border-neutral-200 rounded-md shadow-lg max-h-[70vh] overflow-y-auto"
+      class="absolute left-0 right-0 z-40 bg-surface border border-neutral-200 rounded-md shadow-lg max-h-[70vh] overflow-y-auto"
+      :class="placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'"
     >
       <div v-if="loading && !hasResults" class="px-3 py-2 text-xs text-neutral-500">{{ t('common.loading') }}</div>
       <div v-else-if="!hasResults" class="px-3 py-2 text-xs text-neutral-500">{{ t('search.no_results') }}</div>

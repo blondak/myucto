@@ -21,7 +21,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/logbook/cars/{id}           — update
  *   DELETE /api/logbook/cars/{id}           — hard pokud nepoužito, jinak archivace
  *
- * RBAC řeší RoleMiddleware (readonly GET, accountant+ CRUD).
+ * RBAC řeší PermissionMiddleware (readonly GET, accountant+ CRUD).
  */
 final class CarsAction
 {

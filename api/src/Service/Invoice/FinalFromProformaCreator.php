@@ -27,6 +27,7 @@ final class FinalFromProformaCreator
         private readonly Connection $db,
         private readonly InvoiceRepository $repo,
         private readonly InvoiceCalculator $calc,
+        private readonly AdvanceCycleLock $cycleLock,
     ) {}
 
     /**
@@ -44,6 +45,19 @@ final class FinalFromProformaCreator
         ?string $dueDate = null,
         ?float $advance = null,
     ): int {
+        return $this->cycleLock->synchronized(
+            $proformaId,
+            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance),
+        );
+    }
+
+    private function createUnlocked(
+        int $proformaId,
+        int $userId,
+        ?string $taxDate,
+        ?string $dueDate,
+        ?float $advance,
+    ): int {
         $proforma = $this->repo->find($proformaId);
         if ($proforma === null) {
             throw new \RuntimeException("Proforma {$proformaId} nenalezena.");
@@ -58,6 +72,7 @@ final class FinalFromProformaCreator
         $existing = $pdo->prepare(
             "SELECT id FROM invoices
               WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
+                AND status <> 'cancelled'
               ORDER BY id LIMIT 1"
         );
         $existing->execute([$proformaId]);
@@ -68,6 +83,18 @@ final class FinalFromProformaCreator
 
         $taxDate = $taxDate ?? date('Y-m-d');
         $dueDate = $dueDate ?? date('Y-m-d');
+
+        VatRateValidityGuard::assertValidOn(
+            $pdo,
+            array_column(
+                array_filter(
+                    $proforma['items'],
+                    static fn (array $item): bool => (float) ($item['total_with_vat'] ?? 0) > 0.0,
+                ),
+                'vat_rate_id',
+            ),
+            $taxDate,
+        );
 
         // Daňové doklady k přijatým platbám proformy (§ 37a ZDPH): jejich základ/daň
         // se na vyúčtování odečte zápornými řádky per doklad per sazba — daň na finálu
@@ -167,8 +194,9 @@ final class FinalFromProformaCreator
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
-                    total_without_vat, total_vat, total_with_vat, order_index, item_kind)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
+                    total_without_vat, total_vat, total_with_vat, order_index, item_kind,
+                    stock_item_id, warehouse_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)'
             );
             $maxOrder = 0;
             foreach ($proforma['items'] as $item) {
@@ -182,6 +210,10 @@ final class FinalFromProformaCreator
                     $item['vat_rate_snapshot'],
                     $item['order_index'],
                     (string) ($item['item_kind'] ?? 'standard'),
+                    // Proforma → finál přenáší vazbu na skladovou kartu (Epic SKLAD §5.4:
+                    // sklad hýbe až finál, proto vazba nesmí cestou zaniknout).
+                    $item['stock_item_id'] ?? null,
+                    $item['warehouse_id'] ?? null,
                 ]);
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
@@ -210,6 +242,9 @@ final class FinalFromProformaCreator
                     $r['vat_rate_snapshot'],
                     ++$maxOrder,
                     'standard',
+                    // Odpočtový řádek není zboží — bez skladové vazby.
+                    null,
+                    null,
                 ]);
             }
 

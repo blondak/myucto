@@ -14,11 +14,13 @@ use MyInvoice\Middleware\ApiScopeMiddleware;
 use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\CsrfMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Middleware\IpAllowlistMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
+use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
-use MyInvoice\Middleware\RoleMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
@@ -80,7 +82,11 @@ final class Bootstrap
         $builder->useAttributes(false);
         $builder->addDefinitions([
             Config::class => $config,
-            ClockInterface::class => fn () => new UtcClock(),
+            // Aplikační hodiny zůstávají v `app.timezone` (Europe/Prague) — účetní kód
+            // (odpisy, období) porovnává kalendářní datum, a UTC by ho mezi půlnocí
+            // a 2:00 posunul o den zpět. Autentizace na tom nestojí: bezpečnostní časy
+            // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
+            ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {
@@ -97,6 +103,64 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
+                $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
+                if (
+                    $caBundle !== ''
+                    && !preg_match('/^(?:[A-Za-z]:[\\\\\/]|\\\\\\\\|\/)/', $caBundle)
+                ) {
+                    $caBundle = $rootDir . DIRECTORY_SEPARATOR . $caBundle;
+                }
+                $fingerprints = $config->get('epo.receipt_signer_fingerprints_sha256', []);
+                if (is_string($fingerprints)) {
+                    $fingerprints = array_filter(array_map('trim', explode(',', $fingerprints)));
+                }
+                $testFingerprints = $config->get('epo.test_receipt_signer_fingerprints_sha256', []);
+                if (is_string($testFingerprints)) {
+                    $testFingerprints = array_filter(array_map('trim', explode(',', $testFingerprints)));
+                }
+                return new \MyInvoice\Service\Epo\EpoDirectResponseParser(
+                    $caBundle !== '' ? $caBundle : null,
+                    is_array($fingerprints) ? array_values($fingerprints) : [],
+                    is_array($testFingerprints) ? array_values($testFingerprints) : [],
+                );
+            },
+            // DPPO podklady: ClosingService (4. arg) je konstrukčně volitelný (unit testy nad SQLite
+            // ho nepředávají), ale PHP-DI autowire optional class-param nevyplní → explicitní bind,
+            // aby náhled DPPO měl projekci závěrkových operací (Feature 1) i v produkci.
+            \MyInvoice\Service\Tax\Return\DppoReturnDataProvider::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tax\Return\DppoReturnDataProvider(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Repository\AccountingPeriodRepository::class),
+                $c->get(\MyInvoice\Service\Tax\Return\NonDeductibleCostsService::class),
+                $c->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class),
+                // § 23/3/a/12 — rovněž volitelná, takže bez tohohle bindu by návrh
+                // připočtení neuhrazených dluhů v produkci tiše nevznikl.
+                $c->get(\MyInvoice\Service\Tax\Return\UnpaidLiabilityService::class),
+                // § 23/7 — ze stejného důvodu: volitelný parametr PHP-DI neautowiruje,
+                // takže bez tohohle bindu by podklad ke spojeným osobám zůstal v produkci
+                // navždy prázdný a nikdo by se to nedozvěděl.
+                $c->get(\MyInvoice\Service\Tax\RelatedPartyService::class),
+            ),
+            // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
+            // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
+            // nepečetilo a řetěz by neexistoval, aniž by to cokoli ohlásilo.
+            \MyInvoice\Service\ActivityLogger::class => fn (ContainerInterface $c) => new \MyInvoice\Service\ActivityLogger(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\ActivityLogHashChain::class),
+            ),
+            // Epic #48 — dashboard „Akce pro tebe" potřebuje živý náhled doplatku DPPO
+            // (TaxReturnService::balanceDuePreview). Konstrukčně volitelný (2. arg) kvůli
+            // ReceivablesPayablesServiceTest, který CrmAggregationService staví ručně jen
+            // s Connection — PHP-DI autowire optional class-param nevyplní, proto explicitní
+            // bind, aby produkce/CrmDashboardAction reálnou instanci vždy dostaly.
+            \MyInvoice\Service\Crm\CrmAggregationService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Crm\CrmAggregationService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class),
+                $c->get(\MyInvoice\Service\Accounting\JournalIntegrityService::class),
+            ),
+            // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
+            // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.
+            \MyInvoice\Infrastructure\Database\ConnectionResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Infrastructure\Database\ConnectionResolver($c->get(Connection::class)),
             RedisProbe::class      => fn (ContainerInterface $c) => new RedisProbe($c->get(Config::class)),
             RedisFactory::class    => fn (ContainerInterface $c) => new RedisFactory($c->get(Config::class)),
             PasskeyService::class  => fn (ContainerInterface $c) => new PasskeyService(
@@ -112,6 +176,15 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Signing\Pdf\NativePdfSignatureBackend::class),
                 $c->get(\MyInvoice\Repository\SigningProfileRepository::class),
                 $c->get(\MyInvoice\Service\Signing\SigningPassphraseProviderInterface::class),
+                $c->get(\MyInvoice\Service\Signing\PersonalCertificateVaultService::class),
+            ),
+            \MyInvoice\Service\Signing\Email\EmailSigningService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Signing\Email\EmailSigningService(
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
+                $c->get(\MyInvoice\Repository\SigningProfileRepository::class),
+                $c->get(\MyInvoice\Service\Signing\SigningPassphraseProviderInterface::class),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(\MyInvoice\Service\Signing\PersonalCertificateVaultService::class),
             ),
             \MyInvoice\Service\Mail\Mailer::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\Mailer(
                 $c->get(Config::class),
@@ -142,6 +215,76 @@ final class Bootstrap
                 // Aktivita dokladu — „payment_matched" záznam u auto-spárování platby
                 // (vidět v aktivitě vystavené i přijaté faktury).
                 $c->get(\MyInvoice\Service\ActivityLogger::class),
+                $c->get(\MyInvoice\Repository\ClientBankAccountRepository::class),
+                $c->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class),
+            ),
+
+            \MyInvoice\Service\Accounting\Bank\TransferAutoPolicyInterface::class => fn (ContainerInterface $c) =>
+                $c->get(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class),
+            // TransferPairService je jinak autowired, ale ?BankAnalyticResolver je optional
+            // class-param (PHP-DI autowire ho nevyplní) — explicitní bind, ať #35 analytika
+            // vlastního účtu funguje i na noze převodu mezi vlastními účty (221/261).
+            \MyInvoice\Service\Accounting\Bank\TransferPairService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Accounting\Bank\TransferPairService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Accounting\PostingService::class),
+                $c->get(\MyInvoice\Repository\PostingRuleRepository::class),
+                $c->get(\MyInvoice\Repository\JournalEntryRepository::class),
+                $c->get(\MyInvoice\Repository\BankPostingSuggestionRepository::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\OwnTransferDetector::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\TransferAutoPolicyInterface::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
+                $c->get(\MyInvoice\Service\Currency\CnbExchangeRateClient::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
+            ),
+            \MyInvoice\Service\Accounting\Bank\BankPostingService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Accounting\Bank\BankPostingService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Accounting\PostingService::class),
+                $c->get(\MyInvoice\Repository\PostingRuleRepository::class),
+                $c->get(\MyInvoice\Repository\AccountingPeriodRepository::class),
+                $c->get(\MyInvoice\Repository\JournalEntryRepository::class),
+                $c->get(\MyInvoice\Repository\BankPostingRuleRepository::class),
+                $c->get(\MyInvoice\Repository\BankPostingSuggestionRepository::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankRuleMatcher::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
+                $c->get(\MyInvoice\Service\Currency\CnbExchangeRateClient::class),
+                $c->get(\MyInvoice\Service\Currency\FixedExchangeRateService::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\Detect\BankDetectorChain::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
+                $c->get(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class),
+                $c->get(\MyInvoice\Repository\TaxAdvanceScheduleRepository::class),
+                $c->get(\MyInvoice\Service\Accounting\Learning\CorrectionRecorder::class),
+                $c->get(\MyInvoice\Service\Accounting\Learning\RulePromotionService::class),
+                $c->get(\MyInvoice\Service\Ai\AnomalyDetector::class),
+                $c->get(\MyInvoice\Service\Ai\AiSuggestionService::class),
+                $c->get(\MyInvoice\Service\Ai\AiKillSwitchService::class),
+                $c->get(\MyInvoice\Service\Ai\EmbeddingWriter::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\LegacyBankPaymentReconciler::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
+            ),
+            \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Bank\GpcParser::class),
+                $c->get(\MyInvoice\Service\Bank\StatementMatcher::class),
+                $c->get(\MyInvoice\Service\Bank\EmailNoticeReconciler::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class),
+                $c->get(\MyInvoice\Repository\SupplierBankAccountRepository::class),
+            ),
+
+            // Licenční klient (E4) má volitelný `?GuzzleHttp\Client $http = null` (test
+            // seam). Autowire by ho vyplnil bare Guzzle (bez base_uri/verify z cfg) →
+            // definujeme explicitně s $http = null, ať si klient postaví vlastní klienta.
+            \MyInvoice\Service\License\LicenseClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\License\LicenseClient(
+                $c->get(Config::class),
+                $c->get(LoggerInterface::class),
+            ),
+            // EPO klient má volitelný Guzzle pouze jako test seam. Produkce musí
+            // použít jeho vlastní timeout/TLS/no-redirect konfiguraci.
+            \MyInvoice\Service\Epo\EpoClient::class => fn () => new \MyInvoice\Service\Epo\EpoClient(
+                null,
+            ),
+            \MyInvoice\Service\Epo\EpoDirectClient::class => fn () => new \MyInvoice\Service\Epo\EpoDirectClient(
+                null,
+                $config->get('epo_test', false) ? 'test' : 'production',
             ),
 
             // IpMatcher má v konstruktoru volitelný `?Config $config = null`. Autowiring
@@ -150,6 +293,9 @@ final class Bootstrap
             // Za reverse proxy → audit log a brute-force lockout vidí IP proxy místo
             // reálného klienta. Explicitní injekce Configu to opravuje.
             IpMatcher::class       => fn (ContainerInterface $c) => new IpMatcher($c->get(Config::class)),
+
+            // Repo sazba ČNB pro úrok z prodlení (penalizace) — interface → repository.
+            \MyInvoice\Service\Penalty\RepoRateProvider::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Repository\CnbRepoRateRepository::class),
 
             // Kniha jízd — registry parserů detailních výpisů tankování. Pořadí = priorita:
             // konkrétní vendor parsery → AI fallback → univerzální summary (vždy uspěje).
@@ -160,6 +306,40 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Logbook\Fuel\AiFuelStatementParser::class),
                 $c->get(\MyInvoice\Service\Logbook\Fuel\SummaryFuelParser::class),
             ]),
+
+            // F7 — AI extrakční brána (LlmGateway). PHP-DI s useAttributes(false)
+            // neumí autowire interface → explicitní bind na router. Konkrétní klienti
+            // (AnthropicClient), LlmProviderRegistry i ResidencyPolicy zůstávají autowired.
+            \MyInvoice\Service\Import\LlmGatewayInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Import\LlmGatewayRouter::class),
+            \MyInvoice\Service\Ai\EmbeddingGatewayInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Ai\EmbeddingGatewayRouter::class),
+            \MyInvoice\Service\Ai\LlmClassifierInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Ai\LlmClassifierRouter::class),
+            \MyInvoice\Service\Ai\AiProviderHttpClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Ai\AiProviderHttpClient(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Import\LlmProviderRegistry::class),
+                $c->get(\MyInvoice\Service\Import\ResidencyPolicy::class),
+                $c->get(\MyInvoice\Service\Ai\AiDpaGate::class),
+                $c->get(LoggerInterface::class),
+            ),
+
+            // Non-Anthropic klienti mají volitelný `?GuzzleHttp\Client $http = null`
+            // (test seam). Autowire by ho vyplnil bare Guzzle (bez http_errors=false →
+            // non-2xx by házelo výjimky) → definujeme explicitně s $http = null,
+            // aby si klient postavil vlastní nakonfigurovaný Guzzle interně.
+            \MyInvoice\Service\Import\AzureOpenAiClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Import\AzureOpenAiClient(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(LoggerInterface::class),
+            ),
+            \MyInvoice\Service\Import\OpenAiClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Import\OpenAiClient(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(LoggerInterface::class),
+            ),
+            \MyInvoice\Service\Import\GeminiClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Import\GeminiClient(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(LoggerInterface::class),
+            ),
 
             // "Upload PDF" bankovních výpisů — registry bank-specifických PDF parserů
             // (banky bez GPC/ABO exportu). PŘIDÁNÍ NOVÉ BANKY: nová třída implements
@@ -181,7 +361,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → Auth → SessionLock → RequireMfa → Role → SupplierScope → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   IpAllowlist → FirstRunLock → Auth → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         $app->addBodyParsingMiddleware();                            // innermost
         $app->addRoutingMiddleware();
@@ -189,8 +369,10 @@ final class Bootstrap
         $app->add($container->get(CsrfMiddleware::class));           // potřebuje session z Auth (bearer skip)
         $app->add($container->get(RateLimitMiddleware::class));      // chrání forgot/setup/login/ARES + per-user/per-token limity
         $app->add($container->get(ApiScopeMiddleware::class));       // bearer-only: enforce read / read_write scope
+        $app->add($container->get(PermissionMiddleware::class));     // jemnozrnná route permission kontrola
         $app->add($container->get(SupplierScopeMiddleware::class));  // multi-supplier scope (X-Supplier-Id / token's supplier_id)
-        $app->add($container->get(RoleMiddleware::class));           // RBAC — kontrola role po Auth
+        $app->add($container->get(DemoReadOnlyMiddleware::class));   // demo: globální zákaz business mutací
+        $app->add($container->get(LicenseMiddleware::class));        // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
         $app->add($container->get(RequireMfaMiddleware::class));     // assurance + povinný MFA setup (bearer skip)
         $app->add($container->get(SessionLockMiddleware::class));    // autoritativní idle/manual lock browser session
         $app->add($container->get(AuthMiddleware::class));           // načte session nebo bearer token

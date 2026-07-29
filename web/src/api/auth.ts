@@ -1,10 +1,12 @@
-import { api } from './client'
+import { api, setCsrfToken } from './client'
+import type { LicenseSummary } from './license'
 
 export interface User {
   id: number
   email: string
   name: string
-  role: 'admin' | 'accountant' | 'readonly'
+  role: RoleSummary
+  is_superadmin: boolean
   locale: 'cs' | 'en'
   totp_enabled?: boolean
   must_setup_totp?: boolean
@@ -12,6 +14,14 @@ export interface User {
   mfa_methods?: Array<'passkey' | 'totp'>
   passkey_count?: number
   must_setup_mfa?: boolean
+}
+
+export interface RoleSummary {
+  id: number
+  name: string
+  type: 'superadmin' | 'staff' | 'client'
+  is_active?: boolean
+  system_key?: string | null
 }
 
 export interface SupplierBrief {
@@ -35,11 +45,21 @@ export interface SupplierBrief {
   /** Děkovný e-mail za úhradu (issue #57) — řídí checkbox v mark-paid modalu. */
   payment_thanks_enabled: boolean
   payment_thanks_default_checked: boolean
+  /** Režim účetnictví (Epic F1). 'double_entry' zpřístupní účetní UI (deník, osnova, období). */
+  accounting_mode?: 'tax_evidence' | 'double_entry'
+  /** Skladová evidence (Epic SKLAD) — gate sekce Sklad v menu + editorů. Funguje nezávisle na accounting_mode. */
+  stock_enabled?: boolean
 }
 
 export interface SetupStatus {
   needs_setup: boolean
   version: string
+  demo?: {
+    enabled: boolean
+    auto_login: boolean
+    email: string
+    password: string
+  }
   passwordless_login_enabled: boolean
   captcha: {
     provider: 'turnstile' | 'none'
@@ -99,6 +119,9 @@ export interface AuthSessionContract {
 export interface MeResponse extends AuthSessionContract {
   current_supplier_id: number
   suppliers: SupplierBrief[]
+  permissions: Record<string, 0 | 1 | 2>
+  permission_catalog_version: string
+  license?: LicenseSummary
 }
 
 export interface PasskeyCredential {
@@ -163,6 +186,31 @@ export interface SetupPayload {
   }
 }
 
+export interface SetupSampleResult {
+  clients: number
+  projects: number
+  invoices: number
+  credit_notes: number
+  vendors: number
+  purchase_invoices: number
+  recurring: number
+  cars: number
+  trips: number
+  fuelings: number
+  cash_registers: number
+  cash_documents: number
+  accounting_enabled: boolean
+  stock_items: number
+  stock_documents: number
+  manufacturers: number
+  eshop_categories: number
+  assets: number
+  bank_statements: number
+  bank_transactions: number
+  journal_entries: number
+  warnings: string[]
+}
+
 export const authApi = {
   setupStatus: () => api.get<SetupStatus>('/auth/setup-status').then((r) => r.data),
 
@@ -190,10 +238,7 @@ export const authApi = {
 
   /** Sample data generator po setup wizardu (jen pokud DB nemá data). */
   setupSample: () =>
-    api.post<{
-      clients: number; projects: number; invoices: number; credit_notes: number
-      cars: number; trips: number; fuelings: number
-    }>(
+    api.post<SetupSampleResult>(
       '/auth/setup-sample',
     ).then((r) => r.data),
 
@@ -255,7 +300,10 @@ export const authApi = {
 
   logout: () => api.post('/auth/logout').then(() => undefined),
 
-  me: () => api.get<MeResponse>('/auth/me').then(r => r.data),
+  me: () => api.get<MeResponse>('/auth/me').then((r) => {
+    setCsrfToken(r.data.csrf_token)
+    return r.data
+  }),
 
   changePassword: (current: string, next: string) =>
     api.post('/auth/change-password', {

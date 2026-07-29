@@ -1,7 +1,7 @@
-# Detekuje a maze OBSOLETE Docker images po MyInvoice.cz (uvolni disk).
+# Detekuje a maze OBSOLETE Docker images po MyUcto.cz (uvolni disk).
 #
 # Co se maze:
-#   1. stare myinvoice / ghcr myinvoice image, ktere NEpouziva zadny kontejner
+#   1. stare myucto / ghcr myucto image, ktere NEpouziva zadny kontejner
 #      (running i exited) ANI je nereferencuje compose soubor,
 #   2. dangling (<none>) vrstvy.
 # Co je VZDY chranene: image pouzivany jakymkoli kontejnerem + image z `image:`
@@ -21,8 +21,8 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Write-Error "dock
 
 function Ref-ToId([string]$ref) { (& docker image inspect $ref --format '{{.Id}}' 2>$null) }
 
-Write-Host "==> MyInvoice image ted:"
-docker images --format '  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}' | Select-String -Pattern 'myinvoice' | ForEach-Object { $_.Line }
+Write-Host "==> MyUcto image ted:"
+docker images --format '  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}' | Select-String -Pattern 'myucto' | ForEach-Object { $_.Line }
 Write-Host ""
 
 # --- chranene image ID (kontejnery + compose reference) --------------------
@@ -33,7 +33,7 @@ foreach ($cid in $cids) {
     if ($img) { [void]$protected.Add($img.Trim()) }
 }
 Get-ChildItem -Filter 'docker-compose*.yml' -ErrorAction SilentlyContinue | ForEach-Object {
-    Select-String -Path $_.FullName -Pattern '^\s*image:\s*(\S+myinvoice\S*)' | ForEach-Object {
+    Select-String -Path $_.FullName -Pattern '^\s*image:\s*(\S+myucto\S*)' | ForEach-Object {
         $ref = ($_.Matches[0].Groups[1].Value) -replace '\$\{[^}]*\}', ''
         if ($ref -and $ref -notmatch '^\s*$') {
             $id = Ref-ToId $ref
@@ -42,22 +42,22 @@ Get-ChildItem -Filter 'docker-compose*.yml' -ErrorAction SilentlyContinue | ForE
     }
 }
 
-# --- kandidati = myinvoice image NEchranene --------------------------------
+# --- kandidati = myucto image NEchranene --------------------------------
 $toRemove = @()
 $rows = & docker images --no-trunc --format '{{.ID}}|{{.Repository}}:{{.Tag}}'
 foreach ($row in $rows) {
     $parts = $row -split '\|', 2
     $id = $parts[0]; $ref = $parts[1]
     if (-not $id -or $ref -match '<none>') { continue }
-    if ($ref -notmatch 'myinvoice') { continue }
+    if ($ref -notmatch 'myucto') { continue }
     if ($protected.Contains($id)) { continue }
     $toRemove += $ref
 }
 
 if ($toRemove.Count -eq 0) {
-    Write-Host "==> Zadne obsolete myinvoice image (vse se pouziva nebo je v compose)."
+    Write-Host "==> Zadne obsolete myucto image (vse se pouziva nebo je v compose)."
 } else {
-    Write-Host "==> Obsolete myinvoice image k odstraneni:"
+    Write-Host "==> Obsolete myucto image k odstraneni:"
     $toRemove | ForEach-Object { Write-Host "    $_" }
     if ($DryRun) {
         Write-Host "    (-DryRun: nemazu)"

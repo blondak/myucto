@@ -192,7 +192,7 @@ final class IsdocExporter
         $this->el($dom, $root, 'UUID', $this->makeUuid($invoice));
         // IssuingSystem patří v root sekvenci před IssueDate (po EgovClassifiers).
         // Identifikuje generátor faktury — užitečné pro debugging accounting SW.
-        $this->el($dom, $root, 'IssuingSystem', 'MyInvoice.cz');
+        $this->el($dom, $root, 'IssuingSystem', 'MyÚčto.cz');
         $this->el($dom, $root, 'IssueDate', (string) $invoice['issue_date']);
         if (!empty($invoice['tax_date'])) {
             $this->el($dom, $root, 'TaxPointDate', (string) $invoice['tax_date']);

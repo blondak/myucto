@@ -60,8 +60,8 @@ final class VatClassificationRepository
         $pdo->prepare(
             'INSERT INTO vat_classifications
                 (supplier_id, code, label, direction, dphdp3_line, kh_section,
-                 vat_rate, is_reverse_charge, kh_regime_code, kh_bad_debt, display_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 vat_rate, is_reverse_charge, kod_pred_pl, kh_regime_code, kh_bad_debt, display_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['code'],
@@ -72,6 +72,7 @@ final class VatClassificationRepository
             !empty($data['kh_section']) ? (string) $data['kh_section'] : null,
             isset($data['vat_rate']) ? (float) $data['vat_rate'] : null,
             !empty($data['is_reverse_charge']) ? 1 : 0,
+            self::normalizeKodPredPl($data['kod_pred_pl'] ?? null),
             in_array($data['kh_regime_code'] ?? null, ['0', '1', '2'], true) ? $data['kh_regime_code'] : null,
             in_array($data['kh_bad_debt'] ?? null, ['N', 'P'], true) ? $data['kh_bad_debt'] : null,
             (int) ($data['display_order'] ?? 100),
@@ -90,7 +91,7 @@ final class VatClassificationRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE vat_classifications
                 SET label = ?, direction = ?, dphdp3_line = ?, kh_section = ?,
-                    vat_rate = ?, is_reverse_charge = ?, kh_regime_code = ?, kh_bad_debt = ?,
+                    vat_rate = ?, is_reverse_charge = ?, kod_pred_pl = ?, kh_regime_code = ?, kh_bad_debt = ?,
                     display_order = ?, archived = ?
               WHERE id = ? AND supplier_id = ?'
         );
@@ -102,6 +103,7 @@ final class VatClassificationRepository
             !empty($data['kh_section']) ? (string) $data['kh_section'] : null,
             isset($data['vat_rate']) ? (float) $data['vat_rate'] : null,
             !empty($data['is_reverse_charge']) ? 1 : 0,
+            self::normalizeKodPredPl($data['kod_pred_pl'] ?? null),
             in_array($data['kh_regime_code'] ?? null, ['0', '1', '2'], true) ? $data['kh_regime_code'] : null,
             in_array($data['kh_bad_debt'] ?? null, ['N', 'P'], true) ? $data['kh_bad_debt'] : null,
             (int) ($data['display_order'] ?? 100),
@@ -123,6 +125,30 @@ final class VatClassificationRepository
         $stmt = $this->db->pdo()->prepare('UPDATE vat_classifications SET archived = 1 WHERE id = ? AND supplier_id = ?');
         $stmt->execute([$id, $supplierId]);
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Kód předmětu plnění pro KH (§ 92b–92f) — normalizace na tvar, který XSD připouští
+     * (`maxLength=3`), nebo `null`.
+     *
+     * Hodnotový výčet je v EXTERNÍM číselníku MFČR, ne v XSD, takže se proti němu
+     * validovat nedá — kontroluje se jen tvar. Vymýšlet si vlastní seznam kódů by bylo
+     * horší než žádná kontrola: seznam by se s číselníkem rozešel a odmítal by legitimní
+     * hodnoty.
+     *
+     * Do doplnění zápisu byl sloupec jen ČTEN — migrace 0127 do něj plošně nasadila `'4'`
+     * (stavební práce) pro všechny tuzemské režimy a uživatel neměl jak to změnit.
+     * Dodavatel odpadu, zlata nebo zboží z přílohy 6 tak posílal do KH systematicky
+     * špatný kód.
+     */
+    private static function normalizeKodPredPl(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $digits = preg_replace('/\D/', '', (string) $value) ?? '';
+
+        return $digits === '' ? null : substr($digits, 0, 3);
     }
 
     private function cast(array $r): array

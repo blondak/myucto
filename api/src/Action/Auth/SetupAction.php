@@ -34,8 +34,39 @@ final class SetupAction
         private readonly SessionManager $sessions,
         private readonly Config $config,
         private readonly SupplierRegistryEnricher $enricher,
+        // SEC-01: brání „nárokování" cizího bankovního účtu už při initial setupu.
+        private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
         private readonly SessionCookieFactory $sessionCookies,
     ) {}
+
+    /**
+     * SEC-01 (2. kolo): setup sice běží jen nad prázdnou tabulkou users, ale
+     * `currencies` a `bank_statements` prázdné být nemusí (obnova dat, znovu-setup
+     * po smazání uživatelů). insertSupplier() zapisuje account_number/bank_code/iban
+     * stejně jako updateCurrency, takže musí projít stejným guardem — jinak je
+     * 409 z SettingsAction obejitelný přes /api/setup.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private function foreignBankAccountError(array $supplier): ?string
+    {
+        $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;
+        if ($bank === null) {
+            return null;
+        }
+        $account = trim((string) ($bank['account_number'] ?? '')) ?: null;
+        $iban    = trim((string) ($bank['iban'] ?? '')) ?: null;
+
+        // supplier ještě nemá id → porovnává se proti všem firmám.
+        if ($this->bankOwnership->accountClaimedByOtherSupplier(0, $account, $iban)) {
+            return 'Tento bankovní účet už je evidovaný u jiné firmy.';
+        }
+        if ($this->bankOwnership->accountBlockedByForeignStatements(0, $account, $iban)) {
+            return 'K tomuto účtu jsou v systému bankovní výpisy jiné firmy.';
+        }
+
+        return null;
+    }
 
     public function __invoke(Request $request, Response $response): Response
     {
@@ -81,6 +112,12 @@ final class SetupAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
+        if ($supplier !== null && ($bankErr = $this->foreignBankAccountError($supplier)) !== null) {
+            return Json::error($response, 'validation_failed', $bankErr, 409, [
+                'fields' => ['supplier.bank_account.account_number' => [$bankErr]],
+            ]);
+        }
+
         $pdo = $this->db->pdo();
 
         try {
@@ -102,12 +139,19 @@ final class SetupAction
                 $pdo->rollBack();
                 return Json::error($response, 'setup_already_done', 'Setup již proběhl.', 409);
             }
-            $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, name, role, locale, is_active)
-                                   VALUES (?, ?, ?, "admin", "cs", 1)');
+            $superadminRoleId = (int) $pdo->query(
+                "SELECT id FROM roles WHERE system_key = 'superadmin' AND role_type = 'superadmin' AND is_active = 1 LIMIT 1"
+            )->fetchColumn();
+            if ($superadminRoleId <= 0) {
+                throw new \RuntimeException('Systémová role superadmin není dostupná. Spusť nejprve migrace.');
+            }
+            $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active)
+                                   VALUES (?, ?, ?, "admin", ?, "cs", 1)');
             $stmt->execute([
                 trim((string) $admin['email']),
                 $passwordHash,
                 trim((string) $admin['name']),
+                $superadminRoleId,
             ]);
             $userId = (int) $pdo->lastInsertId();
 
@@ -181,7 +225,14 @@ final class SetupAction
                 'id'    => $userId,
                 'email' => $admin['email'],
                 'name'  => $admin['name'],
-                'role'  => 'admin',
+                'role'  => [
+                    'id'         => $superadminRoleId,
+                    'name'       => 'Superadmin',
+                    'type'       => 'superadmin',
+                    'is_active'  => true,
+                    'system_key' => 'superadmin',
+                ],
+                'is_superadmin' => true,
                 'totp_enabled' => false,
                 'must_setup_totp' => $requireTotp,
                 'mfa_enabled' => false,

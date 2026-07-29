@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -33,7 +35,7 @@ final class ApprovalListAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'invoices.approval', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Admin only.', 403);
         }
 

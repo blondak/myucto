@@ -9,6 +9,13 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
 type RoleFilter = 'all' | 'customers' | 'vendors'
 
@@ -83,9 +90,55 @@ async function load(reset = true) {
   }
 }
 
-onMounted(async () => {
+function buildQuery(): Record<string, string> {
+  const q: Record<string, string> = {}
+  if (search.value) q.q = search.value
+  if (showArchived.value) q.archived = '1'
+  if (sort.value !== 'name') q.sort = sort.value
+  if (roleFilter.value === 'vendors' && categoryFilter.value !== null) q.category_id = String(categoryFilter.value)
+  return q
+}
+
+function applyQueryToPage(q: Record<string, string>) {
+  search.value = q.q ?? ''
+  showArchived.value = q.archived === '1'
+  sort.value = q.sort === 'revenue' || q.sort === 'last_activity' ? q.sort : 'name'
+  categoryFilter.value = q.category_id ? Number(q.category_id) : null
   load(true)
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'company', labelKey: 'client.company', required: true, sortable: true },
+  { key: 'ic', labelKey: 'common.ic' },
+  { key: 'email', labelKey: 'client.email' },
+  { key: 'count', labelKey: 'nav.projects' },
+  { key: 'amount', labelKey: 'common.revenue', required: true, sortable: true },
+  { key: 'last_activity', labelKey: 'common.last_activity', sortable: true },
+  { key: 'vat_payer', labelKey: 'client.vat_payer_label' },
+  { key: 'currency', labelKey: 'common.currency' },
+  // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
+  { key: 'dic', labelKey: 'common.dic', defaultHidden: true },
+  { key: 'payment_due', labelKey: 'client.payment_due_label', defaultHidden: true },
+]
+const tbl = useTablePrefs('clients', COLUMNS)
+const saved = useSavedFilters('clients', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+
+// R10: existující select i nový SortableTh píší do téhož `sort` refu — synchronizace s prefs.
+watch(() => tbl.sort.value, (s) => {
+  const v = s?.key
+  sort.value = v === 'revenue' || v === 'last_activity' ? v : 'name'
+})
+watch(sort, (v) => {
+  if (tbl.sort.value?.key !== v) tbl.toggleSort(v)
+})
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+}
+
+onMounted(async () => {
   expenseCategories.value = await expenseCategoriesApi.list(false).catch(() => [])
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  load(true)
 })
 watch(showArchived, () => load(true))
 watch(sort, () => load(true))
@@ -100,6 +153,17 @@ const navigateRow = useRowLink()
 function openClient(c: Client, e?: MouseEvent) {
   navigateRow(`/clients/${c.id}`, e)
 }
+
+// Kompaktní zápis splatnosti (payment_due_default + unit) — stejně jako ClientDetail.
+function formatPaymentDue(c: Client): string {
+  if (c.payment_due_default == null) return '—'
+  if (c.payment_due_unit === 'month') {
+    return c.payment_due_default === 1
+      ? t('client.payment_due_preset_month')
+      : `${c.payment_due_default}× ${t('client.payment_due_preset_month').toLowerCase()}`
+  }
+  return t('client.due_days_n', { n: c.payment_due_default })
+}
 </script>
 
 <template>
@@ -107,11 +171,12 @@ function openClient(c: Client, e?: MouseEvent) {
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-semibold">{{ roleFilter === 'vendors' ? t('client.title_vendors') : t('client.title') }}</h1>
       <RouterLink
-        v-if="auth.canWrite"
+        v-if="auth.canWrite('clients.create') || auth.isDemo"
         :to="roleFilter === 'vendors' ? '/clients/new?role=vendor' : '/clients/new'"
-        class="inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md"
+        :class="btnFilled('primary')"
       >
-        {{ roleFilter === 'vendors' ? '+ ' + t('purchase_invoice.new_vendor') : t('client.new') }}
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+        {{ roleFilter === 'vendors' ? t('purchase_invoice.new_vendor') : t('client.new') }}
       </RouterLink>
     </div>
 
@@ -160,27 +225,34 @@ function openClient(c: Client, e?: MouseEvent) {
           <option value="revenue">{{ t('common.sort_revenue') }}</option>
           <option value="last_activity">{{ t('common.sort_last_activity') }}</option>
         </select>
+        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <SavedFiltersMenu :ctrl="saved" />
+          <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+          <DensityToggle class="hidden md:block" :ctrl="tbl" />
+        </div>
       </div>
 
       <TableSkeleton v-if="loading" :rows="6" :cols="6" />
 
       <EmptyState v-else-if="!items.length"
         :title="t('client.no_data')"
-        :cta="t('client.create_first')"
+        :cta="auth.canWrite('clients.create') || auth.isDemo ? t('client.create_first') : undefined"
         :to="roleFilter === 'vendors' ? '/clients/new?role=vendor' : '/clients/new'" />
 
       <!-- Desktop: tabulka -->
-      <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first">
+      <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
           <tr>
-            <th class="text-left px-4 py-2.5 font-medium">{{ t('client.company') }}</th>
-            <th class="text-left px-4 py-2.5 font-medium">{{ t('common.ic') }}</th>
-            <th class="text-left px-4 py-2.5 font-medium">{{ t('client.email') }}</th>
-            <th class="text-center px-4 py-2.5 font-medium">{{ roleFilter === 'vendors' ? t('client.invoice_count_label') : t('nav.projects') }}</th>
-            <th class="text-right px-4 py-2.5 font-medium">{{ roleFilter === 'vendors' ? t('common.costs') : t('common.revenue') }}</th>
-            <th class="text-left px-4 py-2.5 font-medium">{{ t('common.last_activity') }}</th>
-            <th v-if="roleFilter === 'vendors'" class="text-center px-4 py-2.5 font-medium">{{ t('client.vat_payer_label') }}</th>
-            <th class="text-center px-4 py-2.5 font-medium">{{ t('common.currency') }}</th>
+            <SortableTh v-if="tbl.isVisible('company')" :label="t('client.company')" sort-key="name" :sort="tbl.sort.value" @toggle="onSortToggle" />
+            <th v-if="tbl.isVisible('ic')" class="text-left px-4 py-2.5 font-medium">{{ t('common.ic') }}</th>
+            <th v-if="tbl.isVisible('email')" class="text-left px-4 py-2.5 font-medium">{{ t('client.email') }}</th>
+            <th v-if="tbl.isVisible('count')" class="text-center px-4 py-2.5 font-medium">{{ roleFilter === 'vendors' ? t('client.invoice_count_label') : t('nav.projects') }}</th>
+            <SortableTh v-if="tbl.isVisible('amount')" :label="roleFilter === 'vendors' ? t('common.costs') : t('common.revenue')" sort-key="revenue" :sort="tbl.sort.value" align="right" @toggle="onSortToggle" />
+            <SortableTh v-if="tbl.isVisible('last_activity')" :label="t('common.last_activity')" sort-key="last_activity" :sort="tbl.sort.value" @toggle="onSortToggle" />
+            <th v-if="roleFilter === 'vendors' && tbl.isVisible('vat_payer')" class="text-center px-4 py-2.5 font-medium">{{ t('client.vat_payer_label') }}</th>
+            <th v-if="tbl.isVisible('currency')" class="text-center px-4 py-2.5 font-medium">{{ t('common.currency') }}</th>
+            <th v-if="tbl.isVisible('dic')" class="text-left px-4 py-2.5 font-medium">{{ t('common.dic') }}</th>
+            <th v-if="tbl.isVisible('payment_due')" class="text-center px-4 py-2.5 font-medium">{{ t('client.payment_due_label') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
@@ -191,7 +263,7 @@ function openClient(c: Client, e?: MouseEvent) {
             @auxclick.prevent="openClient(c, $event)"
             class="cursor-pointer hover:bg-neutral-50"
           >
-            <td class="px-4 py-3">
+            <td v-if="tbl.isVisible('company')" class="px-4 py-3">
               <div class="flex items-center gap-2">
                 <div class="font-medium text-neutral-900">{{ c.company_name }}</div>
                 <span v-if="c.is_customer !== false && c.is_vendor === true"
@@ -202,9 +274,9 @@ function openClient(c: Client, e?: MouseEvent) {
               </div>
               <div v-if="c.archived_at" class="text-xs text-neutral-400 mt-0.5">{{ t('common.archived') }}</div>
             </td>
-            <td class="px-4 py-3 font-mono text-xs text-neutral-600">{{ c.ic || '—' }}</td>
-            <td class="px-4 py-3 text-neutral-600">{{ c.main_email || '—' }}</td>
-            <td class="px-4 py-3 text-center">
+            <td v-if="tbl.isVisible('ic')" class="px-4 py-3 font-mono text-xs text-neutral-600">{{ c.ic || '—' }}</td>
+            <td v-if="tbl.isVisible('email')" class="px-4 py-3 text-neutral-600">{{ c.main_email || '—' }}</td>
+            <td v-if="tbl.isVisible('count')" class="px-4 py-3 text-center">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.purchase_count" class="inline-block px-2 py-0.5 text-xs bg-warning-50 text-warning-700 rounded">
                   {{ c.purchase_count }}
@@ -218,7 +290,7 @@ function openClient(c: Client, e?: MouseEvent) {
                 <span v-else class="text-neutral-300">—</span>
               </template>
             </td>
-            <td class="px-4 py-3 text-right font-mono">
+            <td v-if="tbl.isVisible('amount')" class="px-4 py-3 text-right font-mono">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.costs && c.costs > 0">{{ formatMoney(c.costs, 'CZK') }}</span>
                 <span v-else class="text-neutral-300">—</span>
@@ -228,7 +300,7 @@ function openClient(c: Client, e?: MouseEvent) {
                 <span v-else class="text-neutral-300">—</span>
               </template>
             </td>
-            <td class="px-4 py-3 text-neutral-600 text-xs">
+            <td v-if="tbl.isVisible('last_activity')" class="px-4 py-3 text-neutral-600 text-xs">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.last_purchase_date">{{ formatDate(c.last_purchase_date) }}</span>
                 <span v-else class="text-neutral-300">—</span>
@@ -238,11 +310,13 @@ function openClient(c: Client, e?: MouseEvent) {
                 <span v-else class="text-neutral-300">—</span>
               </template>
             </td>
-            <td v-if="roleFilter === 'vendors'" class="px-4 py-3 text-center">
+            <td v-if="roleFilter === 'vendors' && tbl.isVisible('vat_payer')" class="px-4 py-3 text-center">
               <span v-if="c.is_vat_payer === false" class="inline-block px-2 py-0.5 text-xs bg-warning-50 text-warning-700 rounded">{{ t('common.no') }}</span>
               <span v-else class="inline-block px-2 py-0.5 text-xs bg-success-50 text-success-700 rounded">{{ t('common.yes') }}</span>
             </td>
-            <td class="px-4 py-3 text-center text-neutral-600 font-mono text-xs">{{ c.currency_default }}</td>
+            <td v-if="tbl.isVisible('currency')" class="px-4 py-3 text-center text-neutral-600 font-mono text-xs">{{ c.currency_default }}</td>
+            <td v-if="tbl.isVisible('dic')" class="px-4 py-3 font-mono text-xs text-neutral-600">{{ c.dic || '—' }}</td>
+            <td v-if="tbl.isVisible('payment_due')" class="px-4 py-3 text-center text-xs text-neutral-600">{{ formatPaymentDue(c) }}</td>
           </tr>
         </tbody>
       </table></div>

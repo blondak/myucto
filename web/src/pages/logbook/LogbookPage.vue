@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 import TripsTab from './TripsTab.vue'
 import CarsTab from './CarsTab.vue'
 import FuelingsTab from './FuelingsTab.vue'
@@ -11,6 +12,7 @@ import SummariesTab from './SummariesTab.vue'
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 type Tab = 'trips' | 'cars' | 'fuel' | 'categories' | 'summary'
 const tabs: Tab[] = ['trips', 'cars', 'fuel', 'categories', 'summary']
@@ -30,6 +32,11 @@ const openNewFuelToken = ref(0)
 async function handleNewQuery() {
   const n = route.query.new
   if (n !== 'trip' && n !== 'fuel') return
+  if (auth.isDemo && n !== 'fuel') {
+    const q = { ...route.query }; delete q.new
+    await router.replace({ query: q })
+    return
+  }
   tab.value = n === 'trip' ? 'trips' : 'fuel'
   const q = { ...route.query }; delete q.new
   await router.replace({ query: q })

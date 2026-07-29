@@ -8,8 +8,12 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Export\CsvWriter;
 use MyInvoice\Service\Export\ExportPeriod;
 use MyInvoice\Service\Export\ExportPeriodResolver;
 use MyInvoice\Service\Export\IsdocExporter;
@@ -27,22 +31,16 @@ use ZipArchive;
 /**
  * Generický export faktur za měsíc nebo čtvrtletí do různých formátů:
  *
- *   GET /api/admin/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3&month=YYYY-MM[&type=invoice][&date_by=issue|tax]
- *   GET /api/admin/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3&period=quarterly&year=YYYY&quarter=1..4
+ *   GET /api/admin/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM[&type=invoice][&date_by=issue|tax]
+ *   GET /api/admin/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&period=quarterly&year=YYYY&quarter=1..4
  *
  * Sdílený filter: period + type + date_by + supplier_id (z X-Supplier-Id middleware).
  * Per-format: výstup MIME a filename.
  *
- * Přístup: admin, accountant nebo readonly (export je čtení).
+ * Přístup: admin nebo accountant.
  */
 final class ExportAction
 {
-    /**
-     * Strop pro sloučené PDF. Na rozdíl od ZIPu, který skládá už nacachovaná
-     * PDF, renderuje merge každý doklad znovu (bez ISDOC a výkazu práce), takže
-     * kvartál o stovkách faktur umí přetáhnout request timeout. ZIP export
-     * zůstává bez stropu — ten je levný.
-     */
     private const MAX_MERGED_INVOICES = 200;
 
     public function __construct(
@@ -63,7 +61,7 @@ final class ExportAction
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         // readonly smí exportovat data (čtení), jen nesmí nic měnit
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'utilities.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 
@@ -81,20 +79,10 @@ final class ExportAction
         $signPdf = filter_var($q['sign_pdf'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         if (($mergePdf || $signPdf) && $format !== 'pdf-zip') {
-            return Json::error(
-                $response,
-                'validation_failed',
-                'Volby merge_pdf a sign_pdf lze použít jen pro PDF export.',
-                400,
-            );
+            return Json::error($response, 'validation_failed', 'Volby merge_pdf a sign_pdf lze použít jen pro PDF export.', 400);
         }
         if ($signPdf && !$mergePdf) {
-            return Json::error(
-                $response,
-                'validation_failed',
-                'Podepsat lze pouze sloučený PDF export.',
-                400,
-            );
+            return Json::error($response, 'validation_failed', 'Podepsat lze pouze sloučený PDF export.', 400);
         }
 
         // Najdi faktury za období + supplier scope.
@@ -111,11 +99,12 @@ final class ExportAction
             $userId = isset($user['id']) ? (int) $user['id'] : null;
             [$filename, $content, $mime] = match ($format) {
                 'pdf-zip' => $mergePdf
-                    ? $this->buildMergedPdf($ids, $sid, $period, $type, $userId, $signPdf)
+                    ? $this->buildMergedPdf($ids, $sid, $period, $type, $userId, $signPdf, !DemoReadOnlyMiddleware::enabled($request))
                     : $this->buildPdfZip($ids, $period, $type, $userId),
                 'isdoc'   => $this->buildIsdoc($ids, $period),
                 'pohoda'  => $this->buildPohoda($ids, $sid, $period),
                 'stereo'  => $this->buildStereo($ids, $period),
+                'csv'     => $this->buildCsv($sid, $period, $dateBy, $type),
                 'money_s3' => $this->buildMoneyS3($ids, $period),
                 default   => throw new \InvalidArgumentException("Neznámý formát: $format"),
             };
@@ -210,7 +199,7 @@ final class ExportAction
 
         $content = (string) file_get_contents($tmpZip);
         @unlink($tmpZip);
-        $base = "myinvoice-{$period->label}" . ($type ? "-$type" : '');
+        $base = "myucto-{$period->label}" . ($type ? "-$type" : '');
         return ["$base.zip", $content, 'application/zip'];
     }
 
@@ -225,11 +214,11 @@ final class ExportAction
         string $type,
         ?int $userId,
         bool $sign,
+        bool $persistRates,
     ): array {
         if (count($ids) > self::MAX_MERGED_INVOICES) {
             throw new \LengthException(sprintf(
-                'Do jednoho PDF lze sloučit nejvýše %d faktur, období jich obsahuje %d. '
-                . 'Zvol kratší období nebo použij ZIP export.',
+                'Do jednoho PDF lze sloučit nejvýše %d faktur, období jich obsahuje %d. Zvol kratší období nebo použij ZIP export.',
                 self::MAX_MERGED_INVOICES,
                 count($ids),
             ));
@@ -242,7 +231,7 @@ final class ExportAction
             throw new \RuntimeException('Dodavatel nebyl nalezen.');
         }
 
-        $result = $this->mergedPdf->export($ids, $supplier, $userId, $sign);
+        $result = $this->mergedPdf->export($ids, $supplier, $userId, $sign, $persistRates);
         try {
             $content = file_get_contents($result['path']);
             if ($content === false) {
@@ -252,7 +241,7 @@ final class ExportAction
             @unlink($result['path']);
         }
 
-        $base = "myinvoice-{$period->label}" . ($type ? "-$type" : '');
+        $base = "myucto-{$period->label}" . ($type ? "-$type" : '');
         return ["$base.pdf", $content, 'application/pdf'];
     }
 
@@ -284,6 +273,70 @@ final class ExportAction
     {
         $r = $this->stereo->export($ids, $period->label);
         return [$r['filename'], $r['content'], $r['mime']];
+    }
+
+    /**
+     * CSV přehled vydaných faktur za období (UTF-8 BOM, `;`) — jeden soubor pro
+     * účetní/Excel. Stejný výběr dokladů jako ostatní formáty (findInvoiceIds),
+     * jen s plnými sloupci pro tabulku.
+     *
+     * @return array{0:string,1:string,2:string}
+     */
+    private function buildCsv(int $sid, ExportPeriod $period, string $dateBy, string $type): array
+    {
+        $dateExpr = $dateBy === 'tax' ? 'COALESCE(i.tax_date, i.issue_date)' : 'i.issue_date';
+        $params = [$sid, $period->dateFrom, $period->dateToExclusive];
+        $typeFilter = '';
+        if ($type !== '' && in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation'], true)) {
+            $typeFilter = ' AND i.invoice_type = ?';
+            $params[] = $type;
+        }
+        $sql = "SELECT i.varsymbol, i.invoice_type,
+                       c.company_name AS client_company_name,
+                       p.name AS project_name,
+                       i.issue_date, i.tax_date, i.due_date,
+                       cur.code AS currency,
+                       i.total_without_vat, i.total_vat, i.total_with_vat, i.amount_to_pay,
+                       i.status, i.paid_at
+                  FROM invoices i
+                  JOIN clients c ON c.id = i.client_id
+             LEFT JOIN projects p ON p.id = i.project_id
+                  JOIN currencies cur ON cur.id = i.currency_id
+                 WHERE i.supplier_id = ?
+                   AND $dateExpr >= ?
+                   AND $dateExpr < ?
+                   AND i.status IN ('issued','sent','reminded','paid')
+                   $typeFilter
+              ORDER BY $dateExpr, i.id";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $header = [
+            'VS', 'Typ', 'Klient', 'Zakázka', 'Vystaveno', 'DUZP', 'Splatnost',
+            'Měna', 'Bez DPH', 'DPH', 'Celkem', 'K úhradě', 'Stav', 'Zaplaceno',
+        ];
+        $csvRows = [];
+        foreach ($rows as $r) {
+            $csvRows[] = [
+                CsvWriter::safe($r['varsymbol'] ?? ''),
+                CsvWriter::safe($r['invoice_type'] ?? ''),
+                CsvWriter::safe($r['client_company_name'] ?? ''),
+                CsvWriter::safe($r['project_name'] ?? ''),
+                $r['issue_date'] ?? '',
+                $r['tax_date'] ?? '',
+                $r['due_date'] ?? '',
+                $r['currency'] ?? '',
+                number_format((float) ($r['total_without_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['total_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['total_with_vat'] ?? 0), 2, '.', ''),
+                number_format((float) ($r['amount_to_pay'] ?? 0), 2, '.', ''),
+                $r['status'] ?? '',
+                $r['paid_at'] ?? '',
+            ];
+        }
+
+        return ["myucto-{$period->label}.csv", CsvWriter::build($header, $csvRows), 'text/csv; charset=utf-8'];
     }
 
     /**

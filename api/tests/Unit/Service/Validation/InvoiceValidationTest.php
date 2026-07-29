@@ -218,6 +218,32 @@ final class InvoiceValidationTest extends TestCase
         self::assertArrayHasKey('items.0.oss_rate_type', $err);
     }
 
+    /**
+     * Zrcadlo PurchaseInvoiceValidationTest::testCreditNoteWithPositiveTotalWarns.
+     *
+     * Vydaný dobropis s kladným součtem se ve výkazech DPH/KH PŘIČTE místo odečtení
+     * (VatLedgerService bere znaménko z položek), zatímco deník ho podle invoice_type
+     * obrátí — deník a přiznání si pak protiřečí. Dvojí negaci blokuje
+     * InvoiceAmountPolicy; tohle je opačný případ, kdy se znaménko neotočilo vůbec.
+     */
+    public function testCreditNoteWithPositiveTotalWarns(): void
+    {
+        $invoice = ['invoice_type' => 'credit_note', 'total_without_vat' => 1000.0];
+        self::assertSame(['credit_note_positive_total'], InvoiceValidation::warnings($invoice));
+    }
+
+    public function testCreditNoteWithNegativeTotalHasNoWarning(): void
+    {
+        $invoice = ['invoice_type' => 'credit_note', 'total_without_vat' => -1000.0];
+        self::assertSame([], InvoiceValidation::warnings($invoice));
+    }
+
+    public function testRegularInvoiceWithPositiveTotalHasNoWarning(): void
+    {
+        $invoice = ['invoice_type' => 'invoice', 'total_without_vat' => 1000.0];
+        self::assertSame([], InvoiceValidation::warnings($invoice));
+    }
+
     /** @return array<string,mixed> */
     private function validOssInvoice(): array
     {

@@ -3,7 +3,7 @@
 #
 #   1. Vygeneruje .env s random DB hesly (pokud chybí)
 #   2. Vygeneruje cfg.docker.php z cfg.sample.php s random secrets (pokud chybí)
-#   3. docker compose pull (image z ghcr.io/radekhulan/myinvoice:latest)
+#   3. docker compose pull (image z ghcr.io/radekhulan/myucto:latest)
 #   4. docker compose up -d (entrypoint sám spustí migrace před apache2-foreground)
 #   5. Počká až app odpoví na HTTP (= migrace doběhly, apache běží)
 #   6. Vypíše URL k setup wizardu
@@ -23,7 +23,7 @@ elif [[ -f "${SCRIPT_DIR}/../${COMPOSE_FILE}" ]]; then
   PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   echo "ERROR: ${COMPOSE_FILE} not found next to script ani v ${SCRIPT_DIR}/.." >&2
-  echo "       Stáhni jej z https://raw.githubusercontent.com/radekhulan/myinvoice/master/${COMPOSE_FILE}" >&2
+  echo "       Stáhni jej z https://raw.githubusercontent.com/radekhulan/myucto/master/${COMPOSE_FILE}" >&2
   exit 1
 fi
 cd "$PROJECT_ROOT"
@@ -37,8 +37,25 @@ fi
 
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
 
+# --- helpers pro robustní start -------------------------------------------
+app_log_tail() { "${COMPOSE[@]}" logs --no-color --tail "${1:-40}" app 2>&1 || true; }
+app_network_broken() {
+  app_log_tail 40 | grep -qiE 'getaddrinfo (for )?db failed|getaddrinfo failed|php_network_getaddresses|Temporary failure in name resolution|Name or service not known'
+}
+port_holder_status() {
+  local port="$1" out name image ports
+  out="$(docker ps --format '{{.Names}}|{{.Image}}|{{.Ports}}' 2>/dev/null || true)"
+  while IFS='|' read -r name image ports; do
+    [[ -z "${ports:-}" ]] && continue
+    case "$ports" in *":${port}->"*) ;; *) continue ;; esac
+    if [[ "$name" == *myucto* || "$image" == *myucto* ]]; then echo "OURS $name";
+    else echo "FOREIGN $name $image"; fi
+    return 0
+  done <<< "$out"
+}
+
 # Smart: pokud už app běží, tohle je spíš update než čerstvá instalace.
-running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myinvoice | head -1 || true)"
+running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myucto | head -1 || true)"
 if [[ -n "$running_image" ]]; then
   echo "==> Pozn.: app už běží (image '${running_image}'). Pro pouhou aktualizaci použij cmd/docker-update.sh."
   echo "    (tenhle skript je idempotentní — klidně pokračuj, jen přepulluje a nahodí znovu)"
@@ -50,11 +67,11 @@ if [[ ! -f .env ]]; then
   DB_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '=+/' | head -c 28)
   DB_PASSWORD=$(openssl rand -base64 24      | tr -d '=+/' | head -c 28)
   cat > .env <<EOF
-# MyInvoice.cz — Docker compose env (gitignored)
+# MyUcto.cz — Docker compose env (gitignored)
 APP_PORT=8080
 DB_PORT=3307
-DB_NAME=myinvoice
-DB_USER=myinvoice
+DB_NAME=myucto
+DB_USER=myucto
 DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
 DB_PASSWORD=${DB_PASSWORD}
 EOF
@@ -83,7 +100,7 @@ if [[ ! -f cfg.docker.php ]]; then
       }
   ' cfg.docker.php
   sed -i.bak \
-      -e "s|'name'    => 'myinvoice',|'name'    => '${DB_NAME}',|" \
+      -e "s|'name'    => 'myucto',|'name'    => '${DB_NAME}',|" \
       -e "s|'user'    => 'root',|'user'    => '${DB_USER}',|" \
       -e "s|'pass'    => 'CHANGE-ME',|'pass'    => '${DB_PASSWORD}',|" \
       -e "s|'pepper' => 'CHANGE-ME',|'pepper' => '${PEPPER}',|" \
@@ -106,36 +123,63 @@ fi
 echo "==> Pulling image from GHCR…"
 "${COMPOSE[@]}" pull app
 
-# --- 4. up -----------------------------------------------------------------
-echo "==> Starting stack…"
-"${COMPOSE[@]}" up -d db app
+# --- pre-flight: hostový port aplikace ------------------------------------
+echo "==> Pre-flight: kontrola hostového portu ${APP_PORT}…"
+holder="$(port_holder_status "${APP_PORT}")"
+if [[ "$holder" == FOREIGN* ]]; then
+  echo "ERROR: Host port ${APP_PORT} drží CIZÍ Docker kontejner: ${holder#FOREIGN }" >&2
+  echo "       Uvolni ho ('docker stop …') nebo změň APP_PORT v .env a spusť znovu." >&2
+  exit 1
+elif [[ "$holder" == OURS* ]]; then
+  echo "    Port ${APP_PORT} drží vlastní myucto kontejner (${holder#OURS }) — OK."
+fi
 
-# --- 5. wait for DB + migrate ---------------------------------------------
+# --- 4. up databáze --------------------------------------------------------
+# --remove-orphans: uklidí stale kontejnery z jiného compose souboru; jinak
+# zbylý app kontejner drží port a nový se nepřipojí k síti ('port already
+# allocated' → app nepřeloží 'db' → migrace v cyklu padají).
+echo "==> Starting database…"
+"${COMPOSE[@]}" up -d --remove-orphans db
+
+# --- 5. wait for DB health -------------------------------------------------
 echo "==> Waiting for database to become healthy…"
-for i in {1..30}; do
+for i in {1..45}; do
   status=$("${COMPOSE[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4)
   if [[ "$status" == "healthy" ]]; then echo "    DB ready."; break; fi
+  [[ "$status" == "unhealthy" ]] && echo "    DB hlásí 'unhealthy' — čekám dál (attempt $i/45)…"
   sleep 2
-  if [[ $i -eq 30 ]]; then
-    echo "ERROR: DB failed to become healthy in 60s. Check '${COMPOSE[*]} logs db'." >&2
+  if [[ $i -eq 45 ]]; then
+    echo "ERROR: DB failed to become healthy in ~90s. Check '${COMPOSE[*]} logs db'." >&2
     exit 1
   fi
 done
 
-# Migrace se spouští automaticky z `docker-entrypoint.sh` před apache2-foreground.
-# Místo druhého explicitního migrate (= race condition s entrypointem, viz issue
-# s duplicate PK v `migrations` tabulce) jen čekáme, až app odpoví na HTTP.
-# Používáme /api/health — je v ALLOWED_PATHS pro FirstRunLockMiddleware, takže
-# vrací 200 i ve fresh-install state (kdy /api/version dostane 423 Locked).
+# --- 4b. up app ------------------------------------------------------------
+echo "==> Starting app…"
+"${COMPOSE[@]}" up -d --remove-orphans app
+
+# --- 6. wait for app (entrypoint runs migrations) -------------------------
+# Migrace se spouští automaticky z entrypointu. Místo druhého explicitního
+# migrate (= race condition s entrypointem) jen čekáme, až app odpoví na
+# /api/health (v ALLOWED_PATHS pro FirstRunLockMiddleware → 200 i ve fresh state).
 echo "==> Waiting for app to become available (entrypoint runs migrations)…"
-for i in {1..60}; do
-  if curl -fsS -o /dev/null "http://localhost:${APP_PORT}/api/health"; then
+recovered=0
+for i in {1..90}; do
+  if curl -fsS -m 3 -o /dev/null "http://localhost:${APP_PORT}/api/health"; then
     echo "    App ready."
     break
   fi
+  if (( i % 5 == 0 )) && [[ "$recovered" == "0" ]] && app_network_broken; then
+    echo "    App běží, ale nemá compose síť (DNS 'db' selhává) → auto-recovery: force-recreate app." >&2
+    "${COMPOSE[@]}" up -d --remove-orphans --force-recreate app >/dev/null 2>&1 || true
+    recovered=1
+    sleep 3
+    continue
+  fi
   sleep 2
-  if [[ $i -eq 60 ]]; then
-    echo "ERROR: App failed to respond in 120s. Check '${COMPOSE[*]} logs app'." >&2
+  if [[ $i -eq 90 ]]; then
+    echo "ERROR: App failed to respond in time. Check '${COMPOSE[*]} logs app':" >&2
+    app_log_tail 25 >&2
     exit 1
   fi
 done
@@ -144,8 +188,8 @@ done
 APP_PORT="${APP_PORT:-8080}"
 echo ""
 echo "============================================================"
-echo " MyInvoice.cz is up at:  http://localhost:${APP_PORT}"
-echo " Image:                  ghcr.io/radekhulan/myinvoice:latest"
+echo " MyUcto.cz is up at:  http://localhost:${APP_PORT}"
+echo " Image:                  ghcr.io/radekhulan/myucto:latest"
 echo ""
 echo " The browser will land on the setup wizard:"
 echo "   1. Admin user (name, email, password ≥ 12 chars)"

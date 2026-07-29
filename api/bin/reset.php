@@ -7,6 +7,7 @@ declare(strict_types=1);
  *
  *   php api/bin/reset.php             # interaktivní potvrzení
  *   php api/bin/reset.php --yes       # bez ptaní
+ *   php api/bin/reset.php --dry-run   # NIC nemaže, jen vypíše co by smazal (+ počty řádků)
  *   php api/bin/reset.php --yes --keep-cache   # ponechá ARES/VIES cache
  *   php api/bin/reset.php --keep-users-supplier # ponechá účet(y) + dodavatele + jeho konfiguraci,
  *                                               # smaže jen byznys data (klienti, doklady, banka…)
@@ -15,10 +16,16 @@ declare(strict_types=1);
  *       takže nezaostává za schématem — nové tabulky (vč. secretů: IMAP hesla,
  *       podpisové certifikáty) se po migraci automaticky vyčistí.
  * Ponechává (globální číselníky + schema): countries, vat_rates, units,
- *       tax_constants, exchange_rates (cache ČNB kurzů — drahé refetchnout), migrations.
+ *       tax_constants, exchange_rates (cache ČNB kurzů — drahé refetchnout), migrations,
+ *       statement_versions/statement_rows/statement_account_map (výkazy, seed 1012),
+ *       cnb_repo_rates (seed 1048), systémové role a jejich oprávnění (seed 1074).
  *       S --keep-cache navíc ares_cache/vies_cache/crpdph_cache.
  * Globální seed (supplier_id IS NULL) zůstává u: vat_classifications,
- *       bank_email_notice_providers — maže se jen per-tenant.
+ *       bank_email_notice_providers, posting_rules — maže se jen per-tenant.
+ * POZOR na per-tenant seedy z migrací (analytiky osnovy, bankovní pravidla): migrace
+ *       jsou evidované jako proběhlé, takže je migrate.php po resetu NEOBNOVÍ. Co má
+ *       dostat každá firma, patří do kódu (ChartOfAccountsTemplate + ChartOfAccountsSeeder),
+ *       ne jen do migrace — viz db/migrations/README-post-setup.md.
  * Vše ostatní (users, supplier, currencies, doklady, banka, dokumenty, podpisy,
  *       importy, cache přepočtů, …) se TRUNCATE.
  *
@@ -51,6 +58,7 @@ $args = array_flip(array_slice($argv, 1));
 $autoYes   = isset($args['--yes']) || isset($args['-y']);
 $keepCache = isset($args['--keep-cache']);
 $keepUsersSupplier = isset($args['--keep-users-supplier']);
+$dryRun    = isset($args['--dry-run']);
 
 $rootDir = Bootstrap::rootDir();
 
@@ -64,7 +72,7 @@ try {
 }
 
 echo "================================================\n";
-echo "  MyInvoice.cz — RESET DATA\n";
+echo "  MyÚčto.cz — RESET DATA\n";
 echo "================================================\n";
 echo "  DB:   " . $config->get('db.name') . " @ " . $config->get('db.host') . "\n";
 echo "  Root: $rootDir\n";
@@ -85,11 +93,16 @@ echo "\n";
 
 if ($keepUsersSupplier) {
     echo "Režim: --keep-users-supplier — ZACHOVÁ uživatele, dodavatele a jeho konfiguraci\n";
-    echo "       (měny, číslování, podepisování, e-mail/banka config, číselníky).\n";
+    echo "       (měny, číslování, podepisování, e-mail/banka config, číselníky,\n";
+    echo "        účtovou osnovu, předkontace a nastavení účetnictví).\n";
     echo "       Smaže BYZNYS data: klienti, doklady, banka, dokumenty, kniha jízd, recurring…\n\n";
 }
 
-if (!$autoYes) {
+if ($dryRun) {
+    echo "Režim: --dry-run — NIC se nemaže, jen výpis.\n\n";
+}
+
+if (!$autoYes && !$dryRun) {
     echo $keepUsersSupplier
         ? "POZOR: smaže všechna byznys data (účet a firma zůstanou). Pokračovat? (napiš 'ANO'): "
         : "POZOR: smaže veškerá data v systému. Pokračovat? (napiš 'ANO'): ";
@@ -112,6 +125,14 @@ $keep = [
     'tax_constants',  // globální daňové konstanty
     'exchange_rates', // cache kurzů ČNB — drahé refetchnout
     'migrations',     // evidence schématu
+    // Účetní globální seedy z migrací — migrate.php je znovu nenaseeduje
+    // (migrace jsou evidované jako proběhlé), proto se mazat NESMÍ.
+    'statement_versions',    // definice výkazů (rozvaha/VZZ, vyhl. 500/2002) — seed 1012
+    'statement_rows',        // řádky výkazů — seed 1012
+    'statement_account_map', // mapování účtů na řádky výkazů — seed 1012
+    'cnb_repo_rates',        // repo sazby ČNB pro úrok z prodlení — seed 1048
+    'bank_rule_templates',   // globální šablony bankovních pravidel — seed 1056
+    'remittance_map',        // globální mapa odvodů na účty ČNB — seed 1056
 ];
 // ARES/VIES/CRPDPH cache — defaultně mažeme, s --keep-cache ponecháme.
 if ($keepCache) {
@@ -122,6 +143,9 @@ if ($keepCache) {
 $partial = [
     'vat_classifications'         => 'supplier_id IS NOT NULL',
     'bank_email_notice_providers' => 'supplier_id IS NOT NULL', // ponech globální bankovní providery
+    'posting_rules'               => 'supplier_id IS NOT NULL', // ponech globální předkontace (seed 1006+)
+    'role_permissions'            => 'role_id NOT IN (SELECT id FROM roles WHERE system_key IS NOT NULL)',
+    'roles'                       => 'system_key IS NULL', // ponech systémové role (seed 1074)
 ];
 
 // --keep-users-supplier: zachovej účet(y) + dodavatele + jeho KONFIGURACI (měny, číslování,
@@ -133,6 +157,8 @@ if ($keepUsersSupplier) {
     $keep = array_merge($keep, [
         // Účet a přihlášení
         'users', 'sessions', 'trusted_devices', 'login_otps',
+        // Dynamické role musí zůstat spolu s uživateli a per-firma override
+        'roles', 'role_permissions', 'user_suppliers',
         // Identita dodavatele + měny + číslování dokladů
         'supplier', 'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
         // API tokeny (PAT)
@@ -142,33 +168,87 @@ if ($keepUsersSupplier) {
         'signature_role_profiles', 'signature_user_profiles', 'signature_document_overrides',
         'pdf_signature_output_settings',
         // E-mail / bankovní avíza (konfigurace, NE zpracované zprávy)
-        'bank_email_imap_settings', 'bank_email_account_mappings', 'email_templates',
+        'bank_email_imap_settings', 'bank_email_account_mappings', 'email_templates', 'email_profiles',
+        // Vlastní bankovní účty — konfigurace, ne pohyby. Bez nich by
+        // bank_email_account_mappings (výše) ukazovalo na neexistující účty a firma
+        // by po resetu neměla kam účtovat banku (analytic_suffix, viz 1109).
+        'supplier_bank_accounts',
+        // ÚČETNÍ KONFIGURACE. Účtová osnova musí přežít spolu se supplierem: firma si
+        // v `supplier.accounting_mode` nese double_entry, ale ChartOfAccountsSeeder se
+        // volá jen z aktivace účetnictví / změny režimu — ne per-request. Bez osnovy by
+        // tenhle režim skončil se zapnutým účetnictvím a prázdným účtovým rozvrhem.
+        'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
+        'auto_posting_policy', 'expense_classification_rules',
+        'journal_entry_templates', 'journal_entry_template_lines',
+        'bank_posting_rules',
         // Per-supplier číselníky
-        'expense_categories', 'revenue_categories', 'tax_profiles', 'trip_categories',
+        'expense_categories', 'revenue_categories', 'trip_categories',
+        // Daňové profily VČETNĚ vazebních tabulek — samotné tax_profiles bez dětí
+        // by zůstaly jako neúplný profil (děti, manžel/ka, činnosti).
+        'tax_profiles', 'tax_profile_activities', 'tax_profile_children',
+        'tax_profile_child_months', 'tax_profile_spouse_claims',
+        // POZOR: sklady, stromy kategorií a pokladny se ZÁMĚRNĚ NEZACHOVÁVAJÍ, i když
+        // vypadají jako konfigurace. Jsou to kontejnery byznys dat, která tenhle režim
+        // maže (skladové karty a pohyby, pokladní doklady), takže by zůstaly prázdné —
+        // a hlavně: `sample_data_entries` se maže, takže sklad z ukázkových dat by přežil
+        // BEZ evidence. Sample generátor pak padal na `uq_wh_supplier_code`
+        // („Duplicate entry '1-HLAVNI'") a purge už ten sirotek neuměl uklidit.
     ]);
     // vat_classifications + bank_email_notice_providers jsou konfigurace → ponech CELÉ.
     unset($partial['vat_classifications'], $partial['bank_email_notice_providers']);
     $keep[] = 'vat_classifications';
     $keep[] = 'bank_email_notice_providers';
+    // Předkontace jsou taky konfigurace — v tomhle režimu ponech i tenant override
+    // (např. přesměrování 501 → 501.900 ze seedu analytik), ne jen globální seed.
+    unset($partial['posting_rules']);
+    $keep[] = 'posting_rules';
 }
 
 $allTables = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
+$versionedTables = array_fill_keys(
+    $pdo->query(
+        "SELECT TABLE_NAME
+           FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_TYPE = 'SYSTEM VERSIONED'"
+    )->fetchAll(\PDO::FETCH_COLUMN),
+    true
+);
 
-echo "\n[reset] Mažu tabulky…\n";
-$pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+echo $dryRun ? "\n[reset] DRY-RUN — co by se smazalo:\n" : "\n[reset] Mažu tabulky…\n";
+if (!$dryRun) {
+    $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+}
 $total = 0;
+$failed = 0;
 foreach ($allTables as $t) {
     if (in_array($t, $keep, true)) {
+        if ($dryRun) {
+            echo sprintf("  KEEP     %-40s %6d řádků\n", $t, (int) $pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn());
+        }
         continue;
     }
     if (isset($partial[$t])) {
         try {
+            if ($dryRun) {
+                $would = (int) $pdo->query("SELECT COUNT(*) FROM `$t` WHERE {$partial[$t]}")->fetchColumn();
+                $stays = (int) $pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn() - $would;
+                echo sprintf("  PARTIAL  %-40s smaže %d, ponechá %d\n", $t, $would, $stays);
+                $total++;
+                continue;
+            }
             $deleted = $pdo->exec("DELETE FROM `$t` WHERE {$partial[$t]}");
             echo "  ✓ $t (ponechán globální seed, smazáno {$deleted} tenant řádků)\n";
             $total++;
         } catch (\PDOException $e) {
             echo "  - $t (skipped: " . $e->getMessage() . ")\n";
+            $failed++;
         }
+        continue;
+    }
+    if ($dryRun) {
+        echo sprintf("  TRUNCATE %-40s %6d řádků\n", $t, (int) $pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn());
+        $total++;
         continue;
     }
     try {
@@ -179,15 +259,23 @@ foreach ($allTables as $t) {
         // Fallback DELETE — TRUNCATE může v některých případech selhat i s FK_CHECKS=0.
         try {
             $pdo->exec("DELETE FROM `$t`");
-            echo "  ✓ $t (DELETE)\n";
+            if (isset($versionedTables[$t])) {
+                $pdo->exec("DELETE HISTORY FROM `$t`");
+                echo "  ✓ $t (DELETE + HISTORY)\n";
+            } else {
+                echo "  ✓ $t (DELETE)\n";
+            }
             $total++;
         } catch (\PDOException $e2) {
             echo "  - $t (skipped: " . $e2->getMessage() . ")\n";
+            $failed++;
         }
     }
 }
 
-$pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+if (!$dryRun) {
+    $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+}
 
 // PDF cache + storage cleanup — vč. přijaté faktury archive + XSD (necháváme)
 $dirs = [
@@ -197,9 +285,13 @@ $dirs = [
     \MyInvoice\Infrastructure\Config\RuntimePaths::storage('cache/mpdf'),
     \MyInvoice\Infrastructure\Config\RuntimePaths::storage('cache/twig'),
 ];
-echo "\n[reset] Čistím cache adresáře…\n";
+echo $dryRun ? "\n[reset] DRY-RUN — cache adresáře by se vyčistily:\n" : "\n[reset] Čistím cache adresáře…\n";
 foreach ($dirs as $d) {
     if (is_dir($d)) {
+        if ($dryRun) {
+            echo "  · $d\n";
+            continue;
+        }
         $count = wipeDir($d);
         echo "  ✓ $d ($count souborů)\n";
     }
@@ -207,7 +299,7 @@ foreach ($dirs as $d) {
 
 // Zruš setup-time MFA přepínače v cfg.local.php (jinak by stará hodnota přežila nový setup).
 // S --keep-users-supplier účet zůstává → NEsahej na auth policy (nesnižuj bezpečnost).
-if (!$keepUsersSupplier) {
+if (!$keepUsersSupplier && !$dryRun) {
     try {
         CfgLocalWriter::setKeys(CfgLocalWriter::resolveTargetDir($rootDir), [
             'auth.require_mfa' => null,
@@ -221,11 +313,21 @@ if (!$keepUsersSupplier) {
 }
 
 echo "\n================================================\n";
-echo "  HOTOVO. Vymazáno $total tabulek.\n";
-echo $keepUsersSupplier
-    ? "  Účet a dodavatel zůstaly zachované — můžeš rovnou zadávat reálná data.\n"
-    : "  Spusť `php api/bin/setup.php` pro nové úvodní nastavení.\n";
+if ($dryRun) {
+    echo "  DRY-RUN. Smazalo by se $total tabulek. Nic se NEZMĚNILO.\n";
+} else {
+    echo $failed === 0
+        ? "  HOTOVO. Vymazáno $total tabulek.\n"
+        : "  HOTOVO S CHYBAMI. Vymazáno $total tabulek, nesmazáno $failed tabulek.\n";
+    echo $keepUsersSupplier
+        ? "  Účet a dodavatel zůstaly zachované — můžeš rovnou zadávat reálná data.\n"
+        : "  Spusť `php api/bin/setup.php` pro nové úvodní nastavení.\n";
+}
 echo "================================================\n";
+
+if ($failed > 0) {
+    exit(1);
+}
 
 function wipeDir(string $dir): int
 {

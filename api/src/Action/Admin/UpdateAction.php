@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Admin;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -75,8 +76,7 @@ final class UpdateAction
 
     private function isAdmin(Request $request, Response $response, ?Response &$err): bool
     {
-        $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
-        if (!is_array($user) || ($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             $err = Json::error($response, 'forbidden', 'Pouze admin.', 403);
             return false;
         }

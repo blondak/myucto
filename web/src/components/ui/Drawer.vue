@@ -1,0 +1,85 @@
+<script setup lang="ts">
+import { onMounted, onBeforeUnmount } from 'vue'
+
+/**
+ * Generic right-anchored drawer — sourozenec Modal.vue se stejným kontraktem
+ * (title, widthClass, emit close, ESC, scroll-lock, Teleport, backdrop click).
+ * Liší se jen ukotvením vpravo a slide-in animací.
+ *
+ * Používej vždy s `v-if` na volajícím místě — mount/unmount řídí transition
+ * i registraci ESC listeneru.
+ */
+const props = withDefaults(defineProps<{
+  title: string
+  subtitle?: string | null
+  widthClass?: string
+}>(), {
+  subtitle: null,
+  widthClass: 'max-w-xl',
+})
+
+const emit = defineEmits<{
+  (e: 'close'): void
+}>()
+
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') emit('close')
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onKey)
+  // Zamkni body scroll dokud je drawer otevřený (shodně s Modal.vue).
+  document.body.style.overflow = 'hidden'
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKey)
+  document.body.style.overflow = ''
+})
+
+void props
+</script>
+
+<template>
+  <Teleport to="body">
+    <div class="fixed inset-0 z-50 bg-black/50" @click.self="emit('close')">
+      <transition
+        appear
+        enter-active-class="transition-transform duration-200 ease-in-out"
+        enter-from-class="translate-x-full"
+        enter-to-class="translate-x-0"
+        leave-active-class="transition-transform duration-200 ease-in-out"
+        leave-from-class="translate-x-0"
+        leave-to-class="translate-x-full"
+      >
+        <aside
+          class="ml-auto flex h-full w-full flex-col bg-surface shadow-xl"
+          :class="widthClass"
+          role="dialog"
+          aria-modal="true"
+        >
+          <header class="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-3 shrink-0">
+            <div class="min-w-0">
+              <h2 class="text-lg font-semibold truncate">{{ title }}</h2>
+              <p v-if="subtitle" class="text-sm text-neutral-500 truncate">{{ subtitle }}</p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <slot name="header-actions" />
+              <button type="button" @click="emit('close')" aria-label="Close"
+                class="cursor-pointer w-8 h-8 inline-flex items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </header>
+          <div class="flex-1 overflow-y-auto p-5">
+            <slot />
+          </div>
+          <footer v-if="$slots.footer" class="border-t border-neutral-200 px-5 py-3 shrink-0">
+            <slot name="footer" />
+          </footer>
+        </aside>
+      </transition>
+    </div>
+  </Teleport>
+</template>

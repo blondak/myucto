@@ -100,6 +100,55 @@ export interface AnthropicCredentialsUpdateResult {
   model: string | null
 }
 
+// ── AI provider brána (Epic F7) — 4 provideři za LlmGateway ─────────────────
+export type AiProvider = 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+export type AiDataRegion = 'eu' | 'us'
+
+/** Per-provider stav + capability descriptor (whitelist modelů, region). */
+export interface AiProviderInfo {
+  configured: boolean
+  extractions_count: number
+  /** whitelist model/deployment id z LlmProviderCapabilities. */
+  models: string[]
+  default_model: string | null
+  data_region: AiDataRegion
+  /** true = lze pro tohoto tenanta dosáhnout EU rezidence dat. */
+  eu_capable: boolean
+  residency_label?: string
+  // provider-specific non-secret echo (klíč se NIKDY nevrací — write-only):
+  endpoint?: string | null       // azure_openai
+  deployment?: string | null     // azure_openai
+  api_version?: string | null    // azure_openai
+  base_url?: string | null       // openai (EU: eu.api.openai.com)
+}
+
+export interface AiCredentialsResponse {
+  ai_provider: AiProvider
+  ai_data_region: AiDataRegion
+  ai_eu_residency_required: boolean
+  providers: Record<AiProvider, AiProviderInfo>
+}
+
+export interface AiCredentialsPayload {
+  provider: AiProvider
+  /** WRITE-ONLY — prázdné = zachovat stávající klíč. */
+  api_key?: string
+  default_model?: string
+  // azure_openai
+  endpoint?: string
+  deployment?: string
+  api_version?: string
+  // openai
+  base_url?: string
+}
+
+export interface AiCredentialsUpdateResult {
+  saved: boolean
+  test_ok: boolean
+  test_error: string | null
+  model: string | null
+}
+
 export interface AiExtractResult {
   ok: boolean
   purchase_invoice_id?: number
@@ -108,9 +157,26 @@ export interface AiExtractResult {
   document_kind?: 'invoice' | 'receipt' | 'credit_note' | 'advance'
   total_with_vat?: number | null
   currency?: string
-  source: 'isdoc_embedded' | 'isdocx' | 'duplicate' | 'ai' | 'ai_failed' | 'ai_invalid' | 'wrong_tenant' | 'no_vendor' | 'create_failed'
+  source: 'isdocx' | 'isdoc_embedded' | 'ai' | 'duplicate' | 'ai_failed' | 'ai_invalid' | 'wrong_tenant' | 'no_vendor' | 'create_failed'
   duplicate?: boolean
   message?: string
+  // provenance (Epic F7)
+  provider?: AiProvider
+  region?: AiDataRegion
+  model?: string
+  usage?: { input_tokens?: number; output_tokens?: number }
+  ai_data?: Record<string, unknown>
+  error?: string
+}
+
+/** Prodejní zrcadlo AiExtractResult — vytváří DRAFT vydané faktury (invoice_id místo purchase_invoice_id). */
+export interface AiIssuedExtractResult {
+  ok: boolean
+  invoice_id?: number
+  client_id?: number
+  source: 'isdocx' | 'isdoc_embedded' | 'ai' | 'duplicate' | 'ai_failed' | 'ai_invalid' | 'wrong_tenant' | 'no_customer' | 'create_failed' | 'isdoc_map_failed' | 'image_convert_failed'
+  provider?: AiProvider
+  region?: AiDataRegion
   model?: string
   usage?: { input_tokens?: number; output_tokens?: number }
   ai_data?: Record<string, unknown>
@@ -153,6 +219,16 @@ export const integrationsApi = {
     }).then(r => r.data),
   deleteAnthropicCreds: () =>
     api.delete<{ ok: boolean }>('/admin/imports/anthropic/credentials').then(r => r.data),
+
+  // AI provider brána (Epic F7) — per-provider credentials, admin-only, klíč write-only
+  getAiCredentials: () =>
+    api.get<AiCredentialsResponse>('/admin/imports/ai/credentials').then(r => r.data),
+  setAiCredentials: (payload: AiCredentialsPayload) =>
+    api.put<AiCredentialsUpdateResult>('/admin/imports/ai/credentials', payload).then(r => r.data),
+  deleteAiCredentials: (provider: AiProvider) =>
+    api.delete<{ ok: boolean }>('/admin/imports/ai/credentials', { params: { provider } }).then(r => r.data),
+  testAiConnection: (provider: AiProvider) =>
+    api.post<AiCredentialsUpdateResult>('/admin/imports/ai/credentials/test', { provider }).then(r => r.data),
   extractPdfAi: (file: File, model?: string, importBatchId?: string) => {
     const fd = new FormData()
     fd.append('pdf', file, file.name)
@@ -161,6 +237,16 @@ export const integrationsApi = {
     if (importBatchId) qs.set('import_batch_id', importBatchId)
     const url = qs.toString() ? `/admin/imports/ai-extract-pdf?${qs.toString()}` : '/admin/imports/ai-extract-pdf'
     return api.post<AiExtractResult>(url, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000, // 2 min — AI inference může trvat
+    }).then(r => r.data)
+  },
+  // Prodejní zrcadlo — AI import VYDANÉ faktury (draft vydané faktury k revizi v editoru).
+  extractPdfAiIssued: (file: File, model?: string) => {
+    const fd = new FormData()
+    fd.append('pdf', file, file.name)
+    const url = model ? `/admin/imports/ai-extract-pdf-issued?model=${model}` : '/admin/imports/ai-extract-pdf-issued'
+    return api.post<AiIssuedExtractResult>(url, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 120000, // 2 min — AI inference může trvat
     }).then(r => r.data)

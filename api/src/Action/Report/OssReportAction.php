@@ -7,9 +7,12 @@ namespace MyInvoice\Action\Report;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Oss\OssLedgerService;
+use MyInvoice\Service\Oss\OssThresholdService;
 use MyInvoice\Service\Oss\OssXmlExporter;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -23,12 +26,13 @@ final class OssReportAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly TaxSubmissionArchiver $archiver,
+        private readonly OssThresholdService $threshold,
     ) {}
 
     public function preview(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 
@@ -51,10 +55,35 @@ final class OssReportAction
         }
     }
 
+    /**
+     * Čerpání prahu 10 000 EUR (§ 8 odst. 3 ZDPH) za kalendářní rok.
+     *
+     * ZÁMĚRNĚ bez guardu `oss_disabled`, na rozdíl od zbytku OSS. Práh je potřeba znát
+     * PŘED registrací — právě nezaregistrovaný dodavatel se potřebuje dozvědět, že mu
+     * povinnost vznikla. Vracet 409 by informaci upřelo přesně tomu, kdo ji potřebuje.
+     */
+    public function threshold(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $year = (int) ($request->getQueryParams()['year'] ?? date('Y'));
+        if ($year < 2020 || $year > 2050) {
+            return Json::error($response, 'validation_failed', 'Neplatný rok.', 400);
+        }
+
+        try {
+            return Json::ok($response, $this->threshold->progress($supplierId, $year));
+        } catch (\Throwable $e) {
+            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+        }
+    }
+
     public function download(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 

@@ -1,0 +1,184 @@
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { stockApi, type StockStatusReport, type StockValuationReport, type Warehouse } from '@/api/stock'
+import { useToast } from '@/composables/useToast'
+import { formatMoney } from '@/composables/useFormat'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+
+const { t } = useI18n()
+const toast = useToast()
+
+const tab = ref<'status' | 'valuation'>('status')
+const warehouses = ref<Warehouse[]>([])
+const loading = ref(false)
+
+const filters = reactive({
+  warehouse_id: '' as number | '',
+  date: new Date().toISOString().slice(0, 10),
+})
+
+const statusReport = ref<StockStatusReport | null>(null)
+const valuationReport = ref<StockValuationReport | null>(null)
+
+async function load() {
+  loading.value = true
+  try {
+    if (tab.value === 'status') {
+      statusReport.value = await stockApi.reportStatus({ warehouse_id: filters.warehouse_id || undefined })
+    } else {
+      valuationReport.value = await stockApi.reportValuation({ date: filters.date, warehouse_id: filters.warehouse_id || undefined })
+    }
+  } catch (e: any) {
+    const code = e?.response?.data?.error?.code
+    if (code === 'too_many_movements' || code === 'stock.error.too_many_movements') {
+      toast.warning(t('stock.reports.too_many_movements'))
+    } else {
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+function selectTab(t2: 'status' | 'valuation') { tab.value = t2; load() }
+
+async function exportFile(format: 'pdf' | 'xlsx') {
+  const url = stockApi.reportExportUrl(tab.value, format, {
+    warehouse_id: filters.warehouse_id || undefined,
+    date: tab.value === 'valuation' ? filters.date : undefined,
+  })
+  window.open(url, '_blank', 'noopener')
+}
+
+const statusRows = computed(() => statusReport.value?.items ?? [])
+const valuationRows = computed(() => valuationReport.value?.items ?? [])
+
+onMounted(async () => {
+  try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  await load()
+})
+</script>
+
+<template>
+  <div>
+    <div class="mb-4">
+      <h1 class="text-2xl font-semibold">{{ t('stock.reports.title') }}</h1>
+    </div>
+
+    <!-- Taby -->
+    <div class="flex gap-1 border-b border-neutral-200 overflow-x-auto mb-4">
+      <button type="button" @click="selectTab('status')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+        :class="tab === 'status' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('stock.reports.tab_status') }}
+      </button>
+      <button type="button" @click="selectTab('valuation')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+        :class="tab === 'valuation' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('stock.reports.tab_valuation') }}
+      </button>
+    </div>
+
+    <!-- Filtry -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_warehouse') }}</label>
+          <select v-model="filters.warehouse_id" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+          </select>
+        </div>
+        <div v-if="tab === 'valuation'">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_date') }}</label>
+          <input v-model="filters.date" type="date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div class="flex gap-2 ml-auto">
+          <button :disabled="loading" @click="exportFile('pdf')" :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('stock.reports.export_pdf') }}
+          </button>
+          <button :disabled="loading" @click="exportFile('xlsx')" :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('stock.reports.export_xlsx') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+
+    <!-- Stav zásob -->
+    <template v-else-if="tab === 'status'">
+      <div v-if="statusRows.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.reports.empty') }}</div>
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_sku') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_name') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_warehouse') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.reports.col_qty') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.reports.col_avg_cost') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.reports.col_value') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="r in statusRows" :key="`${r.warehouse_id}-${r.stock_item_id}`" class="hover:bg-neutral-50" :class="{ 'bg-danger-50/40': r.min_qty != null && Number(r.qty) < Number(r.min_qty) }">
+                <td class="px-3 py-2 font-mono text-xs">{{ r.sku }}</td>
+                <td class="px-3 py-2">{{ r.name }}</td>
+                <td class="px-3 py-2">{{ r.warehouse_name }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ r.qty }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(r.avg_unit_cost)) }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(r.value_total)) }}</td>
+              </tr>
+            </tbody>
+            <tfoot v-if="statusReport">
+              <tr class="border-t-2 border-neutral-300 font-semibold bg-neutral-50">
+                <td class="px-3 py-2" colspan="5">{{ t('stock.reports.totals') }} ({{ statusReport.totals.count }})</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(statusReport.totals.value_total)) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- Ocenění -->
+    <template v-else>
+      <div v-if="valuationRows.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.reports.empty') }}</div>
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_sku') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_name') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_warehouse') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.reports.col_qty') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ t('stock.reports.col_value') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="r in valuationRows" :key="`${r.warehouse_id}-${r.stock_item_id}`" class="hover:bg-neutral-50">
+                <td class="px-3 py-2 font-mono text-xs">{{ r.sku }}</td>
+                <td class="px-3 py-2">{{ r.name }}</td>
+                <td class="px-3 py-2">{{ r.warehouse_name }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ r.qty }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(r.value_total)) }}</td>
+              </tr>
+            </tbody>
+            <tfoot v-if="valuationReport">
+              <tr class="border-t-2 border-neutral-300 font-semibold bg-neutral-50">
+                <td class="px-3 py-2" colspan="4">{{ t('stock.reports.totals') }} ({{ valuationReport.totals.count }})</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(valuationReport.totals.value_total)) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

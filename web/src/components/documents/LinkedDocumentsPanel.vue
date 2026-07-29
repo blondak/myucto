@@ -81,7 +81,7 @@ onMounted(load)
         <span v-if="docs.length" class="text-xs text-neutral-400">({{ docs.length }})</span>
       </h3>
       <button
-        v-if="auth.canWrite"
+        v-if="auth.canWrite('documents.move')"
         type="button"
         class="text-xs px-2 py-1 rounded border border-neutral-200 text-neutral-600 hover:bg-neutral-50"
         @click="toggleAttach"
@@ -136,7 +136,7 @@ onMounted(load)
         <a :href="documentsApi.downloadUrl(d.id)" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-primary-600" :title="t('documents.download')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
         </a>
-        <button v-if="auth.canWrite" type="button" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="unlink(d)">
+        <button v-if="auth.canWrite('documents.move')" type="button" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="unlink(d)">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244M3 3l18 18" /></svg>
         </button>
       </li>

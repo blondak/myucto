@@ -75,7 +75,7 @@ Pokud Android stránku ukončil, neuložená data nelze ze zámku obnovit.
 
 ### Ztratil jsem passkey nebo TOTP zařízení
 
-Použij jinou passkey nebo TOTP. MyInvoice nemá záložní recovery kódy. Pokud
+Použij jinou passkey nebo TOTP. MyÚčto nemá záložní recovery kódy. Pokud
 není dostupný žádný silný faktor, správce spustí CLI rescue:
 
 ```bash
@@ -84,8 +84,14 @@ php api/bin/reset-mfa.php tvuj@email.cz
 
 Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení a čekající
 ověřovací flow a invaliduje všechny session. Kompatibilní alias
-`reset-2fa.php` lze dál použít. Detail viz
-[§ 39.2.4](39_Bezpecnost.md#3924-obnova-pristupu).
+`reset-2fa.php` lze dál použít. Detail viz [§ 74.2.3](74_Bezpecnost.md).
+
+Pokud nemáš shell přístup ke kontejneru/serveru, použij legacy SQL fallback —
+ten ale vypne jen TOTP, passkeys je nutné odvolat zvlášť:
+
+```sql
+UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE email = 'tvuj@email.cz';
+```
 
 ### Varování `secret_encryption_key` (špatná délka klíče)
 
@@ -168,13 +174,13 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ### „Test odeslání" funguje, ale klientovi nic nechodí
 
-- E-mail klienta v MyInvoice je špatný (typo) → uprav v detailu klienta.
+- E-mail klienta v MyÚčtu je špatný (typo) → uprav v detailu klienta.
 - Klient má restriktivní spam filtr → zkontroluj, jestli máš správně
   nastavený SPF + DKIM + DMARC pro doménu, ze které posíláš.
 
 ### DKIM podpis se nedaří aktivovat
 
-1. Vygeneruj klíče: viz [39. Bezpečnost § 37.8](39_Bezpecnost.md).
+1. Vygeneruj klíče: viz [74. Bezpečnost § 55.8](74_Bezpecnost.md).
 2. Publikuj DNS TXT — počkej 5–60 minut na propagaci.
 3. Ověř DKIM přes [mxtoolbox.com](https://mxtoolbox.com/dkim.aspx).
 4. Až DNS funguje, zapni v `cfg.php → smtp.dkim.enabled => true`.
@@ -185,17 +191,66 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 SHA-256 hash souboru se shoduje s nějakým dříve importovaným. Buď:
 
-- Skutečně už je naimportovaný (zkontroluj **Finance → Bankovní účty**, záložka Bankovní výpisy)
+- Skutečně už je naimportovaný (zkontroluj **Peníze → Bankovní účty**, záložka Bankovní výpisy)
 - Stáhl jsi stejný výpis 2× → použij jiný (nebo si vyžádej z banky export
   s jiným časovým rozsahem)
 
+### PDF výpis se nenahraje nebo nesedí zůstatek
+
+PDF import je deterministický a podporuje aktuální rozvržení výpisů **Banky
+CREDITAS, ČSOB a KB**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky
+nebo nové neznámé rozvržení se neodhaduje pomocí AI a import se odmítne.
+
+- Ověř, že jde o originální PDF stažené z bankovnictví, ne tisk do PDF nebo scan.
+- Zkontroluj, zda hlavička obsahuje číslo účtu, období, počáteční a konečný
+  zůstatek.
+- Pokud součet transakcí nesedí na zůstatky na haléř, systém výpis neuloží.
+  Nestvrzuj chybějící pohyby ručně; stáhni úplný výpis za stejné období.
+- U nové varianty layoutu přilož k hlášení anonymizovaný vzor bez citlivých
+  údajů nebo popis banky/verze. Originál s čísly účtů neposílej do veřejného issue.
+
 ### Auto-matching nefunguje
 
-- Klient nezadal **variabilní symbol** → musíš spárovat ručně
-- Částka neodpovídá (klient zaplatil méně, kurz EUR/CZK, bankovní poplatek) →
-  manuální párování s checkmarkem „částečná platba"
+- Otevři **Všechny pohyby** nebo detail výpisu a rozbal důvody skórovaného
+  návrhu. Bez VS může pomoci číslo faktury ve zprávě, zbývající částka, název,
+  datum nebo dříve potvrzený účet protistrany.
+- Automatická shoda vyžaduje nejméně 85 %, deterministický signál a náskok 15
+  procentních bodů. Kandidát od 35 % se jen nabízí; slabší se nezobrazuje.
+- Nový účet protistrany se stane důvěryhodným až po třech bezchybných ručních
+  shodách. Chybné párování zruš — tím se účet znovu nepoužije naslepo.
+- Částka neodpovídá (částečná platba, přeplatek, kurz nebo bankovní poplatek) →
+  potvrď ruční/rozdělené párování a zkontroluj vzniklou alokaci.
 - Faktura je v jiné měně než platba (klient pošle EUR na CZK fakturu) →
   manuálně, doúčtuj kurzový rozdíl
+
+Překlep ve VS, přeplatek, poplatek, rozdílná měna a zálohová faktura se nikdy
+nepotvrdí automaticky, i kdyby ostatní signály byly silné.
+
+### Pohyb není v „K zaúčtování"
+
+Záložka **K zaúčtování** je pracovní fronta, ne úplný archiv. Pohyb najdeš v
+top-level záložce **Všechny pohyby**, která zahrnuje i zaúčtované a ignorované
+transakce napříč výpisy. Pokud pro nezaúčtovaný pohyb nevznikl vůbec žádný
+návrh, objeví se také v **Účetnictví → K doúčtování** s důvodem „bez pravidla“
+nebo „nepodporovaná cizí měna“.
+
+### Vlastní převod se nespároval nebo nezaúčtoval přes 261
+
+- Oba účty musí být v nastavení banky evidované jako vlastní účty stejné firmy.
+- Automaticky se zpracují jen převody ve stejné měně. Převod mezi CZK a EUR je
+  kvůli kurzu a kurzovému rozdílu ruční.
+- V nastavení automatiky musí být povoleny jak **Převody mezi vlastními účty**,
+  tak **Rozpoznávání vlastních převodů**.
+- Druhá noha může přijít v jiném výpisu nebo období. Do té doby je zůstatek 261
+  legitimně „na cestě“; nevytvářej duplicitní ruční zápis.
+
+### Odvod finančnímu úřadu nebo pojišťovně čeká na potvrzení
+
+Rozpoznání účtu u ČNB/0710 samo nestačí. Automatické zaúčtování odvodu je
+povolené jen proti existujícímu zaúčtovanému předpisu a nejvýše do jeho
+kreditního zůstatku. Nejdříve zaúčtuj předpis daně, sociálního či zdravotního
+pojištění. Nejasný VS, neznámé předčíslí nebo nedostatečný zůstatek ponechá
+položku v Automatu k ruční kontrole.
 
 ### Bankovní účet z výpisu „nepatří aktuálnímu dodavateli"
 
@@ -233,9 +288,42 @@ na fakturu / 14 dní.
 ### Bank scan cron neimportuje nové výpisy
 
 1. Zkontroluj, že soubory v `private/bank-incoming/` mají správný formát
-   (ABO/GPC, ne XML).
-2. Zkontroluj práva: `chmod -R 0750 private/`.
-3. Spusť ručně: `php api/bin/cron-bank-scan.php` — uvidíš error.
+   (ABO/GPC nebo podporované PDF; jiné XML ani scan PDF se neimportují).
+2. Zkontroluj práva služby nad `private/bank-incoming/` a
+   `private/bank-archive/`. Na Windows ověř identitu IIS/Task Scheduleru, na
+   Linuxu vlastníka a oprávnění adresářů.
+3. Spusť ručně `php api/bin/cron-bank-scan.php` a zkontroluj konkrétní chybu.
+
+### „K doúčtování“ není prázdné, ale Automat ano
+
+To je očekávané. **Automat** zobrazuje návrhy a blokace automatizačního motoru.
+**K doúčtování** navíc inventarizuje bankovní pohyby bez jakéhokoli návrhu,
+nezaúčtované vydané/přijaté doklady a otevřené žádosti o dokument. Otevři akci
+na řádku; společná fronta je read-only a sama zápis nevytváří.
+
+### V reportu Úplnost dokladů chybí nebo přebývá položka
+
+Report vychází z aktuálních vazeb. Bankovní pohyb zmizí po doložení a párování
+nebo po vzniku aktivního bankovního zápisu; stornovaný zápis se za aktivní
+nepočítá. Zkontroluj nastavený práh dnů a směr příchozí/odchozí. Druhá část
+reportu vychází ze saldokonta 311/321 a ukazuje jen doklady po splatnosti s
+nenulovým zůstatkem, nikoli všechny faktury ve stavu „nezaplaceno“.
+
+### Valutová pokladna nenabízí úhradu faktury nebo převod
+
+Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
+Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
+311/321 a valutový převod přes 261 zatím nejsou podporované a systém je
+záměrně blokuje. Proveď doložený ruční zápis v deníku. V daňové evidenci je
+pokladna pouze korunová.
+
+### AI kontace nic nenavrhla
+
+Ověř zapnutí AI asistence pro daný typ, přihlašovací údaje poskytovatele,
+potvrzenou DPA, rezidenční politiku a denní limit. Nepoužitelná odpověď levného
+modelu může být jednou zopakována silnějším modelem; pokud ani ta neprojde,
+položka zůstane ruční. AI nikdy nezaúčtuje položku sama. Pokus a jeho výsledek
+jsou uložené v auditní stopě návrhu.
 
 ## 99.7 Výkon
 
@@ -269,7 +357,7 @@ vytvoř toho samého klienta (oddělená data).
 
 Pokud problém nevyřeší tato kapitola, kontaktuj:
 
-- **GitHub Issues** repo MyInvoice.cz
+- **GitHub Issues** repo MyÚčto.cz
 - E-mail vývojáře — viz `cfg.php → smtp.from`
 - IT administrátor tvé organizace
 

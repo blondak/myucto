@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Cron\CronCatalog;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,7 +30,7 @@ final class CronJobsAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 
@@ -147,6 +148,12 @@ final class CronJobsAction
      */
     private function jobConfigured(array $job): bool
     {
+        if (($job['requires_ai_opt_in'] ?? false) === true) {
+            $enabled = $this->db->pdo()->query('SELECT 1 FROM supplier WHERE ai_assist_enabled=1 LIMIT 1');
+            if ($enabled === false || $enabled->fetchColumn() === false) {
+                return false;
+            }
+        }
         $key = $job['requires_config'] ?? null;
         if ($key === null) {
             return true;

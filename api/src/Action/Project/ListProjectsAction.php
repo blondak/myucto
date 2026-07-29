@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Project;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\ProjectRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -15,6 +16,7 @@ final class ListProjectsAction
 {
     public function __construct(
         private readonly ProjectRepository $repo,
+        private readonly ClientRepository $clients,
         private readonly Config $config,
     ) {}
 
@@ -22,6 +24,11 @@ final class ListProjectsAction
     {
         $clientId = isset($args['client_id']) ? (int) $args['client_id'] : null;
         if ($clientId !== null) {
+            $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+            $client = $this->clients->find($clientId);
+            if ($client === null || (int) ($client['supplier_id'] ?? 0) !== $sid) {
+                return Json::error($response, 'not_found', 'Klient nenalezen.', 404);
+            }
             return Json::ok($response, ['data' => $this->repo->listForClient($clientId)]);
         }
 

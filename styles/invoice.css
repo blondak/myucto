@@ -1,4 +1,4 @@
-/* MyInvoice.cz — CSS pro PDF render faktury (mPDF kompatibilní) */
+/* MyUcto.cz — CSS pro PDF render faktury (mPDF kompatibilní) */
 /* @page se NEPOUŽÍVÁ — A4 + margins jsou nastaveny v Mpdf konstruktoru. */
 
 body {
@@ -381,6 +381,52 @@ table.czk-recap tr.grand td {
     border-left: 2pt solid #E8A547;
     color: #8B6420;
     font-weight: 600;
+}
+
+/* Rozpis plateb platebního kalendáře (§ 31a ZDPH).
+   mPDF kvirky: padding patří do <td>, ne do <div>; žádné nested selectory. */
+.schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 5mm 0 2mm 0;
+}
+.schedule-title {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #403B52;
+    padding: 0 0 1.5mm 0;
+    border-bottom: 0.6pt solid #E0DAF0;
+}
+.schedule-legal {
+    font-size: 8pt;
+    font-weight: 400;
+    color: #8681A0;
+}
+.schedule-th {
+    font-size: 8pt;
+    font-weight: 600;
+    color: #6E6885;
+    text-align: left;
+    padding: 1.5mm 2mm;
+    border-bottom: 0.4pt solid #E0DAF0;
+}
+.schedule-td {
+    font-size: 9pt;
+    color: #403B52;
+    padding: 1.2mm 2mm;
+    border-bottom: 0.3pt solid #F0EDF7;
+}
+.schedule-total {
+    font-weight: 700;
+    background: #FBFAFD;
+}
+.schedule-empty {
+    font-size: 9pt;
+    color: #8681A0;
+    padding: 2mm;
+}
+.schedule-note {
+    font-size: 8.5pt;
 }
 
 /* Footer — podpis dodavatele + zápis v OR */

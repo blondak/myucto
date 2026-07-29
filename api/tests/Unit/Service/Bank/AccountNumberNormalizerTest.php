@@ -121,4 +121,67 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertFalse(AccountNumberNormalizer::matchesAny('1000000005', '1000000006', 'CZ6508000000192000145399'));
         self::assertFalse(AccountNumberNormalizer::matchesAny('1000000005', null, null));
     }
+
+    #[DataProvider('canonicalCases')]
+    public function testCanonical(?string $accountNumber, ?string $iban, ?string $expected): void
+    {
+        self::assertSame($expected, AccountNumberNormalizer::canonical($accountNumber, $iban));
+    }
+
+    /** @return iterable<string, array{?string, ?string, ?string}> */
+    public static function canonicalCases(): iterable
+    {
+        yield 'national with prefix and bank' => ['19-2000145399/0800', null, '192000145399'];
+        yield 'matching Czech IBAN' => ['CZ65 0800 0000 1920 0014 5399', null, '192000145399'];
+        yield 'zero-padded GPC' => ['0000192000145399', null, '192000145399'];
+        yield 'IBAN fallback' => [null, 'CZ65 0800 0000 1920 0014 5399', '192000145399'];
+        yield 'non-CZ IBAN' => ['DE89370400440532013000', null, null];
+        yield 'empty' => [null, null, null];
+    }
+
+    public function testCanonicalBankCodePrefersExplicitCodeAndFallsBackToIban(): void
+    {
+        self::assertSame('0100', AccountNumberNormalizer::canonicalBankCode('100'));
+        self::assertSame('0800', AccountNumberNormalizer::canonicalBankCode(null, 'CZ65 0800 0000 1920 0014 5399'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode(null, 'DE89370400440532013000'));
+    }
+
+    #[DataProvider('accountPrefixCases')]
+    public function testCzechAccountPrefix(string $raw, ?string $expected): void
+    {
+        self::assertSame($expected, AccountNumberNormalizer::czechAccountPrefix($raw));
+    }
+
+    /** @return iterable<string,array{string,?string}> */
+    public static function accountPrefixCases(): iterable
+    {
+        yield 'national' => ['705-77628031', '705'];
+        yield 'GPC' => ['0007057762803100', '705'];
+        yield 'IBAN' => ['CZ6507100007057762803100', '705'];
+        yield 'without prefix' => ['77628031/0710', null];
+    }
+
+    #[DataProvider('accountBaseCases')]
+    public function testCzechAccountBase(string $raw, ?string $expected): void
+    {
+        self::assertSame($expected, AccountNumberNormalizer::czechAccountBase($raw));
+    }
+
+    /**
+     * Základ = číslo BEZ předčíslí. Musí vyjít stejně z národního i nulami vycpaného
+     * GPC zápisu — na tom stojí rozpoznání zdravotní pojišťovny v remittance_map,
+     * kde `normalize()` selhává (u účtu s předčíslím ho slepí s číslem).
+     *
+     * @return iterable<string,array{string,?string}>
+     */
+    public static function accountBaseCases(): iterable
+    {
+        yield 'ČSSZ národní' => ['21012-7928311', '7928311'];
+        yield 'ČSSZ GPC' => ['0210120007928311', '7928311'];
+        yield 'VZP bez předčíslí' => ['1111006311', '1111006311'];
+        yield 'VZP GPC' => ['0000001111006311', '1111006311'];
+        yield 's kódem banky' => ['1111006311/0710', '1111006311'];
+        yield 'IBAN' => ['CZ6507100007057762803100', '7762803100'];
+        yield 'prázdné' => ['', null];
+    }
 }

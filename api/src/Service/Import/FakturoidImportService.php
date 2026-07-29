@@ -40,6 +40,8 @@ use Psr\Log\LoggerInterface;
 final class FakturoidImportService
 {
     private const PROGRESS_FLUSH_EVERY = 10;
+    /** Strop pro PDF ukládané do archivu (SEC-13) — víc než scan dokladu nepotřebujeme. */
+    private const MAX_ARCHIVED_PDF_BYTES = 20 * 1024 * 1024;
 
     public function __construct(
         private readonly Connection $db,
@@ -443,6 +445,9 @@ final class FakturoidImportService
             'tax_date'              => $taxDate,
             'due_date'              => $dueDate,
             'received_at'           => date('Y-m-d'),
+            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
+            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) ($e['currency'] ?? 'CZK'), $supplierId, isActive: false),
             'exchange_rate'         => isset($e['exchange_rate']) ? (float) $e['exchange_rate'] : null,
             'exchange_rate_source'  => 'manual',
@@ -585,6 +590,13 @@ final class FakturoidImportService
     {
         $pdf = $this->fakturoid->downloadInvoicePdf($supplierId, $fakturoidId);
         if ($pdf === null) return; // 204 = PDF se ještě generuje
+        if (!$this->isStorablePdf($pdf)) {
+            $this->logger->warning('Fakturoid: vydaná faktura nevrátila platné PDF, přeskočeno', [
+                'supplier_id' => $supplierId,
+                'invoice_id' => $invoiceId,
+            ]);
+            return;
+        }
 
         $archiveRoot = (string) $this->config->get('invoice.import_archive_storage', '');
         if ($archiveRoot === '') {
@@ -617,6 +629,14 @@ final class FakturoidImportService
 
         $pdf = $this->fakturoid->downloadAttachment($supplierId, $url);
         if ($pdf === null) return;
+        // SEC-13 — druhá brána nad guardem v klientovi: do archivu nesmí nic než PDF.
+        if (!$this->isStorablePdf($pdf)) {
+            $this->logger->warning('Fakturoid: příloha výdaje není platné PDF, přeskočeno', [
+                'supplier_id' => $supplierId,
+                'purchase_invoice_id' => $purchaseInvoiceId,
+            ]);
+            return;
+        }
 
         $archiveRoot = (string) $this->config->get('purchase_invoice.archive_storage', '');
         if ($archiveRoot === '') {
@@ -632,6 +652,18 @@ final class FakturoidImportService
         $relPath = \MyInvoice\Service\Import\PurchaseInvoicePdfArchiver::shardedRelPath($supplierId, $sha);
         $name = ((string) ($exp['number'] ?? 'expense')) . '.pdf';
         $this->purchaseRepo->setPdfMetadata($purchaseInvoiceId, $supplierId, $relPath, $sha, strlen($pdf), $name);
+    }
+
+    /**
+     * Obsah smí do archivu jen když je to reálné PDF v rozumné velikosti.
+     * Magic bytes se hledají po odstranění případného BOM/whitespace na začátku,
+     * stejně jako u ostatních upload cest (viz BankStatementAction).
+     */
+    private function isStorablePdf(string $content): bool
+    {
+        $len = strlen($content);
+        if ($len < 5 || $len > self::MAX_ARCHIVED_PDF_BYTES) return false;
+        return str_starts_with(ltrim($content, "\x00\x09\x0a\x0d\x20\xef\xbb\xbf"), '%PDF-');
     }
 
     private function loadBookmark(int $supplierId): ?string

@@ -7,6 +7,54 @@ export interface DphPriznaniLine {
   label: string
 }
 
+export type DphCrossCheck343Reason = 'timing_73' | 'value_mismatch' | 'missing_entry' | 'extra_entry'
+
+export interface DphCrossCheckDocument {
+  invoice_id: number
+  doc_number: string | null
+  source: string
+  declared: number
+  counter: number
+  difference: number
+  reason?: DphCrossCheck343Reason | null
+  claim_period?: string | null
+  entry_date?: string | null
+  received_at?: string | null
+}
+
+export interface DphCrossCheckFinding {
+  check: string
+  label: string
+  severity: 'mismatch' | 'info'
+  blocking: boolean
+  declared: number | null
+  counter: number | null
+  difference: number
+  explained?: number
+  documents: DphCrossCheckDocument[]
+  note: string
+}
+
+/** Typ podání DPHDP3 (C7'): řádné / opravné (§138) / dodatečné (§141) / dodatečné-opravné. */
+export type DphVariant = 'radne' | 'opravne' | 'dodatecne' | 'dodatecne_opravne'
+/** Typ podání KH (C7'): řádné / řádné-opravné / následné (§101f) / následné-opravné. */
+export type KhVariant = 'radne' | 'opravne' | 'nasledne' | 'nasledne_opravne'
+
+export interface PostFilingChangeDoc {
+  source: 'sale' | 'purchase' | 'cash'
+  invoice_id: number
+  doc_number: string | null
+  total: number
+  updated_at: string
+}
+
+export interface PostFilingChanges {
+  has_filing: boolean
+  snapshot_available: boolean
+  submission: { id: number; generated_at: string; form_variant: string } | null
+  documents: PostFilingChangeDoc[]
+}
+
 export interface DphPriznaniPreview {
   summary: {
     period: string
@@ -19,8 +67,18 @@ export interface DphPriznaniPreview {
     is_excess_deduction: boolean
     submission_deadline: string
     supplier_vat_period: string
+    // C7' — typ podání + podklady dodatečného přiznání.
+    variant: DphVariant
+    dapdph_forma: string
+    is_amendment: boolean
+    d_zjist: string | null
+    last_known_tax: number | null
+    tax_difference: number | null
+    reference_submission_id: number | null
   }
   warnings: string[]
+  cross_check: DphCrossCheckFinding[]
+  post_filing_changes: PostFilingChanges
 }
 
 export interface DphSettings {
@@ -30,21 +88,6 @@ export interface DphSettings {
   is_identified?: boolean
   taxpayer_type: 'fo' | 'po' | null
   has_financial_office: boolean
-}
-
-export interface KhPreview {
-  summary: {
-    period: string
-    a1_count: number
-    a2_count: number
-    a4_count: number
-    a5_count_aggregated: number
-    b1_count: number
-    b2_count: number
-    b3_count_aggregated: number
-    submission_deadline: string
-  }
-  warnings: string[]
 }
 
 export interface DphTrendRow {
@@ -119,6 +162,26 @@ export interface DphBookPreview {
     received: { base: number; vat: number; total: number }
     vat_balance: number
   }
+}
+
+export interface KhPreview {
+  summary: {
+    period: string
+    a1_count: number
+    a2_count: number
+    a4_count: number
+    a5_count_aggregated: number
+    b1_count: number
+    b2_count: number
+    b3_count_aggregated: number
+    submission_deadline: string
+    variant: KhVariant
+    khdph_forma: string
+    is_follow_up: boolean
+    d_zjist: string | null
+    c_jed_vyzvy: string | null
+  }
+  warnings: string[]
 }
 
 export interface OssPreview {
@@ -199,6 +262,21 @@ export interface OssPreview {
       original_period: string
     }>
   }>
+  /** Čerpání celounijního prahu 10 000 EUR (§ 8 odst. 3 ZDPH) za CELÝ kalendářní rok. */
+  threshold: OssThresholdProgress
+  warnings: string[]
+}
+
+export interface OssThresholdProgress {
+  year: number
+  threshold_eur: number
+  total_eur: number
+  pct: number
+  exceeded: boolean
+  exceeded_on: string | null
+  near_threshold: boolean
+  by_country: Array<{ country: string; amount_eur: number }>
+  unconverted_rows: number
   warnings: string[]
 }
 
@@ -242,12 +320,225 @@ function monthlyExportPeriodParams(period: ExportPeriodArg): Record<string, stri
     : { period: 'monthly', year: period.year, month: period.month }
 }
 
+export type ClosingPackagePart =
+  | 'balance_sheet' | 'income_statement' | 'general_ledger'
+  | 'trial_balance' | 'journal' | 'balance_inventory' | 'dph_book' | 'income_tax' | 'income_tax_advances'
+  | 'asset_inventory' | 'saldo_over_1y' | 'accruals' | 'statement_notes'
+  | 'cash_flow' | 'equity_changes'
+
+/**
+ * EP-6: POVINNÉ jádro balíčku — bez těchto částí je balíček `failed`, ne `completed`.
+ *
+ * Musí odpovídat `ClosingPackageService::REQUIRED_PARTS`. Chyběla tu `statement_notes`,
+ * takže povinná příloha závěrky se z UI vůbec nevyžádala — a protože se stav vyhodnocuje
+ * jen nad VYŽÁDANÝMI částmi, balíček bez ní končil jako „hotovo".
+ */
+export const CLOSING_PACKAGE_REQUIRED_PARTS: ClosingPackagePart[] = [
+  'balance_sheet', 'income_statement', 'general_ledger', 'trial_balance', 'journal', 'balance_inventory',
+  'statement_notes',
+]
+
+export interface ClosingPackagePreview {
+  period_id: number
+  fiscal_year: number
+  counts: Record<ClosingPackagePart, number>
+}
+
+export interface ClosingPackageJob {
+  id: number
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'completed_with_warnings'
+  total_items: number | null
+  processed: number
+  created_count: number
+  failed_count: number
+  current_step: string | null
+  log_text?: string | null
+  last_error: string | null
+  cancel_requested: boolean
+  result_name: string | null
+  result_size: number | null
+  params: Record<string, unknown> | null
+  created_at: string
+  finished_at: string | null
+}
+
+/** Řádek auditu „kurz na dokladu vs. ČNB" (§C / K4). */
+export interface CnbRateAuditItem {
+  doc_type: 'invoice' | 'purchase_invoice'
+  doc_id: number
+  doc_no: string | null
+  date: string
+  currency: string
+  used_rate: number
+  cnb_rate: number
+  cnb_rate_date: string
+  diff_percent: number
+  impact_czk: number
+}
+
+export interface CnbRateAuditResult {
+  from: string
+  to: string
+  threshold_percent: number
+  items: CnbRateAuditItem[]
+  missing_cnb_count: number
+  fixed_mode_skipped: boolean
+}
+
+/** Řádek náhledu §74b — korekce odpočtu DPH u neuhrazených závazků (pohled dlužníka). */
+export interface S74bRow {
+  purchase_invoice_id: number
+  vendor_name: string
+  vendor_dic: string | null
+  vendor_invoice_number: string | null
+  tax_date: string | null
+  due_date: string | null
+  total_with_vat: number
+  claimed_deduction_vat: number
+  unpaid_ratio: number
+  aged: boolean
+  target_reduction: number
+  net_corrected: number
+  delta: number
+  movement: 'reduction' | 'restoration' | null
+  state: string
+  dphdp3_line_hint: string | null
+  kh_zdph_44: boolean
+}
+
+export interface S74bTotals {
+  reduction: number
+  restoration: number
+  net_delta: number
+}
+
+export interface S74bPreview {
+  period: { year: number; month: number; period_end: string }
+  rows: S74bRow[]
+  totals: S74bTotals
+}
+
+export interface S74bRecordResult extends S74bPreview {
+  recorded: number
+}
+
+// ── § 36a ZDPH / § 23 odst. 7 ZDP — spojené osoby a ceny obvyklé ────────────
+export type RelatedPartyType = 'capital' | 'otherwise' | 'close_person' | 'employment'
+
+export interface RelatedPartyTransaction {
+  direction: 'issued' | 'received'
+  doc_type: 'invoice' | 'purchase_invoice'
+  doc_id: number
+  doc_no: string
+  partner_name: string
+  related_party_type: RelatedPartyType | null
+  tax_date: string
+  amount: number
+}
+
+/**
+ * MĚŘITELNÁ odchylka — položka fakturovaná spojené osobě proti MEDIÁNU cen téže položky
+ * fakturovaných nespojeným. Kde srovnatelný vzorek není, backend odchylku netvrdí
+ * a řádek vůbec nevrátí.
+ */
+export interface RelatedPartyDeviation {
+  doc_type: 'invoice'
+  doc_id: number
+  doc_no: string
+  partner_name: string
+  description: string
+  unit_price: number
+  market_price: number
+  deviation_pct: number
+  samples: number
+  note: string
+}
+
+export interface RelatedPartyOverview {
+  from: string
+  to: string
+  transactions: RelatedPartyTransaction[]
+  total: number
+  deviations: RelatedPartyDeviation[]
+}
+
+export interface RelatedPartyAdjustment {
+  id: number
+  client_id: number | null
+  partner_name: string
+  movement: 'increase' | 'decrease'
+  amount: number
+  reason: string
+}
+
+export interface RelatedPartyAdjustments {
+  rows: RelatedPartyAdjustment[]
+  total_increase: number
+  total_decrease: number
+  net_delta: number
+}
+
+// ── § 43 ZDPH — oprava VÝŠE daně per doklad ────────────────────────────────
+/** Sazbová skupina PŮVODNÍHO plnění (§ 43 odst. 2) — ř. 1 vs ř. 2, ne dnešní sazba. */
+export type S43RateKind = 'basic' | 'reduced'
+
+export interface S43Correction {
+  id: number
+  doc_type: 'invoice' | 'purchase_invoice'
+  doc_id: number
+  period_year: number
+  period_month: number
+  rate_kind: S43RateKind
+  base_delta: number
+  vat_delta: number
+  corrective_doc_number: string | null
+  delivered_on: string
+  reason: string
+}
+
+// ── § 79 / § 79a ZDPH — odpočet při registraci a jeho snížení (ř. 45) ──────
+export interface S79Item {
+  id: number
+  kind: 'registration' | 'deregistration'
+  label: string
+  acquired_on: string
+  effective_on: string
+  asset_kind: 'inventory' | 'fixed_asset'
+  period_years: number | null
+  vat_amount: number
+  /** Částka do ř. 45 se znaménkem: nárok kladně, snížení záporně. */
+  amount: number
+  applies: boolean
+  reason: string
+}
+
+export interface S79Overview {
+  from: string
+  to: string
+  rows: S79Item[]
+  total: number
+}
+
 export const reportsApi = {
   dphSettings: () =>
     api.get<DphSettings>('/reports/dphdp3/settings').then(r => r.data),
 
-  dphPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
+  dphPreview: (
+    year: number, month: number, period?: 'monthly' | 'quarterly',
+    variant: DphVariant = 'radne', dZjist?: string,
+  ) =>
     api.get<DphPriznaniPreview>('/reports/dphdp3/preview', {
+      params: {
+        year, month,
+        ...(period ? { period } : {}),
+        ...(variant !== 'radne' ? { variant } : {}),
+        ...(dZjist ? { d_zjist: dZjist } : {}),
+      },
+    }).then(r => r.data),
+
+  /** Fronta „doklady změněné po podání" (C7') — kandidáti na dodatečné přiznání. */
+  dphPostFilingChanges: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
+    api.get<PostFilingChanges>('/reports/dphdp3/post-filing-changes', {
       params: { year, month, ...(period ? { period } : {}) },
     }).then(r => r.data),
 
@@ -259,9 +550,18 @@ export const reportsApi = {
       params: { year, month, ...(period ? { period } : {}) },
     }).then(r => r.data),
 
-  khPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
+  khPreview: (
+    year: number, month: number, period?: 'monthly' | 'quarterly',
+    variant: KhVariant = 'radne', dZjist?: string, cJedVyzvy?: string,
+  ) =>
     api.get<KhPreview>('/reports/dphkh1/preview', {
-      params: { year, month, ...(period ? { period } : {}) },
+      params: {
+        year, month,
+        ...(period ? { period } : {}),
+        ...(variant !== 'radne' ? { variant } : {}),
+        ...(dZjist ? { d_zjist: dZjist } : {}),
+        ...(cJedVyzvy ? { c_jed_vyzvy: cJedVyzvy } : {}),
+      },
     }).then(r => r.data),
 
   // Souhrnné hlášení (EU dodání) — plátci i identifikované osoby; lze kvartálně pro služby
@@ -292,34 +592,17 @@ export const reportsApi = {
     return `/api/reports/dphshv?${params.toString()}`
   },
 
-  incomeTaxPreview: (year: number, type: 'fo' | 'po') =>
-    api.get<{
-      summary: {
-        year: number
-        taxpayer_type: 'fo' | 'po'
-        revenue_orientacni: number
-        exempt_revenue_orientacni?: number
-        costs_orientacni: number
-        profit_orientacni: number
-        submission_deadline: string
-        currency: string
-        is_vat_payer: boolean
-      }
-      warnings: string[]
-    }>('/reports/income-tax/preview', { params: { year, type } }).then(r => r.data),
-
-  incomeTaxDownloadUrl: (year: number, type: 'fo' | 'po') => {
-    const sid = localStorage.getItem('myinvoice.current_supplier_id')
-    const params = new URLSearchParams({ year: String(year), type })
-    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
-    return `/api/reports/income-tax?${params.toString()}`
-  },
-
-  khDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  khDownloadUrl: (
+    year: number, month: number, period?: 'monthly' | 'quarterly',
+    variant: KhVariant = 'radne', dZjist?: string, cJedVyzvy?: string,
+  ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     if (period) params.set('period', period)
+    if (variant !== 'radne') params.set('variant', variant)
+    if (dZjist) params.set('d_zjist', dZjist)
+    if (cJedVyzvy) params.set('c_jed_vyzvy', cJedVyzvy)
     return `/api/reports/dphkh1?${params.toString()}`
   },
 
@@ -329,8 +612,21 @@ export const reportsApi = {
       params: period ? { year, month, period } : { year, month },
     }).then(r => r.data),
 
+  dphBookPdfUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    const params = new URLSearchParams({ year: String(year), month: String(month) })
+    if (period) params.set('period', period)
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    return `/api/reports/dph-book?${params.toString()}`
+  },
+
   ossPreview: (year: number, quarter: number) =>
     api.get<OssPreview>('/reports/oss/preview', { params: { year, quarter } }).then(r => r.data),
+
+  /** Práh 10 000 EUR — dostupný i BEZ zapnutého OSS, protože ho potřebuje znát právě ten,
+   *  kdo ještě registrovaný není. */
+  ossThreshold: (year: number) =>
+    api.get<OssThresholdProgress>('/reports/oss/threshold', { params: { year } }).then(r => r.data),
 
   ossDownloadUrl: (year: number, quarter: number) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
@@ -339,13 +635,77 @@ export const reportsApi = {
     return `/api/reports/oss?${params.toString()}`
   },
 
-  dphBookPdfUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
-    const sid = localStorage.getItem('myinvoice.current_supplier_id')
-    const params = new URLSearchParams({ year: String(year), month: String(month) })
-    if (period) params.set('period', period)
-    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
-    return `/api/reports/dph-book?${params.toString()}`
-  },
+  // Audit kurzů vs. ČNB (§C / K4) — cizoměnové doklady s odchylkou účetního kurzu
+  cnbRateAudit: (from: string, to: string, threshold?: number) =>
+    api.get<CnbRateAuditResult>('/reports/cnb-rate-audit', {
+      params: { from, to, ...(threshold != null ? { threshold } : {}) },
+    }).then(r => r.data),
+
+  // §74b — korekce odpočtu DPH u neuhrazených závazků (dlužník). Preview = dry-run,
+  // record = vědomá evidence období do ledgeru (recordAging), NE zaúčtování.
+  s74bPreview: (year: number, month: number) =>
+    api.get<S74bPreview>('/reports/s74b/preview', { params: { year, month } }).then(r => r.data),
+
+  s74bRecord: (year: number, month: number) =>
+    api.post<S74bRecordResult>('/reports/s74b/record', { year, month }).then(r => r.data),
+
+  // § 36a / § 23 odst. 7 — transakce se spojenými osobami, měřitelné cenové odchylky
+  // a evidence úprav základu daně. Read-only přehled + CRUD úprav.
+  relatedParties: (from: string, to: string) =>
+    api.get<RelatedPartyOverview>('/reports/related-parties', { params: { from, to } }).then(r => r.data),
+
+  relatedPartyAdjustments: (year: number) =>
+    api.get<RelatedPartyAdjustments>('/reports/related-parties/adjustments', { params: { year } }).then(r => r.data),
+
+  createRelatedPartyAdjustment: (payload: {
+    fiscal_year: number
+    amount: number
+    reason: string
+    client_id?: number | null
+    movement?: 'increase' | 'decrease'
+  }) => api.post<{ id: number }>('/reports/related-parties/adjustments', payload).then(r => r.data),
+
+  deleteRelatedPartyAdjustment: (id: number) =>
+    api.delete(`/reports/related-parties/adjustments/${id}`).then(r => r.data),
+
+  // § 43 — oprava výše daně. `period_year`/`period_month` je období PŮVODNÍHO plnění,
+  // `delivered_on` jen určuje, kdy nejdřív šlo opravu provést.
+  s43List: (year: number, month?: number) =>
+    api.get<{ year: number; month: number | null; rows: S43Correction[] }>('/reports/s43', {
+      params: month ? { year, month } : { year },
+    }).then(r => r.data),
+
+  s43Create: (payload: {
+    source_type: 'invoice' | 'purchase_invoice'
+    source_id: number
+    period_year: number
+    period_month: number
+    rate_kind: S43RateKind
+    base_delta: number
+    vat_delta: number
+    delivered_on: string
+    reason: string
+    corrective_doc_number?: string | null
+  }) => api.post<{ id: number }>('/reports/s43', payload).then(r => r.data),
+
+  s43Delete: (id: number) => api.delete(`/reports/s43/${id}`).then(r => r.data),
+
+  // § 79 / § 79a — období vykázání řídí `effective_on`, ne datum pořízení majetku.
+  s79List: (from: string, to: string) =>
+    api.get<S79Overview>('/reports/s79', { params: { from, to } }).then(r => r.data),
+
+  s79Create: (payload: {
+    kind: 'registration' | 'deregistration'
+    label: string
+    acquired_on: string
+    effective_on: string
+    asset_kind: 'inventory' | 'fixed_asset'
+    vat_amount: number
+    period_years?: number | null
+    note?: string | null
+  }) => api.post<{ id: number }>('/reports/s79', payload).then(r => r.data),
+
+  s79Delete: (id: number) => api.delete(`/reports/s79/${id}`).then(r => r.data),
 
   // Hromadný export — background job (počty per část pro UI checkboxy)
   monthlyExportPreview: (period: ExportPeriodArg) =>
@@ -381,12 +741,49 @@ export const reportsApi = {
     return `/api/reports/monthly-export/jobs/${id}/download${qs ? `?${qs}` : ''}`
   },
 
+  // Uzávěrkový balíček — background job (ZIP se všemi sestavami uzávěrky účetního
+  // období). Stejný job lifecycle jako hromadný export, ale vázán na period_id.
+  closingPackagePreview: (periodId: number) =>
+    api.get<ClosingPackagePreview>('/reports/closing-package/preview', { params: { period_id: periodId } })
+      .then(r => r.data),
+
+  closingPackageStart: (periodId: number, parts: string[], includeXlsx: boolean) =>
+    api.post<{ job_id: number; status: string; params: Record<string, unknown> }>(
+      '/reports/closing-package/start', { period_id: periodId, parts, include_xlsx: includeXlsx },
+    ).then(r => r.data),
+
+  closingPackageJob: (id: number) =>
+    api.get<ClosingPackageJob>(`/reports/closing-package/jobs/${id}`).then(r => r.data),
+
+  closingPackageJobs: () =>
+    api.get<ClosingPackageJob[]>('/reports/closing-package/jobs').then(r => r.data),
+
+  closingPackageCancel: (id: number) =>
+    api.post<{ ok: boolean; cancel_requested: boolean }>(`/reports/closing-package/jobs/${id}/cancel`).then(r => r.data),
+
+  closingPackageDeleteJob: (id: number) =>
+    api.delete<{ ok: boolean; deleted: boolean }>(`/reports/closing-package/jobs/${id}`).then(r => r.data),
+
+  closingPackageDownloadUrl: (id: number) => {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    const params = new URLSearchParams()
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    const qs = params.toString()
+    return `/api/reports/closing-package/jobs/${id}/download${qs ? `?${qs}` : ''}`
+  },
+
   /** URL na download endpoint — frontend ho otevírá v novém okně */
-  dphDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  dphDownloadUrl: (
+    year: number, month: number, period?: 'monthly' | 'quarterly', acknowledgeMismatch?: boolean,
+    variant: DphVariant = 'radne', dZjist?: string,
+  ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (period) params.set('period', period)
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    if (acknowledgeMismatch) params.set('acknowledge_mismatch', '1')
+    if (variant !== 'radne') params.set('variant', variant)
+    if (dZjist) params.set('d_zjist', dZjist)
     return `/api/reports/dphdp3?${params.toString()}`
   },
 }

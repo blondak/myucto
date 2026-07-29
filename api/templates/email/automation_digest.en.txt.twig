@@ -1,0 +1,13 @@
+{% extends '_layout.txt.twig' %}
+{% block content %}
+MORNING AUTOMATION OVERVIEW
+===========================
+
+You have {{ totals.pending }} suggestions to approve and {{ totals.needs }} items that need your input.
+
+{% for company in companies %}{{ company.name }}: {{ company.auto }} automatic · {{ company.pending }} to approve · {{ company.needs }} need you
+Approve: {{ company.pending_link }}
+Needs input: {{ company.needs_link }}
+
+{% endfor %}Open automation: {{ automation_link }}
+{% endblock %}

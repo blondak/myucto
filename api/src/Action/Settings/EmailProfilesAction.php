@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\EmailProfileRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\IpMatcher;
@@ -363,8 +365,7 @@ final class EmailProfilesAction
 
     private function isAdmin(Request $request): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return ($user['role'] ?? null) === 'admin';
+        return RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE);
     }
 
     /**

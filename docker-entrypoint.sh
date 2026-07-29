@@ -24,9 +24,9 @@ fi
 if [ "${MYINVOICE_ENABLE_CRON:-1}" != "0" ]; then
   # Cron v Debianu nedědí ENV kontejneru → vydumpujeme ho pro wrapper. Obsahuje tajemství
   # (DB heslo, SMTP, klíče), proto jen pro root + www-data (0640), ne world-readable.
-  export -p > /etc/myinvoice-cron.env
-  chmod 0640 /etc/myinvoice-cron.env
-  chown root:www-data /etc/myinvoice-cron.env 2>/dev/null || true
+  export -p > /etc/myucto-cron.env
+  chmod 0640 /etc/myucto-cron.env
+  chown root:www-data /etc/myucto-cron.env 2>/dev/null || true
   # Selhání cronu nesmí shodit kontejner (Apache poběží dál).
   if cron; then
     echo "[entrypoint] vestavěný cron spuštěn (logy v \${MYINVOICE_DATA_DIR}/log/cron)"

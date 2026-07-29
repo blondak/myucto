@@ -23,16 +23,7 @@ final class FuelingRepository
      */
     public function listForTenant(int $supplierId, array $filters = []): array
     {
-        $where = ['f.supplier_id = ?'];
-        $params = [$supplierId];
-        if (!empty($filters['car_id']))    { $where[] = 'f.car_id = ?';    $params[] = (int) $filters['car_id']; }
-        if (!empty($filters['vendor_id'])) { $where[] = 'f.vendor_id = ?'; $params[] = (int) $filters['vendor_id']; }
-        if (!empty($filters['source']))    { $where[] = 'f.source = ?';    $params[] = (string) $filters['source']; }
-        if (!empty($filters['year']))      { $where[] = 'YEAR(f.fueled_date) = ?';  $params[] = (int) $filters['year']; }
-        if (!empty($filters['month']))     { $where[] = 'MONTH(f.fueled_date) = ?'; $params[] = (int) $filters['month']; }
-        if (!empty($filters['date_from'])) { $where[] = 'f.fueled_date >= ?'; $params[] = (string) $filters['date_from']; }
-        if (!empty($filters['date_to']))   { $where[] = 'f.fueled_date <= ?'; $params[] = (string) $filters['date_to']; }
-        if (!empty($filters['unassigned'])) { $where[] = 'f.car_id IS NULL'; }
+        [$where, $params] = $this->buildWhere($supplierId, $filters);
         $sql = 'SELECT f.*, c.registration AS car_registration, c.name AS car_name,
                        cl.company_name AS vendor_name,
                        pi.vendor_invoice_number AS source_invoice_number
@@ -45,6 +36,76 @@ final class FuelingRepository
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Stránkovaná varianta pro list endpoint — COUNT(*) bez LIMIT + data s LIMIT/OFFSET.
+     *
+     * @param array{car_id?:int, source?:string, vendor_id?:int, year?:int, month?:int, date_from?:string, date_to?:string, unassigned?:bool} $filters
+     * @return array{0:list<array<string,mixed>>, 1:int} [rows, total]
+     */
+    public function listPaged(int $supplierId, array $filters, int $perPage, int $offset): array
+    {
+        [$where, $params] = $this->buildWhere($supplierId, $filters);
+        $whereSql = implode(' AND ', $where);
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM fuelings f WHERE ' . $whereSql);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        // LIMIT/OFFSET inlinujeme jako validované inty (vzor StockItemRepository::list /
+        // DocumentRepository::search) — native prepared statements neumí LIMIT/OFFSET jako parametr.
+        $sql = 'SELECT f.*, c.registration AS car_registration, c.name AS car_name,
+                       cl.company_name AS vendor_name,
+                       pi.vendor_invoice_number AS source_invoice_number
+                  FROM fuelings f
+             LEFT JOIN cars c     ON c.id  = f.car_id
+             LEFT JOIN clients cl ON cl.id = f.vendor_id
+             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id
+                 WHERE ' . $whereSql . '
+              ORDER BY f.fueled_date DESC, f.fueled_time DESC, f.id DESC
+                 LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $rows = array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return [$rows, $total];
+    }
+
+    /**
+     * Distinct roky tankování pro dropdown filtru (scope = supplier [+ auto], NE aktuální
+     * rok/měsíc filtr — ať dropdown při výběru roku nezkolabuje na jednu položku).
+     *
+     * @return list<int>
+     */
+    public function distinctYears(int $supplierId, ?int $carId = null): array
+    {
+        $where = ['supplier_id = ?'];
+        $params = [$supplierId];
+        if ($carId !== null) { $where[] = 'car_id = ?'; $params[] = $carId; }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT YEAR(fueled_date) AS y FROM fuelings WHERE ' . implode(' AND ', $where) . ' ORDER BY y DESC'
+        );
+        $stmt->execute($params);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * @param array{car_id?:int, source?:string, vendor_id?:int, year?:int, month?:int, date_from?:string, date_to?:string, unassigned?:bool} $filters
+     * @return array{0:list<string>, 1:list<mixed>} [where, params]
+     */
+    private function buildWhere(int $supplierId, array $filters): array
+    {
+        $where = ['f.supplier_id = ?'];
+        $params = [$supplierId];
+        if (!empty($filters['car_id']))    { $where[] = 'f.car_id = ?';    $params[] = (int) $filters['car_id']; }
+        if (!empty($filters['vendor_id'])) { $where[] = 'f.vendor_id = ?'; $params[] = (int) $filters['vendor_id']; }
+        if (!empty($filters['source']))    { $where[] = 'f.source = ?';    $params[] = (string) $filters['source']; }
+        if (!empty($filters['year']))      { $y = (int) $filters['year']; $where[] = 'f.fueled_date >= ? AND f.fueled_date < ?'; $params[] = sprintf('%04d-01-01', $y); $params[] = sprintf('%04d-01-01', $y + 1); }
+        if (!empty($filters['month']))     { $where[] = 'MONTH(f.fueled_date) = ?'; $params[] = (int) $filters['month']; }
+        if (!empty($filters['date_from'])) { $where[] = 'f.fueled_date >= ?'; $params[] = (string) $filters['date_from']; }
+        if (!empty($filters['date_to']))   { $where[] = 'f.fueled_date <= ?'; $params[] = (string) $filters['date_to']; }
+        if (!empty($filters['unassigned'])) { $where[] = 'f.car_id IS NULL'; }
+        return [$where, $params];
     }
 
     public function find(int $id, int $supplierId): ?array

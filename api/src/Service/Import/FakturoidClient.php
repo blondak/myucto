@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use GuzzleHttp\Client;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundRequestException;
+use MyInvoice\Service\Http\OutboundResponse;
+use MyInvoice\Service\Http\OutboundUrlGuard;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -25,15 +29,20 @@ use Psr\Log\LoggerInterface;
  *
  * URL pattern: https://app.fakturoid.cz/api/v3/accounts/{slug}/...
  * Priorita: pokud má supplier `fakturoid_client_id` → OAuth2; jinak BasicAuth.
- * User-Agent: REQUIRED header (jinak 403) — `MyInvoice.cz/<version> (radek@hulan.cz)`.
+ * User-Agent: REQUIRED header (jinak 403) — `MyUcto.cz/<version> (radek@hulan.cz)`.
  *
  * Rate limit: 240 req/min hard, naše soft 200/min → throttle při >180.
  */
 final class FakturoidClient
 {
+    private const API_HOST = 'app.fakturoid.cz';
     private const API_BASE = 'https://app.fakturoid.cz/api/v3/accounts';
     private const TOKEN_URL = 'https://app.fakturoid.cz/api/v3/oauth/token';
-    private const USER_AGENT = 'MyInvoice.cz Import (https://github.com/radekhulan/myinvoice; radek@hulan.cz)';
+    /** SEC-13 — přesné hosty, ze kterých smíme stahovat přílohy výdajů (fail-closed). */
+    private const ATTACHMENT_HOSTS = ['app.fakturoid.cz', 'files.fakturoid.cz'];
+    /** Strop staženého souboru přílohy (scan dokladu se do 20 MiB vejde). */
+    private const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+    private const USER_AGENT = 'MyUcto.cz Import (https://github.com/radekhulan/myucto; radek@hulan.cz)';
     private const TIMEOUT = 30;
     private const RATE_LIMIT_THRESHOLD = 180; // req/min
     /** Fixní velikost stránky Fakturoid API v3 (invoices/expenses/subjects). */
@@ -43,10 +52,18 @@ final class FakturoidClient
     /** @var array<int, list<int>>  supplier_id → list timestamps (rolling 60s) */
     private array $requestLog = [];
 
+    /**
+     * `$urlGuard` i `$config` jsou POVINNÉ (SEC-13): PHP-DI autowiring optional
+     * class-param nikdy nevyplní, takže `?Config $config = null` by znamenalo,
+     * že `import.fakturoid.attachment_hosts` je mrtvý klíč a záchranná brzda
+     * (doplnění storage hostu bez zásahu do kódu) by nefungovala.
+     */
     public function __construct(
         private readonly Connection $db,
         private readonly SecretEncryption $crypto,
         private readonly LoggerInterface $logger,
+        private readonly OutboundUrlGuard $urlGuard,
+        private readonly Config $config,
     ) {
         $this->http = new Client([
             'timeout' => self::TIMEOUT,
@@ -281,45 +298,227 @@ final class FakturoidClient
 
     /**
      * Stáhne přílohu výdaje (originální doklad od dodavatele). Fakturoid vrací
-     * v expense JSON pole `attachment` jako URL — stáhneme ho s autorizací.
+     * v expense JSON pole `attachment` jako absolutní URL — tedy hodnotu, kterou
+     * neurčujeme my, ale poskytovatel.
+     *
+     * SEC-13: proto NEJDE přes {@see binaryGet} (Guzzle + Authorization hlavička),
+     * ale přes {@see OutboundUrlGuard}:
+     *   - host musí být na allowlistu Fakturoid download hostů,
+     *   - Authorization se posílá jen na vlastní API origin (jinde by šlo o exfiltraci
+     *     OAuth/Basic tokenu při kompromitované odpovědi poskytovatele),
+     *   - žádné redirecty, jen https, jen veřejné IP, spojení na ověřenou IP,
+     *   - tělo se stahuje streamovaně s tvrdým limitem,
+     *   - výsledek musí být PDF podle Content-Type i magic bytes.
      */
     public function downloadAttachment(int $supplierId, string $attachmentUrl): ?string
     {
         if ($attachmentUrl === '') return null;
-        return $this->binaryGet($supplierId, $attachmentUrl, absolute: true);
+
+        $creds = $this->getCredentials($supplierId);
+        if ($creds === null) return null;
+
+        try {
+            $target = $this->urlGuard->validate($attachmentUrl, $this->attachmentHosts());
+        } catch (OutboundRequestException $e) {
+            $this->logger->warning('Fakturoid: příloha odmítnuta guardem', [
+                'supplier_id' => $supplierId,
+                'reason' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        $headers = ['User-Agent' => self::USER_AGENT, 'Accept' => 'application/pdf'];
+        // Authorization výhradně na vlastní API origin — nikdy na CDN/storage host.
+        if (self::mayReceiveAuthorization($target->host)) {
+            $headers = $this->authHeaders($supplierId, $creds) + $headers;
+            $headers['Accept'] = 'application/pdf';
+        }
+
+        $this->throttle($supplierId);
+        try {
+            $resp = $this->urlGuard->request(
+                method: 'GET',
+                url: $attachmentUrl,
+                headers: $headers,
+                allowedHosts: $this->attachmentHosts(),
+                timeout: self::TIMEOUT,
+                maxBytes: self::MAX_ATTACHMENT_BYTES,
+            );
+        } catch (OutboundRequestException $e) {
+            $this->logger->warning('Fakturoid: stažení přílohy selhalo', [
+                'supplier_id' => $supplierId,
+                'reason' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if ($resp->status !== 200 || $resp->body === '') return null;
+
+        if (!self::isAcceptablePdf($resp->body, $resp->mimeType())) {
+            $this->logger->warning('Fakturoid: příloha není platné PDF', [
+                'supplier_id' => $supplierId,
+                'content_type' => $resp->mimeType(),
+            ]);
+            return null;
+        }
+
+        return $resp->body;
     }
 
     /**
-     * GET binárního obsahu (PDF / příloha). `$absolute` = endpoint je už plná URL
-     * (Fakturoid attachment), jinak se skládá z API_BASE + slug. 401 → refresh + retry.
+     * Smí na tento host odejít Authorization hlavička? Jen vlastní API origin —
+     * storage/CDN host by dostal OAuth Bearer nebo Basic token k účtu (SEC-13).
      */
-    private function binaryGet(int $supplierId, string $endpoint, bool $absolute = false): ?string
+    public static function mayReceiveAuthorization(string $host): bool
+    {
+        return rtrim(strtolower(trim($host)), '.') === self::API_HOST;
+    }
+
+    /**
+     * Obsah přílohy je přijatelný jen jako PDF — Content-Type musí sedět (prázdný
+     * a `application/octet-stream` tolerujeme, servery bývají nepřesné) a magic bytes
+     * musí být `%PDF-` po odstranění BOM/whitespace.
+     */
+    public static function isAcceptablePdf(string $body, string $mime): bool
+    {
+        if ($body === '' || strlen($body) > self::MAX_ATTACHMENT_BYTES) return false;
+        $mime = strtolower(trim($mime));
+        if ($mime !== '' && $mime !== 'application/pdf' && $mime !== 'application/octet-stream') {
+            return false;
+        }
+        return str_starts_with(ltrim($body, "\x00\x09\x0a\x0d\x20\xef\xbb\xbf"), '%PDF-');
+    }
+
+    /** @return list<string> Vestavěné download hosty (bez konfiguračních doplňků). */
+    public static function defaultAttachmentHosts(): array
+    {
+        return self::ATTACHMENT_HOSTS;
+    }
+
+    /**
+     * Přesné hosty, ze kterých smíme stahovat přílohy. Default jsou domény Fakturoidu;
+     * `import.fakturoid.attachment_hosts` umožní doplnit storage host bez zásahu do kódu.
+     * Fail-closed: cokoli mimo seznam se nestahuje.
+     *
+     * @return list<string>
+     */
+    private function attachmentHosts(): array
+    {
+        $hosts = self::ATTACHMENT_HOSTS;
+        $extra = $this->config->get('import.fakturoid.attachment_hosts', []) ?? [];
+        if (is_string($extra)) {
+            $extra = preg_split('/[\s,]+/', $extra) ?: [];
+        }
+        if (is_array($extra)) {
+            foreach ($extra as $host) {
+                if (is_string($host) && trim($host) !== '') {
+                    $hosts[] = trim($host);
+                }
+            }
+        }
+        return array_values(array_unique($hosts));
+    }
+
+    /**
+     * GET binárního obsahu z vlastního API (PDF vydané faktury). Endpoint je vždy
+     * relativní slug — absolutní URL od poskytovatele sem nesmí (viz downloadAttachment).
+     * 401 → refresh + retry.
+     *
+     * SEC-13 (sesterská cesta k downloadAttachment): jde přes {@see OutboundUrlGuard},
+     * ne přes syrový Guzzle. Guzzle totiž ve výchozím stavu následuje redirecty —
+     * odpověď Fakturoidu (nebo kohokoli, kdo by jeho odpověď ovlivnil) by tak mohla
+     * poslat naši Authorization hlavičku na cizí nebo vnitřní host. Guard navíc
+     * vynutí https, veřejnou IP, spojení na ověřenou IP a tvrdý strop velikosti.
+     */
+    private function binaryGet(int $supplierId, string $endpoint): ?string
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) return null;
 
-        $url = $absolute
-            ? $endpoint
-            : self::API_BASE . '/' . urlencode($creds['slug']) . '/' . ltrim($endpoint, '/');
+        $url = self::API_BASE . '/' . urlencode($creds['slug']) . '/' . ltrim($endpoint, '/');
 
         $headers = $this->authHeaders($supplierId, $creds);
         $headers['Accept'] = '*/*'; // ne JSON — chceme binárku
 
-        $this->throttle($supplierId);
-        $resp = $this->http->get($url, ['headers' => $headers]);
-        $code = $resp->getStatusCode();
+        $resp = $this->guardedApiGet($supplierId, $url, $headers);
+        if ($resp === null) return null;
 
-        if ($code === 401 && $this->isUsingOAuth($creds)) {
+        if ($resp->status === 401 && $this->isUsingOAuth($creds)) {
             $this->invalidateToken($supplierId);
             $headers = $this->authHeaders($supplierId, $creds);
             $headers['Accept'] = '*/*';
-            $resp = $this->http->get($url, ['headers' => $headers]);
-            $code = $resp->getStatusCode();
+            $resp = $this->guardedApiGet($supplierId, $url, $headers);
+            if ($resp === null) return null;
         }
 
-        if ($code !== 200) return null; // 204 = PDF not ready, 404 = bez přílohy
-        $body = (string) $resp->getBody();
-        return $body !== '' ? $body : null;
+        // Fakturoid může PDF servírovat přesměrováním na storage host. Guard redirecty
+        // zásadně nenásleduje (hop by obešel allowlist i IP kontrolu), takže jediný hop
+        // obsloužíme ručně a znovu přes guard: cíl musí projít allowlistem download
+        // hostů a Authorization se na něj UŽ NEPOSÍLÁ (jinak bychom token k účtu
+        // vystavili CDN/storage provozovateli).
+        if (in_array($resp->status, [301, 302, 303, 307, 308], true)) {
+            $location = $resp->header('location');
+            if ($location === null || $location === '') return null;
+
+            $resp = $this->followBinaryRedirect($supplierId, $location);
+            if ($resp === null) return null;
+        }
+
+        if ($resp->status !== 200) return null; // 204 = PDF not ready, 404 = bez přílohy
+        return $resp->body !== '' ? $resp->body : null;
+    }
+
+    /**
+     * Jediný povolený hop za binárkou. Cíl prochází plnou validací guardu proti
+     * allowlistu download hostů; bez Authorization hlavičky a bez dalšího hopu.
+     */
+    private function followBinaryRedirect(int $supplierId, string $location): ?OutboundResponse
+    {
+        $this->throttle($supplierId);
+        try {
+            return $this->urlGuard->request(
+                method: 'GET',
+                url: $location,
+                headers: ['User-Agent' => self::USER_AGENT, 'Accept' => '*/*'],
+                allowedHosts: $this->attachmentHosts(),
+                timeout: self::TIMEOUT,
+                maxBytes: self::MAX_ATTACHMENT_BYTES,
+            );
+        } catch (OutboundRequestException $e) {
+            $this->logger->warning('Fakturoid: přesměrování binárky odmítnuto guardem', [
+                'supplier_id' => $supplierId,
+                'reason' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * GET na vlastní API origin přes guard. Allowlist je tvrdě jen `API_HOST` —
+     * na tuhle cestu chodí výhradně URL, které skládáme my z API_BASE, takže
+     * konfigurační doplňky download hostů se sem záměrně nepromítají.
+     *
+     * @param array<string,string> $headers
+     */
+    private function guardedApiGet(int $supplierId, string $url, array $headers): ?OutboundResponse
+    {
+        $this->throttle($supplierId);
+        try {
+            return $this->urlGuard->request(
+                method: 'GET',
+                url: $url,
+                headers: $headers,
+                allowedHosts: [self::API_HOST],
+                timeout: self::TIMEOUT,
+                maxBytes: self::MAX_ATTACHMENT_BYTES,
+            );
+        } catch (OutboundRequestException $e) {
+            $this->logger->warning('Fakturoid: binární GET selhal', [
+                'supplier_id' => $supplierId,
+                'reason' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

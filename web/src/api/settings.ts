@@ -1,9 +1,66 @@
 import { api } from './client'
+import type { EpoSigningCredential } from './epoSubmissions'
 
 /** Typy zpráv pro kopii dodavateli — zrcadlí RecipientResolver::TYPE_*. */
 export type SelfCopyType = 'documents' | 'reminders' | 'approvals'
 /** off = neposílat, cc/bcc = role kopie dodavatele. */
 export type SelfCopyMode = 'off' | 'cc' | 'bcc'
+
+/** Náhled dopadu přepnutí accounting_mode → double_entry (audit 2026-07, G5). */
+/** Polozka ciselniku CINNOSTI (CZ-NACE / c_okec) - naseptavac v danovem nastaveni. */
+export interface NaceCode {
+  /** Kanonicka hodnota do `c_okec` (sekce 01-09 vede ciselnik bez vodici nuly: 14800). */
+  code: string
+  /** Citelny zapis tridy - 731100 -> 73.11.00. */
+  display: string
+  name: string
+  valid_from: string
+}
+
+/** Stav ulozeneho CZ-NACE proti ciselniku - `expired` po prechodu na NACE rev. 2.1. */
+export interface NaceResolved {
+  code: string
+  display: string
+  name: string | null
+  status: 'active' | 'expired' | 'unknown'
+  valid_to: string | null
+}
+
+export interface ModeSwitchPreview {
+  cash_documents: number
+  invoices: number
+  purchase_invoices: number
+  bank_transactions: number
+  total: number
+}
+
+export type AiAssistScope = 'bank_tx' | 'purchase_invoices'
+
+export interface AiAssistSettings {
+  enabled: boolean
+  scope: AiAssistScope[]
+  provider: 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+  provider_label: string
+  data_region: 'eu' | 'us'
+  dpa_confirmed: Record<string, string | null>
+  embedding_available: boolean
+  knn_warm: {
+    bank_transaction: boolean
+    purchase_invoice: boolean
+    labels: { bank_transaction: number; purchase_invoice: number }
+  }
+  muted_sources: Array<{ source: 'knn' | 'llm'; muted_at: string; reason: Record<string, unknown> }>
+  daily_limit: number
+  today_used: number
+}
+
+export interface AiAssistUpdate {
+  enabled?: boolean
+  scope?: AiAssistScope[]
+  dpa_confirm?: AiAssistSettings['provider']
+  dpa_revoke?: AiAssistSettings['provider']
+  unmute_source?: 'knn' | 'llm'
+}
 
 export interface Supplier {
   id: number
@@ -19,6 +76,12 @@ export interface Supplier {
   ic: string | null
   dic: string | null
   is_vat_payer: boolean
+  vat_status_effective_from?: string
+  vat_status_history?: Array<{
+    effective_from: string
+    is_vat_payer: boolean
+    annual_deduction_percent: number
+  }>
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi. Nelze kombinovat s is_vat_payer. */
   is_identified: boolean
@@ -72,6 +135,16 @@ export interface Supplier {
   // Efektivní hodnoty z cfg (read-only) — UI je ukáže u volby „dle konfigurace".
   // `approvals` má v cfg dva flagy: žádost (approvals) a upomínka (approval_reminders).
   cfg_self_copy_fallback?: Record<SelfCopyType | 'approval_reminders', SelfCopyMode>
+  // Režim účetnictví (Epic F0, migrace 1001) — double_entry aktivuje účetní moduly (F1)
+  accounting_mode?: 'tax_evidence' | 'double_entry'
+  // Skladová evidence (Epic SKLAD, migrace 1022) — nezávislé na accounting_mode.
+  // Smí přepínat i účetní (ne jen admin) — viz SettingsAction::$stockOnlyFields.
+  stock_enabled?: boolean
+  stock_auto_issue?: boolean
+  // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po přijetí;
+  // účinek jen v režimu double_entry.
+  auto_post_invoices?: boolean
+  auto_post_purchases?: boolean
   // Tax settings pro EPO výkazy DPH/KH (migrace 0038, fáze 6)
   taxpayer_type?: 'fo' | 'po' | null
   vat_period?: 'monthly' | 'quarterly' | null
@@ -84,7 +157,10 @@ export interface Supplier {
   financial_office_code?: string | null
   workplace_code?: string | null
   cz_nace_code?: string | null
+  /** Ulozeny CZ-NACE prelozeny pres ciselnik CINNOSTI (read-only, dopocitava backend). */
+  cz_nace_resolved?: NaceResolved | null
   data_box_id?: string | null
+  data_box_type?: 'FO' | 'PFO' | 'PO' | 'OVM' | null
   sest_jmeno?: string | null
   sest_prijmeni?: string | null
   sest_telefon?: string | null
@@ -96,6 +172,14 @@ export interface Supplier {
   opr_jmeno?: string | null
   opr_prijmeni?: string | null
   opr_postaveni?: string | null
+  // Přehled OSVČ pro ČSSZ XML (Fáze 3)
+  cssz_vsdp?: string | null
+  cssz_ossz_code?: string | null
+  health_insurance_number?: string | null
+  // AI extrakční brána (Epic F7) — non-secret volby (secrety jen přes /ai/credentials).
+  ai_provider?: 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+  ai_data_region?: 'eu' | 'us'
+  ai_eu_residency_required?: boolean
   // Globální cfg fallback (read-only) — UI ho ukáže jako placeholder
   // v prázdných polích per-supplier šablon. Hodnota přichází z cfg.varsymbol.templates.
   cfg_varsymbol_fallback?: {
@@ -104,6 +188,22 @@ export interface Supplier {
     credit_note: string
     purchase: string
   }
+  // Featura G (private/REAL_data_followup_UX.md) — preventivní varování: efektivní
+  // šablony (supplier-wide + per-client přepsání) numericky kolidují po normalizaci
+  // VS na číslice (StatementMatcher) — read-only, přepočítá se při každém načtení/uložení.
+  number_series_collisions?: NumberSeriesCollision[]
+}
+
+export interface NumberSeriesSide {
+  type: 'invoice' | 'proforma' | 'credit_note'
+  client_id: number | null
+  client_name: string | null
+  template: string
+}
+
+export interface NumberSeriesCollision {
+  a: NumberSeriesSide
+  b: NumberSeriesSide
 }
 
 export interface BrandingProfile {
@@ -502,6 +602,8 @@ export type SigningCredentialPassphrasePolicy = 'encrypted_store' | 'passphrase_
 
 export interface SigningProfileCredentialMeta {
   has_certificate: boolean
+  certificate_source?: 'personal_vault' | 'uploaded_file'
+  vault_credential_id?: number | null
   certificate_fingerprint?: string | null
   certificate_subject?: string | null
   certificate_email?: string | null
@@ -591,9 +693,17 @@ export type PdfSignatureOutputSettingPayload = Partial<Pick<
   'enabled' | 'backend' | 'selection_source' | 'user_profile_fallback' | 'default_profile_id' | 'failure_policy' | 'signature_config'
 >>
 
+export interface PdfSignatureOutputSettingsBatchResult {
+  output_settings: PdfSignatureOutputSetting[]
+}
+
 export const settingsApi = {
   getSupplier: () => api.get<Supplier>('/settings/supplier').then(r => r.data),
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
+  // E2: při total > 0 přesměruje FE do průvodce; přímé uložení jistí BE 409 backfill_required.
+  getModeSwitchPreview: () => api.get<ModeSwitchPreview>('/settings/mode-switch-preview').then(r => r.data),
+  getAiAssist: () => api.get<AiAssistSettings>('/settings/ai-assist').then(r => r.data),
+  updateAiAssist: (payload: AiAssistUpdate) => api.put<AiAssistSettings>('/settings/ai-assist', payload).then(r => r.data),
 
   listCurrencies: () => api.get<CurrencyAccount[]>('/settings/currencies').then(r => r.data),
   createCurrency: (payload: Partial<CurrencyAccount>) =>
@@ -755,12 +865,29 @@ export const settingsApi = {
     ).then(r => r.data),
   deleteSigningProfileCredential: (id: number) =>
     api.delete<SigningProfileCredentialMeta>(`/settings/signing/profiles/${id}/credentials/certificate`).then(r => r.data),
+  listPersonalSigningCertificates: () =>
+    api.get<EpoSigningCredential[]>('/settings/signing/personal-certificates').then(r => r.data),
+  linkPersonalSigningCertificate: (
+    profileId: number,
+    credentialId: number,
+    password: string,
+    totpCode: string,
+  ) => api.put<SigningProfileCredentialMeta>(
+    `/settings/signing/profiles/${profileId}/credentials/personal-vault`,
+    {
+      credential_id: credentialId,
+      password,
+      totp_code: totpCode || undefined,
+    },
+  ).then(r => r.data),
   getPdfSigningSettings: () =>
     api.get<PdfSignatureSettings>('/settings/pdf-signing').then(r => r.data),
   testPdfSigning: (outputType: string) =>
     api.post<PdfSignatureTestResult>('/settings/pdf-signing/test', { output_type: outputType }).then(r => r.data),
   updatePdfSignatureOutputSetting: (outputType: string, payload: PdfSignatureOutputSettingPayload) =>
     api.put<PdfSignatureOutputSetting>(`/settings/pdf-signing/output-settings/${outputType}`, payload).then(r => r.data),
+  updatePdfSignatureOutputSettings: (settings: Array<PdfSignatureOutputSettingPayload & { output_type: string }>) =>
+    api.put<PdfSignatureOutputSettingsBatchResult>('/settings/pdf-signing/output-settings', { settings }).then(r => r.data),
   getPdfSigningUserDefaults: () =>
     api.get<PdfSignatureUserDefaults>('/settings/pdf-signing/user-defaults').then(r => r.data),
   updatePdfSigningUserDefault: (outputType: string, profileId: number | null) =>
@@ -777,6 +904,15 @@ export const settingsApi = {
     api.put<PdfSignatureDocumentSelection>(`/documents/${entityType}/${id}/signature-selection`, payload).then(r => r.data),
   deletePdfSignatureDocumentSelection: (entityType: PdfSignatureDocumentEntityType, id: number) =>
     api.delete<PdfSignatureDocumentSelection>(`/documents/${entityType}/${id}/signature-selection`).then(r => r.data),
+  /**
+   * Naseptavac CZ-NACE - vraci jen kody platne k dnesku. ARES eviduje jeste
+   * NACE rev. 2, ciselnik EPO je od 1. 1. 2026 na rev. 2.1, takze prefill
+   * z ARES casto prinese expirovany kod a uzivatel si tu najde nastupce.
+   * Prazdny `q` vrati prvni stranku; jinak prefix kodu nebo hledani v nazvu.
+   */
+  searchNaceCodes: (q: string, limit = 20) =>
+    api.get<{ items: NaceCode[] }>('/settings/nace-codes', { params: { q, limit } }).then(r => r.data.items),
+
   // Vrací HTML string — frontend ho pak nacpe do iframe.srcdoc (obejde X-Frame-Options DENY).
   emailPreviewHtml: (locale: 'cs' | 'en' = 'cs', brandingProfileId: number | null = null) =>
     api.get<string>('/settings/email-branding/preview', {

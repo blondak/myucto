@@ -4,16 +4,24 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\AdvanceCycleLock;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
-use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockIssueService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -30,6 +38,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class CancelInvoiceAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Connection $db,
@@ -37,9 +47,37 @@ final class CancelInvoiceAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly StatsRecomputer $stats,
+        private readonly DocumentLockService $locks,
+        private readonly StockIssueService $stockIssue,
+        private readonly DocumentJournalSync $journalSync,
+        private readonly AdvanceCycleLock $cycleLock,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) ($args['id'] ?? 0);
+        $invoice = $this->repo->find($id);
+        if (SupplierGuard::owns($request, $invoice) && ($invoice['invoice_type'] ?? '') === 'tax_document') {
+            $proformaId = !empty($invoice['parent_invoice_id']) ? (int) $invoice['parent_invoice_id'] : 0;
+            if ($proformaId === 0) {
+                $payment = $this->db->pdo()->prepare(
+                    'SELECT invoice_id FROM invoice_payments WHERE tax_document_invoice_id = ? LIMIT 1'
+                );
+                $payment->execute([$id]);
+                $proformaId = (int) ($payment->fetchColumn() ?: 0);
+            }
+            if ($proformaId > 0) {
+                return $this->cycleLock->synchronized(
+                    $proformaId,
+                    fn (): Response => $this->invokeUnlocked($request, $response, $args),
+                );
+            }
+        }
+
+        return $this->invokeUnlocked($request, $response, $args);
+    }
+
+    private function invokeUnlocked(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
         $invoice = $this->repo->find($id);
@@ -51,6 +89,37 @@ final class CancelInvoiceAction
         }
         if ($invoice['invoice_type'] === 'cancellation') {
             return Json::error($response, 'invalid_type', 'Stornovací doklad nelze stornovat.', 409);
+        }
+        if ($invoice['invoice_type'] === 'tax_document') {
+            $proformaId = !empty($invoice['parent_invoice_id']) ? (int) $invoice['parent_invoice_id'] : 0;
+            if ($proformaId === 0) {
+                $payment = $this->db->pdo()->prepare(
+                    'SELECT invoice_id FROM invoice_payments WHERE tax_document_invoice_id = ? LIMIT 1'
+                );
+                $payment->execute([$id]);
+                $proformaId = (int) ($payment->fetchColumn() ?: 0);
+            }
+            $final = $this->db->pdo()->prepare(
+                "SELECT 1 FROM invoices
+                  WHERE supplier_id = ? AND parent_invoice_id = ?
+                    AND invoice_type = 'invoice' AND status <> 'cancelled'
+                  LIMIT 1"
+            );
+            $final->execute([(int) $invoice['supplier_id'], $proformaId]);
+            if ($proformaId > 0 && $final->fetchColumn() !== false) {
+                return Json::error(
+                    $response,
+                    'advance_tax_document_settled',
+                    'Daňový doklad k přijaté platbě nelze stornovat, dokud existuje navazující finální faktura. Nejdřív stornujte finální fakturu.',
+                    409,
+                );
+            }
+        }
+
+        // Zámek dokladu (Epic F6): storno = účetní akt — zaúčtovaný/uzavřený doklad
+        // klient nestornuje (403), účetní v zavřeném období 409, admin ?force=1.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id)) {
+            return $deny;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -77,9 +146,33 @@ final class CancelInvoiceAction
         $pdo = $this->db->pdo();
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
+        $requireUnbooked = RequestAuthorization::isClientType($request);
 
-        $pdo->beginTransaction();
+        $supplierId = (int) $invoice['supplier_id'];
+        $stockEnabled = $this->stockIssue->isStockEnabled($supplierId);
+        $ownTx = !$pdo->inTransaction();
+        if ($stockEnabled && $ownTx) {
+            // Storno auto-výdejky poběží ve stejné transakci — READ COMMITTED je
+            // nutné pro FOR UPDATE zámky StockDocumentService (SET bez SESSION
+            // platí jen pro následující transakci).
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        }
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
         try {
+            // A3 (audit H5): interní storno zaúčtované faktury musí stornovat i aktivní
+            // zápis v deníku — jinak deník drží výnos + 311 stornované faktury, kterou
+            // DPH evidence už nevykazuje (trvalá divergence). PRVNÍ krok (fail-fast): při
+            // uzavřeném období vyhodí PostingException → rollback + 409 dřív, než doklad
+            // dostane cancellation záznam / cancelled status (nic se nezmění).
+            $this->journalSync->onCancel($supplierId, 'invoice', (int) $invoice['id'], [
+                'user_id'    => $userId,
+                'posted_by'  => $userId,
+                'ip'         => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                'user_agent' => $request->getHeaderLine('User-Agent'),
+            ]);
+
             // 1. Vytvoř cancellation záznam (interní, bez varsymbolu)
             $stmt = $pdo->prepare(
                 'INSERT INTO invoices
@@ -103,13 +196,64 @@ final class CancelInvoiceAction
             ]);
             $cancellationId = (int) $pdo->lastInsertId();
 
-            // 2. Označ původní fakturu jako cancelled
-            $pdo->prepare('UPDATE invoices SET status = "cancelled", cancelled_at = NOW() WHERE id = ?')
-                ->execute([$invoice['id']]);
+            // 2. Označ původní fakturu jako cancelled. Optimistický zámek L1 (Epic F6):
+            // pro klienta UPDATE podmíněný booked_at IS NULL — účetní mohla zaúčtovat
+            // mezi guard-checkem a zápisem; 0 řádek → rollback + 409 document_locked.
+            $upd = $pdo->prepare(
+                'UPDATE invoices SET status = "cancelled", cancelled_at = NOW() WHERE id = ?'
+                . ($requireUnbooked ? ' AND booked_at IS NULL' : '')
+            );
+            $upd->execute([$invoice['id']]);
+            if ($requireUnbooked && $upd->rowCount() === 0) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::error(
+                    $response,
+                    'document_locked',
+                    'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                    409,
+                );
+            }
 
-            $pdo->commit();
+            // Epic SKLAD §5.3: interní storno stornuje i posted auto-doklady
+            // k faktuře (protidoklad v původní ceně, hodnotově neutrální) —
+            // atomicky se změnou statusu. No-op, pokud žádné nejsou.
+            if ($stockEnabled) {
+                $this->stockIssue->reverseForInvoice($supplierId, (int) $invoice['id'], $userId);
+            }
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (PostingException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error(
+                $response,
+                'journal_' . $e->errorCode,
+                'Fakturu nelze stornovat — má zaúčtovaný zápis, který nelze stornovat ('
+                    . $e->getMessage() . '). Nejdřív vyřešte zaúčtování v deníku.',
+                409,
+            );
+        } catch (StockException $e) {
+            // Např. storno vratky dobropisu při nedostatku zásob, zamčené období,
+            // otevřená inventura — srozumitelný kód/status místo holé 500.
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error(
+                $response,
+                'stock.error.' . $e->errorCode,
+                $e->getMessage(),
+                $e->httpStatus,
+                ['items' => $e->details],
+            );
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Json::error($response, 'cancel_failed', $e->getMessage(), 500);
         }
 
@@ -177,17 +321,19 @@ final class CancelInvoiceAction
                        (invoice_id, description, quantity, unit, unit_price_without_vat,
                         vat_rate_id, vat_rate_snapshot,
                         total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
+                        stock_item_id, warehouse_id,
                         oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
                         oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
                         oss_vat_amount_return, oss_original_period)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )
                 : $pdo->prepare(
                     'INSERT INTO invoice_items
                        (invoice_id, description, quantity, unit, unit_price_without_vat,
                         vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
+                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
+                        stock_item_id, warehouse_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)'
                 );
             foreach ($invoice['items'] as $item) {
                 $code = $item['vat_classification_code']
@@ -205,6 +351,10 @@ final class CancelInvoiceAction
                     $item['vat_rate_snapshot'],
                     $item['order_index'],
                     $code !== null ? (string) $code : null,
+                    // Vazba na skladovou kartu z parent faktury (Epic SKLAD §5.3) —
+                    // bez ní by vratka při vystavení dobropisu neuměla napárovat výdej.
+                    $item['stock_item_id'] ?? null,
+                    $item['warehouse_id'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);
@@ -253,5 +403,4 @@ final class CancelInvoiceAction
             'edit_url'       => "/invoices/$creditNoteId/edit",
         ], 201);
     }
-
 }

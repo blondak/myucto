@@ -17,6 +17,67 @@ use DOMElement;
 final class EpoSupplierBlockBuilder
 {
     /**
+     * Sloupce, které {@see fillVetaP} čte. SSOT seznamu — do fáze F1 existoval ve třech
+     * téměř shodných kopiích (DPH, KH, SH) a lišily se drobnostmi, takže se nedalo říct,
+     * který je ten správný.
+     *
+     * @var list<string>
+     */
+    public const REQUIRED_SUPPLIER_KEYS = [
+        'company_name', 'street', 'city', 'zip', 'country_iso2',
+        'dic', 'taxpayer_type', 'financial_office_code', 'workplace_code',
+        'email', 'phone',
+        'street_number_pop', 'street_number_orient',
+        'opr_jmeno', 'opr_prijmeni', 'opr_postaveni',
+        'sest_jmeno', 'sest_prijmeni', 'sest_telefon',
+    ];
+
+    /**
+     * SELECT fragment pro načtení dodavatele do `fillVetaP()`. Vrací VŠECHNY sloupce,
+     * které helper čte, plus ty, které si volající tradičně bere navíc (`ic`,
+     * `is_vat_payer`, `data_box_id`, `vat_period`, …) — sjednocení je levnější než
+     * tři subtilně odlišné seznamy.
+     *
+     * Používej s `FROM supplier s LEFT JOIN countries c ON c.id = s.country_id`.
+     */
+    public static function supplierSelect(): string
+    {
+        return "s.id, s.company_name, s.street, s.city, s.zip,
+                    COALESCE(c.iso2, 'CZ') AS country_iso2,
+                    s.ic, s.dic, s.is_vat_payer, s.is_identified,
+                    s.taxpayer_type, s.vat_period, s.financial_office_code,
+                    s.workplace_code, s.cz_nace_code, s.data_box_id,
+                    s.email, s.phone,
+                    s.street_number_pop, s.street_number_orient,
+                    s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,
+                    s.sest_jmeno, s.sest_prijmeni, s.sest_telefon, s.sest_email, s.sest_funkce";
+    }
+
+    /**
+     * Načte dodavatele pro EPO podání. Jediná cesta, kterou mají DPH/KH/SH používat —
+     * tři vlastní kopie SELECTu byly příčinou, ne důsledkem: helper níž totiž degradoval
+     * TIŠE, když volající sloupec zapomněl.
+     *
+     * @return array<string,mixed>
+     */
+    public static function loadSupplier(\PDO $pdo, int $supplierId): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT ' . self::supplierSelect() . '
+               FROM supplier s
+          LEFT JOIN countries c ON c.id = s.country_id
+              WHERE s.id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
+        }
+
+        return $row;
+    }
+
+    /**
      * Vyplní VetaP atributy z `supplier` row.
      *
      * @param array<string,mixed> $supplier Načteno z `supplier` tabulky včetně
@@ -27,18 +88,19 @@ final class EpoSupplierBlockBuilder
      */
     public static function fillVetaP(DOMElement $vetaP, array $supplier, bool $includeContact = true): void
     {
+        self::assertSupplierContract($supplier);
+
         // c_ufo (kód FÚ) je required. Fallback "451" (Praha 1) pokud chybí.
         $vetaP->setAttribute('c_ufo', (string) ($supplier['financial_office_code'] ?: '451'));
         if (!empty($supplier['workplace_code'])) {
             $vetaP->setAttribute('c_pracufo', (string) $supplier['workplace_code']);
         }
-        // DIČ — pattern [0-9]{1,10}, strip "CZ" prefix.
-        $dic = (string) ($supplier['dic'] ?? '');
-        $vetaP->setAttribute('dic', preg_replace('/^CZ/i', '', $dic) ?? $dic);
+        $vetaP->setAttribute('dic', self::normalizeDic($supplier['dic'] ?? null));
         // typ_ds = TYP DAŇOVÉHO SUBJEKTU (F = fyzická, P = právnická osoba), NIKOLI typ
-        // datové schránky — ten se sem plnil dřív a shodil podání každé právnické
-        // osobě („U fyzické osoby musí být kmenová část DIČ tvořena RČ nebo vlastním
-        // číslem plátce"). Jediný autoritativní zdroj je `taxpayer_type` (fo/po).
+        // datové schránky. Dřív se sem plnil sloupec `data_box_type` (OVM/PO/FO) — u s.r.o.
+        // s prázdnou datovkou vypadl fallback "F" a EPO podání spadlo na kontrole
+        // „U fyzické osoby musí být kmenová část DIČ tvořena RČ nebo vlastním číslem plátce".
+        // Jediný autoritativní zdroj je `taxpayer_type` (fo/po).
         $isPravnickaOsoba = ($supplier['taxpayer_type'] ?? null) === 'po';
         $vetaP->setAttribute('typ_ds', $isPravnickaOsoba ? 'P' : 'F');
 
@@ -59,30 +121,7 @@ final class EpoSupplierBlockBuilder
             $vetaP->setAttribute('prijmeni', $prijmeni !== '' ? $prijmeni : $jmeno);
         }
 
-        // Adresa: ulice samotná + čísla popisné/orientační zvlášť (per EPO konvence).
-        //   1) Pokud má uživatel samostatné `street_number_pop` / `street_number_orient`,
-        //      použijeme je a z `street` odstřihneme trailing čísla (aby se nezdvojovala).
-        //   2) Jinak fallback parsing z `street` — typický český formát "Ulice 1104/36"
-        //      rozdělí na ulice + č.p. + č.o.
-        $rawStreet = (string) ($supplier['street'] ?? '');
-        $cpop = trim((string) ($supplier['street_number_pop'] ?? ''));
-        $corient = trim((string) ($supplier['street_number_orient'] ?? ''));
-        $uliceText = $rawStreet;
-        if ($cpop !== '' || $corient !== '') {
-            // Manuálně vyplněná čísla → odřízni numerický suffix z ulice (i s "/")
-            $uliceText = preg_replace('/\s+\d+[a-zA-Z]?(?:\s*\/\s*\d+[a-zA-Z]?)?\s*$/u', '', $rawStreet) ?? $rawStreet;
-            $uliceText = trim($uliceText);
-        } elseif ($rawStreet !== '') {
-            // Fallback parsing:
-            //   "Kardinála Berana 1104/36" → ulice="Kardinála Berana", pop=1104, orient=36
-            //   "Hlavní 12"                → ulice="Hlavní", pop=12
-            //   "Hlavní 12a"               → ulice="Hlavní", pop=12a (alfa suffix ok)
-            if (preg_match('/^(.+?)\s+(\d+[a-zA-Z]?)(?:\s*\/\s*(\d+[a-zA-Z]?))?\s*$/u', $rawStreet, $m)) {
-                $uliceText = trim($m[1]);
-                $cpop = $m[2];
-                if (!empty($m[3])) $corient = $m[3];
-            }
-        }
+        [$uliceText, $cpop, $corient] = self::parseStreet($supplier);
         $vetaP->setAttribute('ulice', $uliceText);
         if ($cpop !== '')    $vetaP->setAttribute('c_pop', $cpop);
         if ($corient !== '') $vetaP->setAttribute('c_orient', $corient);
@@ -125,6 +164,99 @@ final class EpoSupplierBlockBuilder
         if (!empty($supplier['sest_telefon'])) $vetaP->setAttribute('sest_telef', self::normalizePhone((string) $supplier['sest_telefon']));
         // Pozn.: sest_email a sest_funkce NEJSOU v EPO XSD (DPH/KH/SHV) — držíme je
         // jen v DB pro vnitřní použití (kontakt na účetní v UI).
+    }
+
+    /**
+     * Kontrakt volajícího: řádek musí OBSAHOVAT všechny klíče, které helper čte.
+     *
+     * Rozlišuje se chybějící KLÍČ (chyba volajícího — zapomenutý sloupec v SELECTu)
+     * od prázdné HODNOTY (legitimní stav — dodavatel prostě nemá vyplněný telefon).
+     *
+     * Proč to vůbec je: helper dřív u chybějícího sloupce degradoval **bez chyby** —
+     * atribut se prostě neemitoval a podání odešlo neúplné. Registr SSOT to označil za
+     * druhé nejrizikovější místo fáze F1 s poučením „kontrakt musí být vynutitelný,
+     * ne slovní". Tohle je ta vynutitelnost: chyba volajícího spadne hlasitě a hned,
+     * ne až na kontrole EPO u uživatele.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private static function assertSupplierContract(array $supplier): void
+    {
+        $missing = array_values(array_filter(
+            self::REQUIRED_SUPPLIER_KEYS,
+            static fn (string $key): bool => !array_key_exists($key, $supplier),
+        ));
+
+        if ($missing !== []) {
+            throw new \InvalidArgumentException(sprintf(
+                'fillVetaP(): v řádku dodavatele chybí sloupce [%s]. '
+                    . 'Načítej ho přes EpoSupplierBlockBuilder::loadSupplier(), '
+                    . 'ne vlastním SELECTem — chybějící sloupec by se jinak projevil '
+                    . 'až neúplným podáním.',
+                implode(', ', $missing),
+            ));
+        }
+    }
+
+    /**
+     * Rozdělí adresu na ulici + číslo popisné + číslo orientační (konvence EPO).
+     *
+     *   1) Má-li uživatel vyplněná samostatná `street_number_pop` / `street_number_orient`,
+     *      použijí se a z `street` se odřízne trailing číslo, aby se nezdvojovalo.
+     *   2) Jinak fallback parsing z `street`:
+     *      „Kardinála Berana 1104/36" → ['Kardinála Berana', '1104', '36']
+     *      „Hlavní 12"                → ['Hlavní', '12', '']
+     *      „Hlavní 12a"               → ['Hlavní', '12a', '']   (alfa suffix ok)
+     *      „17. listopadu 220"        → ['17. listopadu', '220', '']  (číslo v NÁZVU ulice)
+     *      „Na Poříčí"                → ['Na Poříčí', '', '']   (bez čísla)
+     *
+     * **Proč veřejná metoda:** do fáze F1 byla tahle logika INLINE uvnitř `fillVetaP()`,
+     * tedy nevolatelná — a existovala proto ve čtyřech kopiích (DPFO, DPPO, ČSSZ a tady).
+     * To není nedbalost volajících, je to strukturální příčina: SSOT, který nejde zavolat,
+     * se okopíruje rychleji, než kdyby žádný nebyl, protože vytváří dojem, že pravidlo
+     * je vyřešené. Příští oprava adresy by zase dopadla jen na část podání.
+     *
+     * Ověřeno měřením, že sjednocení nic nemění: všechny čtyři kopie se na korpusu
+     * 19 reálných českých adresních tvarů shodovaly (viz EpoStreetParsingTest).
+     *
+     * @param array<string,mixed> $supplier řádek `supplier` (street, street_number_pop/orient)
+     * @return array{0:string, 1:string, 2:string} [ulice, c_pop, c_orient]
+     */
+    public static function parseStreet(array $supplier): array
+    {
+        $rawStreet = trim((string) ($supplier['street'] ?? ''));
+        $cpop = trim((string) ($supplier['street_number_pop'] ?? ''));
+        $corient = trim((string) ($supplier['street_number_orient'] ?? ''));
+
+        if ($cpop !== '' || $corient !== '') {
+            $ulice = trim(preg_replace('/\s+\d+[a-zA-Z]?(?:\s*\/\s*\d+[a-zA-Z]?)?\s*$/u', '', $rawStreet) ?? $rawStreet);
+
+            return [$ulice, $cpop, $corient];
+        }
+
+        if ($rawStreet !== '' && preg_match('/^(.+?)\s+(\d+[a-zA-Z]?)(?:\s*\/\s*(\d+[a-zA-Z]?))?\s*$/u', $rawStreet, $m)) {
+            return [trim($m[1]), $m[2], $m[3] ?? ''];
+        }
+
+        return [$rawStreet, $cpop, $corient];
+    }
+
+    /**
+     * Číslo domu v jednom řetězci — tvar, který chce ČSSZ (`c_pop/c_orient`), na rozdíl
+     * od EPO, kde jsou to dva samostatné atributy.
+     *
+     * Prázdné číslo popisné NEEMITUJE vedoucí lomítko: `['', '9']` dá `'9'`, ne `'/9'`.
+     * Původní kopie v `CsszPrehledXmlBuilder` lomítko psala, takže dodavatel s vyplněným
+     * jen číslem orientačním (stav, který ARES i ruční zadání umí vyrobit) dostal do
+     * podání tvar `„/9"`.
+     */
+    public static function houseNumber(string $cpop, string $corient): string
+    {
+        if ($cpop === '') {
+            return $corient;
+        }
+
+        return $corient === '' ? $cpop : $cpop . '/' . $corient;
     }
 
     /**
@@ -176,6 +308,26 @@ final class EpoSupplierBlockBuilder
      * Vrací `null` pro zemi mimo mapu — atribut `stat` je v EPO optional, takže je
      * lepší ho vynechat než poslat neplatnou (číselníkově neexistující) hodnotu.
      */
+    /**
+     * Kmenová část tuzemského DIČ pro EPO — XSD pattern je `[0-9]{1,10}`.
+     *
+     * Nestačí utrhnout prefix `CZ`: DIČ zapsané s mezerami nebo pomlčkami
+     * (`CZ 123 456 789`, běžný tvar z importu a z ruky) prošlo do XML nečíselné,
+     * v rozporu s vlastním komentářem u kódu. EPO takové podání odmítne až na
+     * kontrole schématu, tedy ve chvíli, kdy uživatel podává.
+     *
+     * SSOT pro všechny buildery; `KontrolniHlaseniBuilder::cleanDic()` sem deleguje.
+     */
+    public static function normalizeDic(?string $dic): string
+    {
+        if ($dic === null || $dic === '') {
+            return '';
+        }
+        $clean = preg_replace('/^CZ/i', '', strtoupper(trim($dic))) ?? '';
+
+        return preg_replace('/[^0-9]/', '', $clean) ?? '';
+    }
+
     public static function countryName(string $iso2): ?string
     {
         static $map = [
@@ -221,8 +373,8 @@ final class EpoSupplierBlockBuilder
      * Normalizace telefonu pro EPO `c_telef` / `sest_telef`:
      *   - odstraní `+420` / `00420` prefix
      *   - odstraní mezery, pomlčky, závorky
-     * Reálné EPO podání uvádí jen 9-místné číslo (např. "722944990"); naše DB
-     * může mít formát "+420 722 944 990".
+     * Reálné EPO podání uvádí jen 9-místné číslo (např. "601002003"); naše DB
+     * může mít formát "+420 601 002 003".
      */
     public static function normalizePhone(string $raw): string
     {
@@ -233,23 +385,29 @@ final class EpoSupplierBlockBuilder
     }
 
     /**
-     * Normalizace CZ-NACE / OKEČ hodnoty pro `c_okec`. Hodnoty z UI mohou být
-     * "62.02", "62020", "620200" apod. → strip non-digit znaků, ořež na max 6.
+     * Normalizace CZ-NACE / OKEČ hodnoty pro `c_okec`. Hodnoty z UI/ARES mohou
+     * být "62.02", "62020", "620200", ale i pouhý oddíl "74".
      *
-     * NEPADUJEME zprava nulami: CZ-NACE číselník EPO je proměnné šířky — většina
-     * položek je 5-místná (`62020`), jen pár odvětví má 6-místné podtřídy
-     * (`010111`). XSD `totalDigits=6` je MAXIMUM, ne fixní délka; skutečný výčet
-     * hodnot žije v externím číselníku MFČR
-     * (https://adisspr.mfcr.cz/pmd/dokumentace/ciselniky/). Pravostranné doplnění
-     * 5-místného kódu nulou ("62020" → "620200") vyrobí hodnotu mimo číselník
-     * a EPO podání odmítne ("hodnota musí být z číselníku"). Validitu proti
-     * číselníku zde NEKONTROLUJEME — uživatel zná svou klasifikaci.
+     * Deleguje na {@see EpoOkecCodebook::normalize()} — kanonizaci proti snapshotu
+     * číselníku ČINNOSTI z Daňového portálu MFČR. Dřívější varianta tady jen
+     * strippovala nečíslice a záměrně NEpadovala, s odůvodněním, že číselník je
+     * proměnné šířky a většina položek je 5místná. Snapshot to vyvrací: z 1952
+     * položek je 1775 šestimístných a jen 177 pětimístných, a ty pětimístné jsou
+     * kódy sekcí 01–09 uložené bez vodicí nuly (sloupec je číselný, „14800" =
+     * 01.48.00). Ani slepé padování ani žádné padování proto nesedí — jediné
+     * správné je dohledání v číselníku, které obojí rozliší.
+     *
+     * Kód mimo číselník se NEBLOKUJE (snapshot může zestárnout; EPO na to hlásí
+     * jen propustnou chybu 30). Pozor na platnost: k 1. 1. 2026 se číselník
+     * překlopil na NACE rev. 2.1, takže i správně široký kód může být odmítnut
+     * proto, že expiroval (620900 → od 2026 629000).
+     *
+     * KRATŠÍ NEŽ 4 číslice → null = atribut se VYNECHÁ (c_okec je optional;
+     * oddíl z ARES v číselníku není a vyvolal by chybu 30).
      */
     public static function normalizeOkec(string $raw): ?string
     {
-        $digits = preg_replace('/\D/', '', $raw) ?? '';
-        if ($digits === '') return null;
-        if (strlen($digits) > 6) $digits = substr($digits, 0, 6);
-        return $digits;
+        $resolved = EpoOkecCodebook::normalize($raw);
+        return $resolved === null ? null : $resolved['code'];
     }
 }

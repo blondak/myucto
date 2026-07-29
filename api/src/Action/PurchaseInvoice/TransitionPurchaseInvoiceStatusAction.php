@@ -5,10 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -31,6 +38,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class TransitionPurchaseInvoiceStatusAction
 {
     use HandlesVarsymbolDuplicate;
+    use GuardsDocumentLock;
 
     private const TRANSITIONS = [
         // Forward flow (typical lifecycle): draft → received → booked → paid
@@ -45,10 +53,17 @@ final class TransitionPurchaseInvoiceStatusAction
         'cancelled' => ['received'],
     ];
 
+    /** Cílové stavy povolené roli client (M2): booked/cancelled = účetní akt → 403 VŽDY. */
+    private const CLIENT_TARGETS = ['received', 'paid'];
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
+        private readonly Connection $db,
+        private readonly DocumentJournalSync $journalSync,
+        private readonly DocumentAutoPoster $autoPoster,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -66,6 +81,30 @@ final class TransitionPurchaseInvoiceStatusAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $target = (string) ($body['target'] ?? '');
+
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+
+        // Epic F6: klient smí jen received ⇄ paid; booked/cancelled jsou účetní akt —
+        // 403 forbidden_transition VŽDY, bez ohledu na zámek i stav dokladu.
+        if (RequestAuthorization::isClientType($request) && !in_array($target, self::CLIENT_TARGETS, true)) {
+            return Json::error($response, 'forbidden_transition', 'Tento přechod stavu provádí účetní.', 403);
+        }
+
+        // Zámek dokladu (Epic F6): received ⇄ paid jen na nezamčených dokladech (jen client;
+        // účetní workflow stavy mění bez omezení — datum účetního případu se neposouvá).
+        $lock = $this->locks->forPurchaseInvoice($existing);
+        if ($deny = $this->denyIfLocked($request, $response, $lock, 'purchase_invoice', $id, clientOnly: true)) {
+            return $deny;
+        }
+
+        // Matice §4.3: booked/cancelled je účetní akt k datu dokladu — staff v zavřeném
+        // období 409 period_closed, admin ?force=1 s auditem. Client sem s těmito targety
+        // nedojde (403 forbidden_transition výš), takže druhé volání gatuje jen staff.
+        if (in_array($target, ['booked', 'cancelled'], true)) {
+            if ($deny = $this->denyIfLocked($request, $response, $lock, 'purchase_invoice', $id)) {
+                return $deny;
+            }
+        }
 
         $currentStatus = (string) $existing['status'];
         $allowed = self::TRANSITIONS[$currentStatus] ?? [];
@@ -105,7 +144,68 @@ final class TransitionPurchaseInvoiceStatusAction
             }
         }
 
-        $this->repo->setStatus($id, $target, $supplierId, $paidDate);
+        // Ruční zaúčtování PF = transition na booked (Epic F6, §4.7): doplň booked_by.
+        // Pro klienta optimistický zámek L1 — UPDATE podmíněný booked_at IS NULL
+        // (účetní mohla zaúčtovat mezi guard-checkem výš a tímto zápisem).
+        $bookedBy = $target === 'booked' && !empty($user['id']) ? (int) $user['id'] : null;
+        $requireUnbooked = RequestAuthorization::isClientType($request);
+
+        if ($target === 'cancelled') {
+            // A3 (audit H5): storno PF (přechod na cancelled) musí stornovat i aktivní
+            // zápis v deníku — jinak deník drží náklad + 321 stornované PF, kterou DPH
+            // evidence už nevykazuje. Reverze + setStatus v JEDNÉ transakci; uzavřené
+            // období → PostingException → rollback + 409 (doklad i zápis beze změny).
+            $pdo = $this->db->pdo();
+            $ownTx = !$pdo->inTransaction();
+            if ($ownTx) {
+                $pdo->beginTransaction();
+            }
+            try {
+                $this->journalSync->onCancel($supplierId, 'purchase_invoice', $id, [
+                    'user_id'    => $user['id'] ?? null,
+                    'posted_by'  => $user['id'] ?? null,
+                    'ip'         => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    'user_agent' => $request->getHeaderLine('User-Agent'),
+                ]);
+                if (!$this->repo->setStatus($id, $target, $supplierId, $paidDate, $bookedBy, $requireUnbooked)) {
+                    if ($ownTx && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return Json::error(
+                        $response,
+                        'document_locked',
+                        'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                        409,
+                    );
+                }
+                if ($ownTx) {
+                    $pdo->commit();
+                }
+            } catch (PostingException $e) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::error(
+                    $response,
+                    'journal_' . $e->errorCode,
+                    'Přijatou fakturu nelze stornovat — má zaúčtovaný zápis, který nelze stornovat ('
+                        . $e->getMessage() . '). Nejdřív vyřešte zaúčtování v deníku.',
+                    409,
+                );
+            } catch (\Throwable $e) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        } elseif (!$this->repo->setStatus($id, $target, $supplierId, $paidDate, $bookedBy, $requireUnbooked)) {
+            return Json::error(
+                $response,
+                'document_locked',
+                'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                409,
+            );
+        }
 
         // Při přechodu z draftu (typicky po manuální kontrole AI-importované faktury)
         // automaticky vyčistit extraction_warning — uživatel data ověřil tím, že
@@ -118,12 +218,27 @@ final class TransitionPurchaseInvoiceStatusAction
             }
         }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log("purchase_invoice.transitioned", $user['id'] ?? null, 'purchase_invoice', $id, [
             'from' => $currentStatus,
             'to'   => $target,
         ], $ip, $request->getHeaderLine('User-Agent'));
+
+        // Auto-post hook (A2): přijetí přijaté faktury (přechod na 'received') je analog
+        // vystavení FV — má-li firma zapnutý auto_post_purchases a běží v podvojném
+        // účetnictví, zaúčtuj PF hned. Chyba zaúčtování NESMÍ zablokovat přechod stavu —
+        // DocumentAutoPoster ji jen zaloguje (PF zůstane nezaúčtovaná). Idempotentní, takže
+        // opakované dosažení stavu received (un-cancel apod.) zápis neduplikuje.
+        if ($target === 'received') {
+            $this->autoPoster->maybeAutoPost(
+                $supplierId,
+                'purchase_invoice',
+                $id,
+                isset($user['id']) ? (int) $user['id'] : null,
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
 
         return Json::ok($response, $this->repo->find($id, $supplierId));
     }

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Document;
 
 use MyInvoice\Repository\DmsMessageRepository;
+use MyInvoice\Repository\DocumentFileRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
+use Psr\Log\LoggerInterface;
 
 /**
  * Orchestruje uložení nahraného souboru do sekce Dokumenty:
@@ -24,12 +26,14 @@ final class DocumentIngestService
     public function __construct(
         private readonly DocumentStorage $storage,
         private readonly DocumentRepository $documents,
+        private readonly DocumentFileRepository $files,
         private readonly DocumentFolderRepository $folders,
         private readonly DmsMessageRepository $dms,
         private readonly ZfoExtractor $zfo,
         private readonly ZipImporter $zipImporter,
         private readonly DocumentTextExtractor $textExtractor,
         private readonly ThumbnailGenerator $thumbnails,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -113,6 +117,37 @@ final class DocumentIngestService
             'parent_document_id' => $parentId,
             'uploaded_by'        => $userId,
         ]);
+
+        // DUAL-WRITE (§4.5): documents inline sloupce = source of truth pro primary;
+        // zrcadlíme je do role='primary' document_files řádku (uniformně jako backfill
+        // 1024 — každý documents řádek má vlastní primary keyed na své document_id).
+        // Extra soubory (role='attachment') přidává až files API (Commit 5).
+        try {
+            $this->files->add([
+                'document_id'   => $id,
+                'supplier_id'   => $supplierId,
+                'role'          => 'primary',
+                'sha256'        => $stored['sha256'],
+                'filename'      => $stored['filename'],
+                'original_name' => $originalName,
+                'mime_type'     => $stored['mime_type'],
+                'size_bytes'    => $stored['size_bytes'],
+                'doc_type'      => $stored['doc_type'],
+                'sort_order'    => 0,
+                'uploaded_by'   => $userId,
+            ]);
+        } catch (\Throwable $e) {
+            // Best-effort mirror — nikdy nepoloží ingest (documents inline zůstává SoT),
+            // ale selhání logujeme: bez primary document_files řádku by dokument neměl
+            // svůj soubor v novém subsystému A (diagnostikovatelné až přes tenhle log).
+            $this->logger->warning('Document primary-file mirror insert failed', [
+                'document_id' => $id,
+                'supplier_id' => $supplierId,
+                'sha256'      => $stored['sha256'],
+                'error'       => $e->getMessage(),
+            ]);
+        }
+
         $this->postProcess($id, $stored, $supplierId);
         return $id;
     }

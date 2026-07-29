@@ -11,10 +11,25 @@ use MyInvoice\Infrastructure\Config\Config;
  *
  * Pepper se přidává jako suffix k heslu před hashováním. Pokud je pepper prázdný,
  * hashujeme jen heslo (devel režim) — v produkci je třeba mít pepper nastavený.
+ *
+ * Jedinou výjimkou z costu 12 je běh PHPUnit nad databází `*_test` — viz TEST_COST.
  */
 final class PasswordHasher
 {
     private const COST = 12;
+
+    /**
+     * Cost používaný VÝHRADNĚ v testovacím běhu. Bcrypt je záměrně pomalý — cost 12
+     * stojí na téhle mašině ~165 ms na hash a testy hesla hashují v setUp (zakládání
+     * uživatelů, step-up tokeny, členství), což dělalo ~6 s z běhu sady.
+     *
+     * Není to konfigurační hodnota a ZÁMĚRNĚ jí být nemá: config se dá omylem nasadit.
+     * Gate je stejná pojistka, jakou používá izolace testovací databáze — jméno DB musí
+     * končit na `_test` A ZÁROVEŇ musí běžet PHPUnit. Produkce nemá jak se do téhle
+     * větve dostat, takže produkční cost zůstává 12 za všech okolností.
+     */
+    private const TEST_COST = 4;
+
     private const MIN_LENGTH = 12;
     private const MAX_LENGTH = 128;
 
@@ -23,7 +38,7 @@ final class PasswordHasher
     public function hash(string $plain): string
     {
         $this->validate($plain);
-        return password_hash($this->withPepper($plain), PASSWORD_BCRYPT, ['cost' => self::COST]);
+        return password_hash($this->withPepper($plain), PASSWORD_BCRYPT, ['cost' => $this->cost()]);
     }
 
     public function verify(string $plain, string $hash): bool
@@ -36,15 +51,28 @@ final class PasswordHasher
 
     public function needsRehash(string $hash): bool
     {
-        return password_needs_rehash($hash, PASSWORD_BCRYPT, ['cost' => self::COST]);
+        if (!password_needs_rehash($hash, PASSWORD_BCRYPT, ['cost' => $this->cost()])) {
+            return false;
+        }
+        // V testovací DB leží hashe s produkčním costem 12 (seedy, klon ostré DB).
+        // Kdyby je snížený testovací cost prohlásil za zastaralé, LoginAction by je
+        // při každém přihlášení přepisoval — chování, které v produkci nenastane.
+        // Proto v testech uznáváme oba costy; nebcryptový/poškozený hash propadne dál.
+        if (self::testCostApplies($this->config)) {
+            return password_needs_rehash($hash, PASSWORD_BCRYPT, ['cost' => self::COST]);
+        }
+
+        return true;
     }
 
     /**
      * Vždy spustit (i pro neexistující email) → konstantní timing proti user enumeration.
+     * Cost musí odpovídat tomu, jakým se hashuje, jinak by dummy větev měla jinou
+     * dobu běhu než reálná a rozdíl by prozradil existenci účtu.
      */
     public function dummyVerify(): void
     {
-        password_verify('dummy', '$2y$12$' . str_repeat('a', 53));
+        password_verify('dummy', sprintf('$2y$%02d$', $this->cost()) . str_repeat('a', 53));
     }
 
     /**
@@ -65,5 +93,21 @@ final class PasswordHasher
     {
         $pepper = (string) $this->config->get('app.pepper', '');
         return $pepper === '' ? $plain : ($plain . $pepper);
+    }
+
+    private function cost(): int
+    {
+        return self::testCostApplies($this->config) ? self::TEST_COST : self::COST;
+    }
+
+    /**
+     * Snížený cost platí jen tam, kde nemůže uškodit: pod PHPUnit a proti databázi,
+     * jejíž jméno končí na `_test`. Obě podmínky musí platit současně — je to táž
+     * pojistka, jakou má tests/bootstrap.php proti běhu testů nad ostrými daty.
+     */
+    private static function testCostApplies(Config $config): bool
+    {
+        return defined('PHPUNIT_COMPOSER_INSTALL')
+            && str_ends_with((string) $config->get('db.name', ''), '_test');
     }
 }

@@ -38,7 +38,7 @@ $groups = require $tocFile;
 // Resolve aktuální kapitolu
 $bodyHtml    = '';
 $activeFile  = '';
-$activeTitle = 'MyInvoice.cz — manuál';
+$activeTitle = 'MyÚčto.cz — manuál';
 
 if ($ch !== '') {
     $f = $dir . '/' . $ch . '.html';
@@ -99,10 +99,9 @@ function chapterNum(string $file): string {
 $cssVer = (string)@filemtime(__DIR__ . '/manual.css');
 $hasPdf = is_file(__DIR__ . '/manual.pdf');
 
-// SVG ikony (Heroicons outline, stroke 2, viewBox 24)
-$ICON_SYSTEM = 'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25';
-$ICON_LIGHT  = 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0z';
-$ICON_DARK   = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998z';
+// SVG ikony (Heroicons outline, stroke 2, viewBox 24) — stejné jako ThemeToggle.vue v apce
+$ICON_LIGHT = 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0z';
+$ICON_DARK  = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998z';
 
 ?>
 <!doctype html>
@@ -133,22 +132,14 @@ $ICON_DARK   = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75
 <!-- ═════════ TOPBAR ═════════ -->
 <header class="topbar">
     <a href="/manual" class="brand">
-        <img src="/styles/logo.svg" alt="MyInvoice">
-        <span class="wordmark">My<b>Invoice</b><i>.cz</i></span>
+        <img src="/styles/logo.svg" alt="MyÚčto">
+        <span class="wordmark">My<b>Účto</b><i>.cz</i></span>
         <span class="brand-badge">Manuál</span>
     </a>
     <div class="topbar-right">
-        <div class="theme-group" role="group" aria-label="Barevný režim">
-            <button type="button" class="theme-btn" data-theme="auto" title="Podle systému" aria-label="Podle systému">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="<?= $ICON_SYSTEM ?>"/></svg>
-            </button>
-            <button type="button" class="theme-btn" data-theme="light" title="Světlý" aria-label="Světlý">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="<?= $ICON_LIGHT ?>"/></svg>
-            </button>
-            <button type="button" class="theme-btn" data-theme="dark" title="Tmavý" aria-label="Tmavý">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="<?= $ICON_DARK ?>"/></svg>
-            </button>
-        </div>
+        <button type="button" class="theme-toggle" id="theme-toggle" title="Přepnout barevný režim" aria-label="Přepnout barevný režim">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path id="theme-toggle-icon" stroke-linecap="round" stroke-linejoin="round" d="<?= $ICON_DARK ?>"/></svg>
+        </button>
         <?php if ($hasPdf): ?>
         <a href="/manual/manual.pdf" class="btn btn-outline hide-mobile" download>
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
@@ -218,7 +209,7 @@ $ICON_DARK   = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75
         <?php endforeach; ?>
     </nav>
     <div class="sidebar-footer">
-        <div>MyInvoice.cz<?php if ($version !== ''): ?> <span class="ver">v<?= htmlspecialchars($version) ?></span><?php endif; ?></div>
+        <div>MyÚčto.cz<?php if ($version !== ''): ?> <span class="ver">v<?= htmlspecialchars($version) ?></span><?php endif; ?></div>
         <div>Vyvíjí <a href="https://mywebdesign.cz/" target="_blank" rel="noopener">MyWebdesign.cz</a></div>
     </div>
 </aside>
@@ -258,20 +249,29 @@ $ICON_DARK   = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75
 </svg>
 
 <script>
-// ── Barevný režim (System / Light / Dark) — sdílí klíč s aplikací ──
+// ── Barevný režim (Light / Dark) — sdílí klíč s apkou (ThemeToggle.vue) ──
 (function () {
     const KEY = 'myinvoice-color-scheme';
+    const ICON_LIGHT = '<?= $ICON_LIGHT ?>';
+    const ICON_DARK = '<?= $ICON_DARK ?>';
     const mq = matchMedia('(prefers-color-scheme: dark)');
+    const btn = document.getElementById('theme-toggle');
+    const icon = document.getElementById('theme-toggle-icon');
     const get = () => { try { return (localStorage.getItem(KEY) || 'auto').replace(/^"|"$/g, ''); } catch (e) { return 'auto'; } };
     const set = (v) => { try { localStorage.setItem(KEY, v); } catch (e) {} };
-    const btns = document.querySelectorAll('.theme-btn');
-    function apply() {
+    function isDark() {
         const p = get();
-        const dark = p === 'dark' || (p !== 'light' && mq.matches);
-        document.documentElement.classList.toggle('dark', dark);
-        btns.forEach(b => b.classList.toggle('active', b.dataset.theme === p));
+        return p === 'dark' || (p !== 'light' && mq.matches);
     }
-    btns.forEach(b => b.addEventListener('click', () => { set(b.dataset.theme); apply(); }));
+    function apply() {
+        const dark = isDark();
+        document.documentElement.classList.toggle('dark', dark);
+        icon.setAttribute('d', dark ? ICON_LIGHT : ICON_DARK);
+        const label = dark ? 'Přepnout na světlý režim' : 'Přepnout na tmavý režim';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    }
+    btn.addEventListener('click', () => { set(isDark() ? 'light' : 'dark'); apply(); });
     mq.addEventListener('change', apply);
     apply();
 })();

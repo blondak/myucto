@@ -477,12 +477,21 @@ final class MoneyS3XmlExporter
         return 'prodej zboží a služeb';
     }
 
+    /**
+     * Money S3 `Uhrada` je volný text. Nové hodnoty z migrace 1128 musí mít EXPLICITNÍ
+     * popisek — default větev tvrdí „převodem", takže bez toho by inkaso i dobírka
+     * odešly do účetnictví jako bankovní převod.
+     */
     private function paymentMethodLabel(string $paymentMethod): string
     {
         return match ($paymentMethod) {
-            'cash' => 'v hotovosti',
-            'card' => 'kartou',
-            default => 'převodem',
+            'cash'             => 'v hotovosti',
+            'card'             => 'kartou',
+            'direct_debit'     => 'inkasem',
+            'cash_on_delivery' => 'dobírkou',
+            'offset'           => 'zápočtem',
+            'other'            => 'jiným způsobem',
+            default            => 'převodem',
         };
     }
 

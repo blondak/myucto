@@ -1,0 +1,19 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Monthly report — {{ period_label }}
+------------
+
+Hello,
+
+please find attached the monthly financial report for {{ period_label }} (income statement, balance sheet, overdue receivables and payables{% if has_vat %}, VAT{% endif %}).
+{% if note_text is defined and note_text|length %}
+
+Accountant's note:
+{{ note_text }}
+{% endif %}
+
+The full report is attached to this email as a PDF.
+
+Thank you for your cooperation.
+{% endblock %}

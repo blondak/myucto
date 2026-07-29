@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Auth;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Sample\SampleDataGenerator;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -14,9 +15,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * POST /api/auth/setup-sample
  *
- * Vygeneruje testovací sample data (5 klientů, 8 zakázek, 20 faktur, 4 dobropisy,
- * 4 dodavatelé, 12 přijatých faktur, 2 pravidelné fakturace, kniha jízd: 1 auto/15 jízd/6 tankování)
- * pro prvního admin usera a prvního supplieru.
+ * Vygeneruje rozsáhlý syntetický dataset (24 klientů, 12 dodavatelů,
+ * 120 vydaných a 120 přijatých faktur, pokladna, sklad, e-shopové číselníky,
+ * banka, majetek a účetní deník) pro prvního admin usera a prvního supplieru.
  *
  * VYŽADUJE auth jako admin (po /setup je auto-login). Eliminuje veřejné okno,
  * kdy by anonymous mohl vyrobit data před adminem.
@@ -34,7 +35,7 @@ final class SetupSampleAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Jen admin.', 403);
         }
         $adminId = (int) ($user['id'] ?? 0);

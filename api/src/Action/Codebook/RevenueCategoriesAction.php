@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\RevenueCategoryRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -41,7 +43,7 @@ final class RevenueCategoriesAction
     public function create(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -70,7 +72,7 @@ final class RevenueCategoriesAction
     public function update(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -100,7 +102,7 @@ final class RevenueCategoriesAction
     public function delete(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);

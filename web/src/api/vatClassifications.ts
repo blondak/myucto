@@ -14,6 +14,8 @@ export interface VatClassification {
   is_reverse_charge: boolean
   kh_regime_code: '0' | '1' | '2' | null
   kh_bad_debt: 'N' | 'P' | null
+  /** Kód předmětu plnění § 92b–92f pro KH A.1/B.1; výčet je v číselníku MFČR, ne v XSD. */
+  kod_pred_pl: string | null
   display_order: number
   archived: boolean
   created_at: string

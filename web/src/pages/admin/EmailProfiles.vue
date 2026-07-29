@@ -9,6 +9,7 @@ import {
   type SigningProfile,
 } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -682,8 +683,8 @@ function certificateCommonName(subject: string | null | undefined): string | nul
           <h1 class="text-2xl font-semibold">{{ t('settings.email_profiles_title') }}</h1>
           <p class="text-sm text-neutral-500 mt-1">{{ t('settings.email_profiles_hint') }}</p>
         </div>
-        <button type="button" @click="newProfile"
-          class="cursor-pointer rounded-md bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700">
+        <button type="button" @click="newProfile" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('settings.email_profiles_new') }}
         </button>
       </div>
@@ -901,11 +902,13 @@ function certificateCommonName(subject: string | null | undefined): string | nul
               <div class="mt-1 flex flex-col gap-2 sm:flex-row">
                 <input id="email-profile-imap-folder" v-model="draft.imap_folder" required class="min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
                 <button type="button" @click="browseImapFolders" :disabled="browsingImapFolders || testingImapSettings"
-                  class="shrink-0 cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50">
+                  :class="[btnOutline('neutral'), 'shrink-0']">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" /></svg>
                   {{ browsingImapFolders ? t('settings.email_profile_imap_browsing') : t('settings.email_profile_imap_browse') }}
                 </button>
                 <button type="button" @click="testImapSettings" :disabled="testingImapSettings || browsingImapFolders"
-                  class="shrink-0 cursor-pointer rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50">
+                  :class="[btnOutline('neutral'), 'shrink-0']">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
                   {{ testingImapSettings ? t('settings.email_profile_imap_testing') : t('settings.email_profile_imap_test') }}
                 </button>
               </div>
@@ -968,15 +971,18 @@ function certificateCommonName(subject: string | null | undefined): string | nul
       </div>
       <div class="mt-5 flex flex-wrap items-center gap-3">
         <button type="button" @click="testDraftProfile" :disabled="testingDraft || saving"
-          class="cursor-pointer rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50">
+          :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" /></svg>
           {{ testingDraft ? t('common.loading') : t('settings.email_profile_test_draft') }}
         </button>
         <button type="button" @click="saveProfile" :disabled="saving"
-          class="cursor-pointer rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50">
+          :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ saving ? t('common.loading') : t('common.save') }}
         </button>
         <button type="button" @click="showForm = false; resetDraft()"
-          class="cursor-pointer rounded-md border border-neutral-300 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50">
+          :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
       </div>

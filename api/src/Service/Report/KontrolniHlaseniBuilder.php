@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Tax\BadDebt\Section46Service;
+use MyInvoice\Service\Tax\BadDebt\Section74bService;
 
 /**
  * Builder XML pro Kontrolní hlášení (DPHKH1) — EPO portál MFČR.
@@ -37,30 +39,58 @@ final class KontrolniHlaseniBuilder
         // Limit A.4/A.5 a B.2/B.3 (10 000 Kč) + práh základní/snížená sazba — per
         // rok období z číselníku daňových konstant (admin override), ne natvrdo.
         private readonly TaxConstantsRepository $taxConstants,
+        // § 74b ZDPH — evidované korekce odpočtu dlužníka (vykazují se v B.2, zdph_44='P').
+        private readonly Section74bService $section74b,
+        // § 46 ZDPH — evidované věřitelské opravy u nedobytné pohledávky (A.4, zdph_44='P').
+        private readonly Section46Service $section46,
     ) {}
 
     /**
-     * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>}
+     * Mapa UI variant → EPO `khdph_forma`. B=řádné, O=řádné/opravné (§101f/1, PŘED lhůtou),
+     * N=následné (§101f/2, PO lhůtě), E=následné/opravné. Na rozdíl od DPHDP3 se následné
+     * KH NEpodává jako rozdíl, ale ZNOVU — úplné se všemi údaji za období (XSD anotace) —
+     * proto je N/E jen jiný atribut nad plným hlášením, bez diffu.
      */
-    public function build(int $supplierId, int $year, int $month, string $period = 'monthly'): array
-    {
+    private const VARIANT_FORMA = [
+        'radne'             => 'B',
+        'opravne'           => 'O',
+        'nasledne'          => 'N',
+        'nasledne_opravne'  => 'E',
+    ];
+
+    /**
+     * @param string $variant 'radne'|'opravne'|'nasledne'|'nasledne_opravne' (C7').
+     * @param ?string $dZjist  datum zjištění důvodů (Y-m-d) — pro N/E (§101f/2).
+     * @param ?string $cJedVyzvy č.j. výzvy správce daně — jen když N/E reaguje na výzvu.
+     * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
+     */
+    public function build(
+        int $supplierId,
+        int $year,
+        int $month,
+        string $period = 'monthly',
+        string $variant = 'radne',
+        ?string $dZjist = null,
+        ?string $cJedVyzvy = null,
+    ): array {
+        $forma = self::VARIANT_FORMA[$variant] ?? null;
+        if ($forma === null) {
+            throw new \RuntimeException("Neznámý typ kontrolního hlášení: {$variant}.");
+        }
+        $isFollowUp = $forma === 'N' || $forma === 'E'; // následné — volitelné d_zjist / č.j. výzvy
+        $dZjist    = $isFollowUp ? $this->normalizeDate($dZjist) : null;
+        $cJedVyzvy = $isFollowUp ? $this->normalizeVyzva($cJedVyzvy) : null;
+
         $supplier = $this->loadSupplier($supplierId);
         $warnings = $this->validateSupplier($supplier, $period);
-
-        if ($period === 'quarterly') {
-            $quarter = (int) ceil($month / 3);
-            $startMonth = ($quarter - 1) * 3 + 1;
-            // Konec kvartálu = poslední den měsíce quarter*3, NEZÁVISLE na předaném
-            // $month (jinak build(..., 4, 'quarterly') utne období na duben a zahodí
-            // květen+červen). Stejná logika jako DphBookBuilder::build().
-            $endMonth = $quarter * 3;
-            $start = sprintf('%04d-%02d-01', $year, $startMonth);
-        } else {
-            $quarter = null;
-            $endMonth = $month;
-            $start = sprintf('%04d-%02d-01', $year, $month);
+        if ($isFollowUp && $dZjist === null && $cJedVyzvy === null) {
+            // XSD anotace d_zjist: u následného KH musí být vyplněno buď datum zjištění, nebo
+            // č.j. výzvy. Neblokujeme (uživatel může doplnit), ale upozorníme.
+            $warnings[] = 'Následné kontrolní hlášení: doplňte datum zjištění důvodů nebo č.j. výzvy '
+                . 'správce daně (§ 101f odst. 2) — jinak nemusí projít podání na EPO.';
         }
-        $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))->modify('last day of this month')->format('Y-m-d');
+
+        [$start, $end, $quarter, $endMonth] = self::periodBounds($year, $month, $period);
 
         // Všechny sekce z jedné projekce kanonických řádků (VatLedgerService).
         ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
@@ -76,19 +106,14 @@ final class KontrolniHlaseniBuilder
         $b1 = $this->filterReverseChargeRowsWithDic($b1, 'B.1', $warnings);
         $a4 = $this->filterKhAttributeConflicts($a4, 'A.4', $warnings);
         $b2 = $this->filterKhAttributeConflicts($b2, 'B.2', $warnings);
+        // § 74b korekce odpočtu dlužníka — do B.2 se zdph_44='P' VŽDY (i pod 10 000 Kč);
+        // musí předcházet rekapitulaci VetaC, ať pln23/pln5 sedí s DPHDP3 ř. 40/41.
+        $this->appendSection74bCorrections($b2, $supplierId, $year, $month, $period, $warnings);
+        // § 46 věřitelská oprava u nedobytné pohledávky — zrcadlo výše na vydané straně:
+        // do A.4 se zdph_44='P' VŽDY (i pod 10 000 Kč), před rekapitulací VetaC.
+        $this->appendSection46Corrections($a4, $supplierId, $year, $month, $period, $warnings);
 
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        $dom->preserveWhiteSpace = false;
-        $dom->formatOutput = true;
-
-        $pisemnost = $dom->createElement('Pisemnost');
-        $pisemnost->setAttribute('nazevSW', 'MyInvoice.cz');
-        $pisemnost->setAttribute('verzeSW', (string) ($this->loadAppVersion() ?? '0'));
-        $dom->appendChild($pisemnost);
-
-        $dphkh = $dom->createElement('DPHKH1');
-        $dphkh->setAttribute('verzePis', '03.01');
-        $pisemnost->appendChild($dphkh);
+        [$dom, $dphkh] = EpoEnvelope::create('DPHKH1', '03.01');
 
         // VetaD — identifikační údaje (mesic pro měsíční, ctvrt pro kvartální)
         $vetaD = $dom->createElement('VetaD');
@@ -101,7 +126,14 @@ final class KontrolniHlaseniBuilder
         }
         $vetaD->setAttribute('rok', (string) $year);
         $vetaD->setAttribute('d_poddp', date('d.m.Y')); // datum podání (dnes)
-        $vetaD->setAttribute('khdph_forma', 'B'); // B = řádné podání
+        $vetaD->setAttribute('khdph_forma', $forma); // B=řádné, O=řádné/opravné, N=následné, E=následné/opravné
+        if ($dZjist !== null) {
+            // § 101f/2: den zjištění nesprávných/neúplných údajů (DD.MM.YYYY).
+            $vetaD->setAttribute('d_zjist', (new \DateTimeImmutable($dZjist))->format('d.m.Y'));
+        }
+        if ($cJedVyzvy !== null) {
+            $vetaD->setAttribute('c_jed_vyzvy', $cJedVyzvy);
+        }
         $dphkh->appendChild($vetaD);
 
         // VetaP — identifikace plátce (sdíleno s DPHDP3 přes EpoSupplierBlockBuilder)
@@ -229,6 +261,16 @@ final class KontrolniHlaseniBuilder
             $v->setAttribute('dan1', $this->formatAmount($r['vat21']));
             $v->setAttribute('zakl_dane2', $this->formatAmount($r['base12']));
             $v->setAttribute('dan2', $this->formatAmount($r['vat12']));
+            // Obranná pojistka (AI extrakce, task #7): přijatý dobropis vedený pod ČÍSLEM
+            // OPRAVOVANÉ faktury místo pod vlastním evidenčním číslem opravného dokladu.
+            // Poznáme to podle shody vendor_invoice_number s číslem navázaného rodiče. Řádek
+            // z KH NEODstraňujeme ani XML neměníme — jen upozorníme na možný špatný c_evid_dd.
+            if (($r['document_kind'] ?? null) === 'credit_note'
+                && ($r['parent_vendor_invoice_number'] ?? null) !== null
+                && (string) $r['vendor_invoice_number'] === (string) $r['parent_vendor_invoice_number']) {
+                $warnings[] = 'Dobropis ' . (string) $r['vendor_invoice_number'] . ' je v KH veden pod číslem '
+                    . 'opravované faktury — ověřte evidenční číslo dokladu (Opravný daňový doklad).';
+            }
             // pomer = A když byl uplatněn poměrný odpočet §75 (částky jsou už zkrácené ve VatLedgerService).
             $v->setAttribute('pomer', !empty($r['is_pomer']) ? 'A' : 'N');
             $v->setAttribute('zdph_44', (string) ($r['kh_bad_debt'] ?? 'N'));
@@ -280,7 +322,8 @@ final class KontrolniHlaseniBuilder
         $deadlineMonth = $endMonth + 1;
         $deadlineYear = $year;
         if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
-        $deadline = sprintf('%04d-%02d-25', $deadlineYear, $deadlineMonth);
+        // § 33/4 DŘ: termín padající na víkend/svátek se posouvá na další pracovní den.
+        $deadline = CzechWorkingDays::deadline($deadlineYear, $deadlineMonth);
 
         return [
             'xml'      => $dom->saveXML() ?: '',
@@ -296,10 +339,148 @@ final class KontrolniHlaseniBuilder
                 'b2_count'            => count($b2),
                 'b3_count_aggregated' => $b3['count'],
                 'submission_deadline' => $deadline,
+                // C7' — typ podání (řádné/opravné/následné).
+                'variant'             => $variant,
+                'khdph_forma'         => $forma,
+                'is_follow_up'        => $isFollowUp,
+                'd_zjist'             => $dZjist,
+                'c_jed_vyzvy'         => $cJedVyzvy,
             ],
             'warnings' => $warnings,
             'missing_rates' => $missingRates,
         ];
+    }
+
+    /**
+     * Přidá evidované korekce §74b (dlužník) do sekce B.2 jako řádky opravy nedobytné
+     * pohledávky (zdph_44='P') — bez ohledu na částku (i pod 10 000 Kč nejde do B.3).
+     * Základ i daň nesou znaménko dle pohybu (snížení záporně, obnova kladně), shodně
+     * s DPHDP3 ř. 40/41. Doklad bez platného DIČ dodavatele nelze v KH uvést → warning.
+     *
+     * @param list<array<string,mixed>> $b2 by-ref
+     * @param list<string> $warnings by-ref
+     */
+    private function appendSection74bCorrections(array &$b2, int $supplierId, int $year, int $month, string $period, array &$warnings): void
+    {
+        $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
+        foreach ($s74b['invoices'] as $row) {
+            if (self::cleanDic($row['vendor_dic'] ?? '') === '') {
+                $warnings[] = 'Oprava §74b u dokladu ' . (($row['vendor_invoice_number'] ?? '') ?: 'bez čísla')
+                    . ' nelze uvést v KH B.2: chybí platné DIČ dodavatele.';
+                continue;
+            }
+            $b2[] = [
+                'vendor_invoice_number'        => $row['vendor_invoice_number'],
+                'tax_date'                     => $row['tax_date'],
+                'counterparty_dic'             => $row['vendor_dic'],
+                'base21' => $row['base21'], 'vat21' => $row['vat21'],
+                'base12' => $row['base12'], 'vat12' => $row['vat12'],
+                'is_pomer'                     => false,
+                'document_kind'                => null,
+                'parent_vendor_invoice_number' => null,
+                'kh_bad_debt'                  => 'P',
+                'kh_attribute_conflict'        => false,
+            ];
+        }
+    }
+
+    /**
+     * Přidá evidované věřitelské opravy § 46 do sekce A.4 jako řádky opravy nedobytné
+     * pohledávky (zdph_44='P') — bez ohledu na částku (i pod 10 000 Kč nejde do A.5).
+     * Základ i daň nesou znaménko dle pohybu (oprava záporně, obnova kladně), shodně
+     * s DPHDP3 ř. 1/2. Doklad bez platného DIČ odběratele nelze v KH uvést → warning.
+     *
+     * @param list<array<string,mixed>> $a4 by-ref
+     * @param list<string> $warnings by-ref
+     */
+    private function appendSection46Corrections(array &$a4, int $supplierId, int $year, int $month, string $period, array &$warnings): void
+    {
+        $s46 = $this->section46->periodCorrectionLines($supplierId, $year, $month, $period);
+        foreach ($s46['invoices'] as $row) {
+            if (self::cleanDic($row['client_dic'] ?? '') === '') {
+                $warnings[] = 'Oprava §46 u dokladu ' . (($row['varsymbol'] ?? '') ?: 'bez čísla')
+                    . ' nelze uvést v KH A.4: chybí platné DIČ odběratele.';
+                continue;
+            }
+            $a4[] = [
+                'varsymbol'             => $row['varsymbol'],
+                'tax_date'              => $row['tax_date'],
+                'counterparty_dic'      => $row['client_dic'],
+                'base21' => $row['base21'], 'vat21' => $row['vat21'],
+                'base12' => $row['base12'], 'vat12' => $row['vat12'],
+                'kh_regime_code'        => '0',
+                'kh_bad_debt'           => 'P',
+                'kh_attribute_conflict' => false,
+            ];
+        }
+    }
+
+    /** Normalizace vstupního data (Y-m-d) — null pokud prázdné/neplatné. */
+    private function normalizeDate(?string $date): ?string
+    {
+        $date = trim((string) $date);
+        if ($date === '') {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($date))->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Č.j. výzvy správce daně (XSD c_jed_vyzvy, maxLength 32). Prázdné → null. Ořízne na 32 znaků,
+     * formát 99999999/99/9999-99999-999999 validuje uživatel (XSD délku hlídá, tvar ne).
+     */
+    private function normalizeVyzva(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+        return mb_substr($value, 0, 32);
+    }
+
+    /**
+     * Hranice období výkazu (start, end, kvartál) — sdílené build() i invoiceSections().
+     * Kvartál končí posledním dnem měsíce quarter*3 NEZÁVISLE na předaném $month (jinak
+     * build(..., 4, 'quarterly') utne období na duben a zahodí květen+červen). Stejná
+     * logika jako DphBookBuilder::build().
+     *
+     * @return array{0:string, 1:string, 2:?int, 3:int} [start, end, quarter|null, endMonth]
+     */
+    private static function periodBounds(int $year, int $month, string $period): array
+    {
+        if ($period === 'quarterly') {
+            $quarter = (int) ceil($month / 3);
+            $startMonth = ($quarter - 1) * 3 + 1;
+            $endMonth = $quarter * 3;
+            $start = sprintf('%04d-%02d-01', $year, $startMonth);
+        } else {
+            $quarter = null;
+            $endMonth = $month;
+            $start = sprintf('%04d-%02d-01', $year, $month);
+        }
+        $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))
+            ->modify('last day of this month')->format('Y-m-d');
+        return [$start, $end, $quarter, $endMonth];
+    }
+
+    /**
+     * Per-doklad zařazení do sekcí KH (audit 2026-07 C8' — křížová kontrola DPHDP3↔KH).
+     * Vrací TÉTOŽ směrování jako build() (sdílené {@see buildSections()}), jen keyed per
+     * faktura + s efektivní sekcí, ať se reconciliation nerozejde s reálně podaným
+     * hlášením. Read-only, bez XML. section=null = doklad se do KH nevykazuje (osvobozené,
+     * dovoz ze 3. země, plnění bez nároku).
+     *
+     * @return list<array{invoice_id:int, source:string, doc_number:?string, section:?string,
+     *                     base_total:float, base21:float, base12:float}>
+     */
+    public function invoiceSections(int $supplierId, int $year, int $month, string $period = 'monthly'): array
+    {
+        [$start, $end] = self::periodBounds($year, $month, $period);
+        return $this->buildSections($supplierId, $start, $end)['invoices'];
     }
 
     /**
@@ -315,9 +496,23 @@ final class KontrolniHlaseniBuilder
      *
      * @return array{a1:list<array<string,mixed>>, a2:list<array<string,mixed>>,
      *   a4:list<array<string,mixed>>, a5:array<string,mixed>, b1:list<array<string,mixed>>,
-     *   b2:list<array<string,mixed>>, b3:array<string,mixed>}
+     *   b2:list<array<string,mixed>>, b3:array<string,mixed>, missing_rates:list<array<string,mixed>>}
      */
     private function collectSections(int $supplierId, string $start, string $end): array
+    {
+        $r = $this->buildSections($supplierId, $start, $end);
+        return $r['sections'] + ['missing_rates' => $r['missing_rates']];
+    }
+
+    /**
+     * Jádro směrování dokladů do sekcí KH — postaví jak agregované sekce (pro build()),
+     * tak per-doklad tagy s efektivní sekcí (pro invoiceSections() / křížovou kontrolu C8')
+     * z JEDNÉ projekce kanonických řádků, aby se KH výkaz a jeho reconciliation nikdy
+     * nerozešly.
+     *
+     * @return array{sections: array<string,mixed>, invoices: list<array<string,mixed>>}
+     */
+    private function buildSections(int $supplierId, string $start, string $end): array
     {
         // Konstanty pro rok OBDOBÍ výkazu (ne aktuální) — zpětně generované KH za
         // staré období musí použít tehdejší limit/sazby.
@@ -333,12 +528,16 @@ final class KontrolniHlaseniBuilder
         $missingRates = VatLedgerService::missingExchangeRateRows($ledgerRows);
         $inv = [];
         foreach ($ledgerRows as $r) {
-            $key = $r['source'] . ':' . $r['invoice_id'];
+            $key = $r['source'] . ':' . ($r['document_kind'] ?? '') . ':' . $r['invoice_id'];
             if (!isset($inv[$key])) {
                 $inv[$key] = [
                     'source'                => $r['source'],
+                    'invoice_id'            => (int) $r['invoice_id'],
                     'varsymbol'             => $r['doc_number'],
                     'vendor_invoice_number' => $r['vendor_invoice_number'],
+                    'document_kind'         => $r['document_kind'] ?? null,
+                    // Číslo opravované faktury (rodiče dobropisu) pro obrannou pojistku KH.
+                    'parent_vendor_invoice_number' => $r['parent_vendor_invoice_number'] ?? null,
                     'tax_date'              => $r['tax_date'],
                     'dic'                   => self::cleanDic($r['counterparty_dic']),
                     'dic_raw'               => $r['counterparty_dic'], // syrové VAT ID pro A.2 (EU alfanum.)
@@ -400,6 +599,24 @@ final class KontrolniHlaseniBuilder
         $a1 = []; $a2 = []; $a4 = []; $b1 = []; $b2 = [];
         $a5 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0];
         $b3 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0];
+        $invoices = [];
+
+        // Per-doklad tag pro křížovou kontrolu C8' (VatCrossCheckService::invoiceSections).
+        // Mixed doklad přispívá do VÍCE sekcí (RC část do A.1/B.1 + tuzemská do A.4/A.5/B.2/B.3),
+        // proto emitujeme řádek za KAŽDOU sekci se základem, který do ní reálně spadl. Kontrola 1
+        // (A.4/A.5) čte base21+base12, kontrola 2 (B.1) čte base_total (= B.1 základ) → base_total
+        // = base21+base12 dané sekce. Dřív se tagovala jen jedna sekce z celo-dokladového základu.
+        $tag = function (array $g, string $section, float $base21, float $base12) use (&$invoices): void {
+            $invoices[] = [
+                'invoice_id' => $g['invoice_id'],
+                'source'     => $g['source'],
+                'doc_number' => $g['source'] === 'sale' ? $g['varsymbol'] : $g['vendor_invoice_number'],
+                'section'    => $section,
+                'base_total' => $base21 + $base12,
+                'base21'     => $base21,
+                'base12'     => $base12,
+            ];
+        };
 
         foreach ($inv as $g) {
             $hasDic = $g['dic'] !== '';
@@ -417,6 +634,7 @@ final class KontrolniHlaseniBuilder
                     $a1[] = ['counterparty_dic' => $g['dic_raw'], 'vendor_invoice_number' => $g['varsymbol'],
                              'tax_date' => $g['tax_date'], 'base' => $g['a1_base'],
                              'kod_pred_pl' => $g['kod_pred_pl']];
+                    $tag($g, 'A.1', $g['a1_base'], 0.0);
                 }
                 // A.4/A.5 — tuzemská zdanitelná část (RC/osvobozené/EU dodání/vývoz nepřispěly).
                 if (!$domZero) {
@@ -430,14 +648,22 @@ final class KontrolniHlaseniBuilder
                             'kh_attribute_conflict' => count($regimeCodes) > 1 || count($badDebtCodes) > 1];
                     if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
                         $a4[] = $row;
+                        $tag($g, 'A.4', $g['dom_base21'], $g['dom_base12']);
                     } else {
                         $a5['count']++; $a5['base21'] += $g['dom_base21']; $a5['vat21'] += $g['dom_vat21'];
                         $a5['base12'] += $g['dom_base12']; $a5['vat12'] += $g['dom_vat12'];
+                        $tag($g, 'A.5', $g['dom_base21'], $g['dom_base12']);
                     }
                 }
             } else { // purchase
-                // A.2 — přeshraniční samovyměřená plnění (§ 24 služby z EU i 3. země,
-                // § 25 pořízení zboží z JČS). vatid_dod nese syrové EU VAT ID (alfanum.).
+                // A.2 — přijatá plnění, kde daň přiznává příjemce (§ 108). Do KH A.2 patří:
+                // pořízení zboží z JČS (§ 25) A ZÁROVEŇ přijetí služby / dodání zboží
+                // s instalací od osoby NEUSAZENÉ v tuzemsku (§ 24) — tj. dodavatel z EU
+                // I ze 3. země. Služba ze 3. země (US SaaS, DPHDP3 ř.12 + ř.43) tedy do
+                // A.2 PATŘÍ (XSD celk_zd_a2 explicitně jmenuje ř.12/13). U 3. země zůstávají
+                // k_stat/vatid_dod prázdné (XSD optional) — viz emisní blok VetaA2. Daňový
+                // dopad = 0: DPHDP3 tuto klasifikaci nechává beze změny (řídí se dphdp3_line,
+                // ne kh_section) — přibývá jen formální řádek v KH A.2.
                 if ($g['has_a2']) {
                     $a2[] = ['vendor_invoice_number' => $g['vendor_invoice_number'], 'tax_date' => $g['tax_date'],
                              'counterparty_dic' => $g['dic_raw'], 'country_iso2' => $g['country_iso2'],
@@ -453,6 +679,7 @@ final class KontrolniHlaseniBuilder
                              'base21' => $g['b1_base21'], 'vat21' => $g['b1_vat21'],
                              'base12' => $g['b1_base12'], 'vat12' => $g['b1_vat12'],
                              'kod_pred_pl' => $g['kod_pred_pl']];
+                    $tag($g, 'B.1', $g['b1_base21'], $g['b1_base12']);
                 }
                 // B.2/B.3 — tuzemská přijatá zdanitelná (s nárokem). RC bez KH sekce (dovoz
                 // ze 3. země kód 25) a plnění bez nároku (kód 42) do dom_* nepřispěly.
@@ -461,19 +688,27 @@ final class KontrolniHlaseniBuilder
                     $row = ['vendor_invoice_number' => $g['vendor_invoice_number'], 'tax_date' => $g['tax_date'],
                             'counterparty_dic' => $g['dic'], 'base21' => $g['dom_base21'], 'vat21' => $g['dom_vat21'],
                             'base12' => $g['dom_base12'], 'vat12' => $g['dom_vat12'], 'is_pomer' => $g['is_pomer'],
+                            'document_kind' => $g['document_kind'],
+                            'parent_vendor_invoice_number' => $g['parent_vendor_invoice_number'],
                             'kh_bad_debt' => count($badDebtCodes) === 1 ? $badDebtCodes[0] : null,
                             'kh_attribute_conflict' => count($badDebtCodes) > 1];
                     if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
                         $b2[] = $row;
+                        $tag($g, 'B.2', $g['dom_base21'], $g['dom_base12']);
                     } else {
                         $b3['count']++; $b3['base21'] += $g['dom_base21']; $b3['vat21'] += $g['dom_vat21'];
                         $b3['base12'] += $g['dom_base12']; $b3['vat12'] += $g['dom_vat12'];
+                        $tag($g, 'B.3', $g['dom_base21'], $g['dom_base12']);
                     }
                 }
             }
         }
 
-        return ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3, 'missing_rates' => $missingRates];
+        return [
+            'sections' => ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3],
+            'invoices' => $invoices,
+            'missing_rates' => $missingRates,
+        ];
     }
 
     /** @return list<string> warnings */
@@ -497,31 +732,9 @@ final class KontrolniHlaseniBuilder
 
     private function loadSupplier(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT s.id, s.company_name, s.street, s.city, s.zip,
-                    COALESCE(c.iso2, 'CZ') AS country_iso2,
-                    s.ic, s.dic, s.is_vat_payer, s.is_identified,
-                    s.taxpayer_type, s.vat_period, s.financial_office_code,
-                    s.workplace_code, s.data_box_id,
-                    s.email, s.phone, s.cz_nace_code,
-                    s.street_number_pop, s.street_number_orient,
-                    s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,
-                    s.sest_jmeno, s.sest_prijmeni, s.sest_telefon, s.sest_email, s.sest_funkce
-               FROM supplier s
-          LEFT JOIN countries c ON c.id = s.country_id
-              WHERE s.id = ?"
-        );
-        $stmt->execute([$supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false) throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
-        return $row;
+        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
     }
 
-    private function loadAppVersion(): ?string
-    {
-        $verFile = __DIR__ . '/../../../../VERSION';
-        return is_file($verFile) ? trim((string) file_get_contents($verFile)) : null;
-    }
 
     /**
      * KH „Kód předmětu plnění" (VetaA1/VetaB1.kod_pred_pl) z klasifikace. Není-li na
@@ -591,10 +804,9 @@ final class KontrolniHlaseniBuilder
     /** Public static: stejnou normalizaci DIČ používá DphBookBuilder pro efektivní KH sekci. */
     public static function cleanDic(?string $dic): string
     {
-        if (!$dic) return '';
-        // CZ12345678 → 12345678. Pattern v XSD je [0-9]{1,10}, takže strip vše ne-digit po prefixu.
-        $clean = preg_replace('/^CZ/i', '', strtoupper(trim($dic))) ?? '';
-        return preg_replace('/[^0-9]/', '', $clean) ?? '';
+        // SSOT je EpoSupplierBlockBuilder::normalizeDic — tahle metoda je jen zavedený
+        // vstupní bod pro KH a zůstává kvůli volajícím.
+        return EpoSupplierBlockBuilder::normalizeDic($dic);
     }
 
     /**

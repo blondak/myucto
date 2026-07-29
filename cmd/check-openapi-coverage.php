@@ -17,6 +17,12 @@ declare(strict_types=1);
  *   - /api/public/approval/* — pro koncové zákazníky, ne pro integrace
  *   - /api/openapi.yaml, /api/docs, /api/health, /api/version — self-reference / triviální
  *   - mutace na /api/settings/*, /api/suppliers (POST/PUT/DELETE) a /api/admin/update/*
+ *   - /api/maintenance/* (sample data, admin), /api/settings/{pdf-signing,signing,
+ *     email-profiles,bank-email-notices} — admin konfigurace, ne pro integrace
+ *
+ * Extrakce routes: skupiny $app->group('/prefix', fn) se párují závorkově
+ * (per-group scope). NEporovnávat $g-> globálně přes všechny prefixy —
+ * to cross-multiplikuje routes a generuje falešné nálezy.
  *
  * Exit kódy:
  *   0 = bez nálezů
@@ -34,12 +40,54 @@ if (!is_file($openapiFile)) { fwrite(STDERR, "ERR: missing $openapiFile\n"); exi
 
 // --- 1) Extract routes z Routes.php ----------------------------------------
 $src = (string) file_get_contents($routesFile);
+$len = strlen($src);
 $routes = [];
 
-// Plain $app-> calls
+// 1a) Najdi každou skupinu $app->group('/prefix', function ($g) { ... }) a spáruj
+//     složené závorky, aby se $g-> routes přiřadily jen VLASTNÍ skupině.
+//     (Dřív se naivně párovaly všechny $g-> v souboru pod každý prefix →
+//      cross-multiplikace routes přes všechny group prefixy = falešné nálezy.)
+$groupRanges = []; // [prefix, bodyStart, bodyEnd]
+$offset = 0;
+while (preg_match(
+    '/\$app->group\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*function\s*\([^)]*\)\s*(?:use\s*\([^)]*\)\s*)?\{/',
+    substr($src, $offset),
+    $gm,
+    PREG_OFFSET_CAPTURE
+)) {
+    $prefix   = $gm[1][0];
+    $bracePos = $offset + $gm[0][1] + strlen($gm[0][0]) - 1; // pozice otevírací {
+    $depth = 0; $end = $bracePos;
+    for ($i = $bracePos; $i < $len; $i++) {
+        if ($src[$i] === '{') $depth++;
+        elseif ($src[$i] === '}') { if (--$depth === 0) { $end = $i; break; } }
+    }
+    $groupRanges[] = [$prefix, $bracePos, $end];
+    $offset = $end + 1;
+}
+foreach ($groupRanges as [$prefix, $start, $end]) {
+    $body = substr($src, $start, $end - $start + 1);
+    if (preg_match_all(
+        '/\$g->(get|post|put|patch|delete|any)\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
+        $body,
+        $im,
+        PREG_SET_ORDER
+    )) {
+        foreach ($im as $hit) {
+            $routes[] = ['method' => strtoupper($hit[1]), 'path' => $prefix . $hit[2]];
+        }
+    }
+}
+
+// 1b) Plain $app-> routes MIMO skupiny — vymaskuj těla skupin, ať se
+//     $g-> volání nechytnou jako $app-> (a naopak zůstanou jen top-level routes).
+$masked = $src;
+foreach ($groupRanges as [$prefix, $start, $end]) {
+    $masked = substr_replace($masked, str_repeat(' ', $end - $start + 1), $start, $end - $start + 1);
+}
 if (preg_match_all(
     '/\$app->(get|post|put|patch|delete|any)\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
-    $src,
+    $masked,
     $m,
     PREG_SET_ORDER
 )) {
@@ -48,34 +96,23 @@ if (preg_match_all(
     }
 }
 
-// Group-routes ($g-> uvnitř $app->group('/api/auth', ...))
-if (preg_match_all(
-    '/\$app->group\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
-    $src,
-    $gm,
-    PREG_SET_ORDER
-)) {
-    foreach ($gm as $gp) {
-        $prefix = $gp[1];
-        if (preg_match_all(
-            '/\$g->(get|post|put|patch|delete|any)\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
-            $src,
-            $im,
-            PREG_SET_ORDER
-        )) {
-            foreach ($im as $hit) {
-                $routes[] = ['method' => strtoupper($hit[1]), 'path' => $prefix . $hit[2]];
-            }
-        }
-    }
-}
-
-// Normalize: drop placeholder regex (`{id:[0-9]+}` → `{id}`)
+// Normalize placeholdery: `{id:[0-9]+}` → `{id}`, `{entity_type:invoice|work_report}` → `{entity_type}`
+// Musí umět i jednu úroveň vnořených složených závorek (regex kvantifikátory typu
+// `{date:\d{4}-\d{2}-\d{2}}` nebo `{batchId:[a-fA-F0-9]{32}}`) — jinak se placeholder
+// oseká na první vnitřní `}` a zbytek regexu zůstane v cestě jako text.
 foreach ($routes as &$r) {
-    $r['path'] = preg_replace('/:\\[[^\\]]+\\][^}]*/', '', $r['path']);
-    // Slim path /:id → OpenAPI {id} (žádný case tady, ale safety)
+    $r['path'] = preg_replace('/\{(\w+):(?:[^{}]|\{[^{}]*\})*\}/', '{$1}', $r['path']);
 }
 unset($r);
+
+// Dedupe (identický method+path se může objevit víckrát)
+$seen = [];
+$routes = array_values(array_filter($routes, static function ($r) use (&$seen) {
+    $k = $r['method'] . ' ' . $r['path'];
+    if (isset($seen[$k])) return false;
+    $seen[$k] = true;
+    return true;
+}));
 
 // --- 2) Endpoints, které vědomě neaudituji ---------------------------------
 $skipPrefixes = [
@@ -91,6 +128,10 @@ $skipPrefixes = [
     '/api/auth/totp/',
     '/api/auth/tokens',            // session-only, nelze volat bearer-em
     '/api/settings/email-branding/', // admin UI tooling (logo upload, preview)
+    '/api/maintenance/',           // správa sample dat, admin-only (RoleMiddleware)
+    '/api/settings/pdf-signing',   // admin konfigurace el. podpisu (certifikáty)
+    '/api/settings/signing',       // admin podpisové profily + credentials
+    '/api/settings/bank-email-notices', // admin: parsování bankovních e-mailů
 ];
 $skipExact = [
     '/api/openapi.yaml',
@@ -103,6 +144,7 @@ $skipExact = [
     '/api/invoices/{id}/send-test',
     '/api/invoices/{id}/reminder-test',
     '/api/invoices/{id}/request-approval-test',
+    '/api/settings/email-profiles', // admin: konfigurace odesílacích e-mail profilů
     '/api/{path}',  // catch-all 404 fallback
 ];
 

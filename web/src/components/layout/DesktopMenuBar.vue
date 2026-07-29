@@ -1,0 +1,218 @@
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+
+interface NavItem {
+  to: string
+  label: string
+  icon: string
+  external?: boolean
+  newTo?: string
+  badge?: number
+  dividerBefore?: boolean
+}
+
+interface NavSection {
+  key: string
+  title?: string
+  accent?: 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal'
+  items: NavItem[]
+}
+
+/**
+ * Accent → podtržení aktivní sekce. Táž paleta jako tečky a levé lišty v postranním
+ * menu (ACCENT_DOT / ACCENT_RAIL v AppLayout), ať obě navigace mluví stejnou řečí.
+ * Plná sytost: proužek je 2px vysoký a tlumený odstín by na něm nebyl poznat.
+ */
+const ACCENT_BAR: Record<NonNullable<NavSection['accent']>, string> = {
+  primary: 'bg-primary-400',
+  primaryDeep: 'bg-primary-600',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  danger:  'bg-danger-500',
+  neutral: 'bg-neutral-400',
+  accent:  'bg-accent-500',
+  teal:    'bg-teal-500',
+}
+
+const props = defineProps<{
+  sections: NavSection[]
+  isActive: (to: string) => boolean
+  canCreate: (item: NavItem) => boolean
+  createTarget: (item: NavItem) => string
+  /** Popisek klávesové zkratky položky, nebo prázdno když žádnou nemá. */
+  shortcutFor: (to: string) => string
+  quickNewLabel: string
+  menuLabel: string
+}>()
+
+const route = useRoute()
+const root = ref<HTMLElement | null>(null)
+const openSection = ref<string | null>(null)
+const hoverCapable = ref(false)
+let hoverMql: MediaQueryList | null = null
+
+function sectionIsActive(section: NavSection): boolean {
+  return section.items.some(item => !item.external && props.isActive(item.to))
+}
+
+function toggleSection(key: string) {
+  if (hoverCapable.value) {
+    openSection.value = key
+    return
+  }
+  openSection.value = openSection.value === key ? null : key
+}
+
+function openFromPointer(key: string) {
+  if (hoverCapable.value) openSection.value = key
+}
+
+function closeFromPointer(key: string) {
+  if (hoverCapable.value && openSection.value === key) openSection.value = null
+}
+
+function close() {
+  openSection.value = null
+}
+
+function onDocumentPointerDown(event: PointerEvent) {
+  if (root.value && !root.value.contains(event.target as Node)) close()
+}
+
+function onDocumentKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') close()
+}
+
+function onHoverChange(event: MediaQueryListEvent) {
+  hoverCapable.value = event.matches
+}
+
+watch(() => route.fullPath, close)
+
+onMounted(() => {
+  hoverMql = window.matchMedia('(hover: hover) and (pointer: fine)')
+  hoverCapable.value = hoverMql.matches
+  hoverMql.addEventListener('change', onHoverChange)
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  document.addEventListener('keydown', onDocumentKeydown)
+})
+
+onBeforeUnmount(() => {
+  hoverMql?.removeEventListener('change', onHoverChange)
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('keydown', onDocumentKeydown)
+})
+</script>
+
+<template>
+  <nav ref="root" class="flex min-w-0 flex-1 h-full items-stretch" :aria-label="menuLabel">
+    <div
+      v-for="(section, index) in sections"
+      :key="section.key"
+      class="relative flex items-stretch"
+      @pointerenter="openFromPointer(section.key)"
+      @pointerleave="closeFromPointer(section.key)"
+    >
+      <button
+        type="button"
+        class="cursor-pointer relative inline-flex min-w-0 items-center gap-1 px-2 xl:px-2.5 h-full text-[13px] font-semibold uppercase tracking-wide whitespace-nowrap text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
+        :class="sectionIsActive(section) || openSection === section.key ? 'bg-neutral-100 text-primary-700' : ''"
+        :aria-expanded="openSection === section.key"
+        aria-haspopup="menu"
+        @click.stop="toggleSection(section.key)"
+        @keydown.down.prevent="openSection = section.key"
+      >
+        <span>{{ section.title }}</span>
+        <svg class="w-3 h-3 shrink-0 transition-transform" :class="openSection === section.key ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+        <!--
+          Lícuje s hlavičkou i s rozbaleným menu: inset-x-0 dá proužku šířku tlačítka
+          (tedy i levou hranu dropdownu, ten je na sekci zarovnaný taky bez odsazení)
+          a -bottom-px ho posadí NA 1px spodní border hlavičky místo nad něj — jinak
+          se skládaly dvě čáry pod sebou. Bez rounded-full, ať konce navazují na hranu.
+        -->
+        <span
+          v-if="sectionIsActive(section)"
+          class="absolute inset-x-0 -bottom-px h-0.5"
+          :class="ACCENT_BAR[section.accent ?? 'primary']"
+          aria-hidden="true"
+        ></span>
+      </button>
+
+      <transition
+        enter-active-class="transition duration-100 ease-out"
+        enter-from-class="opacity-0 -translate-y-1"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-75 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 -translate-y-1"
+      >
+        <div
+          v-if="openSection === section.key"
+          class="absolute top-full z-50 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-neutral-200 dark:border-neutral-300 rounded-b-lg shadow-xl dark:shadow-[0_14px_32px_rgba(0,0,0,0.45)] py-1.5"
+          :class="index >= sections.length - 3 ? 'right-0' : 'left-0'"
+          role="menu"
+        >
+          <template v-for="item in section.items" :key="item.to">
+            <div v-if="item.dividerBefore" class="my-1.5 border-t border-neutral-200" aria-hidden="true"></div>
+            <a
+              v-if="item.external"
+              :href="item.to"
+              target="_blank"
+              rel="noopener"
+              class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700"
+              role="menuitem"
+              @click="close"
+            >
+              <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+              </svg>
+              <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+              <span v-if="props.shortcutFor(item.to)" class="shrink-0 text-[11px] leading-none tracking-wide text-neutral-400">{{ props.shortcutFor(item.to) }}</span>
+            </a>
+            <div v-else class="relative group/item" role="none">
+              <RouterLink
+                :to="item.to"
+                class="flex items-center gap-2.5 px-3 py-2 text-sm transition-colors"
+                :class="props.isActive(item.to) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
+                role="menuitem"
+                @click="close"
+              >
+                <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+                </svg>
+                <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                <span v-if="item.badge" class="min-w-5 rounded-full bg-warning-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-700">{{ item.badge }}</span>
+                <!--
+                  Zkratka sedí na témže místě jako tlačítko „+" (to je absolutně
+                  pozicované na right-2 a naskakuje na hover), takže při hoveru
+                  ustoupí — jinak by se překrývaly. Když položka „+" nemá, zůstává
+                  zkratka vidět i pod kurzorem.
+                -->
+                <span
+                  v-if="props.shortcutFor(item.to)"
+                  class="shrink-0 text-[11px] leading-none tracking-wide text-neutral-400 transition-opacity"
+                  :class="props.canCreate(item) ? 'group-hover/item:opacity-0' : ''"
+                >{{ props.shortcutFor(item.to) }}</span>
+              </RouterLink>
+              <RouterLink
+                v-if="props.canCreate(item)"
+                :to="props.createTarget(item)"
+                :title="quickNewLabel"
+                :aria-label="quickNewLabel"
+                class="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 opacity-0 group-hover/item:opacity-100 focus:opacity-100 hover:bg-primary-100 hover:text-primary-700"
+                @click="close"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 7v10m5-5H7" />
+                </svg>
+              </RouterLink>
+            </div>
+          </template>
+        </div>
+      </transition>
+    </div>
+  </nav>
+</template>

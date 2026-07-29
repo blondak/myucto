@@ -11,10 +11,43 @@ export interface TaxProfile {
   spouse_credit: boolean
   children_count: number
   mortgage_interest: number
+  /** Bytová potřeba obstaraná do 31. 12. 2020 → strop úroků 300k (§15/3-4 ZDP), jinak 150k */
+  mortgage_pre_2021: boolean
   pension_contrib: number
   life_insurance: number
+  dip_contrib: number
+  long_term_care: number
+  mortgage_months: number
+  disability_12_months: number
+  disability_3_months: number
+  ztpp_months: number
   donations: number
+  activities: TaxActivity[]
+  children: TaxChild[]
+  spouse_claim: SpouseClaim | null
+  osvc_months: OsvcMonth[]
   saved?: boolean
+}
+
+export interface TaxActivity {
+  name: string; nace_code: string; expense_mode: 'actual' | 'pausal'; expense_rate: number
+  income: number; expenses: number; active_months: number; allocation_note?: string | null
+}
+export interface TaxChildMonth { month: number; order: number; ztpp: boolean; claimed: boolean }
+export interface TaxChild {
+  first_name: string; last_name: string; birth_number?: string | null; birth_date?: string | null
+  shared_household_proved: boolean; other_parent_not_claimed_proved: boolean; evidence_ref?: string | null
+  months: TaxChildMonth[]
+}
+export interface SpouseClaim {
+  first_name: string; last_name: string; birth_number?: string | null; birth_date?: string | null
+  eligible_months: number; ztpp: boolean; own_income: number; income_proved: boolean
+  shared_household_proved: boolean; child_under_three_proved: boolean; evidence_ref?: string | null
+}
+export interface OsvcMonth {
+  month: number; activity_status: 'inactive' | 'main' | 'secondary'; social_participates: boolean
+  health_minimum_applies: boolean; state_insured: boolean; employed: boolean; new_osvc: boolean
+  assessment_base?: number | null; note?: string | null
 }
 
 /**
@@ -31,6 +64,7 @@ export interface PausalSegment {
 
 /** Roční konstanty (tvar TaxConstants::forYear z backendu). Volné typování — engine je čte dynamicky. */
 export interface TaxConstantsData {
+  [key: string]: any
   year: number
   pausal_monthly: PausalSegment[]
   /** Odvozené (součet 12 měsíčních záloh roku) — read-only, neukládá se. */
@@ -48,18 +82,27 @@ export interface TaxConstantsData {
   health_assessment_pct: number
   social_min_base_main: number
   social_min_base_secondary: number
+  social_max_base: number
   /** Rozhodná částka (zisk) pro povinnou účast na důch. pojištění u vedlejší SVČ */
   social_secondary_participation_threshold: number
   health_min_base: number
   expense_caps: Record<string, number>
   mortgage_cap: number
+  /** §15/3-4: strop úroků pro bytové potřeby obstarané do 31. 12. 2020 (300k) */
+  mortgage_cap_pre2021: number
   pension_cap: number
+  /** Dary §15/1 FO: spodní limit (Kč nebo 2 % ZD) a horní strop (% ZD) */
+  donation_min_fo?: number
+  donation_cap_fo_pct?: number
   vat_limit_low: number
   vat_limit_high: number
   /** DPH — platí pro všechny plátce (nejen OSVČ) */
   vat_rate_standard: number
   vat_rate_reduced: number
   kh_item_threshold: number
+  child_bonus_min: number
+  fixed_asset_limit: number
+  transition_receivables_max_years: number
 }
 
 /** Pravděpodobný čistý příjem za minulý kalendářní měsíc (odhad, viz TaxOptimizer::estimateMonthly). */

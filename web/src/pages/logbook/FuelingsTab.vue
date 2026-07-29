@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
+import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDate, formatMonth, formatMoney } from '@/composables/useFormat'
 import {
   logbookApi, type Car, type Fueling, type FuelingPayload,
@@ -9,9 +10,11 @@ import {
 } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
 import FilterBar from '@/components/ui/FilterBar.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t, locale } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
 const auth = useAuthStore()
 const props = defineProps<{ resetToken?: number; openNewToken?: number }>()
 
@@ -29,32 +32,25 @@ const cars = ref<Car[]>([])
 const loading = ref(false)
 const filterCar = ref<number | ''>('')
 
-// Filtr rok/měsíc (client-side, default = vše) + stránkování
+// Filtr rok/měsíc + serverové stránkování (číselný pager — page NAHRAZUJE seznam, vzor StatementList.vue)
 const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const page = ref(1)
+const pages = ref(1)
+const total = ref(0)
 const perPage = 25
+const years = ref<number[]>([])
 
-const yearOptions = computed(() => {
-  const ys = new Set<number>()
-  for (const f of fuelings.value) ys.add(Number(f.fueled_date.slice(0, 4)))
-  return [...ys].sort((a, b) => b - a)
-})
 const monthOptions = computed(() => {
   const loc = locale.value === 'en' ? 'en-US' : 'cs-CZ'
   return Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(loc, { month: 'long' }))
 })
-const filteredFuelings = computed(() => fuelings.value.filter((f) => {
-  if (yearFilter.value && Number(f.fueled_date.slice(0, 4)) !== yearFilter.value) return false
-  if (monthFilter.value && Number(f.fueled_date.slice(5, 7)) !== monthFilter.value) return false
-  return true
-}))
-const totalAmount = computed(() => filteredFuelings.value.reduce((s, f) => s + f.amount_with_vat, 0))
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredFuelings.value.length / perPage)))
-const pagedFuelings = computed(() => filteredFuelings.value.slice((page.value - 1) * perPage, page.value * perPage))
+// Součet částky — jen z aktuálně zobrazené stránky (počet tankování v patičce bere meta.total);
+// autoritativní souhrn za období je v SummariesTab / /logbook/summary.
+const totalAmount = computed(() => fuelings.value.reduce((s, f) => s + f.amount_with_vat, 0))
 const groups = computed(() => {
   const map = new Map<string, { month: string; rows: Fueling[]; amount: number }>()
-  for (const f of pagedFuelings.value) {
+  for (const f of fuelings.value) {
     const m = f.fueled_date.slice(0, 7)
     if (!map.has(m)) map.set(m, { month: m, rows: [], amount: 0 })
     const g = map.get(m)!
@@ -64,19 +60,31 @@ const groups = computed(() => {
 })
 
 watch(yearFilter, (y) => { if (!y) monthFilter.value = '' })
-watch([yearFilter, monthFilter], () => { page.value = 1 })
-watch(totalPages, (tp) => { if (page.value > tp) page.value = tp })
+watch([yearFilter, monthFilter], () => { reload() })
 
 async function load() {
   loading.value = true
   try {
-    const params: Record<string, string | number> = {}
+    const params: Record<string, string | number> = { page: page.value, per_page: perPage }
     if (filterCar.value) params.car_id = filterCar.value
-    ;[fuelings.value, cars.value] = await Promise.all([
+    if (yearFilter.value) params.year = yearFilter.value
+    if (monthFilter.value) params.month = monthFilter.value
+    const [fuelingsRes, carsRes] = await Promise.all([
       logbookApi.listFuelings(params),
       cars.value.length ? Promise.resolve(cars.value) : logbookApi.listCars(false),
     ])
+    fuelings.value = fuelingsRes.data
+    total.value = fuelingsRes.meta.total
+    pages.value = fuelingsRes.meta.pages
+    years.value = fuelingsRes.years
+    cars.value = carsRes
   } finally { loading.value = false; maybeOpenNew() }
+}
+// Reset na 1. stranu (změna filtru / po uložení). goToPage = navigace v rámci pageru.
+function reload() { page.value = 1; load() }
+function goToPage(p: number) {
+  const np = Math.min(Math.max(1, p), pages.value)
+  if (np !== page.value) { page.value = np; load() }
 }
 onMounted(load)
 
@@ -94,8 +102,7 @@ watch(() => props.resetToken, () => {
   filterCar.value = ''
   yearFilter.value = ''
   monthFilter.value = ''
-  page.value = 1
-  load()
+  reload()
 })
 
 // ── Export XLSX / PDF ───────────────────────────────────────────
@@ -171,6 +178,7 @@ function editFueling(f: Fueling) {
 }
 
 async function save() {
+  if (blockDemoMutation()) return
   if (Number(draft.amount_with_vat) <= 0) { toast.error(t('logbook.amount_required')); return }
   saving.value = true
   try {
@@ -184,10 +192,12 @@ async function save() {
       odometer: draft.odometer != null && draft.odometer !== ('' as any) ? Number(draft.odometer) : null,
       station: draft.station || null, note: draft.note || null,
     }
+    const wasNew = !draft.id
     if (draft.id) await logbookApi.updateFueling(draft.id, payload)
     else await logbookApi.createFueling(payload)
     open.value = false
     toast.success(t('common.saved'))
+    if (wasNew) page.value = 1 // nové tankování je nejnovější → skoč na 1. stranu (řazení date DESC)
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message ?? t('common.error'))
@@ -196,8 +206,13 @@ async function save() {
 
 async function removeFueling(f: Fueling) {
   if (!confirm(t('logbook.confirm_delete_fueling'))) return
-  try { await logbookApi.deleteFueling(f.id); toast.success(t('common.deleted')); await load() }
-  catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
+  try {
+    await logbookApi.deleteFueling(f.id)
+    toast.success(t('common.deleted'))
+    await load()
+    // Smazání poslední položky na poslední straně → posuň se o stranu zpět.
+    if (fuelings.value.length === 0 && page.value > 1) goToPage(page.value - 1)
+  } catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
 }
 
 // ── Načíst z faktur (benzínky) ──────────────────────────────────
@@ -287,41 +302,41 @@ const sourceBadge: Record<string, string> = {
 <template>
   <section>
     <FilterBar :active-count="activeFilterCount">
-        <select v-model="filterCar" @change="load" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <select v-model="filterCar" @change="reload" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('logbook.all_cars') }}</option>
           <option v-for="c in cars" :key="c.id" :value="c.id">{{ c.registration }}{{ c.name ? ` — ${c.name}` : '' }}</option>
         </select>
         <select v-model="yearFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option :value="''">{{ t('logbook.all_years') }}</option>
-          <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+          <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
         </select>
         <select v-model="monthFilter" :disabled="yearFilter === ''" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50">
           <option :value="''">{{ t('logbook.all_months') }}</option>
           <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
         </select>
-        <button @click="openExport" :disabled="fuelings.length === 0"
-          class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5 disabled:opacity-50">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>
+        <button @click="openExport" :disabled="total === 0"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('logbook.export') }}
         </button>
-        <button v-if="auth.canWrite" @click="openInvoices"
-          class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/></svg>
+        <button v-if="auth.canWrite('logbook.write')" @click="openInvoices"
+          :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           {{ t('logbook.from_invoices') }}
         </button>
       <template #actions>
-        <button v-if="auth.canWrite" @click="newFueling" class="cursor-pointer h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6"/></svg>
+        <button v-if="auth.canWrite('logbook.write') || auth.isDemo" @click="newFueling" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('logbook.fueling_new') }}
         </button>
       </template>
     </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="filteredFuelings.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_fuelings') }}</div>
+    <div v-else-if="total === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_fuelings') }}</div>
 
     <template v-else>
-      <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.fuelings_summary', { count: filteredFuelings.length, amount: fmtMoney(totalAmount, 'CZK') }) }}</div>
+      <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.fuelings_summary', { count: total, amount: fmtMoney(totalAmount, 'CZK') }) }}</div>
 
       <section v-for="g in groups" :key="g.month" class="mb-5">
         <header class="flex items-center justify-between bg-neutral-50 border border-neutral-200 rounded-t-lg px-4 py-2.5">
@@ -368,7 +383,7 @@ const sourceBadge: Record<string, string> = {
                 <td class="px-3 py-2 text-right font-mono">{{ fmtMoney(f.amount_with_vat, f.currency) }}</td>
                 <td class="px-3 py-2 text-xs text-neutral-500 truncate max-w-[12rem]">{{ f.station || f.vendor_name || '—' }}</td>
                 <td class="px-3 py-2">
-                  <div v-if="auth.canWrite" class="flex justify-end gap-1.5">
+                  <div v-if="auth.canWrite('logbook.write')" class="flex justify-end gap-1.5">
                     <button @click="editFueling(f)" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828z"/></svg>
                       {{ t('common.edit') }}
@@ -403,7 +418,7 @@ const sourceBadge: Record<string, string> = {
               class="inline-block mt-1 text-xs text-primary-600 hover:underline">
               {{ f.source_invoice_number ? `Doklad č. ${f.source_invoice_number}` : t('logbook.invoice_link') }} ↗
             </router-link>
-            <div v-if="auth.canWrite" class="flex gap-2 mt-2">
+            <div v-if="auth.canWrite('logbook.write')" class="flex gap-2 mt-2">
               <button @click="editFueling(f)" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828z"/></svg>
                 {{ t('common.edit') }}
@@ -417,13 +432,13 @@ const sourceBadge: Record<string, string> = {
         </div>
       </section>
 
-      <!-- Stránkování -->
-      <div v-if="totalPages > 1" class="flex items-center justify-center gap-3 mt-4">
-        <button @click="page--" :disabled="page <= 1" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
+      <!-- Číselný pager (serverové stránkování — page nahrazuje seznam) -->
+      <div v-if="pages > 1" class="flex items-center justify-center gap-3 mt-4">
+        <button @click="goToPage(page - 1)" :disabled="page <= 1" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
         </button>
-        <span class="text-sm text-neutral-600">{{ t('logbook.page_of', { page, pages: totalPages }) }}</span>
-        <button @click="page++" :disabled="page >= totalPages" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
+        <span class="text-sm text-neutral-600">{{ t('logbook.page_of', { page, pages }) }}</span>
+        <button @click="goToPage(page + 1)" :disabled="page >= pages" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
         </button>
       </div>

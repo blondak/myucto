@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { PaymentAccountSource } from './purchaseInvoices'
+import type { PaymentMethod, PaymentMethodSource } from './invoices'
 
 /** Stav ověření platebního účtu protistrany (CRPDPH / registr plátců). */
 export type PaymentAccountVerified = 'verified' | 'not_listed' | 'unreliable' | 'na'
@@ -42,10 +43,18 @@ export interface PaymentCandidate {
   constant_symbol: string | null
   payment_account_source: PaymentAccountSource | null
   payment_ordered_at: string | null
+  /**
+   * Forma úhrady (migrace 1128). Defaultně sem chodí jen 'bank_transfer' — jiné hodnoty
+   * se objeví jen se zapnutým `include_non_transfer` a do příkazu je zařadit NELZE.
+   */
+  payment_method: PaymentMethod
+  payment_method_source: PaymentMethodSource
   has_account: boolean
   has_pdf: boolean
   can_verify: boolean
   abo_eligible: boolean
+  /** Má platný IBAN (mod-97) → lze zařadit do SEPA (pain.001.001.03) exportu. */
+  sepa_eligible: boolean
   account_verified: PaymentAccountVerified
 }
 
@@ -57,9 +66,18 @@ export interface VerifyAccountResponse {
   dic: string | null
 }
 
+/** Stránkovací meta (jednotný kontrakt list endpointů). */
+export interface PageMeta {
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
 export interface PaymentOrderCandidatesResponse {
   payer_accounts: PayerAccount[]
-  candidates: PaymentCandidate[]
+  data: PaymentCandidate[]
+  meta: PageMeta
 }
 
 /** Položka uloženého platebního příkazu (detail) — kanonický pohled z backendu. */
@@ -142,13 +160,23 @@ export interface CreatePaymentOrderResponse {
   clamped_date: boolean
 }
 
-export type PaymentOrderFormat = 'abo' | 'csv' | 'pdf'
+export type PaymentOrderFormat = 'abo' | 'csv' | 'pdf' | 'sepa'
 
 export const paymentOrdersApi = {
-  /** Kandidáti + plátcovské účty, volitelně filtrované měnou plátce. */
-  candidates: (currency?: string) =>
+  /**
+   * Kandidáti + plátcovské účty, volitelně filtrované měnou plátce. Stránkovaně (load-more).
+   *
+   * `includeNonTransfer` vypne default filtr „jen bankovní převod" — inkasní faktury se
+   * do příkazu nedávají, ale chybně označenou fakturu musí jít najít a opravit.
+   */
+  candidates: (currency?: string, page = 1, perPage = 50, includeNonTransfer = false) =>
     api.get<PaymentOrderCandidatesResponse>('/purchase-invoices/payment-orders/candidates', {
-      params: currency ? { currency } : {},
+      params: {
+        page,
+        per_page: perPage,
+        ...(currency ? { currency } : {}),
+        ...(includeNonTransfer ? { include_non_transfer: 1 } : {}),
+      },
     }).then(r => r.data),
 
   create: (payload: CreatePaymentOrderPayload) =>
@@ -158,8 +186,11 @@ export const paymentOrdersApi = {
   markOrdered: (payload: { invoice_ids: number[]; mark_paid?: boolean }) =>
     api.post<{ count: number }>('/purchase-invoices/payment-orders/mark', payload).then(r => r.data),
 
-  list: () =>
-    api.get<{ data: PaymentOrderListItem[] }>('/purchase-invoices/payment-orders').then(r => r.data.data),
+  /** Historie dávek, stránkovaně (load-more). */
+  list: (page = 1, perPage = 50) =>
+    api.get<{ data: PaymentOrderListItem[]; meta: PageMeta }>('/purchase-invoices/payment-orders', {
+      params: { page, per_page: perPage },
+    }).then(r => r.data),
 
   get: (id: number) =>
     api.get<PaymentOrderView>(`/purchase-invoices/payment-orders/${id}`).then(r => r.data),

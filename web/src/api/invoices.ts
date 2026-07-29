@@ -1,6 +1,34 @@
 import { api } from './client'
+import type { DocumentLock } from './locks'
 
-export type InvoiceType = 'invoice' | 'proforma' | 'credit_note' | 'cancellation' | 'tax_document'
+export type InvoiceType = 'invoice' | 'proforma' | 'credit_note' | 'cancellation' | 'tax_document' | 'penalty' | 'payment_calendar'
+
+/** Jeden segment výpočtu úroku z prodlení (rozpad jen kvůli hranici kalendářního roku — sazba je napříč segmenty stejná). */
+export interface PenaltyInterestSegment {
+  from: string
+  to: string
+  days: number
+  repo_rate: number
+  annual_rate: number
+  day_count_basis: number
+  interest: number
+}
+
+/** Náhled výpočtu úroku z prodlení (NV č. 351/2013 Sb.). */
+export interface PenaltyPreview {
+  principal: number
+  due_date: string
+  as_of: string
+  total_days: number
+  total_interest: number
+  surcharge_points: number
+  segments: PenaltyInterestSegment[]
+  source_invoice_id: number
+  source_varsymbol: string
+  currency: string
+  /** Do kdy pokrývá dřívější (nestornovaná) penalizace tohoto dokladu — null když žádná není. */
+  previously_covered_through: string | null
+}
 export type InvoiceStatus = 'draft' | 'issued' | 'sent' | 'reminded' | 'paid' | 'cancelled'
 export type ApprovalStatus = 'none' | 'requested' | 'approved' | 'rejected'
 /** Odvozený platební stav (#89) — počítá se z paid_total vs. amount_to_pay; null pro draft/cancelled. */
@@ -35,7 +63,6 @@ export interface InvoicePaymentsResponse {
   payment_status: PaymentStatus | null
 }
 
-/** Bankovní operace přímo spárovaná s fakturou, i když nevytvořila účetní platbu. */
 export interface RelatedBankTransaction {
   id: number
   statement_id: number
@@ -85,9 +112,13 @@ export interface InvoiceItem {
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
+  /** Vazba na skladovou kartu (Epic SKLAD, B5) — FE MUSÍ posílat zpět v round-tripu, jinak se DELETE+INSERT tiše smaže. */
+  stock_item_id?: number | null
+  /** Sklad, ze kterého se položka vydá při vystavení (auto-výdejka); null = default sklad supplieru. */
+  warehouse_id?: number | null
   oss_applicable?: boolean
   oss_consumer_country?: string | null
-  oss_rate_type?: 'standard' | 'reduced' | 'second_reduced' | 'parking' | 'zero' | string | null
+  oss_rate_type?: 'standard' | 'reduced' | 'second_reduced' | 'parking' | string | null
   oss_supply_type?: 'goods' | 'services' | null
   oss_exchange_rate?: number | null
   oss_exchange_rate_date?: string | null
@@ -113,7 +144,49 @@ export interface InvoiceTotals {
   discount_amount?: number
 }
 
-export type PaymentMethod = 'bank_transfer' | 'card' | 'cash' | 'other'
+/**
+ * Forma úhrady (migrace 1128) — sdílená doména pro vydané i přijaté faktury,
+ * zrcadlí PHP `MyInvoice\Support\PaymentMethods`. `direct_debit` (inkaso/SIPO) je
+ * důvod, proč pole vzniklo: na takovou přijatou fakturu se NESMÍ vystavit platební
+ * příkaz, jinak se platí dvakrát.
+ */
+export type PaymentMethod =
+  | 'bank_transfer'
+  | 'direct_debit'
+  | 'card'
+  | 'cash'
+  | 'cash_on_delivery'
+  | 'offset'
+  | 'other'
+
+/** Pořadí pro selecty; klíč i18n je `payment_method.<hodnota>`. */
+export const PAYMENT_METHODS: PaymentMethod[] = [
+  'bank_transfer',
+  'direct_debit',
+  'card',
+  'cash',
+  'cash_on_delivery',
+  'offset',
+  'other',
+]
+
+/** Zdroj hodnoty `payment_method` — priorita manual > ai > vendor > default. */
+export type PaymentMethodSource = 'default' | 'vendor' | 'ai' | 'manual'
+
+/**
+ * § 31 a § 31a ZDPH — jedna platba rozpisu splátkového nebo platebního kalendáře.
+ *
+ * Kalendář je sám o sobě daňovým dokladem právě proto, že rozpis obsahuje; bez něj
+ * ho nelze vystavit a odběratel z něj nemůže uplatnit odpočet.
+ */
+export interface PaymentScheduleRow {
+  id?: number
+  due_on: string
+  base_amount: number
+  vat_amount: number
+  total_amount: number
+  note: string | null
+}
 
 export interface Invoice {
   id: number
@@ -128,6 +201,10 @@ export interface Invoice {
   currency_id: number
   currency: string
   reverse_charge: boolean
+  /** § 30 ZDPH — zjednodušený daňový doklad (do 10 000 Kč vč. daně). */
+  is_simplified: boolean
+  /** § 31/31a ZDPH — rozpis plateb kalendáře (prázdné u ostatních typů). */
+  payment_schedule?: PaymentScheduleRow[]
   /** Ceny položek zadané včetně DPH (brutto) — DPH se počítá shora koeficientem. */
   prices_include_vat: boolean
   /** Doklad není základem daně z příjmů (§4 osvobození / přefakturace) → vyloučen z DPFO/DPPO i SP/ZP. DPH/KH/tržby nedotčeny. */
@@ -179,6 +256,7 @@ export interface Invoice {
   last_reminder_at: string | null
   reminder_count: number
   paid_at: string | null
+  booked_at?: string | null
   cancelled_at: string | null
   pdf_path: string | null
   /** Zdrojové PDF z importu (iDoklad/Fakturoid) — oddělené od našeho rendered `pdf_path`. */
@@ -214,9 +292,25 @@ export interface Invoice {
   exchange_rate?: number | null
   exchange_rate_date?: string | null
   czk_recap?: CzkRecap | null
+  /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
+  locked?: DocumentLock
   _meta?: {
     exchange_rate?: ExchangeRateMeta
   }
+  /** Non-blocking varování z create/update (kódy → t('invoice.warning.<code>')). */
+  _warnings?: string[]
+  /** Detaily k `_warnings` kódům pro interpolaci v UI (§C kurz vs ČNB). */
+  _warning_meta?: {
+    exchange_rate_cnb_deviation?: CnbRateDeviationMeta
+  }
+}
+
+/** Detail odchylky účetního kurzu na dokladu od denního ČNB kurzu (§C / K4). */
+export interface CnbRateDeviationMeta {
+  used_rate: number
+  cnb_rate: number
+  cnb_rate_date: string
+  diff_percent: number
 }
 
 export interface CzkRecap {
@@ -239,7 +333,10 @@ export interface ExchangeRateMeta {
   rate: number
   rate_date: string
   fallback_used: boolean
-  source: 'cache' | 'fresh' | 'last_known'
+  source: 'cache' | 'fresh' | 'last_known' | 'fixed'
+  /** Firma je v pevném kurzovém režimu (§24/7), ale pro toto období/měnu není
+   *  pevný kurz nastavený — doklad se přesto uložil s denním kurzem ČNB. */
+  fixed_missing?: boolean
 }
 
 export interface InvoiceListItem {
@@ -264,16 +361,21 @@ export interface InvoiceListItem {
   payment_status?: PaymentStatus | null
   status: InvoiceStatus
   payment_method: PaymentMethod
+  /** Kurz CZK / 1 jednotka měny dokladu; null u CZK dokladů. */
+  exchange_rate?: number | null
   sent_at: string | null
   last_reminder_at: string | null
   reminder_count: number
   paid_at: string | null
   cancelled_at: string | null
+  booked_at?: string | null
   client_company_name: string
   project_name: string | null
   project_requires_approval?: boolean
   has_work_report?: boolean
   month_bucket: string
+  /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
+  locked?: DocumentLock
 }
 
 export interface MonthGroup {
@@ -301,6 +403,10 @@ export interface InvoicePayload {
   due_date?: string
   currency_id?: number
   reverse_charge?: boolean
+  /** § 30 ZDPH; server ověří limit i výjimky § 30 odst. 2. */
+  is_simplified?: boolean
+  /** § 31/31a ZDPH; chybějící klíč rozpis NEMĚNÍ, prázdné pole ho smaže. */
+  payment_schedule?: PaymentScheduleRow[]
   prices_include_vat?: boolean
   income_tax_exempt?: boolean
   income_tax_exempt_reason?: string | null
@@ -327,6 +433,8 @@ export interface InvoicePayload {
     unit_price_without_vat: number
     vat_rate_id: number
     order_index: number
+    stock_item_id?: number | null
+    warehouse_id?: number | null
     oss_applicable?: boolean
     oss_consumer_country?: string | null
     oss_rate_type?: string | null
@@ -351,6 +459,8 @@ export interface ListFilters {
   currency?: string
   unpaid_only?: boolean
   overdue?: boolean
+  /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
+  booked?: '1' | '0'
   q?: string
   page?: number
   per_page?: number
@@ -382,6 +492,7 @@ export const invoicesApi = {
     if (filters.currency)    params['filter[currency]']    = filters.currency
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
+    if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
@@ -414,19 +525,6 @@ export const invoicesApi = {
       per_page: limit,
     }).then(r => r.data.flatMap(g => g.invoices)),
 
-  exportCsv: (filters: ListFilters = {}) => {
-    const params = new URLSearchParams()
-    if (filters.q) params.set('q', filters.q)
-    if (filters.status)     params.set('filter[status]',  Array.isArray(filters.status) ? filters.status.join(',') : filters.status)
-    if (filters.type)       params.set('filter[type]',    Array.isArray(filters.type) ? filters.type.join(',') : filters.type)
-    if (filters.client_id)  params.set('filter[client_id]',  String(filters.client_id))
-    if (filters.year)       params.set('filter[year]',       String(filters.year))
-    if (filters.date_from)  params.set('filter[date_from]',  filters.date_from)
-    if (filters.date_to)    params.set('filter[date_to]',    filters.date_to)
-    if (filters.currency)   params.set('filter[currency]',   filters.currency)
-    return api.get<Blob>('/invoices/export.csv', { params, responseType: 'blob' })
-  },
-
   exportSelectedPdf: (ids: number[], signPdf = false) =>
     api.get<Blob>('/invoices/export.pdf', {
       params: {
@@ -441,7 +539,7 @@ export const invoicesApi = {
    * Vrátí náhled, jaké číslo faktura dostane při Vystavení (BEZ inkrementu counteru).
    * Používá se v editoru jako placeholder „automaticky: JD2026-01".
    */
-  previewVarsymbol: (type: 'invoice' | 'proforma' | 'credit_note', issueDate: string, clientId?: number) =>
+  previewVarsymbol: (type: 'invoice' | 'proforma' | 'credit_note' | 'payment_calendar', issueDate: string, clientId?: number) =>
     api.get<{ varsymbol: string; has_template: boolean }>(
       `/invoices/preview-varsymbol`,
       { params: { type, issue_date: issueDate, ...(clientId ? { client_id: clientId } : {}) } },
@@ -465,6 +563,13 @@ export const invoicesApi = {
     }).then(r => r.data),
   unmarkPaid: (id: number) =>
     api.post<Invoice>(`/invoices/${id}/unmark-paid`, {}).then(r => r.data),
+  /**
+   * Obnoví snapshoty stran (dodavatel/odběratel/banka) ze živých dat i u uzamčeného
+   * dokladu — částky, stav ani číslo se nemění. Jen admin. Na výkazy DPH to vliv
+   * nemá (ty čtou živou tabulku klientů), projeví se v PDF a v exportech.
+   */
+  rebuildSnapshots: (id: number) =>
+    api.post<Invoice>(`/invoices/${id}/rebuild-snapshots`, {}).then(r => r.data),
   // Evidence plateb / částečné úhrady (#89)
   listPayments: (id: number) =>
     api.get<InvoicePaymentsResponse>(`/invoices/${id}/payments`).then(r => r.data),
@@ -590,6 +695,13 @@ export const invoicesApi = {
       sent: Array<{ invoice_id: number; sent_to: string[]; days_overdue: number }>;
       errors: Array<{ invoice_id: number; error: string }>;
     }>('/invoices/bulk-reminder', { invoice_ids: invoiceIds }).then(r => r.data),
+
+  // Penalizace — úrok z prodlení (NV 351/2013)
+  penaltyPreview: (id: number, params: { as_of?: string; principal?: number } = {}) =>
+    api.get<PenaltyPreview>(`/invoices/${id}/penalty/preview`, { params }).then(r => r.data),
+
+  createPenalty: (id: number, body: { as_of?: string; principal?: number } = {}) =>
+    api.post<Invoice>(`/invoices/${id}/penalty`, body).then(r => r.data),
 
   activity: (id: number) =>
     api.get<Array<{

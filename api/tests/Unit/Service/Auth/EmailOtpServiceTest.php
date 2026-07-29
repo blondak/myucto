@@ -38,7 +38,7 @@ final class EmailOtpServiceTest extends TestCase
         try {
             $this->config = Config::load($rootDir);
             $this->db = new Connection($this->config);
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             $this->markTestSkipped('DB unavailable: ' . $e->getMessage());
         }
 

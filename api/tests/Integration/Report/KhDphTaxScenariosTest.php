@@ -223,6 +223,13 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame(['-25000.00', '10000.00', '11000.00', '40000.00'], $b2bases,
             'B.2: P1+P6+P7+P8; A.2 (P4) a B.1 (P5) se NESMÍ duplikovat do B.2');
 
+        // task #7: přijatý dobropis se v KH vede pod VLASTNÍM evidenčním číslem dokladu
+        // (c_evid_dd), ne pod číslem opravované faktury. P7 nemá navázaného rodiče → žádný
+        // warning (obranná pojistka se pak testuje samostatně v testReceivedCreditNote…).
+        $b2evid = [];
+        foreach ($root->VetaB2 as $v) $b2evid[(string) $v['zakl_dane1']] = (string) $v['c_evid_dd'];
+        $this->assertSame('P-2099-007', $b2evid['-25000.00'], 'P7 dobropis: c_evid_dd = vlastní číslo dokladu');
+
         // B.3 — sumace P2 + P3 (P3 nad limit bez DIČ)
         $this->assertSame('17000.00', (string) $root->VetaB3['zakl_dane1'], 'B.3: 2000 (P2) + 15000 (P3 bez DIČ)');
         $this->assertSame('3570.00',  (string) $root->VetaB3['dan1']);
@@ -398,6 +405,104 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * Obranná pojistka (task #7): přijatý dobropis vedený v KH pod ČÍSLEM OPRAVOVANÉ
+     * faktury (shodné s vlastním vendor_invoice_number rodiče) → warning. Řádek v KH
+     * zůstává, c_evid_dd = VLASTNÍ číslo dobropisu. Dobropis s vlastní číselnou řadou
+     * (≠ číslo rodiče) warning NEgeneruje a c_evid_dd je jeho vlastní číslo.
+     */
+    public function testReceivedCreditNoteUnderParentNumberWarns(): void
+    {
+        $vend = $this->client('Dodavatel dobropis', $this->czId, 'CZ88888882', vendor: true);
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+
+        // Rodič = běžná faktura nad limit (B.2), vlastní číslo "FA-SDIL-777".
+        $parentBad = $this->purchase('FA-SDIL-777', $vend, '40', false, 'invoice', $d(2), $d(2), [[40000, 8400, 21]]);
+        // Dobropis BUG: dodavatel ho v AI extrakci dostal pod číslem opravované faktury
+        // ("FA-SDIL-777") místo vlastního → shoda s číslem rodiče → warning.
+        $cnBad = $this->purchase('FA-SDIL-777', $vend, '40', false, 'credit_note', $d(5), $d(5), [[-25000, -5250, 21]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$parentBad, $cnBad]);
+
+        // Rodič 2 = běžná faktura, vlastní číslo "FA-ORIG-111".
+        $parentOk = $this->purchase('FA-ORIG-111', $vend, '40', false, 'invoice', $d(6), $d(6), [[30000, 6300, 21]]);
+        // Dobropis OK: vlastní číselná řada "DOB-999" (≠ číslo rodiče) → žádný warning.
+        $cnOk = $this->purchase('DOB-999', $vend, '40', false, 'credit_note', $d(7), $d(7), [[-15000, -3150, 21]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$parentOk, $cnOk]);
+
+        $result = $this->kh->build($this->supplierId, self::YEAR, self::MONTH);
+        $kh = new \SimpleXMLElement($result['xml']);
+        $root = $kh->DPHKH1;
+
+        // c_evid_dd per základ — každý dobropis v B.2 pod VLASTNÍM číslem dokladu.
+        $b2evid = [];
+        foreach ($root->VetaB2 as $v) $b2evid[(string) $v['zakl_dane1']] = (string) $v['c_evid_dd'];
+        $this->assertSame('FA-SDIL-777', $b2evid['-25000.00'] ?? null,
+            'BUG dobropis: c_evid_dd = jeho vlastní vendor_invoice_number (= číslo rodiče)');
+        $this->assertSame('DOB-999', $b2evid['-15000.00'] ?? null,
+            'OK dobropis: c_evid_dd = jeho vlastní číslo (≠ číslo opravované faktury)');
+
+        // Warning se vygeneruje PRÁVĚ pro dobropis vedený pod číslem opravované faktury.
+        $creditWarnings = array_values(array_filter(
+            $result['warnings'],
+            static fn (string $w): bool => str_contains($w, 'je v KH veden pod číslem opravované faktury'),
+        ));
+        $this->assertCount(1, $creditWarnings, 'Warning právě jednou — jen pro BUG dobropis');
+        $this->assertStringContainsString('Dobropis FA-SDIL-777', $creditWarnings[0]);
+        $this->assertStringNotContainsString('DOB-999', implode(' ', $result['warnings']),
+            'Dobropis s vlastní číselnou řadou warning negeneruje');
+    }
+
+    /**
+     * §2.3 (audit PODVOJNE-AUDIT.md, bod 3): opravný daňový doklad (dobropis)
+     * musí v KH nést v `c_evid_dd` VLASTNÍ evidenční číslo opravného dokladu, NE
+     * číslo opravované (rodičovské) faktury — i když je s rodičem explicitně
+     * provázán přes `parent_purchase_invoice_id`. Vazba na rodiče je jen
+     * evidenční (párování opravy), nesmí přepsat evidenční číslo v KH.
+     *
+     * Syntetická, ale realisticky strukturovaná data: rodič má vlastní číslo,
+     * dobropis vlastní (odlišné) číslo z vlastní číselné řady + vazbu na rodiče.
+     */
+    public function testCreditNoteCarriesOwnEvidenceNumberNotParent(): void
+    {
+        $vend = $this->client('Dodavatel ODD 2.3', $this->czId, 'CZ29099007', vendor: true);
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+
+        // Rodičovská přijatá faktura nad limit (B.2), vlastní číslo dodavatele.
+        $parentNumber = 'FVP-2099-100';
+        $parent = $this->purchase($parentNumber, $vend, '40', false, 'invoice', $d(3), $d(3), [[50000, 10500, 21]]);
+
+        // Opravný daňový doklad s VLASTNÍM evidenčním číslem, provázaný na rodiče.
+        $creditNumber = 'OD-2099-007';
+        $credit = $this->purchase($creditNumber, $vend, '40', false, 'credit_note', $d(9), $d(9), [[-20000, -4200, 21]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$parent, $credit]);
+
+        $result = $this->kh->build($this->supplierId, self::YEAR, self::MONTH);
+        $kh = new \SimpleXMLElement($result['xml']);
+        $root = $kh->DPHKH1;
+
+        // c_evid_dd per základ v B.2.
+        $b2evid = [];
+        foreach ($root->VetaB2 as $v) {
+            $b2evid[(string) $v['zakl_dane1']] = (string) $v['c_evid_dd'];
+        }
+        // Dobropis nese VLASTNÍ číslo, NE číslo rodiče.
+        $this->assertSame($creditNumber, $b2evid['-20000.00'] ?? null,
+            'dobropis: c_evid_dd = jeho vlastní evidenční číslo opravného dokladu');
+        $this->assertNotSame($parentNumber, $b2evid['-20000.00'] ?? null,
+            'dobropis NESMÍ v c_evid_dd nést číslo opravované (rodičovské) faktury');
+        // Rodič nese své vlastní číslo.
+        $this->assertSame($parentNumber, $b2evid['50000.00'] ?? null,
+            'rodičovská faktura: c_evid_dd = její vlastní číslo');
+
+        // Vazba na rodiče je jen evidenční — dobropis s vlastní číselnou řadou
+        // (≠ číslo opravované faktury) NEGENERUJE warning obranné pojistky.
+        $this->assertStringNotContainsString($creditNumber, implode(' ', $result['warnings']),
+            'dobropis s vlastním číslem (≠ číslo rodiče) warning negeneruje');
+    }
+
+    /**
      * Kvartální Kniha DPH: období 'quarterly' natáhne rozsah na celé čtvrtletí
      * (kvartál odvozen z měsíce přes ceil(month/3)) — sekce sumují všechny tři
      * měsíce, na rozdíl od měsíčního pohledu. Period meta nese period_type + quarter.
@@ -552,7 +657,11 @@ final class KhDphTaxScenariosTest extends TestCase
         $pdo = $this->db->pdo();
         $eurId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         if ($eurId === 0) {
-            $pdo->exec("INSERT INTO currencies (code, name) VALUES ('EUR', 'Euro')");
+            // currencies jsou per-supplier a nemají sloupec `name` (label/name_cs/name_en).
+            $pdo->prepare(
+                'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active)
+                 VALUES (?, "EUR", "EUR", "€", "euro", "euro", 2, 1)'
+            )->execute([$this->supplierId]);
             $eurId = (int) $pdo->lastInsertId();
         }
 
@@ -717,7 +826,15 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame('210',  (string) $dp->Veta4['od_zdp23'], 'ř.43 mirror odpočet');
     }
 
-    /** Služba ze 3. země patří na ř.12 DPHDP3 i do KH A.2; EU VAT ID je volitelné. */
+    /**
+     * Služba ze 3. země (§ 24 — dodavatel neusazený v tuzemsku) patří na ř.12 DPHDP3
+     * (samovyměření) A ZÁROVEŇ do KH oddílu A.2. Oddíl A.2 (§ 108) není jen pro JČS:
+     * pokrývá i přijetí služby / dodání zboží s instalací od osoby neusazené v tuzemsku
+     * bez ohledu na to, zda je z EU nebo ze 3. země (XSD celk_zd_a2 explicitně jmenuje
+     * ř.12/13). U 3. země zůstávají k_stat/vatid_dod prázdné (XSD optional). Daňový
+     * dopad je nulový (ř.12 samovyměření + ř.43 zrcadlový odpočet), přibývá jen formální
+     * řádek v KH A.2.
+     */
     public function testThirdCountryServiceInDphAndKhA2(): void
     {
         $usId = $this->countryId('US');
@@ -729,22 +846,28 @@ final class KhDphTaxScenariosTest extends TestCase
         // Kód 24 (služba ze 3. země, ř.12), RC, fakturováno bez DPH (vat=0).
         $this->purchase('P-2099-1401', $usVend, '24', false, 'invoice', $d(10), $d(10), [[10000, 0, 21]]);
 
-        // DPHDP3 — ř.12 samovyměření + ř.43 odpočet (net nula u plátce).
+        // DPHDP3 — ř.12 samovyměření + ř.43 odpočet (net nula u plátce). Beze změny
+        // po opravě KH: DPHDP3 se řídí dphdp3_line, ne kh_section.
         $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
         $this->assertSame('10000', (string) $dp->Veta1['p_sl23_z'], 'ř.12 základ (dovoz služby 3. země)');
         $this->assertSame('2100', (string) $dp->Veta1['dan_psl23_z'], 'ř.12 samovyměřená daň');
         $this->assertSame('10000', (string) $dp->Veta4['nar_zdp23'], 'ř.43 mirror základ');
         $this->assertSame('2100', (string) $dp->Veta4['od_zdp23'], 'ř.43 mirror odpočet');
 
-        // KH — A.2 zahrnuje i ř.12/13 od osoby neusazené v tuzemsku.
+        // KH — služba ze 3. země (§ 24) PATŘÍ do A.2, ne do B.1. U 3. země je
+        // k_stat/vatid_dod prázdné (dodavatel nemá EU VAT ID) — XSD to povoluje.
         $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
-        $this->assertCount(1, $kh->DPHKH1->VetaA2, 'služba ze 3. země (kód 24) patří do KH A.2');
-        $this->assertSame('10000.00', (string) $kh->DPHKH1->VetaA2[0]['zakl_dane1']);
-        $this->assertSame('', (string) $kh->DPHKH1->VetaA2[0]['vatid_dod']);
-        $this->assertSame('', (string) $kh->DPHKH1->VetaA2[0]['k_stat']);
-        $this->assertCount(0, $kh->DPHKH1->VetaB1, 'ani v B.1');
+        $this->assertCount(1, $kh->DPHKH1->VetaA2, 'služba ze 3. země (kód 24, § 24) PATŘÍ do KH A.2');
+        $this->assertCount(0, $kh->DPHKH1->VetaB1, 'NESMÍ být v B.1');
+        $a2 = $kh->DPHKH1->VetaA2[0];
+        $this->assertSame('', (string) $a2['k_stat'], 'A.2 z 3. země: k_stat prázdné (není JČS)');
+        $this->assertSame('', (string) $a2['vatid_dod'], 'A.2 z 3. země: vatid_dod prázdné (bez EU VAT ID)');
+        $this->assertSame('10000.00', (string) $a2['zakl_dane1'], 'A.2 základ 21 %');
+        $this->assertSame('2100.00', (string) $a2['dan1'], 'A.2 samovyměřená daň 10000 × 21 %');
+        // Kontrolní věta C — základ A.2 (vč. ř.12 ze 3. země) se sčítá do celk_zd_a2.
+        $this->assertSame('10000.00', (string) $kh->DPHKH1->VetaC['celk_zd_a2'], 'VetaC celk_zd_a2 zahrnuje 3. zemi');
 
-        // Kniha DPH nese stejnou klasifikaci A.2.
+        // Kniha DPH nese stejnou klasifikaci A.2 (interní klasifikační kód).
         $book = $this->book->build($this->supplierId, self::YEAR, self::MONTH);
         foreach ($book['sections'] as $s) {
             foreach ($s['rows'] as $r) {
@@ -1095,7 +1218,8 @@ final class KhDphTaxScenariosTest extends TestCase
     public function testTaxConstantsOverrideDrivesKhThresholdPerYear(): void
     {
         $pdo = $this->db->pdo();
-        $data = \MyInvoice\Service\Tax\TaxConstants::forYear(2097);
+        $data = \MyInvoice\Service\Tax\TaxConstants::forYear(2026);
+        $data['year'] = 2097;
         $data['kh_item_threshold'] = 5000;
         $pdo->prepare('INSERT INTO tax_constants (year, data) VALUES (?, ?)
                        ON DUPLICATE KEY UPDATE data = VALUES(data)')
@@ -1511,7 +1635,40 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame('2100.00', (string) $kh->VetaB1[0]['dan1']);
     }
 
-    public function testThirdCountryServiceBelongsToKhA2WithoutEuVatId(): void
+    /**
+     * Task B — práh 10 000 Kč (A.4/A.5, B.2/B.3) se u cizoměnového dokladu vyhodnocuje
+     * v CZK (celek × kurz), ne v měně dokladu. EUR doklad, jehož korunový celek překročí
+     * 10 000 Kč, patří jednotlivě do B.2; pod limitem se sumuje do B.3.
+     */
+    public function testForeignCurrencyThresholdUsesCzkForB2B3(): void
+    {
+        $pdo = $this->db->pdo();
+        $eurId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        if ($eurId === 0) {
+            // currencies jsou per-supplier a nemají sloupec `name` (label/name_cs/name_en).
+            $pdo->prepare(
+                'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active)
+                 VALUES (?, "EUR", "EUR", "€", "euro", "euro", 2, 1)'
+            )->execute([$this->supplierId]);
+            $eurId = (int) $pdo->lastInsertId();
+        }
+        $d = sprintf('%04d-%02d-14', self::YEAR, self::MONTH);
+        $over  = $this->client('CZ dodavatel EUR nad', $this->czId, 'CZ48111222', vendor: true);
+        $under = $this->client('CZ dodavatel EUR pod', $this->czId, 'CZ48333444', vendor: true);
+        // Nad: 400 EUR základ + 84 EUR daň = 484 EUR × 25 = 12 100 Kč > 10 000 → B.2 (jednotlivě).
+        $this->purchase('P-EUR-B2', $over, '40', false, 'invoice', $d, $d, [[400.0, 84.0, 21]],
+            currencyId: $eurId, exchangeRate: 25.00);
+        // Pod: 300 EUR základ + 63 EUR daň = 363 EUR × 25 = 9 075 Kč < 10 000 → B.3 (sumace).
+        $this->purchase('P-EUR-B3', $under, '40', false, 'invoice', $d, $d, [[300.0, 63.0, 21]],
+            currencyId: $eurId, exchangeRate: 25.00);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertCount(1, $kh->VetaB2, 'EUR nad 10 000 Kč (12 100) → B.2, ne B.3');
+        $this->assertSame('10000.00', (string) $kh->VetaB2[0]['zakl_dane1'], 'B.2 základ = 400 EUR × 25');
+        $this->assertSame('7500.00', (string) $kh->VetaB3['zakl_dane1'], 'B.3 základ = 300 EUR × 25 (pod limitem)');
+    }
+
+    public function testThirdCountryServiceInKhA2AndSelfAssessedInDph(): void
     {
         $usId = $this->countryId('US');
         if ($usId === 0) $this->markTestSkipped('US není v číselníku countries.');
@@ -1519,11 +1676,17 @@ final class KhDphTaxScenariosTest extends TestCase
         $vendor = $this->client('US poskytovatel', $usId, null, vendor: true);
         $this->purchase('US-SVC-24', $vendor, '24', true, 'invoice', $d, $d, [[20000, 0, 21]]);
 
+        // KH A.2 (§ 24 — služba od osoby neusazené v tuzemsku) zahrnuje i 3. zemi.
+        // Dodavatel bez EU VAT ID → k_stat/vatid_dod prázdné (XSD optional).
         $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
-        $this->assertCount(1, $kh->VetaA2);
-        $this->assertSame('20000.00', (string) $kh->VetaA2[0]['zakl_dane1']);
-        $this->assertSame('', (string) $kh->VetaA2[0]['vatid_dod']);
+        $this->assertCount(1, $kh->VetaA2, 'US služba (§ 24) PATŘÍ do KH A.2');
+        $this->assertSame('', (string) $kh->VetaA2[0]['k_stat'], '3. země: k_stat prázdné');
+        $this->assertSame('', (string) $kh->VetaA2[0]['vatid_dod'], '3. země: vatid_dod prázdné');
+        $this->assertSame('20000.00', (string) $kh->VetaA2[0]['zakl_dane1'], 'A.2 základ');
+        $this->assertSame('4200.00', (string) $kh->VetaA2[0]['dan1'], 'A.2 samovyměřená daň 20000 × 21 %');
+        $this->assertSame('20000.00', (string) $kh->VetaC['celk_zd_a2'], 'celk_zd_a2 zahrne 3. zemi (ř.12)');
 
+        // Samovyměření v DPHDP3 (ř.12) zůstává beze změny — daňový dopad nulový.
         $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
         $this->assertSame('20000', (string) $dp->Veta1['p_sl23_z']);
     }
@@ -1608,7 +1771,8 @@ final class KhDphTaxScenariosTest extends TestCase
         $result = $this->shv->build($this->supplierId, self::YEAR, 4, 'quarterly');
         $sh = (new \SimpleXMLElement($result['xml']))->DPHSHV;
         $this->assertSame('101', (string) $sh->VetaR[0]['pln_hodnota']);
-        $this->assertSame(sprintf('%04d-07-25', self::YEAR), $result['summary']['submission_deadline']);
+        // 25. 7. 2099 je sobota → posun na pondělí 27. 7. (§ 33/4 DŘ).
+        $this->assertSame(sprintf('%04d-07-27', self::YEAR), $result['summary']['submission_deadline']);
     }
 
     /**
@@ -1729,6 +1893,37 @@ final class KhDphTaxScenariosTest extends TestCase
         return $id;
     }
 
+    public function testVatBookDphAndKhAreIdenticalInBothAccountingModes(): void
+    {
+        $customer = $this->client('Paritní odběratel', $this->czId, 'CZ12345679', customer: true);
+        $vendor = $this->client('Paritní dodavatel', $this->czId, 'CZ98765434', vendor: true);
+        $date = sprintf('%04d-%02d-20', self::YEAR, self::MONTH);
+        $this->sale('2099069901', $customer, '1', false, $date, $date, [[10000, 2100, 21]]);
+        $this->purchase('P-2099-991', $vendor, '40', false, 'invoice', $date, $date, [[5000, 1050, 21]]);
+
+        $pdo = $this->db->pdo();
+        $original = (string) $pdo->query("SELECT accounting_mode FROM supplier WHERE id = {$this->supplierId}")->fetchColumn();
+        try {
+            $pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
+            $taxEvidence = [
+                'book' => $this->book->build($this->supplierId, self::YEAR, self::MONTH),
+                'dph' => $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+                'kh' => $this->kh->build($this->supplierId, self::YEAR, self::MONTH),
+            ];
+
+            $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+            $doubleEntry = [
+                'book' => $this->book->build($this->supplierId, self::YEAR, self::MONTH),
+                'dph' => $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+                'kh' => $this->kh->build($this->supplierId, self::YEAR, self::MONTH),
+            ];
+
+            self::assertSame($taxEvidence, $doubleEntry);
+        } finally {
+            $pdo->prepare('UPDATE supplier SET accounting_mode = ? WHERE id = ?')->execute([$original, $this->supplierId]);
+        }
+    }
+
     private function client(string $name, int $countryId, ?string $dic, bool $customer = false, bool $vendor = false): int
     {
         $stmt = $this->db->pdo()->prepare(
@@ -1768,7 +1963,7 @@ final class KhDphTaxScenariosTest extends TestCase
     /**
      * @param list<array{0:float,1:float,2:float}> $items [base, vat, vat_rate_snapshot]
      */
-    private function purchase(string $number, int $vendorId, ?string $code, bool $rc, string $kind, string $issue, ?string $tax, array $items, bool $isFixedAsset = false, string $vatDeduction = 'full', float $vatDeductionPercent = 100.0, ?int $currencyId = null, ?float $exchangeRate = null): void
+    private function purchase(string $number, int $vendorId, ?string $code, bool $rc, string $kind, string $issue, ?string $tax, array $items, bool $isFixedAsset = false, string $vatDeduction = 'full', float $vatDeductionPercent = 100.0, ?int $currencyId = null, ?float $exchangeRate = null): int
     {
         [$base, $vat, $with] = $this->sumItems($items);
         $stmt = $this->db->pdo()->prepare(
@@ -1786,6 +1981,7 @@ final class KhDphTaxScenariosTest extends TestCase
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->purchaseIds[] = $id;
         $this->insertItems('purchase_invoice_items', 'purchase_invoice_id', $id, $items);
+        return $id;
     }
 
     /**

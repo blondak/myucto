@@ -155,6 +155,20 @@ final class VatClassificationMapper
     }
 
     /**
+     * Agregace řádků DPHDP3 za CELÝ kalendářní rok (1.1.–31.12.) — podklad pro vypořádací
+     * koeficient § 76 odst. 7 (čitatel/jmenovatel z ř. 1,2,20-26,31,50 za celé vypořádávané
+     * období) a pro roční krácený odpočet (Σ ř. 40k/41k/42k). Finalizované doklady bez draftů.
+     *
+     * @return array<string, array{base:float, vat:float, count:int, label:string}>
+     */
+    public function aggregateForYear(int $supplierId, int $year): array
+    {
+        $start = sprintf('%04d-01-01', $year);
+        $end   = sprintf('%04d-12-31', $year);
+        return $this->projectDphLines($this->ledger->rows($supplierId, $start, $end, includeDrafts: false));
+    }
+
+    /**
      * Projekce kanonických řádků (VatLedgerService) na řádky DPHDP3. Sdílená logika
      * (klasifikace, CZK, RC samovyměření, rate bucket) žije ve službě; tady jen agregace
      * po dphdp3_line + mirror ř.43 (secondary) + ř.47 (majetek).
@@ -183,11 +197,16 @@ final class VatClassificationMapper
             // zrcadlový odpočet POTLAČÍ: výstupní samovyměření (primární ř.) zůstává, odpočet ne.
             $secondary = $r['dphdp3_line_secondary'];
             if ($secondary !== null && $secondary !== '' && $secondary !== $primary && empty($r['vat_deduction_none'])) {
+                // Ř.51 je pouze doplňující základ plnění vyloučeného z koeficientu §76;
+                // daň zůstává výhradně na primárním ř.1/2.
+                $secondaryVat = in_array($secondary, ['51', '51b'], true)
+                    ? 0.0
+                    : (float) ($r['deduction_vat_czk'] ?? $vatCzk);
                 $this->addLine(
                     $byLine,
                     $secondary,
                     (float) ($r['deduction_base_czk'] ?? $baseCzk),
-                    (float) ($r['deduction_vat_czk'] ?? $vatCzk),
+                    $secondaryVat,
                     $invId,
                     $invoiceLineSeen,
                     $label,

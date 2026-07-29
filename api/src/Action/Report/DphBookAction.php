@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Report;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\DphBookPdfRenderer;
@@ -35,7 +37,7 @@ final class DphBookAction
     public function preview(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -54,7 +56,7 @@ final class DphBookAction
     public function download(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);

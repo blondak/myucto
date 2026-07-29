@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Admin;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mail\LogAnalysis\SmtpLogAnalyzer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -44,7 +45,6 @@ final class InvoiceSmtpLogAction
 
     private function isAdmin(Request $request): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return ($user['role'] ?? '') === 'admin';
+        return RequestAuthorization::isSuperadmin($request);
     }
 }

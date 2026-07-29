@@ -1,0 +1,76 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Architecture;
+
+use MyInvoice\Bootstrap;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Explicitní DI binding v Bootstrapu nesmí zapomenout na konstruktorový parametr.
+ *
+ * PHP-DI **nevyplní optional class-typed parametr** (ten s `= null`) — použije default.
+ * Proto mají některé služby v Bootstrapu ruční `new X(...)` binding. Jenže když se pak
+ * ke konstruktoru přidá další závislost a binding se neupraví, zůstane null a feature
+ * TIŠE zmizí: žádná chyba, jen prázdná karta na dashboardu.
+ *
+ * Přesně to se stalo s CrmAggregationService — přibyla JournalIntegrityService, binding
+ * zůstal dvouargumentový a celá karta „Zkontroluj integritu deníku" se přestala zobrazovat.
+ * Odhalila to až kontrola v prohlížeči, ne testy.
+ *
+ * Guard je záměrně úzký: kontroluje jen služby s ručním bindingem, kde je null-závislost
+ * tichým vypnutím funkce. Nový záznam v seznamu = nový ruční binding, který má tuhle past.
+ */
+#[Group('integration')]
+final class ExplicitDiBindingArityTest extends TestCase
+{
+    /**
+     * Služby s ručním bindingem v Bootstrap::buildApp(), u kterých musí být VŠECHNY
+     * konstruktorové závislosti skutečně vyplněné.
+     *
+     * @var list<class-string>
+     */
+    private const MUST_BE_FULLY_WIRED = [
+        \MyInvoice\Service\Crm\CrmAggregationService::class,
+    ];
+
+    public function testExplicitlyBoundServicesGetAllConstructorDependencies(): void
+    {
+        if (!is_file(dirname(__DIR__, 3) . '/cfg.php')) {
+            self::markTestSkipped('cfg.php neexistuje — test vyžaduje DI kontejner.');
+        }
+        try {
+            $container = Bootstrap::buildApp()->getContainer();
+        } catch (\Throwable $e) {
+            self::markTestSkipped('DI nedostupné: ' . $e->getMessage());
+        }
+
+        $missing = [];
+        foreach (self::MUST_BE_FULLY_WIRED as $class) {
+            $instance = $container->get($class);
+            $ctor = (new \ReflectionClass($class))->getConstructor();
+            self::assertNotNull($ctor, $class . ' nemá konstruktor — patří ještě do seznamu?');
+
+            foreach ($ctor->getParameters() as $param) {
+                $type = $param->getType();
+                // Zajímají jen class-typed závislosti (skalární configy řešit nemá smysl).
+                if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
+                    continue;
+                }
+                $prop = new \ReflectionProperty($class, $param->getName());
+                if ($prop->getValue($instance) === null) {
+                    $missing[] = sprintf('%s::$%s (%s)', $class, $param->getName(), $type->getName());
+                }
+            }
+        }
+
+        self::assertSame([], $missing, sprintf(
+            "Ruční DI binding v Bootstrapu nevyplnil závislost:\n  %s\n\n"
+                . "PHP-DI optional class-param sám nedoplní — přidej argument do `new …(…)`\n"
+                . "v Bootstrap::buildApp(). Jinak feature tiše zmizí bez jediné chyby.",
+            implode("\n  ", $missing),
+        ));
+    }
+}

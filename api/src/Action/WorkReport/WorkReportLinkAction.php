@@ -26,7 +26,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST   /api/clients|projects/{id}/work-report-link/send        — odeslat odkaz e-mailem
  *   DELETE /api/clients|projects/{id}/work-report-link             — zneplatnit odkaz
  *
- * RBAC řeší RoleMiddleware dle cesty (clients/projects): GET i pro readonly,
+ * RBAC řeší PermissionMiddleware dle cesty (clients/projects): GET i pro readonly,
  * POST/DELETE jen accountant+admin.
  */
 final class WorkReportLinkAction

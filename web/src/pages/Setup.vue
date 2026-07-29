@@ -6,7 +6,7 @@ import { useI18n } from 'vue-i18n'
 const { t, locale } = useI18n()
 import AppShell from '@/components/layout/AppShell.vue'
 import { useAuthStore } from '@/stores/auth'
-import { authApi, type SetupPayload } from '@/api/auth'
+import { authApi, type SetupPayload, type SetupSampleResult } from '@/api/auth'
 import { bankNameByCode, isKnownBankName } from '@/utils/czBankCodes'
 
 const router = useRouter()
@@ -22,10 +22,7 @@ const requireMfa = ref(false)
 const allowedMfaMethods = ref<Array<'passkey' | 'totp'>>(['passkey', 'totp'])
 const skipSupplier = ref(false)
 const generateSample = ref(false)
-const sampleResult = ref<{
-  clients: number; projects: number; invoices: number; credit_notes: number
-  cars: number; trips: number; fuelings: number
-} | null>(null)
+const sampleResult = ref<SetupSampleResult | null>(null)
 const sampleError = ref('')
 const supplier = ref({
   company_name: '',
@@ -523,7 +520,13 @@ async function submit() {
           </div>
 
           <div v-if="sampleResult" class="mb-6 inline-block bg-success-50 border border-success-500/40 rounded-md px-4 py-2 text-sm text-success-600 text-left">
-            {{ t('setup.sample_done', sampleResult) }}
+            <div>{{ t('setup.sample_done', sampleResult) }}</div>
+            <div v-if="sampleResult.accounting_enabled" class="mt-1">
+              {{ t('setup.sample_done_accounting', sampleResult) }}
+            </div>
+            <div v-for="warning in sampleResult.warnings" :key="warning" class="mt-1 text-warning-600">
+              {{ warning }}
+            </div>
           </div>
           <div v-else-if="sampleError" class="mb-6 inline-block bg-warning-50 border border-warning-500/40 rounded-md px-4 py-2 text-sm text-warning-600 text-left">
             {{ sampleError }}

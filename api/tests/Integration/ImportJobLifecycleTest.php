@@ -62,14 +62,22 @@ final class ImportJobLifecycleTest extends TestCase
         $this->db->close(); // uvolni MySQL connection (jinak kumulace přes běh → max_connections)
     }
 
-    /** Vytvoří job a vynutí mu status + updated_at (explicitní hodnota přebije ON UPDATE). */
-    private function makeJob(string $status, string $updatedAt): int
+    /**
+     * Vytvoří job a vynutí mu status + stáří (explicitní updated_at přebije ON UPDATE).
+     *
+     * Stáří se počítá SQL výrazem `NOW() - INTERVAL`, ne v PHP: `reapStale()` porovnává
+     * `updated_at` proti databázovému NOW(), kdežto PHP má timezone natvrdo na
+     * `app.timezone` (Europe/Prague). Když se obojí rozejde — server v UTC, aplikace
+     * v Praze, což je v CI běžný stav — vyjde „před 30 minutami" databázi jako čas
+     * v BUDOUCNOSTI a žádný job se nesklidí. Jedny hodiny pro zápis i pro porovnání.
+     */
+    private function makeJob(string $status, int $ageMinutes): int
     {
         $id = $this->repo->create($this->supplierId, 'fakturoid', ['dry_run' => true], $this->userId);
         $this->created[] = $id;
         $this->db->pdo()->prepare(
-            'UPDATE import_jobs SET status = ?, updated_at = ? WHERE id = ?'
-        )->execute([$status, $updatedAt, $id]);
+            'UPDATE import_jobs SET status = ?, updated_at = (NOW() - INTERVAL ? MINUTE) WHERE id = ?'
+        )->execute([$status, $ageMinutes, $id]);
         return $id;
     }
 
@@ -80,18 +88,13 @@ final class ImportJobLifecycleTest extends TestCase
         return (string) $stmt->fetchColumn();
     }
 
-    private function ago(int $minutes): string
-    {
-        return (new \DateTimeImmutable("-{$minutes} minutes"))->format('Y-m-d H:i:s');
-    }
-
     public function testReapStaleFailsDeadJobsButKeepsFresh(): void
     {
-        $staleQueued  = $this->makeJob('queued',  $this->ago(30));
-        $staleRunning = $this->makeJob('running', $this->ago(30));
-        $freshQueued  = $this->makeJob('queued',  $this->ago(1));
-        $freshRunning = $this->makeJob('running', $this->ago(1));
-        $done         = $this->makeJob('completed', $this->ago(30));
+        $staleQueued  = $this->makeJob('queued',  30);
+        $staleRunning = $this->makeJob('running', 30);
+        $freshQueued  = $this->makeJob('queued',  1);
+        $freshRunning = $this->makeJob('running', 1);
+        $done         = $this->makeJob('completed', 30);
 
         $reaped = $this->repo->reapStale($this->supplierId, 'fakturoid');
 
@@ -105,7 +108,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testRequestCancelImmediatelyCancelsQueued(): void
     {
-        $id = $this->makeJob('queued', $this->ago(0));
+        $id = $this->makeJob('queued', 0);
         $ok = $this->repo->requestCancel($id, $this->supplierId);
         $this->assertTrue($ok);
         $this->assertSame('cancelled', $this->statusOf($id), 'Queued se ruší okamžitě (žádný živý worker)');
@@ -113,7 +116,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testRequestCancelImmediatelyCancelsStaleRunning(): void
     {
-        $id = $this->makeJob('running', $this->ago(30));
+        $id = $this->makeJob('running', 30);
         $ok = $this->repo->requestCancel($id, $this->supplierId);
         $this->assertTrue($ok);
         $this->assertSame('cancelled', $this->statusOf($id), 'Stale running (mrtvý worker) se ruší okamžitě');
@@ -121,7 +124,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testRequestCancelGracefulOnFreshRunning(): void
     {
-        $id = $this->makeJob('running', $this->ago(1));
+        $id = $this->makeJob('running', 1);
         $ok = $this->repo->requestCancel($id, $this->supplierId);
         $this->assertTrue($ok);
         // Aktivní worker — jen flag, status zůstává running (worker dočte a sám ukončí).
@@ -133,7 +136,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testRequestCancelRejectsForeignTenant(): void
     {
-        $id = $this->makeJob('queued', $this->ago(0));
+        $id = $this->makeJob('queued', 0);
         $ok = $this->repo->requestCancel($id, $this->supplierId + 999);
         $this->assertFalse($ok, 'Cizí tenant nesmí zrušit');
         $this->assertSame('queued', $this->statusOf($id));
@@ -141,7 +144,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testDeleteRemovesJob(): void
     {
-        $id = $this->makeJob('completed', $this->ago(5));
+        $id = $this->makeJob('completed', 5);
         $this->assertTrue($this->repo->delete($id, $this->supplierId));
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM import_jobs WHERE id = ?');
         $stmt->execute([$id]);
@@ -150,7 +153,7 @@ final class ImportJobLifecycleTest extends TestCase
 
     public function testDeleteRejectsForeignTenant(): void
     {
-        $id = $this->makeJob('completed', $this->ago(5));
+        $id = $this->makeJob('completed', 5);
         $this->assertFalse($this->repo->delete($id, $this->supplierId + 999), 'Cizí tenant nesmí smazat');
         $this->assertSame('completed', $this->statusOf($id), 'Job zůstal');
     }

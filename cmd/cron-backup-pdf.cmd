@@ -6,7 +6,7 @@ REM  Frekvence: 1x denne, doporuceno 02:30 (PO cron-backup, PRED cron-cleanup)
 REM  Retention: 30 dennich + 12 mesicnich (1. v mesici se zachova deze)
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice BackupPDF" ^
+REM    schtasks /create /tn "MyUcto BackupPDF" ^
 REM      /tr "%~f0" /sc daily /st 02:30 /ru SYSTEM
 REM ============================================================================
 setlocal

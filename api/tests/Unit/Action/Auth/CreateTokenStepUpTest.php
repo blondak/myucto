@@ -8,11 +8,13 @@ use MyInvoice\Action\Auth\Tokens\CreateTokenAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaProtectedOperationService;
+use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
@@ -56,6 +58,8 @@ final class CreateTokenStepUpTest extends TestCase
             $this->createMock(SecretEncryption::class),
             $this->createMock(ActivityLogger::class),
             $this->createMock(IpMatcher::class),
+            $this->createMock(UserSupplierRepository::class),
+            $this->createMock(PasswordHasher::class),
             $credentials,
             $policy,
             $this->createMock(BruteForceGuard::class),

@@ -186,6 +186,11 @@ export interface RecurringListResponse {
   meta: RecurringListMeta
 }
 
+export interface RecurringInvoicesResponse {
+  data: GeneratedInvoiceRow[]
+  meta: { total: number; page: number; per_page: number; pages: number }
+}
+
 export const recurringApi = {
   list: (filters: { client_id?: number; status?: RecurringStatus; page?: number; per_page?: number; sort?: RecurringSort } = {}) => {
     const params: Record<string, string | number> = {}
@@ -197,8 +202,8 @@ export const recurringApi = {
     return api.get<RecurringListResponse>('/recurring', { params }).then(r => r.data)
   },
   get:    (id: number) => api.get<RecurringTemplate>(`/recurring/${id}`).then(r => r.data),
-  invoices: (id: number) =>
-    api.get<{ data: GeneratedInvoiceRow[] }>(`/recurring/${id}/invoices`).then(r => r.data.data),
+  invoices: (id: number, params: { page?: number; per_page?: number } = {}) =>
+    api.get<RecurringInvoicesResponse>(`/recurring/${id}/invoices`, { params }).then(r => r.data),
   create: (payload: RecurringTemplatePayload) =>
     api.post<RecurringTemplate>('/recurring', payload).then(r => r.data),
   update: (id: number, payload: RecurringTemplatePayload) =>

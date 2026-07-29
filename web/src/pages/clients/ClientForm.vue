@@ -3,10 +3,12 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clientsApi, TAX_NUMBER_LABELS, type ClientPayload, type Client, type ClientEmailContact, type EmailContactUsageCode, type EmailContactRecipient } from '@/api/clients'
+import { PAYMENT_METHODS } from '@/api/invoices'
 import { codebooksApi, type Country, type Currency } from '@/api/codebooks'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { useToast } from '@/composables/useToast'
+import { useDemoMode } from '@/composables/useDemoMode'
 import { useSupplierStore } from '@/stores/supplier'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
 
@@ -25,8 +27,12 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
 const supplierStore = useSupplierStore()
 const brandingProfiles = ref<BrandingProfile[]>([])
+
+/** Volby předvolené formy úhrady (migrace 1128); null = „nemá názor". */
+const paymentMethodOptions = PAYMENT_METHODS
 
 const route = useRoute()
 const router = useRouter()
@@ -100,6 +106,13 @@ const form = ref<ClientPayload>({
   language: 'cs',
   currency_default_id: 0,
   reverse_charge: false,
+  // § 36a ZDPH / § 23 odst. 7 ZDP — spojení osob je právní vztah, z faktur ani z DIČ
+  // ho odvodit nelze; označí ho uživatel.
+  related_party: false,
+  // Bez zvoleného typu by šlo do API prázdné pole; „jinak spojená" je nejobecnější
+  // varianta a uživatel ji v selectu upřesní.
+  related_party_type: 'otherwise' as 'capital' | 'otherwise' | 'close_person' | 'employment',
+  related_party_note: '',
   is_vat_payer: true,
   // Default: customer. Override z ?role=vendor query (klik 'Nový dodavatel' v list).
   is_customer: route.query.role !== 'vendor',
@@ -108,6 +121,7 @@ const form = ref<ClientPayload>({
   auto_send_reminders: true,
   payment_due_default: null,
   payment_due_unit: null,
+  default_payment_method: null,
   hourly_rate: 0,
   note: null,
   default_expense_category_id: null,
@@ -274,6 +288,9 @@ function sanitize(c: Client): Partial<ClientPayload> {
     language: c.language,
     currency_default_id: c.currency_default_id,
     reverse_charge: c.reverse_charge,
+    related_party: c.related_party === true,
+    related_party_type: c.related_party_type ?? 'otherwise',
+    related_party_note: c.related_party_note ?? '',
     is_vat_payer: c.is_vat_payer ?? true,
     is_customer: c.is_customer !== false,
     is_vendor:   c.is_vendor   === true,
@@ -281,6 +298,7 @@ function sanitize(c: Client): Partial<ClientPayload> {
     auto_send_reminders: c.auto_send_reminders ?? true,
     payment_due_default: c.payment_due_default ?? null,
     payment_due_unit: c.payment_due_unit ?? null,
+    default_payment_method: c.default_payment_method ?? null,
     hourly_rate: c.hourly_rate ?? 0,
     note: c.note ?? null,
     default_expense_category_id: c.default_expense_category_id ?? null,
@@ -378,6 +396,7 @@ async function checkVies() {
 }
 
 async function submit() {
+  if (blockDemoMutation()) return
   submitting.value = true
   error.value = ''
   errors.value = {}
@@ -405,10 +424,17 @@ async function submit() {
       if (revBackfilled > 0) {
         toast.success(t('client.default_revenue_category_backfilled', { count: revBackfilled }))
       }
+      // Non-blocking varování ze serveru (IČO mod 11 / DIČ formát — audit 2026-07).
+      for (const code of updated._warnings ?? []) {
+        toast.warning(t(`client.warning.${code}`))
+      }
       if (props.embedded) { emit('created', updated); return }
       router.push(`/clients/${clientId.value}`)
     } else {
       const created = await clientsApi.create(payload)
+      for (const code of created._warnings ?? []) {
+        toast.warning(t(`client.warning.${code}`))
+      }
       if (props.embedded) { emit('created', created); return }
       router.push(`/clients/${created.id}`)
     }
@@ -690,6 +716,19 @@ async function submit() {
             </div>
             <p v-if="clientDuePreset === 'month'" class="text-xs text-neutral-500 mt-1">{{ t('client.payment_due_month_hint') }}</p>
           </div>
+
+          <!-- Předvolená forma úhrady (migrace 1128). Prázdné = „nemá názor" a doklad si
+               nechá bankovní převod. Hlavní use case: dodavatel, kterému se platí inkasem
+               (ČEZ, SIPO…) — nová faktura se pak sama vyřadí z platebních příkazů. -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_method.vendor_default_label') }}</label>
+            <select v-model="form.default_payment_method"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+              <option :value="null">{{ t('payment_method.vendor_default_none') }}</option>
+              <option v-for="m in paymentMethodOptions" :key="m" :value="m">{{ t(`payment_method.${m}`) }}</option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('payment_method.vendor_default_hint') }}</p>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -714,6 +753,29 @@ async function submit() {
             <input v-model="form.reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             <span>{{ t('client.reverse_charge') }}</span>
           </label>
+
+          <!-- § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba. Typ vztahu se eviduje zvlášť,
+               protože § 23/7 rozlišuje kapitálově spojené osoby (písm. a) od jinak
+               spojených (písm. b) a doložení se u nich vede jinak. -->
+          <div>
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="form.related_party" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+              <span>{{ t('client.related_party') }}</span>
+            </label>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('client.related_party_hint') }}</p>
+            <div v-if="form.related_party" class="ml-6 mt-2 space-y-2">
+              <select v-model="form.related_party_type"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                <option value="capital">{{ t('client.related_party_types.capital') }}</option>
+                <option value="otherwise">{{ t('client.related_party_types.otherwise') }}</option>
+                <option value="close_person">{{ t('client.related_party_types.close_person') }}</option>
+                <option value="employment">{{ t('client.related_party_types.employment') }}</option>
+              </select>
+              <input v-model="form.related_party_note" type="text"
+                     :placeholder="t('client.related_party_note_placeholder')"
+                     class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            </div>
+          </div>
           <div>
             <label class="flex items-center gap-2 text-sm">
               <input v-model="form.auto_send_reminders" type="checkbox" class="rounded border-neutral-300 text-primary-600" />

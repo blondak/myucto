@@ -11,6 +11,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 
 /**
@@ -54,6 +56,7 @@ final class RecurringInvoiceGenerator
         private readonly InvoicePdfRenderer $pdfRenderer,
         private readonly StatsRecomputer $stats,
         private readonly ActivityLogger $logger,
+        private readonly StockIssueService $stockIssue,
         private readonly RecurringPriceListService $priceList,
     ) {}
 
@@ -93,8 +96,12 @@ final class RecurringInvoiceGenerator
             $sentTo = [];
             $varsymbol = null;
         } else {
-            ['issued' => $issued, 'sent_to' => $sentTo, 'varsymbol' => $varsymbol] =
-                $this->performIssue($invoiceId, $template, $userId, $ip, $ua);
+            try {
+                ['issued' => $issued, 'sent_to' => $sentTo, 'varsymbol' => $varsymbol] =
+                    $this->performIssue($invoiceId, $template, $userId, $ip, $ua);
+            } catch (StockException $e) {
+                $this->failIssueOnStock($e, $templateId, $template, $issueDate);
+            }
         }
 
         ['next' => $newNext, 'status' => $newStatus] =
@@ -216,8 +223,12 @@ final class RecurringInvoiceGenerator
             $this->calc->recompute($invoiceId);
             $this->rateApplier->applyToInvoice($invoiceId);
 
-            ['issued' => $issued, 'sent_to' => $sentTo, 'varsymbol' => $varsymbol] =
-                $this->performIssue($invoiceId, $template, $userId, $ip, $ua);
+            try {
+                ['issued' => $issued, 'sent_to' => $sentTo, 'varsymbol' => $varsymbol] =
+                    $this->performIssue($invoiceId, $template, $userId, $ip, $ua);
+            } catch (StockException $e) {
+                $this->failIssueOnStock($e, $templateId, $template, $issueDate);
+            }
         }
 
         ['next' => $newNext, 'status' => $newStatus] =
@@ -295,6 +306,40 @@ final class RecurringInvoiceGenerator
         $this->templates->advanceSchedule($templateId, $newNext, $issueDate, $newStatus);
 
         return ['next' => $newNext, 'status' => $newStatus];
+    }
+
+    /**
+     * A15: sklad zablokoval vystavení (typicky insufficient_stock) — faktura
+     * zůstává draft, rozvrh se PŘESTO posune (další běh cronu nesmí založit
+     * duplicitní koncept téhož období), chyba se zapíše na šablonu (banner
+     * last_error) a propaguje volajícímu (cron/RunNow ji zaloguje).
+     *
+     * @param array<string,mixed> $template
+     */
+    private function failIssueOnStock(StockException $e, int $templateId, array $template, string $issueDate): never
+    {
+        $this->advanceTemplateSchedule($templateId, $template, $issueDate);
+        $message = 'Vystavení faktury zablokoval sklad: ' . $e->getMessage() . self::shortageSuffix($e);
+        $this->templates->setLastError($templateId, $message);
+        throw new \DomainException($message, 0, $e);
+    }
+
+    /** Čitelný výčet chybějících položek z insufficient_stock (A3 payload). */
+    private static function shortageSuffix(StockException $e): string
+    {
+        if ($e->errorCode !== 'insufficient_stock' || $e->details === []) {
+            return '';
+        }
+        $parts = [];
+        foreach ($e->details as $d) {
+            if (!is_array($d)) {
+                continue;
+            }
+            $label = (string) ($d['sku'] ?? $d['name'] ?? $d['stock_item_id'] ?? '?');
+            $parts[] = $label . ' (požadováno ' . (string) ($d['requested'] ?? '?')
+                . ', dostupné ' . (string) ($d['available'] ?? '?') . ')';
+        }
+        return $parts === [] ? '' : ' — chybí: ' . implode(', ', $parts);
     }
 
     /**
@@ -434,6 +479,10 @@ final class RecurringInvoiceGenerator
                     'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
                     'vat_rate_id'            => (int) $item['vat_rate_id'],
                     'order_index'            => (int) $item['order_index'],
+                    // Vazba na skladovou kartu (A15) — recurring faktura přenáší
+                    // stock_item_id/warehouse_id ze šablony, aby auto-výdejka fungovala.
+                    'stock_item_id'          => $item['stock_item_id'] ?? null,
+                    'warehouse_id'           => $item['warehouse_id'] ?? null,
                 ];
             }
             $this->invoices->replaceItems($newId, $items);
@@ -508,21 +557,48 @@ final class RecurringInvoiceGenerator
             isset($invoice['branding_profile_id']) ? (int) $invoice['branding_profile_id'] : null,
         );
 
-        $this->db->pdo()->prepare(
-            'UPDATE invoices SET
+        $issueSql = 'UPDATE invoices SET
                 varsymbol         = ?,
                 client_snapshot   = ?,
                 supplier_snapshot = ?,
                 bank_snapshot     = ?,
                 status            = "issued"
-             WHERE id = ? AND status = "draft"'
-        )->execute([
+             WHERE id = ? AND status = "draft"';
+        $issueParams = [
             $varsymbol,
             json_encode($snaps['client'], JSON_UNESCAPED_UNICODE),
             json_encode($snaps['supplier'], JSON_UNESCAPED_UNICODE),
             $snaps['bank'] !== null ? json_encode($snaps['bank'], JSON_UNESCAPED_UNICODE) : null,
             $invoiceId,
-        ]);
+        ];
+
+        if ($this->stockIssue->isStockEnabled($supplierId)) {
+            // Sklad zapnutý (Epic SKLAD §5.2): flip statusu + auto-výdejka = JEDNA
+            // transakce v READ COMMITTED (FOR UPDATE zámky StockDocumentService
+            // nesmí číst stale RR snapshot; SET bez SESSION platí pro příští tx).
+            $pdo = $this->db->pdo();
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare($issueSql)->execute($issueParams);
+                $this->stockIssue->issueForInvoice(
+                    $supplierId,
+                    array_merge($invoice, ['varsymbol' => $varsymbol]),
+                    $userId,
+                );
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                // Typicky StockException insufficient_stock — rollback nechá fakturu
+                // v draftu; performIssue → failIssueOnStock zapíše last_error (A15).
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        } else {
+            // Sklad vypnutý — PŮVODNÍ cesta beze změny (žádná transakce).
+            $this->db->pdo()->prepare($issueSql)->execute($issueParams);
+        }
 
         $this->stats->recomputeForInvoiceId($invoiceId);
         $this->pdfRenderer->invalidate($invoiceId, 'invalidate_recurring_issue');

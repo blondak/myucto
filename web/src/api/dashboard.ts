@@ -201,6 +201,14 @@ export interface DashboardSummary {
   active_recurring_count: number
   active_clients_count: number
   pending_approvals?: { requested: number; overdue: number }
+  /** Vyžádání chybějících dokladů od klienta (Fáze F, audit 2026-07) — requested+uploaded. */
+  document_requests_open?: { open: number; overdue: number }
+  /** Počet bankovních plateb čekajících na zaúčtování (Epic AUTOMATIZACE) — jen double_entry. */
+  bank_posting_pending?: number
+  /** Počet položek automaticky zaúčtovaných dnes. */
+  automation_auto_today?: number
+  /** Doklady čekající na řízené doúčtování při nedokončené aktivaci PÚ. */
+  accounting_backfill_pending?: number
   flat_tax_threshold?: {
     applicable: boolean
     band: 'band1' | 'band2' | 'band3' | null
@@ -208,6 +216,18 @@ export interface DashboardSummary {
     limit_czk: number | null
     percent: number | null
     status: 'ok' | 'notice' | 'warning' | 'danger' | null
+    year: number
+  }
+  /**
+   * Registrační limity DPH (§ 4a ZDPH) pro daný rok. Jsou ROČNÍKOVÉ — do 2024 platil
+   * jediný limit 2 000 000 Kč, od 2025 přibyl druhý (2 536 500 Kč) s okamžitým vznikem
+   * plátcovství. Frontend je nesmí mít natvrdo, jinak nad staršími daty ukazuje práh,
+   * který tehdy neplatil.
+   */
+  vat_registration_limits?: {
+    low: number
+    high: number
+    near: number
     year: number
   }
   today: string

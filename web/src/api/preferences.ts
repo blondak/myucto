@@ -1,0 +1,51 @@
+import { api } from './client'
+
+export interface SavedFilter {
+  id: number
+  page_key: string                       // snake_case, 1:1 s BE whitelistem (§3.4)
+  name: string
+  is_default: boolean
+  sort_order: number
+  payload: Record<string, string>        // plochý snapshot URL query z buildQuery()
+  updated_at: string
+}
+
+export interface SortPref { key: string; dir: 'asc' | 'desc' }
+
+export interface TablePrefs {
+  hidden?: string[] | null               // SKRYTÉ sloupce (R9); absence/null = default stránky
+  shown?: string[] | null                // explicitně ODKRYTÉ doplňkové (defaultHidden) sloupce
+  sort?: SortPref | null
+  density?: 'comfortable' | 'compact'
+}
+
+export interface NavOrderPrefs {
+  sections?: string[]                     // pořadí bloků (klíče sekcí)
+  items?: Record<string, string[]>        // pořadí položek uvnitř bloku (sectionKey → item.to[])
+  hidden?: string[]                       // položky skryté uživatelem
+}
+
+export const preferencesApi = {
+  // filtry: jeden request na session — bez page_key vrací vše pro usera + aktuální firmu
+  listFilters:  () => api.get<SavedFilter[]>('/user/filters').then(r => r.data),
+  createFilter: (p: { page_key: string; name: string; payload: Record<string, string>; is_default?: boolean }) =>
+                  api.post<SavedFilter>('/user/filters', p).then(r => r.data),
+  updateFilter: (id: number, p: Partial<Pick<SavedFilter, 'name' | 'payload' | 'sort_order' | 'is_default'>>) =>
+                  api.put<SavedFilter>(`/user/filters/${id}`, p).then(r => r.data),
+  deleteFilter: (id: number) => api.delete<{ deleted: boolean }>(`/user/filters/${id}`).then(r => r.data),
+
+  // preference: mapa pref_key → payload
+  getPreferences: () => api.get<Record<string, TablePrefs>>('/user/preferences').then(r => r.data),
+  getPreferenceKey: <T>(key: string) =>
+                    api.get<Record<string, T>>('/user/preferences', { params: { keys: key } }).then(r => r.data[key]),
+  putPreference:  (pageKey: string, prefs: TablePrefs) =>
+                    api.put<TablePrefs>(`/user/preferences/table.${pageKey}`, prefs).then(r => r.data),
+  deletePreference: (pageKey: string) =>
+                    api.delete<{ deleted: boolean }>(`/user/preferences/table.${pageKey}`).then(r => r.data),
+
+  // varianty pro plný pref_key (např. nav.order) — bez skládání `table.` prefixu (§10)
+  putPreferenceKey: <T>(key: string, payload: T) =>
+                    api.put<T>(`/user/preferences/${key}`, payload).then(r => r.data),
+  deletePreferenceKey: (key: string) =>
+                    api.delete<{ deleted: boolean }>(`/user/preferences/${key}`).then(r => r.data),
+}

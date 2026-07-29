@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
@@ -32,6 +34,7 @@ final class CreatePaymentAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PaymentThanksMailer $paymentThanks,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -51,6 +54,13 @@ final class CreatePaymentAction
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
 
+        // Epic F6 (R8/M5): platba je fakt — na zamčeném dokladu povolena i klientovi,
+        // ale POVINNĚ auditována (u proforem spouští vznik daňového dokladu k platbě).
+        // Zámek se vyhodnotí teď, audit se zapíše až PO úspěšném provedení platby —
+        // jinak by selhání recordPayment nechalo falešný audit záznam.
+        $clientLock = RequestAuthorization::isClientType($request) ? $this->locks->forInvoice($invoice) : null;
+        $auditLockedPayment = $clientLock !== null && $clientLock->lockedForClient();
+
         try {
             $result = $this->payments->recordPayment($id, $amount, $paidOn, [
                 'variable_symbol' => $body['variable_symbol'] ?? null,
@@ -64,6 +74,17 @@ final class CreatePaymentAction
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        if ($auditLockedPayment) {
+            $this->logger->log(
+                'invoice.payment_on_locked_document',
+                isset($user['id']) ? (int) $user['id'] : null,
+                'invoice',
+                $id,
+                ['trigger' => 'payment', 'reasons' => $clientLock->reasons()],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
         $this->logger->log('invoice.payment_added', $user['id'] ?? null, 'invoice', $id, [
             'payment_id' => $result['payment_id'],
             'amount'     => round($amount, 2),

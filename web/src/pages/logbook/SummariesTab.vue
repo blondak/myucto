@@ -6,6 +6,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { logbookApi, type LogbookSummary } from '@/api/logbook'
 import MonthlyKmChart from '@/components/charts/MonthlyKmChart.vue'
 import CumulativeKmChart from '@/components/charts/CumulativeKmChart.vue'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -55,13 +56,13 @@ function liters(n: number): string { return n.toLocaleString('cs-CZ', { maximumF
       </select>
       <div class="flex gap-2">
         <button @click="downloadExport('xlsx')" :disabled="exporting || !data?.vehicles.length"
-          class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50 inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           XLSX
         </button>
         <button @click="downloadExport('pdf')" :disabled="exporting || !data?.vehicles.length"
-          class="cursor-pointer h-9 px-3 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           PDF
         </button>
       </div>

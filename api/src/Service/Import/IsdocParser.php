@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 /**
- * Parser ISDOC 6.0.x — extrahuje fakturu do normalizovaného array.
+ * Parser ISDOC 5.x a 6.x — extrahuje fakturu do normalizovaného array.
  *
  * Vrací {supplier_ic, invoices[]} (pro konzistenci se single-file API; ISDOC typicky 1 invoice / file).
  *

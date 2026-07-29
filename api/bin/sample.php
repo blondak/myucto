@@ -8,11 +8,14 @@ declare(strict_types=1);
  *   php api/bin/sample.php           # interaktivní potvrzení
  *   php api/bin/sample.php --yes     # bez ptaní
  *
- * Vytvoří (pro prvního supplier):
- *   - 5 klientů (firmy s IČO + DIČ)
- *   - 8 zakázek (1-3 na klienta)
- *   - 20 vystavených faktur za poslední 2 měsíce
- *   - 4 dobropisy (k 4 z těch 20 faktur)
+ * Vytvoří pro první firmu rozsáhlý syntetický dataset za posledních 12 měsíců:
+ *   - 24 klientů, 36 zakázek, 120 vydaných faktur a 12 dobropisů
+ *   - 12 dodavatelů a 120 přijatých faktur
+ *   - 1 pokladna a 7 příjmových/výdajových pokladních dokladů
+ *   - pro s.r.o./PO nebo plátce DPH také podvojné účetnictví, sklad,
+ *     120 skladových dokladů, 2 majetky, 6 bankovních výpisů / 120 pohybů
+ *     3 e-shopové kategorie, 3 výrobci, zaúčtovaný účetní deník a ukázkové
+ *     případy ve všech frontách sekce Automatizace
  *   - kniha jízd: 1 firemní auto, 15 jízd, 6 tankování
  *
  * Vyžaduje již proběhlý `setup.php` (admin user + supplier v DB).
@@ -44,7 +47,11 @@ $app = Bootstrap::buildApp();
 $container = $app->getContainer();
 $pdo = $container->get(Connection::class)->pdo();
 
-$adminId = (int) $pdo->query("SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+$adminId = (int) $pdo->query(
+    "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE r.system_key = 'superadmin' AND r.role_type = 'superadmin' AND r.is_active = 1
+        AND u.is_active = 1 ORDER BY u.id LIMIT 1"
+)->fetchColumn();
 $supplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
 if ($adminId === 0 || $supplierId === 0) {
     fwrite(STDERR, "[sample] Chybí předpoklady (admin: $adminId, supplier: $supplierId).\n");
@@ -71,13 +78,13 @@ if ((int) $guard->fetchColumn() > 0) {
 }
 
 echo "================================================\n";
-echo "  MyInvoice.cz — SAMPLE TEST DATA\n";
+echo "  MyÚčto.cz — ROZŠÍŘENÁ UKÁZKOVÁ DATA\n";
 echo "================================================\n";
 echo "  Supplier:   #$supplierId\n";
 echo "  Admin:      #$adminId\n";
-echo "  Vygeneruje: 5 klientů, 8 zakázek, 20 faktur, 4 dobropisy, 2 pravidelné fakturace,\n";
-echo "              kniha jízd (1 auto, 15 jízd, 6 tankování)\n";
-echo "  Období:     poslední 2 měsíce\n";
+echo "  Vygeneruje: 24 klientů, 12 dodavatelů, 120 vydaných + 120 přijatých faktur,\n";
+echo "              pokladnu se 7 doklady, sklad, e-shopové číselníky, majetek, banku a deník.\n";
+echo "  Období:     posledních 12 měsíců\n";
 echo "================================================\n\n";
 
 if (!$autoYes) {
@@ -94,6 +101,11 @@ try {
 }
 
 echo "================================================\n";
-printf("  HOTOVO. %d klientů, %d zakázek, %d faktur, %d dobropisů, %d pravidelných fakturací.\n", $r['clients'], $r['projects'], $r['invoices'], $r['credit_notes'], $r['recurring']);
+printf("  HOTOVO. %d klientů, %d dodavatelů, %d zakázek, %d vydaných a %d přijatých faktur.\n", $r['clients'], $r['vendors'], $r['projects'], $r['invoices'], $r['purchase_invoices']);
+printf("          %d dobropisů, %d skladových dokladů, %d majetky, %d výpisů / %d pohybů.\n", $r['credit_notes'], $r['stock_documents'], $r['assets'], $r['bank_statements'], $r['bank_transactions']);
+printf("          Pokladna: %d / %d dokladů. E-shop: %d kategorie / %d výrobci.\n", $r['cash_registers'], $r['cash_documents'], $r['eshop_categories'], $r['manufacturers']);
+printf("          Účetní deník: %d zaúčtovaných zápisů. Podvojné účetnictví: %s.\n", $r['journal_entries'], $r['accounting_enabled'] ? 'ano' : 'ne');
+printf("          Automatizace: %d samo / %d ke schválení / %d potřebuje mě / %d potvrzeno.\n", $r['automation_auto'], $r['automation_pending'], $r['automation_needs_input'], $r['automation_approved']);
 printf("          Kniha jízd: %d auto, %d jízd, %d tankování.\n", $r['cars'], $r['trips'], $r['fuelings']);
+foreach ($r['warnings'] as $warning) fwrite(STDERR, "[sample] Upozornění: {$warning}\n");
 echo "================================================\n";

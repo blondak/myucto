@@ -27,7 +27,7 @@ final class FoldersAction
         $q = $request->getQueryParams();
         if (array_key_exists('parent_id', $q)) {
             $parentId = $this->optInt($q['parent_id']);
-            return Json::ok($response, ['folders' => $this->folders->listChildren($sid, $parentId)]);
+            return Json::ok($response, ['folders' => $this->folders->listChildren($sid, $parentId, $this->viewer($request))]);
         }
         return Json::ok($response, ['folders' => $this->folders->listAll($sid)]);
     }
@@ -53,7 +53,7 @@ final class FoldersAction
         $id = $this->folders->create($sid, $parentId, $name, $this->userId($request));
         $this->logger->log('document.folder_created', $this->userId($request), 'document_folder', $id,
             ['name' => $name, 'parent_id' => $parentId], $this->clientIp($request), $request->getHeaderLine('User-Agent'), $sid);
-        return Json::ok($response, ['id' => $id, 'folders' => $this->folders->listChildren($sid, $parentId)]);
+        return Json::ok($response, ['id' => $id, 'folders' => $this->folders->listChildren($sid, $parentId, $this->viewer($request))]);
     }
 
     /** PATCH /api/document-folders/{id} {name} */
@@ -113,7 +113,7 @@ final class FoldersAction
         if ($this->folders->find($id, $sid) === null) {
             return Json::error($response, 'not_found', 'Složka nenalezena.', 404);
         }
-        $ids = $this->folders->softDeleteSubtree($id, $sid, $this->userId($request));
+        $ids = $this->folders->softDeleteSubtree($id, $sid, $this->userId($request), $this->viewer($request));
         $this->logger->log('document.folder_trashed', $this->userId($request), 'document_folder', $id,
             ['folder_count' => count($ids)], $this->clientIp($request), $request->getHeaderLine('User-Agent'), $sid);
         return Json::ok($response, ['ok' => true, 'trashed_folders' => count($ids)]);

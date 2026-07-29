@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Export;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -14,6 +15,7 @@ use MyInvoice\Service\Pdf\DphBookPdfRenderer;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Pdf\PurchaseInvoicePdfRenderer;
 use MyInvoice\Service\Report\DphBookBuilder;
+use MyInvoice\Service\Report\VatLedgerService;
 use ZipArchive;
 
 /**
@@ -399,10 +401,10 @@ final class MonthlyExportService
         // Vystavené dle DUZP (daň na výstupu vzniká k DUZP). Shodné s VatLedgerService.
         $sql = "SELECT id FROM invoices
                  WHERE supplier_id = ?
-                   AND COALESCE(tax_date, issue_date) >= ?
-                   AND COALESCE(tax_date, issue_date) <  ?
+                   AND effective_tax_date >= ?
+                   AND effective_tax_date <  ?
                    AND status IN ('issued','sent','reminded','paid')
-              ORDER BY COALESCE(tax_date, issue_date), id";
+              ORDER BY effective_tax_date, id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$sid, $period->dateFrom, $period->dateToExclusive]);
         return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
@@ -411,15 +413,18 @@ final class MonthlyExportService
     /** @return list<array<string,mixed>> */
     private function findPurchaseInvoices(int $sid, ExportPeriod $period): array
     {
-        // Přijaté dle pozdějšího z (DUZP, vystavení) — § 73/1/a ZDPH; zahraniční
-        // reverse charge dle DUZP (§ 25, § 73/1/b — issue #117). Shodné s VatLedgerService.
-        // CASE místo GREATEST kvůli přenositelnosti (SQLite GREATEST nemá).
-        $dateExpr = 'CASE'
-            . " WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'"
-            . ' THEN COALESCE(pi.tax_date, pi.issue_date)'
-            . ' WHEN pi.tax_date IS NULL THEN pi.issue_date'
-            . ' WHEN pi.issue_date IS NULL THEN pi.tax_date'
-            . ' WHEN pi.tax_date >= pi.issue_date THEN pi.tax_date ELSE pi.issue_date END';
+        // Rozhodné datum nároku na odpočet (§ 73) — SDÍLENÝ výraz s knihou DPH.
+        //
+        // Dřív tu byla vlastní kopie s komentářem „Shodné s VatLedgerService", která
+        // shodná NEBYLA: chyběla jí větev `received_at_source = 'manual'` (§ 73/1 —
+        // nárok nejdřív v měsíci doručení dokladu) i rozpoznání reverse charge podle
+        // klasifikačního kódu a položek. Na ostrých datech kvůli tomu 2 z 248 dokladů
+        // padly v exportu do jiného měsíce než v podaném přiznání, takže podklady pro
+        // účetní neseděly na to, co se odeslalo na FÚ.
+        //
+        // Výraz počítá s aliasy `pi` a `co` — ty tenhle dotaz má. CASE (ne GREATEST)
+        // zůstává kvůli přenositelnosti na SQLite.
+        $dateExpr = VatLedgerService::purchaseClaimDateExpr();
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.pdf_path,
                        c.company_name AS vendor_company_name
                   FROM purchase_invoices pi
@@ -438,39 +443,38 @@ final class MonthlyExportService
     /** @return list<array<string,mixed>> výpisy za období vč. blob obsahů */
     private function findStatements(int $sid, ExportPeriod $period): array
     {
+        // SEC-01: vlastnictví řeší výhradně BankStatementOwnershipResolver. Starý
+        // wildcard predikát tady vydával syrové GPC/PDF výpisy cizí firmy komukoliv
+        // přihlášenému (route /api/reports/monthly-export/start).
         $sql = "SELECT bs.id, bs.account_number, bs.file_name, bs.file_content, bs.pdf_name, bs.pdf_content
                   FROM bank_statements bs
                  WHERE bs.statement_date >= ?
                    AND bs.statement_date <  ?
-                   AND EXISTS (
-                       SELECT 1 FROM currencies cur
-                        WHERE cur.supplier_id = ?
-                          AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                            = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                          AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                   )
+                   AND " . BankStatementOwnershipResolver::sql() . "
                  ORDER BY bs.statement_date, bs.id";
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$period->dateFrom, $period->dateToExclusive, $sid]);
+        $stmt->execute(array_merge(
+            [$period->dateFrom, $period->dateToExclusive],
+            BankStatementOwnershipResolver::params($sid),
+        ));
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /** @return array{0:int,1:int} [bankPdfCount, bankGpcCount] bez načítání blobů */
     private function countStatementFiles(int $sid, ExportPeriod $period): array
     {
+        // SEC-01: shodný scope jako findStatements() — i pouhý počet prozrazuje
+        // existenci cizích výpisů.
         $sql = "SELECT SUM(bs.pdf_content IS NOT NULL) AS pdf_count, SUM(bs.file_content IS NOT NULL) AS gpc_count
                   FROM bank_statements bs
                  WHERE bs.statement_date >= ?
                    AND bs.statement_date <  ?
-                   AND EXISTS (
-                       SELECT 1 FROM currencies cur
-                        WHERE cur.supplier_id = ?
-                          AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                            = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                          AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                   )";
+                   AND " . BankStatementOwnershipResolver::sql();
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$period->dateFrom, $period->dateToExclusive, $sid]);
+        $stmt->execute(array_merge(
+            [$period->dateFrom, $period->dateToExclusive],
+            BankStatementOwnershipResolver::params($sid),
+        ));
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         return [(int) ($row['pdf_count'] ?? 0), (int) ($row['gpc_count'] ?? 0)];
     }
@@ -504,9 +508,7 @@ final class MonthlyExportService
      */
     private function asciiSlug(string $s): string
     {
-        $s = ExportFilename::transliterate($s);
-        $s = preg_replace('/[^A-Za-z0-9]+/', '-', $s) ?? '';
-        return mb_substr(trim($s, '-'), 0, 60);
+        return \MyInvoice\Support\Slugifier::slug($s, '-', 'keep', 60);
     }
 
     private function statementFilename(string $name, string $account, int $id, string $ext): string
@@ -543,7 +545,7 @@ final class MonthlyExportService
             'dph_book' => 'Kniha DPH (PDF)',
         ];
         $lines = [
-            'Hromadný export MyInvoice.cz', '============================',
+            'Hromadný export MyÚčto.cz', '=========================',
         ];
         if (trim($companyName) !== '') {
             $lines[] = 'Firma: ' . $companyName;

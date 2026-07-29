@@ -7,7 +7,7 @@ REM  Smaze: login_attempts >24h, expirovane sessions, pouzite password_resets,
 REM         ARES/VIES cache >30 dni, PDF cache >90 dni, log files nad max_files.
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice Cleanup" ^
+REM    schtasks /create /tn "MyUcto Cleanup" ^
 REM      /tr "%~f0" /sc daily /st 03:00 /ru SYSTEM
 REM ============================================================================
 setlocal

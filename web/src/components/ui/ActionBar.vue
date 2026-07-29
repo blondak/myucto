@@ -18,7 +18,9 @@ import { useI18n } from 'vue-i18n'
  * Mobil: inline zůstanou jen primary; secondary + overflow jsou v „…" menu.
  */
 
-export type ActionVariant = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'accent'
+import { BTN_BASE, FILLED, OUTLINE, MENU_ICON, ICONS, type ActionVariant } from './buttonStyles'
+
+export type { ActionVariant }
 // 'advanced' = méně časté / admin / destruktivní akce — v dropdownu schované pod rozbalovacím „Pokročilé"
 export type ActionTier = 'primary' | 'secondary' | 'overflow' | 'advanced'
 
@@ -47,60 +49,9 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// ─── ikony (stroke, viewBox 24); sjednocené z původních toolbarů ───
-const ICONS = {
-  edit:      'M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
-  send:      'M3 8l7.89 5.26a2 2 0 0 0 2.22 0L21 8M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z',
-  check:     'M5 13l4 4L19 7',
-  chart:     'M9 17v-6m3 6v-4m3 4v-2M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z',
-  trash:     'M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3',
-  doc:       'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z',
-  checkCircle: 'M9 14l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-  coin:      'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-  bell:      'M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z',
-  copy:      'M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z',
-  download:  'M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
-  qr:        'M4 4h6v6H4V4zm0 10h6v6H4v-6zM14 4h6v6h-6V4zm2 10h2m2 0v2m-4 2v2m4 0h2m-2-6h.01M14 18h.01',
-  inbox:     'M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2',
-  uturn:     'M3 10h10a8 8 0 0 1 8 8v2M3 10l6 6m-6-6l6-6',
-  x:         'M6 18L18 6M6 6l12 12',
-  badgeCheck: 'M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-  link:      'M13.828 10.172a4 4 0 0 1 0 5.656l-3 3a4 4 0 0 1-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 0 1 0-5.656l3-3a4 4 0 0 1 5.656 5.656l-1.5 1.5',
-  archive:   'M5 8h14M5 8a2 2 0 1 1 0-4h14a2 2 0 1 1 0 4M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4',
-  user:      'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z',
-  play:      'M14.752 11.168l-3.197-2.132A1 1 0 0 0 10 9.87v4.263a1 1 0 0 0 1.555.832l3.197-2.132a1 1 0 0 0 0-1.664z M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-  pause:     'M10 9v6m4-6v6m7-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-  plus:      'M12 6v6m0 0v6m0-6h6m-6 0H6',
-  cycle:     'M4 4v5h5M4 9a8 8 0 0 1 14.13-4.06M20 20v-5h-5M20 15a8 8 0 0 1-14.13 4.06',
-} as const
-
+// Ikony a barevné varianty (FILLED/OUTLINE/MENU_ICON) žijí v buttonStyles.ts —
+// sdílené s tlačítky mimo ActionBar (jednotný koncept UI, AGENTS.md §Frontend).
 const DOTS = 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z'
-
-// barevné varianty pro plné / outline / ikonu v menu
-const FILLED: Record<ActionVariant, string> = {
-  primary: 'bg-primary-600 hover:bg-primary-700 text-white',
-  success: 'bg-success-600 hover:bg-success-700 text-white',
-  warning: 'bg-warning-500 hover:bg-warning-600 text-white',
-  danger:  'bg-danger-600 hover:bg-danger-700 text-white',
-  neutral: 'bg-neutral-700 hover:bg-neutral-800 text-white',
-  accent:  'bg-accent-600 hover:bg-accent-700 text-white',
-}
-const OUTLINE: Record<ActionVariant, string> = {
-  primary: 'border border-primary-500/40 text-primary-700 hover:bg-primary-50',
-  success: 'border border-success-500/50 text-success-600 hover:bg-success-50',
-  warning: 'border border-warning-500/50 text-warning-600 hover:bg-warning-50',
-  danger:  'border border-danger-500/50 text-danger-500 hover:bg-danger-50',
-  neutral: 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50',
-  accent:  'border border-accent-500/40 text-accent-700 hover:bg-accent-50',
-}
-const MENU_ICON: Record<ActionVariant, string> = {
-  primary: 'text-primary-600',
-  success: 'text-success-600',
-  warning: 'text-warning-600',
-  danger:  'text-danger-600',
-  neutral: 'text-neutral-400',
-  accent:  'text-accent-600',
-}
 
 const visible = computed(() => props.actions.filter(a => a.show === undefined || !!a.show))
 const primary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'primary'))
@@ -108,24 +59,32 @@ const secondary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary
 const overflow = computed(() => visible.value.filter(a => a.tier === 'overflow'))
 const advanced = computed(() => visible.value.filter(a => a.tier === 'advanced'))
 
-// Na mobilu necháme inline jen první 2 akce (primary + sekundární), zbytek spadne do „…".
+// Kolik akcí (primary + secondary) zůstane inline v hlavičce; zbytek spadne do „…".
+// Desktop = max 3 (AGENTS.md: max 3 tlačítka v hlavičce), mobil = 2.
 const MOBILE_INLINE = 2
+const DESKTOP_INLINE = 3
+const inlineOrder = computed(() => [...primary.value, ...secondary.value])
 const mobileInlineKeys = computed(() => new Set(
-  [...primary.value, ...secondary.value].slice(0, MOBILE_INLINE).map(a => a.key),
+  inlineOrder.value.slice(0, MOBILE_INLINE).map(a => a.key),
+))
+const desktopInlineKeys = computed(() => new Set(
+  inlineOrder.value.slice(0, DESKTOP_INLINE).map(a => a.key),
 ))
 // sekundární, které zůstávají inline i na mobilu (jsou mezi prvními 2)
 const secondaryMobile = computed(() => secondary.value.filter(a => mobileInlineKeys.value.has(a.key)))
-// sekundární jen pro desktop (na mobilu jdou do menu)
-const secondaryDesktop = computed(() => secondary.value.filter(a => !mobileInlineKeys.value.has(a.key)))
+// sekundární inline jen na desktopu (v prvních 3, ale ne v prvních 2) → na mobilu jdou do menu
+const secondaryDesktop = computed(() => secondary.value.filter(a => desktopInlineKeys.value.has(a.key) && !mobileInlineKeys.value.has(a.key)))
+// sekundární nad rámec desktop capu → vždy v „…" (i na desktopu)
+const secondaryOverflow = computed(() => secondary.value.filter(a => !desktopInlineKeys.value.has(a.key)))
 
-const hasSecondary = computed(() => secondary.value.length > 0)
 const hasSecondaryDesktop = computed(() => secondaryDesktop.value.length > 0)
+const hasSecondaryOverflow = computed(() => secondaryOverflow.value.length > 0)
 const hasOverflow = computed(() => overflow.value.length > 0)
 const hasAdvanced = computed(() => advanced.value.length > 0)
-// „…" trigger: vždy když je overflow/advanced; jinak (jen collapsnuté secondary) jen na mobilu
-const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondary.value)
-// na desktopu má „…" smysl jen pro overflow/advanced (secondary jsou inline)
-const triggerDesktop = computed(() => hasOverflow.value || hasAdvanced.value)
+// „…" trigger: vždy když je overflow/advanced/secondaryOverflow; jinak (jen collapsnuté secondary) jen na mobilu
+const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value || hasSecondaryDesktop.value)
+// na desktopu má „…" smysl pro overflow/advanced/secondaryOverflow (secondaryDesktop jsou inline)
+const triggerDesktop = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value)
 const advancedOpen = ref(false)
 
 function tagOf(a: ActionItem) {
@@ -139,7 +98,7 @@ function attrsOf(a: ActionItem): Record<string, unknown> {
   return { type: 'button' }
 }
 
-const inlineBase = 'cursor-pointer px-3 h-9 text-sm font-medium rounded-md inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed'
+const inlineBase = BTN_BASE
 
 // ─── dropdown ───
 const open = ref(false)
@@ -235,9 +194,9 @@ onBeforeUnmount(() => {
             {{ t('common.more_actions') }}
           </div>
 
-          <!-- collapsnuté secondary jen na mobilu (na desktopu jsou inline) -->
-          <div v-if="hasSecondaryDesktop" class="sm:hidden">
-            <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
+          <!-- sekundární, které se nevešly inline: secondaryOverflow vždy, secondaryDesktop jen na mobilu -->
+          <template v-if="hasSecondaryOverflow || hasSecondaryDesktop">
+            <component :is="tagOf(a)" v-for="a in secondaryOverflow" :key="a.key" v-bind="attrsOf(a)"
               :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                        a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                        a.disabled ? 'opacity-50 pointer-events-none' : '']"
@@ -248,8 +207,21 @@ onBeforeUnmount(() => {
               </svg>
               <span>{{ a.loading ? '…' : a.label }}</span>
             </component>
-            <div v-if="hasOverflow" class="my-1 border-t border-neutral-100"></div>
-          </div>
+            <div v-if="hasSecondaryDesktop" class="sm:hidden">
+              <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
+                :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
+                         a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                         a.disabled ? 'opacity-50 pointer-events-none' : '']"
+                :title="a.title || undefined" @click="runItem(a)">
+                <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+                </svg>
+                <span>{{ a.loading ? '…' : a.label }}</span>
+              </component>
+            </div>
+            <div v-if="hasOverflow" :class="['my-1 border-t border-neutral-100', hasSecondaryOverflow ? '' : 'sm:hidden']"></div>
+          </template>
 
           <!-- overflow vždy -->
           <component :is="tagOf(a)" v-for="a in overflow" :key="a.key" v-bind="attrsOf(a)"
@@ -266,7 +238,8 @@ onBeforeUnmount(() => {
 
           <!-- advanced → rozbalovací „Pokročilé" (méně časté / admin / destruktivní akce) -->
           <template v-if="hasAdvanced">
-            <div v-if="hasOverflow || hasSecondary" class="my-1 border-t border-neutral-100"></div>
+            <div v-if="hasOverflow || hasSecondaryOverflow || hasSecondaryDesktop"
+              :class="['my-1 border-t border-neutral-100', (hasOverflow || hasSecondaryOverflow) ? '' : 'sm:hidden']"></div>
             <button type="button" @click.stop="advancedOpen = !advancedOpen"
               class="w-full flex items-center justify-between gap-2 px-3 py-2 text-neutral-500 hover:bg-neutral-50 cursor-pointer text-left">
               <span class="inline-flex items-center gap-2.5">

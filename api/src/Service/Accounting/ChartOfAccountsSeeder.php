@@ -1,0 +1,197 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Accounting;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\PostingRuleRepository;
+use PDO;
+
+/**
+ * Naseeduje směrnou účtovou osnovu ({@see ChartOfAccountsTemplate}) do
+ * chart_of_accounts pro danou firmu (Epic F1). Spouští se, když firma zapne
+ * podvojné účetnictví (supplier.accounting_mode = 'double_entry') — trigger
+ * napojí navazující workflow (Action/Settings).
+ *
+ * Idempotentní: vkládá jen účty, jejichž account_code pro daného suppliera ještě
+ * neexistuje (nepřepisuje uživatelské úpravy názvů/analytik). Vrací počet reálně
+ * vložených účtů.
+ */
+final class ChartOfAccountsSeeder
+{
+    public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Vloží chybějící účty šablony pro suppliera. Idempotentní.
+     *
+     * @return int počet nově vložených účtů (0 = osnova už kompletní)
+     */
+    public function seedForSupplier(int $supplierId): int
+    {
+        $pdo = $this->db->pdo();
+
+        $existing = $this->existingCodes($pdo, $supplierId);
+
+        $insert = $pdo->prepare(
+             'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active, tax_deductibility)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)'
+        );
+
+        $inserted = 0;
+        // Nested-safe: pokud volající už drží transakci (např. test), neotevírej vlastní.
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            // SYNTETIKY jedním dávkovým INSERTem. Po jednom to bylo 213 round-tripů při
+            // KAŽDÉM seedování — naměřeno 10,1 ms vs. 1,6 ms dávkově, a seeduje se při
+            // každém založení firmy (v testech stovkykrát). Analytiky dávkovat NELZE:
+            // potřebují `parent_id`, tedy id právě vloženého rodiče.
+            $pending = [];
+            foreach (ChartOfAccountsTemplate::ACCOUNTS as $acc) {
+                if (!isset($existing[$acc['code']]) && ($acc['parent_code'] ?? null) === null) {
+                    $pending[] = $acc;
+                }
+            }
+            if ($pending !== []) {
+                $params = [];
+                foreach ($pending as $acc) {
+                    array_push(
+                        $params,
+                        $supplierId,
+                        $acc['code'],
+                        $acc['name'],
+                        $acc['type'],
+                        $acc['normal_side'], // null → saldní účet
+                        1,
+                        null,
+                        ChartOfAccountsTemplate::taxDeductibility($acc['code']), // §25 ZDP
+                    );
+                }
+                $pdo->prepare(
+                    'INSERT INTO chart_of_accounts
+                        (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active, tax_deductibility)
+                     VALUES ' . implode(', ', array_fill(0, count($pending), '(?, ?, ?, ?, ?, ?, ?, 1, ?)'))
+                )->execute($params);
+                $inserted += count($pending);
+
+                // Id se dočtou zpět jedním dotazem — `lastInsertId()` u dávkového INSERTu
+                // vrací jen PRVNÍ id a spoléhat na souvislou řadu by bylo křehké.
+                $existing = $this->existingCodes($pdo, $supplierId);
+            }
+
+            foreach (ChartOfAccountsTemplate::ACCOUNTS as $acc) {
+                if (isset($existing[$acc['code']]) || ($acc['parent_code'] ?? null) === null) {
+                    continue;
+                }
+                $parentCode = (string) $acc['parent_code'];
+                $parentId = $existing[$parentCode] ?? null;
+                if ($parentId === null) {
+                    throw new \RuntimeException('Chybí rodičovský účet ' . $parentCode . ' pro analytiku ' . $acc['code'] . '.');
+                }
+                $insert->execute([
+                    $supplierId,
+                    $acc['code'],
+                    $acc['name'],
+                    $acc['type'],
+                    $acc['normal_side'],
+                    0,
+                    $parentId,
+                    ChartOfAccountsTemplate::taxDeductibility($acc['code']),
+                ]);
+                $existing[$acc['code']] = (int) $pdo->lastInsertId();
+                $inserted++;
+            }
+            $this->seedAnalyticPostingRules($pdo, $supplierId);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $inserted;
+    }
+
+    /**
+     * Doprovod k analytikám 501.x/511.x ze šablony: jakmile syntetika 501 dostane
+     * potomky, NESMÍ se na ni dál účtovat (součet analytik by neseděl na syntetiku),
+     * ale globální předkontace míří pořád na holé '501'. Založíme proto per-tenant
+     * override na zbytkovou 501.900 — přesně to, co migrace 1127 udělala existujícím
+     * firmám (globální pravidla ZÁMĚRNĚ nechává být, platí i pro firmy bez analytik).
+     *
+     * Idempotentní: override se zakládá jen když pro daný rule_key ještě není.
+     */
+    private function seedAnalyticPostingRules(PDO $pdo, int $supplierId): void
+    {
+        $hasResidual = $pdo->prepare(
+            "SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '501.900' LIMIT 1"
+        );
+        $hasResidual->execute([$supplierId]);
+        if ($hasResidual->fetchColumn() === false) {
+            return;
+        }
+
+        $rules = [
+            'invoice.material.received'    => 'Materiál — ostatní (analytika 501.900)',
+            'invoice.small_asset.received' => 'Drobný majetek (analytika 501.900)',
+        ];
+        $insert = $pdo->prepare(
+            'INSERT INTO posting_rules
+                (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+             SELECT ?, ?, ?, ?, ?, ?, 1
+              WHERE NOT EXISTS (SELECT 1 FROM posting_rules WHERE supplier_id = ? AND rule_key = ?)'
+        );
+        foreach ($rules as $ruleKey => $description) {
+            $insert->execute([
+                $supplierId, $ruleKey, $description, '501.900', '321',
+                PostingRuleRepository::OVERRIDE_PRIORITY,
+                $supplierId, $ruleKey,
+            ]);
+        }
+
+        // Předvolba analytik v nastavení — jen když si firma ještě nic nevybrala.
+        $pdo->prepare(
+            "UPDATE accounting_supplier_settings
+                SET fuel_account_code = '501.100'
+              WHERE supplier_id = ? AND fuel_account_code IS NULL"
+        )->execute([$supplierId]);
+        $pdo->prepare(
+            "UPDATE accounting_supplier_settings
+                SET vehicle_repair_account_code = '511.100'
+              WHERE supplier_id = ? AND vehicle_repair_account_code IS NULL"
+        )->execute([$supplierId]);
+    }
+
+    /**
+     * Existuje pro suppliera už nějaký účet? (rychlá detekce pro trigger.)
+     */
+    public function hasChart(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * @return array<string,int> account_code => id
+     */
+    private function existingCodes(PDO $pdo, int $supplierId): array
+    {
+        $stmt = $pdo->prepare('SELECT id, account_code FROM chart_of_accounts WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(string) $row['account_code']] = (int) $row['id'];
+        }
+        return $map;
+    }
+}

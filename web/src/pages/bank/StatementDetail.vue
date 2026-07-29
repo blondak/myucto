@@ -1,24 +1,56 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { bankApi, type BankStatementDetail, type BankTransaction, type MatchCandidate, type SplitSuggestion } from '@/api/bank'
+import {
+  bankApi,
+  type BankStatementDetail,
+  type BankTransaction,
+  type MatchStatus,
+  type PostingFilter,
+} from '@/api/bank'
 import { formatMoney, formatDate } from '@/composables/useFormat'
-import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import VendorPicker from '@/components/purchase/VendorPicker.vue'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { invoicesApi } from '@/api/invoices'
-import ClientFormModal from '@/components/modals/ClientFormModal.vue'
-import type { Client } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
+import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
+import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
+import BankMatchModal from '@/components/bank/BankMatchModal.vue'
+import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
+import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
+import type { PostResult } from '@/api/bankPosting'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 
 const { t, locale } = useI18n()
 const toast = useToast()
 const router = useRouter()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+
+// Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
+// VŠECHNY transakce výpisu, ne jen aktuálně načtenou stránku (viz transactions_meta).
+const pendingPostingCount = computed(() => statement.value?.pending_posting_count ?? 0)
+
+// Learned hint banner po ručním zaúčtování (in-memory, zmizí reloadem).
+const hintTx = ref<BankTransaction | null>(null)
+const hintData = ref<{ count: number; debit: string; credit: string } | null>(null)
+function onTxPosted(payload: { result: PostResult; debit: string; credit: string }, tx: BankTransaction) {
+  if (payload.result.similar && payload.result.similar.count > 0) {
+    hintTx.value = tx
+    hintData.value = { count: payload.result.similar.count, debit: payload.debit, credit: payload.credit }
+  }
+  load()
+}
+function closeHint() { hintTx.value = null; hintData.value = null }
+
+// Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
+// extrahováno do BankTransactionRow.vue + useBankTransactionActions, ať ji sdílí
+// i „Všechny pohyby" (UnpostedTransactions.vue), #52.
+const bankActions = useBankTransactionActions({ reload: () => load() })
 
 // E-mailová avíza jsou měsíční agregát (statement_date = 1. den měsíce) → název měsíce.
 function monthLabel(dateStr: string): string {
@@ -30,104 +62,84 @@ function monthLabel(dateStr: string): string {
 const route = useRoute()
 const statement = ref<BankStatementDetail | null>(null)
 const loading = ref(true)
-
-// Filtr transakcí dle stavu spárování ('' = vše).
-const STATUS_OPTIONS = ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] as const
-const statusFilter = ref<string>('')
-const filteredTransactions = computed<BankTransaction[]>(() => {
-  const txs = statement.value?.transactions ?? []
-  return statusFilter.value === '' ? txs : txs.filter(tx => tx.match_status === statusFilter.value)
-})
-// Virtuální (sekundární) zdroj — měsíční agregát, ne nahraný soubor z banky.
-// Takový výpis nemá počáteční/koncový zůstatek ani originál ke stažení.
+const loadingMore = ref(false)
 const isVirtual = computed(() =>
   statement.value?.source === 'email_notice' || statement.value?.source === 'idoklad'
 )
 
-// Souhrn pro měsíční virtuální výpis: disponibilní zůstatek z nejnovější položky,
-// která ho nesla (avíza Creditas/Fio/RB; u iDokladu zůstatek není), + součty
-// příjmů/výdajů měsíce z transakcí.
+// Stránkování transakcí (load-more) — viz transactions_meta v odpovědi detailu.
+const txPage = ref(1)
+const txPages = ref(1)
+const txTotal = ref(0)
+
+// Filtr transakcí dle stavu spárování ('' = vše) — řeší se server-side (query `status`).
+const STATUS_OPTIONS = ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] as const
+function statusLabel(s: string): string {
+  const key = `bank.match_status.${s}`
+  const label = t(key)
+  return label === key ? s : label
+}
+const statusFilter = ref<string>('')
+const postingFilter = ref<PostingFilter | ''>(route.query.posting_status === 'unposted' ? 'unposted' : '')
+// Aktuálně načtené (a serverem filtrované) transakce — název ponechán kvůli šabloně.
+const filteredTransactions = computed<BankTransaction[]>(() => statement.value?.transactions ?? [])
+// Souhrn pro měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza,
+// které ho neslo (Creditas/Fio/RB), + součty příjmů/výdajů měsíce — počítá backend
+// přes VŠECHNY transakce výpisu (notice_summary), ne jen aktuálně načtenou stránku.
 const noticeSummary = computed(() => {
   const s = statement.value
-  if (!s || !isVirtual.value) return null
-  let last: BankTransaction | null = null
-  let credit = 0
-  let debit = 0
-  for (const tx of s.transactions) {
-    if (tx.amount >= 0) credit += tx.amount
-    else debit += -tx.amount
-    if (tx.balance === null || tx.balance === undefined) continue
-    if (last === null || tx.posted_at > last.posted_at || (tx.posted_at === last.posted_at && tx.id > last.id)) {
-      last = tx
+  if (!s || !isVirtual.value || !s.notice_summary) return null
+  return {
+    balance: s.notice_summary.balance,
+    balanceAt: s.notice_summary.balance_at,
+    credit: s.notice_summary.credit,
+    debit: s.notice_summary.debit,
+  }
+})
+
+async function load(reset = true) {
+  if (reset) {
+    loading.value = true
+    txPage.value = 1
+  } else {
+    loadingMore.value = true
+    txPage.value++
+  }
+  try {
+    const statementId = Number(route.params.id)
+    const [res, suggestionsResult] = await Promise.all([
+      bankApi.get(statementId, {
+        page: txPage.value,
+        status: statusFilter.value ? (statusFilter.value as MatchStatus) : undefined,
+        posting_status: postingFilter.value || undefined,
+      }),
+      reset
+        ? bankApi.matchSuggestions(statementId)
+        : Promise.resolve(null),
+    ])
+    const transactions = reset || !statement.value
+      ? res.transactions
+      : [...statement.value.transactions, ...res.transactions]
+    statement.value = { ...res, transactions }
+    if (suggestionsResult) {
+      const map = new Map(suggestionsResult.suggestions
+        .filter(s => s.status === 'pending')
+        .map(s => [s.bank_transaction_id, s]))
+      bankActions.setSuggestions(map)
     }
-  }
-  return { balance: last?.balance ?? null, balanceAt: last?.posted_at ?? null, credit, debit }
-})
-
-const rematching = ref(false)
-const matchingTx = ref<number | null>(null)
-const matchCtx = ref<BankTransaction | null>(null)
-const matchVarsymbol = ref<string>('')
-const matchError = ref<string>('')
-// Návrhy ke spárování dle částky ±14 dní (vydané i přijaté faktury).
-const matchCandidates = ref<MatchCandidate[]>([])
-const loadingCandidates = ref(false)
-// true = v ±14 dnech nic nesedělo, matchCandidates obsahuje širší (±90 dní) a/nebo cross-currency návrhy.
-const candidatesFallback = ref(false)
-// Návrhy sloučené úhrady: kombinace faktur jednoho klienta, jejichž součet = platba.
-const splitSuggestions = ref<SplitSuggestion[]>([])
-const loadingSplit = ref(false)
-const splitWindow = ref(7)
-// Kotva: konkrétní vybraná faktura, kolem které se dohledá zbytek (téhož klienta).
-type AnchorOption = { value: number; label: string; secondary?: string }
-const anchorInvoiceId = ref<number | null>(null)
-const anchorOptions = ref<AnchorOption[]>([])
-const anchorSelected = ref<AnchorOption | null>(null)
-const anchorLoading = ref(false)
-let anchorSearchTimer: ReturnType<typeof setTimeout> | null = null
-
-// Vytvoření konceptu přijaté faktury z odchozí (záporné) platby.
-const createTx = ref<BankTransaction | null>(null)
-const createVendorId = ref<number | null>(null)
-const vendorModalOpen = ref(false)
-const creatingPi = ref(false)
-const vendorPickerRef = ref<InstanceType<typeof VendorPicker> | null>(null)
-
-useHotkey('escape', () => {
-  if (matchingTx.value !== null) matchingTx.value = null
-  if (createTx.value !== null && !vendorModalOpen.value) createTx.value = null
-})
-
-function openCreate(tx: BankTransaction) {
-  createTx.value = tx
-  createVendorId.value = null
-}
-function onVendorCreated(client: Client) {
-  vendorModalOpen.value = false
-  createVendorId.value = client.id
-  vendorPickerRef.value?.reload()
-}
-async function submitCreatePurchase() {
-  if (!createTx.value || !createVendorId.value || creatingPi.value) return
-  creatingPi.value = true
-  try {
-    const r = await bankApi.createPurchaseInvoice(createTx.value.id, createVendorId.value)
-    createTx.value = null
-    router.push(`/purchase-invoices/${r.purchase_invoice_id}`)
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
+    txTotal.value = res.transactions_meta.total
+    txPages.value = res.transactions_meta.pages
   } finally {
-    creatingPi.value = false
+    loading.value = false
+    loadingMore.value = false
   }
 }
+onMounted(() => load(true))
 
-async function load() {
-  loading.value = true
-  try {
-    statement.value = await bankApi.get(Number(route.params.id))
-  } finally { loading.value = false }
-}
-onMounted(load)
+// Změna filtru stavu spárování → reset na 1. stránku (server-side filtr).
+watch([statusFilter, postingFilter], () => {
+  if (statement.value) load(true)
+})
 
 // --- PDF příloha (nahrání / smazání) ---
 const uploadingPdf = ref(false)
@@ -180,152 +192,7 @@ async function onDeleteStatement() {
   }
 }
 
-function statusBadge(s: string): string {
-  if (s === 'auto_exact') return 'bg-success-50 text-success-600'
-  if (s === 'auto_partial') return 'bg-warning-50 text-warning-600'
-  if (s === 'manual') return 'bg-primary-100 text-primary-700'
-  if (s === 'ignored') return 'bg-neutral-100 text-neutral-500'
-  return 'bg-danger-50 text-danger-500'
-}
-
-function statusLabel(s: string): string {
-  const key = `bank.match_status.${s}`
-  const label = t(key)
-  return label === key ? s : label
-}
-
-function startMatch(tx: BankTransaction) {
-  matchingTx.value = tx.id
-  matchCtx.value = tx
-  // Prefill VS z transakce — ruční zadání zůstává jako druhá možnost
-  matchVarsymbol.value = tx.variable_symbol || ''
-  matchError.value = ''
-  // Návrhy dle částky ±14 dní (best-effort — když selže, ruční VS pořád funguje)
-  matchCandidates.value = []
-  candidatesFallback.value = false
-  loadingCandidates.value = true
-  bankApi.matchCandidates(tx.id)
-    .then(r => {
-      if (matchingTx.value !== tx.id) return
-      matchCandidates.value = r.candidates
-      candidatesFallback.value = r.fallback
-    })
-    .catch(() => {})
-    .finally(() => { loadingCandidates.value = false })
-  // Návrhy sloučené úhrady (jen příchozí platba — klient zaplatil víc faktur naráz)
-  splitSuggestions.value = []
-  splitWindow.value = 7
-  anchorInvoiceId.value = null
-  anchorOptions.value = []
-  anchorSelected.value = null
-  if (tx.amount > 0) loadSplitSuggestions(tx, 7)
-}
-
-function loadSplitSuggestions(tx: BankTransaction, window: number, anchorId?: number | null) {
-  loadingSplit.value = true
-  bankApi.splitSuggestions(tx.id, { window, invoiceId: anchorId ?? undefined })
-    .then(r => {
-      if (matchingTx.value === tx.id) {
-        splitSuggestions.value = r.suggestions
-        splitWindow.value = r.window
-      }
-    })
-    .catch(() => {})
-    .finally(() => { loadingSplit.value = false })
-}
-
-function widenSplitWindow() {
-  if (!matchCtx.value) return
-  loadSplitSuggestions(matchCtx.value, Math.min(60, splitWindow.value + 7), anchorInvoiceId.value)
-}
-
-// Našeptávač kotvy: vystavené faktury vč. zaplacených (fulltext varsymbol + klient).
-// Zaplacené musí jít vybrat kvůli rekonciliaci (split nabízí i 'paid').
-function onAnchorSearch(q: string) {
-  if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
-  const query = q.trim()
-  if (query.length < 2) { anchorOptions.value = []; return }
-  anchorLoading.value = true
-  anchorSearchTimer = setTimeout(() => {
-    invoicesApi.searchMatchable(query, 20)
-      .then(list => {
-        anchorOptions.value = list.map(i => {
-          const owed = i.amount_to_pay - (i.paid_total ?? 0)
-          const shown = owed > 0 ? owed : i.amount_to_pay
-          return {
-            value: i.id,
-            label: `${i.varsymbol || '#' + i.id} — ${i.client_company_name}`,
-            secondary: `${formatMoney(shown, i.currency)} · ${formatDate(i.due_date || i.issue_date)}`,
-          }
-        })
-      })
-      .catch(() => { anchorOptions.value = [] })
-      .finally(() => { anchorLoading.value = false })
-  }, 220)
-}
-
-function onAnchorSelect(id: number | null) {
-  anchorInvoiceId.value = id
-  anchorSelected.value = id !== null
-    ? (anchorOptions.value.find(o => o.value === id) ?? anchorSelected.value)
-    : null
-  if (!matchCtx.value) return
-  loadSplitSuggestions(matchCtx.value, splitWindow.value, id)
-}
-
-async function confirmSuggestion(s: SplitSuggestion) {
-  if (!matchingTx.value) return
-  matchError.value = ''
-  try {
-    await bankApi.matchMultiple(matchingTx.value, s.invoices.map(i => i.id))
-    matchingTx.value = null
-    await load()
-  } catch (e: any) {
-    matchError.value = apiErrorMessage(e, t('bank.match_failed'))
-  }
-}
-
-async function confirmCandidate(c: MatchCandidate) {
-  if (!matchingTx.value) return
-  matchError.value = ''
-  try {
-    await bankApi.matchManual(matchingTx.value,
-      c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id })
-    matchingTx.value = null
-    await load()
-  } catch (e: any) {
-    matchError.value = apiErrorMessage(e, t('bank.match_failed'))
-  }
-}
-
-async function confirmMatch() {
-  if (!matchingTx.value || !matchVarsymbol.value.trim()) return
-  matchError.value = ''
-  try {
-    await bankApi.matchManual(matchingTx.value, { varsymbol: matchVarsymbol.value.trim() })
-    matchingTx.value = null
-    await load()
-  } catch (e: any) {
-    matchError.value = apiErrorMessage(e, t('bank.match_failed'))
-  }
-}
-
-async function ignoreTx(tx: BankTransaction) {
-  if (!confirm(t('bank.ignore_confirm'))) return
-  await bankApi.ignore(tx.id)
-  await load()
-}
-
-async function unmatchTx(tx: BankTransaction) {
-  if (!confirm(t('bank.unmatch_confirm'))) return
-  try {
-    await bankApi.unmatch(tx.id)
-    await load()
-  } catch (e: any) {
-    alert(apiErrorMessage(e, t('bank.unmatch_failed')))
-  }
-}
-
+const rematching = ref(false)
 async function rematchStatement() {
   if (!statement.value || rematching.value) return
   if (!confirm(t('bank.rematch_confirm'))) return
@@ -417,11 +284,20 @@ async function rematchStatement() {
       </div>
     </div>
 
+    <RuleHintBanner v-if="isDoubleEntry && hintTx && hintData" class="mt-4"
+      :count="hintData.count" :tx="hintTx"
+      :debit-account-code="hintData.debit" :credit-account-code="hintData.credit"
+      @close="closeHint" @created="load" />
+
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
       <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between gap-3">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 flex items-center gap-2">
           {{ t('bank.transactions') }}
-          ({{ filteredTransactions.length }}<span v-if="statusFilter"> / {{ statement.transactions.length }}</span>)
+          ({{ txTotal }}<span v-if="statusFilter || postingFilter"> / {{ statement.transaction_count }}</span>)
+          <span v-if="isDoubleEntry && pendingPostingCount > 0"
+            class="inline-flex items-center bg-warning-50 text-warning-600 rounded-full px-2 py-0.5 text-xs normal-case font-medium">
+            {{ t('bank.posting.pending_chip', { count: pendingPostingCount }) }}
+          </span>
         </h2>
         <div class="flex items-center gap-2">
           <select v-model="statusFilter"
@@ -430,43 +306,50 @@ async function rematchStatement() {
             <option value="">{{ t('bank.filter_all') }}</option>
             <option v-for="s in STATUS_OPTIONS" :key="s" :value="s">{{ statusLabel(s) }}</option>
           </select>
+          <select v-if="isDoubleEntry" v-model="postingFilter"
+            :title="t('bank.filter_posting')"
+            class="h-8 px-2 text-xs border border-neutral-300 rounded-md text-neutral-700 bg-surface">
+            <option value="">{{ t('bank.filter_posting_all') }}</option>
+            <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
+            <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
+          </select>
           <a v-if="statement.has_file" :href="bankApi.downloadUrl(statement.id)"
              :title="t('bank.download_gpc')"
-             class="cursor-pointer h-8 px-3 text-xs border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+             :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             GPC
           </a>
           <a v-if="statement.has_pdf" :href="bankApi.pdfUrl(statement.id)"
              :title="statement.pdf_name ?? t('bank.download_pdf')"
-             class="cursor-pointer h-8 px-3 text-xs border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+             :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             PDF
           </a>
-          <label v-if="auth.canWrite && !statement.has_pdf && !isVirtual"
+          <label v-if="auth.canWrite('bank.import') && !statement.has_pdf && !isVirtual"
              :title="t('bank.pdf_upload_hint')"
-             class="cursor-pointer h-8 px-3 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+             :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ uploadingPdf ? '…' : t('bank.pdf_upload') }}
             <input type="file" accept=".pdf,application/pdf" class="hidden" @change="onPdfSelected" />
           </label>
-          <button v-if="auth.canWrite && statement.has_pdf" type="button" @click="onDeletePdf"
+          <button v-if="auth.canWrite('bank.import') && statement.has_pdf" type="button" @click="onDeletePdf"
              :title="t('bank.pdf_delete')"
-             class="cursor-pointer h-8 px-3 text-xs border border-danger-500/40 text-danger-600 hover:bg-danger-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
+             :class="btnOutline('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('bank.pdf_delete') }}
           </button>
-          <button v-if="auth.canWrite" type="button" @click="rematchStatement" :disabled="rematching"
-            class="cursor-pointer h-8 px-3 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 disabled:opacity-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" :class="{ 'animate-spin': rematching }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15" />
+          <button v-if="auth.canWrite('bank.match')" type="button" @click="rematchStatement" :disabled="rematching"
+            :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" :class="{ 'animate-spin': rematching }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
             </svg>
             {{ rematching ? t('bank.rematch_running') : t('bank.rematch') }}
           </button>
-          <button v-if="auth.isAdmin && isVirtual && statement.matched_count === 0"
+          <button v-if="auth.isSuperadmin && isVirtual && statement.matched_count === 0"
             type="button" @click="onDeleteStatement" :disabled="deletingStatement"
             :title="t('bank.statement_delete_hint')"
-            class="cursor-pointer h-8 px-3 text-xs border border-danger-500/40 text-danger-600 hover:bg-danger-50 disabled:opacity-50 rounded-md font-medium inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
+            :class="btnOutline('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ deletingStatement ? '…' : t('bank.statement_delete') }}
           </button>
         </div>
@@ -486,312 +369,32 @@ async function rematchStatement() {
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
-          <tr v-for="tx in filteredTransactions" :key="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
-            <td class="px-3 py-2 text-xs">{{ formatDate(tx.posted_at) }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs"
-              :class="tx.amount > 0 ? 'text-success-600' : 'text-danger-500'">
-              {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, tx.currency ?? statement.currency ?? 'CZK') }}
-            </td>
-            <td class="px-3 py-2 font-mono text-xs">
-              <span v-if="tx.variable_symbol">{{ tx.variable_symbol }}</span>
-              <span v-else class="text-neutral-400">—</span>
-              <span v-if="tx.constant_symbol" class="text-neutral-400 ml-1">/ {{ tx.constant_symbol }}</span>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <div class="font-mono text-neutral-600">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
-              <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <template v-if="(tx.matched_invoices?.length ?? 0) > 1">
-                <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-                  class="text-primary-600 hover:underline block">
-                  {{ mi.varsymbol || `#${mi.invoice_id}` }}
-                </RouterLink>
-                <div v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
-              </template>
-              <template v-else>
-                <RouterLink v-if="tx.matched_invoice_id" :to="`/invoices/${tx.matched_invoice_id}`"
-                  class="text-primary-600 hover:underline">
-                  {{ tx.matched_varsymbol || `#${tx.matched_invoice_id}` }}
-                </RouterLink>
-                <RouterLink v-else-if="tx.matched_purchase_invoice_id" :to="`/purchase-invoices/${tx.matched_purchase_invoice_id}`"
-                  class="text-primary-600 hover:underline">
-                  {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
-                </RouterLink>
-                <span v-else class="text-neutral-400">—</span>
-                <div v-if="tx.matched_client_name" class="text-neutral-500 text-xs">{{ tx.matched_client_name }}</div>
-                <div v-else-if="tx.matched_vendor_name" class="text-neutral-500 text-xs">{{ tx.matched_vendor_name }}</div>
-              </template>
-            </td>
-            <td class="px-3 py-2 text-center">
-              <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(tx.match_status)">
-                {{ statusLabel(tx.match_status) }}
-              </span>
-            </td>
-            <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-              <RouterLink v-if="tx.matched_invoice_id" :to="`/invoices/${tx.matched_invoice_id}`"
-                class="text-primary-600 hover:text-primary-700 mr-2">{{ t('bank.open') }}</RouterLink>
-              <RouterLink v-else-if="tx.matched_purchase_invoice_id" :to="`/purchase-invoices/${tx.matched_purchase_invoice_id}`"
-                class="text-primary-600 hover:text-primary-700 mr-2">{{ t('bank.open') }}</RouterLink>
-              <button v-if="(tx.amount < 0 && tx.match_status === 'unmatched') && auth.canWrite" @click="openCreate(tx)"
-                class="cursor-pointer text-primary-600 hover:text-primary-700 mr-2">
-                {{ t('bank.create_purchase') }}
-              </button>
-              <button v-if="(tx.match_status === 'unmatched' || tx.match_status === 'auto_partial') && auth.canWrite"
-                @click="startMatch(tx)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-2">
-                {{ t('bank.match') }}
-              </button>
-              <button v-if="(tx.match_status === 'unmatched') && auth.canWrite" @click="ignoreTx(tx)"
-                class="cursor-pointer text-neutral-500 hover:text-neutral-700">
-                {{ t('bank.ignore') }}
-              </button>
-              <button v-if="(['auto_exact','auto_partial','manual','ignored'].includes(tx.match_status)) && auth.canWrite"
-                @click="unmatchTx(tx)" class="cursor-pointer text-neutral-500 hover:text-danger-600">
-                {{ t('bank.unmatch') }}
-              </button>
-            </td>
-          </tr>
+          <BankTransactionRow v-for="tx in filteredTransactions" :key="tx.id"
+            layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
+            :fallback-currency="statement.currency" :colspan="7" :actions="bankActions"
+            @posted="onTxPosted" @changed="load" />
         </tbody>
       </table>
       </div>
 
       <!-- Mobile: stack karet -->
       <div class="md:hidden divide-y divide-neutral-100">
-        <div v-for="tx in filteredTransactions" :key="`m-${tx.id}`"
-          class="p-3 space-y-2"
-          :class="{ 'opacity-50': tx.match_status === 'ignored' }">
-          <div class="flex items-baseline justify-between gap-2">
-            <div class="font-mono text-base font-semibold whitespace-nowrap"
-              :class="tx.amount > 0 ? 'text-success-600' : 'text-danger-500'">
-              {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, tx.currency ?? statement.currency ?? 'CZK') }}
-            </div>
-            <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(tx.match_status)">
-              {{ statusLabel(tx.match_status) }}
-            </span>
-          </div>
-          <div class="flex items-baseline justify-between text-xs text-neutral-500">
-            <span class="font-mono">{{ formatDate(tx.posted_at) }}</span>
-            <span class="font-mono">
-              <span v-if="tx.variable_symbol">VS {{ tx.variable_symbol }}</span>
-              <span v-else class="text-neutral-400">—</span>
-              <span v-if="tx.constant_symbol" class="text-neutral-400 ml-1">/ {{ tx.constant_symbol }}</span>
-            </span>
-          </div>
-          <div class="text-xs">
-            <div class="font-mono text-neutral-600 truncate">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
-            <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
-          </div>
-          <div v-if="(tx.matched_invoices?.length ?? 0) > 1" class="text-xs">
-            <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-              class="text-primary-600 hover:underline font-mono mr-2">
-              {{ mi.varsymbol || `#${mi.invoice_id}` }}
-            </RouterLink>
-            <span v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
-          </div>
-          <div v-else-if="tx.matched_invoice_id" class="text-xs">
-            <RouterLink :to="`/invoices/${tx.matched_invoice_id}`"
-              class="text-primary-600 hover:underline font-mono">
-              {{ tx.matched_varsymbol || `#${tx.matched_invoice_id}` }}
-            </RouterLink>
-            <span v-if="tx.matched_client_name" class="text-neutral-500 ml-2">{{ tx.matched_client_name }}</span>
-          </div>
-          <div v-else-if="tx.matched_purchase_invoice_id" class="text-xs">
-            <RouterLink :to="`/purchase-invoices/${tx.matched_purchase_invoice_id}`"
-              class="text-primary-600 hover:underline font-mono">
-              {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
-            </RouterLink>
-            <span v-if="tx.matched_vendor_name" class="text-neutral-500 ml-2">{{ tx.matched_vendor_name }}</span>
-          </div>
-          <div class="flex flex-wrap gap-2 pt-1">
-            <RouterLink v-if="tx.matched_invoice_id" :to="`/invoices/${tx.matched_invoice_id}`"
-              class="flex-1 h-9 inline-flex items-center justify-center text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md">
-              {{ t('bank.open') }}
-            </RouterLink>
-            <RouterLink v-else-if="tx.matched_purchase_invoice_id" :to="`/purchase-invoices/${tx.matched_purchase_invoice_id}`"
-              class="flex-1 h-9 inline-flex items-center justify-center text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md">
-              {{ t('bank.open') }}
-            </RouterLink>
-            <button v-if="(tx.amount < 0 && tx.match_status === 'unmatched') && auth.canWrite" @click="openCreate(tx)"
-              class="cursor-pointer flex-1 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md">
-              {{ t('bank.create_purchase') }}
-            </button>
-            <button v-if="(tx.match_status === 'unmatched' || tx.match_status === 'auto_partial') && auth.canWrite"
-              @click="startMatch(tx)"
-              class="cursor-pointer flex-1 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md">
-              {{ t('bank.match') }}
-            </button>
-            <button v-if="(tx.match_status === 'unmatched') && auth.canWrite" @click="ignoreTx(tx)"
-              class="cursor-pointer flex-1 h-9 text-sm border border-neutral-300 text-neutral-600 hover:bg-neutral-50 rounded-md">
-              {{ t('bank.ignore') }}
-            </button>
-            <button v-if="(['auto_exact','auto_partial','manual','ignored'].includes(tx.match_status)) && auth.canWrite"
-              @click="unmatchTx(tx)"
-              class="cursor-pointer flex-1 h-9 text-sm border border-neutral-300 text-neutral-600 hover:bg-danger-50 hover:text-danger-600 rounded-md">
-              {{ t('bank.unmatch') }}
-            </button>
-          </div>
-        </div>
+        <BankTransactionRow v-for="tx in filteredTransactions" :key="`m-${tx.id}`"
+          layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
+          :fallback-currency="statement.currency" :actions="bankActions"
+          @posted="onTxPosted" @changed="load" />
+      </div>
+
+      <div v-if="txPage < txPages" class="text-center py-3 border-t border-neutral-200">
+        <button @click="load(false)" :disabled="loadingMore"
+          class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+        </button>
       </div>
     </div>
 
-    <!-- Manual match modal — návrhy dle částky + ruční VS jako druhá možnost -->
-    <div v-if="matchingTx" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-        <h3 class="text-lg font-semibold mb-1">{{ t('bank.manual_match_title') }}</h3>
-        <p v-if="matchCtx" class="text-xs text-neutral-500 mb-3 font-mono">
-          {{ matchCtx.amount > 0 ? '+' : '' }}{{ formatMoney(matchCtx.amount, matchCtx.currency ?? statement.currency ?? 'CZK') }}
-          · {{ formatDate(matchCtx.posted_at) }}
-          <span v-if="matchCtx.counterparty_name" class="text-neutral-400"> · {{ matchCtx.counterparty_name }}</span>
-        </p>
-
-        <!-- Návrhy ke spárování dle částky (±14 dní, fallback ±90 dní) -->
-        <div class="mb-4">
-          <div class="text-sm font-medium text-neutral-700 mb-1.5">{{ t('bank.candidates_title') }}</div>
-          <p v-if="!loadingCandidates && candidatesFallback && matchCandidates.length > 0"
-            class="text-xs text-warning-600 bg-warning-50 border border-warning-500/30 rounded-md px-2 py-1.5 mb-1.5">
-            {{ t('bank.candidates_fallback_hint') }}
-          </p>
-          <div v-if="loadingCandidates" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
-          <div v-else-if="matchCandidates.length === 0" class="text-xs text-neutral-400 py-2">{{ t('bank.no_candidates') }}</div>
-          <ul v-else class="border border-neutral-200 rounded-md divide-y divide-neutral-100 max-h-56 overflow-auto">
-            <li v-for="c in matchCandidates" :key="`${c.type}-${c.id}`">
-              <button type="button" @click="confirmCandidate(c)"
-                class="w-full text-left px-3 py-2 hover:bg-primary-50 flex items-center justify-between gap-2">
-                <span class="min-w-0">
-                  <span class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold"
-                    :class="c.type === 'invoice' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
-                    {{ c.type === 'invoice' ? t('bank.candidate_issued') : t('bank.candidate_purchase') }}
-                  </span>
-                  <span v-if="c.paid" class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-neutral-200 text-neutral-600 ml-1">
-                    {{ t('bank.candidate_paid') }}
-                  </span>
-                  <span v-if="c.currency_mismatch" :title="t('bank.candidate_currency_mismatch_hint')"
-                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-danger-50 text-danger-600 ml-1">
-                    {{ t('bank.candidate_currency_mismatch') }}
-                  </span>
-                  <span class="font-mono text-sm ml-1">{{ c.ref || `#${c.id}` }}</span>
-                  <span v-if="c.party" class="text-xs text-neutral-500 block truncate">{{ c.party }}</span>
-                </span>
-                <span class="text-right whitespace-nowrap shrink-0">
-                  <span class="font-mono text-sm">{{ formatMoney(c.amount, c.currency) }}</span>
-                  <span v-if="c.converted_amount != null" class="text-xs text-neutral-400 block">
-                    ≈ {{ formatMoney(c.converted_amount, c.converted_currency || 'CZK') }}
-                  </span>
-                  <span class="text-xs text-neutral-400 block">{{ formatDate(c.due_date || c.issue_date) }}</span>
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
-
-        <!-- Sloučená úhrada: kombinace faktur jednoho klienta sečtené na částku platby -->
-        <div v-if="matchCtx && matchCtx.amount > 0" class="mb-4">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <div class="text-sm font-medium text-neutral-700">{{ t('bank.split_title') }}</div>
-            <button v-if="splitWindow < 60" type="button" @click="widenSplitWindow"
-              class="cursor-pointer text-xs text-primary-600 hover:underline whitespace-nowrap">
-              {{ t('bank.split_widen', { days: Math.min(60, splitWindow + 7) }) }}
-            </button>
-          </div>
-          <p class="text-xs text-neutral-400 mb-1.5">{{ t('bank.split_hint', { days: splitWindow }) }}</p>
-
-          <!-- Kotva: vyber jednu fakturu, dohledá se zbytek téhož klienta -->
-          <div class="mb-2">
-            <SearchableSelect
-              :model-value="anchorInvoiceId"
-              :options="anchorOptions"
-              :selected-option="anchorSelected"
-              :remote="true"
-              :loading="anchorLoading"
-              :placeholder="t('bank.split_anchor_placeholder')"
-              :loading-label="t('common.loading')"
-              :no-results-label="t('bank.no_candidates')"
-              @search="onAnchorSearch"
-              @update:model-value="(v) => onAnchorSelect(v as number | null)" />
-            <p v-if="anchorInvoiceId" class="text-xs text-primary-600 mt-1">{{ t('bank.split_anchor_active') }}</p>
-          </div>
-
-          <div v-if="loadingSplit" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
-          <div v-else-if="splitSuggestions.length === 0" class="text-xs text-neutral-400 py-2">{{ t('bank.split_none') }}</div>
-          <ul v-else class="space-y-2">
-            <li v-for="(s, idx) in splitSuggestions" :key="idx" class="border border-neutral-200 rounded-md p-2.5">
-              <div class="flex items-center justify-between gap-2 mb-1.5">
-                <span class="text-sm font-medium truncate">{{ s.client_name || t('bank.split_unknown_client') }}</span>
-                <span class="font-mono text-sm"
-                  :class="Math.abs(s.total - Math.abs(matchCtx.amount)) < 1 ? 'text-success-600' : 'text-neutral-600'">
-                  {{ formatMoney(s.total, s.currency) }}
-                </span>
-              </div>
-              <ul class="text-xs text-neutral-500 space-y-0.5 mb-2">
-                <li v-for="inv in s.invoices" :key="inv.id" class="flex items-center justify-between gap-2">
-                  <span class="font-mono truncate">
-                    {{ inv.ref || `#${inv.id}` }}
-                    <span v-if="inv.is_paid"
-                      class="font-sans text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-neutral-200 text-neutral-600 ml-1"
-                      :title="t('bank.split_reconcile_hint')">{{ t('bank.candidate_paid') }}</span>
-                    <span class="text-neutral-400 ml-1">· {{ formatDate(inv.due_date || inv.issue_date) }}</span>
-                  </span>
-                  <span class="font-mono whitespace-nowrap">
-                    {{ formatMoney(inv.amount, inv.currency) }}
-                    <span v-if="inv.converted != null" class="text-neutral-400"> ≈ {{ formatMoney(inv.converted, s.currency) }}</span>
-                  </span>
-                </li>
-              </ul>
-              <button type="button" @click="confirmSuggestion(s)"
-                class="cursor-pointer w-full h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">
-                {{ t('bank.split_match', { count: s.count }) }}
-              </button>
-            </li>
-          </ul>
-        </div>
-
-        <!-- Druhá možnost: ruční zadání VS -->
-        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.match_by_vs') }}</label>
-        <div class="flex gap-2 mb-1">
-          <input v-model="matchVarsymbol" type="text" inputmode="numeric"
-            placeholder="2603001"
-            @keyup.enter="confirmMatch"
-            class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-          <button @click="confirmMatch" :disabled="!matchVarsymbol.trim()"
-            class="cursor-pointer px-4 h-10 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
-            {{ t('bank.match') }}
-          </button>
-        </div>
-        <p class="text-xs text-neutral-500 mb-4">{{ t('bank.vs_hint') }}</p>
-
-        <div v-if="matchError" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500 mb-3">
-          {{ matchError }}
-        </div>
-        <div class="flex justify-end">
-          <button @click="matchingTx = null" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Vytvoření konceptu přijaté faktury z odchozí platby — výběr dodavatele -->
-    <div v-if="createTx" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-        <h3 class="text-lg font-semibold mb-1">{{ t('bank.create_purchase_title') }}</h3>
-        <p class="text-xs text-neutral-500 mb-3">
-          {{ formatMoney(Math.abs(createTx.amount), createTx.currency ?? 'CZK') }} ·
-          {{ formatDate(createTx.posted_at) }}
-          <span v-if="createTx.counterparty_name"> · {{ createTx.counterparty_name }}</span>
-        </p>
-        <VendorPicker ref="vendorPickerRef" v-model="createVendorId" :on-create-new="() => { vendorModalOpen = true }" />
-        <p class="text-xs text-neutral-500 mt-2 mb-4">{{ t('bank.create_purchase_hint') }}</p>
-        <div class="flex justify-end gap-2">
-          <button @click="createTx = null" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button @click="submitCreatePurchase" :disabled="!createVendorId || creatingPi"
-            class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
-            {{ creatingPi ? '…' : t('bank.create_purchase_submit') }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <ClientFormModal v-if="vendorModalOpen"
-      :defaults="{ is_vendor: true, is_customer: false, company_name: createTx?.counterparty_name || '' }"
-      @created="onVendorCreated"
-      @close="vendorModalOpen = false" />
+    <BankMatchModal :actions="bankActions" :fallback-currency="statement.currency" />
+    <BankCreatePurchaseModal :actions="bankActions" />
+    <BankRequestDocModal :actions="bankActions" />
   </div>
 </template>

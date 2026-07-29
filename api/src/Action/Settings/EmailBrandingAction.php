@@ -8,7 +8,10 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\SupplierLogoConverter;
@@ -142,13 +145,15 @@ final class EmailBrandingAction
      */
     public function preview(Request $request, Response $response): Response
     {
-        // Admin role guard — preview čte soubor z disku přes file_get_contents
+        // Admin/demo-read guard — preview čte soubor z disku přes file_get_contents
         // a vrací bytes base64-encoded v inline `<img>`. Bez tohohle guardu by readonly
         // user mohl exfiltrovat libovolný soubor, který admin předem podstrčil přes
         // logo_path mass-assign (CWE-915 + CWE-538, security report @andrejtomci #2).
         // Mass-assign na logo_path je už uzavřený v SettingsAction, ale tohle je
-        // druhá vrstva — preview je čistě admin funkce (live edit brandingu).
-        if (!$this->isAdmin($request)) {
+        // druhá vrstva. Demo smí pouze read-only náhled a logo cesta se validuje níže.
+        $demoCanRead = DemoReadOnlyMiddleware::enabled($request)
+            && RequestAuthorization::allows($request, 'settings.branding', AccessLevel::READ);
+        if (!$this->isAdmin($request) && !$demoCanRead) {
             return Json::error($response, 'forbidden', 'Pouze admin smí prohlížet branding.', 403);
         }
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
@@ -309,8 +314,7 @@ TWIG;
 
     private function isAdmin(Request $request): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return isset($user['role']) && $user['role'] === 'admin';
+        return RequestAuthorization::allows($request, 'settings.branding', AccessLevel::WRITE);
     }
 
     private function defaultProfileId(int $supplierId): ?int

@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Admin;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\InvoiceImportService;
 use MyInvoice\Service\IpMatcher;
@@ -45,7 +47,7 @@ final class ImportAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'utilities.import', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
 

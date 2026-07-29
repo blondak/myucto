@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Auth;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
@@ -101,6 +102,7 @@ final class LoginSessionIssuerTest extends TestCase
             $credentials,
             new MfaPolicyService($config),
             new SessionLockPolicy($config),
+            $this->roleProfileStub(),
         );
         $response = $issuer->issue(
             (new ResponseFactory())->createResponse(),
@@ -145,5 +147,18 @@ final class LoginSessionIssuerTest extends TestCase
         $cookie = $response->getHeaderLine('Set-Cookie');
         self::assertStringContainsString('__Host-myinvoice_session=' . str_repeat('a', 64), $cookie);
         self::assertStringContainsString('HttpOnly; Path=/; Max-Age=3600; SameSite=Lax; Secure', $cookie);
+    }
+
+    /**
+     * MyÚčto posílá roli jako objekt z tabulky `roles`; tenhle test ověřuje
+     * vydání session, ne autorizaci, takže stačí prázdný profil.
+     */
+    private function roleProfileStub(): UserRoleProfile
+    {
+        $roleProfile = $this->createMock(UserRoleProfile::class);
+        $roleProfile->method('forUser')->willReturn(
+            ['id' => 0, 'name' => '', 'type' => '', 'is_active' => false, 'system_key' => null],
+        );
+        return $roleProfile;
     }
 }

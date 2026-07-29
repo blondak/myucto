@@ -15,7 +15,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # = radekhulan/myinvoice
+  IMAGE_NAME: ${{ github.repository }}   # = radekhulan/myucto
 
 # Strategie multi-arch buildu:
 #   1) `build` job běží matrixově per platforma na native runneru (amd64 = ubuntu-latest,
@@ -67,11 +67,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           labels: |
-            org.opencontainers.image.title=MyInvoice.cz
-            org.opencontainers.image.description=Czech invoicing system (PHP 8.5 + Vue 3 + MariaDB), multi-supplier — alpine/nginx
+            org.opencontainers.image.title=MyUcto.cz
+            org.opencontainers.image.description=Czech accounting system (PHP 8.5 + Vue 3 + MariaDB), multi-supplier — alpine/nginx
             org.opencontainers.image.vendor=MyWebdesign.cz s.r.o.
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=LicenseRef-MyUcto-Mixed
 
       - name: Build and push by digest
         id: build
@@ -181,9 +180,6 @@ jobs:
           node-version: '24'
       - uses: pnpm/action-setup@v6
         with:
-          # Pin na konkrétní verzi (shoda s lokálem) — `latest` vytáhlo pnpm 11.12.0,
-          # které padá při čtení pnpm-lock.yaml v9.0 („Cannot use 'in' operator to
-          # search for 'integrity' in undefined"). 11.13.0 je ověřeně funkční.
           version: 11.13.0
 
       - name: Composer install (production)
@@ -214,7 +210,7 @@ jobs:
         # archiv sám sebe modifikuje během čtení ("file changed as we read it",
         # exit 1), protože CWD je `.` v archivu.
         run: |
-          BUNDLE="myinvoice-${{ steps.tag.outputs.tag }}.tar.gz"
+          BUNDLE="myucto-${{ steps.tag.outputs.tag }}.tar.gz"
           TMP_BUNDLE="/tmp/$BUNDLE"
           tar -czf "$TMP_BUNDLE" \
             --exclude='./.git' \
@@ -241,16 +237,31 @@ jobs:
             --exclude='./web/vite.config.ts' \
             --exclude='./web/eslint.config.js' \
             --exclude='*.log' \
-            --transform "s,^\./,myinvoice-${{ steps.tag.outputs.tag }}/," \
+            --transform "s,^\./,myucto-${{ steps.tag.outputs.tag }}/," \
             .
           mv "$TMP_BUNDLE" "$BUNDLE"
           ls -lh "$BUNDLE"
           sha256sum "$BUNDLE" > "$BUNDLE.sha256"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
 
+      # `generate_release_notes: true` — GitHub sám vygeneruje changelog
+      # (commity + přispěvatelé) proti předchozímu tagu. Když repo obsahuje
+      # `.github/release-notes/<tag>.md`, jeho obsah se použije jako úvod
+      # a vygenerovaný changelog se připojí pod něj.
+      - name: Prepare release body
+        run: |
+          NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES" ]; then
+            echo "BODY_PATH=$NOTES" >> "$GITHUB_ENV"
+          else
+            echo "BODY_PATH=" >> "$GITHUB_ENV"
+          fi
+
       - name: Upload bundle to release
         uses: softprops/action-gh-release@v3
         with:
+          generate_release_notes: true
+          body_path: ${{ env.BODY_PATH }}
           files: |
             ${{ env.BUNDLE }}
             ${{ env.BUNDLE }}.sha256

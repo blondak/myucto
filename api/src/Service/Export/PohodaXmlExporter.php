@@ -52,20 +52,21 @@ final class PohodaXmlExporter
     public const NS_INV = 'http://www.stormware.cz/schema/version_2/invoice.xsd';
     public const NS_TYP = 'http://www.stormware.cz/schema/version_2/type.xsd';
 
-    /**
-     * Délkové facety `typ:addressType` z type.xsd. Delší hodnota shodí XSD validaci,
-     * takže se ořezává (mb_substr kvůli diakritice). Adresa je identifikační údaj,
-     * ne částka — zkrácení je přijatelnější než neexportovatelný doklad.
-     */
-    private const ADDR_MAX = [
-        'company' => 255,  // typ:stringCompany
-        'name'    => 64,   // typ:string64
-        'street'  => 64,   // typ:string64
-        'city'    => 45,   // typ:string45
-        'zip'     => 15,   // typ:string15
-        'email'   => 98,   // typ:string98
-        'phone'   => 40,   // typ:string40
+    /** @var array<string,int> */
+    private const PARTNER_FIELD_LIMITS = [
+        'company_name' => 255,
+        'city' => 45,
+        'street' => 64,
+        'zip' => 15,
+        'ic' => 15,
+        'dic' => 18,
+        'phone' => 40,
+        'email' => 98,
     ];
+
+    private const DOCUMENT_NUMBER_LIMIT = 32;
+    private const REFERENCE_CODE_LIMIT = 19;
+    private const ITEM_UNIT_LIMIT = 10;
 
     private readonly InvoiceExportDataResolver $dataResolver;
 
@@ -143,8 +144,8 @@ final class PohodaXmlExporter
         $dataPack->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:typ', self::NS_TYP);
         $dataPack->setAttribute('version', '2.0');
         $dataPack->setAttribute('id', 'myinvoice-' . date('YmdHis'));
-        $dataPack->setAttribute('ico', (string) ($cfg['ic'] ?? ''));
-        $dataPack->setAttribute('application', 'MyInvoice.cz');
+        $dataPack->setAttribute('ico', mb_substr((string) ($cfg['ic'] ?? ''), 0, self::PARTNER_FIELD_LIMITS['ic']));
+        $dataPack->setAttribute('application', 'MyÚčto.cz');
         $dataPack->setAttribute('note', 'Export ' . date('Y-m-d H:i'));
         $dom->appendChild($dataPack);
 
@@ -188,7 +189,7 @@ final class PohodaXmlExporter
             // přidělit interní číslo z agendy přijatých faktur (element vynecháme).
             if (!$isPurchase && $vs !== '') {
                 $num = $dom->createElementNS(self::NS_INV, 'inv:number');
-                $this->el($dom, $num, self::NS_TYP, 'typ:numberRequested', $vs);
+                $this->el($dom, $num, self::NS_TYP, 'typ:numberRequested', mb_substr($vs, 0, self::DOCUMENT_NUMBER_LIMIT));
                 $hdr->appendChild($num);
             }
 
@@ -228,12 +229,12 @@ final class PohodaXmlExporter
             if (!empty($invoice['note_above_items'])) {
                 $this->el($dom, $hdr, self::NS_INV, 'inv:text', mb_substr((string) $invoice['note_above_items'], 0, 240));
             } else {
-                $this->el($dom, $hdr, self::NS_INV, 'inv:text', 'Faktura ' . ($invoice['varsymbol'] ?? ''));
+                $this->el($dom, $hdr, self::NS_INV, 'inv:text', mb_substr('Faktura ' . ($invoice['varsymbol'] ?? ''), 0, 240));
             }
 
             // Per-faktura číslo zakázky (z projektu) — přepíše se po reimportu zpět na project_number
             if (!empty($invoice['project_number'])) {
-                $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', (string) $invoice['project_number']);
+                $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', mb_substr((string) $invoice['project_number'], 0, self::DOCUMENT_NUMBER_LIMIT));
             }
 
             // Účet / středisko / činnost / zakázka (per-supplier)
@@ -256,20 +257,20 @@ final class PohodaXmlExporter
             $client = $isPurchase ? $this->resolveSupplier($invoice) : $this->resolveClient($invoice);
             $partner = $dom->createElementNS(self::NS_INV, 'inv:partnerIdentity');
             $address = $dom->createElementNS(self::NS_TYP, 'typ:address');
-            $this->el($dom, $address, self::NS_TYP, 'typ:company', $this->addr($client['company_name'] ?? '', 'company'));
-            if (!empty($client['ic']))  $this->el($dom, $address, self::NS_TYP, 'typ:ico', (string) $client['ic']);
-            if (!empty($client['dic'])) $this->el($dom, $address, self::NS_TYP, 'typ:dic', (string) $client['dic']);
-            $this->el($dom, $address, self::NS_TYP, 'typ:street', $this->addr($client['street'] ?? '', 'street'));
-            $this->el($dom, $address, self::NS_TYP, 'typ:city',   $this->addr($client['city'] ?? '', 'city'));
-            $this->el($dom, $address, self::NS_TYP, 'typ:zip',    $this->addr($client['zip'] ?? '', 'zip'));
+            $this->el($dom, $address, self::NS_TYP, 'typ:company', $this->partnerField($client, 'company_name'));
+            if (!empty($client['ic']))  $this->el($dom, $address, self::NS_TYP, 'typ:ico', $this->partnerField($client, 'ic'));
+            if (!empty($client['dic'])) $this->el($dom, $address, self::NS_TYP, 'typ:dic', $this->partnerField($client, 'dic'));
+            $this->el($dom, $address, self::NS_TYP, 'typ:street', $this->partnerField($client, 'street'));
+            $this->el($dom, $address, self::NS_TYP, 'typ:city',   $this->partnerField($client, 'city'));
+            $this->el($dom, $address, self::NS_TYP, 'typ:zip',    $this->partnerField($client, 'zip'));
             if (!empty($client['country_iso2'])) {
                 $country = $dom->createElementNS(self::NS_TYP, 'typ:country');
                 $this->el($dom, $country, self::NS_TYP, 'typ:ids', (string) $client['country_iso2']);
                 $address->appendChild($country);
             }
             $email = $client['email'] ?? $client['main_email'] ?? null;
-            if ($email) $this->el($dom, $address, self::NS_TYP, 'typ:email', $this->addr($email, 'email'));
-            if (!empty($client['phone'])) $this->el($dom, $address, self::NS_TYP, 'typ:phone', $this->addr($client['phone'], 'phone'));
+            if ($email) $this->el($dom, $address, self::NS_TYP, 'typ:email', mb_substr((string) $email, 0, self::PARTNER_FIELD_LIMITS['email']));
+            if (!empty($client['phone'])) $this->el($dom, $address, self::NS_TYP, 'typ:phone', $this->partnerField($client, 'phone'));
             $partner->appendChild($address);
             $hdr->appendChild($partner);
 
@@ -294,7 +295,7 @@ final class PohodaXmlExporter
                 // delší popisy ořízneme, jinak XSD validace spadne (mb_substr kvůli diakritice).
                 $this->el($dom, $row, self::NS_INV, 'inv:text', mb_substr((string) ($item['description'] ?? ''), 0, 90));
                 $this->el($dom, $row, self::NS_INV, 'inv:quantity', $this->fmt((float) $item['quantity']));
-                $this->el($dom, $row, self::NS_INV, 'inv:unit', (string) ($item['unit'] ?? 'ks'));
+                $this->el($dom, $row, self::NS_INV, 'inv:unit', mb_substr((string) ($item['unit'] ?? 'ks'), 0, self::ITEM_UNIT_LIMIT));
                 // CoefficientOfRefundables (1 = celé)
                 $this->el($dom, $row, self::NS_INV, 'inv:coefficient', '1.0');
                 // payVAT: false = pricing without VAT in unit price (default)
@@ -406,14 +407,8 @@ final class PohodaXmlExporter
     private function codeRef(\DOMDocument $dom, \DOMElement $parent, string $name, string $code): void
     {
         $wrap = $dom->createElementNS(self::NS_INV, $name);
-        $this->el($dom, $wrap, self::NS_TYP, 'typ:ids', $code);
+        $this->el($dom, $wrap, self::NS_TYP, 'typ:ids', mb_substr($code, 0, self::REFERENCE_CODE_LIMIT));
         $parent->appendChild($wrap);
-    }
-
-    /** Ořízne adresní pole na délkový facet z type.xsd (viz self::ADDR_MAX). */
-    private function addr(mixed $value, string $field): string
-    {
-        return mb_substr(trim((string) $value), 0, self::ADDR_MAX[$field]);
     }
 
     private function el(\DOMDocument $dom, \DOMElement $parent, string $ns, string $name, string $value): \DOMElement
@@ -453,6 +448,11 @@ final class PohodaXmlExporter
     private function resolveSupplier(array $invoice): array
     {
         return $this->dataResolver->supplier($invoice);
+    }
+
+    private function partnerField(array $partner, string $field): string
+    {
+        return mb_substr((string) ($partner[$field] ?? ''), 0, self::PARTNER_FIELD_LIMITS[$field]);
     }
 
     private function fmt(float $value): string

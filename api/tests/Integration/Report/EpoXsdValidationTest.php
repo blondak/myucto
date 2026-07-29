@@ -6,9 +6,9 @@ namespace MyInvoice\Tests\Integration\Report;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
-use MyInvoice\Service\Report\IncomeTaxBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\SouhrnneHlaseniBuilder;
+use MyInvoice\Service\Tax\Return\TaxReturnService;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 use PHPUnit\Framework\TestCase;
 
@@ -62,6 +62,12 @@ final class EpoXsdValidationTest extends TestCase
         $this->conn = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
         $this->supplierId = $this->createSyntheticSupplier();
 
+        $foSupplierId = (int) ($this->conn->pdo()->query(
+            "SELECT id FROM supplier WHERE taxpayer_type = 'fo' ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        $poSupplierId = (int) ($this->conn->pdo()->query(
+            "SELECT id FROM supplier WHERE taxpayer_type = 'po' ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
         $year = (int) date('Y');
         $month = (int) date('n');
 
@@ -73,10 +79,34 @@ final class EpoXsdValidationTest extends TestCase
                 ->build($this->supplierId, $year, $month),
             'dphshv' => fn () => $container->get(SouhrnneHlaseniBuilder::class)
                 ->build($this->supplierId, $year, $month),
-            'dpfdp5' => fn () => $container->get(IncomeTaxBuilder::class)
-                ->build($this->supplierId, $year - 1, 'fo'),
-            'dppdp9' => fn () => $container->get(IncomeTaxBuilder::class)
-                ->build($this->supplierId, $year - 1, 'po'),
+            'dpfdp7' => function () use ($container, $foSupplierId, $year): array {
+                // Skutečná podmínka není „existuje firma typu FO", ale „existuje
+                // FINALIZOVANÉ přiznání se snapshotem" — ostré XML DPFO jde vyrobit
+                // jen z něj (TaxReturnService::buildXml, `final_snapshot_required`).
+                // Dokud tu stála jen kontrola na FO firmu, test po jejím doplnění do
+                // fixture spadl na 409 místo aby se přeskočil.
+                if ($foSupplierId === 0) {
+                    $this->markTestSkipped('V lokální DB není žádná firma typu FO pro DPFO XSD test.');
+                }
+                $hasFinal = $this->conn->pdo()->prepare(
+                    "SELECT 1 FROM income_tax_returns
+                      WHERE supplier_id = ? AND year = ? AND taxpayer_type = 'fo'
+                        AND status = 'final' AND final_snapshot_id IS NOT NULL
+                      LIMIT 1"
+                );
+                $hasFinal->execute([$foSupplierId, $year - 1]);
+                if ($hasFinal->fetchColumn() === false) {
+                    $this->markTestSkipped('FO firma nemá finalizované přiznání za ' . ($year - 1) . ' — ostré XML z něj nejde vyrobit.');
+                }
+
+                return $container->get(TaxReturnService::class)->buildXml($foSupplierId, $year - 1, 'fo');
+            },
+            'dppdp9' => function () use ($container, $poSupplierId, $year): array {
+                if ($poSupplierId === 0) {
+                    $this->markTestSkipped('V lokální DB není žádná firma typu PO pro DPPO XSD test.');
+                }
+                return $container->get(TaxReturnService::class)->buildXml($poSupplierId, $year - 1, 'po');
+            },
         ];
     }
 
@@ -95,30 +125,14 @@ final class EpoXsdValidationTest extends TestCase
         $this->assertBuilderPassesXsd('dphshv');
     }
 
-    /**
-     * DPFO/DPPO jsou MVP foundation — výkaz není kompletní. Test jen že XML
-     * obsahuje validní strukturu (Pisemnost + DPFDP5/DPPDP9 root), ne plnou XSD
-     * validaci (záměrně neúplný výkaz).
-     */
-    public function testDpfdp5ProducesValidXmlStructure(): void
+    public function testDpfdp7PassesXsdValidation(): void
     {
-        if (!$this->validator->hasSchema('dpfdp5')) {
-            $this->markTestSkipped('XSD schema dpfdp5.xsd není v storage/xsd/ — spusť `bash cmd/download-xsd.sh dpfdp5`.');
-        }
-        $result = ($this->builders['dpfdp5'])();
-        $this->assertNotEmpty($result['xml']);
-        $this->assertStringContainsString('<DPFDP5', $result['xml']);
-        $this->assertStringContainsString('<Pisemnost', $result['xml']);
+        $this->assertBuilderPassesXsd('dpfdp7');
     }
 
-    public function testDppdp9ProducesValidXmlStructure(): void
+    public function testDppdp9PassesXsdValidation(): void
     {
-        if (!$this->validator->hasSchema('dppdp9')) {
-            $this->markTestSkipped('XSD schema dppdp9.xsd není v storage/xsd/.');
-        }
-        $result = ($this->builders['dppdp9'])();
-        $this->assertStringContainsString('<DPPDP9', $result['xml']);
-        $this->assertStringContainsString('<Pisemnost', $result['xml']);
+        $this->assertBuilderPassesXsd('dppdp9');
     }
 
     /**

@@ -99,14 +99,25 @@ try {
             ->execute([$defaultCurrencyId, $supplierId]);
     }
 
+    // `role_id` MUSÍ být vyplněné, ne jen legacy enum `role`: autorizace i
+    // ApiTokenService::validate() joinují `roles` přes role_id, takže uživatel
+    // bez něj se tváří jako neexistující (validate vrací null, akce 403).
+    $superadminRoleId = $pdo->query(
+        "SELECT id FROM roles WHERE system_key = 'superadmin' LIMIT 1"
+    )->fetchColumn();
+    if ($superadminRoleId === false) {
+        throw new RuntimeException('Role superadmin chybí — neproběhly migrace rolí?');
+    }
+
     $hasher = $container->get(PasswordHasher::class);
     $pdo->prepare(
-        'INSERT INTO users (email, password_hash, name, role, locale) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO users (email, password_hash, name, role, role_id, locale) VALUES (?, ?, ?, ?, ?, ?)'
     )->execute([
         'fixture@example.invalid',
         $hasher->hash('Fixture-password-42'),
         'Fixture Admin',
         'admin',
+        (int) $superadminRoleId,
         'cs',
     ]);
 

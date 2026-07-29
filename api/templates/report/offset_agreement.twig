@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Dohoda o zápočtu</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #15131D; }
+    .title { font-size: 15pt; font-weight: bold; text-align: center; margin-bottom: 1mm; }
+    .subtitle { text-align: center; font-size: 9pt; color: #555; margin-bottom: 6mm; }
+    .parties { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+    .parties td { vertical-align: top; width: 50%; padding: 2mm 3mm; border: 0.2pt solid #ddd; }
+    .party-label { font-size: 7.5pt; color: #888; text-transform: uppercase; letter-spacing: 0.4pt; }
+    .party-name { font-weight: bold; font-size: 10pt; }
+    .meta { font-size: 8.5pt; color: #555; margin-bottom: 5mm; }
+    .meta strong { color: #15131D; }
+    .sect { font-size: 10pt; font-weight: bold; margin: 4mm 0 1mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+    table.book thead th { font-size: 7.5pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 1mm 1.5mm; font-size: 8.5pt; border-bottom: 0.2pt solid #eee; }
+    .num { text-align: right; }
+    .side-total td { font-weight: bold; border-top: 0.4pt solid #999; }
+    .grand { margin-top: 4mm; padding: 2mm 3mm; background: #f4f4f5; font-size: 10pt; }
+    .grand .num { font-weight: bold; }
+    .note { margin-top: 4mm; font-size: 8.5pt; color: #555; }
+    .sign { width: 100%; margin-top: 16mm; border-collapse: collapse; }
+    .sign td { width: 50%; text-align: center; font-size: 8.5pt; color: #555; padding-top: 10mm;
+        border-top: 0.3pt solid #999; }
+</style>
+</head>
+<body>
+
+<div class="title">Dohoda o vzájemném zápočtu pohledávek a závazků</div>
+<div class="subtitle">č. {{ agreement.document_no }} — dle § 1982 a násl. občanského zákoníku</div>
+
+<table class="parties">
+    <tr>
+        <td>
+            <div class="party-label">Strana 1</div>
+            <div class="party-name">{{ entity.name }}</div>
+            {% if entity.ic %}<div>IČO: {{ entity.ic }}</div>{% endif %}
+            <div>{{ entity.address }}</div>
+        </td>
+        <td>
+            <div class="party-label">Strana 2 (partner)</div>
+            <div class="party-name">{{ partner.name }}</div>
+            {% if partner.ic %}<div>IČO: {{ partner.ic }}</div>{% endif %}
+            <div>{{ partner.address }}</div>
+        </td>
+    </tr>
+</table>
+
+<div class="meta">
+    Datum zápočtu: <strong>{{ agreement.agreement_date|cz_date }}</strong> &nbsp;·&nbsp;
+    Započtená částka: <strong>{{ agreement.total_amount|cz_money }} Kč</strong> &nbsp;·&nbsp;
+    Stav: <strong>{{ agreement.status == 'confirmed' ? 'potvrzeno' : (agreement.status == 'cancelled' ? 'zrušeno' : 'návrh') }}</strong>
+</div>
+
+<div class="sect">Pohledávky (vydané faktury)</div>
+<table class="book">
+    <thead><tr><th class="thl">Doklad</th><th>Započteno (Kč)</th></tr></thead>
+    <tbody>
+        {% for it in receivables %}
+            <tr><td>{{ it.doc_no }}</td><td class="num">{{ it.amount|cz_money }}</td></tr>
+        {% endfor %}
+        <tr class="side-total"><td>Celkem pohledávky</td><td class="num">{{ agreement.total_amount|cz_money }}</td></tr>
+    </tbody>
+</table>
+
+<div class="sect">Závazky (přijaté faktury)</div>
+<table class="book">
+    <thead><tr><th class="thl">Doklad</th><th>Započteno (Kč)</th></tr></thead>
+    <tbody>
+        {% for it in payables %}
+            <tr><td>{{ it.doc_no }}</td><td class="num">{{ it.amount|cz_money }}</td></tr>
+        {% endfor %}
+        <tr class="side-total"><td>Celkem závazky</td><td class="num">{{ agreement.total_amount|cz_money }}</td></tr>
+    </tbody>
+</table>
+
+<div class="grand">
+    <table style="width:100%"><tr>
+        <td>Vzájemné pohledávky a závazky se započítávají do výše</td>
+        <td class="num">{{ agreement.total_amount|cz_money }} Kč</td>
+    </tr></table>
+</div>
+
+{% if agreement.note %}<div class="note">Poznámka: {{ agreement.note }}</div>{% endif %}
+
+<table class="sign">
+    <tr>
+        <td>{{ entity.name }}</td>
+        <td>{{ partner.name }}</td>
+    </tr>
+</table>
+
+</body>
+</html>

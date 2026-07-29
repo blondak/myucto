@@ -123,7 +123,7 @@ final class LogbookSummaryExportService
             'tempDir' => $tmpDir, 'autoPageBreak' => true, ...MpdfFontConfig::options(),
         ]);
         $mpdf->SetTitle('Kniha jízd — souhrn ' . $year);
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->WriteHTML($this->pdfHtml($data, $year, $supplier));
         return $mpdf->Output('', 'S');
     }

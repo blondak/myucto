@@ -17,8 +17,9 @@ export interface BankStatement {
   curr_balance: number
   transaction_count: number
   matched_count: number
-  /** Položky převzaté oficiálním výpisem (match_status='ignored') — u sekundárních zdrojů. */
   ignored_count?: number
+  /** Počet skutečných pohybů bez aktivního účetního zápisu (ignorované položky se nepočítají). */
+  unposted_count: number
   imported_at: string
   has_file: boolean
   /** Je k výpisu přiložené PDF (bank_statements.pdf_content)? */
@@ -28,6 +29,7 @@ export interface BankStatement {
 }
 
 export type MatchStatus = 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
+export type PostingFilter = 'unposted' | 'posted'
 
 export interface BankTransaction {
   id: number
@@ -39,6 +41,10 @@ export interface BankTransaction {
   /** Disponibilní zůstatek účtu z e-mailového avíza (Creditas/Fio/RB); u GPC transakcí null. */
   balance?: number | null
   currency: string | null
+  /** Částka v CZK (u korunového pohybu = amount). null = kurz ke dni pohybu není k dispozici. */
+  amount_czk?: number | null
+  /** Kurz použitý pro amount_czk — týž, jakým se pohyb zaúčtuje (pevný kurz firmy → ČNB). */
+  fx_rate?: number | null
   variable_symbol: string | null
   constant_symbol: string | null
   specific_symbol: string | null
@@ -60,6 +66,34 @@ export interface BankTransaction {
   matched_invoices?: MatchedInvoice[]
   match_status: MatchStatus
   matched_at: string | null
+  /** Datum pohybu nemá otevřené účetní období nebo spadá do účetního zámku. */
+  period_closed?: boolean
+  /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
+  posting?: {
+    status: 'posted' | 'suggested' | null
+    journal_entry_id?: number
+    document_no?: string
+    automated?: boolean
+    automation_source?: 'rule' | 'learned' | 'payment_match' | 'transfer' | 'detector' | 'schedule' | 'knn' | 'llm'
+    suggestion_id?: number
+    suggestion_source?: 'rule' | 'learned' | 'payment_match' | 'transfer' | 'detector' | 'schedule' | 'knn' | 'llm'
+    rule_id?: number
+    rule_name?: string
+    debit_account_code?: string
+    credit_account_code?: string
+    note?: string
+    transfer?: {
+      direction: 'out' | 'in'
+      own_account_label: string | null
+      pair: { tx_id: number; statement_id: number; posted_at: string; entry_id: number | null } | null
+    }
+  } | null
+}
+
+/** Výsledek zaúčtování z hooku match/rematch (M5) — FE toastuje rozdíl „spárováno" × „a zaúčtováno". */
+export interface MatchPostingResult {
+  action: 'posted' | 'suggested' | 'skipped'
+  reason?: string
 }
 
 /** Jedna vystavená faktura uhrazená bankovní transakcí (z invoice_payments). */
@@ -115,10 +149,74 @@ export interface SplitSuggestion {
   invoices: SplitSuggestionInvoice[]
 }
 
+export interface MatchSignalMap { [signal: string]: number }
+
+export interface MatchSuggestionCandidate {
+  type: 'invoice' | 'purchase_invoice' | 'split'
+  invoice_id: number | null
+  invoice_ids: number[] | null
+  purchase_invoice_id: number | null
+  score: number
+  signals: MatchSignalMap
+  flags: string[]
+  fee_amount: number | null
+  overpayment_amount: number | null
+  display: {
+    ref: string | null
+    party: string | null
+    amount: number
+    currency: string
+    due_date: string | null
+    paid: boolean
+  }
+}
+
+export interface MatchSuggestion {
+  id: number
+  bank_transaction_id: number
+  kind: 'single' | 'split' | 'vs_typo' | 'overpayment' | 'fee_gap'
+  reason: string
+  top_score: number
+  margin: number | null
+  deterministic_core: boolean
+  status: string
+  candidates: MatchSuggestionCandidate[]
+  created_at: string
+}
+
+/** Stránkovací meta (jednotný kontrakt list endpointů). */
+export interface PageMeta {
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
+/** Souhrn pro měsíční avízo-výpis (source='email_notice') — počítaný na backendu přes
+ *  VŠECHNY transakce výpisu, nezávisle na stránkování/filtru transakcí v detailu. */
+export interface BankStatementNoticeSummary {
+  balance: number | null
+  balance_at: string | null
+  credit: number
+  debit: number
+}
+
 export interface BankStatementDetail extends BankStatement {
   credit_total: number
   debit_total: number
+  /** Aktuálně načtená stránka transakcí (dle `transactions_meta` + filtru `status`). */
   transactions: BankTransaction[]
+  transactions_meta: PageMeta
+  /** Počet transakcí VÝPISU (ne jen načtené stránky) čekajících na návrh zaúčtování. */
+  pending_posting_count: number
+  notice_summary: BankStatementNoticeSummary | null
+}
+
+export interface BankTransactionsParams {
+  page?: number
+  per_page?: number
+  status?: MatchStatus | ''
+  posting_status?: PostingFilter | ''
 }
 
 export interface ImportResult {
@@ -128,12 +226,7 @@ export interface ImportResult {
   duplicate: boolean
 }
 
-/**
- * Kandidát bankovního účtu při nejednoznačném sdíleném čísle účtu. Nastane, když
- * jednomu číslu účtu odpovídá víc účtů dodavatele — buď různými měnami (#167),
- * nebo různým kódem banky (#206, stejné číslo u dvou bank). `label` už je
- * server-side složený tak, aby oba případy odlišil (měna + číslo/kód banky).
- */
+/** Kandidát účtu při shodném čísle ve více měnách nebo bankách (#167/#206). */
 export interface AmbiguousAccount {
   account_id: number
   code: string
@@ -168,6 +261,10 @@ export interface BankListParams {
   month?: number | ''
   account?: string
   bank_code?: string
+  counterparty_account?: string
+  client_id?: number | ''
+  amount?: number | string | ''
+  posting_status?: 'unposted' | ''
 }
 
 /** Jeden bod měsíční řady zůstatku (nativní měna účtu). */
@@ -194,7 +291,7 @@ export interface AccountBalance {
   /** Datum, ke kterému aktuální stav platí (výpis / avízo). */
   statement_date: string
   /** Odkud aktuální stav pochází: GPC výpis, nebo disponibilní zůstatek z avíza. */
-  current_source: 'gpc' | 'pdf' | 'email_notice'
+  current_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad'
   statement_count: number
   months: AccountBalanceMonth[]
 }
@@ -225,8 +322,19 @@ export const bankApi = {
       ...(params.month !== undefined && params.month !== '' ? { 'filter[month]': params.month } : {}),
       ...(params.account ? { 'filter[account]': params.account } : {}),
       ...(params.bank_code ? { 'filter[bank_code]': params.bank_code } : {}),
+      ...(params.counterparty_account ? { 'filter[counterparty_account]': params.counterparty_account } : {}),
+      ...(params.client_id ? { 'filter[client_id]': params.client_id } : {}),
+      ...(params.amount !== undefined && params.amount !== '' ? { 'filter[amount]': params.amount } : {}),
+      ...(params.posting_status ? { 'filter[posting_status]': params.posting_status } : {}),
     } }).then(r => r.data),
-  get: (id: number) => api.get<BankStatementDetail>(`/bank-statements/${id}`).then(r => r.data),
+  /** Detail výpisu + STRÁNKOVANÁ transakce (`transactions_meta`). Volitelný filtr `status`. */
+  get: (id: number, params: BankTransactionsParams = {}) =>
+    api.get<BankStatementDetail>(`/bank-statements/${id}`, { params: {
+      page: params.page ?? 1,
+      ...(params.per_page ? { per_page: params.per_page } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.posting_status ? { posting_status: params.posting_status } : {}),
+    } }).then(r => r.data),
   /** Přehled zůstatků na účtech dle GPC výpisů (tabulka + měsíční vývoj + CZK součet). */
   accountBalances: () =>
     api.get<AccountBalancesResponse>('/bank-statements/account-balances').then(r => r.data),
@@ -260,14 +368,14 @@ export const bankApi = {
     api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`)
       .then(r => r.data),
   matchManual: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; varsymbol?: string }) =>
-    api.post<{ matched: true; paid_at?: string; purchase_invoice_id?: number }>(`/bank-transactions/${txId}/match`, {
+    api.post<{ matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null }>(`/bank-transactions/${txId}/match`, {
       ...(ref.invoiceId ? { invoice_id: ref.invoiceId } : {}),
       ...(ref.purchaseInvoiceId ? { purchase_invoice_id: ref.purchaseInvoiceId } : {}),
       ...(ref.varsymbol ? { varsymbol: ref.varsymbol } : {}),
     }).then(r => r.data),
   /** Sloučená úhrada: jedna příchozí platba → více vystavených faktur (téhož klienta). */
   matchMultiple: (txId: number, invoiceIds: number[]) =>
-    api.post<{ matched: true; split: true; paid_at?: string; invoice_ids: number[]; final_draft_ids?: number[] }>(
+    api.post<{ matched: true; split: true; paid_at?: string; invoice_ids: number[]; final_draft_ids?: number[]; posting?: MatchPostingResult | null }>(
       `/bank-transactions/${txId}/match`, { invoice_ids: invoiceIds },
     ).then(r => r.data),
   /** Návrhy sloučené úhrady (kombinace faktur jednoho klienta dle částky + okna dní). */
@@ -279,6 +387,16 @@ export const bankApi = {
         ...(opts.window ? { window: opts.window } : {}),
         ...(opts.max ? { max: opts.max } : {}),
       } },
+    ).then(r => r.data),
+  matchSuggestions: (statementId: number) =>
+    api.get<{ suggestions: MatchSuggestion[] }>(`/bank-statements/${statementId}/match-suggestions`).then(r => r.data),
+  acceptMatchSuggestion: (id: number, candidate: number) =>
+    api.post<{ matched: true; posting?: MatchPostingResult | null }>(
+      `/bank-match-suggestions/${id}/accept`, { candidate_index: candidate },
+    ).then(r => r.data),
+  rejectMatchSuggestion: (id: number, reason?: string) =>
+    api.post<{ rejected: true }>(
+      `/bank-match-suggestions/${id}/reject`, reason ? { reason } : {},
     ).then(r => r.data),
   ignore: (txId: number) =>
     api.post<{ ignored: true }>(`/bank-transactions/${txId}/ignore`, {}).then(r => r.data),

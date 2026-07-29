@@ -218,14 +218,32 @@ final class SigningProfileRepository
     public function softDeleteProfile(int $supplierId, int $profileId): bool
     {
         $code = $this->deletedProfileCode($supplierId, $profileId);
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE signing_profiles
-                SET code = ?, deleted_at = CURRENT_TIMESTAMP, is_active = 0
-              WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL'
-        );
-        $stmt->execute([$code, $supplierId, $profileId]);
-
-        return $stmt->rowCount() > 0;
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'UPDATE signing_profiles
+                    SET code = ?, deleted_at = CURRENT_TIMESTAMP, is_active = 0
+                  WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL'
+            );
+            $stmt->execute([$code, $supplierId, $profileId]);
+            $deleted = $stmt->rowCount() > 0;
+            if ($deleted) {
+                $this->deleteCredential($supplierId, $profileId);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            return $deleted;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function profilePdfTsaPasswordEnc(int $supplierId, int $profileId): ?string
@@ -247,7 +265,8 @@ final class SigningProfileRepository
 
     /**
      * @param array{
-     *   certificate_path:string,
+     *   certificate_path?:?string,
+     *   vault_credential_id?:?int,
      *   certificate_fingerprint?:?string,
      *   certificate_subject?:?string,
      *   certificate_email?:?string,
@@ -267,7 +286,16 @@ final class SigningProfileRepository
         ?int $createdBy = null,
     ): void {
         $this->assertProfileExists($supplierId, $profileId);
-        $path = $this->nonEmpty((string) ($data['certificate_path'] ?? ''), 'certificate_path', 255);
+        $path = $this->nullableString($data['certificate_path'] ?? null, 'certificate_path', 255);
+        $vaultCredentialId = isset($data['vault_credential_id'])
+            ? (int) $data['vault_credential_id']
+            : null;
+        if ($vaultCredentialId !== null && $vaultCredentialId <= 0) {
+            $vaultCredentialId = null;
+        }
+        if ($path === null && $vaultCredentialId === null) {
+            throw new \InvalidArgumentException('Certifikát musí mít soubor nebo vazbu na osobní trezor.');
+        }
         $passphrasePolicy = $this->oneOf(
             (string) ($data['passphrase_policy'] ?? 'encrypted_store'),
             self::PASSPHRASE_POLICIES,
@@ -276,11 +304,12 @@ final class SigningProfileRepository
 
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO signing_credentials
-                (profile_id, certificate_path, certificate_fingerprint, certificate_subject,
+                (profile_id, vault_credential_id, certificate_path, certificate_fingerprint, certificate_subject,
                  certificate_email, certificate_valid_from, certificate_valid_to, certificate_usage_json,
                  passphrase_policy, passphrase_profile_id, encrypted_passphrase, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
+                 vault_credential_id = VALUES(vault_credential_id),
                  certificate_path = VALUES(certificate_path),
                  certificate_fingerprint = VALUES(certificate_fingerprint),
                  certificate_subject = VALUES(certificate_subject),
@@ -296,6 +325,7 @@ final class SigningProfileRepository
         );
         $stmt->execute([
             $profileId,
+            $vaultCredentialId,
             $path,
             $data['certificate_fingerprint'] ?? null,
             $data['certificate_subject'] ?? null,
@@ -366,14 +396,13 @@ final class SigningProfileRepository
         return $stmt->rowCount() > 0;
     }
 
-    public function softDeleteCredential(int $supplierId, int $profileId): bool
+    public function deleteCredential(int $supplierId, int $profileId): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE signing_credentials c
+            'DELETE c
+               FROM signing_credentials c
                JOIN signing_profiles p ON p.id = c.profile_id
-                SET c.deleted_at = CURRENT_TIMESTAMP, c.is_active = 0
-              WHERE p.supplier_id = ? AND c.profile_id = ?
-                AND c.deleted_at IS NULL'
+              WHERE p.supplier_id = ? AND c.profile_id = ?'
         );
         $stmt->execute([$supplierId, $profileId]);
 
@@ -436,6 +465,35 @@ final class SigningProfileRepository
                 ? $this->encodeJson($data['signature_config'])
                 : null,
         ]);
+    }
+
+    /**
+     * @param list<array{
+     *   output_type:string,
+     *   usage:string,
+     *   data:array<string,mixed>
+     * }> $settings
+     */
+    public function upsertOutputSettingsAtomic(int $supplierId, array $settings): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            foreach ($settings as $setting) {
+                $this->upsertOutputSetting(
+                    $supplierId,
+                    $setting['output_type'],
+                    $setting['data'],
+                    $setting['usage'],
+                );
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -685,6 +743,7 @@ final class SigningProfileRepository
     {
         return 'SELECT p.*,
                        c.id AS credential_id,
+                       c.vault_credential_id AS credential_vault_id,
                        c.certificate_subject AS credential_certificate_subject,
                        c.certificate_email AS credential_certificate_email,
                        c.certificate_valid_from AS credential_certificate_valid_from,
@@ -713,6 +772,7 @@ final class SigningProfileRepository
             'has_pdf_tsa_password' => ($row['pdf_tsa_password_enc'] ?? null) !== null && (string) $row['pdf_tsa_password_enc'] !== '',
             'pdf_reason' => ($row['pdf_reason'] ?? null) !== null ? (string) $row['pdf_reason'] : null,
             'has_certificate' => ($row['credential_id'] ?? null) !== null,
+            'certificate_source' => ($row['credential_vault_id'] ?? null) !== null ? 'personal_vault' : 'uploaded_file',
             'certificate_subject' => ($row['credential_certificate_subject'] ?? null) !== null ? (string) $row['credential_certificate_subject'] : null,
             'certificate_email' => ($row['credential_certificate_email'] ?? null) !== null ? (string) $row['credential_certificate_email'] : null,
             'certificate_valid_from' => ($row['credential_certificate_valid_from'] ?? null) !== null ? (string) $row['credential_certificate_valid_from'] : null,
@@ -735,7 +795,12 @@ final class SigningProfileRepository
         return [
             'id' => (int) $row['id'],
             'profile_id' => (int) $row['profile_id'],
-            'certificate_path' => (string) $row['certificate_path'],
+            'vault_credential_id' => $row['vault_credential_id'] !== null
+                ? (int) $row['vault_credential_id']
+                : null,
+            'certificate_path' => $row['certificate_path'] !== null
+                ? (string) $row['certificate_path']
+                : null,
             'certificate_fingerprint' => $row['certificate_fingerprint'] !== null ? (string) $row['certificate_fingerprint'] : null,
             'certificate_subject' => $row['certificate_subject'] !== null ? (string) $row['certificate_subject'] : null,
             'certificate_email' => $row['certificate_email'] !== null ? (string) $row['certificate_email'] : null,

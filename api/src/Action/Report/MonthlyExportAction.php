@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\ExportPeriod;
 use MyInvoice\Service\Export\ExportPeriodResolver;
@@ -31,7 +33,7 @@ use Slim\Psr7\Stream;
  *   POST   /api/reports/monthly-export/jobs/{id}/cancel         → zruší job
  *   DELETE /api/reports/monthly-export/jobs/{id}                → smaže job + soubor
  *
- * Přístup: admin / accountant / readonly (export = čtení).
+ * Přístup: čtení exportů vyžaduje READ, spuštění, zrušení a smazání WRITE.
  */
 final class MonthlyExportAction
 {
@@ -61,7 +63,7 @@ final class MonthlyExportAction
     /** POST /start — vytvoří job a spustí worker na pozadí. */
     public function start(Request $request, Response $response): Response
     {
-        if (($err = $this->guard($request, $response)) !== null) return $err;
+        if (($err = $this->guard($request, $response, AccessLevel::WRITE)) !== null) return $err;
         [$period, $errResp] = $this->parsePeriod($request, $response);
         if ($errResp !== null) return $errResp;
         $sid = SupplierGuard::currentId($request);
@@ -183,7 +185,7 @@ final class MonthlyExportAction
     /** POST /jobs/{id}/cancel — zruší běžící/čekající job. */
     public function cancel(Request $request, Response $response, array $args): Response
     {
-        if (($err = $this->guard($request, $response)) !== null) return $err;
+        if (($err = $this->guard($request, $response, AccessLevel::WRITE)) !== null) return $err;
         $id = (int) ($args['id'] ?? 0);
         $sid = SupplierGuard::currentId($request);
         if ($this->jobs->find($id, $sid) === null) {
@@ -196,7 +198,7 @@ final class MonthlyExportAction
     /** DELETE /jobs/{id} — smaže job i jeho soubor. */
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (($err = $this->guard($request, $response)) !== null) return $err;
+        if (($err = $this->guard($request, $response, AccessLevel::WRITE)) !== null) return $err;
         $id = (int) ($args['id'] ?? 0);
         $sid = SupplierGuard::currentId($request);
         $job = $this->jobs->find($id, $sid);
@@ -222,10 +224,13 @@ final class MonthlyExportAction
 
     // ── helpers ────────────────────────────────────────────────────────────
 
-    private function guard(Request $request, Response $response): ?Response
+    private function guard(
+        Request $request,
+        Response $response,
+        AccessLevel $minimum = AccessLevel::READ,
+    ): ?Response
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports.export', $minimum)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         return null;

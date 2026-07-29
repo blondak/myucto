@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Regression guardy pro 4. interní audit (2026-06-12) — externí zneužitelnost dat.
  * Code-inspection (bez DB) — drží fixy uzamčené v CI. Behaviorální pokrytí
- * middleware je v RoleMiddlewareTest / ApiScopeMiddlewareTest.
+ * middleware je v PermissionMiddlewareTest / ApiScopeMiddlewareTest.
  *
  * Nálezy:
  *   NX-P1-1  PAT path allowlist + default scope read
@@ -48,14 +48,13 @@ final class SecurityHardening202606Test extends TestCase
 
     // ---- NX-P2-1 — RBAC -------------------------------------------------------
 
-    public function testRoleMiddlewareHasNoBlanketGetStar(): void
+    public function testPermissionMapHasNoBlanketGetStar(): void
     {
-        $code = $this->src('Middleware/RoleMiddleware.php');
-        // Cílíme na array-element tvar (s čárkou), ne na zmínku v komentáři.
+        $code = $this->src('Security/RoutePermissionMap.php');
         self::assertStringNotContainsString("'GET *',", $code,
-            'RoleMiddleware už nesmí mít blanket GET * pravidlo (čtecí autorizace musí být explicitní)');
+            'RoutePermissionMap nesmí mít blanket GET * pravidlo');
         self::assertStringContainsString('#^/api/purchase-invoices(/|$)#', $code,
-            'Accountant musí mít plnou CRUD na purchase-invoices');
+            'Přijaté faktury musí mít explicitní route mapování');
     }
 
     // ---- NX-P2-2 — approval atomicity + rate-limit ----------------------------

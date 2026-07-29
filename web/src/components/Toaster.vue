@@ -28,6 +28,8 @@ function bgClass(type: string): string {
           :class="bgClass(t.type)"
           @click="dismiss(t.id)">
           <span class="flex-1 whitespace-pre-line">{{ t.text }}</span>
+          <button v-if="t.action" type="button" class="font-semibold underline whitespace-nowrap"
+            @click.stop="t.action.handler(); dismiss(t.id)">{{ t.action.label }}</button>
           <span class="text-lg leading-none opacity-60">×</span>
         </div>
       </transition-group>

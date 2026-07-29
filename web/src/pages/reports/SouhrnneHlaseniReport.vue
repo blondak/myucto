@@ -5,8 +5,11 @@ import { reportsApi } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n()
+const auth = useAuthStore()
 
 const now = new Date()
 const year = ref(now.getFullYear())
@@ -71,19 +74,6 @@ onMounted(loadPreview)
 
 <template>
   <div class="max-w-5xl">
-    <!-- ⚠️ Disclaimer -->
-    <div class="bg-danger-50 border-2 border-danger-500 rounded-lg p-4 mb-4">
-      <div class="flex items-start gap-3">
-        <svg class="w-6 h-6 text-danger-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-1-8a1 1 0 0 0-1 1v3a1 1 0 0 0 2 0V6a1 1 0 0 0-1-1z" clip-rule="evenodd"/>
-        </svg>
-        <div class="text-sm text-danger-700">
-          <p class="font-semibold mb-1">{{ t('reports.disclaimer_title') }}</p>
-          <p>{{ t('reports.disclaimer_body') }}</p>
-        </div>
-      </div>
-    </div>
-
     <!-- Topbar -->
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
@@ -118,9 +108,9 @@ onMounted(loadPreview)
             <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
           </select>
         </template>
-        <button type="button" @click="downloadXml" :disabled="loading || !preview"
-          class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        <button v-if="auth.canRead('reports.export')" type="button" @click="downloadXml" :disabled="loading || !preview"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('reports.shv.download_xml') }}
         </button>
       </div>

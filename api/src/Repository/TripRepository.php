@@ -20,19 +20,7 @@ final class TripRepository
      */
     public function listForTenant(int $supplierId, array $filters = []): array
     {
-        $where = ['t.supplier_id = ?'];
-        $params = [$supplierId];
-        if (!empty($filters['car_id']))      { $where[] = 't.car_id = ?';      $params[] = (int) $filters['car_id']; }
-        if (!empty($filters['category_id'])) { $where[] = 't.category_id = ?'; $params[] = (int) $filters['category_id']; }
-        if (!empty($filters['year']))        { $where[] = 'YEAR(t.trip_date) = ?';  $params[] = (int) $filters['year']; }
-        if (!empty($filters['month']))       { $where[] = 'MONTH(t.trip_date) = ?'; $params[] = (int) $filters['month']; }
-        if (!empty($filters['date_from']))   { $where[] = 't.trip_date >= ?';  $params[] = (string) $filters['date_from']; }
-        if (!empty($filters['date_to']))     { $where[] = 't.trip_date <= ?';  $params[] = (string) $filters['date_to']; }
-        if (!empty($filters['q'])) {
-            $where[] = '(t.purpose LIKE ? OR t.origin LIKE ? OR t.destination LIKE ?)';
-            $like = '%' . $filters['q'] . '%';
-            $params[] = $like; $params[] = $like; $params[] = $like;
-        }
+        [$where, $params] = $this->buildWhere($supplierId, $filters);
         $sql = 'SELECT t.*, c.registration AS car_registration, c.name AS car_name,
                        tc.label AS category_label, tc.is_private AS category_is_private
                   FROM trips t
@@ -43,6 +31,77 @@ final class TripRepository
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Stránkovaná varianta pro list endpoint — COUNT(*) bez LIMIT + data s LIMIT/OFFSET.
+     *
+     * @param array{car_id?:int, category_id?:int, year?:int, month?:int, date_from?:string, date_to?:string, q?:string} $filters
+     * @return array{0:list<array<string,mixed>>, 1:int} [rows, total]
+     */
+    public function listPaged(int $supplierId, array $filters, int $perPage, int $offset): array
+    {
+        [$where, $params] = $this->buildWhere($supplierId, $filters);
+        $whereSql = implode(' AND ', $where);
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM trips t WHERE ' . $whereSql);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        // LIMIT/OFFSET inlinujeme jako validované inty (vzor StockItemRepository::list /
+        // DocumentRepository::search) — native prepared statements neumí LIMIT/OFFSET jako parametr.
+        $sql = 'SELECT t.*, c.registration AS car_registration, c.name AS car_name,
+                       tc.label AS category_label, tc.is_private AS category_is_private
+                  FROM trips t
+                  JOIN cars c ON c.id = t.car_id
+             LEFT JOIN trip_categories tc ON tc.id = t.category_id
+                 WHERE ' . $whereSql . '
+              ORDER BY t.trip_date DESC, t.id DESC
+                 LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $rows = array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return [$rows, $total];
+    }
+
+    /**
+     * Distinct roky jízd pro dropdown filtru (scope = supplier [+ auto], NE aktuální rok/měsíc
+     * filtr — ať dropdown při výběru roku nezkolabuje na jednu položku). Vzor: BankStatementAction.
+     *
+     * @return list<int>
+     */
+    public function distinctYears(int $supplierId, ?int $carId = null): array
+    {
+        $where = ['supplier_id = ?'];
+        $params = [$supplierId];
+        if ($carId !== null) { $where[] = 'car_id = ?'; $params[] = $carId; }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT YEAR(trip_date) AS y FROM trips WHERE ' . implode(' AND ', $where) . ' ORDER BY y DESC'
+        );
+        $stmt->execute($params);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * @param array{car_id?:int, category_id?:int, year?:int, month?:int, date_from?:string, date_to?:string, q?:string} $filters
+     * @return array{0:list<string>, 1:list<mixed>} [where, params]
+     */
+    private function buildWhere(int $supplierId, array $filters): array
+    {
+        $where = ['t.supplier_id = ?'];
+        $params = [$supplierId];
+        if (!empty($filters['car_id']))      { $where[] = 't.car_id = ?';      $params[] = (int) $filters['car_id']; }
+        if (!empty($filters['category_id'])) { $where[] = 't.category_id = ?'; $params[] = (int) $filters['category_id']; }
+        if (!empty($filters['year']))        { $y = (int) $filters['year']; $where[] = 't.trip_date >= ? AND t.trip_date < ?'; $params[] = sprintf('%04d-01-01', $y); $params[] = sprintf('%04d-01-01', $y + 1); }
+        if (!empty($filters['month']))       { $where[] = 'MONTH(t.trip_date) = ?'; $params[] = (int) $filters['month']; }
+        if (!empty($filters['date_from']))   { $where[] = 't.trip_date >= ?';  $params[] = (string) $filters['date_from']; }
+        if (!empty($filters['date_to']))     { $where[] = 't.trip_date <= ?';  $params[] = (string) $filters['date_to']; }
+        if (!empty($filters['q'])) {
+            $where[] = '(t.purpose LIKE ? OR t.origin LIKE ? OR t.destination LIKE ?)';
+            $like = '%' . $filters['q'] . '%';
+            $params[] = $like; $params[] = $like; $params[] = $like;
+        }
+        return [$where, $params];
     }
 
     public function find(int $id, int $supplierId): ?array

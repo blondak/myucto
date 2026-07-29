@@ -1,0 +1,21 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+CHYBÍ DOKLAD — ČEKÁME NA VÁS
+=============================
+
+Dobrý den,
+
+ve firmě {{ supplier_name }} stále čekáme na doklad, o který jsme vás požádali
+{{ requested_days_ago }} {{ requested_days_ago == 1 ? 'den' : (requested_days_ago < 5 ? 'dny' : 'dní') }} zpět:
+
+Chybí:  {{ description }}
+{% if amount %}Částka: {{ amount|number_format(2, ',', ' ') }} Kč
+{% endif %}{% if deadline %}Termín: {{ deadline|date('j.n.Y') }}
+{% endif %}
+{% if portal_link %}
+Nahrát doklad: {{ portal_link }}
+{% endif %}
+Stačí vyfotit nebo naskenovat doklad a nahrát ho přes klientský portál — o zbytek
+se postaráme my.
+{% endblock %}

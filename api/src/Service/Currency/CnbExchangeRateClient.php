@@ -38,7 +38,7 @@ final class CnbExchangeRateClient
     public function __construct(
         private readonly Connection $db,
         private readonly LoggerInterface $logger,
-        private readonly ?Config $config = null,
+        private readonly Config $config,
     ) {}
 
     /**
@@ -81,6 +81,12 @@ final class CnbExchangeRateClient
                 ];
             }
 
+            // Demo používá pouze existující cache: žádný odchozí HTTP provoz ani
+            // doplňování exchange_rates z read-only GET požadavků.
+            if ($this->isDemo()) {
+                continue;
+            }
+
             // Fetch + parse
             $rates = $this->fetchAndParse($tryDate);
             if ($rates !== null) {
@@ -98,7 +104,7 @@ final class CnbExchangeRateClient
         }
 
         // 3) Last-known fallback — vezmeme nejnovější známý kurz dané měny z DB.
-        $latest = $this->latestKnown($code);
+        $latest = $this->latestKnown($code, $issueDate->format('Y-m-d'));
         if ($latest !== null) {
             return [
                 'rate'          => $latest['rate'],
@@ -151,6 +157,8 @@ final class CnbExchangeRateClient
                     'source' => 'cache',
                 ];
             }
+
+            if ($this->isDemo()) continue;
 
             $rates = $this->fetchAndParse($tryDate);
             if ($rates === null) continue;
@@ -306,18 +314,23 @@ final class CnbExchangeRateClient
         }
     }
 
+    private function isDemo(): bool
+    {
+        return (bool) $this->config->get('demo.enabled', false);
+    }
+
     /**
      * @return array{rate: float, rate_date: string}|null
      */
-    private function latestKnown(string $code): ?array
+    private function latestKnown(string $code, string $notAfter): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT rate, rate_date FROM exchange_rates
-              WHERE currency_code = ?
+              WHERE currency_code = ? AND rate_date <= ?
            ORDER BY rate_date DESC
               LIMIT 1'
         );
-        $stmt->execute([$code]);
+        $stmt->execute([$code, $notAfter]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($row === false) return null;
         return [

@@ -41,12 +41,22 @@ onMounted(async () => {
 
 const isVatPayer = computed(() => summary.value?.is_vat_payer ?? false)
 
-// Registrační limity DPH (§ 6 ZDPH, novela účinná od 1. 1. 2025) — testují se za KALENDÁŘNÍ rok:
-//   > 2 000 000 Kč → plátcem od 1. ledna následujícího roku (lze i dobrovolně dřív)
-//   > 2 536 500 Kč → plátcem ze zákona od dne následujícího po překročení
-const VAT_REG_THRESHOLD = 2_000_000
-const VAT_REG_THRESHOLD_IMMEDIATE = 2_536_500
-const VAT_REG_NEAR = VAT_REG_THRESHOLD * 0.8
+// Registrační limity DPH (§ 4a ZDPH) — testují se za KALENDÁŘNÍ rok:
+//   > dolní limit → plátcem od 1. ledna následujícího roku (lze i dobrovolně dřív)
+//   > horní limit → plátcem ze zákona od dne následujícího po překročení
+//
+// Prahy chodí z API, protože jsou ROČNÍKOVÉ: do 2024 platil jediný limit 2 000 000 Kč,
+// od 2025 přibyl druhý (2 536 500 Kč). Natvrdo zapsané by nad daty roku 2024 ukazovaly
+// práh, který tehdy neplatil. Fallback drží čísla platná od 2025 pro případ starého API.
+const vatRegLimits = computed(() => summary.value?.vat_registration_limits ?? {
+  low: 2_000_000,
+  high: 2_536_500,
+  near: 1_600_000,
+  year: summary.value?.year ?? new Date().getFullYear(),
+})
+const VAT_REG_THRESHOLD = computed(() => vatRegLimits.value.low)
+const VAT_REG_THRESHOLD_IMMEDIATE = computed(() => vatRegLimits.value.high)
+const VAT_REG_NEAR = computed(() => vatRegLimits.value.near)
 
 /** Obrat za aktuální kalendářní rok (CZK) — základ pro test registrační povinnosti k DPH. */
 const obratCzkThisYear = computed<number | null>(() => {
@@ -54,7 +64,9 @@ const obratCzkThisYear = computed<number | null>(() => {
   return cz ? cz.this_year : null
 })
 const vatRegPct = computed<number | null>(() =>
-  obratCzkThisYear.value !== null ? Math.round((obratCzkThisYear.value / VAT_REG_THRESHOLD) * 100) : null
+  obratCzkThisYear.value !== null && VAT_REG_THRESHOLD.value > 0
+    ? Math.round((obratCzkThisYear.value / VAT_REG_THRESHOLD.value) * 100)
+    : null
 )
 
 const statusCountsProjects = computed<Record<string, number>>(() => {

@@ -15,7 +15,18 @@
         <testsuite name="Architecture">
             <directory>tests/Architecture</directory>
         </testsuite>
+        <!-- Invarianty (L3): tvrzení, která platí nezávisle na datech. Neseedují nic,
+             měří databázi tak, jak je — chytí i to, co do dat dostala cesta, na kterou
+             žádný scénářový test nedosáhne (backfill, import, ruční zásah). -->
+        <testsuite name="Invariants">
+            <directory>tests/Invariants</directory>
+        </testsuite>
     </testsuites>
+    <!-- Sdílené DB spojení testovacího běhu potřebuje po každém testu úklid session
+         stavu + hlasité nahlášení rozdělané transakce. Viz SharedTestConnectionGuard. -->
+    <extensions>
+        <bootstrap class="MyInvoice\Tests\Support\SharedTestConnectionGuard"/>
+    </extensions>
     <source>
         <include>
             <directory suffix=".php">src</directory>

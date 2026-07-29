@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Section74bCorrectionRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\Tax\BadDebt\Section74bService;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
@@ -24,6 +27,7 @@ final class DphBookBuilderTest extends TestCase
 {
     private PDO $pdo;
     private DphBookBuilder $builder;
+    private Section74bService $section74b;
 
     protected function setUp(): void
     {
@@ -39,7 +43,12 @@ final class DphBookBuilderTest extends TestCase
         $ref->getProperty('pdo')->setValue($conn, $this->pdo);
 
         $taxConstants = new TaxConstantsRepository($conn);
-        $this->builder = new DphBookBuilder($conn, new VatLedgerService($conn, $taxConstants), $taxConstants);
+        $this->section74b = new Section74bService(
+            $conn,
+            new Section74bCorrectionRepository($conn),
+            new ActivityLogger($conn),
+        );
+        $this->builder = new DphBookBuilder($conn, new VatLedgerService($conn, $taxConstants), $taxConstants, $this->section74b);
     }
 
     public function testReverseChargeNetsToZeroInBalance(): void
@@ -75,6 +84,65 @@ final class DphBookBuilderTest extends TestCase
         $this->assertSame(0.0, $r['totals']['vat_balance']);
     }
 
+    public function testSection74bReductionLowersDeductionInBook(): void
+    {
+        // Normální tuzemský odpočet 21 % v období: základ 10 000, DPH 2 100 → ř.40 (sekce 15.040).
+        $this->insertReceivedInvoice(20, 200, '2026-05-05', 'PF-DOM-1', 10000.0, 2100.0, '40');
+        // Doklad s odpočtem uplatněným DŘÍVE (mimo období — DUZP 2025-01, do květnové knihy sám
+        // nevstupuje), za který je v období 2026-05 zaevidováno snížení §74b celého odpočtu 2 100.
+        $this->insertReceivedInvoice(30, 200, '2025-01-15', 'PF-74B-1', 10000.0, 2100.0, '40');
+        $this->insertS74bCorrection(30, 2026, 5, 'reduction', 2100.0, 2100.0);
+
+        // periodCorrectionLines: snížení → ř.40 (21 %) základ i daň ZÁPORNĚ.
+        $lines = $this->section74b->periodCorrectionLines(1, 2026, 5, 'monthly');
+        $this->assertSame(-2100.0, $lines['basic']['vat'], 'snížení §74b je záporná daň v ř.40');
+        $this->assertSame(-10000.0, $lines['basic']['base']);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+
+        $section = null;
+        foreach ($r['sections'] as $s) {
+            if ($s['key'] === '15.040') {
+                $section = $s;
+            }
+        }
+        $this->assertNotNull($section, 'sekce 15.040 (odpočet 21 %) musí existovat');
+        // Součet sekce = normální odpočet 2 100 + korekce §74b (−2 100) = 0.
+        $this->assertSame(0.0, round($section['subtotal_vat'], 2));
+        // received (odpočet) sedí s ř.40 po korekci = 2 100 + basic.vat.
+        $this->assertSame(
+            round(2100.0 + $lines['basic']['vat'], 2),
+            round($r['totals']['received']['vat'], 2),
+            'odpočet Knihy DPH musí sedět s ř.40 DPHDP3 po §74b korekci'
+        );
+
+        // §74b má vlastní řádek se záporným odpočtem, označený jako oprava (KH B.2).
+        $s74bRow = null;
+        foreach ($section['rows'] as $row) {
+            if ((int) $row['invoice_id'] === 30) {
+                $s74bRow = $row;
+            }
+        }
+        $this->assertNotNull($s74bRow, '§74b korekce má vlastní řádek v 15.040');
+        $this->assertSame(-2100.0, round($s74bRow['vat'], 2), 'snížení odpočtu = záporná daň');
+        $this->assertSame('B.2', $s74bRow['kh_section'], '§74b doklad se v Knize DPH značí KH B.2');
+    }
+
+    public function testNoSection74bCorrectionsLeavesBookUnchanged(): void
+    {
+        // Jen normální odpočet, žádná evidovaná korekce §74b → sekce beze změny.
+        $this->insertReceivedInvoice(21, 200, '2026-05-05', 'PF-DOM-2', 10000.0, 2100.0, '40');
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+
+        $this->assertSame(2100.0, round($r['totals']['received']['vat'], 2));
+        foreach ($r['sections'] as $s) {
+            foreach ($s['rows'] as $row) {
+                $this->assertStringNotContainsStringIgnoringCase('§74b', (string) ($row['description'] ?? ''));
+            }
+        }
+    }
+
     // ───── helpers ───────────────────────────────────────────────────────────
 
     private function createSchema(): void
@@ -105,26 +173,57 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->exec("CREATE TABLE purchase_invoices (
             id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, vendor_id INTEGER NOT NULL, varsymbol TEXT NULL,
             vendor_invoice_number TEXT NULL, document_kind TEXT NULL, issue_date TEXT NOT NULL, tax_date TEXT NULL,
+            received_at TEXT NULL, received_at_source TEXT NOT NULL DEFAULT 'import',
             currency_id INTEGER NOT NULL, exchange_rate REAL NULL, reverse_charge INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'received', vat_classification_code TEXT NULL,
             vat_deduction TEXT NOT NULL DEFAULT 'full', vat_deduction_percent REAL NOT NULL DEFAULT 100,
-            is_fixed_asset INTEGER NOT NULL DEFAULT 0, total_with_vat REAL NOT NULL DEFAULT 0
+            is_fixed_asset INTEGER NOT NULL DEFAULT 0, total_without_vat REAL NOT NULL DEFAULT 0,
+            total_vat REAL NOT NULL DEFAULT 0, total_with_vat REAL NOT NULL DEFAULT 0,
+            parent_purchase_invoice_id INTEGER NULL
+        )");
+        $this->pdo->exec("CREATE TABLE vat_s74b_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER NOT NULL,
+            purchase_invoice_id INTEGER NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL,
+            movement TEXT NOT NULL, vat_amount REAL NOT NULL, claimed_deduction_vat REAL NOT NULL,
+            unpaid_ratio REAL NOT NULL, state TEXT NOT NULL, note TEXT NULL, created_by INTEGER NULL
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");
+        $this->pdo->exec("CREATE TABLE purchase_invoice_vat_allocations (
+            id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL DEFAULT 1, purchase_invoice_id INTEGER NOT NULL,
+            description TEXT NULL, vat_rate REAL NOT NULL,
+            base_amount REAL NOT NULL, vat_amount REAL NOT NULL,
+            vat_classification_code TEXT NULL, vat_deduction TEXT NOT NULL DEFAULT 'full',
+            vat_deduction_percent REAL NOT NULL DEFAULT 100
+        )");
         $this->pdo->exec("CREATE TABLE invoices (
             id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, client_id INTEGER NULL, varsymbol TEXT NULL,
             issue_date TEXT NOT NULL, tax_date TEXT NULL, currency_id INTEGER NOT NULL, exchange_rate REAL NULL,
             reverse_charge INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'issued',
-            invoice_type TEXT NOT NULL DEFAULT 'invoice', vat_classification_code TEXT NULL, total_with_vat REAL NOT NULL DEFAULT 0
+            invoice_type TEXT NOT NULL DEFAULT 'invoice', vat_classification_code TEXT NULL, total_with_vat REAL NOT NULL DEFAULT 0,
+            effective_tax_date TEXT GENERATED ALWAYS AS (COALESCE(tax_date, issue_date)) STORED
         )");
         $this->pdo->exec("CREATE TABLE invoice_items (
             id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL, oss_applicable INTEGER NOT NULL DEFAULT 0
+        )");
+
+        // Pokladna (mini-epic #14) — VatLedgerService::fetchCash() JOINuje tyto tabulky.
+        // Prázdné → žádné cash řádky (chování neutrální k faktury-only testům).
+        $this->pdo->exec("CREATE TABLE cash_documents (
+            id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, doc_number TEXT NULL,
+            status TEXT NOT NULL DEFAULT 'draft', doc_type TEXT NOT NULL, vat_mode TEXT NOT NULL DEFAULT 'none',
+            tax_date TEXT NULL, issue_date TEXT NOT NULL, total_amount REAL NOT NULL DEFAULT 0,
+            partner_name TEXT NULL, partner_dic TEXT NULL, description TEXT NULL,
+            invoice_id INTEGER NULL, purchase_invoice_id INTEGER NULL
+        )");
+        $this->pdo->exec("CREATE TABLE cash_document_vat_lines (
+            id INTEGER PRIMARY KEY, cash_document_id INTEGER NOT NULL, vat_rate REAL NOT NULL,
+            base_amount REAL NOT NULL, vat_amount REAL NOT NULL, vat_classification_code TEXT NULL
         )");
     }
 
@@ -134,6 +233,7 @@ final class DphBookBuilderTest extends TestCase
             ['1',   'Sale 21 %',           'sale',     '1',  null, 'A.4', 21.0, 0],
             ['24',  'Služba ze 3. země',   'purchase', '12', '43', null, 21.0, 1],
             ['24e', 'Služba z EU',         'purchase', '5',  '43', null, 21.0, 1],
+            ['40',  'Tuzemsko 21 %',       'purchase', '40', null, 'B.2', 21.0, 0],
         ];
         $stmt = $this->pdo->prepare("INSERT INTO vat_classifications
             (supplier_id, code, label, direction, dphdp3_line, dphdp3_line_secondary, kh_section, vat_rate, is_reverse_charge, display_order, archived)
@@ -159,5 +259,23 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code)
             VALUES (?, ?, ?, 'služba', ?, ?, ?)")
             ->execute([$id, $id, $rate, $base, $vat, $code]);
+    }
+
+    private function insertReceivedInvoice(int $id, int $vendorId, string $taxDate, string $vendorInvoiceNumber, float $base, float $vat, string $code): void
+    {
+        $this->pdo->prepare("INSERT INTO purchase_invoices (id, supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind, issue_date, tax_date, currency_id, exchange_rate, reverse_charge, status, vat_classification_code, vat_deduction, vat_deduction_percent, total_without_vat, total_vat, total_with_vat)
+            VALUES (?, 1, ?, ?, ?, 'invoice', ?, ?, 1, 1, 0, 'received', ?, 'full', 100, ?, ?, ?)")
+            ->execute([$id, $vendorId, (string) $id, $vendorInvoiceNumber, $taxDate, $taxDate, $code, $base, $vat, $base + $vat]);
+        $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code)
+            VALUES (?, ?, 21.0, 'tuzemsko', ?, ?, ?)")
+            ->execute([$id, $id, $base, $vat, $code]);
+    }
+
+    private function insertS74bCorrection(int $purchaseInvoiceId, int $year, int $month, string $movement, float $vatAmount, float $claimed): void
+    {
+        $this->pdo->prepare("INSERT INTO vat_s74b_corrections
+            (supplier_id, purchase_invoice_id, period_year, period_month, movement, vat_amount, claimed_deduction_vat, unpaid_ratio, state, note, created_by)
+            VALUES (1, ?, ?, ?, ?, ?, ?, 1.0, 'corrected', NULL, NULL)")
+            ->execute([$purchaseInvoiceId, $year, $month, $movement, $vatAmount, $claimed]);
     }
 }

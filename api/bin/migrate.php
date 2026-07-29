@@ -15,6 +15,15 @@ declare(strict_types=1);
  *   php api/bin/migrate.php                # migrace + auto-backfill
  *   php api/bin/migrate.php --status       # jen stav, žádná akce
  *   php api/bin/migrate.php --no-backfills # migrace BEZ auto-backfillu
+ *   php api/bin/migrate.php --until=1073_x.sql # aplikovat nejvýše zadanou migraci
+ *   php api/bin/migrate.php --below=1000       # jen migrace s číselnou předponou < 1000
+ *   php api/bin/migrate.php --only=1000_user_suppliers.sql,1121_price_list_items.sql
+ *
+ * `--below` je stabilní alternativa k `--until` — neváže se na konkrétní jméno
+ * souboru, které se s každou upstream migrací posouvá. `--below=1000` = přesně
+ * upstreamové schéma MyInvoice (MyÚčto začíná na 1000). `--only` aplikuje jen
+ * vyjmenované migrace; obojí je určené pro převod dat z MyInvoice (viz
+ * manual/06_Prevod_z_MyInvoice.md), ne pro běžný provoz.
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -47,6 +56,85 @@ $applied = array_flip($applied);
 
 $files = glob($migrationsDir . '/*.sql');
 sort($files, SORT_STRING);
+
+$until = null;
+$below = null;
+$only  = null;
+foreach ($argv as $arg) {
+    if (str_starts_with($arg, '--until=')) {
+        $until = basename(substr($arg, strlen('--until=')));
+    } elseif (str_starts_with($arg, '--below=')) {
+        $raw = trim(substr($arg, strlen('--below=')));
+        if (!ctype_digit($raw)) {
+            fwrite(STDERR, "--below vyžaduje celé číslo, dostal: {$raw}\n");
+            exit(2);
+        }
+        $below = (int) $raw;
+    } elseif (str_starts_with($arg, '--only=')) {
+        $list = array_values(array_filter(array_map(
+            static fn (string $n): string => basename(trim($n)),
+            explode(',', substr($arg, strlen('--only=')))
+        )));
+        if (!$list) {
+            fwrite(STDERR, "--only vyžaduje aspoň jeden název migrace.\n");
+            exit(2);
+        }
+        $only = $list;
+    }
+}
+
+if ($only !== null && ($until !== null || $below !== null)) {
+    fwrite(STDERR, "--only nelze kombinovat s --until ani --below.\n");
+    exit(2);
+}
+
+if ($until !== null) {
+    $untilIndex = array_search($until, array_map('basename', $files), true);
+    if ($untilIndex === false) {
+        fwrite(STDERR, "Unknown migration for --until: {$until}\n");
+        exit(2);
+    }
+    $files = array_slice($files, 0, $untilIndex + 1);
+}
+
+if ($below !== null) {
+    // Číselná předpona; připouští i písmenné vsuvky (0026a_…, 0026c_…), které
+    // se do řady dostaly dodatečně. Soubor BEZ číselné předpony neumíme zařadit
+    // — radši spadnout než ho tiše vynechat a postavit děravé schéma.
+    $unnumbered = [];
+    $selected   = [];
+    foreach ($files as $f) {
+        $name = basename($f);
+        if (preg_match('/^(\d+)[a-z]*_/i', $name, $m) !== 1) {
+            $unnumbered[] = $name;
+            continue;
+        }
+        if ((int) $m[1] < $below) {
+            $selected[] = $f;
+        }
+    }
+    if ($unnumbered) {
+        fwrite(STDERR, "--below={$below}: tyto migrace nemají číselnou předponu a nelze je zařadit:\n  "
+            . implode("\n  ", $unnumbered) . "\n");
+        exit(2);
+    }
+    if (!$selected) {
+        fwrite(STDERR, "--below={$below}: žádná migrace tomu neodpovídá.\n");
+        exit(2);
+    }
+    $files = $selected;
+}
+
+if ($only !== null) {
+    $known   = array_map('basename', $files);
+    $unknown = array_values(array_diff($only, $known));
+    if ($unknown) {
+        fwrite(STDERR, "Unknown migration for --only: " . implode(', ', $unknown) . "\n");
+        exit(2);
+    }
+    // Pořadí drží abecedně seřazený $files, ne pořadí na příkazové řádce.
+    $files = array_values(array_filter($files, static fn (string $f): bool => in_array(basename($f), $only, true)));
+}
 
 $statusOnly = in_array('--status', $argv, true);
 

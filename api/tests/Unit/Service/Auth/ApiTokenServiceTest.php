@@ -32,7 +32,7 @@ final class ApiTokenServiceTest extends TestCase
             $config = Config::load($rootDir);
             $this->db = new Connection($config);
             $redis = new RedisFactory($config);
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             $this->markTestSkipped('DB unavailable: ' . $e->getMessage());
         }
         $this->svc = new ApiTokenService($this->db, $redis);

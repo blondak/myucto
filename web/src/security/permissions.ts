@@ -1,0 +1,37 @@
+export const PERMISSION_KEYS = [
+  'dashboard', 'dashboard.portfolio',
+  'clients', 'clients.create', 'clients.archive', 'clients.public_links',
+  'projects', 'projects.create', 'projects.archive',
+  'invoices', 'invoices.create', 'invoices.issue', 'invoices.send',
+  'invoices.reminder', 'invoices.mark_paid', 'invoices.cancel', 'invoices.clone',
+  'invoices.delete', 'invoices.approval',
+  'purchase_invoices', 'purchase_invoices.create', 'purchase_invoices.transition',
+  'purchase_invoices.scan', 'purchase_invoices.payment_orders', 'purchase_invoices.delete',
+  'recurring', 'recurring.create', 'recurring.run', 'recurring.pause', 'recurring.delete',
+  'bank', 'bank.import', 'bank.match', 'bank.post', 'bank.unpost', 'bank.rules',
+  'documents', 'documents.upload', 'documents.move', 'documents.delete',
+  'documents.restore', 'documents.requests',
+  'accounting', 'accounting.journal.write', 'accounting.journal.post',
+  'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.offsets',
+  'accounting.templates',
+  'tax_evidence', 'tax_evidence.classification.write', 'tax_evidence.export',
+  'reports', 'reports.finalize', 'reports.submit', 'reports.reopen', 'reports.export',
+  'cash', 'cash.document.write', 'cash.close',
+  'assets', 'assets.write', 'assets.depreciation', 'assets.dispose',
+  'stock', 'stock.items.write', 'stock.documents.write', 'stock.take', 'stock.close',
+  'eshop', 'eshop.write',
+  'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',
+  'settings.company', 'settings.company.write', 'settings.bank_accounts',
+  'settings.branding', 'settings.ai_provider', 'settings.signing',
+  'utilities', 'utilities.export', 'utilities.import', 'utilities.archives',
+  'profile', 'profile.tokens',
+] as const
+
+export type PermissionKey = typeof PERMISSION_KEYS[number]
+export type AccessLevel = 'read' | 'write'
+export type PermissionValue = 0 | 1 | 2
+
+export const accessLevelValue: Record<AccessLevel, PermissionValue> = {
+  read: 1,
+  write: 2,
+}

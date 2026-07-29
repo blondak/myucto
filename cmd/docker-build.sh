@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build (or rebuild) the MyInvoice.cz Docker image.
+# Build (or rebuild) the MyUcto.cz Docker image.
 #
 # Usage: cmd/docker-build.sh [--no-cache] [--pull]
 set -euo pipefail
@@ -16,7 +16,7 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> Building MyInvoice.cz image (this can take a few minutes on first run)…"
+echo "==> Building MyUcto.cz image (this can take a few minutes on first run)…"
 docker compose build "$@" app
 
 echo ""

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# export-pdf.sh — MyInvoice.cz manuál: Markdown -> PDF (md2pdf engine), POSIX runner.
+# export-pdf.sh — MyUcto.cz manuál: Markdown -> PDF (md2pdf engine), POSIX runner.
 #
 # Tenký spouštěč nad sdíleným MD2PDF enginem (Linux/macOS, příp. Git-Bash na
 # Windows; ekvivalent tools/export-pdf.ps1). Sloučí kapitoly manuálu

@@ -9,6 +9,8 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -41,7 +43,7 @@ final class InvoicesZipAction
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         // readonly smí exportovat data (čtení), jen nesmí nic měnit
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'utilities.archives', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 
@@ -120,7 +122,7 @@ final class InvoicesZipAction
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         $size = filesize($tmpZip);
-        $filename = "myinvoice-$month" . ($type ? "-$type" : '') . ".zip";
+        $filename = "myucto-$month" . ($type ? "-$type" : '') . ".zip";
 
         $fp = fopen($tmpZip, 'rb');
         $stream = new Stream($fp);

@@ -17,12 +17,22 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
+import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const thanksEnabled = computed(() => supplierStore.currentSupplier?.payment_thanks_enabled ?? false)
+// Účetní badge „Zaúčtováno / Nezaúčtováno" jen v podvojném účetnictví (daňová evidence doklady neúčtuje).
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 useHotkey('ctrl+n', (e) => { e.preventDefault(); router.push('/invoices/new') })
 
@@ -45,6 +55,8 @@ const dateFrom = ref<string>('')
 const dateTo = ref<string>('')
 const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
+// Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
+const bookedFilter = ref<'' | '1' | '0'>('')
 const currencyFilter = ref<string>('')
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
@@ -60,6 +72,7 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value || dateTo.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
+  if (bookedFilter.value) n++
   return n
 })
 
@@ -84,6 +97,16 @@ function hasPositiveAmountToPay(inv: InvoiceListItem): boolean {
   return Number(inv.amount_to_pay ?? 0) > 0
 }
 
+// Zámek dokladu (F6) — jen z BE pole `locked`, FE nic neodvozuje.
+function rowLockedForMe(inv: InvoiceListItem): boolean {
+  return auth.isClientRole && !!inv.locked?.is_locked
+}
+
+function lockTitle(inv: InvoiceListItem): string {
+  const reasons = (inv.locked?.reasons ?? []).map(r => t(`lock.reason.${r}`)).join(', ')
+  return reasons ? `${t('lock.badge')}: ${reasons}` : (t('lock.badge') as string)
+}
+
 function toggleSelected(id: number) {
   const i = selectedIds.value.indexOf(id)
   if (i === -1) selectedIds.value.push(id)
@@ -95,19 +118,17 @@ function isGroupSelected(group: MonthGroup): boolean {
 }
 
 function isGroupSelectionPartial(group: MonthGroup): boolean {
-  const selectedCount = group.invoices.filter(invoice => selectedIds.value.includes(invoice.id)).length
-  return selectedCount > 0 && selectedCount < group.invoices.length
+  const count = group.invoices.filter(invoice => selectedIds.value.includes(invoice.id)).length
+  return count > 0 && count < group.invoices.length
 }
 
 function toggleGroupSelected(group: MonthGroup) {
   const groupIds = group.invoices.map(invoice => invoice.id)
   const selected = new Set(selectedIds.value)
-
   if (groupIds.every(id => selected.has(id))) {
     selectedIds.value = selectedIds.value.filter(id => !groupIds.includes(id))
     return
   }
-
   for (const id of groupIds) selected.add(id)
   selectedIds.value = Array.from(selected)
 }
@@ -139,7 +160,7 @@ async function bulkExportPdf() {
     const response = await invoicesApi.exportSelectedPdf(ids, bulkPdfSign.value)
     const disposition = response.headers['content-disposition'] || ''
     const match = disposition.match(/filename="?([^";]+)"?/)
-    const filename = match?.[1] || `myinvoice-vybrane-faktury-${new Date().toISOString().slice(0, 10)}.pdf`
+    const filename = match?.[1] || `myucto-vybrane-faktury-${new Date().toISOString().slice(0, 10)}.pdf`
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
     link.href = url
@@ -194,7 +215,7 @@ const issuableSelected = computed(() => {
   const ids = new Set(selectedIds.value)
   return groups.value
     .flatMap(g => g.invoices)
-    .filter(inv => ids.has(inv.id) && inv.status === 'draft')
+    .filter(inv => ids.has(inv.id) && inv.status === 'draft' && !rowLockedForMe(inv))
     .sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || '') || (a.id - b.id))
 })
 
@@ -208,6 +229,7 @@ const markPayableSelected = computed(() => {
       && ['issued', 'sent', 'reminded'].includes(inv.status)
       && inv.invoice_type !== 'cancellation'
       && hasPositiveAmountToPay(inv)
+      && !rowLockedForMe(inv)
     )
 })
 
@@ -331,6 +353,46 @@ async function bulkIssue() {
   }
 }
 
+// Hromadné zaúčtování (A2) — jen podvojné účetnictví, jen nezaúčtované (booked_at NULL)
+// vystavené doklady (drafty/storna nemají co účtovat). Report ok/fail řeší bulkPost.
+const postableSelected = computed(() => {
+  if (!isDoubleEntry.value) return []
+  const ids = new Set(selectedIds.value)
+  return groups.value
+    .flatMap(g => g.invoices)
+    .filter(inv =>
+      ids.has(inv.id)
+      && !inv.booked_at
+      && ['issued', 'sent', 'reminded', 'paid'].includes(inv.status)
+      && inv.invoice_type !== 'cancellation'
+    )
+})
+
+async function bulkPost() {
+  const list = postableSelected.value
+  if (list.length === 0) {
+    toast.warning(t('invoice.bulk_post_no_eligible'))
+    return
+  }
+  if (!confirm(t('invoice.bulk_post_confirm', { n: list.length }))) return
+  bulkBusy.value = true
+  try {
+    const r = await accountingApi.postInvoicesBulk(list.map(i => i.id))
+    selectedIds.value = []
+    if (r.failed.length) {
+      const detail = r.failed.map(f => `#${f.id}: ${t(postingErrorI18nKey(f.error_code))}`).join('\n')
+      toast.warning(t('invoice.bulk_post_partial', { ok: r.posted.length, err: r.failed.length }) + '\n' + detail)
+    } else {
+      toast.success(t('invoice.bulk_post_success', { n: r.posted.length }))
+    }
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.bulk_post_failed'))
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
 async function bulkSend() {
   const list = sendableSelected.value
   if (list.length === 0) {
@@ -359,29 +421,6 @@ async function bulkSend() {
     await load()
   } finally {
     bulkBusy.value = false
-  }
-}
-
-async function exportCsv() {
-  try {
-    const r = await invoicesApi.exportCsv({
-      q: search.value || undefined,
-      status: statusFilter.value || undefined,
-      type: typeFilter.value || undefined,
-      year: dateFrom.value || dateTo.value ? undefined : (yearFilter.value === '' ? undefined : Number(yearFilter.value)),
-      month: dateFrom.value || dateTo.value || yearFilter.value === '' || monthFilter.value === '' ? undefined : Number(monthFilter.value),
-      date_from: dateFrom.value || undefined,
-      date_to:   dateTo.value || undefined,
-      currency:  currencyFilter.value || undefined,
-    })
-    const url = URL.createObjectURL(r.data as unknown as Blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(a); a.click(); a.remove()
-    URL.revokeObjectURL(url)
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.csv_export_failed'))
   }
 }
 
@@ -435,6 +474,7 @@ async function load(reset = true) {
       currency:  currencyFilter.value || undefined,
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
+      booked: bookedFilter.value || undefined,
       page: page.value,
     })
     if (reset) {
@@ -454,14 +494,39 @@ async function load(reset = true) {
 // link click přes route.query change z !empty na empty → reset.
 const DEFAULT_YEAR = new Date().getFullYear()
 
+const COLUMNS: ColumnDef[] = [
+  { key: 'number', labelKey: 'invoice.varsymbol', required: true },
+  { key: 'client', labelKey: 'invoice.client_project' },
+  { key: 'type', labelKey: 'invoice.type' },
+  { key: 'issued', labelKey: 'invoice.tax_date' },
+  { key: 'due', labelKey: 'invoice.due_date' },
+  { key: 'amount', labelKey: 'invoice.amount_to_pay', required: true },
+  { key: 'status', labelKey: 'invoice.status_label' },
+  // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
+  { key: 'paid_at', labelKey: 'invoice.col_paid_at', defaultHidden: true },
+  { key: 'payment_method', labelKey: 'payment_method.label', defaultHidden: true },
+  { key: 'booked_at', labelKey: 'invoice.col_booked_at', defaultHidden: true },
+  { key: 'exchange_rate', labelKey: 'invoice.col_exchange_rate', defaultHidden: true },
+  { key: 'amount_czk', labelKey: 'invoice.col_amount_czk', defaultHidden: true },
+  { key: 'locked', labelKey: 'lock.column' },
+]
+const tbl = useTablePrefs('invoices', COLUMNS)
+
+// Kurz do tabulky — 3 desetinná místa (ČNB konvence), lokalizovaný zápis.
+function formatRate(rate: number): string {
+  return new Intl.NumberFormat('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(rate)
+}
+const saved = useSavedFilters('invoices', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+
 onMounted(async () => {
-  loadFiltersFromQuery(route.query)
   // Načti seznam klientů + měn pro select (paralelně s prvním load)
   clientsApi.list({ archived: false, per_page: 200, role: 'customers' }).then(r => { clients.value = r.data }).catch(() => {})
   codebooksApi.currencies().then(r => {
     const seen = new Set<string>()
     currencies.value = r.filter(c => c.is_active && !seen.has(c.code) && seen.add(c.code))
   }).catch(() => {})
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  loadFiltersFromQuery(route.query)
   await load(true)
 })
 
@@ -471,9 +536,10 @@ function loadFiltersFromQuery(q: typeof route.query) {
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
+  bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value) ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -481,9 +547,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
-let suppressUrlSync = false
-function syncFiltersToUrl() {
-  if (suppressUrlSync) return
+function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
   if (statusFilter.value) q.status = statusFilter.value
   if (typeFilter.value) q.type = typeFilter.value
@@ -496,12 +560,27 @@ function syncFiltersToUrl() {
   if (currencyFilter.value) q.currency = currencyFilter.value
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
+  if (bookedFilter.value) q.booked = bookedFilter.value
   if (search.value) q.q = search.value
+  return q
+}
+
+let suppressUrlSync = false
+function syncFiltersToUrl() {
+  if (suppressUrlSync) return
+  router.replace({ query: buildQuery() })
+}
+
+function applyQueryToPage(q: Record<string, string>) {
+  suppressUrlSync = true
+  loadFiltersFromQuery(q)
   router.replace({ query: q })
+  setTimeout(() => { suppressUrlSync = false }, 0)
+  load(true)
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, currencyFilter], () => {
+       overdueOnly, unpaidOnly, bookedFilter, currencyFilter], () => {
   syncFiltersToUrl()
   load(true)
 })
@@ -526,6 +605,7 @@ watch(() => route.query, (newQ) => {
     dateTo.value = ''
     overdueOnly.value = false
     unpaidOnly.value = false
+    bookedFilter.value = ''
     currencyFilter.value = ''
     search.value = ''
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -563,54 +643,62 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <h1 class="text-2xl font-semibold">{{ t('invoice.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('invoice.subtitle_grouping') }}</p>
       </div>
-      <div class="flex items-center gap-2">
-        <button v-if="selectedIds.length > 0"
+      <div class="flex items-center gap-2 flex-wrap justify-end">
+        <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
           @click="openBulkPdfExport"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16"/></svg>
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
           {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
         </button>
-        <button v-if="(issuableSelected.length > 0) && auth.canWrite"
+        <button v-if="(issuableSelected.length > 0) && auth.canWrite('invoices.issue')"
           @click="bulkIssue"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          :class="btnFilled('success')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_issue', { n: issuableSelected.length }) }}
         </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite"
+        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.issue') && !auth.isClientRole"
           @click="bulkReissue"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/></svg>
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
         </button>
-        <button v-if="(markPayableSelected.length > 0) && auth.canWrite"
+        <button v-if="(markPayableSelected.length > 0) && auth.canWrite('invoices.mark_paid')"
           @click="bulkMarkPaid"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-success-500 text-success-600 hover:bg-success-50 disabled:opacity-50 text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+          :class="btnOutline('success')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_mark_paid', { n: markPayableSelected.length }) }}
         </button>
-        <button v-if="(sendableSelected.length > 0) && auth.canWrite"
+        <button v-if="(sendableSelected.length > 0) && auth.canWrite('invoices.send')"
           @click="bulkSend"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 0 0 2.22 0L21 8M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z"/></svg>
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_send', { n: sendableSelected.length }) }}
         </button>
-        <button v-if="(reminderSelected.length > 0) && auth.canWrite"
+        <button v-if="(reminderSelected.length > 0) && auth.canWrite('invoices.reminder') && !auth.isClientRole"
           @click="bulkSendReminders"
           :disabled="bulkBusy"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-warning-500 hover:bg-warning-600 disabled:opacity-50 text-white text-sm font-medium rounded-md">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 0 0-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
+          :class="btnOutline('warning')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_reminder', { n: reminderSelected.length }) }}
         </button>
+        <button v-if="(postableSelected.length > 0) && auth.canWrite('accounting.journal.post') && !auth.isClientRole"
+          @click="bulkPost"
+          :disabled="bulkBusy"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
+          {{ bulkBusy ? '…' : t('invoice.bulk_post', { n: postableSelected.length }) }}
+        </button>
         <RouterLink
-          v-if="auth.canWrite"
+          v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
-          class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md"
+          :class="btnFilled('primary')"
         >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('invoice.new') }}
         </RouterLink>
       </div>
@@ -678,11 +766,18 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <input v-model="unpaidOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('invoice.unpaid_only') }}
         </label>
-        <button @click="exportCsv"
-          class="cursor-pointer ml-auto h-9 px-3 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 0 1 2-2h11l5 5v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          {{ t('invoice.csv_export') }}
-        </button>
+        <select v-if="isDoubleEntry" v-model="bookedFilter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('common.booked_filter_all')">
+          <option value="">{{ t('common.booked_filter_all') }}</option>
+          <option value="1">{{ t('common.booked_badge') }}</option>
+          <option value="0">{{ t('common.unbooked_badge') }}</option>
+        </select>
+      <template #actions>
+        <SavedFiltersMenu :ctrl="saved" />
+        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <DensityToggle class="hidden md:block" :ctrl="tbl" />
+      </template>
     </FilterBar>
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
@@ -690,7 +785,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState :title="t('invoice.no_data')" :cta="t('invoice.issue_first')" to="/invoices/new" />
+      <EmptyState
+        :title="auth.isClientRole ? t('invoice.empty_client') : t('invoice.no_data')"
+        :cta="auth.canWrite('invoices.create') || auth.isDemo ? t('invoice.issue_first') : undefined"
+        to="/invoices/new" />
     </div>
 
     <div v-else>
@@ -722,7 +820,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <!-- Desktop: tabulka -->
         <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
           <div class="overflow-x-auto">
-          <table class="w-full text-sm table-sticky-first">
+          <table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
               <tr>
                 <th class="px-2 py-2 w-10 text-center">
@@ -736,13 +834,21 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                   />
                 </th>
-                <th class="text-left px-4 py-2 font-medium w-32">Var. symbol</th>
-                <th class="text-left px-4 py-2 font-medium">{{ t('invoice.client_project') }}</th>
-                <th class="text-center px-4 py-2 font-medium">Typ</th>
-                <th class="text-center px-4 py-2 font-medium">DUZP / Vystaveno</th>
-                <th class="text-center px-4 py-2 font-medium">Splatnost</th>
-                <th class="text-right px-4 py-2 font-medium">{{ t('invoice.amount_to_pay') }}</th>
-                <th class="text-center px-4 py-2 font-medium">Stav</th>
+                <th v-if="tbl.isVisible('number')" class="text-left px-4 py-2 font-medium w-32">Var. symbol</th>
+                <th v-if="tbl.isVisible('client')" class="text-left px-4 py-2 font-medium">{{ t('invoice.client_project') }}</th>
+                <th v-if="tbl.isVisible('type')" class="text-center px-4 py-2 font-medium">Typ</th>
+                <th v-if="tbl.isVisible('issued')" class="text-center px-4 py-2 font-medium">DUZP / Vystaveno</th>
+                <th v-if="tbl.isVisible('due')" class="text-center px-4 py-2 font-medium">Splatnost</th>
+                <th v-if="tbl.isVisible('amount')" class="text-right px-4 py-2 font-medium">{{ t('invoice.amount_to_pay') }}</th>
+                <th v-if="tbl.isVisible('status')" class="text-center px-4 py-2 font-medium">Stav</th>
+                <th v-if="tbl.isVisible('paid_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_paid_at') }}</th>
+                <th v-if="tbl.isVisible('payment_method')" class="text-center px-4 py-2 font-medium">{{ t('payment_method.label') }}</th>
+                <th v-if="tbl.isVisible('booked_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_booked_at') }}</th>
+                <th v-if="tbl.isVisible('exchange_rate')" class="text-right px-4 py-2 font-medium">{{ t('invoice.col_exchange_rate') }}</th>
+                <th v-if="tbl.isVisible('amount_czk')" class="text-right px-4 py-2 font-medium">{{ t('invoice.col_amount_czk') }}</th>
+                <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
+                  <span class="sr-only">{{ t('lock.column') }}</span>
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -762,29 +868,29 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                   />
                 </td>
-                <td class="px-4 py-2.5 font-mono text-xs">
+                <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
                   <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                   <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
                 </td>
-                <td class="px-4 py-2.5">
+                <td v-if="tbl.isVisible('client')" class="px-4 py-2.5">
                   <div class="font-medium text-neutral-900">{{ inv.client_company_name }}</div>
                   <div v-if="inv.project_name" class="text-xs text-neutral-500 truncate max-w-md">{{ inv.project_name }}</div>
                 </td>
-                <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
-                <td class="px-4 py-2.5 text-center text-xs">
+                <td v-if="tbl.isVisible('type')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
+                <td v-if="tbl.isVisible('issued')" class="px-4 py-2.5 text-center text-xs">
                   <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                 </td>
-                <td class="px-4 py-2.5 text-center text-xs">
+                <td v-if="tbl.isVisible('due')" class="px-4 py-2.5 text-center text-xs">
                   <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                     {{ formatDate(inv.due_date) }}
                   </span>
                 </td>
-                <td class="px-4 py-2.5 text-right font-mono">
+                <td v-if="tbl.isVisible('amount')" class="px-4 py-2.5 text-right font-mono">
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                 </td>
-                <td class="px-4 py-2.5 text-center" @click.stop>
+                <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center" @click.stop>
                   <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — rychlý přístup k modalu. -->
-                  <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite"
+                  <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite('invoices')"
                     @click="openWorkReport(inv.id)"
                     class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
                     :title="t('invoice.wr_btn')">
@@ -798,6 +904,37 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
                   <span v-if="inv.reminder_count > 0" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
                     :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
+                </td>
+                <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('payment_method')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  {{ t(`payment_method.${inv.payment_method || 'bank_transfer'}`) }}
+                </td>
+                <td v-if="tbl.isVisible('booked_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <span v-if="inv.booked_at">{{ formatDate(inv.booked_at) }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('exchange_rate')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <span v-if="inv.currency !== 'CZK' && inv.exchange_rate">{{ formatRate(inv.exchange_rate) }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('amount_czk')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <!-- BE konvence: CZK dokladům kurz vždy 1 (i kdyby byl v datech); bez kurzu nepočítat -->
+                  <span v-if="inv.currency === 'CZK'">{{ formatMoney(inv.total_with_vat, 'CZK') }}</span>
+                  <span v-else-if="inv.exchange_rate">{{ formatMoney(inv.total_with_vat * inv.exchange_rate, 'CZK') }}</span>
+                  <span v-else class="text-neutral-300">—</span>
+                </td>
+                <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
+                  <PostingBadge v-if="inv.locked?.journal_entry_id"
+                    :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
+                  <svg v-else-if="inv.locked?.is_locked" class="w-4 h-4 inline-block text-neutral-400"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                    role="img" :aria-label="lockTitle(inv)">
+                    <title>{{ lockTitle(inv) }}</title>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
+                  </svg>
                 </td>
               </tr>
             </tbody>
@@ -851,12 +988,20 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     </span>
                   </div>
                   <div class="flex items-center gap-1 flex-wrap justify-end" @click.stop>
+                    <PostingBadge v-if="inv.locked?.journal_entry_id"
+                      :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
+                    <svg v-else-if="inv.locked?.is_locked" class="w-3.5 h-3.5 text-neutral-400"
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                      role="img" :aria-label="lockTitle(inv)">
+                      <title>{{ lockTitle(inv) }}</title>
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
+                    </svg>
                     <span v-if="inv.sent_at" class="text-xs px-1 py-0.5 rounded bg-success-50 text-success-600"
                       :title="t('invoice.sent_at', { date: formatDate(inv.sent_at) })">✉</span>
                     <span v-if="inv.reminder_count > 0" class="text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600 font-semibold"
                       :title="t('invoice.reminder_at', { count: inv.reminder_count, date: formatDate(inv.last_reminder_at) })">⚠ {{ inv.reminder_count }}</span>
                     <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — stejně jako v desktop tabulce. -->
-                    <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite"
+                    <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite('invoices')"
                       @click="openWorkReport(inv.id)"
                       class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
                       :title="t('invoice.wr_btn')">
@@ -900,13 +1045,14 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <p v-if="selectedPdfIds.length > 100" class="text-sm text-danger-500">
           {{ t('invoice.bulk_pdf_limit') }}
         </p>
-        <div class="flex justify-end gap-2 pt-1">
+        <div class="flex flex-wrap justify-end gap-2 pt-1">
           <button type="button" @click="bulkPdfOpen = false" :disabled="bulkBusy"
-            class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+            :class="btnOutline('neutral')">
             {{ t('common.cancel') }}
           </button>
           <button type="button" @click="bulkExportPdf" :disabled="bulkBusy || selectedPdfIds.length > 100"
-            class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 inline-flex items-center gap-1.5">
+            :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
             {{ bulkBusy ? t('common.loading') : t('invoice.bulk_pdf_download') }}
           </button>
         </div>

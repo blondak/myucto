@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { logbookApi, type Car, type CarPayload, type FuelType } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -99,9 +100,9 @@ function fuelLabel(f: FuelType | null): string {
         <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300 text-primary-600" @change="load" />
         {{ t('logbook.show_archived') }}
       </label>
-      <button v-if="auth.canWrite" @click="newCar"
-        class="cursor-pointer h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6"/></svg>
+      <button v-if="auth.canWrite('logbook.write')" @click="newCar"
+        :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('logbook.car_new') }}
       </button>
     </div>
@@ -134,7 +135,7 @@ function fuelLabel(f: FuelType | null): string {
               <td class="px-3 py-2 text-right font-mono">{{ c.odometer_start != null ? c.odometer_start.toLocaleString('cs-CZ') : '—' }}</td>
               <td class="px-3 py-2 text-right font-mono">{{ c.trips_count ?? 0 }}</td>
               <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-                <template v-if="auth.canWrite">
+                <template v-if="auth.canWrite('logbook.write')">
                   <button @click="editCar(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('common.edit') }}</button>
                   <button @click="removeCar(c)" :disabled="carInUse(c)" :title="carInUse(c) ? t('logbook.car_delete_blocked') : ''" class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-danger-500">{{ t('common.delete') }}</button>
                 </template>
@@ -159,7 +160,7 @@ function fuelLabel(f: FuelType | null): string {
             <span class="font-mono">{{ t('logbook.odometer_start') }}: {{ c.odometer_start != null ? c.odometer_start.toLocaleString('cs-CZ') : '—' }}</span>
             <span>{{ t('logbook.tab_trips') }}: {{ c.trips_count ?? 0 }}</span>
           </div>
-          <div v-if="auth.canWrite" class="flex gap-4 mt-2 text-xs">
+          <div v-if="auth.canWrite('logbook.write')" class="flex gap-4 mt-2 text-xs">
             <button @click="editCar(c)" class="cursor-pointer text-primary-600 hover:text-primary-700">{{ t('common.edit') }}</button>
             <button @click="removeCar(c)" :disabled="carInUse(c)" :title="carInUse(c) ? t('logbook.car_delete_blocked') : ''" class="cursor-pointer ml-auto text-danger-500 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-danger-500">{{ t('common.delete') }}</button>
           </div>

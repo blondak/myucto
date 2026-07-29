@@ -7,10 +7,12 @@ import { useToast } from '@/composables/useToast'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import {
   documentsApi, type DocItem, type DocFolder, type BreadcrumbItem, type DocJob, type TagInfo,
-  type UploadSkip,
+  type UploadSkip, type DocScope,
 } from '@/api/documents'
+import { adminApi, type AdminUser } from '@/api/admin'
 import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
 import TagInput from '@/components/documents/TagInput.vue'
+import { ICONS, BTN_BASE, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,9 +31,35 @@ const documents = ref<DocItem[]>([])
 const maxFileBytes = ref(50 * 1024 * 1024)
 const phpMaxUpload = ref(0) // efektivní PHP per-request limit (0 = neznámý/neomezený)
 const loading = ref(false)
+const loadingMore = ref(false)
+const page = ref(1)
+const pages = ref(1)
+const total = ref(0)
+
+const trashLoadingMore = ref(false)
+const trashPage = ref(1)
+const trashPages = ref(1)
+const trashTotal = ref(0)
 
 const view = ref<'grid' | 'list'>((localStorage.getItem('documents.view') as 'grid' | 'list') || 'grid')
 watch(view, v => localStorage.setItem('documents.view', v))
+
+// Scope (Epic F7): Firemní (company) vs Osobní (user). Owner picker jen při scope=user (admin).
+const scope = ref<DocScope>('company')
+const ownerUserId = ref<number | null>(null)
+const owners = ref<AdminUser[]>([])
+async function loadOwners() {
+  if (!auth.isSuperadmin || owners.value.length) return
+  try { owners.value = await adminApi.listUsers() } catch { owners.value = [] }
+}
+function setScope(s: DocScope) {
+  if (scope.value === s) return
+  scope.value = s
+  if (s === 'company') ownerUserId.value = null
+  else loadOwners()
+  if (!trashMode.value) loadListing()
+}
+watch(ownerUserId, () => { if (scope.value === 'user' && !trashMode.value) loadListing() })
 
 // search
 const query = ref('')
@@ -110,27 +138,53 @@ async function loadTags() {
 const tagModalOpen = ref(false)
 const bulkTags = ref<string[]>([])
 
-async function loadListing() {
-  loading.value = true
-  selected.value = new Set()
-  selectedFolders.value = new Set()
-  revealedFolderId.value = null
+async function loadListing(reset = true) {
+  if (reset) {
+    loading.value = true
+    page.value = 1
+    selected.value = new Set()
+    selectedFolders.value = new Set()
+    revealedFolderId.value = null
+  } else {
+    loadingMore.value = true
+    page.value++
+  }
   try {
-    const r = await documentsApi.list(folderId.value, { tag: tagFilter.value || undefined })
-    breadcrumb.value = r.breadcrumb
-    folders.value = r.folders
-    documents.value = r.documents
-    maxFileBytes.value = r.max_file_bytes
-    phpMaxUpload.value = r.php_max_upload_bytes ?? 0
+    const r = await documentsApi.list(folderId.value, {
+      tag: tagFilter.value || undefined,
+      scope: scope.value,
+      ownerUserId: scope.value === 'user' ? (ownerUserId.value ?? undefined) : undefined,
+      page: page.value,
+    })
+    breadcrumb.value = r.meta.breadcrumb
+    folders.value = r.meta.folders
+    documents.value = reset ? r.data : [...documents.value, ...r.data]
+    maxFileBytes.value = r.meta.max_file_bytes
+    phpMaxUpload.value = r.meta.php_max_upload_bytes ?? 0
+    total.value = r.meta.total
+    pages.value = r.meta.pages
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
 }
 
-async function loadTrash() {
-  const r = await documentsApi.trash()
-  trashDocs.value = r.documents
-  trashFolders.value = r.folders
+async function loadTrash(reset = true) {
+  if (reset) {
+    trashPage.value = 1
+  } else {
+    trashLoadingMore.value = true
+    trashPage.value++
+  }
+  try {
+    const r = await documentsApi.trash({ page: trashPage.value })
+    trashFolders.value = r.meta.folders
+    trashDocs.value = reset ? r.data : [...trashDocs.value, ...r.data]
+    trashTotal.value = r.meta.total
+    trashPages.value = r.meta.pages
+  } finally {
+    trashLoadingMore.value = false
+  }
 }
 
 watch(folderId, () => { if (!trashMode.value) loadListing() })
@@ -469,7 +523,7 @@ function onFolderPick(e: Event) {
 // drag & drop (vč. celých složek přes webkitGetAsEntry)
 async function onDrop(e: DragEvent) {
   dragOver.value = false
-  if (!auth.canWrite || !e.dataTransfer) return
+  if (!auth.canWrite('documents.upload') || !e.dataTransfer) return
   const collected = await collectFromDataTransfer(e.dataTransfer)
   await uploadFiles(collected)
 }
@@ -524,29 +578,54 @@ onMounted(() => {
       <div class="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          :class="['cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border', trashMode ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50']"
+          :class="[BTN_BASE, trashMode ? 'border border-primary-500 bg-primary-50 text-primary-700' : OUTLINE.neutral]"
           @click="toggleTrash"
         >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></svg>
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('documents.trash') }}
         </button>
-        <template v-if="auth.canWrite && !trashMode">
-          <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" @click="newFolder">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v4m-2-2h4" /></svg>
+        <template v-if="auth.canWrite('documents.upload') && !trashMode">
+          <button type="button" :class="btnOutline('neutral')" @click="newFolder">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('documents.new_folder') }}
           </button>
-          <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" :title="t('documents.upload_folder_hint')" @click="folderInput?.click()">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 16V8m-3 3l3-3 3 3" /></svg>
+          <button type="button" :class="btnOutline('primary')" :title="t('documents.upload_folder_hint')" @click="folderInput?.click()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ t('documents.upload_folder') }}
           </button>
-          <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md bg-primary-600 hover:bg-primary-700 text-white" @click="fileInput?.click()">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12m-4-8l4-4 4 4" /></svg>
+          <button type="button" :class="btnFilled('primary')" @click="fileInput?.click()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ t('documents.upload') }}
           </button>
         </template>
       </div>
       <input ref="fileInput" type="file" multiple class="hidden" @change="onFilePick" />
       <input ref="folderInput" type="file" webkitdirectory multiple class="hidden" @change="onFolderPick" />
+    </div>
+
+    <!-- Scope taby (Firemní / Osobní) — Epic F7 -->
+    <div v-if="!trashMode" class="flex items-center gap-3 mb-3 flex-wrap">
+      <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden h-9">
+        <button type="button"
+          :class="['cursor-pointer px-3 text-sm inline-flex items-center gap-1.5', scope === 'company' ? 'bg-primary-600 text-white font-medium' : 'text-neutral-600 hover:bg-neutral-50']"
+          @click="setScope('company')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.warehouse" /></svg>
+          {{ t('documents.scope.company') }}
+        </button>
+        <button type="button"
+          :class="['cursor-pointer px-3 text-sm inline-flex items-center gap-1.5 border-l border-neutral-300', scope === 'user' ? 'bg-primary-600 text-white font-medium' : 'text-neutral-600 hover:bg-neutral-50']"
+          @click="setScope('user')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
+          {{ t('documents.scope.user') }}
+        </button>
+      </div>
+      <!-- Owner picker jen při scope=user (admin vidí všechny; ostatní jen sebe) -->
+      <select v-if="scope === 'user' && auth.isSuperadmin && owners.length"
+        v-model="ownerUserId"
+        class="cursor-pointer h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm max-w-56">
+        <option :value="null">{{ t('documents.scope.owner_all') }}</option>
+        <option v-for="u in owners" :key="u.id" :value="u.id">{{ u.name }}</option>
+      </select>
     </div>
 
     <!-- Toolbar: search + view -->
@@ -582,7 +661,7 @@ onMounted(() => {
     </div>
 
     <!-- ZIP mode -->
-    <div v-if="auth.canWrite && !trashMode" class="flex items-center gap-3 mb-3 text-xs text-neutral-500">
+    <div v-if="auth.canWrite('documents') && !trashMode" class="flex items-center gap-3 mb-3 text-xs text-neutral-500">
       <span>{{ t('documents.zip_mode') }}:</span>
       <label class="inline-flex items-center gap-1 cursor-pointer"><input type="radio" value="explode" v-model="zipMode" /> {{ t('documents.zip_explode') }}</label>
       <label class="inline-flex items-center gap-1 cursor-pointer"><input type="radio" value="keep" v-model="zipMode" /> {{ t('documents.zip_keep') }}</label>
@@ -639,8 +718,8 @@ onMounted(() => {
     <div v-if="trashMode">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-medium text-neutral-600">{{ t('documents.trash') }}</h2>
-        <button v-if="auth.canWrite && (trashDocs.length || trashFolders.length)" type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border border-danger-300 text-danger-500 hover:bg-danger-50" @click="emptyTrash">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></svg>
+        <button v-if="auth.canWrite('documents.delete') && (trashDocs.length || trashFolders.length)" type="button" :class="btnOutline('danger')" @click="emptyTrash">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('documents.trash_empty') }}
         </button>
       </div>
@@ -649,7 +728,7 @@ onMounted(() => {
         <li v-for="f in trashFolders" :key="'tf' + f.id" class="flex items-center gap-3 px-3 py-2 bg-surface border border-neutral-200 rounded-lg">
           <svg class="w-5 h-5 text-warning-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
           <span class="flex-1 text-sm text-neutral-700">{{ f.name }}</span>
-          <button v-if="auth.canWrite" type="button" class="cursor-pointer inline-flex items-center gap-1 h-8 px-2.5 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" @click="restoreFolder(f)">
+          <button v-if="auth.canWrite('documents.restore')" type="button" class="cursor-pointer inline-flex items-center gap-1 h-8 px-2.5 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" @click="restoreFolder(f)">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M4 9a8 8 0 1 1-2 5" /></svg>
             {{ t('documents.restore') }}
           </button>
@@ -657,12 +736,17 @@ onMounted(() => {
         <li v-for="d in trashDocs" :key="'td' + d.id" class="flex items-center gap-3 px-3 py-2 bg-surface border border-neutral-200 rounded-lg">
           <span :class="['shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
           <span class="flex-1 text-sm text-neutral-700 truncate">{{ d.title }}</span>
-          <button v-if="auth.canWrite" type="button" class="cursor-pointer inline-flex items-center gap-1 h-8 px-2.5 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" @click="restoreDoc(d)">
+          <button v-if="auth.canWrite('documents.restore')" type="button" class="cursor-pointer inline-flex items-center gap-1 h-8 px-2.5 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50" @click="restoreDoc(d)">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M4 9a8 8 0 1 1-2 5" /></svg>
             {{ t('documents.restore') }}
           </button>
         </li>
       </ul>
+      <div v-if="trashPage < trashPages" class="text-center mt-3">
+        <button type="button" :disabled="trashLoadingMore" class="cursor-pointer h-9 px-4 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:opacity-50" @click="loadTrash(false)">
+          {{ trashLoadingMore ? t('common.loading_more') : t('common.load_more') }}
+        </button>
+      </div>
     </div>
 
     <!-- ═══════════ SEARCH RESULTS ═══════════ -->
@@ -712,20 +796,20 @@ onMounted(() => {
       <div v-if="selCount > 0" class="flex items-center gap-2 mb-3 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm flex-wrap">
         <span class="font-medium text-primary-700">{{ t('documents.selected', { n: selCount }) }}</span>
         <div class="flex-1"></div>
-        <button v-if="auth.canWrite" type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium rounded-md border border-neutral-300 bg-surface text-neutral-700 hover:bg-neutral-50" @click="openMove">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM13 13l3-3m0 0l-3-3m3 3H8" /></svg>
+        <button v-if="auth.canWrite('documents.move')" type="button" class="bg-surface" :class="btnOutline('neutral')" @click="openMove">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" /></svg>
           {{ t('documents.bulk_move') }}
         </button>
-        <button v-if="auth.canWrite && selDocCount > 0" type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium rounded-md border border-neutral-300 bg-surface text-neutral-700 hover:bg-neutral-50" @click="bulkTag">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a2 2 0 0 1 1.414.586l7 7a2 2 0 0 1 0 2.828l-5 5a2 2 0 0 1-2.828 0l-7-7A2 2 0 0 1 5 8V5a2 2 0 0 1 2-2z" /></svg>
+        <button v-if="auth.canWrite('documents') && selDocCount > 0" type="button" class="bg-surface" :class="btnOutline('neutral')" @click="bulkTag">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           {{ t('documents.bulk_tag') }}
         </button>
-        <button type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium rounded-md border border-neutral-300 bg-surface text-neutral-700 hover:bg-neutral-50" @click="bulkDownload">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
+        <button type="button" class="bg-surface" :class="btnOutline('primary')" @click="bulkDownload">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('documents.bulk_download') }}
         </button>
-        <button v-if="auth.canWrite" type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium rounded-md border border-danger-300 bg-surface text-danger-500 hover:bg-danger-50" @click="bulkDelete">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></svg>
+        <button v-if="auth.canWrite('documents.delete')" type="button" class="bg-surface" :class="btnOutline('danger')" @click="bulkDelete">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('documents.bulk_delete') }}
         </button>
         <button type="button" class="cursor-pointer inline-flex items-center justify-center h-8 w-8 rounded-md text-neutral-500 hover:bg-neutral-100" :title="t('documents.clear_selection')" @click="clearSel">
@@ -752,7 +836,7 @@ onMounted(() => {
               </span>
             </span>
             <span
-              v-if="auth.canWrite"
+              v-if="auth.canWrite('documents')"
               :class="['flex items-center gap-1 transition-opacity', revealedFolderId === f.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100']"
               @click.stop="revealFolderActions(f)"
             >
@@ -769,7 +853,7 @@ onMounted(() => {
         <!-- empty -->
         <div v-if="!folders.length && !documents.length" class="text-center py-16 border-2 border-dashed border-neutral-200 rounded-lg">
           <p class="text-sm text-neutral-400">{{ t('documents.empty_folder') }}</p>
-          <p v-if="auth.canWrite" class="text-xs text-neutral-300 mt-1">{{ t('documents.drop_here') }}</p>
+          <p v-if="auth.canWrite('documents')" class="text-xs text-neutral-300 mt-1">{{ t('documents.drop_here') }}</p>
         </div>
 
         <!-- documents: grid -->
@@ -826,11 +910,17 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+
+        <div v-if="page < pages" class="text-center mt-4">
+          <button type="button" :disabled="loadingMore" class="cursor-pointer h-9 px-4 text-sm rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-50 disabled:opacity-50" @click="loadListing(false)">
+            {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- Drag overlay -->
-    <div v-if="dragOver && auth.canWrite" class="fixed inset-0 z-40 bg-primary-500/10 border-4 border-dashed border-primary-400 flex items-center justify-center pointer-events-none">
+    <div v-if="dragOver && auth.canWrite('documents.upload')" class="fixed inset-0 z-40 bg-primary-500/10 border-4 border-dashed border-primary-400 flex items-center justify-center pointer-events-none">
       <span class="px-4 py-2 bg-surface rounded-lg shadow text-primary-700 font-medium">{{ t('documents.drop_here') }}</span>
     </div>
 

@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\I18n\Locale;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
@@ -76,6 +77,7 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly ResponseFactory $responseFactory,
         private readonly ApiTokenService $apiTokens,
         private readonly IpMatcher $ipMatcher,
+        private readonly UserRoleProfile $roleProfile,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -97,7 +99,15 @@ final class AuthMiddleware implements MiddlewareInterface
                 'id'           => $tokenRow['user_id'],
                 'email'        => $tokenRow['user_email'],
                 'name'         => $tokenRow['user_name'],
-                'role'         => $tokenRow['user_role'],
+                'role_id'      => $tokenRow['user_role_id'],
+                'role_summary' => [
+                    'id'         => $tokenRow['user_role_id'],
+                    'name'       => $tokenRow['user_role_name'],
+                    'type'       => $tokenRow['user_role_type'],
+                    'is_active'  => $tokenRow['user_role_active'],
+                    'system_key' => $tokenRow['user_role_system_key'],
+                ],
+                'is_superadmin' => $tokenRow['user_role_system_key'] === 'superadmin',
                 'locale'       => $tokenRow['user_locale'],
                 'is_active'    => true,
                 'totp_enabled' => $tokenRow['user_totp_enabled'],
@@ -145,6 +155,9 @@ final class AuthMiddleware implements MiddlewareInterface
 
         if ($session !== null) {
             if (is_array($user) && $user['is_active'] === true) {
+                // SessionManager vrací účet v upstream tvaru (legacy `users.role`).
+                // PermissionMiddleware rozhoduje podle `role_id` a tabulky `roles`.
+                $user = $this->roleProfile->enrich($user);
                 Locale::set((string) ($user['locale'] ?? 'cs'));
                 $request = $request
                     ->withAttribute(self::ATTR_USER, $user)

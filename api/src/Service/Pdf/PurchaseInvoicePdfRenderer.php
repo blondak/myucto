@@ -111,7 +111,7 @@ final class PurchaseInvoicePdfRenderer
             ...MpdfFontConfig::options(),
         ]);
         $mpdf->SetTitle(($docTypeLabel ?: 'Faktura') . ' ' . ($invoice['vendor_invoice_number'] ?? '#' . $invoice['id']));
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }
@@ -146,17 +146,19 @@ final class PurchaseInvoicePdfRenderer
     {
         if ($locale === 'en') {
             return match ($kind) {
-                'receipt'     => 'Receipt',
-                'credit_note' => 'Credit note',
-                'advance'     => 'Advance',
-                default       => 'Invoice',
+                'receipt'      => 'Receipt',
+                'credit_note'  => 'Credit note',
+                'advance'      => 'Advance',
+                'tax_document' => 'Tax document for payment',
+                default        => 'Invoice',
             };
         }
         return match ($kind) {
-            'receipt'     => 'Přijatá účtenka',
-            'credit_note' => 'Přijatý dobropis',
-            'advance'     => 'Přijatá záloha',
-            default       => 'Přijatá faktura',
+            'receipt'      => 'Přijatá účtenka',
+            'credit_note'  => 'Přijatý dobropis',
+            'advance'      => 'Přijatá záloha',
+            'tax_document' => 'Daňový doklad k platbě',
+            default        => 'Přijatá faktura',
         };
     }
 
@@ -169,8 +171,7 @@ final class PurchaseInvoicePdfRenderer
             $this->twig = new Environment($loader, [
                 'autoescape' => 'html',
                 'strict_variables' => false,
-                'cache' => false,
-            ]);
+            ] + TwigCache::options('purchase-invoice'));
         }
         return $this->twig;
     }

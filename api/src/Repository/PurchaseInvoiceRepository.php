@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Support\PaymentMethods;
 use PDO;
 
 /**
@@ -69,6 +71,7 @@ final class PurchaseInvoiceRepository
             : ($vendorCurrent !== null ? (bool) (int) $vendorCurrent : true);
         $row['items'] = $this->itemsFor($id);
         $row['vat_breakdown'] = $this->buildVatBreakdown($row['items']);
+        $row['vat_allocations'] = $this->vatAllocationsFor($id, $supplierId);
         $row['totals'] = [
             'without_vat'         => $row['total_without_vat'],
             'vat'                 => $row['total_vat'],
@@ -88,9 +91,37 @@ final class PurchaseInvoiceRepository
         $row['advance_link_suggestion'] = $row['advance_link_suggested_id'] !== null
             ? $this->briefFor((int) $row['advance_link_suggested_id'], $supplierId)
             : null;
-        $row['settled_by'] = ($row['document_kind'] ?? '') === 'advance'
+        // Zpětná vazba „kdo mě vyúčtoval". Platí i pro samostatný daňový doklad k platbě —
+        // ten zálohovou fakturu nahrazuje, takže se stejně jako ona jednou vyúčtuje konečnou
+        // fakturou a uživatel to na něm musí vidět.
+        $row['settled_by'] = in_array((string) ($row['document_kind'] ?? ''), ['advance', 'tax_document'], true)
             ? $this->settledByFor($id, $supplierId)
             : null;
+
+        // Dobropis (credit_note): původní přijatá faktura, kterou opravuje (migrace 1096).
+        //  - linked_parent = shrnutí té faktury (jen když je vazba nastavená a patří tenantovi)
+        //  - has_parent_candidates = dobropis bez vazby, ale existuje faktura téhož dodavatele
+        $row['linked_parent'] = ($row['parent_purchase_invoice_id'] ?? null) !== null
+            ? $this->briefFor((int) $row['parent_purchase_invoice_id'], $supplierId)
+            : null;
+        $row['has_parent_candidates'] = false;
+        if (($row['document_kind'] ?? '') === 'credit_note' && $row['parent_purchase_invoice_id'] === null) {
+            $q = $this->db->pdo()->prepare(
+                "SELECT EXISTS (
+                          SELECT 1 FROM purchase_invoices pi
+                           WHERE pi.supplier_id = ? AND pi.vendor_id = ?
+                             AND pi.document_kind = 'invoice' AND pi.status != 'cancelled'
+                             AND pi.id <> ?
+                        )"
+            );
+            $q->execute([$supplierId, (int) ($row['vendor_id'] ?? 0), $id]);
+            $row['has_parent_candidates'] = (bool) $q->fetchColumn();
+        }
+        // Reverzní pohled: dobropisy, které tento doklad opravují (na faktuře uvidím
+        // „opravováno dobropisem X"). Může jich být víc (částečné dobropisy).
+        $row['corrected_by'] = ($row['document_kind'] ?? '') !== 'credit_note'
+            ? $this->correctedByFor($id, $supplierId)
+            : [];
 
         // Příznaky pro UI tlačítka „spárovat" (zobrazit jen když existuje protějšek):
         //  - has_advance_candidates    = vyúčtovací faktura bez vazby a existuje nespárovaná záloha
@@ -125,7 +156,140 @@ final class PurchaseInvoiceRepository
             $q->execute([$supplierId, $vendorId, $id]);
             $row['has_settlement_candidates'] = (bool) $q->fetchColumn();
         }
+
+        // Bankovní úhrady dokladu — proklik z detailu na příslušný bankovní výpis.
+        // Jen POSTED bank zápisy (journal_entries source_type='bank', reversed_by IS NULL),
+        // vzor viz paidAdvanceAmount(). Splátky = víc řádků.
+        $row['bank_payments'] = $this->bankPaymentsFor($id, $supplierId);
+        // Hotovostní úhrady dokladu — pokladní doklady (PPD/VPD) POSTED přes journal_entry_id.
+        $row['cash_payments'] = $this->cashPaymentsFor($id, $supplierId);
+        // Úhrady zápočtem proti účtu (migrace 1126) — třetí zaúčtovaný kanál vedle banky
+        // a pokladny. Bez něj by doklad uhrazený zápočtem hlásil mark_paid_unposted,
+        // přestože zápis v deníku existuje.
+        $row['settlement_payments'] = $this->settlementPaymentsFor($id, $supplierId);
+
+        // Transparence ruční/legacy úhrady: status='paid', ale NEEXISTUJE žádná zaúčtovaná
+        // úhrada (banka, pokladna ani zápočet) → závazek 321 zůstává v deníku otevřený
+        // (viz doklad 163). FE ukáže výrazné upozornění; proklik není kam vést.
+        $row['mark_paid_unposted'] = ($row['status'] === 'paid')
+            && $row['bank_payments'] === []
+            && $row['cash_payments'] === []
+            && $row['settlement_payments'] === [];
         return $row;
+    }
+
+    /**
+     * Bankovní úhrady přijaté faktury pro proklik na výpis (statement_id). Zahrnuje
+     * jen matche s POSTED bank zápisem (journal_entries source_type='bank',
+     * source_id=bank_transaction_id, reversed_by IS NULL). Řazeno dle data zaúčtování.
+     *
+     * @return list<array{bank_transaction_id:int, statement_id:int, amount:float,
+     *                     posted_at:string, counterparty:?string, currency:string,
+     *                     journal_entry_id:int}>
+     */
+    private function bankPaymentsFor(int $invoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pm.bank_transaction_id, bt.statement_id, pm.amount,
+                    bt.posted_at, bt.counterparty_name, je.id AS journal_entry_id,
+                    UPPER(COALESCE(bt.currency, bs.currency, 'CZK')) AS currency
+               FROM payment_matches pm
+               JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+               JOIN journal_entries je
+                 ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
+                AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
+              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?
+              ORDER BY bt.posted_at, pm.id"
+        );
+        $stmt->execute([$supplierId, $invoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[] = [
+                'bank_transaction_id' => (int) $r['bank_transaction_id'],
+                'statement_id'        => (int) $r['statement_id'],
+                'amount'              => (float) $r['amount'],
+                'posted_at'           => (string) $r['posted_at'],
+                'counterparty'        => $r['counterparty_name'] !== null ? (string) $r['counterparty_name'] : null,
+                'currency'            => (string) $r['currency'],
+                'journal_entry_id'    => (int) $r['journal_entry_id'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Hotovostní úhrady přijaté faktury — pokladní doklady (PPD/VPD) navázané na
+     * fakturu (purchase_invoice_id) a POSTED přes journal_entry_id (migrace 1019).
+     * Proklik z detailu na zaúčtování úhrady (deník) a na příslušnou pokladnu.
+     *
+     * @return list<array{cash_document_id:int, doc_number:?string, amount:float,
+     *                     date:string, register_id:int, register_name:?string,
+     *                     journal_entry_id:int, currency:string}>
+     */
+    private function cashPaymentsFor(int $invoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT cd.id AS cash_document_id, cd.doc_number, cd.total_amount AS amount,
+                    cd.issue_date, cd.register_id, cd.journal_entry_id,
+                    cr.name AS register_name,
+                    UPPER(COALESCE(cd.currency_code, 'CZK')) AS currency
+               FROM cash_documents cd
+               JOIN cash_registers cr ON cr.id = cd.register_id
+              WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ?
+                AND cd.status = 'posted' AND cd.journal_entry_id IS NOT NULL
+              ORDER BY cd.issue_date, cd.id"
+        );
+        $stmt->execute([$supplierId, $invoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[] = [
+                'cash_document_id' => (int) $r['cash_document_id'],
+                'doc_number'       => $r['doc_number'] !== null ? (string) $r['doc_number'] : null,
+                'amount'           => (float) $r['amount'],
+                'date'             => (string) $r['issue_date'],
+                'register_id'      => (int) $r['register_id'],
+                'register_name'    => $r['register_name'] !== null ? (string) $r['register_name'] : null,
+                'journal_entry_id' => (int) $r['journal_entry_id'],
+                'currency'         => (string) $r['currency'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Úhrady zápočtem proti účtu (invoice_settlements, migrace 1126) — proklik z detailu
+     * na příslušný účetní zápis. Jen POTVRZENÉ zápočty; zrušené (status='cancelled') mají
+     * protizápis a doklad se vrátil do nezaplaceného stavu, takže se jako úhrada nepočítají.
+     *
+     * @return list<array{settlement_id:int, amount:float, date:string, account_code:string,
+     *                     account_name:string, note:?string, journal_entry_id:?int}>
+     */
+    private function settlementPaymentsFor(int $invoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT s.id, s.amount, s.settled_on, s.note, s.journal_entry_id,
+                    a.account_code, a.name AS account_name
+               FROM invoice_settlements s
+               JOIN chart_of_accounts a ON a.id = s.account_id
+              WHERE s.supplier_id = ? AND s.doc_type = 'purchase_invoice' AND s.doc_id = ?
+                AND s.status = 'confirmed'
+              ORDER BY s.settled_on, s.id"
+        );
+        $stmt->execute([$supplierId, $invoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[] = [
+                'settlement_id'    => (int) $r['id'],
+                'amount'           => (float) $r['amount'],
+                'date'             => (string) $r['settled_on'],
+                'account_code'     => (string) $r['account_code'],
+                'account_name'     => (string) $r['account_name'],
+                'note'             => $r['note'] !== null ? (string) $r['note'] : null,
+                'journal_entry_id' => $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null,
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -173,6 +337,31 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Dobropisy, které opravují tuto přijatou fakturu (reverzní pohled k parent_purchase_invoice_id,
+     * migrace 1096). Může jich být víc — částečné dobropisy k téže faktuře.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function correctedByFor(int $invoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id FROM purchase_invoices
+              WHERE parent_purchase_invoice_id = ? AND supplier_id = ?
+                AND document_kind = 'credit_note'
+              ORDER BY issue_date, id"
+        );
+        $stmt->execute([$invoiceId, $supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $cid) {
+            $brief = $this->briefFor((int) $cid, $supplierId);
+            if ($brief !== null) {
+                $out[] = $brief;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Items dané přijaté faktury, seřazené.
      *
      * @return list<array<string,mixed>>
@@ -184,15 +373,197 @@ final class PurchaseInvoiceRepository
                     pii.unit_price_without_vat, pii.vat_rate_id, pii.vat_rate_snapshot,
                     pii.total_without_vat, pii.total_vat, pii.total_with_vat,
                     pii.order_index, pii.vat_classification_code, pii.is_fixed_asset,
+                    pii.expense_kind, pii.expense_account_code,
+                    pii.accrual_from, pii.accrual_to,
+                    pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM purchase_invoice_items pii
                JOIN vat_rates vr ON vr.id = pii.vat_rate_id
+               LEFT JOIN stock_items si ON si.id = pii.stock_item_id
               WHERE pii.purchase_invoice_id = ?
               ORDER BY pii.order_index, pii.id'
         );
         $stmt->execute([$purchaseInvoiceId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map(fn (array $r) => $this->castItem($r), $rows);
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function vatAllocationsFor(int $purchaseInvoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, purchase_invoice_id, description, usage_type, vat_rate,
+                    base_amount, vat_amount, total_amount, vat_deduction,
+                    vat_deduction_percent, tax_treatment, account_code,
+                    vat_classification_code, order_index
+               FROM purchase_invoice_vat_allocations
+              WHERE purchase_invoice_id = ? AND supplier_id = ?
+              ORDER BY order_index, id'
+        );
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        return array_map(static function (array $row): array {
+            foreach (['id', 'purchase_invoice_id', 'order_index'] as $field) {
+                $row[$field] = (int) $row[$field];
+            }
+            foreach (['vat_rate', 'base_amount', 'vat_amount', 'total_amount', 'vat_deduction_percent'] as $field) {
+                $row[$field] = (float) $row[$field];
+            }
+            return $row;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $allocations
+     */
+    public function replaceVatAllocations(int $purchaseInvoiceId, int $supplierId, array $allocations): void
+    {
+        $pdo = $this->db->pdo();
+        $invoice = $pdo->prepare(
+            'SELECT total_without_vat, total_vat, reverse_charge
+               FROM purchase_invoices
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $invoice->execute([$purchaseInvoiceId, $supplierId]);
+        $totals = $invoice->fetch(PDO::FETCH_ASSOC);
+        if ($totals === false) {
+            throw new \InvalidArgumentException('Přijatá faktura neexistuje.');
+        }
+
+        if ($allocations === []) {
+            $pdo->prepare(
+                'DELETE FROM purchase_invoice_vat_allocations
+                  WHERE purchase_invoice_id = ? AND supplier_id = ?'
+            )->execute([$purchaseInvoiceId, $supplierId]);
+            $pdo->prepare('UPDATE purchase_invoices SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND supplier_id = ?')
+                ->execute([$purchaseInvoiceId, $supplierId]);
+            return;
+        }
+        if ((bool) $totals['reverse_charge']) {
+            throw new \InvalidArgumentException('Účetní alokace zatím nelze použít u reverse charge dokladu.');
+        }
+
+        $allowedUsage = ['business', 'personal', 'mixed', 'non_deductible'];
+        $allowedDeduction = ['full', 'none', 'proportional', 'reduced'];
+        $allowedTax = ['deductible', 'non_deductible', 'not_expense'];
+        $sumBase = 0.0;
+        $sumVat = 0.0;
+        $expectedStmt = $pdo->prepare(
+            'SELECT vat_rate_snapshot, SUM(total_without_vat) AS base_amount,
+                    SUM(total_vat) AS vat_amount
+               FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ?
+              GROUP BY vat_rate_snapshot'
+        );
+        $expectedStmt->execute([$purchaseInvoiceId]);
+        $expectedByRate = [];
+        foreach ($expectedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $expectedByRate[number_format((float) $row['vat_rate_snapshot'], 2, '.', '')] = [
+                'base' => (float) $row['base_amount'], 'vat' => (float) $row['vat_amount'],
+            ];
+        }
+        $allocatedByRate = [];
+        foreach ($allocations as $allocation) {
+            $description = trim((string) ($allocation['description'] ?? ''));
+            $usage = (string) ($allocation['usage_type'] ?? 'business');
+            $deduction = (string) ($allocation['vat_deduction'] ?? 'full');
+            $taxTreatment = (string) ($allocation['tax_treatment'] ?? 'deductible');
+            $accountCode = trim((string) ($allocation['account_code'] ?? ''));
+            $base = round((float) ($allocation['base_amount'] ?? 0), 2);
+            $vat = round((float) ($allocation['vat_amount'] ?? 0), 2);
+            $total = round((float) ($allocation['total_amount'] ?? ($base + $vat)), 2);
+            $percent = max(0.0, min(100.0, (float) ($allocation['vat_deduction_percent'] ?? 100)));
+            $rateKey = number_format((float) ($allocation['vat_rate'] ?? 0), 2, '.', '');
+
+            if ($description === '' || $accountCode === '') {
+                throw new \InvalidArgumentException('Každá účetní alokace musí mít popis a účet.');
+            }
+            if (!in_array($usage, $allowedUsage, true)
+                || !in_array($deduction, $allowedDeduction, true)
+                || !in_array($taxTreatment, $allowedTax, true)
+            ) {
+                throw new \InvalidArgumentException('Účetní alokace obsahuje nepodporovaný režim.');
+            }
+            if ($usage === 'personal' && ($deduction !== 'none' || $taxTreatment !== 'not_expense')) {
+                throw new \InvalidArgumentException('Osobní alokace musí být bez nároku na odpočet a nesmí být nákladem firmy.');
+            }
+            if ($usage === 'mixed' && $deduction !== 'proportional') {
+                throw new \InvalidArgumentException('Smíšené využití musí používat poměrný odpočet podle § 75.');
+            }
+            if (abs(($base + $vat) - $total) > 0.02) {
+                throw new \InvalidArgumentException('Základ a DPH účetní alokace neodpovídají její celkové částce.');
+            }
+            if ($deduction === 'none' && abs($percent) > 0.001) $percent = 0.0;
+            if ($deduction === 'full' && abs($percent - 100.0) > 0.001) $percent = 100.0;
+            $sumBase += $base;
+            $sumVat += $vat;
+            $allocatedByRate[$rateKey] ??= ['base' => 0.0, 'vat' => 0.0];
+            $allocatedByRate[$rateKey]['base'] += $base;
+            $allocatedByRate[$rateKey]['vat'] += $vat;
+        }
+        if (abs($sumBase - (float) $totals['total_without_vat']) > 0.02
+            || abs($sumVat - (float) $totals['total_vat']) > 0.02
+        ) {
+            throw new \InvalidArgumentException('Součet účetních alokací musí odpovídat rekapitulaci DPH dokladu.');
+        }
+        foreach ($allocatedByRate as $rate => $allocated) {
+            $expected = $expectedByRate[$rate] ?? null;
+            if ($expected === null
+                || abs($allocated['base'] - $expected['base']) > 0.02
+                || abs($allocated['vat'] - $expected['vat']) > 0.02
+            ) {
+                throw new \InvalidArgumentException('Účetní alokace musí odpovídat rekapitulaci každé sazby DPH.');
+            }
+        }
+        if (count($allocatedByRate) !== count($expectedByRate)) {
+            throw new \InvalidArgumentException('Účetní alokace musí pokrýt všechny sazby DPH dokladu.');
+        }
+
+        $accounts = $pdo->prepare(
+            'SELECT account_code FROM chart_of_accounts
+              WHERE supplier_id = ? AND is_active = 1'
+        );
+        $accounts->execute([$supplierId]);
+        $validAccounts = array_fill_keys($accounts->fetchAll(PDO::FETCH_COLUMN), true);
+        foreach ($allocations as $allocation) {
+            if (!isset($validAccounts[trim((string) ($allocation['account_code'] ?? ''))])) {
+                throw new \InvalidArgumentException('Účetní alokace odkazuje na neaktivní nebo neexistující účet.');
+            }
+        }
+
+        $pdo->prepare(
+            'DELETE FROM purchase_invoice_vat_allocations
+              WHERE purchase_invoice_id = ? AND supplier_id = ?'
+        )->execute([$purchaseInvoiceId, $supplierId]);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO purchase_invoice_vat_allocations
+                (supplier_id, purchase_invoice_id, description, usage_type, vat_rate,
+                 base_amount, vat_amount, total_amount, vat_deduction,
+                 vat_deduction_percent, tax_treatment, account_code,
+                 vat_classification_code, order_index)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach (array_values($allocations) as $index => $allocation) {
+            $deduction = (string) ($allocation['vat_deduction'] ?? 'full');
+            $percent = max(0.0, min(100.0, (float) ($allocation['vat_deduction_percent'] ?? 100)));
+            if ($deduction === 'none') $percent = 0.0;
+            if ($deduction === 'full') $percent = 100.0;
+            $base = round((float) ($allocation['base_amount'] ?? 0), 2);
+            $vat = round((float) ($allocation['vat_amount'] ?? 0), 2);
+            $stmt->execute([
+                $supplierId, $purchaseInvoiceId, trim((string) $allocation['description']),
+                (string) ($allocation['usage_type'] ?? 'business'),
+                round((float) ($allocation['vat_rate'] ?? 0), 2),
+                $base, $vat, round((float) ($allocation['total_amount'] ?? ($base + $vat)), 2),
+                $deduction, $percent,
+                (string) ($allocation['tax_treatment'] ?? 'deductible'),
+                trim((string) $allocation['account_code']),
+                ($allocation['vat_classification_code'] ?? null) ?: null,
+                (int) ($allocation['order_index'] ?? $index),
+            ]);
+        }
+        $pdo->prepare('UPDATE purchase_invoices SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND supplier_id = ?')
+            ->execute([$purchaseInvoiceId, $supplierId]);
     }
 
     /**
@@ -238,10 +609,14 @@ final class PurchaseInvoiceRepository
             $params[] = (int) $filters['vendor_id'];
         }
         if (!empty($filters['year'])) {
-            $where[] = 'YEAR(pi.issue_date) = ?';
-            $params[] = (int) $filters['year'];
+            // Sargovatelný půlotevřený rozsah místo YEAR(...) — využije idx_pi_supplier_issue.
+            $y = (int) $filters['year'];
+            $where[] = 'pi.issue_date >= ? AND pi.issue_date < ?';
+            $params[] = sprintf('%04d-01-01', $y);
+            $params[] = sprintf('%04d-01-01', $y + 1);
         }
         if (!empty($filters['month'])) {
+            // MONTH() napříč roky nelze převést na souvislý rozsah — ponecháno.
             $where[] = 'MONTH(pi.issue_date) = ?';
             $params[] = (int) $filters['month'];
         }
@@ -263,6 +638,40 @@ final class PurchaseInvoiceRepository
         if (!empty($filters['overdue'])) {
             $where[] = "pi.status IN ('received','booked') AND pi.due_date <= CURDATE()";
         }
+        // „Bez párování úhrady" — doklad NEMÁ žádnou zaúčtovanou úhradu: ani bankovní
+        // match (payment_matches), ani hotovostní pokladní doklad (cash_documents POSTED).
+        // Odhalí ručně/legacy uhrazené faktury (status='paid' bez zaúčtované úhrady) —
+        // závazek 321 pak zůstává v deníku otevřený. Vylučuje cancelled (irelevantní) a
+        // doklady kryté zálohou / na 0 Kč (amount_to_pay <= 0) — ty jsou vypořádané
+        // zálohovým dokladem (advance_paid_amount), nemají a nemají mít bankovní/pokladní
+        // párování, takže nejde o chybu (např. finální faktura na 0 Kč k uhrazené záloze).
+        if (!empty($filters['unmatched'])) {
+            // Pokladní VPD / ruční úhrada často není navázaná strukturálně
+            // (cash_documents.purchase_invoice_id = NULL, purpose='other') — vazba je jen
+            // v popisu zápisu („Úhrada PF <číslo>"). Takový doklad ale závazek v deníku
+            // uzavírá (zápis MD 321). Vyloučíme proto i faktury, které mají POSTED zápis
+            // s řádkem MD 321* a popisem odkazujícím na číslo dodavatelské faktury — tím
+            // odpadnou faktury reálně uhrazené pokladnou/ručně, i bez strukturálního párování.
+            $where[] = "pi.status IN ('paid','received','booked')
+                AND pi.amount_to_pay > 0
+                AND NOT EXISTS (SELECT 1 FROM payment_matches pm
+                                 WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id)
+                AND NOT EXISTS (SELECT 1 FROM cash_documents cd
+                                 WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                   AND cd.status = 'posted')
+                AND NOT EXISTS (SELECT 1 FROM journal_entries je
+                                  JOIN journal_entry_lines jl ON jl.entry_id = je.id
+                                  JOIN chart_of_accounts ja ON ja.id = jl.account_id
+                                 WHERE je.supplier_id = pi.supplier_id AND je.posted_at IS NOT NULL
+                                   AND je.reversed_by IS NULL AND jl.side = 'debit'
+                                   AND ja.account_code LIKE '321%'
+                                   AND pi.vendor_invoice_number <> ''
+                                   AND je.description LIKE CONCAT('%', pi.vendor_invoice_number, '%'))
+                AND NOT EXISTS (SELECT 1 FROM purchase_invoices cn
+                                 WHERE cn.supplier_id = pi.supplier_id
+                                   AND cn.document_kind = 'credit_note'
+                                   AND cn.parent_purchase_invoice_id = pi.id)";
+        }
         if (!empty($filters['needs_review'])) {
             $where[] = "pi.extraction_warning IS NOT NULL";
         }
@@ -277,12 +686,30 @@ final class PurchaseInvoiceRepository
                 ? 'pi.payment_ordered_at IS NOT NULL'
                 : 'pi.payment_ordered_at IS NULL';
         }
+        // Zaúčtováno / nezaúčtováno (podvojné účetnictví) — '1' = zaúčtováno (booked_at IS NOT NULL),
+        // '0' = nezaúčtováno (IS NULL). V daňové evidenci je booked_at vždy NULL (FE filtr gatuje na
+        // double_entry). Pozor: ortogonální ke starému stavu `status='booked'` — zaúčtovanost řeší booked_at.
+        // Zálohové faktury se neúčtují (účtuje se až inkaso zálohy a vyúčtování) — engine je vylučuje
+        // shodně v PostingService::post(), DocumentBackfill, PendingBackfillCounter i ClosingRepository,
+        // takže fronta „k zaúčtování" je nesmí nabízet, jinak slibuje akci, která skončí 422.
+        if (isset($filters['booked']) && $filters['booked'] !== null && $filters['booked'] !== '') {
+            if ((string) $filters['booked'] === '1') {
+                $where[] = 'pi.booked_at IS NOT NULL';
+            } else {
+                $where[] = "pi.booked_at IS NULL AND COALESCE(pi.document_kind, 'invoice') <> 'advance'";
+            }
+        }
         if (!empty($filters['q'])) {
             // Escape % a _ wildcards aby uživatelský input nedělal slow-query / unexpected match
             $q = addcslashes((string) $filters['q'], '%_\\');
-            $where[] = '(pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ? OR c.company_name LIKE ?)';
+            // Hledá i v TEXTU POLOŽEK dokladu (EXISTS, ne JOIN — JOIN by doklad znásobil na
+            // počet položek). Uživatel typicky hledá „monitor", „Lenovo" apod. napříč doklady.
+            $where[] = '(pi.varsymbol LIKE ? OR pi.vendor_invoice_number LIKE ? OR c.company_name LIKE ?'
+                . ' OR EXISTS (SELECT 1 FROM purchase_invoice_items pii WHERE pii.purchase_invoice_id = pi.id'
+                . ' AND pii.description LIKE ?))';
             $params[] = $q . '%';
             $params[] = $q . '%';
+            $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
         }
 
@@ -303,14 +730,22 @@ final class PurchaseInvoiceRepository
                        pi.payment_ordered_at,
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
+                       ec.label AS expense_category_label, ec.code AS expense_category_code,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket,
                        EXISTS (SELECT 1 FROM purchase_invoices adv_f
-                               WHERE adv_f.advance_purchase_invoice_id = pi.id) AS is_settled_advance
+                               WHERE adv_f.advance_purchase_invoice_id = pi.id) AS is_settled_advance,
+                       -- §DM: doklad obsahuje drobný majetek → ikonka v seznamu. Stačí, že
+                       -- ho nese JEDNA položka (faktura běžně míchá majetek se službou),
+                       -- proto EXISTS, ne JOIN — ten by doklad znásobil na počet položek.
+                       EXISTS (SELECT 1 FROM purchase_invoice_items pii
+                               WHERE pii.purchase_invoice_id = pi.id
+                                 AND pii.expense_kind = 'small_asset') AS has_small_asset
                        {$selectTotal}
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
+             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
                  WHERE $whereSql
                  ORDER BY pi.issue_date DESC, pi.id DESC";
 
@@ -359,12 +794,23 @@ final class PurchaseInvoiceRepository
             $grouped[$month]['count']++;
 
             // Měsíční součet = reálný náklad. Vyřadit: draft/cancelled a spárovanou/zaplacenou
-            // zálohu (advance) — náklad nese finální faktura, jinak 2× započteno (shoda s
-            // costs_by_month / CRM). Nespárovaná nezaplacená záloha se počítá (očekávaný náklad).
+            // zálohu (advance) — náklad nese finální faktura, jinak 2× započteno.
+            // Nespárovaná nezaplacená záloha se počítá (očekávaný náklad).
             // Řádek se i tak zobrazí (analogicky proforma u vystavených faktur).
+            //
+            // ZÁMĚRNĚ OPAČNĚ NEŽ CRM — nesjednocovat: tohle je ÚČETNÍ pohled (zaplacená
+            // záloha sedí na 314, náklad nezakládá), zatímco CrmAggregationService
+            // a PurchaseSummaryAction jsou informativní predikce, kde zaplacená
+            // a nespárovaná záloha do nákladů patří. Rozhodnutí, ne chyba —
+            // viz private/checks/NALEZY.md, N-019. Hlídá AdvanceCostPredicateParityTest.
+            //
+            // DDKP (§ 28 ZDPH) není náklad NIKDY — účtuje jen odpočet DPH ze zálohy (343/314),
+            // náklad vzniká až u vyúčtovací faktury. Bez toho hlavička měsíce nesedí
+            // s dlaždicí Náklady ani s costs_by_month o celé brutto DDKP.
             $excludedAdvance = $row['document_kind'] === 'advance'
                 && ($row['status'] === 'paid' || $isSettledAdvance);
-            if (!in_array($row['status'], ['draft', 'cancelled'], true) && !$excludedAdvance) {
+            $excludedVatDoc = $row['document_kind'] === 'tax_document';
+            if (!in_array($row['status'], ['draft', 'cancelled'], true) && !$excludedAdvance && !$excludedVatDoc) {
                 $cur = $row['currency'];
                 if (!isset($grouped[$month]['totals_per_currency'][$cur])) {
                     $grouped[$month]['totals_per_currency'][$cur] = [
@@ -450,7 +896,7 @@ final class PurchaseInvoiceRepository
         }
 
         $documentKind = (string) ($data['document_kind'] ?? 'invoice');
-        if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance'], true)) {
+        if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'], true)) {
             $documentKind = 'invoice';
         }
 
@@ -467,9 +913,19 @@ final class PurchaseInvoiceRepository
             $vendorSnapshot = $this->buildVendorSnapshot($vendorId);
         }
 
+        // C6 (§ 73/1/a): 'manual' = účetní vědomě zadala datum přijetí ve formuláři,
+        // 'import' = otisk data importu. Rozhoduje o období odpočtu ve VatLedgerService.
+        $receivedAtSource = (($data['received_at_source'] ?? null) === 'manual') ? 'manual' : 'import';
+
+        // Forma úhrady (migrace 1128). Pořadí: co poslal volající (editor / AI import)
+        // → předvolba dodavatele (`clients.default_payment_method`) → 'bank_transfer'.
+        // Předvolba dodavatele se otiskne jako source='vendor', aby ji pozdější ruční
+        // volba účetní směla přepsat, ale sama nepřepsala nic silnějšího.
+        [$paymentMethod, $paymentMethodSource] = $this->resolvePaymentMethodForCreate($data, $vendorId);
+
         $sql = 'INSERT INTO purchase_invoices
             (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
-             issue_date, tax_date, due_date, received_at,
+             issue_date, tax_date, due_date, received_at, received_at_source,
              currency_id, exchange_rate, exchange_rate_date, exchange_rate_source,
              reverse_charge, prices_include_vat, language, note_above_items, note_below_items,
              vendor_snapshot, own_snapshot,
@@ -478,8 +934,9 @@ final class PurchaseInvoiceRepository
              paid_amount_payment_ccy, paid_amount_invoice_ccy, exchange_diff_base,
              payment_account_number, payment_bank_code, payment_iban, payment_bic,
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
+             payment_method, payment_method_source,
              status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -493,6 +950,7 @@ final class PurchaseInvoiceRepository
             empty($data['tax_date']) ? null : (string) $data['tax_date'],
             (string) $data['due_date'],
             (string) ($data['received_at'] ?? $data['issue_date']),
+            $receivedAtSource,
             (int) $data['currency_id'],
             isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null,
             empty($data['exchange_rate_date']) ? null : (string) $data['exchange_rate_date'],
@@ -513,8 +971,10 @@ final class PurchaseInvoiceRepository
             isset($data['paid_amount_invoice_ccy']) ? (float) $data['paid_amount_invoice_ccy'] : null,
             isset($data['exchange_diff_base']) ? (float) $data['exchange_diff_base'] : null,
             ...$this->paymentColumns($data),
+            $paymentMethod,
+            $paymentMethodSource,
             isset($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
-            in_array($data['vat_deduction'] ?? 'full', ['full', 'none', 'proportional'], true) ? (string) ($data['vat_deduction'] ?? 'full') : 'full',
+            in_array($data['vat_deduction'] ?? 'full', ['full', 'none', 'proportional', 'reduced'], true) ? (string) ($data['vat_deduction'] ?? 'full') : 'full',
             max(0.0, min(100.0, (float) ($data['vat_deduction_percent'] ?? 100))),
             (array_key_exists('tax_deductible', $data) && !$data['tax_deductible']) ? 0 : 1,
             !empty($data['is_fixed_asset']) ? 1 : 0,
@@ -522,7 +982,104 @@ final class PurchaseInvoiceRepository
             $userId,
         ]);
 
-        return (int) $pdo->lastInsertId();
+        $newId = (int) $pdo->lastInsertId();
+
+        // Vazba dobropisu na opravovanou fakturu (migrace 1096) — INSERT výš je poziční a
+        // křehký, proto ji dosadíme samostatným UPDATE jen když ji volající poslal. Tenant/
+        // /self/kind validaci řeší Action; tady jen persistujeme int|null.
+        if (array_key_exists('parent_purchase_invoice_id', $data)) {
+            $parentId = ($data['parent_purchase_invoice_id'] ?? null) ? (int) $data['parent_purchase_invoice_id'] : null;
+            if ($parentId !== null) {
+                $u = $pdo->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ?
+                                     WHERE id = ? AND supplier_id = ?');
+                $u->execute([$parentId, $newId, $supplierId]);
+            }
+        }
+
+        return $newId;
+    }
+
+    /**
+     * Forma úhrady pro NOVÝ doklad (migrace 1128).
+     *
+     * Volající poslal hodnotu → bereme ji i s jeho zdrojem ('manual' z editoru,
+     * 'ai' z extrakce). Nic neposlal → zkusíme předvolbu dodavatele
+     * (`clients.default_payment_method`, NULL = dodavatel „nemá názor") a otiskneme
+     * source='vendor'. Jinak 'bank_transfer'/'default'.
+     *
+     * @param array<string,mixed> $data
+     * @return array{0:string,1:string}
+     */
+    private function resolvePaymentMethodForCreate(array $data, int $vendorId): array
+    {
+        if (array_key_exists('payment_method', $data) && PaymentMethods::isValid($data['payment_method'])) {
+            return [
+                PaymentMethods::normalize($data['payment_method']),
+                PaymentMethods::normalizeSource($data['payment_method_source'] ?? 'manual'),
+            ];
+        }
+
+        $vendorDefault = $this->vendorDefaultPaymentMethod($vendorId);
+        if ($vendorDefault !== null) {
+            return [$vendorDefault, 'vendor'];
+        }
+
+        return [PaymentMethods::DEFAULT, 'default'];
+    }
+
+    /** Uložený zdroj formy úhrady dokladu (default, když řádek/sloupec nejde přečíst). */
+    private function currentPaymentMethodSource(int $id, int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT payment_method_source FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([$id, $supplierId]);
+            $v = $stmt->fetchColumn();
+        } catch (\Throwable) {
+            return 'default';
+        }
+        return $v === false ? 'default' : PaymentMethods::normalizeSource($v);
+    }
+
+    /**
+     * Nastaví formu úhrady s respektem k prioritě zdrojů (manual > ai > vendor > default).
+     * Používá ji AI extrakce — nikdy nesmí přebít ruční volbu účetní.
+     *
+     * @return bool true = zapsáno, false = silnější zdroj hodnotu ubránil
+     */
+    public function setPaymentMethod(int $id, int $supplierId, string $method, string $source): bool
+    {
+        if (!PaymentMethods::isValid($method)) {
+            return false;
+        }
+        $source = PaymentMethods::normalizeSource($source);
+        if (!PaymentMethods::canOverride($this->currentPaymentMethodSource($id, $supplierId), $source)) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET payment_method = ?, payment_method_source = ?
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([PaymentMethods::normalize($method), $source, $id, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** Předvolená forma úhrady dodavatele; null = neurčeno (nebo sloupec ještě není). */
+    private function vendorDefaultPaymentMethod(int $vendorId): ?string
+    {
+        if ($vendorId <= 0) {
+            return null;
+        }
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT default_payment_method FROM clients WHERE id = ?');
+            $stmt->execute([$vendorId]);
+            $v = $stmt->fetchColumn();
+        } catch (\Throwable) {
+            // Sloupec chybí (starší DB bez migrace 1128) → chovej se jako „bez předvolby".
+            return null;
+        }
+        return $v === false ? null : PaymentMethods::normalizeNullable($v);
     }
 
     /**
@@ -590,22 +1147,21 @@ final class PurchaseInvoiceRepository
      * a zbývá k úhradě). Vrací platební údaje příjemce + DIČ dodavatele (pro CRPDPH
      * ověření). Volitelný filtr měny (= měna účtu plátce).
      *
+     * @param int|null $limit Bez LIMIT/OFFSET, když null (zpětně kompatibilní default).
+     * @param bool $includeNonTransfer Zahrnout i faktury hrazené jinak než převodem
+     *                                 (inkaso apod.) — viz {@see paymentCandidatesWhere}.
      * @return list<array<string,mixed>>
      */
-    public function listPaymentCandidates(int $supplierId, ?string $currency = null): array
+    public function listPaymentCandidates(int $supplierId, ?string $currency = null, ?int $limit = null, int $offset = 0, bool $includeNonTransfer = false): array
     {
-        $where = ["pi.supplier_id = ?", "pi.status IN ('received','booked')", "pi.amount_to_pay > 0"];
-        $params = [$supplierId];
-        if ($currency !== null && $currency !== '') {
-            $where[] = 'cur.code = ?';
-            $params[] = strtoupper($currency);
-        }
+        [$where, $params] = $this->paymentCandidatesWhere($supplierId, $currency, $includeNonTransfer);
         $sql = "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.document_kind,
                        pi.vendor_id, pi.issue_date, pi.due_date,
                        pi.total_with_vat, pi.amount_to_pay, pi.rounding,
                        (pi.pdf_path IS NOT NULL AND pi.pdf_path <> '') AS has_pdf,
                        pi.payment_account_number, pi.payment_bank_code, pi.payment_iban, pi.payment_bic,
                        pi.payment_variable_symbol, pi.payment_constant_symbol,
+                       pi.payment_method, pi.payment_method_source,
                        pi.payment_account_source, pi.payment_account_checked_at, pi.payment_ordered_at,
                        cur.code AS currency, cur.symbol AS currency_symbol,
                        c.company_name AS vendor_company_name, c.dic AS vendor_dic, c.ic AS vendor_ic
@@ -614,6 +1170,11 @@ final class PurchaseInvoiceRepository
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE " . implode(' AND ', $where) . "
                  ORDER BY pi.due_date ASC, pi.id ASC";
+        // LIMIT/OFFSET inlinujeme jako validované inty (vzor StockItemRepository::list) —
+        // native prepared statements neumí LIMIT/OFFSET s parametrem typu string.
+        if ($limit !== null) {
+            $sql .= ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset);
+        }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -626,6 +1187,60 @@ final class PurchaseInvoiceRepository
             $r['has_pdf']        = (bool) $r['has_pdf'];
         }
         return $rows;
+    }
+
+    /** COUNT(*) se STEJNÝM WHERE jako {@see listPaymentCandidates} (bez LIMIT), pro paginaci. */
+    public function countPaymentCandidates(int $supplierId, ?string $currency = null, bool $includeNonTransfer = false): int
+    {
+        [$where, $params] = $this->paymentCandidatesWhere($supplierId, $currency, $includeNonTransfer);
+        $sql = "SELECT COUNT(*)
+                  FROM purchase_invoices pi
+                  JOIN clients c     ON c.id   = pi.vendor_id
+                  JOIN currencies cur ON cur.id = pi.currency_id
+                 WHERE " . implode(' AND ', $where);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Sdílený WHERE pro {@see listPaymentCandidates} i {@see countPaymentCandidates} —
+     * drž obojí v syncu, jinak se rozejde stránkování s totálem.
+     *
+     * `payment_method = 'bank_transfer'` je OPT-OUT filtr, ne natvrdo: inkaso (SIPO),
+     * karta, dobírka ani zápočet se převodem neplatí a v příkazu k úhradě by vedly na
+     * DVOJÍ platbu. Ale protože hodnota může být nastavená CHYBNĚ (AI, předvolba
+     * dodavatele), musí jít filtr vypnout — jinak by taková faktura z obrazovky zmizela
+     * BEZE STOPY a nikdo by ji nikdy nezaplatil. Proto `$includeNonTransfer`.
+     *
+     * Daňový doklad k poskytnuté záloze (DDKP, § 28 ZDPH) NENÍ platební cíl a filtr je
+     * u něj NEPODMÍNĚNÝ — peníze odešly už na zálohovou fakturu, DDKP jen dokládá nárok
+     * na odpočet DPH (343/314). Jeho `amount_to_pay` je přitom generated sloupec
+     * `total_with_vat − advance_paid_amount`, takže nese PLNÉ BRUTTO už zaplacené zálohy;
+     * bez tohoto filtru by DDKP ve stavu `received`/`booked` spadl do příkazu k úhradě
+     * a dodavateli by odešla druhá platba. Stejné pravidlo drží StatementMatcher:630/768/823
+     * (párování) a BankPostingService:702 (protiúčet); vydanou větev kryje strukturálně
+     * InvoicePaymentService::PAYABLE_TYPES.
+     *
+     * @return array{0:list<string>,1:list<mixed>}
+     */
+    private function paymentCandidatesWhere(int $supplierId, ?string $currency, bool $includeNonTransfer = false): array
+    {
+        $where = [
+            "pi.supplier_id = ?",
+            "pi.status IN ('received','booked')",
+            "pi.amount_to_pay > 0",
+            "pi.document_kind <> 'tax_document'",
+        ];
+        $params = [$supplierId];
+        if (!$includeNonTransfer) {
+            $where[] = "pi.payment_method = 'bank_transfer'";
+        }
+        if ($currency !== null && $currency !== '') {
+            $where[] = 'cur.code = ?';
+            $params[] = strtoupper($currency);
+        }
+        return [$where, $params];
     }
 
     /**
@@ -651,7 +1266,12 @@ final class PurchaseInvoiceRepository
     /**
      * Update draft přijaté faktury. Volající má ověřit, že je `status='draft'`.
      */
-    public function updateDraft(int $id, array $data, int $supplierId): void
+    /**
+     * @param bool $requireUnbooked Optimistický zámek (Epic F6, L1): UPDATE podmíněný
+     *                              `booked_at IS NULL`. Vrací false, když doklad mezitím
+     *                              někdo zaúčtoval (řádek existuje, ale booked_at je set).
+     */
+    public function updateDraft(int $id, array $data, int $supplierId, bool $requireUnbooked = false): bool
     {
         $hasVarsymbol = array_key_exists('varsymbol', $data);
         $manualVarsymbol = null;
@@ -665,8 +1285,22 @@ final class PurchaseInvoiceRepository
         }
 
         $documentKind = (string) ($data['document_kind'] ?? 'invoice');
-        if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance'], true)) {
+        if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'], true)) {
             $documentKind = 'invoice';
+        }
+        // Druh DDKP je NEMĚNNÝ. Editor ho v nabídce nemá (jen invoice/receipt/credit_note/
+        // advance), takže otevřením daňového dokladu k záloze a uložením by se druh tiše
+        // přepsal na jiný — doklad by rázem ztratil všechny výjimky: vypadl by z guardu
+        // příkazu k úhradě (fantomový závazek v plné výši už zaplacené zálohy), započetl by
+        // se do nákladů a PostingService by ho zaúčtoval jako běžnou fakturu místo 343/314.
+        // Zpětná cesta neexistuje — do 'tax_document' se přes updateDocumentKind přepnout nedá.
+        // Zachováváme tiše (ne výjimkou), ať editace ostatních polí DDKP zůstane možná.
+        $kindStmt = $this->db->pdo()->prepare(
+            'SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+        );
+        $kindStmt->execute([$id, $supplierId]);
+        if ((string) ($kindStmt->fetchColumn() ?: '') === 'tax_document') {
+            $documentKind = 'tax_document';
         }
 
         $vendorInvoiceNumber = trim((string) ($data['vendor_invoice_number'] ?? ''));
@@ -699,6 +1333,45 @@ final class PurchaseInvoiceRepository
                 . ' payment_variable_symbol = ?, payment_account_source = ?, payment_account_checked_at = ?';
         }
 
+        // C6 (§ 73/1/a): zdroj data přijetí přepisujeme jen když ho volající poslal —
+        // jinak by manuální update bez received_at otisk 'manual' degradoval zpět na 'import'.
+        $hasReceivedAtSource = array_key_exists('received_at_source', $data);
+        $receivedAtSourceParam = null;
+        $receivedAtSourceSet = '';
+        if ($hasReceivedAtSource) {
+            $receivedAtSourceParam = ($data['received_at_source'] === 'manual') ? 'manual' : 'import';
+            $receivedAtSourceSet = ', received_at_source = ?';
+        }
+
+        // Vazba dobropisu na opravovanou fakturu (migrace 1096). Přepisujeme jen když ji
+        // volající explicitně poslal (editor dokladu) — ostatní update cesty ji neposílají
+        // → uložená vazba zůstává nedotčená. Tenant/self/kind validaci dělá Action.
+        $hasParent = array_key_exists('parent_purchase_invoice_id', $data);
+        $parentParam = null;
+        $parentSet = '';
+        if ($hasParent) {
+            $parentParam = ($data['parent_purchase_invoice_id'] ?? null) ? (int) $data['parent_purchase_invoice_id'] : null;
+            $parentSet = ', parent_purchase_invoice_id = ?';
+        }
+
+        // Forma úhrady (migrace 1128) — píšeme jen když ji volající poslal A jeho zdroj
+        // smí přepsat ten uložený (manual > ai > vendor > default). Bez téhle brány by
+        // AI re-extrakce nebo změna předvolby dodavatele tiše přebila to, co účetní
+        // ručně nastavila. Ostatní update cesty pole neposílají → zůstává nedotčené.
+        $hasPaymentMethod = array_key_exists('payment_method', $data)
+            && PaymentMethods::isValid($data['payment_method']);
+        $paymentMethodSet = '';
+        $paymentMethodParams = [];
+        if ($hasPaymentMethod) {
+            $newSource = PaymentMethods::normalizeSource($data['payment_method_source'] ?? 'manual');
+            if (PaymentMethods::canOverride($this->currentPaymentMethodSource($id, $supplierId), $newSource)) {
+                $paymentMethodSet = ', payment_method = ?, payment_method_source = ?';
+                $paymentMethodParams = [PaymentMethods::normalize($data['payment_method']), $newSource];
+            } else {
+                $hasPaymentMethod = false;
+            }
+        }
+
         $sql = 'UPDATE purchase_invoices SET
                 vendor_id = ?, vendor_invoice_number = ?, document_kind = ?,
                 issue_date = ?, tax_date = ?, due_date = ?, received_at = ?,
@@ -709,10 +1382,14 @@ final class PurchaseInvoiceRepository
                 payment_currency_id = ?, payment_exchange_rate = ?,
                 paid_amount_payment_ccy = ?, paid_amount_invoice_ccy = ?, exchange_diff_base = ?,
                 vat_classification_code = ?, vat_deduction = ?, vat_deduction_percent = ?, tax_deductible = ?, is_fixed_asset = ?, expense_category_id = ?'
+              . $receivedAtSourceSet
+              . $parentSet
               . ($hasVendorVatPayer ? ', vendor_is_vat_payer = ?' : '')
               . $paymentSet
+              . $paymentMethodSet
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
-              . ' WHERE id = ? AND supplier_id = ?';
+              . ' WHERE id = ? AND supplier_id = ?'
+              . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
 
         $params = [
             (int) $data['vendor_id'],
@@ -738,21 +1415,41 @@ final class PurchaseInvoiceRepository
             isset($data['paid_amount_invoice_ccy']) ? (float) $data['paid_amount_invoice_ccy'] : null,
             isset($data['exchange_diff_base']) ? (float) $data['exchange_diff_base'] : null,
             isset($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
-            in_array($data['vat_deduction'] ?? 'full', ['full', 'none', 'proportional'], true) ? (string) ($data['vat_deduction'] ?? 'full') : 'full',
+            in_array($data['vat_deduction'] ?? 'full', ['full', 'none', 'proportional', 'reduced'], true) ? (string) ($data['vat_deduction'] ?? 'full') : 'full',
             max(0.0, min(100.0, (float) ($data['vat_deduction_percent'] ?? 100))),
             (array_key_exists('tax_deductible', $data) && !$data['tax_deductible']) ? 0 : 1,
             !empty($data['is_fixed_asset']) ? 1 : 0,
             isset($data['expense_category_id']) && $data['expense_category_id'] ? (int) $data['expense_category_id'] : null,
         ];
+        if ($hasReceivedAtSource) $params[] = $receivedAtSourceParam;
+        if ($hasParent) $params[] = $parentParam;
         if ($hasVendorVatPayer) $params[] = $vendorIsVatPayer;
         if ($hasPayment) {
             array_push($params, ...$paymentParams);
+        }
+        if ($hasPaymentMethod) {
+            array_push($params, ...$paymentMethodParams);
         }
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         $params[] = $id;
         $params[] = $supplierId;
 
-        $this->db->pdo()->prepare($sql)->execute($params);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        if ($requireUnbooked && $stmt->rowCount() === 0) {
+            // rowCount 0 = buď booked_at podmínka nesedla, nebo identická data (MySQL
+            // počítá changed rows). Rozliš dotazem — locked jen když booked_at není NULL.
+            // Vědomě akceptovaný double-race: mezi UPDATE a tímto SELECTem může účetní
+            // doklad zase odemknout → falešné 200 u no-op zápisu (ms okno, bez dopadu
+            // na data — UPDATE nic nezměnil).
+            $check = $this->db->pdo()->prepare(
+                'SELECT 1 FROM purchase_invoices WHERE id = ? AND supplier_id = ? AND booked_at IS NULL'
+            );
+            $check->execute([$id, $supplierId]);
+            return $check->fetchColumn() !== false;
+        }
+        return true;
     }
 
     /**
@@ -781,8 +1478,9 @@ final class PurchaseInvoiceRepository
                 (purchase_invoice_id, description, quantity, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index,
-                 vat_classification_code, is_fixed_asset)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)'
+                 vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
+                 accrual_from, accrual_to, stock_item_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -793,7 +1491,7 @@ final class PurchaseInvoiceRepository
         //   EU vendor s 0% → '24e' (přijetí služby z EU, ř.5) — typický pro Microsoft Ireland apod.
         //   non-EU vendor s 0% → '24' (přijetí služby ze 3. země, ř.12) — Anthropic, GitHub apod.
         $metaStmt = $pdo->prepare(
-            'SELECT pi.reverse_charge, co.iso2,
+            'SELECT pi.supplier_id, pi.reverse_charge, co.iso2,
                     COALESCE(pi.tax_date, pi.issue_date) AS doc_date
                FROM purchase_invoices pi
                JOIN clients c     ON c.id  = pi.vendor_id
@@ -801,9 +1499,30 @@ final class PurchaseInvoiceRepository
               WHERE pi.id = ?'
         );
         $metaStmt->execute([$purchaseInvoiceId]);
-        $meta = $metaStmt->fetch(PDO::FETCH_ASSOC) ?: ['reverse_charge' => 0, 'iso2' => 'CZ', 'doc_date' => null];
+        $meta = $metaStmt->fetch(PDO::FETCH_ASSOC) ?: ['supplier_id' => 0, 'reverse_charge' => 0, 'iso2' => 'CZ', 'doc_date' => null];
         $reverseCharge = (bool) $meta['reverse_charge'];
         $countryIso = (string) ($meta['iso2'] ?? 'CZ');
+
+        // Skladová karta na řádku (volitelná, Epic SKLAD/ESHOP) — jen NAZNAČUJE
+        // kartu pro předvyplnění příjemkového wizardu; skutečný pohyb dělá až
+        // příjemka. Guard vlastnictví: přijmeme jen id patřící témuž tenantovi.
+        $supplierId = (int) ($meta['supplier_id'] ?? 0);
+        $ownedStock = [];
+        $stockIds = [];
+        foreach ($items as $it) {
+            $sid = is_array($it) && isset($it['stock_item_id']) && $it['stock_item_id'] !== null && $it['stock_item_id'] !== ''
+                ? (int) $it['stock_item_id'] : 0;
+            if ($sid > 0) {
+                $stockIds[] = $sid;
+            }
+        }
+        if ($stockIds !== [] && $supplierId > 0) {
+            $stockIds = array_values(array_unique($stockIds));
+            $ph = implode(',', array_fill(0, count($stockIds), '?'));
+            $q = $pdo->prepare("SELECT id FROM stock_items WHERE supplier_id = ? AND id IN ($ph)");
+            $q->execute(array_merge([$supplierId], $stockIds));
+            $ownedStock = array_flip(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []));
+        }
         // Základní sazba pro rok dokladu (číselník daňových konstant) — určuje, kdy
         // sazba znamená "tuzemská základní" v auto-klasifikaci.
         $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
@@ -819,6 +1538,25 @@ final class PurchaseInvoiceRepository
             if ($code === null) {
                 $code = self::defaultClassificationCode($rate, $reverseCharge, $countryIso, $standardRate);
             }
+            $sid = isset($item['stock_item_id']) && $item['stock_item_id'] !== null && $item['stock_item_id'] !== ''
+                ? (int) $item['stock_item_id'] : 0;
+            $stockItemId = ($sid > 0 && isset($ownedStock[$sid])) ? $sid : null;
+
+            // §DM: `expense_kind` je autoritativní klasifikace, `is_fixed_asset` zůstává jako
+            // příznak pro DPH (VatLedgerService → ř. 47 DPHDP3) a evidenci majetku. Držíme je
+            // v souladu na JEDNOM místě, jinak se dva zdroje pravdy rozejdou hned prvním
+            // uložením: expense_kind='fixed_asset' ⇔ is_fixed_asset=1.
+            $kind = ExpenseKind::tryFromNullable(
+                isset($item['expense_kind']) && $item['expense_kind'] !== '' ? (string) $item['expense_kind'] : null
+            );
+            $legacyFixed = !empty($item['is_fixed_asset']);
+            if ($kind === null && $legacyFixed) {
+                $kind = ExpenseKind::FixedAsset;   // starý caller posílá jen boolean
+            }
+            $isFixedAsset = $kind !== null
+                ? ($kind === ExpenseKind::FixedAsset ? 1 : 0)
+                : ($legacyFixed ? 1 : 0);
+
             $stmt->execute([
                 $purchaseInvoiceId,
                 (string) ($item['description'] ?? ''),
@@ -829,9 +1567,37 @@ final class PurchaseInvoiceRepository
                 $rate,
                 (int) ($item['order_index'] ?? $i),
                 $code !== null ? (string) $code : null,
-                !empty($item['is_fixed_asset']) ? 1 : 0,
+                $isFixedAsset,
+                $kind?->value,
+                // Účet na řádku (nepovinný) — platnost ověřuje PostingService proti osnově
+                // tenanta; tady se jen normalizuje prázdný řetězec na NULL.
+                isset($item['expense_account_code']) && trim((string) $item['expense_account_code']) !== ''
+                    ? trim((string) $item['expense_account_code'])
+                    : null,
+                // Časové rozlišení nákladu (§DČR) — období od–do. Prázdné → NULL (bez rozlišení).
+                // Odklad na 381 dělá až uzávěrka; tady se jen ULOŽÍ zadané období.
+                self::normalizeAccrualDate($item['accrual_from'] ?? null),
+                self::normalizeAccrualDate($item['accrual_to'] ?? null),
+                $stockItemId,
             ]);
         }
+    }
+
+    /**
+     * Normalizace data časového rozlišení řádku (§DČR) — přijme YYYY-MM-DD, jinak NULL.
+     * Prázdný řetězec / null / neplatný formát = NULL (bez rozlišení, dosavadní chování).
+     */
+    private static function normalizeAccrualDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $s = trim((string) $value);
+        if ($s === '') {
+            return null;
+        }
+        $d = \DateTimeImmutable::createFromFormat('!Y-m-d', substr($s, 0, 10));
+        return $d !== false ? $d->format('Y-m-d') : null;
     }
 
     /**
@@ -910,8 +1676,12 @@ final class PurchaseInvoiceRepository
     /**
      * Status transition. Volající ověří povolené přechody (state machine).
      * Side-efekty (timestamp pole) tady — booked_at, paid_at, cancelled_at.
+     *
+     * @param bool $requireUnbooked Optimistický zámek (Epic F6, L1): UPDATE podmíněný
+     *                              `booked_at IS NULL`. Vrací false, když doklad mezitím
+     *                              někdo zaúčtoval (guard-check → zápis TOCTOU okno).
      */
-    public function setStatus(int $id, string $newStatus, int $supplierId, ?string $paidDate = null): void
+    public function setStatus(int $id, string $newStatus, int $supplierId, ?string $paidDate = null, ?int $bookedBy = null, bool $requireUnbooked = false): bool
     {
         if (!in_array($newStatus, ['draft', 'received', 'booked', 'paid', 'cancelled'], true)) {
             throw new \InvalidArgumentException("Invalid status: $newStatus");
@@ -922,6 +1692,9 @@ final class PurchaseInvoiceRepository
 
         if ($newStatus === 'booked') {
             $sets[] = 'booked_at = NOW()';
+            // Epic F6: kdo zaúčtoval (zámek pro roli client) — nepřepisuj dřívějšího autora.
+            $sets[] = 'booked_by = COALESCE(booked_by, ?)';
+            $params[] = $bookedBy;
         } elseif ($newStatus === 'paid') {
             $sets[] = 'paid_at = ?';
             $params[] = $paidDate ?? date('Y-m-d');
@@ -932,13 +1705,41 @@ final class PurchaseInvoiceRepository
             // odpovídajícího "exit" stavu, aby data byla konzistentní.
             $sets[] = 'paid_at = NULL';
             $sets[] = 'cancelled_at = NULL';
+            // Epic F6: návrat do received odemyká omylem zabookovanou PF (unbook endpoint
+            // pro PF neexistuje) — ale jen bez aktivního posted zápisu; s ním zámek drží
+            // deník (stejná still_posted sémantika jako BookInvoiceAction::unbook /
+            // JournalAction::unlockSourceAfterReverse — nejdřív reverse).
+            if (!$this->hasActivePostedEntry($id, $supplierId)) {
+                $sets[] = 'booked_at = NULL';
+                $sets[] = 'booked_by = NULL';
+            }
         }
 
         $params[] = $id;
         $params[] = $supplierId;
 
-        $sql = 'UPDATE purchase_invoices SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?';
-        $this->db->pdo()->prepare($sql)->execute($params);
+        $sql = 'UPDATE purchase_invoices SET ' . implode(', ', $sets)
+             . ' WHERE id = ? AND supplier_id = ?'
+             . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        // State machine nezná no-op přechod (status se vždy mění), takže rowCount 0
+        // při requireUnbooked = booked_at podmínka nesedla → doklad mezitím zaúčtován.
+        return !$requireUnbooked || $stmt->rowCount() > 0;
+    }
+
+    /** Aktivní posted zápis k PF (posted_at NOT NULL, reversed_by NULL) — drží zámek. */
+    private function hasActivePostedEntry(int $id, int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?
+                AND posted_at IS NOT NULL AND reversed_by IS NULL
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $id]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /**
@@ -962,17 +1763,46 @@ final class PurchaseInvoiceRepository
         if ($final === null || $advance === null) {
             throw new \RuntimeException('Doklad nenalezen.');
         }
-        if (($advance['document_kind'] ?? '') !== 'advance') {
-            throw new \RuntimeException('Propojit lze jen se zálohovou fakturou (advance).');
+        // Vyúčtovat lze zálohovou fakturu, ale i SAMOSTATNÝ daňový doklad k platbě.
+        //
+        // U nákupu zaplaceného kartou žádná zálohová faktura nevzniká: prodejce vystaví
+        // rovnou „daňový doklad ke dni přijaté úplaty" (§ 28/8 ZDPH) a fakturu na zboží
+        // pošle až s dodáním. Ten doklad zálohovou fakturu NAHRAZUJE — visí na 314 a
+        // uplatňuje se z něj odpočet. Dokud šlo propojit jen `advance`, neměl uživatel
+        // konečnou fakturu čím spárovat: 314 zůstalo nevypořádané a hrozilo, že se DPH
+        // uplatní podruhé, protože nic nedrželo informaci, že už byla nárokována.
+        //
+        // DDKP navázaný na zálohovou fakturu se propojuje PŘES NI, ne přímo — jinak by
+        // se tatáž záloha dala vyúčtovat dvakrát (jednou přes zálohu, jednou přes DDKP).
+        $advanceKind = (string) ($advance['document_kind'] ?? '');
+        $advanceIsStandaloneDdkp = $advanceKind === 'tax_document'
+            && ($advance['parent_purchase_invoice_id'] ?? null) === null;
+        if ($advanceKind !== 'advance' && !$advanceIsStandaloneDdkp) {
+            throw new \RuntimeException($advanceKind === 'tax_document'
+                ? 'Tenhle daňový doklad k platbě patří k zálohové faktuře — propoj konečnou fakturu s ní.'
+                : 'Propojit lze jen se zálohovou fakturou nebo se samostatným daňovým dokladem k platbě.');
         }
-        if (($final['document_kind'] ?? '') === 'advance') {
-            throw new \RuntimeException('Zálohu nelze vyúčtovávat jinou zálohou.');
+        if (in_array((string) ($final['document_kind'] ?? ''), ['advance', 'tax_document'], true)) {
+            throw new \RuntimeException('Zálohu nelze vyúčtovávat jinou zálohou ani daňovým dokladem k platbě.');
         }
         if ((int) $final['vendor_id'] !== (int) $advance['vendor_id']) {
             throw new \RuntimeException('Záloha i finální faktura musí být od stejného dodavatele.');
         }
+        if (($advance['status'] ?? '') === 'cancelled') {
+            throw new \RuntimeException('Stornovanou zálohovou fakturu nelze propojit.');
+        }
+        if ((int) $final['currency_id'] !== (int) $advance['currency_id']) {
+            throw new \RuntimeException('Záloha i finální faktura musí být ve stejné měně.');
+        }
 
-        $advanceTotal = (float) $advance['total_with_vat'];
+        $paid = $this->paidAdvanceAmount($advanceId, $supplierId);
+        $paidInInvoiceCurrency = (float) ($advance['paid_amount_invoice_ccy'] ?? 0);
+        $advanceBase = $paidInInvoiceCurrency > 0.0
+            ? $paidInInvoiceCurrency
+            : ($paid > 0.0
+                ? $paid
+                : (($advance['status'] ?? '') === 'paid' ? (float) $advance['total_with_vat'] : 0.0));
+        $advanceTotal = min($advanceBase, (float) $final['total_with_vat']);
         $setAdvancePaid = ((float) ($final['advance_paid_amount'] ?? 0)) == 0.0;
 
         $sql = 'UPDATE purchase_invoices
@@ -985,9 +1815,68 @@ final class PurchaseInvoiceRepository
         $this->db->pdo()->prepare($sql)->execute($params);
     }
 
-    /** Zruší propojení finální faktury se zálohou (advance_paid_amount ponecháme — ruční korekce). */
+    private function paidAdvanceAmount(int $advanceId, int $supplierId): float
+    {
+        $bank = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(pm.amount), 0)
+               FROM payment_matches pm
+               JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+               JOIN purchase_invoices pi ON pi.id = pm.purchase_invoice_id
+               JOIN currencies cur ON cur.id = pi.currency_id
+               JOIN journal_entries je
+                 ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
+                AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
+              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?
+                AND UPPER(COALESCE(bt.currency, bs.currency, 'CZK')) = cur.code"
+        );
+        $bank->execute([$supplierId, $advanceId]);
+
+        $cash = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(cd.total_amount), 0)
+               FROM cash_documents cd
+               JOIN purchase_invoices pi ON pi.id = cd.purchase_invoice_id
+               JOIN currencies cur ON cur.id = pi.currency_id
+               JOIN journal_entries je
+                 ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
+                AND je.source_id = cd.id AND je.reversed_by IS NULL
+              WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ?
+                AND UPPER(cd.currency_code) = cur.code"
+        );
+        $cash->execute([$supplierId, $advanceId]);
+
+        return round((float) $bank->fetchColumn() + (float) $cash->fetchColumn(), 2);
+    }
+
+    /**
+     * Zruší propojení finální faktury se zálohou (advance_paid_amount ponecháme — ruční korekce).
+     *
+     * Zaúčtovaný doklad rozpojit NELZE. Zúčtování zálohy se do zápisu promítá právě
+     * podle téhle vazby (PostingService::appendAdvanceSettlementPurchase přidává
+     * 321 MD / 314 D). Po rozpojení by v deníku zůstaly řádky odkazující na vazbu,
+     * která už neexistuje, a re-post by vygeneroval jiný zápis — doklad a deník by
+     * se rozešly. Zrcadlo guardu na vydané větvi
+     * ({@see InvoiceRepository::unlinkAdvance}, kde se stejně chrání finál
+     * s odpočtovými řádky § 37a).
+     *
+     * @throws \RuntimeException když je doklad zaúčtovaný
+     */
     public function unlinkAdvance(int $finalId, int $supplierId): void
     {
+        $posted = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?
+                AND posted_at IS NOT NULL AND reversed_by IS NULL
+              LIMIT 1"
+        );
+        $posted->execute([$supplierId, $finalId]);
+        if ($posted->fetchColumn() !== false) {
+            throw new \RuntimeException(
+                'Zaúčtovanou fakturu nelze odpojit od zálohy — zúčtování zálohy je součástí '
+                . 'účetního zápisu. Nejdřív zápis stornuj, teprve pak vazbu zruš.'
+            );
+        }
+
         $this->db->pdo()
             ->prepare('UPDATE purchase_invoices
                           SET advance_purchase_invoice_id = NULL
@@ -1037,7 +1926,12 @@ final class PurchaseInvoiceRepository
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.vendor_id = ?
-                AND pi.document_kind = 'advance'
+                -- Kromě zálohových faktur i SAMOSTATNÉ daňové doklady k platbě: u nákupu
+                -- placeného kartou je takový doklad jedinou zálohou, která existuje.
+                -- DDKP patřící k zálohové faktuře se nabízet nesmí — vyúčtuje se přes ni,
+                -- jinak by šla tatáž záloha vyúčtovat dvakrát.
+                AND (pi.document_kind = 'advance'
+                     OR (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NULL))
                 AND pi.status != 'cancelled'
                 AND pi.id <> ?
                 AND NOT EXISTS (SELECT 1 FROM purchase_invoices s
@@ -1454,15 +2348,18 @@ final class PurchaseInvoiceRepository
 
     /**
      * Prefix interního čísla přijaté faktury podle daňového typu:
-     *   plný nárok   → PF (uznatelný) / PN (neuznatelný)
-     *   krácený §75  → KU / KN
-     *   bez nároku   → NU / NN
+     *   plný nárok    → PF (uznatelný) / PN (neuznatelný)
+     *   poměrný §75   → KU / KN
+     *   krácený §76   → KR / RN   (koeficient — vypořádání na úrovni roku)
+     *   bez nároku    → NU / NN
+     * Prefix musí být přesně 2 velká písmena ([A-Z]{2}, viz swapTemplatePrefix).
      */
     public static function varsymbolPrefix(string $vatDeduction, bool $taxDeductible): string
     {
         return match ($vatDeduction) {
             'none'         => $taxDeductible ? 'NU' : 'NN',
             'proportional' => $taxDeductible ? 'KU' : 'KN',
+            'reduced'      => $taxDeductible ? 'KR' : 'RN',
             default        => $taxDeductible ? 'PF' : 'PN',
         };
     }
@@ -1622,6 +2519,18 @@ final class PurchaseInvoiceRepository
         if ($current === 'advance' || $kind === 'advance') {
             return 'Změnu na/ze zálohy proveďte v editoru dokladu (má vazby na vyúčtování).';
         }
+        // Do 'tax_document' se přepnout nedá (není v $allowed), ale ODEJÍT z něj šlo —
+        // a to je jednosměrka do rozbitého stavu. DDKP účtuje jen odpočet DPH (343/314),
+        // je strukturálně vázaný na zálohu přes parent_purchase_invoice_id a všude má
+        // výjimky: mimo příkaz k úhradě, mimo náklady, mimo závazky, vlastní větev
+        // v PostingService. Po překlopení na 'invoice' by je ztratil — vznikl by
+        // fantomový závazek v plné výši už zaplacené zálohy a duplicitní náklad
+        // i odpočet — a zpět už ho nikdo nepřepne.
+        if ($current === 'tax_document') {
+            return 'Daňový doklad k záloze nelze překlopit na jiný druh — je vázaný na '
+                . 'zálohovou fakturu a jeho DPH už byla uplatněna. Pokud doklad nemá '
+                . 'existovat, stornuj ho.';
+        }
         $pdo->prepare(
             'UPDATE purchase_invoices SET document_kind = ? WHERE id = ? AND supplier_id = ?'
         )->execute([$kind, $id, $supplierId]);
@@ -1696,6 +2605,26 @@ final class PurchaseInvoiceRepository
         $stmt->execute([$supplierId, $vendorId, $vendorInvoiceNumber, $issueDate]);
         $id = $stmt->fetchColumn();
         return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Dohledá JEDNOZNAČNÉHO kandidáta na opravovanou fakturu dobropisu — běžnou fakturu
+     * (`document_kind = 'invoice'`) téhož tenanta a dodavatele s daným číslem dokladu.
+     * Vrací id JEN když existuje právě jeden takový doklad; při 0 nebo víc shodách null
+     * (dohad do dat nepatří — stejná logika jako předvyplnění v migraci 1096).
+     */
+    public function findUniqueInvoiceIdByVendorNumber(int $supplierId, int $vendorId, string $vendorInvoiceNumber): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM purchase_invoices
+              WHERE supplier_id = ? AND vendor_id = ?
+                AND document_kind = \'invoice\'
+                AND vendor_invoice_number = ?
+              LIMIT 2'
+        );
+        $stmt->execute([$supplierId, $vendorId, $vendorInvoiceNumber]);
+        $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        return count($ids) === 1 ? (int) $ids[0] : null;
     }
 
     /**
@@ -1798,15 +2727,21 @@ final class PurchaseInvoiceRepository
     {
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
-                  'advance_purchase_invoice_id', 'advance_link_suggested_id'] as $f) {
+                  'advance_purchase_invoice_id', 'advance_link_suggested_id',
+                  'parent_purchase_invoice_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;
         $row['prices_include_vat'] = isset($row['prices_include_vat']) ? (bool) $row['prices_include_vat'] : false;
         $row['is_fixed_asset'] = isset($row['is_fixed_asset']) ? (bool) $row['is_fixed_asset'] : false;
+        // §DM — jen v seznamu (list() ho počítá přes EXISTS). Podmíněně: v detailu sloupec
+        // není a natvrdo dosazené false by lhalo o dokladu, který drobný majetek má.
+        if (array_key_exists('has_small_asset', $row)) {
+            $row['has_small_asset'] = (bool) $row['has_small_asset'];
+        }
         $row['tax_deductible'] = !array_key_exists('tax_deductible', $row) || (bool) $row['tax_deductible'];
         $vatDeduction = (string) ($row['vat_deduction'] ?? '');
-        $row['vat_deduction'] = in_array($vatDeduction, ['full', 'none', 'proportional'], true) ? $vatDeduction : 'full';
+        $row['vat_deduction'] = in_array($vatDeduction, ['full', 'none', 'proportional', 'reduced'], true) ? $vatDeduction : 'full';
         $row['vat_deduction_percent'] = isset($row['vat_deduction_percent']) ? (float) $row['vat_deduction_percent'] : 100.0;
         foreach ([
             'total_without_vat', 'total_vat', 'total_with_vat', 'rounding',
@@ -1834,7 +2769,7 @@ final class PurchaseInvoiceRepository
 
     private function castItem(array $row): array
     {
-        foreach (['id', 'purchase_invoice_id', 'vat_rate_id', 'order_index'] as $f) {
+        foreach (['id', 'purchase_invoice_id', 'vat_rate_id', 'order_index', 'stock_item_id'] as $f) {
             if (isset($row[$f])) $row[$f] = (int) $row[$f];
         }
         foreach ([

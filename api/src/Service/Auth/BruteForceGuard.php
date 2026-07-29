@@ -42,12 +42,16 @@ final class BruteForceGuard
     {
         $bucket = $this->bucketKey($email, $ip);
 
-        if (($r = $this->redis->client()) !== null) {
-            foreach ($this->windows() as $window) {
+        $windows = $this->windows();
+        $done = $this->redis->run(function ($r) use ($bucket, $windows) {
+            foreach ($windows as $window) {
                 $key = "bf:{$bucket}:{$window}";
                 $r->incr($key);
                 $r->expire($key, $window);
             }
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
 
@@ -66,10 +70,14 @@ final class BruteForceGuard
     {
         $bucket = $this->bucketKey($email, $ip);
 
-        if (($r = $this->redis->client()) !== null) {
-            foreach ($this->windows() as $window) {
+        $windows = $this->windows();
+        $done = $this->redis->run(function ($r) use ($bucket, $windows) {
+            foreach ($windows as $window) {
                 $r->del("bf:{$bucket}:{$window}");
             }
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
 
@@ -86,10 +94,14 @@ final class BruteForceGuard
         $lockout24h   = (int) $this->config->get('brute_force.lockout_24h_at', 30);
         [$wShort, $wMid, $wLong] = $this->windows();
 
-        if (($r = $this->redis->client()) !== null) {
-            $countShort = (int) ($r->get("bf:{$bucket}:{$wShort}") ?? 0);
-            $countMid   = (int) ($r->get("bf:{$bucket}:{$wMid}")   ?? 0);
-            $countLong  = (int) ($r->get("bf:{$bucket}:{$wLong}")  ?? 0);
+        $counts = $this->redis->run(fn($r) => [
+            (int) ($r->get("bf:{$bucket}:{$wShort}") ?? 0),
+            (int) ($r->get("bf:{$bucket}:{$wMid}")   ?? 0),
+            (int) ($r->get("bf:{$bucket}:{$wLong}")  ?? 0),
+        ]);
+
+        if (is_array($counts)) {
+            [$countShort, $countMid, $countLong] = $counts;
         } else {
             $pdo = $this->db->pdo();
             $sql = 'SELECT COUNT(*) FROM login_attempts WHERE bucket_key = ? AND success = 0 AND created_at >= NOW() - INTERVAL ? SECOND';
@@ -115,8 +127,9 @@ final class BruteForceGuard
     {
         $key = "totp:fail:{$userId}";
         $threshold = 10;
-        if (($r = $this->redis->client()) !== null) {
-            return (int) ($r->get($key) ?? 0) >= $threshold;
+        $count = $this->redis->run(fn($r) => (int) ($r->get($key) ?? 0));
+        if ($count !== null) {
+            return $count >= $threshold;
         }
         // Fallback DB — login_attempts s bucket_key totp:user:{id}
         $stmt = $this->db->pdo()->prepare(
@@ -131,9 +144,12 @@ final class BruteForceGuard
     public function recordTotpFailure(int $userId): void
     {
         $key = "totp:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->incr($key);
             $r->expire($key, 600);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare(
@@ -145,8 +161,11 @@ final class BruteForceGuard
     public function recordTotpSuccess(int $userId): void
     {
         $key = "totp:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->del($key);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare('DELETE FROM login_attempts WHERE bucket_key = ?');
@@ -162,8 +181,9 @@ final class BruteForceGuard
     {
         $key = "eotp:fail:{$userId}";
         $threshold = 10;
-        if (($r = $this->redis->client()) !== null) {
-            return (int) ($r->get($key) ?? 0) >= $threshold;
+        $count = $this->redis->run(fn($r) => (int) ($r->get($key) ?? 0));
+        if ($count !== null) {
+            return $count >= $threshold;
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM login_attempts
@@ -177,9 +197,12 @@ final class BruteForceGuard
     public function recordEmailOtpFailure(int $userId): void
     {
         $key = "eotp:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->incr($key);
             $r->expire($key, 600);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare(
@@ -191,8 +214,11 @@ final class BruteForceGuard
     public function recordEmailOtpSuccess(int $userId): void
     {
         $key = "eotp:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->del($key);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare('DELETE FROM login_attempts WHERE bucket_key = ?');
@@ -208,8 +234,9 @@ final class BruteForceGuard
     {
         $key = "passkey:fail:{$userId}";
         $threshold = 10;
-        if (($r = $this->redis->client()) !== null) {
-            return (int) ($r->get($key) ?? 0) >= $threshold;
+        $count = $this->redis->run(fn($r) => (int) ($r->get($key) ?? 0));
+        if ($count !== null) {
+            return $count >= $threshold;
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM login_attempts
@@ -223,9 +250,12 @@ final class BruteForceGuard
     public function recordPasskeyFailure(int $userId): void
     {
         $key = "passkey:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->incr($key);
             $r->expire($key, 600);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare(
@@ -237,8 +267,11 @@ final class BruteForceGuard
     public function recordPasskeySuccess(int $userId): void
     {
         $key = "passkey:fail:{$userId}";
-        if (($r = $this->redis->client()) !== null) {
+        $done = $this->redis->run(function ($r) use ($key) {
             $r->del($key);
+            return true;
+        }, false);
+        if ($done === true) {
             return;
         }
         $stmt = $this->db->pdo()->prepare('DELETE FROM login_attempts WHERE bucket_key = ?');

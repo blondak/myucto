@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Validation;
 
 use MyInvoice\Service\Oss\OssPeriod;
+use MyInvoice\Support\PaymentMethods;
 
 final class InvoiceValidation
 {
     /**
      * @param array<int, float>|null $vatRates
-     * @param array<int, string>|null $vatRateCountries sazba → stát, pro kontrolu zahraničních sazeb mimo OSS
+     * @param array<int, string>|null $vatRateCountries
      * @return array<string, string[]>
      */
     public static function invoice(array $data, ?array $vatRates = null, ?array $vatRateCountries = null): array
@@ -18,13 +19,14 @@ final class InvoiceValidation
         $err = [];
 
         $type = (string) ($data['invoice_type'] ?? 'invoice');
-        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation', 'tax_document'], true)) {
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation', 'tax_document', 'penalty', 'payment_calendar'], true)) {
             $err['invoice_type'][] = 'Neplatný typ dokladu';
         }
 
+        // Doména hodnot je sdílená s přijatými fakturami (migrace 1128) — jeden zdroj
+        // pravdy v PaymentMethods, ať se ENUM v DB a whitelisty nerozejdou.
         if (array_key_exists('payment_method', $data) && $data['payment_method'] !== null && $data['payment_method'] !== '') {
-            $pm = (string) $data['payment_method'];
-            if (!in_array($pm, ['bank_transfer', 'card', 'cash', 'other'], true)) {
+            if (!PaymentMethods::isValid($data['payment_method'])) {
                 $err['payment_method'][] = 'Neplatný způsob úhrady';
             }
         }
@@ -58,9 +60,6 @@ final class InvoiceValidation
                 }
                 $err = array_merge($err, InvoiceAmountPolicy::validateItem($item, $i));
 
-                // Zahraniční sazba smí být jen na OSS řádku. Bez téhle kontroly by řádek s cizí
-                // sazbou zůstal v tuzemské evidenci (VatLedgerService) a podle prahu roku by se
-                // zařadil do české klasifikace — DE 19 % by se vykázalo na snížené sazbě DPHDP3.
                 if ($vatRateCountries !== null && empty($item['oss_applicable']) && !empty($item['vat_rate_id'])) {
                     $rateCountry = $vatRateCountries[(int) $item['vat_rate_id']] ?? null;
                     if ($rateCountry !== null && $rateCountry !== 'CZ') {
@@ -162,6 +161,38 @@ final class InvoiceValidation
         }
 
         return $err;
+    }
+
+    /**
+     * NEBLOKUJÍCÍ varování k uloženému dokladu — zrcadlo
+     * {@see PurchaseInvoiceValidation::warnings()} na vydané větvi.
+     *
+     * @param array<string,mixed> $invoice uložený doklad po přepočtu (nese totály)
+     * @return list<string> kódy varování pro i18n `invoice.warning.*`
+     */
+    public static function warnings(array $invoice): array
+    {
+        $warn = [];
+
+        // Dobropis (opravný daňový doklad) má dle metodiky záporné částky. Kladný
+        // součet znamená, že se znaménko neotočilo ani jednou — base = qty × price
+        // vyjde kladně a ve výkazech DPH/KH se plnění PŘIČTE místo odečtení
+        // (DPHDP3 ř. 1/2, KH A.4), zatímco deník ho obrátí správně
+        // (PostingService::buildFromInvoice podle invoice_type) → deník a přiznání
+        // si protiřečí. Zrcadlo issue #35 z přijaté větve.
+        //
+        // Pozor: dvojí negaci (záporné množství I cena) blokuje už
+        // InvoiceAmountPolicy::validateItem na obou větvích. Tady jde o opačný případ —
+        // žádná negace. UI sice u dobropisu předvyplňuje záporné množství, ale je to
+        // jen klientská pomůcka, kterou lze přepsat (a API volání ji obejde úplně).
+        if ((string) ($invoice['invoice_type'] ?? 'invoice') === 'credit_note') {
+            $totalBase = (float) ($invoice['total_without_vat'] ?? 0);
+            if ($totalBase > 0.005) {
+                $warn[] = 'credit_note_positive_total';
+            }
+        }
+
+        return $warn;
     }
 
     private static function isValidDate(string $date): bool

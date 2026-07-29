@@ -460,8 +460,9 @@ final class BankEmailNoticeRepository
             $effective = $raw;
             if ($row['bank_transaction_id'] !== null && $txStatus !== null) {
                 $txMatched = in_array($txStatus, ['auto_exact', 'auto_partial', 'manual'], true);
-                if ($txMatched && $raw === 'match_failed') {
-                    // Spárováno až po skenu → už to není selhání.
+                if ($txMatched && in_array($raw, ['match_failed', 'postprocess_failed'], true)) {
+                    // Aktuálně spárovaná platba je úspěch. Chybu následného přesunu
+                    // e-mailu zachová error_message, ale nesmí přebít stav párování.
                     $effective = 'processed_success';
                 } elseif (!$txMatched && $raw === 'processed_success') {
                     // Původně spárováno, později rozpárováno.
@@ -514,13 +515,23 @@ final class BankEmailNoticeRepository
 
         // Měsíční výpis: avíza pro stejný účet/měnu/měsíc se sbírají do jednoho
         // bank_statements (source=email_notice), ať seznam výpisů nezaplaví 1 řádek/avízo.
+        // Tenant je součástí klíče i SQL scope: stejné číslo účtu může být ve více
+        // firmách a globální uq_bs_hash nesmí sloučit jejich avíza do cizího výpisu.
         // Deterministický file_hash + UNIQUE uq_bs_hash = atomický find-or-create.
         $ym = preg_match('/^\d{4}-\d{2}/', (string) $notice->postedAt, $mm) === 1 ? $mm[0] : date('Y-m');
-        $monthKey = $account . '|' . ($bankCode ?? '') . '|' . $currency . '|' . $ym;
+        $legacyMonthKey = $account . '|' . ($bankCode ?? '') . '|' . $currency . '|' . $ym;
+        $monthKey = $supplierId . '|' . $legacyMonthKey;
         $fileHash = hash('sha256', 'email-notice-monthly:' . $monthKey);
+        $legacyFileHash = hash('sha256', 'email-notice-monthly:' . $legacyMonthKey);
 
-        $findStmt = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ? LIMIT 1');
-        $findStmt->execute([$fileHash]);
+        $findStmt = $pdo->prepare(
+            'SELECT id
+               FROM bank_statements
+              WHERE supplier_id = ? AND file_hash IN (?, ?)
+              ORDER BY (file_hash = ?) DESC
+              LIMIT 1'
+        );
+        $findStmt->execute([$supplierId, $fileHash, $legacyFileHash, $fileHash]);
         $found = $findStmt->fetchColumn();
         if ($found !== false) {
             $statementId = (int) $found;
@@ -528,14 +539,15 @@ final class BankEmailNoticeRepository
             try {
                 $pdo->prepare(
                     'INSERT INTO bank_statements
-                        (source, source_ref, file_name, file_hash, account_number, bank_code, currency, statement_date,
+                        (source, source_ref, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date,
                          transaction_count, matched_count, imported_by)
-                     VALUES (?,?,?,?,?,?,?,?,0,0,NULL)'
+                     VALUES (?,?,?,?,?,?,?,?,?,0,0,NULL)'
                 )->execute([
                     'email_notice',
                     'imap-monthly:' . $monthKey,
                     'Email avíza ' . $ym,
                     $fileHash,
+                    $supplierId,
                     $account,
                     $bankCode,
                     $currency,
@@ -545,7 +557,7 @@ final class BankEmailNoticeRepository
             } catch (\PDOException $e) {
                 // Souběh — jiný běh výpis mezitím založil; načti existující.
                 if ($e->getCode() === '23000') {
-                    $findStmt->execute([$fileHash]);
+                    $findStmt->execute([$supplierId, $fileHash, $legacyFileHash, $fileHash]);
                     $statementId = (int) $findStmt->fetchColumn();
                 } else {
                     throw $e;
@@ -556,11 +568,20 @@ final class BankEmailNoticeRepository
         // Idempotence (#161): re-scan téhož avíza (typicky po smazání processed-message
         // záznamu přes „Smazat záznam", což odstraní dedup na úrovni zprávy) nesmí založit
         // druhou transakci. source_ref nese message_id (nebo fallback hash) → je per-avízo
-        // stabilní. Najdeme-li existující, jen re-matchujeme a vrátíme ji.
+        // stabilní. Ukládaný klíč obsahuje tenant + hash reference; legacy raw
+        // reference se hledá jen uvnitř stejného supplier scope. Najdeme-li
+        // existující, jen re-matchujeme a vrátíme ji.
+        $transactionSourceRef = 'supplier-' . $supplierId . ':' . hash('sha256', $sourceRef);
         $dupStmt = $pdo->prepare(
-            "SELECT id, statement_id FROM bank_transactions WHERE source = 'email_notice' AND source_ref = ? LIMIT 1"
+            "SELECT bt.id, bt.statement_id
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.source = 'email_notice'
+                AND bs.supplier_id = ?
+                AND bt.source_ref IN (?, ?)
+              LIMIT 1"
         );
-        $dupStmt->execute([$sourceRef]);
+        $dupStmt->execute([$supplierId, $transactionSourceRef, $sourceRef]);
         $existing = $dupStmt->fetch(\PDO::FETCH_ASSOC);
         if ($existing !== false) {
             $transactionId = (int) $existing['id'];
@@ -578,7 +599,7 @@ final class BankEmailNoticeRepository
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             'email_notice',
-            $sourceRef,
+            $transactionSourceRef,
             $statementId,
             $notice->postedAt,
             $notice->amount,

@@ -196,6 +196,18 @@ final class ImportJobRepository
         )->execute([$id]);
     }
 
+    /**
+     * EP-6: „hotovo s upozorněními" — všechny POVINNÉ části uspěly, ale některé
+     * doplňkové části selhaly (viz ClosingPackageService). Výsledek je ke stažení,
+     * ale uživatel vidí počet selhání + log chybějících částí.
+     */
+    public function markCompletedWithWarnings(int $id): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE import_jobs SET status = "completed_with_warnings", finished_at = NOW() WHERE id = ?'
+        )->execute([$id]);
+    }
+
     public function markFailed(int $id, string $error): void
     {
         $this->db->pdo()->prepare(

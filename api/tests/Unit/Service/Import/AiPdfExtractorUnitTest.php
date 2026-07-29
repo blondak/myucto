@@ -8,13 +8,15 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Import\AiPdfExtractor;
-use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\ClientResolver;
+use MyInvoice\Service\Import\InvoiceExtractionRouter;
 use MyInvoice\Service\Import\IsdocParser;
 use MyInvoice\Service\Import\IsdocToPurchaseInvoiceMapper;
 use MyInvoice\Service\Import\ImageToPdfConverter;
+use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Service\Import\PdfIsdocExtractor;
 use MyInvoice\Service\Import\PurchaseInvoicePdfArchiver;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
@@ -30,7 +32,7 @@ use Psr\Log\NullLogger;
  *     katastrofální items mismatch >50 %)
  *   - maybeFlagTotalsMismatch — signed sum (sleva s mínusem, dobropisy se zápornou
  *     qty), žádný `total_with_vat / 1.21` fallback (multi-rate false positive)
- *   - applyRoundingFromAiTotal — Zoner case 84092.58 vs "K úhradě" 84093 = 0.42 rounding
+ *   - applyRoundingFromAiTotal — reálný nález — 84092.58 vs "K úhradě" 84093 = 0.42 rounding
  *
  * Závislosti AiPdfExtractoru jsou mockované přes PHPUnit createMock — testy
  * neběží proti DB / API.
@@ -40,6 +42,14 @@ final class AiPdfExtractorUnitTest extends TestCase
 {
     private PurchaseInvoiceRepository $repo;
     private AiPdfExtractor $extractor;
+    /** @var LlmGatewayInterface&\PHPUnit\Framework\MockObject\MockObject */
+    private $anthropic;
+    /** @var PdfIsdocExtractor&\PHPUnit\Framework\MockObject\MockObject */
+    private $pdfIsdoc;
+    /** @var IsdocParser&\PHPUnit\Framework\MockObject\MockObject */
+    private $isdocParser;
+    /** @var IsdocToPurchaseInvoiceMapper&\PHPUnit\Framework\MockObject\MockObject */
+    private $isdocMapper;
 
     protected function setUp(): void
     {
@@ -47,23 +57,103 @@ final class AiPdfExtractorUnitTest extends TestCase
         // některé z nich. Pro pure-logic checky (detectWeakExtraction) žádné nepotřebujeme,
         // pro maybeFlagTotalsMismatch / applyRoundingFromAiTotal jen $repo.
         $this->repo = $this->createMock(PurchaseInvoiceRepository::class);
+        $this->anthropic = $this->createMock(LlmGatewayInterface::class);
+        // ISDOC-first rozhodnutí obstarává reálný router nad mockovanými extraktory —
+        // pin testy tak řídí přímo (a jen) detekci/parse ISDOC.
+        $this->pdfIsdoc = $this->createMock(PdfIsdocExtractor::class);
+        $this->isdocParser = $this->createMock(IsdocParser::class);
+        $this->isdocMapper = $this->createMock(IsdocToPurchaseInvoiceMapper::class);
+        $router = new InvoiceExtractionRouter($this->pdfIsdoc, $this->isdocParser, new NullLogger());
 
         $this->extractor = new AiPdfExtractor(
             $this->createMock(Connection::class),
-            $this->createMock(AnthropicClient::class),
+            $this->anthropic,
             $this->createMock(ClientResolver::class),
             $this->repo,
             $this->createMock(PurchaseInvoiceCalculator::class),
-            $this->createMock(PdfIsdocExtractor::class),
-            $this->createMock(IsdocParser::class),
-            $this->createMock(IsdocToPurchaseInvoiceMapper::class),
+            $router,
+            $this->isdocMapper,
             $this->createMock(Config::class),
             $this->createMock(CnbExchangeRateClient::class),
             new ImageToPdfConverter(), // bez závislostí — reálná instance stačí
             $this->createMock(\MyInvoice\Repository\TaxConstantsRepository::class),
             $this->createMock(PurchaseInvoicePdfArchiver::class),
+            new ExpenseKindClassifier(), // pure, bez DB — mock by nic nepřidal
             new NullLogger(),
         );
+    }
+
+    // ── PIN: ISDOC-first sémantika (F7 §3.9, §11.1) ────────────────────────
+    // Zamykají OPRAVENÉ chování: validní ISDOC ⇒ LLM 0×; přítomný ISDOC který
+    // selhal parse ⇒ LLM právě 1× (AI fallback; import se nebrickuje).
+
+    public function testPin_validEmbeddedIsdoc_neverCallsLlm(): void
+    {
+        $pdfBytes = "%PDF-1.4\nfake pdf s embedded ISDOC";
+        $this->pdfIsdoc->method('extract')->willReturn('<Invoice>…isdoc.cz/namespace/2013…</Invoice>');
+        $this->isdocParser->method('parse')->willReturn([
+            'supplier_ic' => '12345678',
+            'invoices'    => [['id' => 'F-2026-001']],
+        ]);
+        $this->isdocMapper->method('map')->willReturn([
+            'purchase_invoice_id' => 99,
+            'vendor_id'           => 7,
+        ]);
+
+        // Jádro pinu: LLM se NIKDY nesmí zavolat, když ISDOC parsuje validně.
+        $this->anthropic->expects($this->never())->method('extractInvoice');
+
+        $result = $this->extractor->extractAndCreate(1, 1, $pdfBytes, null, 'faktura.pdf');
+
+        self::assertTrue($result['ok']);
+        self::assertSame('isdoc_embedded', $result['source']);
+        self::assertSame(99, $result['purchase_invoice_id']);
+    }
+
+    public function testPin_malformedEmbeddedIsdoc_fallsBackToLlmExactlyOnce(): void
+    {
+        $pdfBytes = "%PDF-1.4\nfake pdf s VADNÝM embedded ISDOC";
+        // ISDOC je fyzicky přítomen…
+        $this->pdfIsdoc->method('extract')->willReturn('<Invoice>…rozbité…');
+        // …ale parse selže (malformed).
+        $this->isdocParser->method('parse')
+            ->willThrowException(new \RuntimeException('Nelze parsovat ISDOC XML.'));
+
+        // Jádro pinu: AI fallback zafunguje PŘESNĚ 1× (import se nebrickuje).
+        $this->anthropic->expects($this->once())
+            ->method('extractInvoice')
+            ->willReturn(['ok' => false, 'error' => 'AI mock — extrakce neběží v unit testu']);
+
+        $result = $this->extractor->extractAndCreate(1, 1, $pdfBytes, null, 'faktura.pdf');
+
+        // AI mock vrátil ok=false → výsledek ai_failed, ale klíčové je, že se AI
+        // VŮBEC zavolalo (dřív by tichý try/catch call utratil / zbrickoval import).
+        self::assertFalse($result['ok']);
+        self::assertSame('ai_failed', $result['source']);
+    }
+
+    public function testPin_validEmbeddedIsdoc_mapRejectsWrongTenant_structuredErrorNoLlm(): void
+    {
+        // Regrese H1 (Fable review commit 2): validní ISDOC, ale mapper ho odmítne
+        // (wrong-tenant / chybějící IČO → InvalidArgumentException). Musí vrátit
+        // STRUKTUROVANOU chybu (ne bublinu do HTTP 500) a §3.9: AI se NEVOLÁ.
+        $pdfBytes = "%PDF-1.4\nfake pdf s validním ISDOC pro jiného plátce";
+        $this->pdfIsdoc->method('extract')->willReturn('<Invoice>…isdoc.cz/namespace/2013…</Invoice>');
+        $this->isdocParser->method('parse')->willReturn([
+            'supplier_ic' => '87654321',
+            'invoices'    => [['id' => 'F-2026-002']],
+        ]);
+        $this->isdocMapper->method('map')
+            ->willThrowException(new \InvalidArgumentException('ISDOC patří jinému plátci (IČO 87654321).'));
+
+        // Validní ISDOC ⇒ LLM se NIKDY nevolá, ani při selhání mapování.
+        $this->anthropic->expects($this->never())->method('extractInvoice');
+
+        $result = $this->extractor->extractAndCreate(1, 1, $pdfBytes, null, 'faktura.pdf');
+
+        self::assertFalse($result['ok']);
+        self::assertSame('isdoc_map_failed', $result['source']);
+        self::assertStringContainsString('jinému plátci', $result['error']);
     }
 
     // ── detectWeakExtraction ────────────────────────────────────────────────
@@ -71,7 +161,7 @@ final class AiPdfExtractorUnitTest extends TestCase
     public function testDetectWeak_clean_extraction_returns_null(): void
     {
         $data = [
-            'vendor'   => ['ic' => '19774290'],
+            'vendor'   => ['ic' => '10000010'],
             'customer' => ['ic' => '21370362'],
             'total_without_vat' => 4113.29,
             'items' => [
@@ -99,7 +189,7 @@ final class AiPdfExtractorUnitTest extends TestCase
         // → není to weakness, nereaguj.
         $data = [
             'vendor'   => ['ic' => '21370362'], // = tenant
-            'customer' => ['ic' => '19774290'], // jiný IČ → swap-back funguje
+            'customer' => ['ic' => '10000010'], // jiný IČ → swap-back funguje
             'total_without_vat' => 5000,
             'items' => [['quantity' => 1, 'unit_price_without_vat' => 5000]],
         ];
@@ -110,7 +200,7 @@ final class AiPdfExtractorUnitTest extends TestCase
     {
         // NC Auto pattern: AI total 5317, items sum 31057 (6x víc)
         $data = [
-            'vendor'   => ['ic' => '19774290'],
+            'vendor'   => ['ic' => '10000010'],
             'customer' => ['ic' => '21370362'],
             'total_without_vat' => 5317.34,
             'items' => [
@@ -125,7 +215,7 @@ final class AiPdfExtractorUnitTest extends TestCase
 
     public function testDetectWeak_discount_sign_under_threshold_does_not_trigger(): void
     {
-        // Zoner pattern PŘED sleva fix: sleva kladná, items=84942, AI=69498 → 22 %.
+        // Reálný nález PŘED sleva fix: sleva kladná, items=84942, AI=69498 → 22 %.
         // Pod 50 % prahem → není to weakness, jen warning.
         $data = [
             'vendor'   => ['ic' => '49437381'],
@@ -145,7 +235,7 @@ final class AiPdfExtractorUnitTest extends TestCase
         // Bez total_without_vat NESPOUŠTÍME items vs total kontrolu (multi-rate
         // by jinak vyžadoval `total_with_vat / 1.21`, což u 21/12/0 % mixu nesedí).
         $data = [
-            'vendor'   => ['ic' => '19774290'],
+            'vendor'   => ['ic' => '10000010'],
             'customer' => ['ic' => '21370362'],
             'total_with_vat' => 6433.98, // jen s DPH, bez DPH chybí
             'items' => [
@@ -185,7 +275,7 @@ final class AiPdfExtractorUnitTest extends TestCase
 
     public function testMismatch_discount_with_negative_sign_no_warning(): void
     {
-        // Zoner #18 po fix: sleva má v unit_price mínus, signed sum sedí s AI.
+        // Reálný nález po fix: sleva má v unit_price mínus, signed sum sedí s AI.
         $this->repo->expects($this->never())->method('setExtractionWarning');
 
         $items = [
@@ -213,7 +303,7 @@ final class AiPdfExtractorUnitTest extends TestCase
 
     public function testMismatch_discount_wrong_sign_warns_no_placeholder(): void
     {
-        // Zoner PŘED sleva fix: 22 % rozdíl → warning ano, placeholder ne (<50 %).
+        // Reálný nález PŘED sleva fix: 22 % rozdíl → warning ano, placeholder ne (<50 %).
         $this->repo->expects($this->once())
             ->method('setExtractionWarning')
             ->with(42, 1, $this->stringContains('vyšší než'));
@@ -275,9 +365,9 @@ final class AiPdfExtractorUnitTest extends TestCase
 
     // ── applyRoundingFromAiTotal ───────────────────────────────────────────
 
-    public function testRounding_zoner_84092_to_84093_yields_042(): void
+    public function testRounding_ai_total_84092_to_84093_yields_042(): void
     {
-        // Zoner: items sum × 1.21 = 84092.58, AI total_with_vat (z "K úhradě") = 84093.
+        // Reálný nález: items sum × 1.21 = 84092.58, AI total_with_vat (z "K úhradě") = 84093.
         // Rozdíl 0.42 → uložit jako rounding.
         $this->repo->method('find')->willReturn(['total_with_vat' => 84092.58]);
         $this->repo->expects($this->once())

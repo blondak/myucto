@@ -81,11 +81,30 @@ final class TaxOptimizerTest extends TestCase
         self::assertSame(57098.0, $r['social']);        // min. základ 195 540 (zisk nízký)
     }
 
-    /** Vedlejší činnost používá NIŽŠÍ minimální vyměřovací základ sociálního. */
-    public function testSecondaryActivityUsesSecondaryMinBase(): void
+    /**
+     * Vedlejší činnost pod rozhodnou částkou → sociální pojistné 0 (regresní oprava E4,
+     * audit 2026-07: optimalizátor musí ctít rozhodnou částku stejně jako přehled/ČSSZ XML).
+     * Zisk 100 000 − 60 000 = 40 000 Kč < rozhodná částka 111 736 Kč (2025) → povinná
+     * účast nevzniká. Dřív se chybně účtovala min. VZ vedlejší (61 476 × 29,2 % = 17 951).
+     * Zdravotní: u vedlejší se min. VZ neuplatní → 20 000 (50 % zisku) × 13,5 % = 2 700.
+     */
+    public function testSecondaryActivityBelowThresholdPaysNoSocial(): void
     {
         $r = $this->opt->compare($this->profile(['is_secondary' => true]), 100_000, $this->c)['regular'];
-        self::assertSame(17951.0, $r['social']);        // 61 476 × 29,2 % (ne 195 540)
+        self::assertSame(0.0, $r['social']);            // pod rozhodnou částkou → 0 (NE 17 951)
+        self::assertSame(2700.0, $r['health']);         // min. VZ se u vedlejší neuplatní
+    }
+
+    /**
+     * Vedlejší činnost NAD rozhodnou částkou → sociální z vyměřovacího základu (% zisku),
+     * s min. VZ vedlejší; zdravotní bez spodní hranice. Zisk 400 000 (60 % paušál na 1 M)
+     * ≥ 111 736 → povinná účast.
+     */
+    public function testSecondaryActivityAboveThresholdPaysSocial(): void
+    {
+        $r = $this->opt->compare($this->profile(['is_secondary' => true]), 1_000_000, $this->c)['regular'];
+        self::assertSame(64240.0, $r['social']);        // 220 000 (55 % ze 400k) × 29,2 %
+        self::assertSame(27000.0, $r['health']);        // 200 000 (50 %) × 13,5 %, bez min. VZ
     }
 
     /**
@@ -138,6 +157,39 @@ final class TaxOptimizerTest extends TestCase
         // 3 600 000 − 720 000 = 2 880 000 → měsíční daň 32 256 (ověřeno computeRegular
         // logikou). Bez stropu by výdaje byly 3× vyšší a daň citelně nižší.
         self::assertSame(32256.0, $r['income_tax']);
+    }
+
+    public function testEstimateMonthlyUsesCanonicalDeductionsAndCredits(): void
+    {
+        $profile = $this->profile([
+            'use_actual_expenses' => true,
+            'pension_contrib' => 48_000,
+            'life_insurance' => 48_000,
+            'dip_contrib' => 48_000,
+            'donations' => 500_000,
+            'disability_12_months' => 12,
+            'children_count' => 2,
+        ]);
+        $monthly = $this->opt->estimateMonthly($profile, 100_000.0, 25_000.0, $this->c);
+        $annualProfile = $profile;
+        $annualProfile['actual_expenses'] = 300_000.0;
+        $annual = $this->opt->compare($annualProfile, 1_200_000.0, $this->c)['regular'];
+
+        self::assertSame(round($annual['income_tax'] / 12, 0), $monthly['income_tax']);
+        self::assertSame(round($annual['social'] / 12, 0), $monthly['social']);
+        self::assertSame(round($annual['health'] / 12, 0), $monthly['health']);
+    }
+
+    public function testEstimateMonthlyDoesNotPayChildBonusBelowMinimumIncome(): void
+    {
+        $r = $this->opt->estimateMonthly(
+            $this->profile(['children_count' => 2]),
+            5_000.0,
+            0.0,
+            $this->c,
+        );
+
+        self::assertSame(0.0, $r['income_tax']);
     }
 
     /** Skutečné výdaje (daňová evidence) místo paušálu. */

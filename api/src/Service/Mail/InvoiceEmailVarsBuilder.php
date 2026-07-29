@@ -160,7 +160,7 @@ final class InvoiceEmailVarsBuilder
             $remaining,
             (string) $invoice['varsymbol'],
             $bank,
-            (string) ($supplierName ?: 'MyInvoice'),
+            (string) ($supplierName ?: 'MyÚčto.cz'),
         );
     }
 

@@ -5,6 +5,7 @@
  *   - 2FA    (TOTP setup, status, aktivace)
  *   - Passkeys (registrace a správa přístupových klíčů)
  *   - Zámek aplikace (osobní interval nečinnosti)
+ *   - Klávesové zkratky (osobní ovládání aplikace)
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -15,6 +16,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import Passkeys from '@/pages/Passkeys.vue'
+import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -23,9 +25,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const sessionSecurity = useSessionSecurityStore()
 
-type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock'
+type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock' | 'shortcuts'
 function tabFromQuery(value: unknown): Tab {
-  return value === 'totp' || value === 'passkeys' || value === 'session-lock'
+  return value === 'totp' || value === 'passkeys' || value === 'session-lock' || value === 'shortcuts'
     ? value
     : 'password'
 }
@@ -68,7 +70,7 @@ async function submitPw() {
     next.value = ''
     confirm.value = ''
   } catch (e: any) {
-    pwError.value = apiErrorMessage(e, t('auth.password_change_failed'))
+    pwError.value = apiErrorMessage(e, t('auth.change_password_failed'))
   } finally {
     pwBusy.value = false
   }
@@ -212,16 +214,17 @@ onMounted(() => {
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('auth.profile_subtitle') }}</p>
     </div>
 
-    <!-- Tabs: na malém viewportu select, aby se dlouhé překlady nemačkaly ani nescrollovaly -->
+    <!-- Tabs: na mobilu a tabletu select, aby se pět názvů nemačkalo ani nescrollovalo -->
     <select :value="tab" @change="setTabFromSelect"
-            class="sm:hidden w-full h-10 px-3 mb-4 border border-neutral-300 rounded-md bg-surface text-sm">
+            class="md:hidden w-full h-10 px-3 mb-4 border border-neutral-300 rounded-md bg-surface text-sm">
       <option value="password">{{ t('auth.change_password_title') }}</option>
       <option value="totp">{{ t('auth.totp_tab') }}</option>
       <option value="passkeys">{{ t('passkeys.title') }}</option>
       <option value="session-lock">{{ t('session_lock.preference_tab') }}</option>
+      <option value="shortcuts">{{ t('keyboard_shortcuts.title') }}</option>
     </select>
 
-    <div class="hidden sm:flex border-b border-neutral-200 mb-4 gap-1">
+    <div class="hidden md:flex flex-wrap border-b border-neutral-200 mb-4 gap-1">
       <button type="button" @click="setTab('password')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
         :class="tab === 'password'
@@ -253,6 +256,13 @@ onMounted(() => {
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('session_lock.preference_tab') }}
+      </button>
+      <button type="button" @click="setTab('shortcuts')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
+        :class="tab === 'shortcuts'
+          ? 'border-primary-600 text-primary-700 font-medium'
+          : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('keyboard_shortcuts.title') }}
       </button>
     </div>
 
@@ -384,7 +394,7 @@ onMounted(() => {
     <Passkeys v-else-if="tab === 'passkeys'" />
 
     <!-- ── Automatický zámek ── -->
-    <form v-else @submit.prevent="saveLockPreference"
+    <form v-else-if="tab === 'session-lock'" @submit.prevent="saveLockPreference"
           class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm space-y-4">
       <div>
         <h2 class="font-medium text-neutral-900">{{ t('session_lock.preference_title') }}</h2>
@@ -464,5 +474,8 @@ onMounted(() => {
         </div>
       </template>
     </form>
+
+    <!-- ── Klávesové zkratky ── -->
+    <KeyboardShortcuts v-else embedded />
   </div>
 </template>

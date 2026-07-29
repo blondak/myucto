@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -47,7 +49,6 @@ final class PdfSigningDiagnosticsAction
 
     private function isAdmin(Request $request): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return isset($user['role']) && $user['role'] === 'admin';
+        return RequestAuthorization::allows($request, 'settings.signing', AccessLevel::READ);
     }
 }

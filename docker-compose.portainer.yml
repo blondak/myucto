@@ -1,4 +1,4 @@
-# MyInvoice.cz — Docker Compose pro Portainer / Dockge (pure-ENV, bez cfg souboru)
+# MyUcto.cz — Docker Compose pro Portainer / Dockge (pure-ENV, bez cfg souboru)
 #
 # Tahle varianta NEpotřebuje bind-mount `cfg.docker.php` — veškerá konfigurace
 # se předává přes proměnné prostředí (12-factor). To je přesně to, co GUI
@@ -36,7 +36,7 @@
 
 services:
   app:
-    image: ghcr.io/radekhulan/myinvoice:latest   # v produkci pinni konkrétní verzi, např. :4.34.3
+    image: ghcr.io/radekhulan/myucto:latest   # v produkci pinni konkrétní verzi, např. :4.34.3
     restart: unless-stopped
     depends_on:
       db:
@@ -62,8 +62,8 @@ services:
       # Databáze — míří na `db` service v tomto stacku.
       MYINVOICE_DB_HOST: db
       MYINVOICE_DB_PORT: "3306"
-      MYINVOICE_DB_NAME: ${DB_NAME:-myinvoice}
-      MYINVOICE_DB_USER: ${DB_USER:-myinvoice}
+      MYINVOICE_DB_NAME: ${DB_NAME:-myucto}
+      MYINVOICE_DB_USER: ${DB_USER:-myucto}
       MYINVOICE_DB_PASS: ${DB_PASSWORD:?DB_PASSWORD required — openssl rand -base64 28}
 
       # Cookies: default HTTP-friendly (přístup přes http://host:port). Za HTTPS
@@ -88,8 +88,18 @@ services:
       MYINVOICE_SMTP_FROM_EMAIL: ${MYINVOICE_SMTP_FROM_EMAIL:-}
       MYINVOICE_SMTP_FROM_NAME: ${MYINVOICE_SMTP_FROM_NAME:-}
 
+      # Redis (volitelné — nasadí se jen s profilem `redis`). Bez ENABLED=1 jede
+      # aplikace na DB fallbacku: sessiony v `sessions`, rate limit v
+      # `rate_limit_counters`. AUTH nech prázdné, pokud Redis nemá requirepass.
+      MYINVOICE_REDIS_ENABLED: ${MYINVOICE_REDIS_ENABLED:-0}
+      MYINVOICE_REDIS_HOST: ${MYINVOICE_REDIS_HOST:-redis}
+      MYINVOICE_REDIS_PORT: ${MYINVOICE_REDIS_PORT:-6379}
+      MYINVOICE_REDIS_AUTH: ${MYINVOICE_REDIS_AUTH:-}
+      MYINVOICE_REDIS_DB: ${MYINVOICE_REDIS_DB:-0}
+      MYINVOICE_REDIS_PREFIX: ${MYINVOICE_REDIS_PREFIX:-myinvoice:}
+
   db:
-    image: mariadb:11
+    image: mariadb:11.8
     restart: unless-stopped
     command:
       - --performance-schema=OFF
@@ -97,8 +107,8 @@ services:
       - --innodb-log-file-size=${DB_INNODB_LOG_SIZE:-48M}
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD required — openssl rand -base64 28}
-      MARIADB_DATABASE: ${DB_NAME:-myinvoice}
-      MARIADB_USER: ${DB_USER:-myinvoice}
+      MARIADB_DATABASE: ${DB_NAME:-myucto}
+      MARIADB_USER: ${DB_USER:-myucto}
       MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required — openssl rand -base64 28}
       TZ: ${TZ:-Europe/Prague}
     volumes:
@@ -114,9 +124,24 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     profiles: ["redis"]
-    command: ["redis-server", "--appendonly", "yes"]
+    # maxmemory + policy jsou povinné: bez limitu si Redis s AOF vezme veškerou
+    # RAM a nechá se OOM-killnout místo evikce. `volatile-lru` navíc evikuje jen
+    # klíče s TTL — sessiony (SETEX) ano, ale nic bez TTL se nezahodí.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - volatile-lru
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db-data:

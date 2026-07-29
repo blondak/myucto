@@ -35,6 +35,10 @@ $report = [];
 $n = $pdo->exec("DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL 24 HOUR");
 $report['login_attempts'] = (int) $n;
 
+// 1b) rate_limit_counters — DB fallback limiteru, nejdelší okno 1h (rezerva 2h)
+$n = $pdo->exec("DELETE FROM rate_limit_counters WHERE created_at < NOW() - INTERVAL 2 HOUR");
+$report['rate_limit_counters'] = (int) $n;
+
 // 2) sessions — TIMESTAMP expires_at porovnáváme s CURRENT_TIMESTAMP, aby
 // MariaDB správně zohlednila session timezone. UTC DATETIME revoked_at naopak
 // porovnáváme s UTC_TIMESTAMP. Nahrazené generace bez revoked_at držíme jako

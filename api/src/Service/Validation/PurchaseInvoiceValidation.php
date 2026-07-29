@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Validation;
 
+use MyInvoice\Support\PaymentMethods;
+
 /**
  * Validace přijaté faktury. Vrací mapu pole → list chyb (CZ texty z ErrorCatalog jsou pro
  * runtime API messages; tato validace vrací technické zprávy, které jdou přes ErrorCatalog
@@ -11,7 +13,7 @@ namespace MyInvoice\Service\Validation;
  */
 final class PurchaseInvoiceValidation
 {
-    public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance'];
+    public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'];
     public const ALLOWED_STATUSES  = ['draft', 'received', 'booked', 'paid', 'cancelled'];
 
     /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský §92 (5), pořízení
@@ -61,6 +63,14 @@ final class PurchaseInvoiceValidation
             $kind = (string) $data['document_kind'];
             if (!in_array($kind, self::ALLOWED_DOC_KINDS, true)) {
                 $err['document_kind'][] = 'Neplatný typ dokladu';
+            }
+        }
+
+        // Forma úhrady (migrace 1128) — whitelist; neznámá hodnota je chyba, ať uživatel
+        // vidí, že se jeho volba neuložila. Repository navíc padá na 'bank_transfer'.
+        if (array_key_exists('payment_method', $data) && $data['payment_method'] !== null && $data['payment_method'] !== '') {
+            if (!PaymentMethods::isValid($data['payment_method'])) {
+                $err['payment_method'][] = 'Neplatný způsob úhrady';
             }
         }
 

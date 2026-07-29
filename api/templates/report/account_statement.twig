@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Opis účtu</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .opening-line { font-size: 9pt; font-weight: bold; margin-bottom: 2mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.book tfoot td {
+        font-weight: bold;
+        font-size: 8pt;
+        padding: 1.5mm 1.5mm;
+        border-top: 0.5pt solid #333;
+        border-bottom: 0.5pt solid #333;
+    }
+    .num { text-align: right; }
+    .col-date { width: 18mm; }
+    .col-doc { width: 30mm; }
+    .col-num { width: 26mm; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }}</div>
+            {% if page and per_page %}
+                <div class="header-meta">Strana výběru: {{ page }} (po {{ per_page }})</div>
+            {% endif %}
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Opis účtu {{ account.code }}</div>
+            <div class="header-period">{{ account.name }}</div>
+            {% if from or to %}
+                <div class="header-sub">Za období: {{ from|cz_date }} – {{ to|cz_date }}</div>
+            {% endif %}
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="opening-line">Počáteční zůstatek: {{ opening_balance|cz_money }}</div>
+
+{% if items is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">
+        Na účtu nejsou ve zvoleném období žádné pohyby.
+    </p>
+{% else %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-date">Datum</th>
+            <th class="thl col-doc">Doklad</th>
+            <th class="thl">Popis</th>
+            <th class="col-num">MD</th>
+            <th class="col-num">D</th>
+            <th class="col-num">Zůstatek</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+            <tr>
+                <td>{{ item.entry_date|cz_date }}</td>
+                <td>{{ item.document_no }}</td>
+                <td>{{ item.description|slice(0, 70) }}</td>
+                <td class="num">{{ item.side == 'debit' ? item.amount|cz_money : '' }}</td>
+                <td class="num">{{ item.side == 'credit' ? item.amount|cz_money : '' }}</td>
+                <td class="num">{{ item.balance|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="3">Obraty za období / konečný zůstatek</td>
+            <td class="num">{{ turnover_md|cz_money }}</td>
+            <td class="num">{{ turnover_d|cz_money }}</td>
+            <td class="num">{{ closing_balance|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+{% endif %}
+
+</body>
+</html>

@@ -32,3 +32,37 @@ export function hasCounterPlaceholder(template: string | null | undefined): bool
   if (!template) return false
   return /\{C+\}/.test(template)
 }
+
+// Featura G (private/REAL_data_followup_UX.md) — client-side zrcadlo
+// VarsymbolSeriesCollisionChecker::digitSkeleton()/templatesCollide() (PHP), pro
+// OKAMŽITÉ varování při psaní do formuláře (backend kontrola se přepočítá až po
+// uložení). Musí zůstat 1:1 v souladu s PHP verzí — testováno v obou (PHPUnit +
+// Vitest) na stejných příkladech.
+//
+// Kolize = po zahození nečíselných znaků (přesně to, co dělá bankovní matcher při
+// párování VS) šablony vyprodukují STEJNOU strukturu číslic → pro shodné datum
+// a počítadlo IDENTICKÝ VS.
+export function digitSkeleton(template: string): string {
+  const parts = template.split(/(\{YYYY\}|\{YY\}|\{MM\}|\{C+\}|\{PP\})/)
+  const tokens: string[] = []
+  for (const part of parts) {
+    if (part === '') continue
+    if (part === '{YYYY}') { tokens.push('Y4'); continue }
+    if (part === '{YY}') { tokens.push('Y2'); continue }
+    if (part === '{MM}') { tokens.push('M2'); continue }
+    if (part === '{PP}') continue // vždy písmena — normalizace na číslice je odstraní
+    const counterMatch = /^\{(C+)\}$/.exec(part)
+    if (counterMatch) { tokens.push('C' + counterMatch[1].length); continue }
+    const digits = part.replace(/\D+/g, '')
+    if (digits !== '') tokens.push('L' + digits)
+  }
+  return tokens.join('|')
+}
+
+export function templatesCollide(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ta = (a ?? '').trim()
+  const tb = (b ?? '').trim()
+  if (ta === '' || tb === '') return false
+  if (ta === tb) return true
+  return digitSkeleton(ta) === digitSkeleton(tb)
+}

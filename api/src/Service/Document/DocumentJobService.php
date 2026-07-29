@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Document;
 
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\ImportJobRepository;
 
 /**
@@ -45,7 +46,14 @@ final class DocumentJobService
             } elseif ($source === 'document_folder_import') {
                 $this->runFolderImport($jobId, $sid, $params, (int) ($job['created_by'] ?? 0) ?: null);
             } elseif ($source === 'document_zip_export') {
-                $this->runExport($jobId, $sid, $params);
+                // Scope-aware export (§4.2): viewer rekonstruován z jobu, aby se
+                // user-scoped doklad neprosákl do company ZIP. Admin (viewer_is_admin)
+                // vidí vše tenanta; jinak jen company + vlastní user doklady tvůrce.
+                $createdBy = (int) ($job['created_by'] ?? 0) ?: null;
+                $viewer = ((bool) ($params['viewer_is_admin'] ?? false))
+                    ? DocumentViewerContext::admin($createdBy)
+                    : DocumentViewerContext::forUser($createdBy);
+                $this->runExport($jobId, $sid, $params, $viewer);
             } else {
                 $this->jobs->markFailed($jobId, "Source '{$source}' není podporován.");
             }
@@ -192,7 +200,7 @@ final class DocumentJobService
     }
 
     /** @param array<string,mixed> $params */
-    private function runExport(int $jobId, int $sid, array $params): void
+    private function runExport(int $jobId, int $sid, array $params, DocumentViewerContext $viewer): void
     {
         $docIds = array_values(array_filter(array_map('intval', (array) ($params['ids'] ?? []))));
         $folderIds = array_values(array_filter(array_map('intval', (array) ($params['folder_ids'] ?? []))));
@@ -207,7 +215,7 @@ final class DocumentJobService
 
         // Vybrané složky → dokumenty se zachováním stromu (prefix cesty v ZIP).
         // $plan: list<array{id:int, prefix:string}>  (prefix '' = kořen ZIP)
-        [$plan, $seenDocIds] = $this->expandFolderSelection($sid, $folderIds);
+        [$plan, $seenDocIds] = $this->expandFolderSelection($sid, $folderIds, $viewer);
         // Volně vybrané dokumenty jdou do kořene ZIP; přeskoč ty, co už pokryla složka.
         foreach ($docIds as $id) {
             if (isset($seenDocIds[$id])) continue;
@@ -246,7 +254,7 @@ final class DocumentJobService
                 $this->jobs->markCancelled($jobId);
                 return;
             }
-            $doc = $this->documents->findRaw($item['id'], $sid, false);
+            $doc = $this->documents->findRaw($item['id'], $sid, $viewer, false);
             $processed++;
             if ($doc === null) { $this->jobs->updateProgress($jobId, ['processed' => $processed]); continue; }
             $path = $this->storage->pathFor($sid, (string) $doc['sha256'], (string) $doc['filename']);
@@ -290,7 +298,7 @@ final class DocumentJobService
      * @return array{0: list<array{id:int, prefix:string}>, 1: array<int,bool>}
      *               plán + množina už pokrytých document id (k dedup volných výběrů)
      */
-    private function expandFolderSelection(int $sid, array $folderIds): array
+    private function expandFolderSelection(int $sid, array $folderIds, DocumentViewerContext $viewer): array
     {
         $folderIds = array_values(array_filter(array_map('intval', $folderIds), static fn(int $v): bool => $v > 0));
         if ($folderIds === []) return [[], []];
@@ -334,7 +342,7 @@ final class DocumentJobService
 
         $plan = [];
         $seen = [];
-        foreach ($this->documents->rawByFolderIds($sid, array_keys($prefixByFolder)) as $d) {
+        foreach ($this->documents->rawByFolderIds($sid, array_keys($prefixByFolder), $viewer) as $d) {
             $id = (int) $d['id'];
             $seen[$id] = true;
             $plan[] = ['id' => $id, 'prefix' => $prefixByFolder[(int) $d['folder_id']] ?? ''];

@@ -71,8 +71,15 @@ final class CzkRecap
      * binární nepřesnosti — např. 21,00 × 24,365 = 511,665, ale ve floatu
      * 511,66499999..., takže `round(...HALF_UP)` vrací 511,66 místo 511,67.
      * S bcmath dostaneme přesný 511,67.
+     *
+     * **Veřejné jako SSOT přepočtu měny.** Registr SSOT vedl „CzkRecap (bcmath) vs
+     * 3 další" jako neověřené hlášení agenta; měřením se potvrdilo, že drift je
+     * REÁLNÝ — na 1,6 mil. kombinací částek a reálných kurzů ČNB se metody rozešly
+     * 603× (např. 3,00 × 25,305 → bcmath 75,92, `round()` 75,91). Rozdíl je vždy
+     * jeden haléř a vzniká, když přesný součin padne na půlhaléřovou hranici.
+     * Sonda: `private/scripts/czk_conversion_sweep.php`.
      */
-    private static function multiplyHalfUp(float $a, float $b): float
+    public static function multiplyHalfUp(float $a, float $b): float
     {
         if (function_exists('bcmul')) {
             $sa = sprintf('%.6F', $a);

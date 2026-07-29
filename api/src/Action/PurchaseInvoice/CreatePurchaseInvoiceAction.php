@@ -5,16 +5,22 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Ares\CrpDphClient;
+use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
+use MyInvoice\Service\Ai\AiSuggestionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -27,6 +33,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class CreatePurchaseInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
+    use GuardsDocumentLock;
 
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
@@ -35,6 +42,11 @@ final class CreatePurchaseInvoiceAction
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
+        private readonly CrpDphClient $crpdph,
+        private readonly Connection $db,
+        private readonly AiSuggestionService $aiSuggestions,
+        private readonly CnbRateDeviationChecker $rateChecker,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -76,37 +88,101 @@ final class CreatePurchaseInvoiceAction
             $body['vat_deduction'] = 'none';
         }
 
+        // Nespolehlivý plátce (CRPDPH, §109 ZDPH ručení za DPH) — audit 2026-07,
+        // nález "Nespolehlivý plátce a zveřejněný účet se kontroluje až v platebním
+        // příkazu, ne při pořízení FP". Dosud kontrolováno jen ve flow platebních
+        // příkazů (PaymentOrderService); doplněno i sem, ať to uvidí i firmy platící
+        // mimo modul příkazů. CrpDphClient má 24h cache a je fail-safe (síťová chyba
+        // / nenakonfigurovaný endpoint → tiché 'error', žádná výjimka, uložení neblokuje).
+        $vendorUnreliablePayer = false;
+        $vendorDicDigits = preg_replace('/\D/', '', (string) ($vendor['dic'] ?? '')) ?? '';
+        if (preg_match('/^\d{8,10}$/', $vendorDicDigits) === 1) {
+            $crpResult = $this->crpdph->lookup($vendorDicDigits);
+            $vendorUnreliablePayer = ($crpResult['unreliable'] ?? null) === true;
+        }
+
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
+
+        // H1: datum nového dokladu nesmí spadat do uzavřeného období (client 403, účetní 409).
+        $refDate = DocumentLockService::purchaseRefDate($body);
+        if ($refDate !== null) {
+            $lock = $this->locks->forDate($supplierId, $refDate);
+            if ($deny = $this->denyIfLocked($request, $response, $lock, 'purchase_invoice', null)) {
+                return $deny;
+            }
+        }
 
         // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
         $this->applyVatClassificationDefaults($body, $supplierId);
 
+        // C6 (§ 73/1/a): ruční zadání data přijetí ve formuláři je vědomý úkon účetní
+        // (i default dnešek z UI), ne slepý otisk importu → 'manual'. VatLedgerService pak
+        // smí uplatnit odpočet dle skutečného držení dokladu. Importy zůstávají 'import'.
+        if (array_key_exists('received_at', $body)) {
+            $body['received_at_source'] = 'manual';
+        }
+
+        // Forma úhrady (migrace 1128): přišla-li z formuláře, je to vědomá volba účetní →
+        // zdroj vždy 'manual', nikdy ne to, co poslal klient. Bez toho by šlo přes API
+        // podstrčit slabý zdroj a nechat si hodnotu přepsat AI extrakcí.
+        if (array_key_exists('payment_method', $body)) {
+            $body['payment_method_source'] = 'manual';
+        }
+
+        // Vazba dobropisu na opravovanou fakturu (migrace 1096) — validace tenanta/druhu/self.
+        if (array_key_exists('parent_purchase_invoice_id', $body)) {
+            $body['parent_purchase_invoice_id'] = self::sanitizeParentLink(
+                $this->db, $body['parent_purchase_invoice_id'] ?? null,
+                (string) ($body['document_kind'] ?? 'invoice'), $supplierId, 0,
+            );
+        }
+
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) $pdo->beginTransaction();
         try {
             $id = $this->repo->createDraft($body, $userId, $supplierId);
+            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+            if (array_key_exists('vat_overrides', $body)) {
+                $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
+            }
+            $this->calc->recompute($id);
+            $this->repo->replaceVatAllocations(
+                $id,
+                $supplierId,
+                is_array($body['vat_allocations'] ?? null) ? $body['vat_allocations'] : [],
+            );
+            if ($ownTransaction) $pdo->commit();
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $code = str_contains($e->getMessage(), 'alokac') ? 'invalid_vat_allocations' : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         } catch (\PDOException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             // Ruční interní číslo koliduje s existujícím (uq_pi_supplier_varsymbol) → 409.
             if ($dupMsg = self::varsymbolDuplicateMessage($e, $body['varsymbol'] ?? null)) {
                 return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
             }
+            // Přesný duplikát PF: stejný dodavatel + číslo dokladu + datum (uq_pi_vendor_invoice) → 409.
+            if ($dupMsg = self::vendorInvoiceDuplicateMessage($e, $body['vendor_invoice_number'] ?? null)) {
+                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409);
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
-
-        $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
-        // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
-        // kalkulátor zapekl do řádkových totálů.
-        if (array_key_exists('vat_overrides', $body)) {
-            $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
-        }
-        $this->calc->recompute($id);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.created', $userId, 'purchase_invoice', $id, [
             'vendor_id'    => $body['vendor_id'],
             'document_kind' => $body['document_kind'] ?? 'invoice',
         ], $ip, $request->getHeaderLine('User-Agent'));
+        try {
+            $this->aiSuggestions->enqueuePurchase($supplierId, $id);
+        } catch (\Throwable) {
+        }
 
         $invoice = $this->repo->find($id, $supplierId);
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
@@ -118,10 +194,125 @@ final class CreatePurchaseInvoiceAction
         if ($vendorNonPayer && !PurchaseInvoiceValidation::isReverseCharge($invoice) && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
             $warnings[] = 'vendor_non_payer_deduction';
         }
+        if ($vendorUnreliablePayer) {
+            $warnings[] = 'vendor_unreliable_payer';
+        }
+        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet, viz helper).
+        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
+            && self::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+            $warnings[] = 'advance_has_tax_document';
+        }
+        // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.
+        if (is_array($invoice)
+            && self::receiptLooksLikePrepayment($this->db, $invoice['id'] ?? null, (string) ($invoice['document_kind'] ?? ''))) {
+            $warnings[] = 'receipt_looks_like_prepayment';
+        }
+        // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k rozhodnému dni.
+        // NEBLOKUJE (§24/7 pevný kurz je legitimní); §73/6 se netýká — kontroluje se JEN
+        // účetní přepočet z hlavičky, korunová částka DPH z dokladu zůstává nedotčená.
+        if (is_array($invoice)) {
+            $dev = $this->rateChecker->deviationWarning(
+                $supplierId,
+                (string) ($invoice['currency'] ?? ''),
+                (string) ($invoice['effective_cost_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
+            );
+            if ($dev !== null) {
+                $warnings[] = 'exchange_rate_cnb_deviation';
+                $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
+            }
+        }
         if (!empty($warnings)) {
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice, 201);
+    }
+
+    /**
+     * Vazba dokladu na rodičovský doklad přes parent_purchase_invoice_id (přetíženo dle
+     * document_kind, jako parent_invoice_id na vydané straně). Vrací platné ID rodiče, nebo NULL:
+     *   • dobropis (credit_note, migrace 1096) → opravovaná běžná faktura (document_kind='invoice'),
+     *   • DDKP (tax_document, migrace 1138)   → poskytnutá záloha (document_kind='advance').
+     * Rodič musí patřit témuž tenantovi, mít správný druh a nesmí to být tentýž doklad. Jiný
+     * druh vazbu vyčistí. Neplatnou vazbu tiše zahazuje na NULL — je to nepovinné vodítko,
+     * nesmí blokovat uložení.
+     */
+    public static function sanitizeParentLink(Connection $db, mixed $raw, string $documentKind, int $supplierId, int $selfId): ?int
+    {
+        $requiredParentKind = match ($documentKind) {
+            'credit_note'  => 'invoice',
+            'tax_document' => 'advance',
+            default        => null,
+        };
+        if ($requiredParentKind === null) {
+            return null;
+        }
+        $parentId = (int) ($raw ?? 0);
+        if ($parentId <= 0 || $parentId === $selfId) {
+            return null;
+        }
+        $stmt = $db->pdo()->prepare(
+            "SELECT 1 FROM purchase_invoices
+              WHERE id = ? AND supplier_id = ? AND document_kind = ? LIMIT 1"
+        );
+        $stmt->execute([$parentId, $supplierId, $requiredParentKind]);
+        return $stmt->fetchColumn() !== false ? $parentId : null;
+    }
+
+    /**
+     * Varování `advance_has_tax_document`: finální faktura navázaná na zálohu, která má DDKP
+     * (daňový doklad k platbě). DPH ze zálohy už byla odečtena (343/314 na DDKP), takže
+     * vyúčtovací faktura smí v DPH/KH nárokovat jen DOPLATKOVOU daň — jinak dvojí odpočet.
+     * Deník to blokuje (advance_settlement_ambiguous), evidence DPH ale ne → měkké upozornění
+     * při uložení. Vrací true, když má navázaná záloha aspoň jeden živý DDKP.
+     */
+    public static function advanceHasActiveTaxDocument(Connection $db, mixed $advanceId, int $supplierId): bool
+    {
+        $advId = (int) ($advanceId ?? 0);
+        if ($advId <= 0) {
+            return false;
+        }
+        // Daň už je uplatněná ve dvou případech: k záloze existuje DDKP — NEBO je „zálohou"
+        // sám samostatný daňový doklad k platbě, který odpočet uplatňuje přímo. Bez té druhé
+        // větve by uživatel u konečné faktury varování nedostal a nárokoval by DPH podruhé,
+        // přestože ji z dokladu o platbě už uplatnil.
+        $stmt = $db->pdo()->prepare(
+            "SELECT 1 FROM purchase_invoices
+              WHERE supplier_id = ?
+                AND status <> 'cancelled'
+                AND document_kind = 'tax_document'
+                AND (
+                      parent_purchase_invoice_id = ?
+                   OR (id = ? AND parent_purchase_invoice_id IS NULL)
+                )
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $advId, $advId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Heuristika `receipt_looks_like_prepayment`: účtenka (receipt), jejíž položky vypadají
+     * jako daňový doklad k PŘIJATÉ PLATBĚ / ZÁLOZE (§28). Taková věc není paragon — patří jako
+     * DDKP (tax_document) nebo záloha (advance); jako receipt zaúčtuje předčasný náklad 518, který
+     * se pak zdvojí s konečnou fakturou. Měkké upozornění (neblokuje). Vrací true při shodě.
+     */
+    public static function receiptLooksLikePrepayment(Connection $db, mixed $invoiceId, string $documentKind): bool
+    {
+        $id = (int) ($invoiceId ?? 0);
+        if ($documentKind !== 'receipt' || $id <= 0) {
+            return false;
+        }
+        $stmt = $db->pdo()->prepare(
+            "SELECT 1 FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ?
+                AND (description LIKE '%přijaté platb%' OR description LIKE '%přijaté úhrad%'
+                     OR description LIKE '%daňový doklad k%' OR description LIKE '%před uskutečněním plnění%'
+                     OR description LIKE '%k záloze%' OR description LIKE '%zaplacené zálo%')
+              LIMIT 1"
+        );
+        $stmt->execute([$id]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

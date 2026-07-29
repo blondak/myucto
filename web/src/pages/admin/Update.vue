@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { updateApi, type UpdateStatus } from '@/api/update'
 import { systemApi, type HealthResponse } from '@/api/client'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 
 const { t } = useI18n()
@@ -19,7 +20,7 @@ const errorMsg = ref<string | null>(null)
 
 const pollingEnabled = ref(true)
 
-const isAdmin = computed(() => auth.user?.role === 'admin')
+const isAdmin = computed(() => auth.isSuperadmin)
 
 async function load(signal?: AbortSignal) {
   errorMsg.value = null
@@ -323,9 +324,9 @@ function fmtDate(s?: string | null): string {
             type="button"
             @click="refresh"
             :disabled="checking"
-            class="inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            :class="btnOutline('neutral')"
           >
-            <svg class="w-4 h-4" :class="{ 'animate-spin': checking }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/></svg>
+            <svg class="w-4 h-4" :class="{ 'animate-spin': checking }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
             {{ checking ? t('updates.checking') : t('updates.check_now') }}
           </button>
           <button
@@ -333,14 +334,14 @@ function fmtDate(s?: string | null): string {
             type="button"
             @click="triggerUpgrade"
             :disabled="triggering"
-            class="inline-flex items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            :class="btnFilled('warning')"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ triggering ? t('updates.triggering') : t('updates.trigger_update', { version: status.latest }) }}
           </button>
           <a v-if="status.release_url" :href="status.release_url" target="_blank" rel="noopener"
-            class="inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+            :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
             {{ t('updates.release_on_github') }}
           </a>
         </div>
@@ -375,8 +376,8 @@ function fmtDate(s?: string | null): string {
         <p class="text-sm text-neutral-600 mt-1.5">{{ t('updates.in_progress_desc') }}</p>
         <div class="mt-3 pt-3 border-t border-primary-200/60 flex items-center gap-3 flex-wrap">
           <button type="button" @click="cancelStuckUpgrade" :disabled="cancelling"
-            class="cursor-pointer h-8 px-3 text-sm border border-neutral-300 bg-surface hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 disabled:opacity-50">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            :class="btnOutline('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ cancelling ? '…' : t('updates.cancel_stuck') }}
           </button>
           <span class="text-xs text-neutral-500">{{ t('updates.cancel_stuck_hint') }}</span>
@@ -456,8 +457,8 @@ php tools/exportManualToPdf.php
 php api/bin/migrate.php
 
 # Alternativa: production bundle (bez Composer / Node)
-# https://github.com/radekhulan/myinvoice/releases/latest
-curl -LO https://github.com/radekhulan/myinvoice/releases/download/v{{ status.latest ?? 'X.Y.Z' }}/myinvoice-{{ status.latest ?? 'X.Y.Z' }}.tar.gz
+# https://github.com/radekhulan/myucto/releases/latest
+curl -LO https://github.com/radekhulan/myucto/releases/download/v{{ status.latest ?? 'X.Y.Z' }}/myinvoice-{{ status.latest ?? 'X.Y.Z' }}.tar.gz
 tar -xzf myinvoice-{{ status.latest ?? 'X.Y.Z' }}.tar.gz --strip-components=1 \
   --exclude='cfg.php' --exclude='cfg.local.php' \
   --exclude='storage' --exclude='private' --exclude='log'

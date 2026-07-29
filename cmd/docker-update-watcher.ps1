@@ -1,4 +1,4 @@
-# MyInvoice.cz — Docker upgrade watcher (Windows / PowerShell verze).
+# MyUcto.cz — Docker upgrade watcher (Windows / PowerShell verze).
 #
 # Sleduje storage/upgrade-requested.json **uvnitř** kontejneru (přes
 # `docker compose exec`) a když ho UI vytvoří (POST /api/admin/update/
@@ -122,7 +122,7 @@ while ($true) {
         # Lock - prejmenuj uvnitr kontejneru, at ho dalsi iterace nevezme znovu.
         & docker compose @composeArgs exec -T app mv -f "$storageDir/upgrade-requested.json" "$storageDir/upgrade-inflight.json" 2>$null
 
-        $log = Join-Path $env:TEMP "myinvoice-upgrade-$ts.log"
+        $log = Join-Path $env:TEMP "myucto-upgrade-$ts.log"
         try {
             # Update běží jako SAMOSTATNÝ proces (izolace — docker-update.ps1 má
             # `exit`/Write-Error s EAP=Stop, které by jinak shodily watcher smyčku),

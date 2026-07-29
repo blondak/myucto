@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
@@ -37,6 +38,7 @@ final class InvoicePaymentService
         private readonly Connection $db,
         private readonly InvoicePdfRenderer $pdf,
         private readonly StatsRecomputer $stats,
+        private readonly ClientBankAccountRepository $clientBankAccounts,
     ) {}
 
     /**
@@ -152,7 +154,7 @@ final class InvoicePaymentService
 
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT i.id, i.supplier_id, i.invoice_type, i.status, i.amount_to_pay, i.paid_total,
+            'SELECT i.id, i.supplier_id, i.client_id, i.invoice_type, i.status, i.amount_to_pay, i.paid_total,
                     cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
@@ -190,12 +192,19 @@ final class InvoicePaymentService
                 self::trimOrNull($opts['variable_symbol'] ?? null, 20),
                 self::trimOrNull($opts['bank_reference'] ?? null, 120),
                 self::trimOrNull($opts['note'] ?? null, 255),
-                in_array($opts['source'] ?? '', ['manual', 'mark_paid', 'bank'], true) ? $opts['source'] : 'manual',
+                in_array($opts['source'] ?? '', ['manual', 'mark_paid', 'bank', 'cash', 'settlement'], true) ? $opts['source'] : 'manual',
                 isset($opts['bank_transaction_id']) && (int) $opts['bank_transaction_id'] > 0
                     ? (int) $opts['bank_transaction_id'] : null,
                 isset($opts['created_by']) && (int) $opts['created_by'] > 0 ? (int) $opts['created_by'] : null,
             ]);
             $paymentId = (int) $pdo->lastInsertId();
+
+            if (($opts['source'] ?? '') === 'bank' && !empty($opts['bank_transaction_id'])) {
+                $this->clientBankAccounts->captureForInvoiceTransaction(
+                    $invoiceId,
+                    (int) $opts['bank_transaction_id'],
+                );
+            }
 
             $transition = $this->recomputeLocked($pdo, $invoiceId);
 
@@ -268,6 +277,7 @@ final class InvoicePaymentService
             self::trimOrNull($opts['bank_reference'] ?? null, 120),
             $paymentId,
         ]);
+        $this->clientBankAccounts->captureForInvoiceTransaction($invoiceId, $txId);
 
         return ['payment_id' => $paymentId, 'amount' => round((float) $rows[0]['amount'], 2)];
     }

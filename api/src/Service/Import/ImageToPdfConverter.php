@@ -179,7 +179,7 @@ final class ImageToPdfConverter
         ]);
         $mpdf->SetTitle('');
         $mpdf->SetAuthor('');
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
 
         $dataUri = 'data:image/jpeg;base64,' . base64_encode($jpeg);
         $mpdf->WriteHTML('<img src="' . $dataUri . '" style="width:100%; height:100%;">');

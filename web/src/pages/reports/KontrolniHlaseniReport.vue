@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { reportsApi, type DphSettings } from '@/api/reports'
+import { reportsApi, type DphSettings, type KhVariant } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n()
+const auth = useAuthStore()
 
 const now = new Date()
 const year = ref(now.getFullYear())
@@ -51,11 +54,22 @@ const sectionBRows = computed<KhSectionRow[]>(() => preview.value ? [
   { code: 'B.3', labelKey: 'reports.kh.b3_label', count: preview.value.summary.b3_count_aggregated, aggregated: true },
 ] : [])
 
+// C7' — typ podání. Následné (N/E) přijímá datum zjištění a č.j. výzvy správce daně.
+const variant = ref<KhVariant>('radne')
+const dZjist = ref('')
+const cJedVyzvy = ref('')
+const isFollowUp = computed(() => variant.value === 'nasledne' || variant.value === 'nasledne_opravne')
+
 async function loadPreview() {
   loading.value = true
   error.value = ''
   try {
-    preview.value = await reportsApi.khPreview(year.value, month.value, effectivePeriod.value)
+    preview.value = await reportsApi.khPreview(
+      year.value, month.value, effectivePeriod.value,
+      variant.value,
+      isFollowUp.value ? dZjist.value : undefined,
+      isFollowUp.value ? cJedVyzvy.value : undefined,
+    )
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -64,7 +78,12 @@ async function loadPreview() {
 }
 
 function downloadXml() {
-  window.open(reportsApi.khDownloadUrl(year.value, month.value, effectivePeriod.value), '_blank')
+  window.open(reportsApi.khDownloadUrl(
+    year.value, month.value, effectivePeriod.value,
+    variant.value,
+    isFollowUp.value ? dZjist.value : undefined,
+    isFollowUp.value ? cJedVyzvy.value : undefined,
+  ), '_blank')
 }
 
 const monthOptions = computed(() =>
@@ -83,7 +102,7 @@ const daysToDeadline = computed(() => {
   return Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 })
 
-watch([year, month, effectivePeriod], loadPreview)
+watch([year, month, effectivePeriod, variant, dZjist, cJedVyzvy], loadPreview)
 onMounted(async () => {
   try { settings.value = await reportsApi.dphSettings() } catch {}
   loadPreview()
@@ -92,19 +111,6 @@ onMounted(async () => {
 
 <template>
   <div class="max-w-5xl">
-    <!-- ⚠️ Disclaimer -->
-    <div class="bg-danger-50 border-2 border-danger-500 rounded-lg p-4 mb-4">
-      <div class="flex items-start gap-3">
-        <svg class="w-6 h-6 text-danger-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-1-8a1 1 0 0 0-1 1v3a1 1 0 0 0 2 0V6a1 1 0 0 0-1-1z" clip-rule="evenodd"/>
-        </svg>
-        <div class="text-sm text-danger-700">
-          <p class="font-semibold mb-1">{{ t('reports.disclaimer_title') }}</p>
-          <p>{{ t('reports.disclaimer_body') }}</p>
-        </div>
-      </div>
-    </div>
-
     <!-- Topbar -->
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
@@ -139,12 +145,32 @@ onMounted(async () => {
             <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
           </select>
         </template>
-        <button type="button" @click="downloadXml" :disabled="loading || !preview"
-          class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        <button v-if="auth.canRead('reports.export')" type="button" @click="downloadXml" :disabled="loading || !preview"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('reports.kh.download_xml') }}
         </button>
       </div>
+    </div>
+
+    <!-- Typ podání (C7' — řádné / opravné / následné) -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">
+      <label class="text-sm font-medium text-neutral-700">{{ t('reports.kh.variant.label') }}</label>
+      <select v-model="variant" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <option value="radne">{{ t('reports.kh.variant.radne') }}</option>
+        <option value="opravne">{{ t('reports.kh.variant.opravne') }}</option>
+        <option value="nasledne">{{ t('reports.kh.variant.nasledne') }}</option>
+        <option value="nasledne_opravne">{{ t('reports.kh.variant.nasledne_opravne') }}</option>
+      </select>
+      <template v-if="isFollowUp">
+        <label class="text-sm text-neutral-600">{{ t('reports.kh.variant.d_zjist') }}</label>
+        <input type="date" v-model="dZjist"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+        <label class="text-sm text-neutral-600">{{ t('reports.kh.variant.c_jed_vyzvy') }}</label>
+        <input type="text" v-model="cJedVyzvy" placeholder="99999999/99/9999-99999-999999"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm w-64" />
+      </template>
+      <span class="text-xs text-neutral-500">{{ t('reports.kh.variant.hint') }}</span>
     </div>
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-400">{{ t('common.loading') }}…</div>

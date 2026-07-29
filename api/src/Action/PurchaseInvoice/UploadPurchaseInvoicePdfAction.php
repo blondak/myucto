@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -31,6 +33,8 @@ use Psr\Http\Message\UploadedFileInterface;
  */
 final class UploadPurchaseInvoicePdfAction
 {
+    use GuardsDocumentLock;
+
     private const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MiB
     private const PDF_MAGIC     = "%PDF-";
 
@@ -40,6 +44,7 @@ final class UploadPurchaseInvoicePdfAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Import\ImageToPdfConverter $imageToPdf,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -53,6 +58,11 @@ final class UploadPurchaseInvoicePdfAction
         $existing = $this->repo->find($id, $supplierId);
         if ($existing === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+
+        // Zámek dokladu (Epic F6): re-upload zdrojového dokumentu mění doklad.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($existing), 'purchase_invoice', $id)) {
+            return $deny;
         }
 
         $files = $request->getUploadedFiles();

@@ -40,7 +40,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      host: 'dev.myinvoice.cz',
+      host: 'dev.myucto.cz',
       port: 5173,
       strictPort: true,
       proxy: {

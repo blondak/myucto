@@ -11,19 +11,21 @@ use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Pdf\PaymentOrderPdfRenderer;
+use MyInvoice\Support\PaymentMethods;
 
 /**
  * Platební příkazy (payment orders) — hromadné generování příkazu k úhradě z
  * nezaplacených přijatých faktur.
  *
  * Tok: kandidáti (nezaplacené faktury + ověření účtu) → výběr + účet plátce + datum
- * → snapshot dávky (payment_orders + items) → export CSV / PDF / ABO(KPC).
+ * → snapshot dávky (payment_orders + items) → export CSV / PDF / ABO(KPC) / SEPA.
  * Po vytvoření se faktury označí `payment_ordered_at` („Zařazeno k úhradě");
  * status se NEpřeklápí na paid (to dělá až párování výpisu), pokud uživatel výslovně
  * nezvolí `mark_paid`.
  *
  * ABO/KPC je tuzemský CZK platební styk → dávka má jednu měnu (= měna účtu plátce);
- * cizí měny (EUR…) lze exportovat jen do CSV/PDF.
+ * cizí měny (EUR…) lze exportovat do CSV/PDF, a je-li plátce i příjemce identifikován
+ * přes IBAN, i do SEPA XML (`SepaPaymentOrderWriter`, ISO 20022 pain.001.001.03).
  */
 final class PaymentOrderService
 {
@@ -34,18 +36,27 @@ final class PaymentOrderService
         private readonly AboPaymentOrderWriter $abo,
         private readonly PaymentOrderCsvWriter $csv,
         private readonly PaymentOrderPdfRenderer $pdf,
+        private readonly SepaPaymentOrderWriter $sepa,
+        private readonly IbanValidator $ibanValidator,
         private readonly Connection $db,
     ) {}
 
     /**
-     * Kandidáti do příkazu + dostupné účty plátce. Volitelný filtr měny.
+     * Kandidáti do příkazu + dostupné účty plátce. Volitelný filtr měny. Stránkovaně
+     * (server-side pagination) — `$perPage`/`$offset` řídí LIMIT/OFFSET nad kandidáty,
+     * `total` je COUNT přes STEJNÝ filtr (bez LIMIT).
      *
-     * @return array{payer_accounts: list<array<string,mixed>>, candidates: list<array<string,mixed>>}
+     * Defaultně jen faktury hrazené převodem — inkaso (SIPO) si dodavatel strhne sám a
+     * příkaz by znamenal dvojí platbu. `$includeNonTransfer` filtr vypne (opt-out), aby
+     * šla najít a opravit faktura s chybně nastavenou formou úhrady.
+     *
+     * @return array{payer_accounts: list<array<string,mixed>>, candidates: list<array<string,mixed>>, total: int}
      */
-    public function candidates(int $supplierId, ?string $currency = null): array
+    public function candidates(int $supplierId, ?string $currency = null, int $perPage = 50, int $offset = 0, bool $includeNonTransfer = false): array
     {
         $payerAccounts = $this->orders->payerAccounts($supplierId);
-        $rows = $this->invoices->listPaymentCandidates($supplierId, $currency);
+        $rows = $this->invoices->listPaymentCandidates($supplierId, $currency, $perPage, $offset, $includeNonTransfer);
+        $total = $this->invoices->countPaymentCandidates($supplierId, $currency, $includeNonTransfer);
 
         $candidates = [];
         foreach ($rows as $r) {
@@ -83,15 +94,18 @@ final class PaymentOrderService
                 'constant_symbol'        => $r['payment_constant_symbol'] ?? null,
                 'payment_account_source' => $r['payment_account_source'] ?? null,
                 'payment_ordered_at'     => $r['payment_ordered_at'] ?? null,
+                'payment_method'         => PaymentMethods::normalize($r['payment_method'] ?? null),
+                'payment_method_source'  => PaymentMethods::normalizeSource($r['payment_method_source'] ?? null),
                 'has_account'            => $hasCz || $hasIban,
                 'has_pdf'                => (bool) ($r['has_pdf'] ?? false),
                 'abo_eligible'           => $hasCz && strtoupper((string) $r['currency']) === 'CZK',
+                'sepa_eligible'          => $hasIban && $this->ibanValidator->isValid((string) $payee['iban']),
                 'can_verify'             => $this->canVerify((string) ($r['vendor_dic'] ?? '')),
                 'account_verified'       => $this->verify((string) ($r['vendor_dic'] ?? ''), $payee),
             ];
         }
 
-        return ['payer_accounts' => $payerAccounts, 'candidates' => $candidates];
+        return ['payer_accounts' => $payerAccounts, 'candidates' => $candidates, 'total' => $total];
     }
 
     /**
@@ -144,6 +158,14 @@ final class PaymentOrderService
             }
             if (strtoupper((string) ($inv['currency'] ?? '')) !== $orderCurrency) {
                 $skipped[] = ['id' => $id, 'reason' => 'currency_mismatch'];
+                continue;
+            }
+            // Pojistka proti dvojí platbě: faktura hrazená jinak než převodem (inkaso/SIPO,
+            // karta, dobírka, zápočet) se do příkazu NIKDY nedostane, ani když ji uživatel
+            // vybere ve výpisu se zapnutým opt-outem (`include_non_transfer`) nebo když se
+            // forma úhrady změnila mezi načtením seznamu a odesláním výběru.
+            if (!PaymentMethods::isBankTransfer($inv['payment_method'] ?? null)) {
+                $skipped[] = ['id' => $id, 'reason' => 'direct_debit'];
                 continue;
             }
             $amount = (float) ($inv['amount_to_pay'] ?? 0);
@@ -284,10 +306,17 @@ final class PaymentOrderService
         ];
     }
 
-    /** Historie dávek (bez položek). @return list<array<string,mixed>> */
-    public function history(int $supplierId): array
+    /**
+     * Historie dávek (bez položek), stránkovaně.
+     *
+     * @return array{0: list<array<string,mixed>>, 1: int} [rows, total]
+     */
+    public function history(int $supplierId, int $perPage = 50, int $offset = 0): array
     {
-        return $this->orders->history($supplierId);
+        return [
+            $this->orders->history($supplierId, $perPage, $offset),
+            $this->orders->countHistory($supplierId),
+        ];
     }
 
     /**
@@ -300,9 +329,18 @@ final class PaymentOrderService
     {
         $valid = [];
         foreach (array_unique(array_map('intval', $invoiceIds)) as $id) {
-            if ($this->invoices->find($id, $supplierId) !== null) {
-                $valid[] = $id;
+            $invoice = $this->invoices->find($id, $supplierId);
+            if ($invoice === null) {
+                continue;
             }
+            // Faktura hrazená jinak než převodem (inkaso, karta, zápočet…) se do příkazu
+            // nezařazuje — a nesmí tedy dostat ani razítko „Zařazeno k úhradě". Bez téhle
+            // pojistky by ji tam dostalo „Jen označit" ve chvíli, kdy má uživatel zapnuté
+            // zobrazení nepřevodových faktur (opt-out u kandidátů).
+            if (!PaymentMethods::isBankTransfer($invoice['payment_method'] ?? null)) {
+                continue;
+            }
+            $valid[] = $id;
         }
         if ($valid === []) {
             return 0;
@@ -320,7 +358,7 @@ final class PaymentOrderService
      * Vyrenderuje dávku do zvoleného formátu.
      *
      * @return array{filename:string, content_type:string, bytes:string}|null
-     * @throws \RuntimeException při nepodporovaném formátu / nevhodných datech pro ABO
+     * @throws \RuntimeException při nepodporovaném formátu / nevhodných datech pro ABO / SEPA
      */
     public function download(int $orderId, int $supplierId, string $format): ?array
     {
@@ -347,8 +385,55 @@ final class PaymentOrderService
                 'content_type' => 'text/plain; charset=utf-8',
                 'bytes'        => $this->abo->build($this->toAboInput($view)),
             ],
+            'sepa' => [
+                'filename'     => $base . '.xml',
+                'content_type' => 'application/xml; charset=utf-8',
+                'bytes'        => $this->sepa->build($this->toSepaInput($view)),
+            ],
             default => throw new \RuntimeException('Nepodporovaný formát: ' . $format),
         };
+    }
+
+    /**
+     * Mapuje kanonický pohled na vstup pro SepaPaymentOrderWriter (ISO 20022 pain.001.001.03).
+     *
+     * @param array<string,mixed> $view
+     * @return array<string,mixed>
+     */
+    private function toSepaInput(array $view): array
+    {
+        // SEPA Credit Transfer je EUR-only scheme (skutečná SEPA clearing síť platí
+        // jen pro EUR) — zrcadlí guard toAboInput() pro CZK. Bez tohoto by přímé
+        // API volání (mimo FE gate na EUR účtu plátce) vygenerovalo XML s
+        // Ccy="CZK" + SvcLvl/Cd=SEPA, které banka odmítne nebo zpracuje chybně.
+        if (strtoupper((string) $view['currency']) !== 'EUR') {
+            throw new \RuntimeException('SEPA export je možný jen pro EUR příkazy.');
+        }
+        $payer = (array) $view['payer'];
+        $supplier = (array) $view['supplier'];
+
+        $items = [];
+        foreach ((array) $view['items'] as $it) {
+            $items[] = [
+                'payee_name'      => $it['payee_name'],
+                'iban'            => $it['iban'],
+                'bic'             => $it['bic'],
+                'amount'          => $it['amount'],
+                'variable_symbol' => $it['variable_symbol'],
+                'message'         => $it['message'],
+            ];
+        }
+
+        return [
+            'order_id'       => $view['id'],
+            'initiator_name' => $supplier['company_name'] ?? null,
+            'payer_name'     => $supplier['company_name'] ?? null,
+            'payer_iban'     => (string) ($payer['iban'] ?? ''),
+            'payer_bic'      => $payer['bic'] ?? null,
+            'payment_date'   => (string) $view['payment_date'],
+            'currency'       => (string) $view['currency'],
+            'items'          => $items,
+        ];
     }
 
     /**

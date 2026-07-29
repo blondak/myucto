@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type CronJob, type CronJobHealth } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 
 const { t } = useI18n()
@@ -193,13 +194,11 @@ const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok'))
                 <td class="px-3 py-2 text-right whitespace-nowrap" @click.stop>
                   <button
                     type="button"
-                    class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-neutral-200 bg-surface hover:bg-neutral-50 text-neutral-700 disabled:opacity-50 disabled:cursor-wait"
+                    :class="btnOutline('warning')"
                     :disabled="running[j.script]"
                     @click="runNow(j.script)"
                   >
-                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
                     {{ t('cron_jobs.run_now') }}
                   </button>
                 </td>
@@ -291,10 +290,11 @@ const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok'))
           <div class="pt-1">
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded border border-neutral-200 bg-surface hover:bg-neutral-50 text-neutral-700 disabled:opacity-50 disabled:cursor-wait"
+              :class="btnOutline('warning')"
               :disabled="running[j.script]"
               @click="runNow(j.script)"
             >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
               {{ t('cron_jobs.run_now') }}
             </button>
           </div>

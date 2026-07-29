@@ -112,6 +112,30 @@ onMounted(loadPreview)
         </div>
       </div>
 
+      <div v-if="preview.threshold && preview.threshold.threshold_eur > 0"
+        class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+        <div class="flex items-baseline justify-between gap-3 mb-2">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium">
+            {{ t('reports.oss.threshold_title', { year: preview.threshold.year }) }}
+          </div>
+          <div class="text-sm font-mono">
+            {{ fmtMoney(preview.threshold.total_eur) }} / {{ fmtMoney(preview.threshold.threshold_eur) }} EUR
+          </div>
+        </div>
+        <div class="h-2 w-full rounded-full bg-neutral-200 overflow-hidden">
+          <div class="h-full rounded-full transition-all"
+            :class="preview.threshold.exceeded ? 'bg-danger-500' : (preview.threshold.near_threshold ? 'bg-warning-500' : 'bg-primary-500')"
+            :style="{ width: Math.min(100, preview.threshold.pct) + '%' }" />
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+          <span>{{ preview.threshold.pct }} %</span>
+          <span v-for="c in preview.threshold.by_country" :key="c.country" class="font-mono">
+            {{ c.country }} {{ fmtMoney(c.amount_eur) }}
+          </span>
+        </div>
+        <p class="mt-2 text-xs text-neutral-500">{{ t('reports.oss.threshold_note') }}</p>
+      </div>
+
       <div v-if="preview.warnings.length" class="bg-warning-50 border border-warning-500/40 text-warning-700 rounded-md p-3 text-sm">
         <div class="font-semibold mb-1">{{ t('reports.oss.warnings') }}</div>
         <ul class="list-disc pl-5 space-y-1">

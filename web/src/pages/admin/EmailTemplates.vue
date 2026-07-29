@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { adminApi, type EmailTemplateListItem, type EmailTemplate } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -136,13 +137,17 @@ function codeLabel(code: string): string {
 
         <div class="flex justify-between gap-2 pt-4 mt-3 border-t border-neutral-200">
           <button v-if="editing.has_override" @click="resetDefault"
-            class="cursor-pointer h-9 px-3 text-sm border border-warning-500/50 text-warning-600 hover:bg-warning-50 rounded-md">
+            :class="btnOutline('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
             {{ t('users.et_reset') }}
           </button>
           <span v-else></span>
           <div class="flex gap-2">
-            <button @click="editing = null" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-            <button @click="save" :disabled="saving" class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
+            <button @click="editing = null" :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}</button>
+            <button @click="save" :disabled="saving" :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ saving ? '…' : t('users.et_save') }}
             </button>
           </div>

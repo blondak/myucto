@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -57,7 +58,7 @@ final class PublicInvoiceGetAction
         }
 
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
-        if (!is_array($user) || empty($user['id'])) {
+        if ((!is_array($user) || empty($user['id'])) && !DemoReadOnlyMiddleware::enabled($request)) {
             $firstView = empty($invoice['public_viewed_at']);
             $this->repo->markPublicViewed((int) $invoice['id']);
             if ($firstView) {

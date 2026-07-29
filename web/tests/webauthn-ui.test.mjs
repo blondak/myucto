@@ -113,13 +113,15 @@ test('security management renders inside the shared profile tabs', async () => {
   const router = await readFile(new URL('router/index.ts', root), 'utf8')
   const authApi = await readFile(new URL('api/auth.ts', root), 'utf8')
 
-  assert.match(profile, /type Tab = 'password' \| 'totp' \| 'passkeys' \| 'session-lock'/)
+  assert.match(profile, /type Tab = 'password' \| 'totp' \| 'passkeys' \| 'session-lock' \| 'shortcuts'/)
   assert.match(profile, /<Passkeys v-else-if="tab === 'passkeys'" \/>/)
+  assert.match(profile, /<KeyboardShortcuts v-else embedded \/>/)
   assert.match(profile, /sessionSecurity\.apply\(result\.session\)/)
-  assert.match(profile, /<select[\s\S]*?class="sm:hidden/)
-  assert.match(profile, /class="hidden sm:flex border-b/)
+  assert.match(profile, /<select[\s\S]*?class="md:hidden/)
+  assert.match(profile, /class="hidden md:flex flex-wrap border-b/)
   assert.match(router, /profile\/passkeys[\s\S]+tab: 'passkeys'/)
   assert.match(router, /profile\/session-lock[\s\S]+tab: 'session-lock'/)
+  assert.match(router, /profile\/shortcuts[\s\S]+tab: 'shortcuts'/)
   assert.match(authApi, /put<SessionLockPreferenceUpdate>\('\/auth\/session\/lock-preference'/)
 })
 

@@ -47,8 +47,7 @@ final class PurchaseInvoiceInboxScanner
         private readonly PurchaseInvoiceRepository $purchaseRepo,
         private readonly ClientRepository $clients,
         private readonly PurchaseInvoiceCalculator $calc,
-        private readonly PdfIsdocExtractor $pdfExtractor,
-        private readonly IsdocParser $isdocParser,
+        private readonly InvoiceExtractionRouter $router,
         private readonly IsdocToPurchaseInvoiceMapper $mapper,
         private readonly AiPdfExtractor $aiExtractor,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
@@ -197,15 +196,23 @@ final class PurchaseInvoiceInboxScanner
             }
 
             $ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
-            $isdocXml = $this->extractIsdocXml($real, $ext);
+            $bytes = @file_get_contents($real);
+            if ($bytes === false) {
+                $failed++;
+                $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Nelze načíst obsah souboru']);
+                continue;
+            }
 
-            // Pokud PDF nemá ISDOC, zkusíme AI fallback (jen pokud je tenant
-            // nakonfigurovaný a NEni dryRun).
-            if ($isdocXml === null && $ext === 'pdf' && !$dryRun && $this->isAiConfigured($supplierId)) {
-                $pdfBytes = @file_get_contents($real);
-                if ($pdfBytes !== false) {
+            // ISDOC-first rozhodnutí (F7 §3.9) — sdílený router (stejná logika jako upload).
+            $decision = $this->router->decide($bytes, $ext);
+
+            // LLM signalizován: buď žádný ISDOC (source=ai), nebo přítomný ISDOC selhal
+            // parse (isdocPresent=true; router už chybu zalogoval → nikdy nebrickovat).
+            // AI fallback jde jen pro PDF, nakonfigurovaného tenanta a mimo dry-run.
+            if ($decision->useLlm) {
+                if ($ext === 'pdf' && !$dryRun && $this->isAiConfigured($supplierId)) {
                     $aiResult = $this->aiExtractor->extractAndCreate(
-                        $supplierId, $userId, $pdfBytes, null, basename($real),
+                        $supplierId, $userId, $bytes, null, basename($real),
                     );
                     if (!empty($aiResult['ok']) && !empty($aiResult['purchase_invoice_id'])) {
                         $created++;
@@ -219,7 +226,7 @@ final class PurchaseInvoiceInboxScanner
                         ]);
                         continue;
                     }
-                    // AI selhalo — pokračujeme do skipped section níže s AI error msg
+                    // AI selhalo — pokračujeme do skipped s AI error msg.
                     $emit([
                         'file'   => $real,
                         'status' => 'skipped',
@@ -228,32 +235,31 @@ final class PurchaseInvoiceInboxScanner
                     $skipped++;
                     continue;
                 }
-            }
 
-            if ($isdocXml === null) {
-                $skipped++;
-                $emit([
-                    'file'   => $real,
-                    'status' => 'skipped',
-                    'reason' => $ext === 'pdf'
-                        ? 'PDF neobsahuje ISDOC. Pro AI extrakci nakonfiguruj Anthropic Claude v Externí integrace → AI.'
-                        : 'Soubor nelze parsovat jako ISDOC',
-                ]);
-                continue;
-            }
-
-            try {
-                $parsed = $this->isdocParser->parse($isdocXml);
-                if (empty($parsed['invoices'])) {
+                // AI nedostupné (ne-PDF / dry-run / nenakonfigurováno). Rozliš fyzicky
+                // přítomný, ale nevalidní ISDOC (→ failed) od žádného ISDOC (→ skipped).
+                if ($decision->isdocPresent) {
                     $failed++;
-                    $emit(['file' => $real, 'status' => 'failed', 'reason' => 'ISDOC neobsahuje fakturu']);
-                    continue;
+                    $emit([
+                        'file'   => $real,
+                        'status' => 'failed',
+                        'reason' => 'ISDOC se nepodařilo naparsovat: ' . ($decision->parseError ?? 'neznámá chyba'),
+                    ]);
+                } else {
+                    $skipped++;
+                    $emit([
+                        'file'   => $real,
+                        'status' => 'skipped',
+                        'reason' => $ext === 'pdf'
+                            ? 'PDF neobsahuje ISDOC. Pro AI extrakci nakonfiguruj Anthropic Claude v Externí integrace → AI.'
+                            : 'Soubor nelze parsovat jako ISDOC',
+                    ]);
                 }
-            } catch (\Throwable $e) {
-                $failed++;
-                $emit(['file' => $real, 'status' => 'failed', 'reason' => 'ISDOC parser error: ' . $e->getMessage()]);
                 continue;
             }
+
+            // Deterministický ISDOC — router už naparsoval validní fakturu(y).
+            $parsed = (array) $decision->parsed;
 
             // Fáze 2 — mapper aktivní. Pro každou ISDOC invoice v souboru (typicky 1)
             // vytvoříme draft purchase_invoice + uložíme PDF do archive_storage.
@@ -338,32 +344,6 @@ final class PurchaseInvoiceInboxScanner
         }
         sort($out, SORT_STRING);
         return $out;
-    }
-
-    /**
-     * Extrahuje ISDOC XML z PDF (přes embedded files) nebo načte přímo .isdoc / .xml.
-     */
-    private function extractIsdocXml(string $path, string $ext): ?string
-    {
-        if ($ext === 'pdf') {
-            $bytes = @file_get_contents($path);
-            if ($bytes === false) return null;
-            return $this->pdfExtractor->extract($bytes);
-        }
-        if ($ext === 'isdocx') {
-            $bytes = @file_get_contents($path);
-            if ($bytes === false) return null;
-            $pkg = (new IsdocxExtractor())->unwrap($bytes);
-            return $pkg['isdoc'] ?? null;
-        }
-        if ($ext === 'isdoc' || $ext === 'xml') {
-            $bytes = @file_get_contents($path);
-            if ($bytes === false) return null;
-            // Quick sanity check: musí obsahovat ISDOC namespace
-            if (!str_contains($bytes, 'isdoc.cz/namespace')) return null;
-            return $bytes;
-        }
-        return null;
     }
 
     /**

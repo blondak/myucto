@@ -94,6 +94,58 @@ final class AccountNumberNormalizer
         return $m[1];
     }
 
+    /** Předčíslí českého účtu z národního, GPC nebo IBAN zápisu. */
+    public static function czechAccountPrefix(string $raw): ?string
+    {
+        $value = trim($raw);
+        if (preg_match('/^(\d{1,6})-\d+(?:\/\d{4})?$/', $value, $m) === 1) {
+            $prefix = ltrim($m[1], '0');
+            return $prefix === '' ? null : $prefix;
+        }
+        $ibanPart = self::czechIbanAccountPart($value);
+        if ($ibanPart !== null) {
+            $prefix = ltrim(substr($ibanPart, 0, 6), '0');
+            return $prefix === '' ? null : $prefix;
+        }
+        $national = preg_replace('#/\d{4}$#', '', $value) ?? $value;
+        $digits = preg_replace('/\D/', '', $national) ?? '';
+        if (strlen($digits) === 16) {
+            $prefix = ltrim(substr($digits, 0, 6), '0');
+            return $prefix === '' ? null : $prefix;
+        }
+        return null;
+    }
+
+    /**
+     * Základ českého účtu (číslo BEZ předčíslí) z národního, GPC nebo IBAN zápisu.
+     *
+     * Doplněk k {@see czechAccountPrefix()}. `normalize()` se sem nehodí: u účtu
+     * s předčíslím slepí předčíslí s číslem, takže `21012-7928311` a jeho
+     * nulami vycpaná GPC podoba `0210120007928311` normalizují různě. Základ je
+     * naopak v obou tvarech stejný (`7928311`) — a u účtu bez předčíslí (VZP
+     * `1111006311` vs. `0000001111006311`) taky.
+     */
+    public static function czechAccountBase(string $raw): ?string
+    {
+        $value = trim($raw);
+        if (preg_match('/^\d{1,6}-(\d+)(?:\/\d{4})?$/', $value, $m) === 1) {
+            $base = ltrim($m[1], '0');
+            return $base === '' ? null : $base;
+        }
+        $ibanPart = self::czechIbanAccountPart($value);
+        if ($ibanPart !== null) {
+            $base = ltrim(substr($ibanPart, 6), '0');
+            return $base === '' ? null : $base;
+        }
+        $national = preg_replace('#/\d{4}$#', '', $value) ?? $value;
+        $digits = preg_replace('/\D/', '', $national) ?? '';
+        if ($digits === '') {
+            return null;
+        }
+        $base = ltrim(strlen($digits) === 16 ? substr($digits, 6) : $digits, '0');
+        return $base === '' ? null : $base;
+    }
+
     /** Kód banky (4 cifry) z českého IBANu, NULL pokud vstup není CZ IBAN. */
     public static function czechIbanBankCode(string $iban): ?string
     {
@@ -123,5 +175,45 @@ final class AccountNumberNormalizer
         }
         $ibanPart = is_string($iban) ? self::czechIbanAccountPart($iban) : null;
         return $ibanPart !== null && self::equals($ibanPart, $statementAccount);
+    }
+
+    /**
+     * Kanonický klíč vlastního účtu: domácí část CZ IBANu nebo národní číslo
+     * bez vodicích nul. Nečeský IBAN bez národního čísla nelze kanonizovat.
+     */
+    public static function canonical(?string $accountNumber, ?string $iban = null): ?string
+    {
+        $number = trim((string) $accountNumber);
+        if ($number !== '') {
+            $ibanPart = self::czechIbanAccountPart($number);
+            $compact = strtoupper((string) preg_replace('/\s+/', '', $number));
+            if ($ibanPart !== null) {
+                return self::normalize($ibanPart) ?: null;
+            }
+            if (preg_match('/^[A-Z]{2}[A-Z0-9]+$/', $compact) !== 1) {
+                $national = preg_replace('#/\d{4}$#', '', $number) ?? $number;
+                $canonical = self::normalize($national);
+                if ($canonical !== '') {
+                    return $canonical;
+                }
+            }
+        }
+
+        $ibanPart = self::czechIbanAccountPart(trim((string) $iban));
+        if ($ibanPart === null) {
+            return null;
+        }
+        $canonical = self::normalize($ibanPart);
+        return $canonical === '' ? null : $canonical;
+    }
+
+    /** Kód banky z explicitní hodnoty, případně z českého IBANu. */
+    public static function canonicalBankCode(?string $bankCode, ?string $iban = null): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $bankCode) ?? '';
+        if ($digits !== '') {
+            return str_pad(substr($digits, -4), 4, '0', STR_PAD_LEFT);
+        }
+        return self::czechIbanBankCode(trim((string) $iban));
     }
 }

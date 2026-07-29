@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Ares;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ares\AresClient;
+use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Ares\ViesClient;
 use PDO;
 use PDOStatement;
@@ -49,8 +50,11 @@ final class ViesClientCzRoutingTest extends TestCase
         $ref->setValue($connection, $pdo);
 
         $ares = new AresClient($config, $connection, new NullLogger());
+        // CRPDPH bez nakonfigurovaného endpointu vrací source='error' → ViesClient
+        // z toho udělá měkké „služba nedostupná", nikdy tvrdé invalid.
+        $crpdph = new CrpDphClient($config, $connection, new NullLogger());
 
-        return new ViesClient($config, $connection, new NullLogger(), $ares);
+        return new ViesClient($config, $connection, new NullLogger(), $ares, $crpdph);
     }
 
     public function testCzOsvcDicWithRodneCisloDoesNotHardNegateViaAres(): void
@@ -67,6 +71,37 @@ final class ViesClientCzRoutingTest extends TestCase
         // 9místné DIČ (kratší rodné číslo) — stejné chování.
         $r = $this->makeClient()->lookup('CZ123456789');
         self::assertNotSame('ares', $r['source']);
+    }
+
+    /**
+     * Skupinová registrace DPH (DIČ s kmenem 699xxxxxx) se NESMÍ ověřovat přes VIES —
+     * ten české DPH skupiny vůbec neeviduje a vracel by trvalý false-negative
+     * „DIČ není platné". Autoritativní je registr plátců DPH (CRPDPH).
+     */
+    public function testCzGroupRegistrationGoesToVatPayerRegistryNotVies(): void
+    {
+        $r = $this->makeClient()->lookup('CZ699000123');
+
+        // Endpoint registru není v testu nakonfigurovaný → měkké „služba nedostupná".
+        // Podstatné je, že se NESÁHLO na VIES ani ARES a že to NENÍ tvrdý negativ.
+        self::assertSame('error', $r['source'], 'Bez endpointu registru = měkký error, ne invalid z VIES.');
+        self::assertNotSame('rest', $r['source']);
+        self::assertNotSame('soap', $r['source']);
+        self::assertNotSame('ares', $r['source']);
+    }
+
+    /**
+     * 8místné „69900012" je běžné IČO, ne skupina — kmen 699 sám o sobě nesmí doklad
+     * odklonit do registru skupin. Rozhoduje až délka 9 (tvar DIČ skupiny CZ699xxxxxx).
+     */
+    public function testEightDigitIcoStartingWith699StillRoutesToAres(): void
+    {
+        $m = new \ReflectionMethod(ViesClient::class, 'tryCrpDph');
+        self::assertTrue($m->isPrivate(), 'tryCrpDph je interní větev pro skupiny.');
+
+        // 8 číslic → ARES větev; bez I/O vrátí null a spadne na VIES (zde 'error').
+        $r = $this->makeClient()->lookup('CZ69900012');
+        self::assertNotSame('crpdph', $r['source'], 'Kmen 699 rozhoduje jen u 9místného DIČ skupiny.');
     }
 
     public function testTryAresReturnsNullWhenSubjectNotFound(): void

@@ -7,7 +7,7 @@ Předpoklady: **Docker Desktop** (Windows / macOS) nebo **Docker Engine
 Klon repa je společný krok pro většinu variant:
 
 ```bash
-git clone https://github.com/radekhulan/myinvoice.git myinvoice
+git clone https://github.com/radekhulan/myucto.git myinvoice
 cd myinvoice
 ```
 
@@ -16,7 +16,7 @@ si stáhnout pre-built z GHCR.
 
 ## 3.1 Varianta A — pre-built image z GHCR (rychlejší, bez local buildu)
 
-Stáhne hotový multi-arch image (`ghcr.io/radekhulan/myinvoice:latest`,
+Stáhne hotový multi-arch image (`ghcr.io/radekhulan/myucto:latest`,
 `linux/amd64` + `linux/arm64`). Nepotřebuješ na hostu `pnpm`/`composer`
 ani několikaminutový build.
 
@@ -69,9 +69,9 @@ takže aktualizace je otázkou jednoho příkazu.
 > Aktualizace** stav verze + tlačítko *Aktualizovat*, které pull image
 > + restart spustí přes host-side watcher. Detaily včetně instalace
 > watcheru jako systemd unit / Scheduled Task → [§ 3.9 Update watcher](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
-> nebo kapitola [Aktualizace](40_Aktualizace.md).
+> nebo kapitola [Aktualizace](75_Aktualizace.md).
 > Pro denní kontrolu nové verze nezapomeň naplánovat
-> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](40_Aktualizace.md)).
+> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](75_Aktualizace.md)).
 
 > **WSL2 / Linux po klonu:** pokud `./cmd/docker-ghcr.sh` hlásí
 > `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…`,
@@ -108,7 +108,7 @@ Skript `docker-install` postupně:
    HTTP loopback)
 3. Postaví image `myinvoice:latest` (multi-stage: Vue build → composer →
    PHP 8.5 + nginx + php-fpm z `Dockerfile.alpine`)
-4. Spustí stack: **app** (nginx:80 → host:8080) + **db** (MariaDB 11)
+4. Spustí stack: **app** (nginx:80 → host:8080) + **db** (MariaDB 11.8)
 5. Počká, až bude DB healthy, a spustí migrace
 
 ## 3.3 Varianta C — bez klonování repa (jen Docker)
@@ -124,9 +124,9 @@ Stáhne si i instalační skript a chová se stejně jako Varianta A
 
 ```bash
 mkdir myinvoice && cd myinvoice
-curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/docker-compose.production.yml
-curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/cfg.sample.php
-curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/cmd/docker-ghcr.sh
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-ghcr.sh
 chmod +x docker-ghcr.sh
 ./docker-ghcr.sh
 ```
@@ -145,8 +145,8 @@ Když chceš plnou kontrolu nad `cfg.docker.php` a `.env`:
 
 ```bash
 mkdir myinvoice && cd myinvoice
-curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/docker-compose.production.yml
-curl -O https://raw.githubusercontent.com/radekhulan/myinvoice/master/cfg.sample.php
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
 mv docker-compose.production.yml docker-compose.yml
 cp cfg.sample.php cfg.docker.php
 # uprav cfg.docker.php — minimálně:
@@ -190,7 +190,7 @@ docker compose exec app php api/bin/migrate.php
 
 **Otevři: 👉 http://localhost:8080**
 
-V prohlížeči naskočí setup wizard — viz [6. První spuštění](06_Setup_wizard.md).
+V prohlížeči naskočí setup wizard — viz [7. První spuštění](07_Setup_wizard.md).
 
 > ⚠️ **Použij `http://`, ne `https://`, a explicitní port `:8080`.** Docker
 > stack běží na plain HTTP — pokud zadáš `https://...` nebo defaultní port,
@@ -250,7 +250,7 @@ log/, storage/, private/dkim/ **i `cfg.local.php`** — per-instance konfigurace
 z setup wizardu tak přežije image update. Viz **[§ 3.5.3 Single-volume úložiště](#353-single-volume-uloziste)** níže.
 Pokud upgraduješ z 3.5.x nebo staršího 3-volume layoutu, `cmd/docker-update.{sh,ps1}`
 detekuje starý layout a před `up -d` automaticky spustí
-`cmd/docker-migrate-volumes.{sh,ps1}` — viz [§ 40.5](40_Aktualizace.md#405-migrace-na-single-volume-layout-35x-360).
+`cmd/docker-migrate-volumes.{sh,ps1}` — viz [§ 75.5](75_Aktualizace.md#755-migrace-na-single-volume-layout-35x-360).
 
 **`cfg.docker.php` mount je nově volitelný** — image obsahuje stub `cfg.php`
 (`<?php return [];`) a vše lze předat přes ENV (12-factor). Pro full-ENV deploy
@@ -260,7 +260,7 @@ v `docker-compose.yml` zakomentuj nebo odstraň.
 ### 3.5.2 Railway / PaaS specifika
 
 Některé PaaS (typicky Railway) injectují nevyřešené placeholdery jako
-`${VAR}`, pokud proměnná není definovaná. MyInvoice je v env
+`${VAR}`, pokud proměnná není definovaná. MyÚčto je v env
 overridech ignoruje, takže nepřepíší validní hodnoty z `cfg.php`/`cfg.docker.php`.
 Pokud chybí `secret_encryption_key`, aplikace fallbackuje na HKDF z `app.pepper`.
 
@@ -308,7 +308,7 @@ docker volume ls | grep myinvoice                           # vidíš pouze app-
 
 **Nikdy nepřepínej layout bez migrace** — aplikace by nahlížela do prázdného
 `/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` to dělá
-automaticky před `up -d`. Detaily v [§ 40.5 Migrace na single-volume layout](40_Aktualizace.md#405-migrace-na-single-volume-layout-35x-360).
+automaticky před `up -d`. Detaily v [§ 75.5 Migrace na single-volume layout](75_Aktualizace.md#755-migrace-na-single-volume-layout-35x-360).
 
 Shrnutí: `cmd/docker-migrate-volumes.{sh,ps1}` snapshotne `cfg.local.php`
 z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data`
@@ -324,7 +324,7 @@ docker run --rm \
   alpine tar czf /backup/myinvoice-data-$(date +%F).tar.gz -C /data .
 ```
 
-Plus dump MariaDB (viz [§ 40.7 Záloha a obnova](40_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
+Plus dump MariaDB (viz [§ 75.7 Záloha a obnova](75_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
 
 ## 3.6 Daily ops
 
@@ -512,12 +512,12 @@ Stav úlohy: `schtasks /query /tn "MyInvoice Update Watcher" /v /fo list`.
 
 Watcher jen reaguje na *kliknutí*. Aby admin **viděl**, že je dostupná
 nová verze (badge v patičce + status na `/admin/update`), musí běžet
-denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](40_Aktualizace.md).
+denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](75_Aktualizace.md).
 
 #### Plné detaily
 
 Recovery při zaseknutém upgradu, test workflow z `master`, externí
-monitoring přes `/api/version` → kapitola [Aktualizace](40_Aktualizace.md).
+monitoring přes `/api/version` → kapitola [Aktualizace](75_Aktualizace.md).
 
 ## 3.10 Image: alpine/nginx (default) + Debian fallback
 
@@ -595,7 +595,7 @@ cmd/docker-prune-images.sh             # smaže obsolete (běžící + compose i
 
 ## 3.11 Instalace přes Portainer / Dockge (GUI, bez příkazové řádky)
 
-Protože je image veřejný na GHCR, jde MyInvoice nasadit i čistě přes webové
+Protože je image veřejný na GHCR, jde MyÚčto nasadit i čistě přes webové
 GUI správce kontejnerů — **bez klonování repa, bez SSH, bez `cfg.docker.php`**.
 Veškerá konfigurace se předává proměnnými prostředí (12-factor).
 
@@ -617,13 +617,13 @@ Nejjednodušší cesta. Přidej katalog šablon a nasaď z formuláře:
 
 1. **Settings → App Templates → URL** vlož:
    ```
-   https://raw.githubusercontent.com/radekhulan/myinvoice/master/portainer-template.json
+   https://raw.githubusercontent.com/radekhulan/myucto/master/portainer-template.json
    ```
    a ulož.
 2. **App Templates** → najdi dlaždici **MyInvoice.cz** → klikni.
 3. Vyplň proměnné (povinné DB hesla + pepper; ostatní mají rozumný default) →
    **Deploy the stack**.
-4. Otevři **http://&lt;host&gt;:8080** → doběhne [setup wizard](06_Setup_wizard.md).
+4. Otevři **http://&lt;host&gt;:8080** → doběhne [setup wizard](07_Setup_wizard.md).
 
 Portainer si compose stáhne z repa sám (`repository.stackfile =
 docker-compose.portainer.yml`), pulne image z GHCR a spustí stack. DB migrace
@@ -635,12 +635,12 @@ Když nechceš přidávat katalog šablon:
 
 1. **Stacks → Add stack → Web editor**.
 2. Vlož obsah `docker-compose.portainer.yml` (zkopíruj z
-   [repa](https://github.com/radekhulan/myinvoice/blob/master/docker-compose.portainer.yml)).
+   [repa](https://github.com/radekhulan/myucto/blob/master/docker-compose.portainer.yml)).
 3. Dole v **Environment variables** přidej proměnné (`DB_PASSWORD`,
    `DB_ROOT_PASSWORD`, `MYINVOICE_PEPPER`, případně `MYINVOICE_SECRET_KEY`,
    `APP_PORT`) → **Deploy the stack**.
 
-Alternativně **Add stack → Repository**: URL `https://github.com/radekhulan/myinvoice`,
+Alternativně **Add stack → Repository**: URL `https://github.com/radekhulan/myucto`,
 Compose path `docker-compose.portainer.yml`.
 
 ### 3.11.3 Dockge
@@ -679,7 +679,7 @@ posílat `X-Forwarded-Proto: https`, jinak vznikne redirect loop.
 
 Nová verze = pull novějšího image + recreate, migrace doběhnou při startu:
 
-- **Portainer:** Stacks → MyInvoice → **Update the stack** se zapnutým
+- **Portainer:** Stacks → MyÚčto → **Update the stack** se zapnutým
   *Re-pull image and redeploy* (u App Template / git stacku *Pull and redeploy*).
 - **Dockge:** tlačítko **Update** u stacku.
 

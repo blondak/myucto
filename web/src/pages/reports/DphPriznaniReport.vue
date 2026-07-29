@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction } from '@/api/reports'
+import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction, type DphVariant, type DphCrossCheckDocument, type DphCrossCheckFinding, type DphCrossCheck343Reason } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { useAuthStore } from '@/stores/auth'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t, locale } = useI18n()
+const auth = useAuthStore()
 
 const now = new Date()
 const year = ref(now.getFullYear())
@@ -31,20 +35,33 @@ const isQuarterly = computed(() => effectivePeriod.value === 'quarterly')
 // Quarter 1-4 z měsíce
 const currentQuarter = computed(() => Math.ceil(month.value / 3))
 
+// C7' — typ podání. Dodatečné (D/E) vyžaduje datum zjištění důvodů (§141 DŘ).
+const variant = ref<DphVariant>('radne')
+const dZjist = ref('')
+const isAmendment = computed(() => variant.value === 'dodatecne' || variant.value === 'dodatecne_opravne')
+const amendmentReady = computed(() => !isAmendment.value || dZjist.value !== '')
+
 async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [s, p, tr, dp] = await Promise.all([
+    const [s, tr, dp] = await Promise.all([
       reportsApi.dphSettings(),
-      reportsApi.dphPreview(year.value, month.value, periodOverride.value || undefined),
       reportsApi.dphTrend(12),
       reportsApi.dphDraftsPrediction(year.value, month.value, periodOverride.value || undefined).catch(() => null),
     ])
     settings.value = s
-    preview.value = p
     trend.value = tr
     draftsPrediction.value = dp
+    // Dodatečné bez data zjištění nelze spočítat — počkáme, až uživatel datum zadá.
+    if (amendmentReady.value) {
+      preview.value = await reportsApi.dphPreview(
+        year.value, month.value, periodOverride.value || undefined,
+        variant.value, isAmendment.value ? dZjist.value : undefined,
+      )
+    } else {
+      preview.value = null
+    }
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -52,9 +69,89 @@ async function loadAll() {
   }
 }
 
+const postFilingDocs = computed(() => preview.value?.post_filing_changes?.documents ?? [])
+const documentPageSize = 20
+const postFilingPage = ref(1)
+const pagedPostFilingDocs = computed(() => postFilingDocs.value.slice(
+  (postFilingPage.value - 1) * documentPageSize,
+  postFilingPage.value * documentPageSize,
+))
+const crossCheckPages = reactive<Record<string, number>>({})
+function crossCheckKey(finding: DphCrossCheckFinding): string {
+  return `${finding.blocking ? 'blocking' : 'info'}:${finding.check}`
+}
+function crossCheckPage(finding: DphCrossCheckFinding): number {
+  return crossCheckPages[crossCheckKey(finding)] ?? 1
+}
+function pagedCrossCheckDocuments(finding: DphCrossCheckFinding): DphCrossCheckDocument[] {
+  const page = crossCheckPage(finding)
+  return finding.documents.slice((page - 1) * documentPageSize, page * documentPageSize)
+}
+function setCrossCheckPage(finding: DphCrossCheckFinding, page: number) {
+  crossCheckPages[crossCheckKey(finding)] = page
+}
+
+const blockingCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(f => f.blocking))
+const infoCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(f => !f.blocking))
+
+// Kontrola 343 — lidská věta ke kódu reason (01-UX P2: vždy věta, nikdy jen kód).
+// Exhaustivní Record: nová hodnota enumu bez věty = chyba vue-tsc.
+function formatClaimPeriod(period: string): string {
+  const [y, m] = period.split('-')
+  return y && m ? `${m}/${y}` : period
+}
+const periodEndYm = computed(() => {
+  const m = isQuarterly.value ? currentQuarter.value * 3 : month.value
+  return `${year.value}-${String(m).padStart(2, '0')}`
+})
+const reasonSentence: Record<DphCrossCheck343Reason, (d: DphCrossCheckDocument) => string> = {
+  timing_73: d => {
+    if (d.claim_period) {
+      const base = t('reports.dph.cross_check.reason.timing_claim_later', { period: formatClaimPeriod(d.claim_period) })
+      return d.received_at
+        ? `${base} ${t('reports.dph.cross_check.reason.timing_received', { date: formatDate(d.received_at) })}`
+        : base
+    }
+    const key = d.entry_date && d.entry_date.slice(0, 7) > periodEndYm.value
+      ? 'reports.dph.cross_check.reason.timing_booked_later'
+      : 'reports.dph.cross_check.reason.timing_booked_earlier'
+    return t(key, { date: formatDate(d.entry_date ?? '') })
+  },
+  value_mismatch: () => t('reports.dph.cross_check.reason.value_mismatch'),
+  missing_entry: () => t('reports.dph.cross_check.reason.missing_entry'),
+  extra_entry: () => t('reports.dph.cross_check.reason.extra_entry'),
+}
+function reasonText(d: DphCrossCheckDocument): string {
+  return d.reason ? reasonSentence[d.reason](d) : ''
+}
+function findingLabel(f: DphCrossCheckFinding): string {
+  return f.check === 'draft_advance_tax_documents'
+    ? t('reports.dph.cross_check.draft_advance_title')
+    : f.label
+}
+function findingNote(f: DphCrossCheckFinding): string {
+  return f.check === 'draft_advance_tax_documents'
+    ? t('reports.dph.cross_check.draft_advance_note')
+    : f.note
+}
+
+function formatCrossAmount(value: number | null): string {
+  return value == null ? '—' : formatMoney(value, 'CZK')
+}
+
 function downloadXml() {
   if (!preview.value) return
-  window.open(reportsApi.dphDownloadUrl(year.value, month.value, periodOverride.value || undefined), '_blank')
+  const acknowledge = blockingCrossCheck.value.length > 0
+    ? confirm(t('reports.dph.cross_check.confirm_download_anyway'))
+    : false
+  if (blockingCrossCheck.value.length > 0 && !acknowledge) return
+  window.open(
+    reportsApi.dphDownloadUrl(
+      year.value, month.value, periodOverride.value || undefined, acknowledge,
+      variant.value, isAmendment.value ? dZjist.value : undefined,
+    ),
+    '_blank',
+  )
 }
 
 const monthOptions = computed(() =>
@@ -115,25 +212,16 @@ const daysToDeadline = computed(() => {
   return Math.ceil((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 })
 
-watch([year, month, periodOverride], loadAll)
+watch([year, month, periodOverride, variant, dZjist], () => {
+  postFilingPage.value = 1
+  for (const key of Object.keys(crossCheckPages)) delete crossCheckPages[key]
+  void loadAll()
+})
 onMounted(loadAll)
 </script>
 
 <template>
   <div class="max-w-5xl">
-    <!-- ⚠️ Prominent disclaimer -->
-    <div class="bg-danger-50 border-2 border-danger-500 rounded-lg p-4 mb-4">
-      <div class="flex items-start gap-3">
-        <svg class="w-6 h-6 text-danger-600 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-1-8a1 1 0 0 0-1 1v3a1 1 0 0 0 2 0V6a1 1 0 0 0-1-1z" clip-rule="evenodd"/>
-        </svg>
-        <div class="text-sm text-danger-700">
-          <p class="font-semibold mb-1">{{ t('reports.disclaimer_title') }}</p>
-          <p>{{ t('reports.disclaimer_body') }}</p>
-        </div>
-      </div>
-    </div>
-
     <!-- Topbar -->
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
@@ -171,12 +259,36 @@ onMounted(loadAll)
         <select v-model.number="year" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
         </select>
-        <button type="button" @click="downloadXml" :disabled="loading || !preview"
-          class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        <button v-if="auth.canRead('reports.export')" type="button" @click="downloadXml" :disabled="loading || !preview"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('reports.dph.download_xml') }}
         </button>
       </div>
+    </div>
+
+    <!-- Typ podání (C7' — řádné / opravné / dodatečné) -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">
+      <label class="text-sm font-medium text-neutral-700">{{ t('reports.dph.variant.label') }}</label>
+      <select v-model="variant" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <option value="radne">{{ t('reports.dph.variant.radne') }}</option>
+        <option value="opravne">{{ t('reports.dph.variant.opravne') }}</option>
+        <option value="dodatecne">{{ t('reports.dph.variant.dodatecne') }}</option>
+        <!-- C7': opravné dodatečné (E) má náhradovou sémantiku, backend ji zatím bezpečně
+             nezrekonstruuje (vrací amendment_correction_unsupported) → skryto z nabídky. -->
+      </select>
+      <template v-if="isAmendment">
+        <label class="text-sm text-neutral-600">{{ t('reports.dph.variant.d_zjist') }}</label>
+        <input type="date" v-model="dZjist"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+      </template>
+      <span class="text-xs text-neutral-500">{{ t('reports.dph.variant.hint') }}</span>
+    </div>
+
+    <!-- Dodatečné bez data zjištění — čekáme na doplnění -->
+    <div v-if="isAmendment && !amendmentReady && !loading"
+      class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mb-4">
+      {{ t('reports.dph.variant.need_date') }}
     </div>
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-400">
@@ -194,6 +306,80 @@ onMounted(loadAll)
         <ul class="mt-1 list-disc list-inside">
           <li v-for="w in preview.warnings" :key="w">{{ w }}</li>
         </ul>
+      </div>
+
+      <!-- Fronta „doklady změněné po podání" (C7') -->
+      <div v-if="postFilingDocs.length > 0"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 space-y-2">
+        <strong>{{ t('reports.dph.post_filing.title') }}</strong>
+        <p class="text-xs">{{ t('reports.dph.post_filing.hint') }}</p>
+        <ul class="list-disc list-inside">
+          <li v-for="d in pagedPostFilingDocs" :key="d.source + d.invoice_id">
+            <span class="font-mono">{{ d.doc_number ?? ('#' + d.invoice_id) }}</span>
+            — {{ formatMoney(d.total, 'CZK') }}
+            <span class="text-xs text-neutral-500">({{ t('reports.dph.post_filing.changed_at') }}: {{ d.updated_at }})</span>
+          </li>
+        </ul>
+        <PaginationBar embedded :page="postFilingPage" :per-page="documentPageSize" :total="postFilingDocs.length" @update:page="postFilingPage = $event" />
+      </div>
+      <div v-if="preview.post_filing_changes?.has_filing && !preview.post_filing_changes.snapshot_available"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700">
+        {{ t('reports.dph.post_filing.legacy_snapshot_warning') }}
+      </div>
+
+      <!-- Dodatečné přiznání — poslední známá daň vs rozdíl (ř.66) -->
+      <div v-if="preview.summary.is_amendment"
+        class="bg-primary-50 border border-primary-200 rounded-md p-3 text-sm text-primary-700">
+        <strong>{{ t('reports.dph.variant.amendment_title') }}</strong>
+        <div class="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono">
+          <div>{{ t('reports.dph.variant.last_known_tax') }}: {{ formatMoney(preview.summary.last_known_tax ?? 0, 'CZK') }}</div>
+          <div>{{ t('reports.dph.variant.tax_difference') }}: {{ formatMoney(preview.summary.tax_difference ?? 0, 'CZK') }}</div>
+          <div v-if="preview.summary.d_zjist">{{ t('reports.dph.variant.d_zjist') }}: {{ preview.summary.d_zjist }}</div>
+        </div>
+      </div>
+
+      <!-- Křížová kontrola DPHDP3↔KH↔SH↔343 (C8') -->
+      <div v-if="blockingCrossCheck.length > 0" class="bg-danger-50 border border-danger-500/40 rounded-md p-3 text-sm text-danger-700 space-y-3">
+        <strong>{{ t('reports.dph.cross_check.title') }}</strong>
+        <div v-for="f in blockingCrossCheck" :key="f.check" class="border-t border-danger-500/20 pt-2 first:border-0 first:pt-0">
+          <div class="font-medium">{{ f.label }}</div>
+          <div class="mt-0.5">{{ f.note }}</div>
+          <div class="mt-1 font-mono text-xs">
+            {{ formatCrossAmount(f.declared) }} vs {{ formatCrossAmount(f.counter) }}
+            ({{ t('reports.dph.cross_check.difference') }}: {{ formatMoney(f.difference, 'CZK') }})
+          </div>
+          <ul v-if="f.documents.length > 0" class="mt-1 list-disc list-inside">
+            <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
+              {{ d.doc_number ?? ('#' + d.invoice_id) }} — {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+            </li>
+          </ul>
+          <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
+        </div>
+        <p class="text-xs text-danger-600">{{ t('reports.dph.cross_check.download_gate_hint') }}</p>
+      </div>
+      <div v-if="infoCrossCheck.length > 0" class="bg-neutral-50 border border-neutral-300 rounded-md p-3 text-sm text-neutral-600 space-y-2">
+        <div v-for="f in infoCrossCheck" :key="f.check">
+          <template v-if="f.check === 'account_343_vs_return' && f.documents.length > 0">
+            <strong>{{ t('reports.dph.cross_check.explained_title') }}</strong>
+            <div class="mt-0.5">{{ f.note }}</div>
+            <ul class="mt-1 list-disc list-inside">
+              <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
+                {{ d.doc_number ?? ('#' + d.invoice_id) }} — {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+              </li>
+            </ul>
+            <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
+          </template>
+          <template v-else>
+            <strong>{{ findingLabel(f) }}</strong>
+            <div class="mt-0.5">{{ findingNote(f) }}</div>
+            <ul v-if="f.documents.length > 0" class="mt-1 list-disc list-inside">
+              <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
+                {{ d.doc_number ?? ('#' + d.invoice_id) }}
+              </li>
+            </ul>
+            <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
+          </template>
+        </div>
       </div>
 
       <!-- Rekapitulace KPI cards (4 — přidán Termín) -->

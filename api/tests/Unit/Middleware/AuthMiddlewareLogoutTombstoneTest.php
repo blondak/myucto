@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\SessionManager;
+use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\IpMatcher;
 use PDO;
 use PDOStatement;
@@ -63,6 +64,7 @@ final class AuthMiddlewareLogoutTombstoneTest extends TestCase
             new ResponseFactory(),
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
+            $this->roleProfileStub(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/invoices')
@@ -127,6 +129,7 @@ final class AuthMiddlewareLogoutTombstoneTest extends TestCase
             new ResponseFactory(),
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
+            $this->roleProfileStub(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/logout')
@@ -143,5 +146,17 @@ final class AuthMiddlewareLogoutTombstoneTest extends TestCase
         };
 
         self::assertSame(204, $middleware->process($request, $handler)->getStatusCode());
+    }
+
+    /**
+     * MyÚčto doplňuje k session účtu jemnozrnnou roli z tabulky `roles`. Tenhle
+     * test hlídá načtení session, ne autorizaci — profil proto uživatele jen
+     * propustí beze změny.
+     */
+    private function roleProfileStub(): UserRoleProfile
+    {
+        $roleProfile = $this->createMock(UserRoleProfile::class);
+        $roleProfile->method('enrich')->willReturnArgument(0);
+        return $roleProfile;
     }
 }

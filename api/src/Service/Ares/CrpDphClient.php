@@ -86,7 +86,7 @@ final class CrpDphClient
     }
 
     /**
-     * Vstup může být „CZ21370362" i „21370362". Služba chce jen číslice (CZ plátci
+     * Vstup může být „CZ12345678" i „12345678". Služba chce jen číslice (CZ plátci
      * mají 8–10 číslic). Non-CZ DIČ tento registr neeviduje → null (přeskočíme).
      */
     private function normalizeDic(string $dic): ?string

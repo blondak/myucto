@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest'
+import { loadEpoHandoffLinks, saveEpoHandoffLinks } from '../epoHandoffCache'
+
+function memoryStorage() {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  }
+}
+
+describe('EPO handoff cache', () => {
+  const now = new Date('2026-07-27T12:00:00Z').getTime()
+
+  it('restores an unexpired official EPO link for the same user and supplier', () => {
+    const storage = memoryStorage()
+    saveEpoHandoffLinks(storage, 7, 11, {
+      1099: {
+        url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
+        expiresAt: '2026-07-27T12:30:00Z',
+        attemptId: 42,
+      },
+    }, now)
+
+    expect(loadEpoHandoffLinks(storage, 7, 11, now + 10 * 60_000)[1099]?.attemptId).toBe(42)
+    expect(loadEpoHandoffLinks(storage, 8, 11, now + 10 * 60_000)).toEqual({})
+  })
+
+  it('removes expired links', () => {
+    const storage = memoryStorage()
+    saveEpoHandoffLinks(storage, 7, 11, {
+      1099: {
+        url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
+        expiresAt: '2026-07-27T12:20:00Z',
+        attemptId: 42,
+      },
+    }, now)
+
+    expect(loadEpoHandoffLinks(storage, 7, 11, now + 21 * 60_000)).toEqual({})
+  })
+
+  it('rejects links outside the official production host', () => {
+    const storage = memoryStorage()
+    const saved = saveEpoHandoffLinks(storage, 7, 11, {
+      1099: {
+        url: 'https://attacker.example/formular?x=synthetic',
+        expiresAt: '2026-07-27T12:20:00Z',
+        attemptId: 42,
+      },
+    }, now)
+
+    expect(saved).toEqual({})
+  })
+})

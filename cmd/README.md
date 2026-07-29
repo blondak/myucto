@@ -22,9 +22,20 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `cron-backup-documents.{cmd,sh}` | ZIP celé sekce Dokumenty (`storage/documents/`, všechny typy; vynechává `_thumbs`/`_jobs`) do `storage/backup/{dbname}-documents-YYYY-MM-DD.zip`, stejná retention; oddělené od `cron-backup-pdf` (ten Dokumenty nezahrnuje) |
 | `cron-bank-scan.{cmd,sh}` | Auto-import nových GPC výpisů z `private/bank-incoming/` + matching plateb na faktury |
 | `cron-bank-email-notices.{cmd,sh}` | IMAP polling bankovních e-mailových avíz, parsování plateb a matching na faktury (konfigurace v **Admin → Bankovní účty**) |
+| `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |
 | `cron-send-approval-reminders.{cmd,sh}` | Upomínky zákazníkům, kteří neschválili výkaz víceprací (`--days=N`, `--dry-run`) |
+| `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
+| `cron-epo-status.{cmd,sh}` | Bezpečné vyzvedávání dodejek a stavů přímých EPO podání s řízeným odstupem; původní podání nikdy neopakuje |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
+| `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
+| `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
+| `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
+| `cron-journal-integrity-check.{cmd,sh}` | Noční integrity job nad účetním deníkem (jen podvojné účetnictví) — sirotčí zápisy, Σ MD ≠ Σ D, booked_at bez zápisu a naopak, doklad ≠ zápis částkou. Čistě čtecí, výsledek do dashboardu (`--dry-run`, `--supplier=ID`) |
+| `cron-license-renew.{cmd,sh}` | Denní obnova licenčního tokenu proti licenčnímu serveru (E4); doplněk k obnově z prvního přihlášeného requestu dne — pokryje instalace, které přes den nikdo neotevře. Mutex zajistí max. 1× denně (síťovou chybu jen loguje) |
+| `license-activate.{cmd,sh}` | **Headless aktivace licenčního klíče** (E4) bez přihlášení do UI — `license-activate.cmd MYU-XXXX-XXXX-XXXX-XXXX [--takeover]`. Zavolá licenční server, uloží klíč+token, vypíše tarif / počty / platnost (u doživotní licence „Neomezeně"). Hodí se pro demo instance, servery a automatizaci. `--takeover` vynutí přenos vazby z jiné instalace (po chybě `already_bound`) |
+| `license-status.{cmd,sh}` | Výpis aktuálního stavu licence (E4) — stav, tarif, počty, platnost, maskovaný klíč |
+| `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
 
 Všechny tři backup ZIPy (DB, PDF, Dokumenty) lze volitelně šifrovat heslem
@@ -39,9 +50,9 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 |---|---|
 | `docker-build.{sh,ps1}` | `docker compose build app` — postaví image (default **alpine/nginx** z `Dockerfile.alpine`; volitelné `--no-cache`, `--pull`) |
 | `docker-install.{sh,ps1}` | First-run setup: vygeneruje `.env` + `cfg.docker.php`, **preferuje GHCR pull** (lokální build jen s `--build` / `MYINVOICE_INSTALL_MODE=source`), `up -d`, počká na DB healthcheck, spustí migrace, vypíše URL setup wizardu |
-| `docker-ghcr.{sh,ps1}` | One-click install **z pre-built image na GHCR** (`ghcr.io/radekhulan/myinvoice:latest` = alpine/nginx) — žádný local build. Stejně jako install vygeneruje `.env` + `cfg.docker.php`, místo `build` udělá `pull`, pak `up -d` + migrace |
+| `docker-ghcr.{sh,ps1}` | One-click install **z pre-built image na GHCR** (`ghcr.io/radekhulan/myucto:latest` = alpine/nginx) — žádný local build. Stejně jako install vygeneruje `.env` + `cfg.docker.php`, místo `build` udělá `pull`, pak `up -d` + migrace |
 | `docker-update.{sh,ps1}` | Update běžící instance — **detekuje režim z image běžícího kontejneru**: registry (`ghcr.io/...`) → `pull`, lokální build → `git pull` + rebuild; pak `up -d` + migrace + úklid dangling vrstev. Přebití `MYINVOICE_UPDATE_MODE=registry\|source`. (Existující Debian instalace se přechodem `:latest` na alpine zmigrují samy při příštím updatu — drop-in.) |
-| `docker-prune-images.{sh,ps1}` | Detekuje a maže **obsolete** myinvoice image (nepoužívané kontejnerem ani compose) + dangling vrstvy. `--dry-run` / `-DryRun` jen vypíše. Chrání běžící i compose-referencované image |
+| `docker-prune-images.{sh,ps1}` | Detekuje a maže **obsolete** myucto image (nepoužívané kontejnerem ani compose) + dangling vrstvy. `--dry-run` / `-DryRun` jen vypíše. Chrání běžící i compose-referencované image |
 | `docker-update-watcher.{sh,ps1}` | Host-side daemon (systemd unit / Scheduled Task) — sleduje flag soubor `storage/upgrade-requested.json` (zapisuje UI v **Systém → Aktualizace**) a spustí `docker-update`, výsledek do `upgrade-result.json` |
 
 ### Build / deploy / kvalita
@@ -61,9 +72,17 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
 | `cron-bank-email-notices` | každých 30 minut | `*/30 * * * *` |
+| `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
+| `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |
+| `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní backoff | `* * * * *` |
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
+| `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
+| `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
+| `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
+| `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
+| `cron-license-renew` | 1× denně | 05:00 |
 | `cron-version-check` | 1× denně | 06:00 |
 
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
@@ -72,16 +91,24 @@ v admin/activity-log (každý cron sám zapíše záznam `cron.<nazev>`).
 ### Windows — Task Scheduler
 
 ```cmd
-schtasks /create /tn "MyInvoice Cleanup"   /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-cleanup.cmd"        /sc daily /st 03:00 /ru SYSTEM
-schtasks /create /tn "MyInvoice Backup"    /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ru SYSTEM
-schtasks /create /tn "MyInvoice BackupPDF" /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
-schtasks /create /tn "MyInvoice BackupDocs" /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
-schtasks /create /tn "MyInvoice BankScan"  /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM
-schtasks /create /tn "MyInvoice BankEmailNotices" /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
-schtasks /create /tn "MyInvoice Reminders" /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
-schtasks /create /tn "MyInvoice ApprovalReminders" /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
-schtasks /create /tn "MyInvoice Recurring"         /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
-schtasks /create /tn "MyInvoice VersionCheck"      /tr "C:\inetpub\wwwroot\myinvoice.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
+schtasks /create /tn "MyUcto Cleanup"   /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cleanup.cmd"        /sc daily /st 03:00 /ru SYSTEM
+schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ru SYSTEM
+schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
+schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
+schtasks /create /tn "MyUcto BankScan"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM
+schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
+schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
+schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
+schtasks /create /tn "MyUcto DocumentRequestReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-document-request-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:30 /ru SYSTEM
+schtasks /create /tn "MyUcto EpoStatus" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-epo-status.cmd" /sc minute /mo 1 /ru SYSTEM
+schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
+schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
+schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
+schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
+schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
+schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
 ```
 
 > 💡 **Update watcher** (samostatný proces, ne plánovaná úloha) — kontroluje
@@ -89,8 +116,8 @@ schtasks /create /tn "MyInvoice VersionCheck"      /tr "C:\inetpub\wwwroot\myinv
 > se **At startup**, ne na cron:
 >
 > ```cmd
-> schtasks /create /tn "MyInvoice UpdateWatcher" ^
->   /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myinvoice.cz\cmd\docker-update-watcher.ps1" ^
+> schtasks /create /tn "MyUcto UpdateWatcher" ^
+>   /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\docker-update-watcher.ps1" ^
 >   /sc onstart /ru SYSTEM /rl HIGHEST
 > ```
 
@@ -107,20 +134,28 @@ schtasks /create /tn "MyInvoice VersionCheck"      /tr "C:\inetpub\wwwroot\myinv
 
 ### Linux — crontab
 
-Edituj `crontab -e` (nebo `/etc/cron.d/myinvoice`):
+Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 
 ```cron
 # m  h  dom mon dow  command
-  0  3  *   *   *    /var/www/myinvoice.cz/cmd/cron-cleanup.sh
-  0  2  *   *   *    /var/www/myinvoice.cz/cmd/cron-backup.sh
- 30  2  *   *   *    /var/www/myinvoice.cz/cmd/cron-backup-pdf.sh
- 35  2  *   *   *    /var/www/myinvoice.cz/cmd/cron-backup-documents.sh
-*/30 *  *   *   *    /var/www/myinvoice.cz/cmd/cron-bank-scan.sh
-*/30 *  *   *   *    /var/www/myinvoice.cz/cmd/cron-bank-email-notices.sh
-  0  9  *   *   1-5  /var/www/myinvoice.cz/cmd/cron-send-reminders.sh
- 15  9  *   *   1-5  /var/www/myinvoice.cz/cmd/cron-send-approval-reminders.sh
- 30  6  *   *   *    /var/www/myinvoice.cz/cmd/cron-generate-recurring-invoices.sh
-  0  6  *   *   *    /var/www/myinvoice.cz/cmd/cron-version-check.sh
+  0  3  *   *   *    /var/www/myucto.cz/cmd/cron-cleanup.sh
+  0  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup.sh
+ 30  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-pdf.sh
+ 35  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-documents.sh
+*/30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-scan.sh
+*/30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-email-notices.sh
+*/10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
+ 0  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh
+ 15  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
+ 30  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-document-request-reminders.sh
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-epo-status.sh
+ 30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
+  0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
+*/10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
+  0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
+ 30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
+  0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
+  0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
 ```
 
 `*.sh` skripty musí být spustitelné: `chmod +x cmd/*.sh`.
@@ -130,15 +165,15 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myinvoice`):
 > z UI. Nejjednodušší instalace přes systemd:
 >
 > ```bash
-> sudo tee /etc/systemd/system/myinvoice-update-watcher.service <<'EOF'
+> sudo tee /etc/systemd/system/myucto-update-watcher.service <<'EOF'
 > [Unit]
-> Description=MyInvoice update watcher
+> Description=MyUcto update watcher
 > After=docker.service
 >
 > [Service]
 > Type=simple
-> WorkingDirectory=/var/www/myinvoice.cz
-> ExecStart=/var/www/myinvoice.cz/cmd/docker-update-watcher.sh
+> WorkingDirectory=/var/www/myucto.cz
+> ExecStart=/var/www/myucto.cz/cmd/docker-update-watcher.sh
 > Restart=always
 >
 > [Install]
@@ -146,7 +181,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myinvoice`):
 > EOF
 >
 > sudo systemctl daemon-reload
-> sudo systemctl enable --now myinvoice-update-watcher
+> sudo systemctl enable --now myucto-update-watcher
 > ```
 
 ### Manuální spuštění (debug)
@@ -162,7 +197,7 @@ cmd\cron-send-reminders.cmd --days=5 --cooldown=14
 ## Docker
 
 V rootu projektu je `Dockerfile` (multi-stage: node → composer → php:8.5-apache)
-a `docker-compose.yml` se službami **app** + **db** (MariaDB 11) + volitelně
+a `docker-compose.yml` se službami **app** + **db** (MariaDB 11.8) + volitelně
 **redis** (profile).
 
 ### První spuštění
@@ -183,14 +218,14 @@ a `cfg.docker.php` přeskočí). Po dokončení běží aplikace na
 
 ```bash
 cmd/docker-build.sh --no-cache    # po změnách v Dockerfile / composer.json / pnpm-lock.yaml
-cmd/docker-build.sh --pull        # pull nových verzí base images (php:8.5-apache, mariadb:11)
+cmd/docker-build.sh --pull        # pull nových verzí base images (php:8.5-apache, mariadb:11.8)
 ```
 
 ### One-click instalace z GHCR (bez local buildu)
 
 Pokud nechceš stavět image lokálně (a `pnpm`/`composer` v hostu řešit
 vůbec), použij `docker-ghcr` — stáhne pre-built multi-arch image z
-[ghcr.io/radekhulan/myinvoice](https://github.com/radekhulan/myinvoice/pkgs/container/myinvoice)
+[ghcr.io/radekhulan/myucto](https://github.com/radekhulan/myucto/pkgs/container/myucto)
 a zbytek (random hesla, `cfg.docker.php`, `up -d`, migrace) je shodný
 s `docker-install`:
 
@@ -226,8 +261,8 @@ Vzniká při prvním spuštění install skriptu:
 |--------------------|-------------|-------------------------------------------------------|
 | `APP_PORT`         | `8080`      | Host port pro Apache                                  |
 | `DB_PORT`          | `3307`      | Host port pro MariaDB (vázán jen na `127.0.0.1`)      |
-| `DB_NAME`          | `myinvoice` | Název DB                                              |
-| `DB_USER`          | `myinvoice` | App user                                              |
+| `DB_NAME`          | `myucto`    | Název DB                                              |
+| `DB_USER`          | `myucto`    | App user                                              |
 | `DB_PASSWORD`      | random      | Heslo app usera (28 znaků base64)                     |
 | `DB_ROOT_PASSWORD` | random      | Heslo MariaDB roota                                   |
 
@@ -262,7 +297,7 @@ entrypoint při startu (default `MYINVOICE_ENABLE_CRON=1`; logy v
 Vypnutí vestavěného cronu a spouštění z hosta (alternativa):
 
 ```cron
-0 9 * * 1-5  docker compose -f /opt/myinvoice/docker-compose.yml exec -T app php api/bin/cron-send-reminders.php
+0 9 * * 1-5  docker compose -f /opt/myucto/docker-compose.yml exec -T app php api/bin/cron-send-reminders.php
 ```
 
 ## Build / deploy
@@ -309,6 +344,17 @@ Pokrývá: GpcParser, InvoiceMath, AccountNumberNormalizer, SupplierGuard,
 TurnstileVerifier, SecretEncryption, TotpService, IpMatcher, varsymbol +
 month-increment helpers, error catalog. Integration test: unauthenticated
 access (smoke check že middleware blokuje bez session).
+
+### Údržba číselníků — spouští se ručně
+
+| Skript | Co dělá |
+|---|---|
+| `download-okec.{cmd,sh}` | Aktualizuje snapshot číselníku ČINNOSTI (CZ-NACE / `c_okec`) v `api/resources/ciselniky/okec.txt` z rozhraní číselníků Daňového portálu. Proti němu jede kanonizace CZ-NACE v přiznání k DPH. |
+
+**Není to cron úloha** — číselník se mění zřídka (poslední velká změna: přechod
+na NACE rev. 2.1 k 1. 1. 2026). Pouštěj ručně, `--dry-run` napřed jen porovná
+a vypíše rozdíl; výsledek zkontroluj přes `git diff` a commitni. Zastaralý
+snapshot nic neblokuje — kód mimo něj se uloží i odešle, jen s upozorněním.
 
 ## Konvence
 

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment } from '@/api/invoices'
+import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
+import { useDemoMode } from '@/composables/useDemoMode'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
 
 useHotkey('ctrl+s', (e) => { e.preventDefault(); submit() })
 import { clientsApi, type Client, type ViesLookupResult } from '@/api/clients'
@@ -20,12 +22,16 @@ import { formatMoney, formatPercent } from '@/composables/useFormat'
 import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
+import { stockApi, type StockItemSearchResult, type Warehouse } from '@/api/stock'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -116,8 +122,7 @@ const units = ref<Unit[]>([])
 const priceListItems = ref<PriceListItem[]>([])
 const selectedPriceListItemId = ref<number | null>(null)
 const resolvingPriceListItem = ref(false)
-// Ceníkové ovládání skryj, pokud dodavatel nemá žádnou použitelnou položku.
-const hasPriceList = computed(() => priceListItems.value.length > 0)
+const hasPriceList = computed(() => !stockEnabled.value && priceListItems.value.length > 0)
 const priceListOptions = computed(() => priceListItems.value.map(item => {
   const resolved = item.resolved_price
   return {
@@ -130,6 +135,11 @@ const priceListOptions = computed(() => priceListItems.value.map(item => {
 }))
 
 async function loadPriceListItems() {
+  if (stockEnabled.value) {
+    priceListItems.value = []
+    selectedPriceListItemId.value = null
+    return
+  }
   const currency = currencies.value.find(item => item.id === form.value.currency_id)?.code
   if (!currency) return
   try {
@@ -157,6 +167,99 @@ const supplierIsVatPayer = computed(() => supplierStore.currentSupplier?.is_vat_
 // fakturuje s přenesenou daňovou povinností (čl. 196 směrnice) a podává SHV.
 const supplierIsIdentified = computed(() => supplierStore.currentSupplier?.is_identified ?? false)
 
+// ─── SKLAD (Epic SKLAD, B5) ─────────────────────────────────────────────
+// Vše gated stock_enabled — bez modulu se editor nezmění ani o pixel.
+const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
+const stockWarehouses = ref<Warehouse[]>([])
+const defaultWarehouseId = computed<number | null>(() => stockWarehouses.value.find(w => w.is_default)?.id ?? stockWarehouses.value[0]?.id ?? null)
+// Per-řádek stav dropdownu (remote hledání) — klíčováno indexem; efemérní (jen na
+// fokusovaném řádku). Vybraný LABEL naopak držíme podle stock_item_id (M1), aby
+// přežil removeItem/moveUp/moveDown (index-mapa by u přesunutého řádku ukázala prázdno).
+const stockRowOptions = reactive<Record<number, { value: number; label: string; secondary?: string }[]>>({})
+const stockRowLoading = reactive<Record<number, boolean>>({})
+const stockOptionById = reactive<Record<number, { value: number; label: string; secondary?: string }>>({})
+const stockItemsCache = new Map<number, StockItemSearchResult>()
+// Dostupnost (nezávazný náhled) — jeden batch dotaz na všechny stock_item_id v řádcích.
+const availabilityMap = ref<Record<string, string>>({})
+
+/** Vybraná option pro daný řádek — dle stock_item_id (stabilní přes reorder/smazání). */
+function stockSelectedFor(item: InvoiceItem): { value: number; label: string; secondary?: string } | null {
+  return item.stock_item_id != null ? (stockOptionById[item.stock_item_id] ?? null) : null
+}
+
+async function loadStockWarehouses() {
+  if (!stockEnabled.value) return
+  try { stockWarehouses.value = await stockApi.listWarehouses(true) } catch { stockWarehouses.value = [] }
+}
+
+async function refreshAvailability() {
+  if (!stockEnabled.value) return
+  const ids = [...new Set(form.value.items.map(it => it.stock_item_id).filter((v): v is number => !!v))]
+  if (ids.length === 0) { availabilityMap.value = {}; return }
+  // M3: auto-výdej kontroluje sklad řádku (default sklad) → availability scope musí sedět,
+  // jinak batch přes všechny sklady lže. Bez zapnutého skladu nemáme sklad → undefined.
+  try { availabilityMap.value = await stockApi.availability(ids, defaultWarehouseId.value ?? undefined) } catch { /* nezávazný náhled — tichý fail */ }
+}
+
+async function onStockSearch(rowIndex: number, q: string) {
+  stockRowLoading[rowIndex] = true
+  try {
+    const res = await stockApi.searchItems(q, 30)
+    for (const r of res) stockItemsCache.set(r.id, r)
+    stockRowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+  } catch {
+    stockRowOptions[rowIndex] = []
+  } finally {
+    stockRowLoading[rowIndex] = false
+  }
+}
+
+function onStockSelect(rowIndex: number, itemId: number | null) {
+  const item = form.value.items[rowIndex]
+  if (!item) return
+  item.stock_item_id = itemId
+  if (itemId === null) return
+  const si = stockItemsCache.get(itemId)
+  if (si) {
+    stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
+    // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
+    item.description = si.name
+    item.unit = si.unit
+    if (si.sale_price_without_vat != null) item.unit_price_without_vat = Number(si.sale_price_without_vat)
+    if (si.vat_rate_id != null && vatRates.value.some(v => v.id === si.vat_rate_id)) item.vat_rate_id = si.vat_rate_id
+  }
+  if (item.warehouse_id == null) item.warehouse_id = defaultWarehouseId.value
+  refreshAvailability()
+}
+
+/** Dostupné množství (string, DECIMAL) pro řádek — undefined = žádný stav (bez karty na skladě). */
+function rowAvailability(item: InvoiceItem): string | null {
+  if (!item.stock_item_id) return null
+  return availabilityMap.value[String(item.stock_item_id)] ?? '0'
+}
+function rowAvailabilityInsufficient(item: InvoiceItem): boolean {
+  const avail = rowAvailability(item)
+  if (avail === null) return false
+  return Number(avail) < Math.abs(Number(item.quantity) || 0)
+}
+
+/** Edit mode: dotáhne label (SKU — název) pro řádky, které už mají stock_item_id (B10: i deaktivovanou kartu). */
+async function hydrateStockSelections() {
+  if (!stockEnabled.value) return
+  const rows = form.value.items
+    .map((it, i) => ({ it, i }))
+    .filter(({ it }) => it.stock_item_id != null)
+  await Promise.all(rows.map(async ({ it }) => {
+    try {
+      const si = await stockApi.getItem(it.stock_item_id!)
+      stockItemsCache.set(si.id, { id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id, sale_price_without_vat: si.sale_price_without_vat })
+      stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    } catch { /* karta smazána/nedostupná — necháme jen id, picker zůstane prázdný */ }
+  }))
+  await refreshAvailability()
+}
+
 // „Osvobozeno od daně z příjmů" má smysl jen pro OSVČ (FO): osvobození dle § 4 ZDP
 // platí výhradně pro fyzické osoby, u s.r.o. (PO) žádný § 4 není a prodej majetku je
 // vždy zdanitelný výnos. U PO proto checkbox skryjeme. Ponecháme ho ale, pokud už je
@@ -179,7 +282,7 @@ const nonPayerTotalLabel = computed(() =>
   form.value.reverse_charge ? t('invoice.totals.without_vat') : t('invoice.totals.total'))
 
 const form = ref<{
-  invoice_type: 'invoice' | 'proforma' | 'credit_note'
+  invoice_type: 'invoice' | 'proforma' | 'credit_note' | 'payment_calendar'
   parent_invoice_id: number | null
   client_id: number | null
   project_id: number | null
@@ -189,6 +292,8 @@ const form = ref<{
   currency_id: number
   currency: string
   reverse_charge: boolean
+  /** § 30 ZDPH — zjednodušený daňový doklad (do 10 000 Kč vč. daně). */
+  is_simplified: boolean
   prices_include_vat: boolean
   income_tax_exempt: boolean
   income_tax_exempt_reason: string
@@ -197,7 +302,7 @@ const form = ref<{
   note_below_items: string
   advance_paid_amount: number
   discount_percent: number
-  payment_method: 'bank_transfer' | 'card' | 'cash' | 'other'
+  payment_method: PaymentMethod
   auto_send_reminders: boolean
   exchange_rate: number | null
   varsymbol: string  // Ruční override čísla faktury (prázdný = generuje se při issue)
@@ -205,6 +310,8 @@ const form = ref<{
   revenue_category: string | null
   revenue_category_id: number | null
   items: InvoiceItem[]
+  /** § 31/31a ZDPH — rozpis plateb kalendáře. Prázdné u ostatních typů dokladu. */
+  payment_schedule: PaymentScheduleRow[]
 }>({
   invoice_type: 'invoice',
   parent_invoice_id: null,
@@ -216,6 +323,7 @@ const form = ref<{
   currency_id: 0,
   currency: 'CZK',
   reverse_charge: false,
+  is_simplified: false,
   prices_include_vat: false,
   income_tax_exempt: false,
   income_tax_exempt_reason: '',
@@ -232,6 +340,7 @@ const form = ref<{
   revenue_category: null,
   revenue_category_id: null,
   items: [],
+  payment_schedule: [],
 })
 
 // Per-faktura přepínač automatických upomínek má smysl jen když je posílá dodavatel
@@ -310,24 +419,13 @@ function vatRateLabel(r: VatRate): string {
 // který nechá nominální sazbu (21 %) a vynuluje daň. Volba RC na řádku by jinak dala 0 %
 // bez automatické poznámky „Daň odvede zákazník".
 const selectableVatRates = computed(() => vatRates.value.filter(r => !r.is_reverse_charge))
-
-// U OSS dodavatele načítáme sazby všech států (loadInvoiceVatRates → country 'ALL'), ale zahraniční
-// sazba smí být jen na řádku označeném jako OSS. Na běžném řádku by se totiž vykázala v tuzemské
-// evidenci (VatLedgerService) a podle prahu roku spadla do české klasifikace — DE 19 % by se
-// objevilo na snížené sazbě DPHDP3 s 19% daní. Řádky bez OSS proto vidí jen CZ sazby.
 const domesticVatRates = computed(() => selectableVatRates.value.filter(r => r.country === 'CZ'))
-
-// OSS je opt-in v nastavení firmy (default vypnuto) — bez registrace se v editoru vůbec
-// nenabízí. Řádek, který OSS příznak už nese, ovládací prvky ukáže i po vypnutí režimu,
-// aby zpětně upravitelný doklad nešlo editovat naslepo.
 const ossAvailable = computed(() => supplierStore.currentSupplier?.oss_enabled === true)
 
 function vatRatesForItem(item: InvoiceItem): VatRate[] {
   return item.oss_applicable ? selectableVatRates.value : domesticVatRates.value
 }
 
-// Odškrtnutí OSS musí shodit i zahraniční sazbu, jinak by na řádku zůstala hodnota,
-// kterou už nabídka neobsahuje (select by zobrazil prázdno a uložila by se stará sazba).
 function onOssApplicableChange(item: InvoiceItem): void {
   if (item.oss_applicable) return
   const current = vatRates.value.find(r => r.id === item.vat_rate_id)
@@ -339,10 +437,8 @@ const ossOriginalPeriodOptions = computed(() => {
   const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(date || '')
   if (!match) return [] as Array<{ value: string; label: string }>
 
-  const currentYear = Number(match[1])
-  const currentQuarter = Math.ceil(Number(match[2]) / 3)
-  const currentIndex = currentYear * 4 + currentQuarter - 1
-  const firstOssIndex = 2021 * 4 + 2 // Q3 2021
+  const currentIndex = Number(match[1]) * 4 + Math.ceil(Number(match[2]) / 3) - 1
+  const firstOssIndex = 2021 * 4 + 2
   const options: Array<{ value: string; label: string }> = []
   for (let index = currentIndex - 1; index >= firstOssIndex; index--) {
     const year = Math.floor(index / 4)
@@ -373,12 +469,12 @@ function blankItem(): InvoiceItem {
     unit_price_without_vat: rate,
     vat_rate_id: defaultVatRateId(),
     order_index: form.value.items.length,
+    stock_item_id: null,
+    warehouse_id: null,
     oss_applicable: false,
     oss_consumer_country: null,
     oss_rate_type: 'standard',
     oss_supply_type: 'goods',
-    // Bez explicitního null by pole zůstalo undefined a select „Oprava období" by se
-    // netrefil do <option :value="null">, takže by se vykreslil prázdný.
     oss_original_period: null,
   }
 }
@@ -473,6 +569,7 @@ onMounted(async () => {
   units.value = un
   vatClassifications.value = vc
   revenueCategories.value = rcat
+  void loadStockWarehouses()
   if (form.value.currency_id === 0) {
     const def = cur.find(c => c.is_default && c.code === 'CZK') || cur[0]
     if (def) {
@@ -486,11 +583,18 @@ onMounted(async () => {
 
   if (isEdit.value && invoiceId.value) {
     const inv = await invoicesApi.get(invoiceId.value)
+    // Zamčený doklad (F6): klient editor vůbec neotevře — UX vrstva, BE by PUT stejně 403nul.
+    if (auth.isClientRole && inv.locked?.is_locked) {
+      toast.info(t('lock.client_hint'))
+      router.replace(`/invoices/${inv.id}`)
+      return
+    }
     editedStatus.value = inv.status
     editedVarsymbol.value = inv.varsymbol
     editedType.value = inv.invoice_type
     Object.assign(form.value, {
-      invoice_type: (inv.invoice_type === 'proforma' || inv.invoice_type === 'credit_note')
+      invoice_type: (inv.invoice_type === 'proforma' || inv.invoice_type === 'credit_note'
+        || inv.invoice_type === 'payment_calendar')
         ? inv.invoice_type
         : 'invoice',
       parent_invoice_id: inv.parent_invoice_id,
@@ -502,6 +606,7 @@ onMounted(async () => {
       currency_id: inv.currency_id,
       currency: inv.currency,
       reverse_charge: inv.reverse_charge,
+      is_simplified: inv.is_simplified === true,
       prices_include_vat: (inv as { prices_include_vat?: boolean }).prices_include_vat ?? false,
       income_tax_exempt: (inv as { income_tax_exempt?: boolean }).income_tax_exempt ?? false,
       income_tax_exempt_reason: (inv as { income_tax_exempt_reason?: string | null }).income_tax_exempt_reason ?? '',
@@ -520,6 +625,7 @@ onMounted(async () => {
       vat_classification_code: (inv as any).vat_classification_code ?? null,
       revenue_category: (inv as any).revenue_category ?? null,
       revenue_category_id: (inv as any).revenue_category_id ?? null,
+      payment_schedule: (inv.payment_schedule ?? []).map(r => ({ ...r })),
     })
     loadedRate.value = (inv.exchange_rate && inv.currency !== 'CZK')
       ? { rate: inv.exchange_rate, date: (inv.exchange_rate_date ?? inv.issue_date).slice(0, 10), currency: inv.currency }
@@ -532,6 +638,7 @@ onMounted(async () => {
     // Načti existující work_report (pokud existuje)
     await loadWorkReport()
     await loadAttachments()
+    await hydrateStockSelections()
     if (editedStatus.value === 'draft') await loadVarsymbolPreview()
   } else {
     // New invoice — pre-select from query
@@ -569,7 +676,13 @@ onMounted(async () => {
 })
 
 async function loadProjects(clientId: number) {
-  projects.value = await projectsApi.listForClient(clientId)
+  // Role client (F6): GET /clients/{id}/projects je pro klienta zakázaný (403) — zakázky nenačítat.
+  if (auth.isClientRole) { projects.value = []; return }
+  try {
+    projects.value = await projectsApi.listForClient(clientId)
+  } catch {
+    projects.value = []
+  }
 }
 
 // Inline client/project creation přes modal — UX zlepšení, žádné opouštění editoru.
@@ -812,7 +925,7 @@ const computed_totals = computed(() => {
         // V režimu „ceny s DPH" je sleva procento z hrubé částky; daň se dopočte
         // shora z hrubé částky po slevě (koeficient), konzistentně s backendem.
         const gross = round2(b.base + b.vat)
-        const discGross = round2(gross * (pct / 100))
+        const discGross = round2(gross * pct / 100)
         if (discGross === 0) continue
         const newGross = round2(gross - discGross)
         const newVat = round2(newGross * b.rate / (100 + b.rate))
@@ -821,10 +934,10 @@ const computed_totals = computed(() => {
         b.base = newBase
         b.vat = newVat
       } else {
-        const disc = round2(b.base * (pct / 100))
+        const disc = round2(b.base * pct / 100)
         if (disc === 0) continue
         b.base = round2(b.base - disc)
-        b.vat = round2(b.vat - round2(disc * (b.rate / 100)))
+        b.vat = round2(b.vat - round2(disc * b.rate / 100))
         discountAmount = round2(discountAmount + disc)
       }
     }
@@ -849,6 +962,104 @@ const computed_totals = computed(() => {
       .sort((a, b) => b.rate - a.rate),
   }
 })
+
+/**
+ * § 30 odst. 1 a 2 ZDPH — proč zjednodušený daňový doklad vystavit NELZE; `null` = lze.
+ *
+ * Zrcadlí serverovou `SimplifiedDocumentPolicy`, která je závazná — tohle je jen živá
+ * nápověda, aby se uživatel o zákazu nedozvěděl až při vystavení, kdy už doklad považuje
+ * za hotový. Server si rozhodnutí dělá znovu a sám.
+ *
+ * Limit se posuzuje z částky VČETNĚ daně: doklad se základem 9 000 Kč je s 21 % na
+ * 10 890 Kč, tedy nad limitem, přestože na základ se pohodlně vejde.
+ */
+const SIMPLIFIED_LIMIT_WITH_VAT = 10000
+const SIMPLIFIED_FORBIDDEN_LINES: Record<string, string> = {
+  '20': 'invoice.simplified_blocked_eu',
+  '25': 'invoice.simplified_blocked_reverse_charge',
+}
+const simplifiedBlockedReason = computed<string | null>(() => {
+  const total = Math.abs(computed_totals.value.with_vat)
+  if (total > SIMPLIFIED_LIMIT_WITH_VAT) {
+    return t('invoice.simplified_blocked_limit', {
+      limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.value.currency),
+      total: formatMoney(total, form.value.currency),
+    })
+  }
+  if (form.value.reverse_charge) {
+    return t('invoice.simplified_blocked_reverse_charge')
+  }
+  const code = form.value.vat_classification_code
+  const line = code === null ? null : vatClassifications.value.find(c => c.code === code)?.dphdp3_line ?? null
+  const key = line === null ? undefined : SIMPLIFIED_FORBIDDEN_LINES[String(line)]
+
+  return key === undefined ? null : t(key)
+})
+
+/**
+ * § 31 a § 31a ZDPH — rozpis plateb splátkového a platebního kalendáře.
+ *
+ * Kalendář je SÁM O SOBĚ daňovým dokladem právě proto, že rozpis obsahuje — proto se
+ * nevystavuje doklad ke každé splátce. Bez rozpisu ho server odmítne vystavit
+ * (`payment_schedule_missing`) a součet rozpisu musí sedět na celkovou částku dokladu.
+ */
+const isPaymentCalendar = computed(() => form.value.invoice_type === 'payment_calendar')
+
+const scheduleTotal = computed(() =>
+  form.value.payment_schedule.reduce((sum, r) => sum + (Number(r.total_amount) || 0), 0))
+
+/** Rozdíl proti celkové částce dokladu — nenulový blokuje vystavení na serveru. */
+const scheduleDiff = computed(() =>
+  Math.round((scheduleTotal.value - computed_totals.value.with_vat) * 100) / 100)
+
+function addScheduleRow(): void {
+  const last = form.value.payment_schedule[form.value.payment_schedule.length - 1]
+  form.value.payment_schedule.push({
+    due_on: last ? nextMonth(last.due_on) : form.value.due_date,
+    base_amount: 0,
+    vat_amount: 0,
+    total_amount: 0,
+    note: null,
+  })
+}
+
+function removeScheduleRow(index: number): void {
+  form.value.payment_schedule.splice(index, 1)
+}
+
+/**
+ * Rozpustí celkovou částku dokladu do N stejných měsíčních splátek.
+ *
+ * Zbytek po dělení jde do POSLEDNÍ splátky, ne rovnoměrně — jinak by se součet rozpisu
+ * rozešel s dokladem o haléře a server by vystavení odmítl.
+ */
+function generateMonthlySchedule(count: number): void {
+  const total = computed_totals.value.with_vat
+  const vatShare = computed_totals.value.with_vat === 0
+    ? 0
+    : computed_totals.value.vat / computed_totals.value.with_vat
+  const per = Math.round((total / count) * 100) / 100
+  const rows: PaymentScheduleRow[] = []
+  let due = form.value.due_date
+  for (let i = 0; i < count; i++) {
+    const amount = i === count - 1 ? Math.round((total - per * (count - 1)) * 100) / 100 : per
+    const vat = Math.round(amount * vatShare * 100) / 100
+    rows.push({ due_on: due, base_amount: Math.round((amount - vat) * 100) / 100, vat_amount: vat, total_amount: amount, note: null })
+    due = nextMonth(due)
+  }
+  form.value.payment_schedule = rows
+}
+
+/** Stejný den následujícího měsíce; u kratšího měsíce poslední den (31. 1. → 28. 2.). */
+function nextMonth(date: string): string {
+  const d = new Date(date + 'T00:00:00')
+  const day = d.getDate()
+  d.setDate(1)
+  d.setMonth(d.getMonth() + 1)
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+  d.setDate(Math.min(day, lastDay))
+  return d.toISOString().slice(0, 10)
+}
 
 const requiresPositiveAmountToPay = computed(() => {
   if (form.value.invoice_type === 'proforma') return true
@@ -1283,6 +1494,7 @@ function onAttachmentDrop(e: DragEvent) {
 }
 
 async function submit() {
+  if (blockDemoMutation()) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
   form.value.items = form.value.items.filter(it =>
@@ -1313,6 +1525,12 @@ async function submit() {
       due_date: form.value.due_date,
       currency_id: form.value.currency_id,
       reverse_charge: form.value.reverse_charge,
+      is_simplified: form.value.is_simplified,
+      // Rozpis se posílá JEN u kalendáře. U ostatních typů by prázdné pole smazalo
+      // rozpis dokladu, který se na kalendář teprve překlápí zpátky.
+      payment_schedule: form.value.invoice_type === 'payment_calendar'
+        ? form.value.payment_schedule.filter(r => r.due_on)
+        : undefined,
       prices_include_vat: form.value.prices_include_vat,
       income_tax_exempt: form.value.income_tax_exempt,
       income_tax_exempt_reason: form.value.income_tax_exempt ? (form.value.income_tax_exempt_reason || null) : null,
@@ -1340,6 +1558,9 @@ async function submit() {
         unit_price_without_vat: it.unit_price_without_vat,
         vat_rate_id: it.vat_rate_id,
         order_index: i,
+        // B5: MUSÍ se posílat zpět, jinak je InvoiceRepository::replaceItems (DELETE+INSERT) tiše smaže.
+        stock_item_id: it.stock_item_id ?? null,
+        warehouse_id: it.warehouse_id ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         oss_rate_type: it.oss_applicable ? (it.oss_rate_type || 'standard') : null,
@@ -1362,7 +1583,12 @@ async function submit() {
     // EUR / cizí měna: backend stáhl kurz ČNB. Pokud byl použit fallback
     // (víkend, svátek nebo last-known kurz), upozorni uživatele.
     const rateMeta = saved._meta?.exchange_rate
-    if (rateMeta?.fallback_used) {
+    if (rateMeta?.fixed_missing) {
+      // Firma je v pevném kurzovém režimu (§24/7), ale pro tohle období/měnu
+      // pevný kurz chybí — doklad se uložil s denním kurzem ČNB (nezablokováno),
+      // účetní by měl pevný kurz doplnit v nastavení.
+      toast.warning(t('invoice.exchange_rate_fixed_missing', { currency: rateMeta.currency }))
+    } else if (rateMeta?.fallback_used) {
       const rateStr = rateMeta.rate.toLocaleString(locale.value === 'cs' ? 'cs-CZ' : 'en-US', {
         minimumFractionDigits: 3, maximumFractionDigits: 4,
       })
@@ -1371,6 +1597,20 @@ async function submit() {
         ? 'invoice.czk_recap.warning_last_known'
         : 'invoice.czk_recap.warning_fallback'
       toast.warning(t(key, { rate: rateStr, currency: rateMeta.currency, date: dateStr }))
+    }
+    // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k DUZP (neblokující).
+    for (const code of saved._warnings ?? []) {
+      if (code === 'exchange_rate_cnb_deviation') {
+        const m = saved._warning_meta?.exchange_rate_cnb_deviation
+        toast.warning(t('invoice.warning.exchange_rate_cnb_deviation', {
+          used: m ? m.used_rate.toFixed(3) : '',
+          cnb: m ? m.cnb_rate.toFixed(3) : '',
+          diff: m ? m.diff_percent.toFixed(2) : '',
+        }))
+      } else {
+        // Ostatní kódy nemají parametry — stačí přeložit (issue #35: credit_note_positive_total).
+        toast.warning(t(`invoice.warning.${code}`))
+      }
     }
     // Po uložení faktury — pokud uživatel otevřel work report, ulož ho
     // (jen řádky s vyplněným popisem; prázdné řádky tiše ignorujeme — viz wrItemsValid)
@@ -1465,7 +1705,7 @@ async function deleteDraft() {
           </span>
         </h1>
       </div>
-      <button v-if="isEdit && editedStatus === 'draft'" @click="deleteDraft" class="text-sm text-danger-500 hover:text-danger-600 cursor-pointer">
+      <button v-if="isEdit && editedStatus === 'draft' && auth.canWrite('invoices.delete')" @click="deleteDraft" class="text-sm text-danger-500 hover:text-danger-600 cursor-pointer">
         {{ t('invoice.delete_draft_btn') }}
       </button>
     </div>
@@ -1493,7 +1733,13 @@ async function deleteDraft() {
                 <option value="invoice">{{ t('invoice.doc_invoice') }}</option>
                 <option value="proforma">{{ t('invoice.doc_proforma') }}</option>
                 <option value="credit_note">{{ t('invoice.doc_credit_note') }}</option>
+                <!-- § 31/31a — kalendář má vlastní typ, ne příznak: jiné náležitosti
+                     (rozpis plateb místo plnění) i jiná pravidla pro DUZP. -->
+                <option value="payment_calendar">{{ t('invoice.doc_payment_calendar') }}</option>
               </select>
+              <p v-if="isPaymentCalendar" class="text-xs text-neutral-500 mt-1">
+                {{ t('invoice.payment_calendar_hint') }}
+              </p>
               <p v-if="form.invoice_type === 'credit_note'" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.credit_note_warning') }}
               </p>
@@ -1547,7 +1793,7 @@ async function deleteDraft() {
                 </template>
               </div>
             </div>
-            <div>
+            <div v-if="!auth.isClientRole">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.project') }}</label>
               <div class="flex gap-2">
                 <div class="flex-1 min-w-0">
@@ -1588,9 +1834,14 @@ async function deleteDraft() {
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_method.label') }}</label>
               <select v-model="form.payment_method" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+                <!-- Stejná sada jako u přijatých faktur (a jako ENUM v DB). Kdyby tu chyběly,
+                     doklad s nově povolenou hodnotou by vykreslil PRÁZDNÝ select. -->
                 <option value="bank_transfer">{{ t('payment_method.bank_transfer') }}</option>
+                <option value="direct_debit">{{ t('payment_method.direct_debit') }}</option>
                 <option value="card">{{ t('payment_method.card') }}</option>
                 <option value="cash">{{ t('payment_method.cash') }}</option>
+                <option value="cash_on_delivery">{{ t('payment_method.cash_on_delivery') }}</option>
+                <option value="offset">{{ t('payment_method.offset') }}</option>
                 <option value="other">{{ t('payment_method.other') }}</option>
               </select>
               <p v-if="form.payment_method !== 'bank_transfer'" class="text-xs text-warning-600 mt-1">
@@ -1606,6 +1857,20 @@ async function deleteDraft() {
                    základ daně, samovyměřuje odběratel sazbou své země. -->
               <p v-if="!supplierIsVatPayer && form.reverse_charge" class="text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.reverse_charge_io_hint') }}
+              </p>
+            </div>
+            <!-- § 30 ZDPH — zjednodušený daňový doklad. Důvod, proč ho nelze použít, se
+                 ukazuje ŽIVĚ: jinak by se uživatel o zákazu dozvěděl až při vystavení,
+                 kdy už doklad považuje za hotový. -->
+            <div v-if="supplierIsVatPayer">
+              <label class="flex items-center gap-2 text-sm text-neutral-700">
+                <input v-model="form.is_simplified" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                <span>{{ t('invoice.simplified_document') }}</span>
+              </label>
+              <p v-if="form.is_simplified && simplifiedBlockedReason"
+                 class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedBlockedReason }}</p>
+              <p v-else class="text-xs text-neutral-500 mt-1 ml-6">
+                {{ t('invoice.simplified_document_hint') }}
               </p>
             </div>
             <div v-if="showPricesIncludeVatUI">
@@ -1742,8 +2007,25 @@ async function deleteDraft() {
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="block w-5 h-4 hover:text-neutral-700 disabled:opacity-30">▼</button>
               </td>
               <td class="px-3 py-2">
-                <textarea v-model="item.description" rows="1" data-row-input="inv-item" :placeholder="t('invoice.items_table.description')"
-                  class="w-full px-2 py-1.5 border border-neutral-300 rounded text-sm resize-y min-h-[36px] focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"></textarea>
+                <StockDescriptionField
+                  v-model:description="item.description"
+                  :stock-item-id="item.stock_item_id ?? null"
+                  :stock-enabled="stockEnabled"
+                  :options="stockRowOptions[i] ?? []"
+                  :loading="stockRowLoading[i]"
+                  :selected-option="stockSelectedFor(item)"
+                  :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: item.unit }) : null"
+                  :availability-insufficient="rowAvailabilityInsufficient(item)"
+                  :placeholder="t('invoice.items_table.description')"
+                  multiline
+                  :rows="1"
+                  row-input-marker="inv-item"
+                  :no-results-label="t('common.no_results')"
+                  :keep-free-text-label="t('common.keep_free_text')"
+                  :unlink-label="t('common.unlink_stock')"
+                  @search="(q: string) => onStockSearch(i, q)"
+                  @select="(v: number | null) => onStockSelect(i, v)"
+                />
               </td>
               <td class="px-3 py-2">
                 <input v-model="item.quantity" v-math type="text" inputmode="decimal"
@@ -1781,9 +2063,6 @@ async function deleteDraft() {
                 </div>
               </td>
             </tr>
-            <!-- Číselníky OSS ve vlastním řádku pod položkou — inline vedle popisu by ho
-                 zmáčkly na pár pixelů. Nezalamují se (flex-nowrap), při nedostatku místa
-                 se vodorovně odrolují. Řádek nemá horní rámeček, ať drží u své položky. -->
             <tr v-if="item.oss_applicable" :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']">
               <td></td>
               <td :colspan="supplierIsVatPayer ? 7 : 6" class="px-3 pb-2">
@@ -1839,8 +2118,25 @@ async function deleteDraft() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.description') }}</label>
-              <textarea v-model="item.description" rows="2" data-row-input="inv-item" :placeholder="t('invoice.items_table.description')"
-                class="w-full px-3 py-2 border border-neutral-300 rounded text-sm resize-y min-h-[44px] focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"></textarea>
+              <StockDescriptionField
+                v-model:description="item.description"
+                :stock-item-id="item.stock_item_id ?? null"
+                :stock-enabled="stockEnabled"
+                :options="stockRowOptions[i] ?? []"
+                :loading="stockRowLoading[i]"
+                :selected-option="stockSelectedFor(item)"
+                :availability-text="item.stock_item_id ? t('stock.availability.in_stock', { qty: rowAvailability(item), unit: item.unit }) : null"
+                :availability-insufficient="rowAvailabilityInsufficient(item)"
+                :placeholder="t('invoice.items_table.description')"
+                multiline
+                :rows="2"
+                row-input-marker="inv-item"
+                :no-results-label="t('common.no_results')"
+                :keep-free-text-label="t('common.keep_free_text')"
+                :unlink-label="t('common.unlink_stock')"
+                @search="(q: string) => onStockSearch(i, q)"
+                @select="(v: number | null) => onStockSelect(i, v)"
+              />
             </div>
             <div v-if="ossAvailable || item.oss_applicable" class="border border-neutral-200 rounded-md p-2">
               <label class="inline-flex items-center gap-2 text-sm">
@@ -2014,6 +2310,87 @@ async function deleteDraft() {
               }) }}
             </div>
           </dl>
+        </div>
+      </div>
+
+      <!-- § 31 / § 31a ZDPH — rozpis plateb kalendáře. Kalendář je daňovým dokladem jen
+           tehdy, obsahuje-li rozpis plateb na předem stanovené období; bez něj ho server
+           odmítne vystavit a odběratel by z něj nemohl uplatnit odpočet. -->
+      <div v-if="isPaymentCalendar" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between flex-wrap gap-2">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.payment_schedule') }}</h3>
+          <div class="flex items-center gap-2">
+            <button type="button" @click="generateMonthlySchedule(12)"
+              class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 font-medium rounded-md">
+              {{ t('invoice.payment_schedule_generate_12') }}
+            </button>
+            <button type="button" @click="addScheduleRow"
+              class="cursor-pointer px-4 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md inline-flex items-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+              {{ t('invoice.payment_schedule_add') }}
+            </button>
+          </div>
+        </header>
+        <div class="p-5 space-y-3">
+          <p v-if="form.payment_schedule.length === 0" class="text-sm text-warning-700 bg-warning-50 border border-warning-200 rounded-md px-3 py-2">
+            {{ t('invoice.payment_schedule_required') }}
+          </p>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <th class="py-2 pr-3 font-medium">{{ t('invoice.payment_schedule_due_on') }}</th>
+                  <th class="py-2 pr-3 font-medium text-right">{{ t('invoice.totals.without_vat') }}</th>
+                  <th class="py-2 pr-3 font-medium text-right">{{ t('invoice.totals.vat') }}</th>
+                  <th class="py-2 pr-3 font-medium text-right">{{ t('invoice.totals.total') }}</th>
+                  <th class="py-2 pr-3 font-medium">{{ t('invoice.payment_schedule_note') }}</th>
+                  <th class="py-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, i) in form.payment_schedule" :key="i" class="border-t border-neutral-200">
+                  <td class="py-2 pr-3">
+                    <input v-model="row.due_on" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input v-model.number="row.base_amount" type="number" step="0.01"
+                           class="w-28 h-9 px-2 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input v-model.number="row.vat_amount" type="number" step="0.01"
+                           class="w-24 h-9 px-2 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input v-model.number="row.total_amount" type="number" step="0.01"
+                           class="w-28 h-9 px-2 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input v-model="row.note" type="text" maxlength="255"
+                           class="w-full h-9 px-2 border border-neutral-300 rounded-md bg-surface" />
+                  </td>
+                  <td class="py-2 text-right">
+                    <button type="button" @click="removeScheduleRow(i)"
+                      class="cursor-pointer text-neutral-400 hover:text-danger-500" :title="t('common.delete')">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Součet rozpisu musí sedět na celkovou částku dokladu; rozejde-li se, není
+               z čeho určit, kolik bylo sjednáno — server vystavení odmítne. -->
+          <div class="flex justify-between text-sm border-t border-neutral-200 pt-3">
+            <span class="text-neutral-600">{{ t('invoice.payment_schedule_total') }}</span>
+            <span class="font-mono font-semibold">{{ formatMoney(scheduleTotal, form.currency) }}</span>
+          </div>
+          <p v-if="form.payment_schedule.length > 0 && scheduleDiff !== 0"
+             class="text-xs text-warning-700 bg-warning-50 border border-warning-200 rounded-md px-3 py-2">
+            {{ t('invoice.payment_schedule_mismatch', {
+              total: formatMoney(scheduleTotal, form.currency),
+              invoice: formatMoney(computed_totals.with_vat, form.currency),
+            }) }}
+          </p>
         </div>
       </div>
 

@@ -26,8 +26,7 @@ final class IdokladBankTransactionImporter
         $result = ['created' => 0, 'skipped' => 0, 'matched' => 0, 'unmapped' => 0, 'document_links' => 0];
         $pdo = $this->db->pdo();
         $accounts = $this->mappedAccounts($pdo, $supplierId, $dryRun);
-        $lastExternalId = $incremental ? $this->lastExternalId($pdo, $supplierId) : null;
-        $query = $lastExternalId !== null ? ['filter' => "Id~gt~{$lastExternalId}"] : [];
+        $query = [];
 
         foreach ($this->idoklad->getAll($supplierId, 'BankStatements', $query) as $movement) {
             $externalId = (int) ($movement['Id'] ?? 0);
@@ -48,8 +47,7 @@ final class IdokladBankTransactionImporter
                 continue;
             }
             $date = $this->date($movement['DateOfTransaction'] ?? null);
-            $amount = abs((float) ($movement['Prices']['TotalWithVat'] ?? 0));
-            if ((int) ($movement['MovementType'] ?? 1) < 0) $amount *= -1;
+            $amount = self::movementAmount($movement);
             if ($date === null || abs($amount) < 0.005) {
                 $result['skipped']++;
                 continue;
@@ -64,7 +62,9 @@ final class IdokladBankTransactionImporter
 
             $statementId = 0;
             $txId = 0;
+            $committed = false;
             try {
+                $pdo->beginTransaction();
                 $statementId = $this->statement($pdo, $supplierId, $externalAccountId, $date, $account);
                 $pdo->prepare(
                 "INSERT INTO bank_transactions
@@ -98,34 +98,34 @@ final class IdokladBankTransactionImporter
                     if ($this->matchPairedIssuedInvoice($pdo, $txId, $supplierId, $movement, $amount, $date, (string) $account['currency'])) {
                         $result['matched']++;
                     } else {
+                        $this->refreshStatement($pdo, $statementId);
+                        $pdo->commit();
+                        $committed = true;
                         $match = $this->matcher->match($txId);
                         if (in_array($match['status'], ['auto_exact', 'auto_partial'], true)) $result['matched']++;
                     }
                 }
                 $this->refreshStatement($pdo, $statementId);
+                if (!$committed) {
+                    $pdo->commit();
+                    $committed = true;
+                }
                 $result['created']++;
             } catch (\Throwable $e) {
-                if (isset($txId) && $txId > 0) {
-                    $pdo->prepare('DELETE FROM bank_transactions WHERE id = ?')->execute([$txId]);
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
                 }
-                if ($statementId > 0) $this->refreshStatement($pdo, $statementId);
                 throw $e;
             }
         }
         return $result;
     }
 
-    private function lastExternalId(PDO $pdo, int $supplierId): ?int
+    /** @param array<string,mixed> $movement */
+    public static function movementAmount(array $movement): float
     {
-        $prefix = $supplierId . ':%';
-        $stmt = $pdo->prepare(
-            "SELECT MAX(CAST(SUBSTRING_INDEX(source_ref, ':', -1) AS UNSIGNED))
-               FROM bank_transactions
-              WHERE source = 'idoklad' AND source_ref LIKE ?"
-        );
-        $stmt->execute([$prefix]);
-        $value = $stmt->fetchColumn();
-        return $value === false || $value === null ? null : (int) $value;
+        $amount = abs((float) ($movement['Prices']['TotalWithVat'] ?? 0));
+        return (int) ($movement['MovementType'] ?? 1) < 0 ? -$amount : $amount;
     }
 
     private function exists(PDO $pdo, string $externalId): bool
@@ -186,11 +186,13 @@ final class IdokladBankTransactionImporter
         $hash = hash('sha256', 'idoklad:' . $ref);
         $pdo->prepare(
             "INSERT INTO bank_statements
-                (source, source_ref, file_name, file_hash, account_number, bank_code, currency, statement_date)
-             VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE statement_date = GREATEST(statement_date, VALUES(statement_date))"
+                (source, source_ref, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date)
+             VALUES ('idoklad', ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                supplier_id = VALUES(supplier_id),
+                statement_date = GREATEST(statement_date, VALUES(statement_date))"
         )->execute([
-            $ref, 'iDoklad ' . $month, $hash, (string) $account['account_number'],
+            $ref, 'iDoklad ' . $month, $hash, $supplierId, (string) $account['account_number'],
             self::text($account['bank_code'] ?? null, 4), (string) $account['currency'], $date,
         ]);
         $s = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');

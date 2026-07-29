@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Přehled o změnách vlastního kapitálu</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-title { font-size: 14pt; font-weight: bold; }
+    .header-scope { font-size: 9pt; margin-top: 1mm; }
+    .header-meta { font-size: 8pt; color: #555; margin-top: 0.5mm; }
+    .entity-info { text-align: right; font-size: 9pt; }
+    .section-title {
+        font-size: 10pt;
+        font-weight: bold;
+        margin-top: 4mm;
+        margin-bottom: 1mm;
+        padding: 1mm 0;
+        border-bottom: 0.5pt solid #999;
+    }
+    table.statement { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.statement thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.statement thead th.thl { text-align: left; }
+    table.statement tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.statement tfoot td {
+        padding: 1mm 1.5mm;
+        font-size: 8pt;
+        font-weight: bold;
+        border-top: 0.5pt solid #999;
+    }
+    .num { text-align: right; }
+    .col-code { width: 18mm; }
+    .col-num { width: 28mm; }
+    .checks-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
+    .check-line { font-size: 8pt; margin-top: 0.5mm; }
+    .check-ok { color: #166534; }
+    .check-fail { color: #b91c1c; font-weight: bold; }
+    .empty-note { font-size: 8pt; color: #777; padding: 1mm 0; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:55%;">
+            <div class="header-title">PŘEHLED O ZMĚNÁCH VLASTNÍHO KAPITÁLU</div>
+            <div class="header-scope">§ 18 odst. 2 zákona o účetnictví, § 44 vyhl. č. 500/2002 Sb.</div>
+            <div class="header-meta">za období {{ period.starts_on|cz_date }} – {{ period.ends_on|cz_date }} (v Kč)</div>
+            <div class="header-meta">Okamžik sestavení: {{ entity.prepared_at }}</div>
+        </td>
+        <td style="width:45%;" class="entity-info">
+            <strong>{{ entity.name }}</strong><br>
+            IČO: {{ entity.ico }}<br>
+            {{ entity.address }}
+        </td>
+    </tr>
+</table>
+
+<div class="section-title">SLOŽKY VLASTNÍHO KAPITÁLU</div>
+{% if rows is empty %}
+    <div class="empty-note">Účetní jednotka nemá v období zaúčtovanou žádnou složku vlastního kapitálu.</div>
+{% else %}
+<table class="statement">
+    <thead>
+        <tr>
+            <th class="thl col-code">Účet</th>
+            <th class="thl">Složka</th>
+            <th class="col-num">Počáteční stav</th>
+            <th class="col-num">Zvýšení</th>
+            <th class="col-num">Snížení</th>
+            <th class="col-num">Konečný stav</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+            <tr>
+                <td>{{ row.account_code }}</td>
+                <td>{{ row.name }}</td>
+                <td class="num">{{ row.opening|number_format(2, ',', ' ') }}</td>
+                <td class="num">{{ row.increase|number_format(2, ',', ' ') }}</td>
+                <td class="num">{{ row.decrease|number_format(2, ',', ' ') }}</td>
+                <td class="num">{{ row.closing|number_format(2, ',', ' ') }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="2">Celkem</td>
+            <td class="num">{{ totals.opening|number_format(2, ',', ' ') }}</td>
+            <td class="num">{{ totals.increase|number_format(2, ',', ' ') }}</td>
+            <td class="num">{{ totals.decrease|number_format(2, ',', ' ') }}</td>
+            <td class="num">{{ totals.closing|number_format(2, ',', ' ') }}</td>
+        </tr>
+    </tfoot>
+</table>
+{% endif %}
+
+<div class="checks-title">Kontrola</div>
+<div class="check-line {{ reconciles ? 'check-ok' : 'check-fail' }}">
+    {{ reconciles ? '✓' : '✗' }} U každé složky platí počáteční stav + zvýšení − snížení = konečný stav
+</div>
+<div class="check-line">
+    Kontrola se ověřuje po složkách, ne jen v součtu — dvě opačné chyby by se v součtu
+    vyrušily a výkaz by vypadal správně.
+</div>
+
+</body>
+</html>

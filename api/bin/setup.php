@@ -267,13 +267,20 @@ try {
     // protože LoginAction ověřuje pomocí PasswordHasher::verify() s pepperem.
     // Pure password_hash() bez pepperu by produkoval hash, který nikdy nematchne při loginu.
     $hasher = new PasswordHasher($config);
+    $superadminRoleId = (int) $pdo->query(
+        "SELECT id FROM roles WHERE system_key = 'superadmin' AND role_type = 'superadmin' AND is_active = 1 LIMIT 1"
+    )->fetchColumn();
+    if ($superadminRoleId <= 0) {
+        throw new RuntimeException('Systémová role superadmin není dostupná. Spusť nejprve migrace.');
+    }
     $pdo->prepare(
-        'INSERT INTO users (email, password_hash, name, role, locale, is_active)
-         VALUES (?, ?, ?, "admin", "cs", 1)'
+        'INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active)
+         VALUES (?, ?, ?, "admin", ?, "cs", 1)'
     )->execute([
         $adminEmail,
         $hasher->hash($adminPass),
         $adminName,
+        $superadminRoleId,
     ]);
 
     $pdo->commit();

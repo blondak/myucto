@@ -129,7 +129,7 @@ final class QrPaymentGenerator
         $remittance = $message ?? ($varsymbol !== '' ? 'Faktura ' . $varsymbol : 'Faktura');
 
         return (string) (new SepaQrData())
-            ->setName($name !== '' ? $name : 'MyInvoice')
+            ->setName($name !== '' ? $name : 'MyUcto.cz')
             ->setIban($iban)
             ->setRemittanceText($remittance)
             ->setAmount($amount);

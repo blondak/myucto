@@ -9,6 +9,7 @@ import {
 } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
 import FilterBar from '@/components/ui/FilterBar.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -30,34 +31,27 @@ const categories = ref<TripCategory[]>([])
 const loading = ref(false)
 const filterCar = ref<number | ''>('')
 
-// Filtr rok/měsíc (client-side, default = vše) + stránkování
+// Filtr rok/měsíc + serverové stránkování (číselný pager — page NAHRAZUJE seznam, vzor StatementList.vue)
 const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const page = ref(1)
+const pages = ref(1)
+const total = ref(0)
 const perPage = 25
+const years = ref<number[]>([])
 const purposes = ref<string[]>([])
 const places = ref<string[]>([])
 
-const yearOptions = computed(() => {
-  const ys = new Set<number>()
-  for (const tr of trips.value) ys.add(Number(tr.trip_date.slice(0, 4)))
-  return [...ys].sort((a, b) => b - a)
-})
 const monthOptions = computed(() => {
   const loc = locale.value === 'en' ? 'en-US' : 'cs-CZ'
   return Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(loc, { month: 'long' }))
 })
-const filteredTrips = computed(() => trips.value.filter((tr) => {
-  if (yearFilter.value && Number(tr.trip_date.slice(0, 4)) !== yearFilter.value) return false
-  if (monthFilter.value && Number(tr.trip_date.slice(5, 7)) !== monthFilter.value) return false
-  return true
-}))
-const totalKm = computed(() => filteredTrips.value.reduce((s, tr) => s + tr.distance_km, 0))
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredTrips.value.length / perPage)))
-const pagedTrips = computed(() => filteredTrips.value.slice((page.value - 1) * perPage, page.value * perPage))
+// Součet ujetých km — jen z aktuálně zobrazené stránky (počet jízd v patičce bere meta.total);
+// autoritativní součet km za období je v SummariesTab / /logbook/summary.
+const totalKm = computed(() => trips.value.reduce((s, tr) => s + tr.distance_km, 0))
 const groups = computed(() => {
   const map = new Map<string, { month: string; trips: Trip[]; km: number }>()
-  for (const tr of pagedTrips.value) {
+  for (const tr of trips.value) {
     const m = tr.trip_date.slice(0, 7)
     if (!map.has(m)) map.set(m, { month: m, trips: [], km: 0 })
     const g = map.get(m)!
@@ -67,8 +61,7 @@ const groups = computed(() => {
 })
 
 watch(yearFilter, (y) => { if (!y) monthFilter.value = '' })
-watch([yearFilter, monthFilter], () => { page.value = 1 })
-watch(totalPages, (tp) => { if (page.value > tp) page.value = tp })
+watch([yearFilter, monthFilter], () => { reload() })
 
 const open = ref(false)
 const saving = ref(false)
@@ -87,16 +80,30 @@ const computedDistance = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const params: Record<string, string | number> = {}
+    const params: Record<string, string | number> = { page: page.value, per_page: perPage }
     if (filterCar.value) params.car_id = filterCar.value
-    ;[trips.value, cars.value, categories.value] = await Promise.all([
+    if (yearFilter.value) params.year = yearFilter.value
+    if (monthFilter.value) params.month = monthFilter.value
+    const [tripsRes, carsRes, categoriesRes] = await Promise.all([
       logbookApi.listTrips(params),
       logbookApi.listCars(false), // vždy fresh kvůli last_odometer
       categories.value.length ? Promise.resolve(categories.value) : logbookApi.listCategories(false),
     ])
+    trips.value = tripsRes.data
+    total.value = tripsRes.meta.total
+    pages.value = tripsRes.meta.pages
+    years.value = tripsRes.years
+    cars.value = carsRes
+    categories.value = categoriesRes
     logbookApi.tripPurposes().then(p => { purposes.value = p }).catch(() => {})
     logbookApi.tripPlaces().then(p => { places.value = p }).catch(() => {})
   } finally { loading.value = false; maybeOpenNew() }
+}
+// Reset na 1. stranu (změna filtru / po uložení). goToPage = navigace v rámci pageru.
+function reload() { page.value = 1; load() }
+function goToPage(p: number) {
+  const np = Math.min(Math.max(1, p), pages.value)
+  if (np !== page.value) { page.value = np; load() }
 }
 onMounted(load)
 
@@ -147,8 +154,7 @@ watch(() => props.resetToken, () => {
   filterCar.value = ''
   yearFilter.value = ''
   monthFilter.value = ''
-  page.value = 1
-  load()
+  reload()
 })
 
 function newTrip() {
@@ -183,10 +189,12 @@ async function save() {
       category_id: draft.category_id ? Number(draft.category_id) : null,
       purpose: draft.purpose || null, origin: draft.origin || null, destination: draft.destination || null, note: draft.note || null,
     }
+    const wasNew = !draft.id
     if (draft.id) await logbookApi.updateTrip(draft.id, payload)
     else await logbookApi.createTrip(payload)
     open.value = false
     toast.success(t('common.saved'))
+    if (wasNew) page.value = 1 // nová jízda je nejnovější → skoč na 1. stranu (řazení date DESC)
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message ?? t('common.error'))
@@ -195,8 +203,13 @@ async function save() {
 
 async function removeTrip(tr: Trip) {
   if (!confirm(t('logbook.confirm_delete_trip'))) return
-  try { await logbookApi.deleteTrip(tr.id); toast.success(t('common.deleted')); await load() }
-  catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
+  try {
+    await logbookApi.deleteTrip(tr.id)
+    toast.success(t('common.deleted'))
+    await load()
+    // Smazání poslední položky na poslední straně → posuň se o stranu zpět.
+    if (trips.value.length === 0 && page.value > 1) goToPage(page.value - 1)
+  } catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
 }
 
 // ── Import CSV/XLSX ─────────────────────────────────────────────
@@ -212,7 +225,7 @@ async function onImportFile(e: Event) {
   importReport.value = null
   try {
     importReport.value = await logbookApi.importTrips(file)
-    if (importReport.value.created > 0) await load()
+    if (importReport.value.created > 0) reload()
     toast.success(t('logbook.import_done', { n: importReport.value.created }))
   } catch (err: any) {
     toast.error(err?.response?.data?.error?.message ?? t('logbook.import_failed'))
@@ -271,32 +284,32 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
 <template>
   <section>
     <FilterBar :active-count="activeFilterCount">
-        <select v-model="filterCar" @change="load" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <select v-model="filterCar" @change="reload" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('logbook.all_cars') }}</option>
           <option v-for="c in cars" :key="c.id" :value="c.id">{{ c.registration }}{{ c.name ? ` — ${c.name}` : '' }}</option>
         </select>
         <select v-model="yearFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option :value="''">{{ t('logbook.all_years') }}</option>
-          <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+          <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
         </select>
         <select v-model="monthFilter" :disabled="yearFilter === ''" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50">
           <option :value="''">{{ t('logbook.all_months') }}</option>
           <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
         </select>
-        <button @click="openExport" :disabled="trips.length === 0"
-          class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5 disabled:opacity-50">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>
+        <button @click="openExport" :disabled="total === 0"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('logbook.export') }}
         </button>
-        <button v-if="auth.canWrite" @click="importOpen = true; importReport = null"
-          class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12m0-12l-4 4m4-4l4 4"/></svg>
+        <button v-if="auth.canWrite('logbook.write')" @click="importOpen = true; importReport = null"
+          :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('logbook.import') }}
         </button>
       <template #actions>
-        <button v-if="auth.canWrite" @click="newTrip" :disabled="cars.length === 0"
-          class="cursor-pointer h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md inline-flex items-center gap-1.5 disabled:opacity-50">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m6-6H6"/></svg>
+        <button v-if="auth.canWrite('logbook.write')" @click="newTrip" :disabled="cars.length === 0"
+          :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('logbook.trip_new') }}
         </button>
       </template>
@@ -304,10 +317,10 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
 
     <div v-if="cars.length === 0 && !loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_cars_hint') }}</div>
     <div v-else-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="filteredTrips.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_trips') }}</div>
+    <div v-else-if="total === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_trips') }}</div>
 
     <template v-else>
-      <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.trips_summary', { count: filteredTrips.length, km: fmtKm(totalKm) }) }}</div>
+      <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.trips_summary', { count: total, km: fmtKm(totalKm) }) }}</div>
 
       <section v-for="g in groups" :key="g.month" class="mb-5">
         <header class="flex items-center justify-between bg-neutral-50 border border-neutral-200 rounded-t-lg px-4 py-2.5">
@@ -349,7 +362,7 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
                 <td class="px-3 py-2 text-right font-mono">{{ fmtKm(tr.odometer_start) }}</td>
                 <td class="px-3 py-2 text-right font-mono">{{ fmtKm(tr.distance_km) }}</td>
                 <td class="px-3 py-2">
-                  <div v-if="auth.canWrite" class="flex justify-end gap-1.5">
+                  <div v-if="auth.canWrite('logbook.write')" class="flex justify-end gap-1.5">
                     <button @click="editTrip(tr)" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828z"/></svg>
                       {{ t('common.edit') }}
@@ -377,7 +390,7 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
               <span class="truncate">{{ tr.purpose || '—' }} · {{ tr.car_registration }}</span>
               <span v-if="tr.category_label" class="shrink-0 px-1.5 py-0.5 rounded" :class="tr.category_is_private ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'">{{ tr.category_label }}</span>
             </div>
-            <div v-if="auth.canWrite" class="flex gap-2 mt-2">
+            <div v-if="auth.canWrite('logbook.write')" class="flex gap-2 mt-2">
               <button @click="editTrip(tr)" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828z"/></svg>
                 {{ t('common.edit') }}
@@ -391,13 +404,13 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
         </div>
       </section>
 
-      <!-- Stránkování -->
-      <div v-if="totalPages > 1" class="flex items-center justify-center gap-3 mt-4">
-        <button @click="page--" :disabled="page <= 1" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
+      <!-- Číselný pager (serverové stránkování — page nahrazuje seznam) -->
+      <div v-if="pages > 1" class="flex items-center justify-center gap-3 mt-4">
+        <button @click="goToPage(page - 1)" :disabled="page <= 1" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
         </button>
-        <span class="text-sm text-neutral-600">{{ t('logbook.page_of', { page, pages: totalPages }) }}</span>
-        <button @click="page++" :disabled="page >= totalPages" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
+        <span class="text-sm text-neutral-600">{{ t('logbook.page_of', { page, pages }) }}</span>
+        <button @click="goToPage(page + 1)" :disabled="page >= pages" class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 inline-flex items-center gap-1">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
         </button>
       </div>

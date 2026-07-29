@@ -80,7 +80,7 @@ final class TotpAction
         $this->db->pdo()->prepare('UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?')
             ->execute([$encrypted, (int) $user['id']]);
 
-        $issuer = parse_url((string) $this->config->get('app.url', 'MyInvoice'), PHP_URL_HOST) ?: 'MyInvoice';
+        $issuer = parse_url((string) $this->config->get('app.url', 'MyUcto.cz'), PHP_URL_HOST) ?: 'MyUcto.cz';
         $uri = $this->totp->provisioningUri($secret, (string) $user['email'], $issuer);
 
         // QR kód jako data URI (PNG base64) — frontend vloží do <img src>

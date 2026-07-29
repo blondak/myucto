@@ -28,6 +28,8 @@ final class ExchangeRateApplierDuzpTest extends TestCase
     private int $supplierId = 0;
     private int $userId = 0;
     private int $eurId = 0;
+    /** EUR měnu jsme založili my → tearDown ji musí uklidit (test neběží v transakci). */
+    private bool $createdEur = false;
     private int $clientId = 0;
     /** @var int[] */
     private array $invoiceIds = [];
@@ -52,10 +54,20 @@ final class ExchangeRateApplierDuzpTest extends TestCase
         if ($this->supplierId === 0 || $this->userId === 0 || $czId === 0) {
             $this->markTestSkipped('Chybí základní data (supplier/user/country).');
         }
-        $this->eurId = (int) ($pdo->query("SELECT id FROM currencies WHERE code='EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        // Měny jsou per-supplier; fallback zakládá EUR pro AKTUÁLNÍHO tenanta, ne globálně.
+        // (Dřív se vkládalo `(code, name)` — takový sloupec v `currencies` není, takže
+        // fallback vždycky spadl na SQL chybu, jakmile testovací DB EUR neměla.)
+        $this->eurId = (int) ($pdo->query(
+            "SELECT id FROM currencies WHERE code='EUR' AND supplier_id={$this->supplierId} ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
         if ($this->eurId === 0) {
-            $pdo->exec("INSERT INTO currencies (code, name) VALUES ('EUR', 'Euro')");
+            $stmt = $pdo->prepare(
+                'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, 2, 1)'
+            );
+            $stmt->execute([$this->supplierId, 'EUR', 'EUR', '€', 'euro', 'euro']);
             $this->eurId = (int) $pdo->lastInsertId();
+            $this->createdEur = true;
         }
         $pdo->prepare(
             'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id,
@@ -76,6 +88,10 @@ final class ExchangeRateApplierDuzpTest extends TestCase
         }
         if ($this->clientId) {
             $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$this->clientId]);
+        }
+        // Až po klientovi (FK currency_default_id) a jen když jsme ji založili my.
+        if ($this->createdEur && $this->eurId) {
+            $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$this->eurId]);
         }
         $this->db->close();
     }
@@ -107,7 +123,11 @@ final class ExchangeRateApplierDuzpTest extends TestCase
             }
         );
 
-        (new ExchangeRateApplier($this->db, $this->invoices, $cnb))->applyToInvoice($id);
+        // Pevný kurz vypnutý (režim daily) → applier spadne na ČNB (jak testujeme).
+        $fixed = $this->createStub(\MyInvoice\Service\Currency\FixedExchangeRateService::class);
+        $fixed->method('resolve')->willReturn(null);
+
+        (new ExchangeRateApplier($this->db, $this->invoices, $cnb, $fixed))->applyToInvoice($id);
 
         $this->assertSame($taxDate, $captured,
             'Kurz ČNB se musí zjistit k DUZP (tax_date), ne k datu vystavení (issue_date)');

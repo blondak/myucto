@@ -2,7 +2,7 @@
 #
 #   1. Vygeneruje .env s random DB hesly (pokud chybi)
 #   2. Vygeneruje cfg.docker.php z cfg.sample.php s random secrets (pokud chybi)
-#   3. docker compose pull (image z ghcr.io/radekhulan/myinvoice:latest)
+#   3. docker compose pull (image z ghcr.io/radekhulan/myucto:latest)
 #   4. docker compose up -d (entrypoint sam spusti migrace pred apache2-foreground)
 #   5. Pocka az app odpovi na HTTP (= migrace dobehly, apache bezi)
 #   6. Vypise URL k setup wizardu
@@ -44,9 +44,54 @@ function Invoke-Compose {
     & docker compose -f $ComposeFile @args
 }
 
+function Get-ComposeProjectName([string]$root) {
+    if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
+    return ((Split-Path -Leaf $root).ToLower() -replace '[^a-z0-9_-]', '')
+}
+
+# Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner/proces.
+function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
+    $lines = & docker ps --format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>$null
+    foreach ($ln in $lines) {
+        $parts = $ln -split '\|', 4
+        if ($parts.Count -lt 4) { continue }
+        if ($parts[3] -notmatch ":$Port->") { continue }
+        $name = $parts[0]; $image = $parts[1]; $proj = $parts[2]
+        if (($proj -eq $OurProject) -or ($name -match 'myucto') -or ($image -match 'myucto')) {
+            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) — OK."
+            return $false
+        }
+        Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
+        Write-Host    "    Reseni: 'docker stop $name' nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        return $true
+    }
+    $conn = $null
+    try { $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1 } catch {}
+    if ($conn) {
+        $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        $pname = if ($proc) { $proc.ProcessName } else { "PID $($conn.OwningProcess)" }
+        if ($pname -match 'docker|vpnkit|wslrelay|com\.docker') {
+            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni — stale endpoint. 'up --force-recreate app' ho uvolni."
+            return $false
+        }
+        Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
+        Write-Host    "    Reseni: ukonci proces nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        return $true
+    }
+    return $false
+}
+
+function Get-AppLogTail([int]$Lines = 40) {
+    return (Invoke-Compose logs --no-color --tail $Lines app 2>&1 | Out-String)
+}
+
+function Test-AppNetworkBroken([string]$Logs) {
+    return [bool]($Logs -match 'getaddrinfo (for )?db failed|getaddrinfo failed|php_network_getaddresses|Temporary failure in name resolution|Name or service not known')
+}
+
 # Smart: pokud uz app bezi, tohle je spis update nez cersta instalace.
 $runningImage = (& docker ps --filter 'label=com.docker.compose.service=app' --format '{{.Image}}' 2>$null |
-    Where-Object { $_ -match 'myinvoice' } | Select-Object -First 1)
+    Where-Object { $_ -match 'myucto' } | Select-Object -First 1)
 if ($runningImage) {
     Write-Host "==> Pozn.: app uz bezi (image '$runningImage'). Pro pouhou aktualizaci pouzij cmd\docker-update.ps1."
     Write-Host "    (tenhle skript je idempotentni - klidne pokracuj, jen prepulluje a nahodi znovu)"
@@ -64,11 +109,11 @@ if (-not (Test-Path .env)) {
     $rootPass = New-RandomToken 24
     $userPass = New-RandomToken 24
     @"
-# MyInvoice.cz - Docker compose env (gitignored)
+# MyUcto.cz - Docker compose env (gitignored)
 APP_PORT=8080
 DB_PORT=3307
-DB_NAME=myinvoice
-DB_USER=myinvoice
+DB_NAME=myucto
+DB_USER=myucto
 DB_ROOT_PASSWORD=$rootPass
 DB_PASSWORD=$userPass
 "@ | Set-Content -Encoding UTF8 -NoNewline .env
@@ -91,7 +136,7 @@ if (-not (Test-Path cfg.docker.php)) {
     $appUrl = "http://localhost:$($envVars.APP_PORT)"
     $cfg = [regex]::Replace($cfg, "'host'    => '127\.0\.0\.1',", "'host'    => 'db',",    1)
     $cfg = [regex]::Replace($cfg, "'host'    => '127\.0\.0\.1',", "'host'    => 'redis',", 1)
-    $cfg = $cfg -replace "'name'    => 'myinvoice',", "'name'    => '$($envVars.DB_NAME)',"
+    $cfg = $cfg -replace "'name'    => 'myucto',", "'name'    => '$($envVars.DB_NAME)',"
     $cfg = $cfg -replace "'user'    => 'root',",      "'user'    => '$($envVars.DB_USER)',"
     $cfg = $cfg -replace "'pass'    => 'CHANGE-ME',", "'pass'    => '$($envVars.DB_PASSWORD)',"
     $cfg = $cfg -replace "'pepper' => 'CHANGE-ME',",  "'pepper' => '$pepper',"
@@ -114,22 +159,40 @@ Write-Host "==> Pulling image from GHCR..."
 Invoke-Compose pull app
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose pull failed" }
 
-# --- 4. up ----------------------------------------------------------------
-Write-Host "==> Starting stack..."
-Invoke-Compose up -d db app
-if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up failed" }
+# --- 3b. pre-flight: hostovy port aplikace -------------------------------
+# Kolize portu (stary/half-created app kontejner) -> novy app se nepripoji k
+# siti ('port already allocated') -> nepreklada 'db' -> migrace v cyklu padaji.
+$ourProject = Get-ComposeProjectName $ProjectRoot
+$appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
+if ($appPort -le 0) { $appPort = 8080 }
+Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort..."
+if (Test-ForeignPortHolder $appPort $ourProject) {
+    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+}
 
-# --- 5. wait for DB + migrate --------------------------------------------
+# --- 4. up databaze ------------------------------------------------------
+# --remove-orphans: uklidi stale kontejnery z jineho compose souboru.
+Write-Host "==> Starting database..."
+Invoke-Compose up -d --remove-orphans db
+if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (db) failed" }
+
+# --- 5. wait for DB health -----------------------------------------------
 Write-Host "==> Waiting for database to become healthy..."
 $ready = $false
-for ($i = 1; $i -le 30; $i++) {
+for ($i = 1; $i -le 45; $i++) {
     $json = Invoke-Compose ps --format json db 2>$null
     if ($json -match '"Health":"healthy"') { $ready = $true; Write-Host "    DB ready."; break }
+    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' — cekam dal (attempt $i/45)..." }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
-    Write-Error "DB failed to become healthy in 60s. Check 'docker compose -f $ComposeFile logs db'."
+    Write-Error "DB failed to become healthy in ~90s. Check 'docker compose -f $ComposeFile logs db'."
 }
+
+# --- 4b. up app ----------------------------------------------------------
+Write-Host "==> Starting app..."
+Invoke-Compose up -d --remove-orphans app
+if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
 
 # Migrace se spousti automaticky z docker-entrypoint.sh pred apache2-foreground.
 # Misto druheho explicitniho migrate (= race condition s entrypointem, viz issue
@@ -149,15 +212,29 @@ if (-not (Test-Path $curl)) {
 Write-Host "==> Waiting for app to become available (entrypoint runs migrations)..."
 $ready = $false
 $lastErr = ''
-for ($i = 1; $i -le 60; $i++) {
-    $out = & $curl -fsS -m 3 -o NUL "http://localhost:$($envVars.APP_PORT)/api/health" 2>&1
+$recovered = $false
+for ($i = 1; $i -le 90; $i++) {
+    $out = & $curl -fsS -m 3 -o NUL "http://localhost:$appPort/api/health" 2>&1
     if ($LASTEXITCODE -eq 0) { $ready = $true; Write-Host "    App ready."; break }
     $lastErr = ($out | Out-String).Trim()
+    if (($i % 5) -eq 0) {
+        $logs = Get-AppLogTail 40
+        if (-not $recovered -and (Test-AppNetworkBroken $logs)) {
+            Write-Warning "App bezi, ale nema compose sit (DNS 'db' selhava) -> auto-recovery: force-recreate app."
+            Invoke-Compose up -d --remove-orphans --force-recreate app 2>&1 | Out-Null
+            $recovered = $true
+            Start-Sleep -Seconds 3
+            continue
+        }
+        elseif ($logs -match 'Migration attempt') { Write-Host "    ...migrace bezi (attempt $i/90)" }
+    }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
     Write-Host "    Last curl error: $lastErr" -ForegroundColor Yellow
-    Write-Error "App failed to respond in 120s. Check 'docker compose -f $ComposeFile logs app'."
+    Write-Host "    --- posledni radky logu app ---" -ForegroundColor Yellow
+    Write-Host (Get-AppLogTail 25)
+    Write-Error "App failed to respond in time. Check 'docker compose -f $ComposeFile logs app'."
 }
 
 # --- 6. report -----------------------------------------------------------
@@ -165,8 +242,8 @@ $port = $envVars.APP_PORT
 if (-not $port) { $port = '8080' }
 Write-Host ""
 Write-Host "============================================================"
-Write-Host " MyInvoice.cz is up at:  http://localhost:$port"
-Write-Host " Image:                  ghcr.io/radekhulan/myinvoice:latest"
+Write-Host " MyUcto.cz is up at:  http://localhost:$port"
+Write-Host " Image:                  ghcr.io/radekhulan/myucto:latest"
 Write-Host ""
 Write-Host " The browser will land on the setup wizard:"
 Write-Host "   1. Admin user (name, email, password >= 12 chars)"

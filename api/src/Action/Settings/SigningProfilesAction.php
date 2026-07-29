@@ -10,10 +10,17 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\SigningProfileRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Epo\EpoStepUpService;
+use MyInvoice\Service\Epo\EpoSubmissionException;
+use MyInvoice\Service\Http\OutboundRequestException;
+use MyInvoice\Service\Http\TsaUrlPolicy;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
+use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use MyInvoice\Service\Signing\SigningProfileAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -48,7 +55,33 @@ final class SigningProfilesAction
         private readonly SecretEncryption $secrets,
         private readonly PdfSigningService $pdfSigning,
         private readonly InvoicePdfRenderer $pdf,
+        private readonly PersonalCertificateVaultService $certificateVault,
+        private readonly EpoStepUpService $stepUp,
+        // POVINNÝ parametr: optional class-param by PHP-DI autowiring nevyplnil
+        // a default instance by neměla Config → allowlist trvale prázdný (SEC-04).
+        private readonly TsaUrlPolicy $tsaPolicy,
     ) {}
+
+    /**
+     * SEC-04: TSA URL smí být jen veřejná HTTPS adresa (a když je nakonfigurovaný
+     * administrátorský allowlist `signing.tsa_allowed_hosts`, tak jen z něj).
+     * Ukládáme bez DNS dotazu — plná kontrola včetně rozřešení IP proběhne znovu
+     * těsně před odesláním razítka, jinak by šlo obejít DNS rebindingem.
+     *
+     * @return string|null Chybová hláška pro uživatele, nebo null když je URL v pořádku.
+     */
+    private function tsaUrlError(?string $url): ?string
+    {
+        if ($url === null || $url === '') {
+            return null;
+        }
+        try {
+            $this->tsaPolicy->assertStorable($url);
+        } catch (OutboundRequestException $e) {
+            return 'TSA URL není přípustná: ' . $e->getMessage();
+        }
+        return null;
+    }
 
     public function settings(Request $request, Response $response): Response
     {
@@ -106,13 +139,12 @@ final class SigningProfilesAction
     {
         $supplierId = $this->supplierId($request);
         $settings = $this->profiles->settings($supplierId);
-        $role = $this->role($request);
-        if (!$this->access->canCreate($role, $settings['accountant_profiles_enabled'])) {
+        if (!$this->access->canCreate($this->isAdmin($request), $this->isAccountant($request), $settings['accountant_profiles_enabled'])) {
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $ownerUserId = $role === 'accountant'
+        $ownerUserId = $this->isAccountant($request)
             ? $this->userId($request)
             : $this->nullableInt($body['owner_user_id'] ?? null);
         $pdfTsaEnabled = array_key_exists('pdf_tsa_enabled', $body)
@@ -121,6 +153,10 @@ final class SigningProfilesAction
         $pdfTsaUrl = $pdfTsaEnabled ? $this->stringOrNull($body['pdf_tsa_url'] ?? null) : null;
         if ($pdfTsaEnabled && $pdfTsaUrl === null) {
             return Json::error($response, 'validation_failed', 'Pro časové razítko zadej TSA URL.', 400);
+        }
+        $tsaError = $this->tsaUrlError($pdfTsaUrl);
+        if ($tsaError !== null) {
+            return Json::error($response, 'validation_failed', $tsaError, 400);
         }
 
         try {
@@ -214,6 +250,13 @@ final class SigningProfilesAction
                     $changes['pdf_tsa_password_enc'] = $password !== null ? $this->secrets->encrypt($password) : null;
                 }
             }
+            // SEC-04 — jedna brána pro obě větve výše (enabled i samostatné pole).
+            if (array_key_exists('pdf_tsa_url', $changes)) {
+                $tsaError = $this->tsaUrlError($changes['pdf_tsa_url']);
+                if ($tsaError !== null) {
+                    return Json::error($response, 'validation_failed', $tsaError, 400);
+                }
+            }
             if (array_key_exists('pdf_reason', $body)) {
                 $changes['pdf_reason'] = $this->stringOrNull($body['pdf_reason']);
             }
@@ -258,11 +301,23 @@ final class SigningProfilesAction
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
 
+        $credential = $this->profiles->credential($supplierId, $profileId);
+        if ($credential !== null && !$this->deleteCredentialFile($credential)) {
+            return Json::error(
+                $response,
+                'credential_file_delete_failed',
+                'Soubor certifikátu se nepodařilo odstranit.',
+                500,
+            );
+        }
         $this->profiles->softDeleteProfile($supplierId, $profileId);
         $this->logger->log('signing.profile_deleted', $this->userId($request), 'signing_profile', $profileId, [
             'code' => $profile['code'] ?? null,
             'owner_user_id' => $profile['owner_user_id'] ?? null,
         ], null, null, $supplierId);
+        if ($credential !== null) {
+            $this->invalidatePdfCacheForSupplierSigning($supplierId);
+        }
 
         return Json::ok($response, ['deleted' => true]);
     }
@@ -300,18 +355,7 @@ final class SigningProfilesAction
         $usage = $this->usageForOutputType($outputType);
         $before = $this->profiles->outputSetting($supplierId, $outputType, $usage);
         $body = (array) ($request->getParsedBody() ?? []);
-        $data = [];
-        foreach (['enabled', 'backend', 'selection_source', 'user_profile_fallback', 'failure_policy'] as $field) {
-            if (array_key_exists($field, $body)) {
-                $data[$field] = $body[$field];
-            }
-        }
-        if (array_key_exists('default_profile_id', $body)) {
-            $data['default_profile_id'] = $this->nullableInt($body['default_profile_id']);
-        }
-        if (array_key_exists('signature_config', $body)) {
-            $data['signature_config'] = $this->normalizeSignatureConfig($body['signature_config'], $usage);
-        }
+        $data = $this->outputSettingData($body, $usage);
 
         try {
             $this->profiles->upsertOutputSetting($supplierId, $outputType, $data, $usage);
@@ -337,6 +381,76 @@ final class SigningProfilesAction
         ], null, null, $supplierId);
 
         return Json::ok($response, $updated);
+    }
+
+    public function updatePdfOutputSettings(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $items = $body['settings'] ?? null;
+        if (!is_array($items) || !array_is_list($items) || $items === []) {
+            return Json::error($response, 'validation_failed', 'Chybí nastavení podpisových výstupů.', 400);
+        }
+
+        $supplierId = $this->supplierId($request);
+        $prepared = [];
+        $before = [];
+        $seen = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                return Json::error($response, 'validation_failed', 'Nastavení podpisového výstupu není platné.', 400);
+            }
+            $outputType = (string) ($item['output_type'] ?? '');
+            if (!$this->isSupportedOutputType($outputType)) {
+                return Json::error($response, 'unsupported_output_type', 'Typ výstupu není podporovaný.', 404);
+            }
+            if (isset($seen[$outputType])) {
+                return Json::error($response, 'validation_failed', 'Typ výstupu je v požadavku uveden vícekrát.', 400);
+            }
+            $seen[$outputType] = true;
+            $usage = $this->usageForOutputType($outputType);
+            $before[$outputType] = $this->profiles->outputSetting($supplierId, $outputType, $usage);
+            $prepared[] = [
+                'output_type' => $outputType,
+                'usage' => $usage,
+                'data' => $this->outputSettingData($item, $usage),
+            ];
+        }
+
+        try {
+            $this->profiles->upsertOutputSettingsAtomic($supplierId, $prepared);
+        } catch (\InvalidArgumentException | \RuntimeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        } catch (\Throwable) {
+            return Json::error($response, 'update_failed', 'Nastavení podpisů se nepodařilo uložit.', 500);
+        }
+
+        $updated = [];
+        foreach ($prepared as $setting) {
+            $outputType = $setting['output_type'];
+            $usage = $setting['usage'];
+            $row = $this->profiles->outputSetting($supplierId, $outputType, $usage);
+            $updated[] = $row;
+            $invalidatedPdfCache = 0;
+            if ($usage === 'pdf' && $this->pdfOutputSettingChanged($before[$outputType], $row)) {
+                $invalidatedPdfCache = $this->invalidatePdfCacheForOutputSetting($supplierId, $outputType);
+            }
+            $this->logger->log('signing.output_settings_updated', $this->userId($request), 'supplier', $supplierId, [
+                'output_type' => $outputType,
+                'usage' => $usage,
+                'enabled' => $row['enabled'] ?? null,
+                'selection_source' => $row['selection_source'] ?? null,
+                'default_profile_id' => $row['default_profile_id'] ?? null,
+                'failure_policy' => $row['failure_policy'] ?? null,
+                'invalidated_pdf_cache' => $invalidatedPdfCache,
+                'batch' => true,
+            ], null, null, $supplierId);
+        }
+
+        return Json::ok($response, ['output_settings' => $updated]);
     }
 
     public function testPdfSigning(Request $request, Response $response): Response
@@ -476,6 +590,79 @@ final class SigningProfilesAction
         return Json::ok($response, $this->credentialMeta($credential));
     }
 
+    public function personalVaultCredentials(Request $request, Response $response): Response
+    {
+        return Json::ok($response, $this->certificateVault->listForSupplier(
+            $this->userId($request),
+            $this->supplierId($request),
+        ));
+    }
+
+    public function linkPersonalVaultCredential(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->supplierId($request);
+        $profileId = (int) ($args['id'] ?? 0);
+        $userId = $this->userId($request);
+        $profile = $this->profiles->findProfile($supplierId, $profileId);
+        if ($profile === null) {
+            return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
+        }
+        if (!$this->canManageProfile($request, $profile)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
+        }
+        if ((int) ($profile['owner_user_id'] ?? 0) !== $userId) {
+            return Json::error(
+                $response,
+                'personal_profile_required',
+                'Osobní certifikát lze připojit jen k vašemu osobnímu podpisovému profilu.',
+                409,
+            );
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $credentialId = (int) ($body['credential_id'] ?? 0);
+        try {
+            $this->stepUp->verify($request, $userId, $body, 'signing_vault_link');
+            $resolved = $this->certificateVault->resolve($credentialId, $userId, $supplierId);
+            $previous = $this->profiles->credential($supplierId, $profileId);
+            $this->profiles->upsertCredential($supplierId, $profileId, [
+                'vault_credential_id' => $credentialId,
+                'certificate_path' => null,
+                'certificate_fingerprint' => $resolved['certificate_fingerprint'],
+                'certificate_subject' => $resolved['certificate_subject'],
+                'certificate_email' => $resolved['certificate_email'],
+                'certificate_valid_from' => $resolved['certificate_valid_from'],
+                'certificate_valid_to' => $resolved['certificate_valid_to'],
+                'certificate_usage' => $resolved['certificate_usage'],
+                'passphrase_policy' => 'encrypted_store',
+                'encrypted_passphrase' => null,
+                'is_active' => true,
+            ], $userId);
+            if ($previous !== null && ($previous['vault_credential_id'] ?? null) === null) {
+                $path = $this->credentialAbsPath((string) ($previous['certificate_path'] ?? ''));
+                if ($path !== '' && is_file($path)) {
+                    @unlink($path);
+                }
+            }
+            $credential = $this->profiles->credential($supplierId, $profileId);
+            $this->logger->log('signing.credential_vault_linked', $userId, 'signing_profile', $profileId, [
+                'profile_code' => $profile['code'] ?? null,
+                'fingerprint' => $credential['certificate_fingerprint'] ?? null,
+                'vault_credential_id' => $credentialId,
+            ], null, null, $supplierId);
+            $this->invalidatePdfCacheForSupplierSigning($supplierId);
+            return Json::ok($response, $this->credentialMeta($credential));
+        } catch (EpoSubmissionException $e) {
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                $e->httpStatus,
+                $e->details,
+            );
+        }
+    }
+
     public function uploadCredentialCertificate(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->supplierId($request);
@@ -586,6 +773,14 @@ final class SigningProfilesAction
         if ($credential === null) {
             return Json::error($response, 'no_certificate', 'Nejdřív nahraj certifikát profilu.', 400);
         }
+        if (($credential['vault_credential_id'] ?? null) !== null) {
+            return Json::error(
+                $response,
+                'vault_credential_managed_separately',
+                'Heslo osobního certifikátu se spravuje v osobním trezoru.',
+                409,
+            );
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $passphrasePolicy = $this->passphrasePolicy((string) ($body['passphrase_policy'] ?? ($credential['passphrase_policy'] ?? 'encrypted_store')));
@@ -660,11 +855,15 @@ final class SigningProfilesAction
 
         $credential = $this->profiles->credential($supplierId, $profileId);
         if ($credential !== null) {
-            $path = $this->credentialAbsPath((string) ($credential['certificate_path'] ?? ''));
-            if ($path !== '' && is_file($path)) {
-                @unlink($path);
+            if (!$this->deleteCredentialFile($credential)) {
+                return Json::error(
+                    $response,
+                    'credential_file_delete_failed',
+                    'Soubor certifikátu se nepodařilo odstranit.',
+                    500,
+                );
             }
-            $this->profiles->softDeleteCredential($supplierId, $profileId);
+            $this->profiles->deleteCredential($supplierId, $profileId);
         }
 
         $this->logger->log('signing.credential_deleted', $this->userId($request), 'signing_profile', $profileId, [
@@ -785,7 +984,8 @@ final class SigningProfilesAction
         $settings = $this->profiles->settings($this->supplierId($request));
 
         return $this->access->canManage(
-            role: $this->role($request),
+            isSuperadmin: $this->isAdmin($request),
+            canWrite: $this->isAccountant($request),
             currentUserId: $this->userId($request),
             ownerUserId: $profile['owner_user_id'] !== null ? (int) $profile['owner_user_id'] : null,
             accountantProfilesEnabled: $settings['accountant_profiles_enabled'],
@@ -829,20 +1029,15 @@ final class SigningProfilesAction
         return (int) ($user['id'] ?? 0);
     }
 
-    private function role(Request $request): string
-    {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return (string) ($user['role'] ?? '');
-    }
-
     private function isAdmin(Request $request): bool
     {
-        return $this->role($request) === 'admin';
+        return RequestAuthorization::isSuperadmin($request);
     }
 
     private function isAccountant(Request $request): bool
     {
-        return $this->role($request) === 'accountant';
+        return !RequestAuthorization::isSuperadmin($request)
+            && RequestAuthorization::allows($request, 'settings.signing', AccessLevel::WRITE);
     }
 
     private function isIntegrityConflict(\PDOException $e): bool
@@ -894,6 +1089,28 @@ final class SigningProfilesAction
     }
 
     /**
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    private function outputSettingData(array $body, string $usage): array
+    {
+        $data = [];
+        foreach (['enabled', 'backend', 'selection_source', 'user_profile_fallback', 'failure_policy'] as $field) {
+            if (array_key_exists($field, $body)) {
+                $data[$field] = $body[$field];
+            }
+        }
+        if (array_key_exists('default_profile_id', $body)) {
+            $data['default_profile_id'] = $this->nullableInt($body['default_profile_id']);
+        }
+        if (array_key_exists('signature_config', $body)) {
+            $data['signature_config'] = $this->normalizeSignatureConfig($body['signature_config'], $usage);
+        }
+
+        return $data;
+    }
+
+    /**
      * @param mixed $value
      * @return array<string,mixed>
      */
@@ -907,9 +1124,9 @@ final class SigningProfilesAction
             return $value;
         }
 
-        $policy = (string) ($value['smime_identity_policy'] ?? 'strict_match');
+        $policy = (string) ($value['smime_identity_policy'] ?? 'warning_only');
         if (!in_array($policy, self::SMIME_IDENTITY_POLICIES, true)) {
-            $policy = 'strict_match';
+            $policy = 'warning_only';
         }
 
         $config = $value;
@@ -1015,6 +1232,12 @@ final class SigningProfilesAction
         return RuntimePaths::storage(ltrim($stored, '/\\'));
     }
 
+    private function deleteCredentialFile(array $credential): bool
+    {
+        $path = $this->credentialAbsPath((string) ($credential['certificate_path'] ?? ''));
+        return $path === '' || !is_file($path) || @unlink($path);
+    }
+
     private function createSigningTestPdf(): string
     {
         $dir = RuntimePaths::storage('tmp/signing-tests');
@@ -1040,7 +1263,7 @@ final class SigningProfilesAction
         $stream = "BT\n"
             . "/F1 12 Tf\n"
             . "40 100 Td\n"
-            . "(MyInvoice PDF signing test) Tj\n"
+            . "(MyUcto PDF signing test) Tj\n"
             . "0 -18 Td\n"
             . "(Generated for signature verification.) Tj\n"
             . "ET\n";
@@ -1142,14 +1365,22 @@ final class SigningProfilesAction
 
         return [
             'has_certificate' => true,
+            'certificate_source' => ($credential['vault_credential_id'] ?? null) !== null
+                ? 'personal_vault'
+                : 'uploaded_file',
+            'vault_credential_id' => $credential['vault_credential_id'] ?? null,
             'certificate_fingerprint' => $credential['certificate_fingerprint'] ?? null,
             'certificate_subject' => $credential['certificate_subject'] ?? null,
             'certificate_email' => $credential['certificate_email'] ?? null,
             'certificate_valid_from' => $credential['certificate_valid_from'] ?? null,
             'certificate_valid_to' => $validTo,
             'certificate_usage' => $credential['certificate_usage'] ?? [],
-            'passphrase_policy' => $credential['passphrase_policy'] ?? null,
-            'passphrase_profile_id' => $credential['passphrase_profile_id'] ?? null,
+            'passphrase_policy' => ($credential['vault_credential_id'] ?? null) !== null
+                ? null
+                : ($credential['passphrase_policy'] ?? null),
+            'passphrase_profile_id' => ($credential['vault_credential_id'] ?? null) !== null
+                ? null
+                : ($credential['passphrase_profile_id'] ?? null),
             'is_active' => $credential['is_active'] ?? false,
             'expired' => is_string($validTo) && strtotime($validTo) !== false && strtotime($validTo) < time(),
         ];

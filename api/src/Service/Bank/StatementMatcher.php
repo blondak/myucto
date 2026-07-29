@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
+use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use PDO;
 
 /**
@@ -69,6 +71,8 @@ final class StatementMatcher
         // avízo, cron, rematch jdou přes match(), takže ruční logging v Action vrstvě
         // je míjí). Nullable kvůli izolovaným konstrukcím v testech; Bootstrap injektuje.
         private readonly ?ActivityLogger $activityLogger = null,
+        private readonly ?ClientBankAccountRepository $clientBankAccounts = null,
+        private readonly ?MatchSuggestionService $matchV2 = null,
     ) {}
 
     /**
@@ -142,7 +146,49 @@ final class StatementMatcher
         return null;
     }
 
+    /**
+     * Zúží kolizi „proforma + její vlastní finál" na proformu. Normalizace VS na číslice
+     * srovná „Z2408001" (proforma) i „2408001" (finál z ní vzniklý) na tutéž hodnotu, takže
+     * dotaz vrátí obě — to ale není nejednoznačnost, jen dva pohledy na týž obchodní případ.
+     * Vrací proformu; kam platbu navázat, rozhodne až logika přesměrování v doMatch().
+     *
+     * Zúží jen PRÁVĚ pár 1 proforma + 1 finál s parent_invoice_id na ni. Tři a víc shod, dvě
+     * proformy nebo dva nepříbuzné doklady zůstanou nedotčené → dál `ambiguous_vs` (správně).
+     *
+     * @param list<array<string,mixed>> $matches
+     * @return list<array<string,mixed>>
+     */
+    private function collapseProformaFinalPair(array $matches): array
+    {
+        if (count($matches) !== 2) {
+            return $matches;
+        }
+        foreach ([[0, 1], [1, 0]] as [$p, $f]) {
+            $proforma = $matches[$p];
+            $final    = $matches[$f];
+            if (($proforma['invoice_type'] ?? '') === 'proforma'
+                && ($final['invoice_type'] ?? '') === 'invoice'
+                && (int) ($final['parent_invoice_id'] ?? 0) === (int) $proforma['id']
+            ) {
+                return [$proforma];
+            }
+        }
+        return $matches;
+    }
+
     public function match(int $transactionId): array
+    {
+        $result = $this->doMatch($transactionId);
+        if ($this->matchV2 === null) return $result;
+        try {
+            return $this->matchV2->afterMatch($transactionId, $result);
+        } catch (\Throwable) {
+            return $result;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function doMatch(int $transactionId): array
     {
         $pdo = $this->db->pdo();
         $tx = $pdo->prepare(
@@ -181,7 +227,7 @@ final class StatementMatcher
         // Porovnává se i domácí část IBANu (#109) — cizoměnové účty bývají evidované
         // jen IBANem (viz schema currencies), GPC ale nese domácí číslo účtu; bez toho
         // EUR výpis skončil jako unknown_supplier_for_account a nikdy se nespároval.
-        $supplierId = 0;
+        $supplierIds = [];
         if (!empty($row['recipient_account'])) {
             $stmt = $pdo->query(
                 'SELECT supplier_id, account_number, iban, bank_code FROM currencies
@@ -202,28 +248,44 @@ final class StatementMatcher
                     }
                 }
                 if (AccountNumberNormalizer::matchesAny((string) $row['recipient_account'], $candidate['account_number'] ?? null, $iban)) {
-                    $supplierId = (int) $candidate['supplier_id'];
-                    break;
+                    $supplierIds[] = (int) $candidate['supplier_id'];
                 }
             }
         }
+        $supplierIds = array_values(array_unique($supplierIds));
+        $supplierId = count($supplierIds) === 1 ? $supplierIds[0] : 0;
         if ($supplierId === 0) {
             return ['status' => 'unmatched', 'reason' => 'unknown_supplier_for_account'];
         }
 
         // ── Outgoing → purchase_invoice (přijaté faktury) ────────────────
         if ($isOutgoing) {
+            // Vrácení peněz odběrateli k vydanému dobropisu: 311/221.
+            if ($vs) {
+                $refund = $this->matchIssuedCreditRefund(
+                    $pdo,
+                    $supplierId,
+                    (string) $vs,
+                    abs($amount),
+                    (string) $row['posted_at'],
+                    $transactionId,
+                    $txCurrency,
+                );
+                if (($refund['status'] ?? 'unmatched') !== 'unmatched') {
+                    return $refund;
+                }
+            }
             // 1) přesný match dle VS dodavatele (vendor_invoice_number / varsymbol)
             if ($vs) {
                 $res = $this->matchPurchase($pdo, $supplierId, (string) $vs, abs($amount), (string) $row['posted_at'], $transactionId, $txCurrency);
-                if (($res['status'] ?? 'unmatched') !== 'unmatched') {
+                if (($res['status'] ?? 'unmatched') !== 'unmatched' || !empty($res['requires_review'])) {
                     return $res;
                 }
             }
             // 2) karetní platby (bez VS) / VS bez shody → fuzzy dle částky + podobného
             //    názvu protistrany (u karet je název obchodníka odlišný od jména dodavatele).
             $res = $this->matchPurchaseFuzzy($pdo, $supplierId, abs($amount), (string) ($row['counterparty_name'] ?? ''), (string) $row['posted_at'], $transactionId, $txCurrency);
-            if (($res['status'] ?? 'unmatched') !== 'unmatched') {
+            if (($res['status'] ?? 'unmatched') !== 'unmatched' || !empty($res['requires_review'])) {
                 return $res;
             }
             // 3) poslední záchrana: shoda dle ČÁSTKY + DATA (±14 dní), stejně jako ruční
@@ -238,6 +300,20 @@ final class StatementMatcher
         // Příchozí platby stále vyžadují VS (vystavené faktury se párují na náš VS).
         if (!$vs) {
             return ['status' => 'unmatched', 'reason' => 'no_vs'];
+        }
+
+        // Refundace přijatého dobropisu od dodavatele: 221/321.
+        $purchaseRefund = $this->matchPurchaseCreditRefund(
+            $pdo,
+            $supplierId,
+            (string) $vs,
+            $amount,
+            (string) $row['posted_at'],
+            $transactionId,
+            $txCurrency,
+        );
+        if (($purchaseRefund['status'] ?? 'unmatched') !== 'unmatched') {
+            return $purchaseRefund;
         }
 
         // ── Incoming → invoice (vystavené faktury) — existing flow ─────────
@@ -257,7 +333,7 @@ final class StatementMatcher
         // VariableSymbolNormalizer::forMatching (číslice bez vodicích nul). REGEXP '[1-9]'
         // vyřadí prázdné / samé-nuly varsymboly (CAST '' → 0), aby nevznikla planá shoda.
         $vsDigits = VariableSymbolNormalizer::digits((string) $vs);
-        $sql = "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type, cur.code AS currency
+        $sql = "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type, i.parent_invoice_id, cur.code AS currency
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
@@ -266,13 +342,26 @@ final class StatementMatcher
                             AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
-                 LIMIT 1";
+                 ORDER BY i.id LIMIT 3";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId, $vs, $vsDigits]);
-        $inv = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$inv) {
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $matches = $this->collapseProformaFinalPair($matches);
+        if (count($matches) > 1) {
+            return ['status' => 'unmatched', 'reason' => 'ambiguous_vs', 'tx_currency' => $txCurrency];
+        }
+        $inv = $matches[0] ?? null;
+        if ($inv === null) {
             return ['status' => 'unmatched', 'reason' => 'no_invoice_with_vs', 'tx_currency' => $txCurrency];
         }
+
+        // Pár proforma + její vlastní finál NENÍ nejednoznačnost — je to očekávaný stav:
+        // proforma nese číslo dokladu s prefixem („Z2408001"), finál z ní vzniklý číslo bez
+        // prefixu („2408001"), a normalizace VS na číslice je oba srovná na tutéž hodnotu.
+        // Kolizi vyřeš zúžením na proformu; o tom, kam platbu nakonec navázat, rozhodne
+        // níže logika přesměrování proforma→finál (ta případ zná a řeší ho správně).
+        // Bez tohoto zúžení by shoda skončila na `ambiguous_vs` a přesměrování by se
+        // nikdy nespustilo → uhrazené zálohy se nepárují a účet 324 zůstane bez inkasa.
 
         // Spárovaná proforma (existuje nestornovaný finál): pohledávku nese FINÁL —
         // doplatek poslaný pod VS proformy se přesměruje na něj. Platba na proformě
@@ -353,9 +442,18 @@ final class StatementMatcher
             try {
                 if (!$alreadyPaid) {
                     if ($this->payments !== null) {
+                        $paymentAmount = $this->txAmountInInvoiceCurrency(
+                            $amount,
+                            $inv,
+                            $txCurrency,
+                            $remaining,
+                        );
+                        if ($paymentAmount > $remaining && $remaining > 0.0) {
+                            $paymentAmount = $remaining;
+                        }
                         $this->payments->recordPayment(
                             (int) $inv['id'],
-                            $this->txAmountInInvoiceCurrency($amount, $inv, $txCurrency, $remaining),
+                            $paymentAmount,
                             (string) $row['posted_at'],
                             [
                                 'source'              => 'bank',
@@ -387,6 +485,8 @@ final class StatementMatcher
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
+
+            $this->clientBankAccounts?->captureForInvoiceTransaction((int) $inv['id'], $transactionId);
 
             // Děkovný e-mail za úhradu (#57/#127) — jen pro fakturu nově označenou jako
             // paid (ne ručně paid, kterou jen navazujeme). Best-effort, mimo transakci:
@@ -444,6 +544,7 @@ final class StatementMatcher
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
+            $this->clientBankAccounts?->captureForInvoiceTransaction((int) $inv['id'], $transactionId);
             $this->logPaymentMatch('invoice', (int) $inv['id'], null, 'auto_partial', $amount, (string) $vs, $transactionId);
 
             $result = [
@@ -466,6 +567,7 @@ final class StatementMatcher
                     SET matched_invoice_id = ?, match_status = 'auto_partial', matched_at = NOW()
                   WHERE id = ?"
             )->execute([$inv['id'], $transactionId]);
+            $this->clientBankAccounts?->captureForInvoiceTransaction((int) $inv['id'], $transactionId);
             return ['status' => 'auto_partial', 'invoice_id' => (int) $inv['id'], 'diff' => $diff];
         }
 
@@ -523,11 +625,18 @@ final class StatementMatcher
                         OR (pi.vendor_invoice_number REGEXP '[1-9]'
                             AND CAST(REGEXP_REPLACE(pi.vendor_invoice_number, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))
                    AND pi.status IN ('received', 'booked', 'paid')
-                 LIMIT 1";
+                   -- DDKP (daňový doklad k platbě) není platební cíl: nemá závazek 321 ani
+                   -- vlastní úhradu, peníze patří k zálohové faktuře (advance). Vyluč z párování.
+                   AND pi.document_kind <> 'tax_document'
+                 ORDER BY pi.id LIMIT 2";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId, $vs, $vs, $vsDigits, $vsDigits]);
-        $pi = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$pi) {
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($matches) > 1) {
+            return ['status' => 'unmatched', 'reason' => 'ambiguous_vs_purchase', 'tx_currency' => $txCurrency];
+        }
+        $pi = $matches[0] ?? null;
+        if ($pi === null) {
             return ['status' => 'unmatched', 'reason' => 'no_purchase_with_vs', 'tx_currency' => $txCurrency];
         }
 
@@ -540,13 +649,19 @@ final class StatementMatcher
         $alreadyPaid = ($pi['status'] === 'paid');
         $diff = abs($absAmount - $m['expected']);
         if ($diff <= $m['exact']) {
+            if ($alreadyPaid) {
+                return [
+                    'status' => 'unmatched',
+                    'reason' => 'already_paid_verify',
+                    'requires_review' => true,
+                    'purchase_invoice_id' => (int) $pi['id'],
+                ];
+            }
             $pdo->beginTransaction();
             try {
-                if (!$alreadyPaid) {
-                    $pdo->prepare(
-                        "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
-                    )->execute([$postedAt, $pi['id']]);
-                }
+                $pdo->prepare(
+                    "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
+                )->execute([$postedAt, $pi['id']]);
                 // payment_matches je N:N — INSERT bezpečný i pro paid invoice.
                 // (Pokud by user spustil rematch znovu, transakce je už auto_exact a do
                 // rematch setu nespadne — duplikace tedy nehrozí.)
@@ -565,25 +680,48 @@ final class StatementMatcher
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
+            $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $pi['id'], $transactionId);
             $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_exact', $absAmount, (string) $vs, $transactionId, $alreadyPaid);
 
             $result = ['status' => 'auto_exact', 'purchase_invoice_id' => (int) $pi['id'], 'varsymbol' => $vs];
-            if ($alreadyPaid) {
-                $result['already_paid'] = true;
-            }
             return $result;
         }
         if ($diff <= $m['partial']) {
             // Partial: zaznam do payment_matches + status na tx, ať UI vidí link
             // (předtím tady byl jen `return` bez zápisu — transakce zůstávaly
             // unmatched, partial match se v UI nikdy nezobrazil).
+            //
+            // Na rozdíl od auto_exact větve výše tady rematch-guard „tx je už auto_exact,
+            // takže do rematch setu nespadne" NEPLATÍ: partial nechává tx v auto_partial,
+            // takže opakovaný rematch tutéž dvojici (tx, PF) potkává znovu a INSERT by
+            // vyrobil druhý payment_matches řádek. Součet alokací by pak byl dvojnásobek
+            // částky transakce a BankPostingService::buildOutgoingMatched by doklad odmítl
+            // jako 'allocation_mismatch' — tj. haléřová platba by se nikdy nezaúčtovala.
+            // Párování je (tx, PF) jedinečné → existující řádek jen aktualizujeme.
             $pdo->beginTransaction();
             try {
-                $pdo->prepare(
-                    "INSERT INTO payment_matches
-                        (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                     VALUES (?, ?, ?, ?, 'auto', 70)"
-                )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+                $existing = $pdo->prepare(
+                    'SELECT id FROM payment_matches
+                      WHERE supplier_id = ? AND bank_transaction_id = ? AND purchase_invoice_id = ?
+                        AND invoice_id IS NULL
+                      ORDER BY id LIMIT 1'
+                );
+                $existing->execute([$supplierId, $transactionId, $pi['id']]);
+                $existingId = $existing->fetchColumn();
+                if ($existingId !== false) {
+                    // Ruční párování má přednost před auto — částku ani confidence nepřepisujeme.
+                    $pdo->prepare(
+                        "UPDATE payment_matches
+                            SET amount = ?, match_confidence = 70
+                          WHERE id = ? AND match_type = 'auto'"
+                    )->execute([$absAmount, (int) $existingId]);
+                } else {
+                    $pdo->prepare(
+                        "INSERT INTO payment_matches
+                            (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
+                         VALUES (?, ?, ?, ?, 'auto', 70)"
+                    )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+                }
                 $pdo->prepare(
                     "UPDATE bank_transactions
                         SET match_status = 'auto_partial', matched_at = NOW()
@@ -594,6 +732,7 @@ final class StatementMatcher
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
+            $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $pi['id'], $transactionId);
             $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_partial', $absAmount, (string) $vs, $transactionId);
 
             return [
@@ -625,7 +764,8 @@ final class StatementMatcher
                   JOIN clients c ON c.id = pi.vendor_id
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN ('received', 'booked')";
+                   AND pi.status IN ('received', 'booked')
+                   AND pi.document_kind <> 'tax_document'"; // DDKP není platební cíl (viz matchPurchase)
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$supplierId]);
 
@@ -644,25 +784,13 @@ final class StatementMatcher
         }
         $pi = $similar[0];
 
-        $pdo->beginTransaction();
-        try {
-            $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND status <> 'paid'")
-                ->execute([$postedAt, $pi['id']]);
-            $pdo->prepare(
-                "INSERT INTO payment_matches
-                    (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                 VALUES (?, ?, ?, ?, 'auto', 60)"
-            )->execute([$supplierId, $transactionId, (int) $pi['id'], $absAmount]);
-            $pdo->prepare("UPDATE bank_transactions SET match_status = 'auto_partial', matched_at = NOW() WHERE id = ?")
-                ->execute([$transactionId]);
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            throw $e;
-        }
-        $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_partial', $absAmount, '', $transactionId);
-
-        return ['status' => 'auto_partial', 'purchase_invoice_id' => (int) $pi['id'], 'fuzzy' => true];
+        return [
+            'status' => 'unmatched',
+            'reason' => 'fuzzy_match_requires_review',
+            'requires_review' => true,
+            'purchase_invoice_id' => (int) $pi['id'],
+            'fuzzy' => true,
+        ];
     }
 
     /** Okno ±N dní kolem data platby pro shodu dle částky+data (zrcadlí BankStatementAction). */
@@ -692,6 +820,7 @@ final class StatementMatcher
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.status IN ('received', 'booked', 'paid')
+                   AND pi.document_kind <> 'tax_document' -- DDKP není platební cíl (viz matchPurchase)
                    AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)
                    AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)";
         $stmt = $pdo->prepare($sql);
@@ -711,29 +840,121 @@ final class StatementMatcher
             return ['status' => 'unmatched', 'reason' => $matches === [] ? 'no_amount_date_match' : 'ambiguous_amount_date_match'];
         }
         $pi = $matches[0];
-        $alreadyPaid = ($pi['status'] ?? '') === 'paid';
+        return [
+            'status' => 'unmatched',
+            'reason' => 'amount_date_requires_review',
+            'requires_review' => true,
+            'purchase_invoice_id' => (int) $pi['id'],
+            'amount_date' => true,
+        ];
+    }
 
+    private function matchIssuedCreditRefund(
+        \PDO $pdo,
+        int $supplierId,
+        string $vs,
+        float $absAmount,
+        string $postedAt,
+        int $transactionId,
+        ?string $txCurrency,
+    ): array {
+        if ($txCurrency !== null && strtoupper($txCurrency) !== self::LOCAL_CURRENCY) {
+            return ['status' => 'unmatched', 'reason' => 'fx_credit_refund_requires_manual'];
+        }
+        $digits = VariableSymbolNormalizer::digits($vs);
+        $stmt = $pdo->prepare(
+            "SELECT i.id, i.amount_to_pay, i.exchange_rate, cur.code AS currency
+               FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
+              WHERE i.supplier_id = ? AND i.invoice_type = 'credit_note'
+                AND i.status IN ('issued','sent','reminded')
+                AND (i.varsymbol = ? OR (i.varsymbol REGEXP '[1-9]'
+                     AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))"
+        );
+        $stmt->execute([$supplierId, $vs, $digits]);
+        $matches = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ((string) $row['currency'] !== self::LOCAL_CURRENCY) continue;
+            $m = $this->expectedMatch(abs((float) $row['amount_to_pay']), (string) $row['currency'], (float) ($row['exchange_rate'] ?: 0), $txCurrency);
+            if ($m !== null && abs($absAmount - $m['expected']) <= $m['exact']) $matches[] = $row;
+        }
+        if (count($matches) !== 1) {
+            return ['status' => 'unmatched', 'reason' => count($matches) > 1 ? 'ambiguous_credit_refund' : 'no_credit_refund'];
+        }
+        $credit = $matches[0];
         $pdo->beginTransaction();
         try {
-            if (!$alreadyPaid) {
-                $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND status <> 'paid'")
-                    ->execute([$postedAt, $pi['id']]);
-            }
+            $pdo->prepare("UPDATE invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
+                ->execute([$postedAt, $credit['id']]);
+            $pdo->prepare(
+                "INSERT INTO payment_matches
+                    (supplier_id, bank_transaction_id, invoice_id, amount, match_type, match_confidence)
+                 VALUES (?, ?, ?, ?, 'auto', 95)"
+            )->execute([$supplierId, $transactionId, $credit['id'], $absAmount]);
+            $pdo->prepare("UPDATE bank_transactions SET matched_invoice_id=?, match_status='auto_exact', matched_at=NOW() WHERE id=?")
+                ->execute([$credit['id'], $transactionId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        $this->clientBankAccounts?->captureForInvoiceTransaction((int) $credit['id'], $transactionId);
+        $this->logPaymentMatch('invoice', (int) $credit['id'], $supplierId, 'auto_exact', $absAmount, $vs, $transactionId);
+        return ['status' => 'auto_exact', 'invoice_id' => (int) $credit['id'], 'credit_refund' => true];
+    }
+
+    private function matchPurchaseCreditRefund(
+        \PDO $pdo,
+        int $supplierId,
+        string $vs,
+        float $amount,
+        string $postedAt,
+        int $transactionId,
+        ?string $txCurrency,
+    ): array {
+        if ($txCurrency !== null && strtoupper($txCurrency) !== self::LOCAL_CURRENCY) {
+            return ['status' => 'unmatched', 'reason' => 'fx_credit_refund_requires_manual'];
+        }
+        $digits = VariableSymbolNormalizer::digits($vs);
+        $stmt = $pdo->prepare(
+            "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                    pi.exchange_rate, cur.code AS currency
+               FROM purchase_invoices pi LEFT JOIN currencies cur ON cur.id = pi.currency_id
+              WHERE pi.supplier_id = ? AND pi.document_kind = 'credit_note'
+                AND pi.status IN ('received','booked')
+                AND (pi.varsymbol = ? OR pi.vendor_invoice_number = ?
+                     OR (pi.varsymbol REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
+                     OR (pi.vendor_invoice_number REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.vendor_invoice_number, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))"
+        );
+        $stmt->execute([$supplierId, $vs, $vs, $digits, $digits]);
+        $matches = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ((string) $row['currency'] !== self::LOCAL_CURRENCY) continue;
+            $m = $this->expectedMatch(abs((float) $row['amount_to_pay']), (string) $row['currency'], (float) ($row['exchange_rate'] ?: 0), $txCurrency);
+            if ($m !== null && abs($amount - $m['expected']) <= $m['exact']) $matches[] = $row;
+        }
+        if (count($matches) !== 1) {
+            return ['status' => 'unmatched', 'reason' => count($matches) > 1 ? 'ambiguous_purchase_credit_refund' : 'no_purchase_credit_refund'];
+        }
+        $credit = $matches[0];
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
+                ->execute([$postedAt, $credit['id']]);
             $pdo->prepare(
                 "INSERT INTO payment_matches
                     (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                 VALUES (?, ?, ?, ?, 'auto', 65)"
-            )->execute([$supplierId, $transactionId, (int) $pi['id'], $absAmount]);
-            $pdo->prepare("UPDATE bank_transactions SET match_status = 'auto_partial', matched_at = NOW() WHERE id = ?")
+                 VALUES (?, ?, ?, ?, 'auto', 95)"
+            )->execute([$supplierId, $transactionId, $credit['id'], $amount]);
+            $pdo->prepare("UPDATE bank_transactions SET match_status='auto_exact', matched_at=NOW() WHERE id=?")
                 ->execute([$transactionId]);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
-        $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_partial', $absAmount, '', $transactionId, $alreadyPaid);
-
-        return ['status' => 'auto_partial', 'purchase_invoice_id' => (int) $pi['id'], 'amount_date' => true];
+        $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $credit['id'], $transactionId);
+        $this->logPaymentMatch('purchase_invoice', (int) $credit['id'], $supplierId, 'auto_exact', $amount, $vs, $transactionId);
+        return ['status' => 'auto_exact', 'purchase_invoice_id' => (int) $credit['id'], 'credit_refund' => true];
     }
 
     /**

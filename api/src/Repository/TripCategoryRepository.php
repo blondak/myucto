@@ -80,12 +80,7 @@ final class TripCategoryRepository
 
     private function slug(string $label): string
     {
-        $s = mb_strtolower($label);
-        $map = ['á'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ň'=>'n','ó'=>'o','ř'=>'r','š'=>'s','ť'=>'t','ú'=>'u','ů'=>'u','ý'=>'y','ž'=>'z'];
-        $s = strtr($s, $map);
-        $s = (string) preg_replace('/[^a-z0-9]+/', '_', $s);
-        $s = trim($s, '_');
-        return $s === '' ? 'kat' : substr($s, 0, 30);
+        return \MyInvoice\Support\Slugifier::slug($label, '_', 'lower', 30, 'kat');
     }
 
     public function create(int $supplierId, array $data): int

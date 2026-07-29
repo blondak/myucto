@@ -84,4 +84,48 @@ final class CzkRecapTest extends TestCase
         self::assertSame(0.0, $r['total_vat_czk']);
         self::assertSame(0.0, $r['total_with_vat_czk']);
     }
+
+    /**
+     * `multiplyHalfUp()` je SSOT přepočtu měny a musí dát MATEMATICKY správný HALF_UP,
+     * i když přesný součin padne na půlhaléřovou hranici.
+     *
+     * Registr SSOT vedl „CzkRecap (bcmath) vs 3 další" jako neověřené hlášení agenta.
+     * Měřením se potvrdilo, že drift je reálný: na 1,6 mil. kombinací částek a reálných
+     * kurzů ČNB se metody rozešly 603× — vždy o jeden haléř a vždy v neprospěch
+     * `round()`, protože v IEEE754 je 75,915 uloženo jako 75,9149999…
+     *
+     * @return iterable<string, array{float, float, float}>
+     */
+    public static function halfCentBoundaries(): iterable
+    {
+        yield '3,00 × 25,305'  => [3.00, 25.305, 75.92];
+        yield '33,00 × 25,305' => [33.00, 25.305, 835.07];
+        yield '7,00 × 30,115'  => [7.00, 30.115, 210.81];
+        yield '21,00 × 24,365' => [21.00, 24.365, 511.67];
+        yield '10,00 × 0,0435' => [10.00, 0.0435, 0.44];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('halfCentBoundaries')]
+    public function testMultiplyHalfUpRoundsExactHalfCentUp(float $amount, float $rate, float $expected): void
+    {
+        self::assertSame(
+            $expected,
+            CzkRecap::multiplyHalfUp($amount, $rate),
+            sprintf('%s × %s musí dát %s — round() dá o haléř míň.', $amount, $rate, $expected),
+        );
+    }
+
+    /**
+     * Pojistka, že vybrané případy skutečně LEŽÍ na hranici. Bez ní by test prošel
+     * i s obyčejným `round()` a netvrdil by nic.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('halfCentBoundaries')]
+    public function testChosenCasesActuallyDivergeFromPlainRound(float $amount, float $rate, float $expected): void
+    {
+        self::assertNotSame(
+            round($amount * $rate, 2),
+            $expected,
+            sprintf('%s × %s se od round() neliší — případ nic nedokazuje.', $amount, $rate),
+        );
+    }
 }

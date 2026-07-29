@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\ActivityLogger;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -25,6 +26,7 @@ final class LoginSessionIssuer
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $lockPolicy,
+        private readonly UserRoleProfile $roleProfile,
     ) {}
 
     /**
@@ -126,12 +128,16 @@ final class LoginSessionIssuer
             : null;
         $cookieSecure = (bool) $this->config->get('session.cookie_secure', true);
         $cookieSameSite = (string) $this->config->get('session.cookie_samesite', 'Lax');
+        $roleProfile = $this->roleProfile->forUser($userId);
         $result = Json::ok($response, [
             'user' => [
                 'id' => $userId,
                 'email' => $email,
                 'name' => (string) ($user['name'] ?? ''),
-                'role' => (string) ($user['role'] ?? ''),
+                // MyÚčto posílá jemnozrnnou roli jako objekt (upstream má prostý string) —
+                // frontend na ní staví `role.type` i `role.system_key`.
+                'role' => $roleProfile,
+                'is_superadmin' => $this->roleProfile->isSuperadmin($userId),
                 'locale' => (string) ($user['locale'] ?? 'cs'),
                 'totp_enabled' => $totpEnabled,
                 'must_setup_totp' => $requireTotp && !$totpEnabled,

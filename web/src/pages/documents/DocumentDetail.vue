@@ -5,9 +5,13 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType, type LinkSearchResult } from '@/api/documents'
-import { docTypeBadge, formatBytes, canInline } from '@/components/documents/docFormat'
+import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
+import { canPreviewDocument, documentPreviewKind } from '@/components/documents/textPreview'
 import EntityLinkPicker from '@/components/documents/EntityLinkPicker.vue'
 import TagInput from '@/components/documents/TagInput.vue'
+import DocumentFilesPanel from '@/components/documents/DocumentFilesPanel.vue'
+import TextDocumentPreview from '@/components/documents/TextDocumentPreview.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,21 +84,22 @@ async function onUnlink(entityType: EntityType, entityId: number) {
   doc.value.links = await documentsApi.removeLink(doc.value.id, entityType, entityId)
 }
 
-// Co zobrazit v náhledu: samotný dokument (PDF/obrázek), jinak první
-// náhledovatelná příloha (typicky PDF uvnitř ZFO datové zprávy).
+// Co zobrazit v náhledu: samotný dokument, jinak první náhledovatelná
+// příloha (typicky PDF/XML uvnitř ZFO datové zprávy).
 const previewTarget = computed<DocItem | null>(() => {
   const d = doc.value
   if (!d) return null
   const all: DocItem[] = [d, ...(d.attachments ?? [])]
   // Ruční výběr (tlačítko „Zobrazit" u přílohy) má přednost.
   if (previewOverrideId.value) {
-    const sel = all.find(x => x.id === previewOverrideId.value && canInline(x.doc_type))
+    const sel = all.find(x => x.id === previewOverrideId.value && canPreviewDocument(x))
     if (sel) return sel
   }
-  if (canInline(d.doc_type)) return d
-  return (d.attachments ?? []).find(a => canInline(a.doc_type)) ?? null
+  if (canPreviewDocument(d)) return d
+  return (d.attachments ?? []).find(canPreviewDocument) ?? null
 })
 const previewUrl = computed(() => previewTarget.value ? documentsApi.previewUrl(previewTarget.value.id) : '')
+const previewKind = computed(() => previewTarget.value ? documentPreviewKind(previewTarget.value) : null)
 
 // Neuložené změny metadat (název / popis / tagy).
 const dirty = computed(() => {
@@ -120,7 +125,15 @@ function goFolder(id: number | null) {
 }
 
 function goEntity(l: { entity_type: EntityType; entity_id: number }) {
-  const map: Record<EntityType, string> = {
+  if (l.entity_type === 'journal_entry') {
+    router.push({ name: 'accounting-journal', query: { entry_id: String(l.entity_id) } })
+    return
+  }
+  if (l.entity_type === 'bank_transaction') {
+    router.push({ name: 'bank-statements' })
+    return
+  }
+  const map: Record<Exclude<EntityType, 'journal_entry' | 'bank_transaction'>, string> = {
     invoice: 'invoice-detail',
     purchase_invoice: 'purchase-invoice-detail',
     client: 'client-detail',
@@ -155,18 +168,24 @@ onMounted(load)
       </button>
       <span :class="['shrink-0 px-2 py-1 rounded text-xs font-semibold', docTypeBadge(doc.doc_type).class]">{{ docTypeBadge(doc.doc_type).label }}</span>
       <div class="min-w-0 flex-1">
-        <h1 class="text-lg font-semibold text-neutral-800 truncate">{{ doc.title }}</h1>
+        <h1 class="text-lg font-semibold text-neutral-800 truncate flex items-center gap-2">
+          {{ doc.title }}
+          <span v-if="doc.scope === 'user'" class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-accent-50 text-accent-700 inline-flex items-center gap-1" :title="doc.owner_name || ''">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
+            {{ t('documents.scope.user') }}<template v-if="doc.owner_name"> · {{ doc.owner_name }}</template>
+          </span>
+        </h1>
         <p class="text-xs text-neutral-500">
           {{ doc.original_name }} · {{ formatBytes(doc.size_bytes) }} · {{ doc.created_at.slice(0, 16) }}
         </p>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        <a :href="documentsApi.downloadUrl(doc.id)" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border border-neutral-300 text-neutral-700 hover:bg-neutral-50">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
+        <a :href="documentsApi.downloadUrl(doc.id)" :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('documents.download') }}
         </a>
-        <button v-if="auth.canWrite" type="button" class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md border border-danger-300 text-danger-500 hover:bg-danger-50" @click="onTrash">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></svg>
+        <button v-if="auth.canWrite('documents.delete')" type="button" :class="btnOutline('danger')" @click="onTrash">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('documents.delete') }}
         </button>
       </div>
@@ -187,14 +206,15 @@ onMounted(load)
           </div>
           <div v-if="previewOpen" class="bg-neutral-100">
             <iframe
-              v-if="previewTarget.doc_type === 'pdf'"
+              v-if="previewKind === 'pdf'"
               :src="previewUrl + '#view=FitH'"
               class="w-full h-[72vh] border-0"
               :title="previewTarget.original_name"
             ></iframe>
-            <div v-else class="flex justify-center p-4">
+            <div v-else-if="previewKind === 'image'" class="flex justify-center p-4">
               <img :src="previewUrl" :alt="previewTarget.original_name" class="max-w-full max-h-[72vh] object-contain" />
             </div>
+            <TextDocumentPreview v-else :document="previewTarget" />
           </div>
         </div>
 
@@ -220,7 +240,7 @@ onMounted(load)
               <span :class="['shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(a.doc_type).class]">{{ docTypeBadge(a.doc_type).label }}</span>
               <button type="button" class="min-w-0 flex-1 text-left text-sm text-neutral-700 truncate hover:text-primary-600" @click="router.push({ name: 'document-detail', params: { id: a.id } })">{{ a.title }}</button>
               <span class="text-xs text-neutral-400">{{ formatBytes(a.size_bytes) }}</span>
-              <button v-if="canInline(a.doc_type)" type="button" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md border border-neutral-300 text-neutral-600 hover:bg-surface" @click="showPreview(a)">
+              <button v-if="canPreviewDocument(a)" type="button" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md border border-neutral-300 text-neutral-600 hover:bg-surface" @click="showPreview(a)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7s-8.268-2.943-9.542-7z" /><circle cx="12" cy="12" r="3" /></svg>
                 {{ t('documents.show') }}
               </button>
@@ -239,29 +259,34 @@ onMounted(load)
           <h3 class="text-sm font-medium text-neutral-700">{{ t('documents.metadata') }}</h3>
           <div>
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.name') }}</label>
-            <input v-model="title" :disabled="!auth.canWrite" type="text" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-200 outline-none disabled:bg-neutral-50" />
+            <input v-if="auth.canWrite('documents')" v-model="title" type="text" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-200 outline-none" />
+            <div v-else class="text-sm">{{ title || '—' }}</div>
           </div>
           <div>
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.description') }}</label>
-            <textarea v-model="description" :disabled="!auth.canWrite" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-200 outline-none disabled:bg-neutral-50"></textarea>
+            <textarea v-if="auth.canWrite('documents')" v-model="description" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-200 outline-none"></textarea>
+            <div v-else class="text-sm whitespace-pre-wrap">{{ description || '—' }}</div>
           </div>
           <div>
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.tags') }}</label>
-            <TagInput v-if="auth.canWrite" v-model="tags" />
+            <TagInput v-if="auth.canWrite('documents')" v-model="tags" />
             <div v-else class="flex flex-wrap gap-1">
               <span v-for="tg in tags" :key="tg" class="inline-flex items-center px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 text-xs">{{ tg }}</span>
               <span v-if="!tags.length" class="text-sm text-neutral-400">—</span>
             </div>
           </div>
-          <div v-if="dirty && auth.canWrite" class="flex items-center gap-2 px-3 py-2 rounded-md bg-warning-50 text-warning-700 text-xs">
+          <div v-if="dirty && auth.canWrite('documents')" class="flex items-center gap-2 px-3 py-2 rounded-md bg-warning-50 text-warning-700 text-xs">
             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
             {{ t('documents.unsaved_changes') }}
           </div>
-          <button v-if="auth.canWrite" type="button" :disabled="saving || !dirty" class="cursor-pointer w-full inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm font-medium rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-default" @click="save">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+          <button v-if="auth.canWrite('documents')" type="button" :disabled="saving || !dirty" class="w-full justify-center" :class="btnFilled('primary')" @click="save">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('documents.save') }}
           </button>
         </div>
+
+        <!-- Multi-file panel (primary + přílohy) — Epic F7 -->
+        <DocumentFilesPanel :document-id="doc.id" />
 
         <!-- Links (oboustranné párování) -->
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3">
@@ -270,13 +295,13 @@ onMounted(load)
             <li v-for="l in doc.links" :key="l.entity_type + '-' + l.entity_id" class="flex items-start gap-2 text-sm">
               <span class="mt-0.5 shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-neutral-100 text-neutral-500">{{ entityLabel(l.entity_type) }}</span>
               <button type="button" class="min-w-0 flex-1 text-left text-neutral-700 hover:text-primary-600 hover:underline" @click="goEntity(l)">{{ l.label }}</button>
-              <button v-if="auth.canWrite" type="button" class="mt-0.5 shrink-0 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="onUnlink(l.entity_type, l.entity_id)">
+              <button v-if="auth.canWrite('documents.move')" type="button" class="mt-0.5 shrink-0 text-neutral-400 hover:text-warning-600" :title="t('documents.unlink_hint')" @click="onUnlink(l.entity_type, l.entity_id)">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244M3 3l18 18" /></svg>
               </button>
             </li>
           </ul>
           <p v-else class="text-sm text-neutral-400">{{ t('documents.no_links') }}</p>
-          <div v-if="auth.canWrite">
+          <div v-if="auth.canWrite('documents.move')">
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.add_link') }}</label>
             <EntityLinkPicker @select="onLink" />
           </div>

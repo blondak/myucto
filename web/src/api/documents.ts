@@ -1,7 +1,27 @@
 import { api } from './client'
 
 export type DocType = 'pdf' | 'docx' | 'xlsx' | 'xml' | 'zfo' | 'p7s' | 'zip' | 'image' | 'other'
-export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project'
+export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project' | 'journal_entry' | 'bank_transaction'
+
+/** Viditelnost dokladu v rámci tenanta (Epic F7). company = celá firma, user = jen vlastník. */
+export type DocScope = 'company' | 'user'
+/** Role souboru u N-souborů-na-doklad (Epic F7). */
+export type DocFileRole = 'primary' | 'attachment'
+
+export interface DocumentFile {
+  id: number
+  document_id: number
+  role: DocFileRole
+  sha256: string
+  filename: string
+  original_name: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  doc_type: DocType | null
+  sort_order: number
+  uploaded_by: number | null
+  created_at: string
+}
 
 export interface DocFolder {
   id: number
@@ -56,22 +76,50 @@ export interface DocItem {
   has_thumb: boolean
   created_at: string
   deleted_at: string | null
+  // scope/owner (Epic F7) — optional pro back-compat se staršími payloady
+  scope?: DocScope
+  owner_user_id?: number | null
+  owner_name?: string | null
   // detail-only
   tags?: string[]
   links?: DocLink[]
   attachments?: DocItem[]
+  files?: DocumentFile[]
   dms_message?: DmsMessage | null
   breadcrumb?: BreadcrumbItem[]
 }
 
 export interface BreadcrumbItem { id: number; name: string }
 
-export interface FolderListing {
+/** Stránkovací meta (Support\Pagination) + doprovodná data k výpisu složky. */
+export interface DocListMeta {
+  total: number
+  page: number
+  per_page: number
+  pages: number
   breadcrumb: BreadcrumbItem[]
   folders: DocFolder[]
-  documents: DocItem[]
   max_file_bytes: number
-  php_max_upload_bytes: number
+  php_max_upload_bytes?: number
+  tag?: string
+}
+
+export interface FolderListing {
+  data: DocItem[]
+  meta: DocListMeta
+}
+
+export interface TrashMeta {
+  total: number
+  page: number
+  per_page: number
+  pages: number
+  folders: DocFolder[]
+}
+
+export interface TrashListing {
+  data: DocItem[]
+  meta: TrashMeta
 }
 
 export interface LinkSearchResult {
@@ -128,12 +176,22 @@ function urlWith(path: string, params: Record<string, string> = {}): string {
 }
 
 export const documentsApi = {
-  list: (folderId: number | null, opts: { docType?: string; tag?: string } = {}) =>
+  list: (
+    folderId: number | null,
+    opts: {
+      docType?: string; tag?: string; scope?: DocScope; ownerUserId?: number | null
+      page?: number; perPage?: number
+    } = {},
+  ) =>
     api.get<FolderListing>('/documents', {
       params: {
         folder_id: folderId ?? '',
         ...(opts.docType ? { doc_type: opts.docType } : {}),
         ...(opts.tag ? { tag: opts.tag } : {}),
+        ...(opts.scope ? { scope: opts.scope } : {}),
+        ...(opts.ownerUserId != null ? { owner_user_id: opts.ownerUserId } : {}),
+        ...(opts.page ? { page: opts.page } : {}),
+        ...(opts.perPage ? { per_page: opts.perPage } : {}),
       },
     }).then(r => r.data),
 
@@ -170,7 +228,13 @@ export const documentsApi = {
       params: { entity_type: entityType, entity_id: entityId },
     }).then(r => r.data.links),
 
-  trash: () => api.get<{ documents: DocItem[]; folders: DocFolder[] }>('/documents/trash').then(r => r.data),
+  trash: (opts: { page?: number; perPage?: number } = {}) =>
+    api.get<TrashListing>('/documents/trash', {
+      params: {
+        ...(opts.page ? { page: opts.page } : {}),
+        ...(opts.perPage ? { per_page: opts.perPage } : {}),
+      },
+    }).then(r => r.data),
   emptyTrash: () => api.post<{ ok: boolean; deleted: number }>('/documents/trash/empty').then(r => r.data),
 
   bulk: (action: 'move' | 'delete' | 'tag', ids: number[], extra: Record<string, unknown> = {}) =>
@@ -242,6 +306,27 @@ export const documentsApi = {
   cancelJob: (id: number) => api.post<{ ok: boolean }>(`/documents/jobs/${id}/cancel`).then(r => r.data),
   deleteJob: (id: number) => api.delete<{ ok: boolean }>(`/documents/jobs/${id}`).then(r => r.data),
   jobDownloadUrl: (id: number) => urlWith(`/documents/jobs/${id}/download`),
+
+  // ── N-souborů-na-doklad (Epic F7) — primary + attachments ──
+  listFiles: (id: number) =>
+    api.get<{ files: DocumentFile[] }>(`/documents/${id}/files`).then(r => r.data.files ?? []),
+  addFiles: (id: number, files: File[], onProgress?: (pct: number) => void) => {
+    const fd = new FormData()
+    for (const f of files) fd.append('file[]', f, f.name)
+    return api.post<{ files: DocumentFile[] }>(`/documents/${id}/files`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => { if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100)) },
+    }).then(r => r.data)
+  },
+  /** set-primary / změna pořadí (sort_order). */
+  patchFile: (id: number, fileId: number, payload: { role?: DocFileRole; sort_order?: number }) =>
+    api.patch<{ files: DocumentFile[] }>(`/documents/${id}/files/${fileId}`, payload).then(r => r.data),
+  deleteFile: (id: number, fileId: number) =>
+    api.delete<{ files: DocumentFile[] }>(`/documents/${id}/files/${fileId}`).then(r => r.data),
+  fileDownloadUrl: (id: number, fileId: number) => urlWith(`/documents/${id}/files/${fileId}/download`),
+
+  previewBytes: (id: number) =>
+    api.get<ArrayBuffer>(`/documents/${id}/download`, { responseType: 'arraybuffer' }).then(r => r.data),
 
   // Direct-navigation URLs (browser; supplier_id via query param)
   previewUrl: (id: number) => urlWith(`/documents/${id}/preview`),

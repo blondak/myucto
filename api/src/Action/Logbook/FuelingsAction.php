@@ -12,12 +12,13 @@ use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Logbook\FuelingOdometerEstimator;
+use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Tankování:
- *   GET    /api/logbook/fuelings      — list (?car_id=&source=&vendor_id=&year=&month=&date_from=&date_to=&unassigned=1)
+ *   GET    /api/logbook/fuelings      — list (?car_id=&source=&vendor_id=&year=&month=&date_from=&date_to=&unassigned=1&page=&per_page=)
  *   GET    /api/logbook/fuelings/{id}
  *   POST   /api/logbook/fuelings      — ruční záznam
  *   PUT    /api/logbook/fuelings/{id}
@@ -38,8 +39,15 @@ final class FuelingsAction
         $supplierId = SupplierGuard::currentId($request);
         $q = $request->getQueryParams();
         $filters = array_intersect_key($q, array_flip(['car_id', 'source', 'vendor_id', 'year', 'month', 'date_from', 'date_to', 'unassigned']));
-        $rows = $this->odometer->annotate($supplierId, $this->repo->listForTenant($supplierId, $filters));
-        return Json::ok($response, $rows);
+        $p = Pagination::fromQuery($q, 50);
+        [$rows, $total] = $this->repo->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
+        $rows = $this->odometer->annotate($supplierId, $rows);
+        $carId = !empty($filters['car_id']) ? (int) $filters['car_id'] : null;
+        $years = $this->repo->distinctYears($supplierId, $carId);
+        return Json::ok($response, array_merge(
+            Pagination::envelope($rows, $total, $p['page'], $p['per_page']),
+            ['years' => $years]
+        ));
     }
 
     public function get(Request $request, Response $response, array $args): Response

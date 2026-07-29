@@ -10,7 +10,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
-use MyInvoice\Service\Import\AnthropicClient;
+use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Service\Import\IsdocParser;
 use MyInvoice\Service\Import\PdfIsdocExtractor;
 use MyInvoice\Service\Payment\BankAccountParser;
@@ -26,7 +26,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *        (nebo signál needs_account / fallback obrázek QR z PDF). Čistě read.
  *   POST /api/purchase-invoices/{id}/payment-qr/extract-account
  *        → jednorázové lazy doplnění účtu z ISDOC → AI (zápis; readonly blokuje
- *          RoleMiddleware podle metody).
+ *          PermissionMiddleware podle metody).
  *   PUT  /api/purchase-invoices/{id}/payment-account       → ruční editace účtu.
  *
  * QR generuje server-side přes QrPaymentGenerator (CZK SPAYD / jinak SEPA EPC),
@@ -41,7 +41,7 @@ final class PaymentQrAction
         private readonly Config $config,
         private readonly PdfIsdocExtractor $pdfIsdoc,
         private readonly IsdocParser $isdoc,
-        private readonly AnthropicClient $anthropic,
+        private readonly LlmGatewayInterface $anthropic,
         private readonly PdfImageExtractor $pdfImages,
     ) {}
 

@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payment\PaymentOrderService;
+use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,7 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/purchase-invoices/payment-orders/{id}                     → detail dávky (read)
  *   GET    /api/purchase-invoices/payment-orders/{id}/download?format=abo|csv|pdf → soubor (read)
  *
- * Zápisové operace (POST) blokuje RoleMiddleware pro readonly uživatele dle metody.
+ * Zápisové operace (POST) blokuje PermissionMiddleware pro readonly uživatele dle metody.
  */
 final class PaymentOrderAction
 {
@@ -32,13 +33,25 @@ final class PaymentOrderAction
         private readonly IpMatcher $ipMatcher,
     ) {}
 
-    /** GET candidates + payer accounts. */
+    /** GET candidates + payer accounts (stránkovaně). */
     public function candidates(Request $request, Response $response): Response
     {
         $supplierId = SupplierGuard::currentId($request);
-        $currency = $request->getQueryParams()['currency'] ?? null;
+        $q = $request->getQueryParams();
+        $currency = $q['currency'] ?? null;
         $currency = is_string($currency) && $currency !== '' ? $currency : null;
-        return Json::ok($response, $this->service->candidates($supplierId, $currency));
+        $p = Pagination::fromQuery($q, 50);
+
+        // Opt-out z filtru „jen bankovní převod": inkasní faktury se do příkazu nedávají,
+        // ale chybně označenou fakturu musí jít najít a opravit — jinak by z obrazovky
+        // zmizela beze stopy a nikdo by ji nikdy nezaplatil.
+        $raw = $q['include_non_transfer'] ?? null;
+        $includeNonTransfer = in_array(is_string($raw) ? strtolower($raw) : $raw, ['1', 'true', 'yes', true], true);
+
+        $result = $this->service->candidates($supplierId, $currency, $p['per_page'], $p['offset'], $includeNonTransfer);
+        $envelope = Pagination::envelope($result['candidates'], $result['total'], $p['page'], $p['per_page']);
+        $envelope['payer_accounts'] = $result['payer_accounts'];
+        return Json::ok($response, $envelope);
     }
 
     /** POST — vytvoř (ulož) platební příkaz. */
@@ -109,11 +122,13 @@ final class PaymentOrderAction
         return Json::ok($response, ['count' => $count]);
     }
 
-    /** GET — historie dávek. */
+    /** GET — historie dávek (stránkovaně). */
     public function history(Request $request, Response $response): Response
     {
         $supplierId = SupplierGuard::currentId($request);
-        return Json::ok($response, ['data' => $this->service->history($supplierId)]);
+        $p = Pagination::fromQuery($request->getQueryParams(), 50);
+        [$rows, $total] = $this->service->history($supplierId, $p['per_page'], $p['offset']);
+        return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
     }
 
     /** GET — detail dávky (vč. položek). */

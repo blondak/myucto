@@ -6,6 +6,8 @@ namespace MyInvoice\Action\Document;
 
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Repository\DocumentViewerContext;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /** Sdílené pomocné metody pro Document akce (supplier scope, user, IP). */
@@ -20,6 +22,18 @@ trait DocumentActionTrait
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         return isset($user['id']) ? (int) $user['id'] : null;
+    }
+
+    /**
+     * Per-user scope guard kontext (Epic F7, §4.2). Superadmin vidí vše tenanta;
+     * ostatní jen firemní a vlastní user dokumenty. Efektivní roli dodává
+     * PermissionMiddleware jako request-scoped EffectiveRole.
+     */
+    private function viewer(Request $request): DocumentViewerContext
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $uid  = isset($user['id']) ? (int) $user['id'] : null;
+        return DocumentViewerContext::fromAuthorization(RequestAuthorization::isSuperadmin($request), $uid);
     }
 
     private function clientIp(Request $request): ?string

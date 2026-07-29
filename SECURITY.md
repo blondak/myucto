@@ -2,11 +2,11 @@
 
 ## Reporting a Vulnerability
 
-Pokud objevíš bezpečnostní zranitelnost v MyInvoice.cz, **prosíme nezveřejňuj
+Pokud objevíš bezpečnostní zranitelnost v MyÚčto.cz, **prosíme nezveřejňuj
 ji v public GitHub Issues**. Místo toho ji nahlaš přímo:
 
 - **Web:** [https://mywebdesign.cz/](https://mywebdesign.cz/) — kontaktní formulář
-  s předmětem `[SECURITY] MyInvoice.cz`
+  s předmětem `[SECURITY] MyÚčto.cz`
 - **Předmět e-mailu:** `[SECURITY] <stručný popis>`
 
 ### Co nahlásit
@@ -48,9 +48,3 @@ Patche dostává **nejnovější minor release** větve:
 |-------|--------|
 | 1.x   | ✅ Aktivně udržovaná |
 | < 1.0 | ❌ Pre-release, bez podpory |
-
-## Security audit
-
-Interní bezpečnostní audit projektu je v `source/07-security-audit.md` —
-veřejně přístupný (transparentnost). Známé findings (P1–P3) jsou označené jako
-fixed nebo s odůvodněním vynechané.

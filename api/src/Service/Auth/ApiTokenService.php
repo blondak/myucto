@@ -137,11 +137,14 @@ final class ApiTokenService
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope,
                     t.expires_at, t.revoked_at,
-                    u.email AS user_email, u.name AS user_name, u.role AS user_role,
+                    u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
+                    r.name AS user_role_name, r.role_type AS user_role_type,
+                    r.is_active AS user_role_active, r.system_key AS user_role_system_key,
                     u.locale AS user_locale, u.is_active AS user_is_active,
                     u.totp_enabled AS user_totp_enabled
              FROM api_tokens t
              JOIN users u ON u.id = t.user_id
+             JOIN roles r ON r.id = u.role_id
              WHERE t.token_hash = ?
                AND t.revoked_at IS NULL
                AND (t.expires_at IS NULL OR t.expires_at > NOW())
@@ -152,12 +155,14 @@ final class ApiTokenService
         if (!$row) {
             return null;
         }
-        if ((int) $row['user_is_active'] !== 1) {
+        if ((int) $row['user_is_active'] !== 1 || (int) $row['user_role_active'] !== 1) {
             return null;
         }
 
         $row['id']                = (int) $row['id'];
         $row['user_id']           = (int) $row['user_id'];
+        $row['user_role_id']      = (int) $row['user_role_id'];
+        $row['user_role_active']  = true;
         $row['supplier_id']       = $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null;
         $row['user_is_active']    = true;
         $row['user_totp_enabled'] = (int) ($row['user_totp_enabled'] ?? 0) === 1;
@@ -170,13 +175,14 @@ final class ApiTokenService
      */
     public function touch(int $tokenId, string $ip): void
     {
-        if (($r = $this->redis->client()) !== null) {
-            $key = 'apitok:touch:' . $tokenId;
-            // SET key 1 EX 300 NX — vrátí "OK" pokud nastaveno, null pokud klíč už existuje (= updateováno nedávno)
-            $set = $r->set($key, '1', 'EX', self::TOUCH_INTERVAL_SEC, 'NX');
-            if ($set === null) {
-                return;
-            }
+        $key = 'apitok:touch:' . $tokenId;
+        // SET key 1 EX 300 NX — vrátí "OK" pokud nastaveno, null pokud klíč už existuje (= updateováno nedávno)
+        $throttled = $this->redis->run(
+            fn($r) => $r->set($key, '1', 'EX', self::TOUCH_INTERVAL_SEC, 'NX') === null,
+            false,
+        );
+        if ($throttled === true) {
+            return;
         }
 
         $packed = @inet_pton($ip);

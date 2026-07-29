@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use DateTimeImmutable;
+use MyInvoice\Infrastructure\Database\Connection;
 
 final class RecurringPriceListService
 {
     private const POLICIES = ['fixed', 'current', 'review_required'];
     private const DESCRIPTION_SOURCES = ['catalog', 'template'];
 
-    public function __construct(private readonly PriceListItemResolver $resolver) {}
+    public function __construct(
+        private readonly PriceListItemResolver $resolver,
+        private readonly Connection $db,
+    ) {}
 
     /**
      * @param list<array<string,mixed>> $items
@@ -38,6 +42,22 @@ final class RecurringPriceListService
                 || empty($row['catalog_price_source'])
                 || $row['catalog_policy'] === 'current';
             if ($needsCanonicalValues) $idsToResolve[] = $row['price_list_item_id'];
+        }
+
+        if (!$this->isAvailable($supplierId)) {
+            foreach ($normalized as &$row) {
+                if ($row['price_list_item_id'] === null) continue;
+                $row['price_list_item_id'] = null;
+                $row['catalog_policy'] = 'fixed';
+                $row['description_source'] = 'template';
+                $row['catalog_price_source'] = null;
+                $row['catalog_source_currency_code'] = null;
+                $row['catalog_source_unit_price'] = null;
+                $row['catalog_exchange_rate'] = null;
+                $row['catalog_exchange_rate_date'] = null;
+            }
+            unset($row);
+            return $normalized;
         }
 
         $resolved = $idsToResolve === [] ? [] : $this->resolver->resolveMany(
@@ -70,6 +90,14 @@ final class RecurringPriceListService
         bool $pricesIncludeVat,
         DateTimeImmutable $referenceDate,
     ): array {
+        if (!$this->isAvailable($supplierId)) {
+            return array_map(function (array $item, int $index): array {
+                $row = $this->normalizeItem($item, $index);
+                $row['catalog_policy'] = 'fixed';
+                return $row;
+            }, array_values($items), array_keys(array_values($items)));
+        }
+
         $ids = [];
         foreach ($items as $item) {
             if (!empty($item['price_list_item_id']) && ($item['catalog_policy'] ?? 'fixed') !== 'fixed') {
@@ -184,5 +212,13 @@ final class RecurringPriceListService
     {
         if ($left === null || $right === null) return $left === $right;
         return abs((float) $left - (float) $right) < 0.005;
+    }
+
+    private function isAvailable(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $stockEnabled = $stmt->fetchColumn();
+        return $stockEnabled !== false && (int) $stockEnabled !== 1;
     }
 }

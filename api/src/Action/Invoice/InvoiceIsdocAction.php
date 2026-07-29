@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
@@ -63,8 +64,11 @@ final class InvoiceIsdocAction
             (string) ($invoice['currency'] ?? 'CZK') !== 'CZK'
             && empty($invoice['exchange_rate'])
         ) {
-            $this->rateApplier->ensureRate($id);
-            $invoice = $this->repo->find($id);
+            $demo = DemoReadOnlyMiddleware::enabled($request);
+            $resolved = $this->rateApplier->ensureRate($id, persist: !$demo);
+            $invoice = $demo
+                ? $this->rateApplier->applyResolvedToInvoiceData($invoice, $resolved)
+                : $this->repo->find($id);
         }
 
         try {

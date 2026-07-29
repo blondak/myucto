@@ -36,6 +36,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundUrlGuard;
 use MyInvoice\Service\Import\FakturoidClient;
 use Psr\Log\NullLogger;
 
@@ -52,7 +53,7 @@ if ($supplierId === null) {
 $config = Config::load(Bootstrap::rootDir());
 $conn   = new Connection($config);
 $crypto = new SecretEncryption($config);
-$client = new FakturoidClient($conn, $crypto, new NullLogger());
+$client = new FakturoidClient($conn, $crypto, new NullLogger(), new OutboundUrlGuard(), $config);
 $pdo    = $conn->pdo();
 
 // Načti všechny faktury, které máme z Fakturoidu, indexované podle fakturoid_id

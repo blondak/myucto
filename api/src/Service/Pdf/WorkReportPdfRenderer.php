@@ -24,6 +24,11 @@ final class WorkReportPdfRenderer
 {
     use SignsPdf;
 
+    private ?Environment $twig = null;
+
+    /** Aktuální locale pro Twig funkci `t()` — přenastavuje render(). */
+    private string $locale = 'cs';
+
     public function __construct(
         private readonly InvoiceRepository $invoices,
         private readonly WorkReportRepository $workReports,
@@ -55,10 +60,8 @@ final class WorkReportPdfRenderer
         $css .= PdfBranding::accentCss($supplier);
 
         $locale = (string) ($invoice['language'] ?? 'cs');
+        $this->locale = $locale;
         $twig = $this->twig();
-        $twig->addFunction(new \Twig\TwigFunction('t', static function (string $cs, string $en) use ($locale) {
-            return $locale === 'en' ? $en : $cs;
-        }));
 
         $body = $twig->render('work_report.twig', [
             'invoice'        => $invoice,
@@ -94,7 +97,7 @@ final class WorkReportPdfRenderer
         ]);
         $mpdf->SetTitle('');
         $mpdf->SetAuthor('');
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
 
         if ($css !== '') {
             $mpdf->WriteHTML($css, \Mpdf\HTMLParserMode::HEADER_CSS);
@@ -129,12 +132,22 @@ final class WorkReportPdfRenderer
 
     private function twig(): Environment
     {
+        if ($this->twig !== null) {
+            return $this->twig;
+        }
+
         $loader = new FilesystemLoader(dirname(__DIR__, 3) . '/templates/invoice');
-        return new Environment($loader, [
+        $this->twig = new Environment($loader, [
             'autoescape' => 'html',
-            'cache' => false,
             'strict_variables' => false,
-        ]);
+        ] + TwigCache::options('invoice'));
+
+        // Locale nesmí být zachycené v closure — viz InvoicePdfRenderer::twig().
+        $this->twig->addFunction(new \Twig\TwigFunction('t', function (string $cs, string $en) {
+            return $this->locale === 'en' ? $en : $cs;
+        }));
+
+        return $this->twig;
     }
 
     private function resolveSupplier(array $invoice): array

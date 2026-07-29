@@ -24,25 +24,43 @@ final class TaxConstantsRepository
      * klíče doplní default z kódu (override uložený starší verzí aplikace nezná
      * později přidané konstanty — bez merge by je "ztratil").
      *
-     * Rok neznámý kódu ani DB (typicky nový rok před release/zkopírováním
-     * číselníku) spadne na nejbližší předchozí známý rok VČETNĚ jeho DB
-     * override — admin úprava aktuálního roku se tak propíše i do dalšího
-     * roku, dokud nedostane vlastní řádek.
+     * Obecné služby mohou použít nejbližší známou sadu; doménové kalkulátory,
+     * u nichž je historický fallback nebezpečný, ověřují rok výsledné sady.
      * @return array<string,mixed>
      */
     public function forYear(int $year): array
     {
         $override = $this->override($year);
         if ($override !== null) {
-            return $this->merge(TaxConstants::forYear($year), $override, $year);
+            $default = in_array($year, TaxConstants::availableYears(), true)
+                ? TaxConstants::forYear($year)
+                : ['year' => $year];
+            return $this->merge($default, $override, $year);
         }
         if (in_array($year, TaxConstants::availableYears(), true)) {
             return TaxConstants::forYear($year);
         }
         $fallback = $this->nearestKnownYear($year);
-        $default = TaxConstants::forYear($fallback);
+        $defaultYear = in_array($fallback, TaxConstants::availableYears(), true)
+            ? $fallback
+            : $this->nearestBuiltInYear($fallback);
+        $default = TaxConstants::forYear($defaultYear);
         $fallbackOverride = $this->override($fallback);
         return $fallbackOverride !== null ? $this->merge($default, $fallbackOverride, $year) : $default;
+    }
+
+    /** Konstanty pro daňové přiznání bez meziričního fallbacku. */
+    public function forExactYear(int $year): array
+    {
+        $override = $this->override($year);
+        if (in_array($year, TaxConstants::availableYears(), true)) {
+            $default = TaxConstants::forYear($year);
+            return $override !== null ? $this->merge($default, $override, $year) : $default;
+        }
+        if ($override !== null) {
+            return $this->merge(['year' => $year], $override, $year);
+        }
+        throw new \OutOfRangeException('Pro rok ' . $year . ' nejsou ověřené daňové konstanty ani DB override.');
     }
 
     /**
@@ -63,13 +81,9 @@ final class TaxConstantsRepository
         if ($legacy) {
             unset($default['pausal_monthly']);
         }
-        return TaxConstants::withDerived(array_replace($default, $override), $year);
+        return TaxConstants::withDerived($this->deepMerge($default, $override), $year);
     }
 
-    /**
-     * Nejbližší předchozí rok známý kódu nebo DB; před začátkem historie
-     * nejstarší známý (zrcadlí fallback {@see TaxConstants::forYear()}).
-     */
     private function nearestKnownYear(int $year): int
     {
         $dbYears = array_map(
@@ -81,10 +95,26 @@ final class TaxConstantsRepository
         return $below !== [] ? max($below) : min($known);
     }
 
+    private function nearestBuiltInYear(int $year): int
+    {
+        $known = TaxConstants::availableYears();
+        $below = array_filter($known, static fn (int $y): bool => $y < $year);
+        return $below !== [] ? max($below) : min($known);
+    }
+
     /** Limit KH pro rozdělení A.4/A.5 a B.2/B.3 (nad → jednotlivě, do → sumace). */
     public function khItemThreshold(int $year): float
     {
         return (float) $this->forYear($year)['kh_item_threshold'];
+    }
+
+    /**
+     * Celounijní práh pro přeshraniční B2C plnění (§ 8 odst. 3 / § 10i ZDPH).
+     * Je v EUR, ne v Kč — je společný pro všechny členské státy.
+     */
+    public function ossThresholdEur(int $year): float
+    {
+        return (float) $this->forYear($year)['oss_threshold_eur'];
     }
 
     /** Základní sazba DPH (§ 47 ZDPH) pro rok — např. pro samovyměření RC. */
@@ -144,7 +174,13 @@ final class TaxConstantsRepository
                 // Merge jako forYear() — starý override nesmí v editoru "ztratit"
                 // později přidané konstanty.
                 'data'        => $override !== null
-                    ? $this->merge(TaxConstants::forYear($year), $override, $year)
+                    ? $this->merge(
+                        in_array($year, TaxConstants::availableYears(), true)
+                            ? TaxConstants::forYear($year)
+                            : ['year' => $year],
+                        $override,
+                        $year,
+                    )
                     : TaxConstants::forYear($year),
             ];
         }
@@ -178,5 +214,25 @@ final class TaxConstantsRepository
         $stmt = $this->db->pdo()->prepare('DELETE FROM tax_constants WHERE year = ?');
         $stmt->execute([$year]);
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Hloubkový merge — override smí přepsat jediný vnořený klíč, aniž by
+     * shodil své sourozence (seznamy se nahrazují celé).
+     *
+     * @param array<string|int,mixed> $base
+     * @param array<string|int,mixed> $override
+     * @return array<string|int,mixed>
+     */
+    private function deepMerge(array $base, array $override): array
+    {
+        foreach ($override as $key => $value) {
+            if (is_array($value) && isset($base[$key]) && is_array($base[$key]) && !array_is_list($value)) {
+                $base[$key] = $this->deepMerge($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+        return $base;
     }
 }

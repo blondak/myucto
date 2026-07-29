@@ -28,6 +28,35 @@ https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_seznam.faces
 > **Pozn.:** soubor zde **musí mít jméno bez `_epo2` suffixu** (např. `dphdp3.xsd`, ne
 > `dphdp3_epo2.xsd`). XmlSchemaValidator hledá `storage/xsd/{form_code}.xsd`.
 
+## Zdroj ČSSZ — přehled OSVČ (sociální pojištění)
+
+Roční **Přehled o příjmech a výdajích OSVČ** se podává elektronicky (datová schránka /
+ePortál ČSSZ) ve **vlastním XML** ČSSZ — jiné schéma i kanál než EPO finanční správy.
+Slouží pro e-podání pojistného OSVČ (fáze DP v2). Namespace `http://schemas.cssz.cz/OSVC2025`.
+
+📋 **Definice e-Podání OSVČ (pro vývojáře, sekce „Datová věta"):**
+https://www.cssz.gov.cz/definice-e-podani-osvc
+
+📥 **Přímé URL (ročník 2025 — dokument-ID se mění per ročník!):**
+
+| Filename | Popis | URL |
+|---|---|---|
+| `osvc25.xsd` | Přehled OSVČ 2025 (XSD) | https://www.cssz.gov.cz/documents/20143/3201321/OSVC25.xsd/5d467add-4c11-0e56-4d54-d455b56c15c9 |
+| — | Popis datové věty (PDF) | https://www.cssz.gov.cz/documents/20143/3201321/DV_OSVC25.pdf/cd3fe989-b5e3-1dcf-bfab-895d22f937ff |
+| — | Vzorové XML (příklad věty) | https://www.cssz.gov.cz/documents/20143/3201321/OSVC25+vzor.xml/e2a3c68f-e8f1-f701-ede0-30dabb8c4b35 |
+
+Stáhni přes `bash cmd/download-xsd.sh osvc25` nebo `cmd\download-xsd.cmd osvc25`.
+Cílový soubor **musí** být `osvc25.xsd` (form_code = `osvc25`, který hledá XmlSchemaValidator).
+
+> **⚠️ Nezaměňovat s PVPOJ.** ČSSZ má dvě různá schémata: **OSVC** = roční *přehled OSVČ*
+> (příjmy a výdaje, tohle používáme), zatímco **PVPOJ** = měsíční *přehled o výši pojistného
+> zaměstnavatele* (mzdy). Pro OSVČ přehled je správné jen `OSVC{YY}`.
+>
+> **Zdravotní pojišťovny (VZP/ZP):** nemají jednotné veřejné XSD jako ČSSZ — každá ZP má
+> vlastní portál (VZP: Portál ZP). Roční přehled OSVČ pro ZP se zatím generuje jako **PDF
+> pomůcka** (`InsuranceSummaryPdfRenderer`); XML se doplní, až bude k dispozici stabilní
+> schéma konkrétní ZP.
+
 ## Zdroj ISDOC
 
 📋 **Aktuální verze standardu (odkazy MV ČR):**

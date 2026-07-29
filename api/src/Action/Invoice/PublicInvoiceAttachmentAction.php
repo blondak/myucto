@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -59,7 +60,7 @@ final class PublicInvoiceAttachmentAction
         }
 
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
-        if (!is_array($user) || empty($user['id'])) {
+        if ((!is_array($user) || empty($user['id'])) && !DemoReadOnlyMiddleware::enabled($request)) {
             $this->repo->markPublicViewed($ref['id']);
             $this->logger->log('invoice.public_attachment_downloaded', null, 'invoice', $ref['id'],
                 ['original_name' => (string) $att['original_name']],

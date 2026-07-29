@@ -235,8 +235,11 @@ final class VatClassificationMapperTest extends TestCase
             varsymbol TEXT NULL,
             vendor_invoice_number TEXT NULL,
             document_kind TEXT NULL,
+            parent_purchase_invoice_id INTEGER NULL,
             issue_date TEXT NOT NULL,
             tax_date TEXT NULL,
+            received_at TEXT NULL,
+            received_at_source TEXT NOT NULL DEFAULT 'import',
             currency_id INTEGER NOT NULL,
             exchange_rate REAL NULL,
             reverse_charge INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +262,17 @@ final class VatClassificationMapperTest extends TestCase
             vat_classification_code TEXT NULL,
             is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");
+        $this->pdo->exec("CREATE TABLE purchase_invoice_vat_allocations (
+            id INTEGER PRIMARY KEY,
+            purchase_invoice_id INTEGER NOT NULL,
+            description TEXT NULL,
+            vat_rate REAL NOT NULL,
+            base_amount REAL NOT NULL,
+            vat_amount REAL NOT NULL,
+            vat_classification_code TEXT NULL,
+            vat_deduction TEXT NOT NULL DEFAULT 'full',
+            vat_deduction_percent REAL NOT NULL DEFAULT 100
+        )");
 
         $this->pdo->exec("CREATE TABLE invoices (
             id INTEGER PRIMARY KEY,
@@ -273,7 +287,8 @@ final class VatClassificationMapperTest extends TestCase
             status TEXT NOT NULL DEFAULT 'issued',
             invoice_type TEXT NOT NULL DEFAULT 'invoice',
             vat_classification_code TEXT NULL,
-            total_with_vat REAL NOT NULL DEFAULT 0
+            total_with_vat REAL NOT NULL DEFAULT 0,
+            effective_tax_date TEXT GENERATED ALWAYS AS (COALESCE(tax_date, issue_date)) STORED
         )");
 
         $this->pdo->exec("CREATE TABLE invoice_items (
@@ -285,6 +300,33 @@ final class VatClassificationMapperTest extends TestCase
             total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL,
             oss_applicable INTEGER NOT NULL DEFAULT 0
+        )");
+
+        // Pokladna (mini-epic #14) — VatLedgerService::fetchCash() JOINuje tyto
+        // tabulky. Prázdné → žádné cash řádky (chování neutrální k faktury-only testům).
+        $this->pdo->exec("CREATE TABLE cash_documents (
+            id INTEGER PRIMARY KEY,
+            supplier_id INTEGER NOT NULL,
+            doc_number TEXT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            doc_type TEXT NOT NULL,
+            vat_mode TEXT NOT NULL DEFAULT 'none',
+            tax_date TEXT NULL,
+            issue_date TEXT NOT NULL,
+            total_amount REAL NOT NULL DEFAULT 0,
+            partner_name TEXT NULL,
+            partner_dic TEXT NULL,
+            description TEXT NULL,
+            invoice_id INTEGER NULL,
+            purchase_invoice_id INTEGER NULL
+        )");
+        $this->pdo->exec("CREATE TABLE cash_document_vat_lines (
+            id INTEGER PRIMARY KEY,
+            cash_document_id INTEGER NOT NULL,
+            vat_rate REAL NOT NULL,
+            base_amount REAL NOT NULL,
+            vat_amount REAL NOT NULL,
+            vat_classification_code TEXT NULL
         )");
     }
 

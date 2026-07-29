@@ -1,4 +1,4 @@
-# Migrate MyInvoice.cz Docker volumes z 3-volume layoutu (3.5.x a starsi)
+# Migrate MyUcto.cz Docker volumes z 3-volume layoutu (3.5.x a starsi)
 # na single-volume layout (od 3.6.0 default).
 #
 # Single-volume layout (`MYINVOICE_DATA_DIR=/data`) drzi VSECHEN stateful
@@ -102,7 +102,7 @@ Write-Host ""
 $CfgSnapshot = ""
 $appCid = (& docker compose @ComposeArgs ps -q app 2>$null | Out-String).Trim()
 if ($appCid) {
-    $tmpSnapshot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "myinvoice-cfglocal-" + [System.Guid]::NewGuid().ToString("N") + ".php")
+    $tmpSnapshot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "myucto-cfglocal-" + [System.Guid]::NewGuid().ToString("N") + ".php")
     & docker cp "${appCid}:/var/www/html/cfg.local.php" $tmpSnapshot *>$null
     if (($LASTEXITCODE -eq 0) -and (Test-Path $tmpSnapshot) -and ((Get-Item $tmpSnapshot).Length -gt 0)) {
         $CfgSnapshot = $tmpSnapshot
@@ -157,7 +157,7 @@ if ($CfgSnapshot -and (Test-Path $CfgSnapshot)) {
 
 # --- 5. start stack -------------------------------------------------------
 Write-Host "==> Startuji stack (docker compose $($ComposeArgs -join ' ') up -d)..."
-& docker compose @ComposeArgs up -d
+& docker compose @ComposeArgs up -d --remove-orphans
 Assert-LastExitOk "docker compose up -d"
 Write-Host ""
 

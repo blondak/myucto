@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MyInvoice.cz — Docker upgrade watcher.
+# MyUcto.cz — Docker upgrade watcher.
 #
 # Sleduje storage/upgrade-requested.json **uvnitř** kontejneru (přes
 # `docker compose exec`) a když ho UI vytvoří (POST /api/admin/update/
@@ -15,16 +15,16 @@
 #   - Pust jako systemd unit, supervisord, nebo "while true; do" smyčku
 #     v session přihlášené k host shellu.
 #
-# Příklad systemd unit (/etc/systemd/system/myinvoice-update-watcher.service):
+# Příklad systemd unit (/etc/systemd/system/myucto-update-watcher.service):
 #
 #   [Unit]
-#   Description=MyInvoice update watcher
+#   Description=MyUcto update watcher
 #   After=docker.service
 #
 #   [Service]
 #   Type=simple
-#   WorkingDirectory=/opt/myinvoice
-#   ExecStart=/opt/myinvoice/cmd/docker-update-watcher.sh
+#   WorkingDirectory=/opt/myucto
+#   ExecStart=/opt/myucto/cmd/docker-update-watcher.sh
 #   Restart=always
 #
 #   [Install]
@@ -86,7 +86,7 @@ while true; do
         # Lock: přejmenuj uvnitř kontejneru — vyhne se double-trigger
         dc exec -T app mv -f "${STORAGE_DIR}/upgrade-requested.json" "${STORAGE_DIR}/upgrade-inflight.json" 2>/dev/null || true
 
-        LOG="/tmp/myinvoice-upgrade-$(date -u +%Y%m%dT%H%M%SZ).log"
+        LOG="/tmp/myucto-upgrade-$(date -u +%Y%m%dT%H%M%SZ).log"
         if bash "$PROJECT_ROOT/cmd/docker-update.sh" >"$LOG" 2>&1; then
             STATUS="applied"
             MESSAGE="Upgrade dokončen. Log na hostu: ${LOG}"

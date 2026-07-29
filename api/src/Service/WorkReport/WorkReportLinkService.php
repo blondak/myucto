@@ -308,11 +308,16 @@ final class WorkReportLinkService
         $stmt->execute($params);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
+        // Výkazy všech faktur dávkově (odstranění N+1 findByInvoice ve smyčce).
+        $wrByInvoice = $this->workReports->findByInvoiceIds(
+            array_map(static fn (array $r) => (int) $r['id'], $rows)
+        );
+
         $reports = [];
         $totalHours = 0.0;
         $byCurrency = [];
         foreach ($rows as $row) {
-            $wr = $this->workReports->findByInvoice((int) $row['id']);
+            $wr = $wrByInvoice[(int) $row['id']] ?? null;
             if ($wr === null) {
                 continue;
             }
@@ -367,6 +372,7 @@ final class WorkReportLinkService
         return [
             'scope'                => (string) $link['scope'],
             'client_company_name'  => $client['company_name'],
+            'client'               => $this->clientBlock($client),
             'project_name'         => $projectName,
             'language'             => $client['language'],
             'supplier_name'        => (string) ($supplier['display_name'] ?: ($supplier['company_name'] ?? '')),
@@ -410,12 +416,46 @@ final class WorkReportLinkService
     /** @return array{company_name:string, language:string} */
     private function loadClientMeta(int $clientId): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT company_name, language FROM clients WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT cl.company_name, cl.language, cl.street, cl.city, cl.zip, cl.ic, cl.dic,
+                    co.name_cs AS country
+               FROM clients cl
+          LEFT JOIN countries co ON co.id = cl.country_id
+              WHERE cl.id = ?'
+        );
         $stmt->execute([$clientId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         return [
             'company_name' => (string) ($row['company_name'] ?? ''),
             'language'     => in_array($row['language'] ?? 'cs', ['cs', 'en'], true) ? (string) $row['language'] : 'cs',
+            'street'       => ($row['street'] ?? '') ?: null,
+            'city'         => ($row['city'] ?? '') ?: null,
+            'zip'          => ($row['zip'] ?? '') ?: null,
+            'country'      => ($row['country'] ?? '') ?: null,
+            'ic'           => ($row['ic'] ?? '') ?: null,
+            'dic'          => ($row['dic'] ?? '') ?: null,
+        ];
+    }
+
+    /**
+     * Odběratel pro hlavičku náhledu — stejný rozsah, jaký o sobě klient vidí na
+     * faktuře (adresa, IČ, DIČ). Odkaz otevírá sám odběratel, takže o vlastních
+     * údajích nic nového nezjistí; bez nich ale blok stran vypadal poloprázdný
+     * proti bloku DODAVATEL/ODBĚRATEL na faktuře.
+     *
+     * @param array<string,mixed> $client Řádek z loadClientMeta().
+     * @return array<string,mixed>
+     */
+    private function clientBlock(array $client): array
+    {
+        return [
+            'company_name' => (string) ($client['company_name'] ?? ''),
+            'street'       => $client['street'] ?? null,
+            'city'         => $client['city'] ?? null,
+            'zip'          => $client['zip'] ?? null,
+            'country'      => $client['country'] ?? null,
+            'ic'           => $client['ic'] ?? null,
+            'dic'          => $client['dic'] ?? null,
         ];
     }
 

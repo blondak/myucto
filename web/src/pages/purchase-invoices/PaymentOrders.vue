@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -21,6 +21,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -36,6 +37,12 @@ const loading = ref(true)
 const error = ref('')
 const creating = ref(false)
 
+// Stránkování kandidátů (load-more).
+const candPage = ref(1)
+const candPages = ref(1)
+const candTotal = ref(0)
+const loadingMoreCandidates = ref(false)
+
 // Ovládací pole
 const today = new Date().toISOString().slice(0, 10)
 const paymentDate = ref(today)
@@ -46,6 +53,9 @@ const markPaid = ref(false)
 // Historie
 const history = ref<PaymentOrderListItem[]>([])
 const historyLoading = ref(false)
+const historyLoadingMore = ref(false)
+const historyPage = ref(1)
+const historyPages = ref(1)
 const editingAccountId = ref<number | null>(null)
 
 // Předvybrané ID z InvoiceList.vue (?preselect=1,2,3)
@@ -63,6 +73,8 @@ const selectedPayer = computed<PayerAccount | null>(() =>
 const payerCurrency = computed(() => selectedPayer.value?.code ?? '')
 
 const isCzk = computed(() => payerCurrency.value.toUpperCase() === 'CZK')
+/** SEPA Credit Transfer (pain.001.001.03) je EUR-only scheme — jiné cizí měny jen CSV/PDF. */
+const isEur = computed(() => payerCurrency.value.toUpperCase() === 'EUR')
 
 onMounted(async () => {
   await loadCandidates()
@@ -80,14 +92,22 @@ function pickDefaultPayer(accounts: PayerAccount[]): number | '' {
   return (firstActive ?? accounts[0]).id
 }
 
-async function loadCandidates() {
-  loading.value = true
+async function loadCandidates(reset = true) {
+  if (reset) {
+    loading.value = true
+    candPage.value = 1
+  } else {
+    loadingMoreCandidates.value = true
+    candPage.value++
+  }
   error.value = ''
   try {
-    // Načteme VŠECHNY nezaplacené faktury napříč měnami — uživatel vidí CZK i ostatní
-    // a vybírat lze jen ty ve měně zvoleného účtu plátce (ostatní jsou disabled).
-    const res = await paymentOrdersApi.candidates()
-    candidates.value = res.candidates
+    // Načteme nezaplacené faktury napříč měnami (stránkovaně) — uživatel vidí CZK
+    // i ostatní a vybírat lze jen ty ve měně zvoleného účtu plátce (ostatní jsou disabled).
+    const res = await paymentOrdersApi.candidates(undefined, candPage.value, 50, includeNonTransfer.value)
+    candidates.value = reset ? res.data : [...candidates.value, ...res.data]
+    candTotal.value = res.meta.total
+    candPages.value = res.meta.pages
     if (payerAccounts.value.length === 0) {
       payerAccounts.value = res.payer_accounts
       selectedPayerId.value = pickDefaultPayer(res.payer_accounts)
@@ -97,6 +117,7 @@ async function loadCandidates() {
     error.value = apiErrorMessage(e)
   } finally {
     loading.value = false
+    loadingMoreCandidates.value = false
   }
 }
 
@@ -114,28 +135,50 @@ function onPayerChange() {
   })
 }
 
-async function loadHistory() {
-  historyLoading.value = true
+async function loadHistory(reset = true) {
+  if (reset) {
+    historyLoading.value = true
+    historyPage.value = 1
+  } else {
+    historyLoadingMore.value = true
+    historyPage.value++
+  }
   try {
-    history.value = await paymentOrdersApi.list()
+    const res = await paymentOrdersApi.list(historyPage.value)
+    history.value = reset ? res.data : [...history.value, ...res.data]
+    historyPages.value = res.meta.pages
   } catch {
     // historie není kritická — tichý fail
   } finally {
     historyLoading.value = false
+    historyLoadingMore.value = false
   }
 }
 
 // ── Výběr ─────────────────────────────────────────────────────────────
 const hideOrdered = ref(false)
 
+/**
+ * Opt-out ze serverového filtru „jen bankovní převod". Na rozdíl od `hideOrdered`
+ * (klientský filtr) se tímhle mění DOTAZ, takže se kandidáti musí načíst znovu.
+ * Smysl: inkasní faktury do příkazu nepatří, ale chybně označená faktura by jinak
+ * z obrazovky zmizela beze stopy a nikdo by ji nezaplatil.
+ */
+const includeNonTransfer = ref(false)
+watch(includeNonTransfer, () => { void loadCandidates(true) })
+
 /** Měnově odpovídá zvolenému účtu plátce? (ABO/příkaz je jednoměnový.) */
 function currencyMatches(c: PaymentCandidate): boolean {
   return !!payerCurrency.value && c.currency.toUpperCase() === payerCurrency.value.toUpperCase()
 }
 
-/** Vyberatelný = má účet a je ve měně zvoleného účtu plátce. */
+/**
+ * Vyberatelný = má účet, sedí měna a platí se PŘEVODEM. Non-transfer faktury jsou
+ * vidět jen kvůli opravě formy úhrady — zaškrtnout je nejde, a i kdyby výběr prošel,
+ * backend je zahodí do `skipped` (PaymentOrderService::create).
+ */
 function isSelectable(c: PaymentCandidate): boolean {
-  return c.has_account && currencyMatches(c)
+  return c.has_account && currencyMatches(c) && c.payment_method === 'bank_transfer'
 }
 
 /** Kandidáti po aplikaci přepínače „skrýt už zařazené k úhradě". */
@@ -191,6 +234,11 @@ const selectedNotAboEligible = computed(() =>
   candidates.value.filter(c => selectedIds.value.includes(c.id) && isCzk.value && !c.abo_eligible),
 )
 
+// Pro SEPA: vybrané faktury, které nemají platný IBAN (u EUR příkazu).
+const selectedNotSepaEligible = computed(() =>
+  candidates.value.filter(c => selectedIds.value.includes(c.id) && isEur.value && !c.sepa_eligible),
+)
+
 // ── Badge helpery ─────────────────────────────────────────────────────
 const sourceBadgeClass = (s: PaymentAccountSource | null): string => {
   if (!s) return 'bg-neutral-100 text-neutral-500'
@@ -233,7 +281,7 @@ const editForm = ref<{ account_number: string; bank_code: string; iban: string; 
 })
 
 function startEditAccount(c: PaymentCandidate) {
-  if (!auth.canWrite) return
+  if (!auth.canWrite('purchase_invoices.payment_orders')) return
   editingAccountId.value = c.id
   editForm.value = {
     account_number: c.account_number ?? '',
@@ -281,9 +329,13 @@ async function saveAccount(c: PaymentCandidate) {
 async function refreshCandidatesKeepSelection() {
   const keep = [...selectedIds.value]
   try {
-    const res = await paymentOrdersApi.candidates(payerCurrency.value || undefined)
-    candidates.value = res.candidates
-    const stillSelectable = new Set(res.candidates.filter(isSelectable).map(c => c.id))
+    // Reset na 1. stránku (stejné jako po libovolné jiné mutaci v seznamech s load-more).
+    candPage.value = 1
+    const res = await paymentOrdersApi.candidates(payerCurrency.value || undefined, 1, 50, includeNonTransfer.value)
+    candidates.value = res.data
+    candTotal.value = res.meta.total
+    candPages.value = res.meta.pages
+    const stillSelectable = new Set(res.data.filter(isSelectable).map(c => c.id))
     selectedIds.value = keep.filter(id => stillSelectable.has(id))
   } catch {
     // ponech stávající stav
@@ -354,7 +406,7 @@ async function verifyAccountRow(c: PaymentCandidate) {
 
 // ── Jen označit (bez exportu) ─────────────────────────────────────────
 async function markOnly() {
-  if (!auth.canWrite || creating.value) return
+  if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
   if (selectedIds.value.length === 0) {
     toast.error(t('payment_order.no_selection'))
     return
@@ -384,7 +436,7 @@ const reasonText = (reason: string): string => {
 }
 
 async function createAndDownload(format: PaymentOrderFormat) {
-  if (!auth.canWrite || creating.value) return
+  if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
   if (selectedIds.value.length === 0) {
     toast.error(t('payment_order.no_selection'))
     return
@@ -395,6 +447,10 @@ async function createAndDownload(format: PaymentOrderFormat) {
   }
   if (format === 'abo' && !isCzk.value) {
     toast.error(t('payment_order.abo_only_czk'))
+    return
+  }
+  if (format === 'sepa' && !selectedPayer.value?.iban) {
+    toast.error(t('payment_order.no_payer_iban'))
     return
   }
   creating.value = true
@@ -497,6 +553,11 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
             <input v-model="hideOrdered" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('payment_order.hide_ordered') }}
           </label>
+          <label class="flex items-center gap-1.5 text-sm text-neutral-700"
+            :title="t('payment_method.include_non_transfer_hint')">
+            <input v-model="includeNonTransfer" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+            {{ t('payment_method.include_non_transfer') }}
+          </label>
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
@@ -504,31 +565,38 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
             {{ t('payment_order.selected_summary', { n: selectedIds.length }) }}
             <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}</span>
           </span>
-          <button v-if="auth.canWrite" type="button" @click="markOnly"
+          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="markOnly"
             :disabled="creating || selectedIds.length === 0"
             :title="t('payment_order.mark_only_hint')"
-            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-neutral-300 text-neutral-700 hover:bg-neutral-100 disabled:opacity-50 text-sm font-medium rounded-md">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+            :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
             {{ t('payment_order.mark_only') }}
           </button>
-          <button v-if="auth.canWrite" type="button" @click="createAndDownload('csv')"
+          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('csv')"
             :disabled="creating || selectedIds.length === 0"
-            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-primary-500 text-primary-700 hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('payment_order.export_csv') }}
           </button>
-          <button v-if="auth.canWrite" type="button" @click="createAndDownload('pdf')"
+          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('pdf')"
             :disabled="creating || selectedIds.length === 0"
-            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 border border-danger-500/50 text-danger-500 hover:bg-danger-50 disabled:opacity-50 text-sm font-medium rounded-md">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('payment_order.export_pdf') }}
           </button>
-          <button v-if="auth.canWrite" type="button" @click="createAndDownload('abo')"
+          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('abo')"
             :disabled="creating || selectedIds.length === 0 || !isCzk"
             :title="!isCzk ? t('payment_order.abo_only_czk') : ''"
-            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white disabled:opacity-50 text-sm font-medium rounded-md">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3z"/></svg>
+            :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ creating ? '…' : t('payment_order.export_abo') }}
+          </button>
+          <button v-if="auth.canWrite('purchase_invoices.payment_orders') && isEur" type="button" @click="createAndDownload('sepa')"
+            :disabled="creating || selectedIds.length === 0 || !selectedPayer?.iban"
+            :title="!selectedPayer?.iban ? t('payment_order.no_payer_iban') : ''"
+            :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ creating ? '…' : t('payment_order.export_sepa') }}
           </button>
         </div>
       </div>
@@ -538,7 +606,12 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         class="rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
         {{ t('payment_order.warn_not_abo_eligible', { n: selectedNotAboEligible.length }) }}
       </div>
-      <div v-if="!auth.canWrite"
+      <!-- Varování: vybrané faktury bez IBAN nejdou do SEPA -->
+      <div v-if="isEur && selectedNotSepaEligible.length > 0"
+        class="rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+        {{ t('payment_order.warn_not_sepa_eligible', { n: selectedNotSepaEligible.length }) }}
+      </div>
+      <div v-if="!auth.canWrite('purchase_invoices.payment_orders')"
         class="rounded-md bg-neutral-100 border border-neutral-200 px-3 py-2 text-sm text-neutral-500">
         {{ t('payment_order.readonly_hint') }}
       </div>
@@ -611,12 +684,19 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       :checked="selectedIds.includes(c.id)"
                       :disabled="!isSelectable(c)"
                       @change="toggleSelected(c)"
-                      :title="!c.has_account ? t('payment_order.no_account') : (!currencyMatches(c) ? t('payment_order.currency_mismatch') : '')"
+                      :title="!c.has_account ? t('payment_order.no_account') : (!currencyMatches(c) ? t('payment_order.currency_mismatch') : (c.payment_method !== 'bank_transfer' ? t('payment_method.non_transfer_tooltip') : ''))"
                       class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30 disabled:opacity-40 disabled:cursor-not-allowed" />
                   </td>
                   <td class="px-4 py-2.5 align-top">
                     <div class="font-medium text-neutral-900 truncate">{{ c.vendor_company_name }}</div>
                     <div class="text-xs text-neutral-500 font-mono truncate">{{ c.vendor_invoice_number }}</div>
+                    <!-- Viditelné jen se zapnutým `includeNonTransfer` — jinak takové
+                         faktury vůbec nechodí. Badge říká, PROČ nejde zaškrtnout. -->
+                    <span v-if="c.payment_method !== 'bank_transfer'"
+                      class="inline-flex items-center mt-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-500/30 whitespace-nowrap"
+                      :title="t('payment_method.non_transfer_tooltip')">
+                      {{ t(`payment_method.${c.payment_method}`) }}
+                    </span>
                   </td>
                   <td class="px-3 py-2.5 text-center text-xs text-neutral-600 align-top">
                     <div>{{ formatDate(c.due_date) }}</div>
@@ -630,7 +710,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                   <td class="px-4 py-2.5 text-xs align-top">
                     <!-- Bez účtu: jen tlačítko „Doplnit účet" (text „chybí" je redundantní). -->
                     <template v-if="!c.has_account">
-                      <button v-if="auth.canWrite && editingAccountId !== c.id" type="button"
+                      <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button"
                         @click="startEditAccount(c)"
                         class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-primary-500 text-primary-700 hover:bg-primary-50 transition">
                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
@@ -656,7 +736,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                           <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12z"/></svg>
                           {{ verifyingId === c.id ? '…' : t('payment_order.verify_account_short') }}
                         </button>
-                        <button v-if="auth.canWrite && editingAccountId !== c.id" type="button"
+                        <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button"
                           @click="startEditAccount(c)"
                           :title="t('payment_order.edit_account')"
                           class="cursor-pointer inline-flex items-center justify-center w-6 h-6 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-100 transition">
@@ -668,6 +748,9 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       </div>
                       <div v-else-if="isCzk && !c.abo_eligible" class="text-[10px] text-warning-600 mt-0.5">
                         {{ t('payment_order.not_abo_eligible_row') }}
+                      </div>
+                      <div v-else-if="isEur && !c.sepa_eligible" class="text-[10px] text-warning-600 mt-0.5">
+                        {{ t('payment_order.not_sepa_eligible_row') }}
                       </div>
                     </template>
                   </td>
@@ -779,9 +862,14 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                 <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 {{ t('payment_order.ordered_badge') }}
               </span>
+              <span v-if="c.payment_method !== 'bank_transfer'"
+                class="inline-flex items-center mt-1 ml-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-500/30 whitespace-nowrap"
+                :title="t('payment_method.non_transfer_tooltip')">
+                {{ t(`payment_method.${c.payment_method}`) }}
+              </span>
               <div class="text-xs mt-1">
                 <template v-if="!c.has_account">
-                  <button v-if="auth.canWrite && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                  <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                     class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-primary-500 text-primary-700 hover:bg-primary-50 transition">
                     <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
                     {{ t('payment_order.add_account') }}
@@ -802,8 +890,9 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       </div>
                       <div v-if="!currencyMatches(c)" class="text-[10px] text-neutral-500 mt-0.5">{{ t('payment_order.currency_mismatch') }}</div>
                       <span v-else-if="isCzk && !c.abo_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_abo_eligible_row') }}</span>
+                      <span v-else-if="isEur && !c.sepa_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_sepa_eligible_row') }}</span>
                     </div>
-                    <button v-if="auth.canWrite && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                    <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                       :title="t('payment_order.edit_account')"
                       class="cursor-pointer flex-shrink-0 inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-100 transition">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931z"/></svg>
@@ -874,6 +963,13 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
       </div>
       </template>
+
+      <div v-if="candPage < candPages" class="text-center mt-3">
+        <button @click="loadCandidates(false)" :disabled="loadingMoreCandidates"
+          class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+          {{ loadingMoreCandidates ? t('common.loading_more') : t('common.load_more') }}
+        </button>
+      </div>
     </div>
 
     <!-- ═══ Historie příkazů ═══ -->
@@ -927,11 +1023,23 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       class="cursor-pointer text-xs px-2 py-1 border border-primary-300 rounded hover:bg-primary-50 text-primary-700 disabled:opacity-40 disabled:cursor-not-allowed">
                       ABO
                     </button>
+                    <button v-if="item.currency.toUpperCase() === 'EUR'" type="button" @click="redownload(item, 'sepa')"
+                      :disabled="!item.payer_iban"
+                      :title="!item.payer_iban ? t('payment_order.no_payer_iban') : ''"
+                      class="cursor-pointer text-xs px-2 py-1 border border-primary-300 rounded hover:bg-primary-50 text-primary-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                      SEPA
+                    </button>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div v-if="historyPage < historyPages" class="text-center py-3 border-t border-neutral-200">
+          <button @click="loadHistory(false)" :disabled="historyLoadingMore"
+            class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+            {{ historyLoadingMore ? t('common.loading_more') : t('common.load_more') }}
+          </button>
         </div>
       </div>
     </section>

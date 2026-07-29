@@ -26,6 +26,8 @@ use Symfony\Component\Mailer\Transport\TransportInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Crypto\DkimSigner;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Header\MailboxListHeader;
+use Symfony\Component\Mime\Message;
 use Symfony\Component\Mime\RawMessage;
 use Twig\Environment;
 use Twig\Extension\SandboxExtension;
@@ -126,6 +128,10 @@ final class Mailer
         ?int $userId = null,
         ?array $emailProfileOverride = null,
     ): array {
+        if ((bool) $this->config->get('demo.enabled', false)) {
+            throw new DemoModeMailBlockedException('Demo režim neodesílá e-maily.');
+        }
+
         $twig = $this->twig();
 
         $vars['locale'] = $locale;
@@ -634,9 +640,15 @@ final class Mailer
     /**
      * Doména z hlavičky From (první adresa), lowercase; null když chybí/neplatná.
      */
-    private function fromDomain(Email $email): ?string
+    private function fromDomain(Message $email): ?string
     {
-        $from = $email->getFrom();
+        $from = $email instanceof Email ? $email->getFrom() : [];
+        if ($from === []) {
+            $header = $email->getHeaders()->get('From');
+            if ($header instanceof MailboxListHeader) {
+                $from = $header->getAddresses();
+            }
+        }
         if ($from === []) {
             return null;
         }
@@ -929,32 +941,33 @@ final class Mailer
 
     private function defaultSubject(string $code, string $locale): string
     {
+        $app = (string) $this->config->get('app.name', 'MyÚčto.cz');
         $subjects = [
             'cs' => [
-                'password_reset'    => 'Obnova hesla — MyInvoice.cz',
-                'login_otp'         => 'Ověřovací kód pro přihlášení — MyInvoice.cz',
-                'email_profile_test'=> 'Test odesílacího profilu — MyInvoice.cz',
-                'invoice_send'      => 'Faktura — MyInvoice.cz',
-                'invoice_payment_thanks' => 'Poděkování za úhradu — MyInvoice.cz',
-                'invoice_reminder'  => 'Upomínka — MyInvoice.cz',
-                'proforma_reminder' => 'Připomínka zálohy — MyInvoice.cz',
-                'recurring_draft_reminder' => 'Koncept pravidelné faktury se brzy vystaví — MyInvoice.cz',
-                'work_report_link'  => 'Náhled na výkaz práce — MyInvoice.cz',
-                'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — MyInvoice.cz',
+                'password_reset'    => 'Obnova hesla — ' . $app,
+                'login_otp'         => 'Ověřovací kód pro přihlášení — ' . $app,
+                'email_profile_test'=> 'Test odesílacího profilu — ' . $app,
+                'invoice_send'      => 'Faktura — ' . $app,
+                'invoice_payment_thanks' => 'Poděkování za úhradu — ' . $app,
+                'invoice_reminder'  => 'Upomínka — ' . $app,
+                'proforma_reminder' => 'Připomínka zálohy — ' . $app,
+                'recurring_draft_reminder' => 'Koncept pravidelné faktury se brzy vystaví — ' . $app,
+                'work_report_link'  => 'Náhled na výkaz práce — ' . $app,
+                'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — ' . $app,
             ],
             'en' => [
-                'password_reset'    => 'Password reset — MyInvoice.cz',
-                'login_otp'         => 'Sign-in verification code — MyInvoice.cz',
-                'email_profile_test'=> 'Sending profile test — MyInvoice.cz',
-                'invoice_send'      => 'Invoice — MyInvoice.cz',
-                'invoice_payment_thanks' => 'Thank you for your payment — MyInvoice.cz',
-                'invoice_reminder'  => 'Reminder — MyInvoice.cz',
-                'proforma_reminder' => 'Advance payment reminder — MyInvoice.cz',
-                'recurring_draft_reminder' => 'Recurring invoice draft will be issued soon — MyInvoice.cz',
-                'work_report_link'  => 'Work report preview — MyInvoice.cz',
-                'work_report_access_code' => 'Verification code for work report preview — MyInvoice.cz',
+                'password_reset'    => 'Password reset — ' . $app,
+                'login_otp'         => 'Sign-in verification code — ' . $app,
+                'email_profile_test'=> 'Sending profile test — ' . $app,
+                'invoice_send'      => 'Invoice — ' . $app,
+                'invoice_payment_thanks' => 'Thank you for your payment — ' . $app,
+                'invoice_reminder'  => 'Reminder — ' . $app,
+                'proforma_reminder' => 'Advance payment reminder — ' . $app,
+                'recurring_draft_reminder' => 'Recurring invoice draft will be issued soon — ' . $app,
+                'work_report_link'  => 'Work report preview — ' . $app,
+                'work_report_access_code' => 'Verification code for work report preview — ' . $app,
             ],
         ];
-        return $subjects[$locale][$code] ?? ($subjects['cs'][$code] ?? 'MyInvoice.cz');
+        return $subjects[$locale][$code] ?? ($subjects['cs'][$code] ?? $app);
     }
 }

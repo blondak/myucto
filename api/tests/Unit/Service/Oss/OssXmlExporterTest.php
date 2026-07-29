@@ -37,6 +37,22 @@ final class OssXmlExporterTest extends TestCase
         $this->exporter($preview)->build(1, 2026, 3);
     }
 
+    public function testRegistrationDatesUseEpoFormat(): void
+    {
+        $preview = $this->preview();
+        $preview['settings']['oss_valid_from'] = '2026-07-15';
+        $preview['settings']['oss_valid_to'] = '2026-09-20';
+
+        $result = $this->exporter($preview)->build(1, 2026, 3);
+        $dom = new \DOMDocument();
+        self::assertTrue($dom->loadXML($result['xml']));
+        $xpath = new \DOMXPath($dom);
+
+        self::assertSame('15.7.2026', $xpath->evaluate('string(/Pisemnost/OSSEI1/VetaD/@period_start_date)'));
+        self::assertSame('20.9.2026', $xpath->evaluate('string(/Pisemnost/OSSEI1/VetaD/@period_end_date)'));
+        self::assertSame('passed', (new XmlSchemaValidator())->validate($result['xml'], 'ossei1')['status']);
+    }
+
     public function testMissingSupplyTypeBlocksExport(): void
     {
         $preview = $this->preview();

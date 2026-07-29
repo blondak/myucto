@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Inventární karta dlouhodobého majetku</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .card { }
+    .card + .card { page-break-before: always; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 12pt; font-weight: bold; text-align: center; padding: 0 4mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .card-no { text-align: right; font-size: 8pt; color: #555; }
+    .attrs-table { width: 100%; border-collapse: collapse; margin: 3mm 0; }
+    .attrs-table td { padding: 1mm 2mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    .attrs-table td.label { width: 42mm; color: #555; }
+    .attrs-table td.value { font-weight: bold; }
+    .section-title { font-size: 9pt; font-weight: bold; margin: 4mm 0 1mm; }
+    .groups { }
+    .group-token {
+        display: inline-block; padding: 0.6mm 1.8mm; margin-right: 1.5mm; font-size: 7.5pt;
+        border: 0.3pt solid #999; color: #555;
+    }
+    .group-token.active { border: 0.6pt solid #15131D; color: #15131D; font-weight: bold; background: #eee; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top;
+    }
+    table.book tfoot td {
+        font-weight: bold; font-size: 8pt; padding: 1.5mm 1.5mm;
+        border-top: 0.5pt solid #333; border-bottom: 0.5pt solid #333;
+    }
+    .num { text-align: right; }
+    .col-no { width: 10mm; }
+    .col-date { width: 22mm; }
+    .col-note { width: 46mm; }
+    .empty-note { text-align: center; color: #888; padding: 6mm 0; }
+</style>
+</head>
+<body>
+
+{% for card in cards %}
+<div class="card">
+    <table class="header-table">
+        <tr>
+            <td style="width:32%;">
+                <div class="header-meta">{{ entity.name }}</div>
+                <div class="header-meta">IČO: {{ entity.ico }}</div>
+                <div class="header-meta">{{ entity.address }}</div>
+            </td>
+            <td style="width:36%;">
+                <div class="header-title">INVENTÁRNÍ KARTA<br>dlouhodobého hmotného majetku</div>
+            </td>
+            <td style="width:32%;">
+                <div class="card-no">Číslo karty: <strong>{{ card.inventory_number|default('—') }}</strong></div>
+                <div class="card-no">Fiskální rok: {{ period.fiscal_year }}</div>
+                <div class="card-no">Sestaveno: {{ entity.prepared_at }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="attrs-table">
+        <tr>
+            <td class="label">Název / popis</td>
+            <td class="value">{{ card.name }}{% if card.description %} — {{ card.description }}{% endif %}</td>
+            <td class="label">Výrobní číslo</td>
+            <td class="value"></td>
+        </tr>
+        <tr>
+            <td class="label">Umístění</td>
+            <td class="value"></td>
+            <td class="label">Kategorie</td>
+            <td class="value"></td>
+        </tr>
+        <tr>
+            <td class="label">Sektor</td>
+            <td class="value"></td>
+            <td class="label">Středisko</td>
+            <td class="value"></td>
+        </tr>
+        <tr>
+            <td class="label">Poznámka</td>
+            <td class="value" colspan="3"></td>
+        </tr>
+        <tr>
+            <td class="label">Vstupní (pořizovací) cena</td>
+            <td class="value">{{ card.input_price|cz_money }} Kč{% if card.increased_input_price != card.input_price %} (zvýšená VC vč. TZ: {{ card.increased_input_price|cz_money }} Kč){% endif %}</td>
+            <td class="label">Datum pořízení</td>
+            <td class="value">{{ card.acquisition_date|cz_date }}</td>
+        </tr>
+        <tr>
+            <td class="label">Datum zařazení do užívání</td>
+            <td class="value">{{ card.put_into_use_date|cz_date|default('—') }}</td>
+            <td class="label">Způsob odpisování</td>
+            <td class="value">{{ card.tax_method_label }}</td>
+        </tr>
+        <tr>
+            <td class="label">§31/32 zvýšení odpisu v 1. roce (nový HIM)</td>
+            <td class="value">{{ card.is_first_year_increase ? 'Ano' : 'Ne' }}</td>
+            <td class="label">§30a mimořádný odpis</td>
+            <td class="value">{{ card.is_extraordinary ? 'Ano' : 'Ne' }}</td>
+        </tr>
+    </table>
+
+    <div class="section-title">Odpisová skupina</div>
+    <div class="groups">
+        {% for token in card.tax_group_tokens %}
+            <span class="group-token{{ token.active ? ' active' : '' }}">{{ token.label }}</span>
+        {% endfor %}
+    </div>
+
+    <div class="section-title">Daňové odpisy</div>
+    {% if card.rows is empty %}
+        <p class="empty-note">Majetek nemá daňový odpisový plán (způsob odpisování: {{ card.tax_method_label }}).</p>
+    {% else %}
+    <table class="book">
+        <thead>
+            <tr>
+                <th class="thl col-no">Řádek</th>
+                <th class="thl col-date">Datum</th>
+                <th>Počáteční ZC</th>
+                <th>Zhodnocení</th>
+                <th>Odpis</th>
+                <th>Zůstatková cena</th>
+                <th class="thl col-note">Poznámka</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in card.rows %}
+                <tr>
+                    <td>{{ row.no }}</td>
+                    <td>{{ row.date|cz_date }}</td>
+                    <td class="num">{{ row.residual_start|cz_money }}</td>
+                    <td class="num">{{ row.improvement|cz_money }}</td>
+                    <td class="num">{{ row.depreciation|cz_money }}</td>
+                    <td class="num">{{ row.residual_end|cz_money }}</td>
+                    <td>{{ row.note|default('') }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3">CELKEM</td>
+                <td class="num">{{ card.rows_total.improvement|cz_money }}</td>
+                <td class="num">{{ card.rows_total.depreciation|cz_money }}</td>
+                <td class="num">{{ card.final_residual|cz_money }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    {% endif %}
+</div>
+{% endfor %}
+
+</body>
+</html>

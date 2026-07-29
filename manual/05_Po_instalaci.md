@@ -5,21 +5,25 @@ Ať jsi instaloval přes [Docker](03_Instalace_Docker.md) nebo
 v prohlížeči a projdi úvodním průvodcem. Tato kapitola navíc shrnuje CLI
 nástroje a plánované úlohy (cron) pro běžnou údržbu.
 
+Pokud převádíš existující instalaci MyInvoice, neprocházej nejdřív setup
+wizardem. Použij postup [Převod dat z MyInvoice do MyÚčto](06_Prevod_z_MyInvoice.md),
+který zachová správné pořadí importu a MyÚčto migrací.
+
 ## 5.1 První spuštění
 
 Otevři aplikaci v prohlížeči (u Dockeru **http://localhost:8080**, u nativní
 instalace URL podle web serveru) — naskočí **setup wizard**. Provede tě
 založením prvního dodavatele, administrátorského účtu a základní konfigurace.
-Detailní popis: [První spuštění (setup wizard)](06_Setup_wizard.md).
+Detailní popis: [První spuštění (setup wizard)](07_Setup_wizard.md).
 
 ## 5.2 Co nastavit hned po prvním přihlášení
 
 - **Dodavatel** — IČO/DIČ, adresa, logo, číslování faktur, bankovní účty
-  (Nastavení → Můj dodavatel; detail viz [Nastavení](36_Nastaveni.md)).
+  (Nastavení → Můj dodavatel; detail viz [Nastavení](71_Nastaveni.md)).
 - **Odchozí pošta (SMTP)** — aby fungovalo odesílání faktur a upomínek.
 - **Daňové nastavení** — typ poplatníka, perioda DPH, kód FÚ (pokud jsi plátce;
-  viz [Výkazy DPH](29_Vykazy_DPH.md)).
-- **Zabezpečení** — 2FA, IP allowlist, role uživatelů (viz [Bezpečnost](39_Bezpecnost.md)).
+  viz [Výkazy DPH](36_Vykazy_DPH.md)).
+- **Zabezpečení** — 2FA, IP allowlist, role uživatelů (viz [Bezpečnost](74_Bezpecnost.md)).
 - **Plánované úlohy (cron)** — zálohy, párování plateb, upomínky
   (viz [§ 5.5 Cron skripty](#55-cron-skripty)).
 
@@ -28,7 +32,7 @@ Detailní popis: [První spuštění (setup wizard)](06_Setup_wizard.md).
 - Nasazuj za **HTTPS** (u Dockeru reverse proxy — viz
   [§ 3.8 HTTPS / TLS terminace](03_Instalace_Docker.md#38-https-tls-terminace)).
 - Zapni **zálohy** a ověř, že běží (Systém → Plánované úlohy).
-- Pinuj konkrétní verzi image a sleduj [Aktualizace](40_Aktualizace.md).
+- Pinuj konkrétní verzi image a sleduj [Aktualizace](75_Aktualizace.md).
 
 ## 5.4 CLI nástroje
 
@@ -52,6 +56,8 @@ V `cmd/` jsou připravené `.cmd` (Windows Task Scheduler) i `.sh` (Linux cron) 
 | `cron-bank-scan` | každých 30 min |
 | `cron-bank-email-notices` | každých 30 min |
 | `cron-send-reminders` | 1× denně 09:00, Po–Pá |
+| `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
+| `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
 
 Detaily v `cmd/README.md`.
 

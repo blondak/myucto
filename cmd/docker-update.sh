@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update a running MyInvoice.cz Docker stack to the latest code.
+# Update a running MyUcto.cz Docker stack to the latest code.
 #
 #   1. Pulls (registry mode) or rebuilds (source mode) the app image
 #   2. Restarts the stack
@@ -7,7 +7,7 @@
 #
 # Detekuje režim z IMAGE běžícího app kontejneru (ne podle compose souborů):
 #   - běžící registry image (ghcr.io/...) → registry mode → docker compose pull
-#   - běžící lokální build (myinvoice:latest) → source mode → git pull + build
+#   - běžící lokální build (myucto:latest) → source mode → git pull + build
 #   - nic neběží + lokálně je GHCR image → registry (byls GHCR deploy, jen zhasnutý)
 #   - nic neběží + .git + build: → source, jinak registry
 # Přebití: MYINVOICE_UPDATE_MODE=registry|source.
@@ -34,20 +34,20 @@ set -a; . ./.env; set +a
 # který compose file je zrovna po ruce; staré řešení podle compose souborů bylo
 # křehké, protože git klon má oba soubory + kolidující název projektu).
 #   - běžící image z registru (ghcr.io/...) → registry mode → `docker compose pull`
-#   - běžící lokálně stavěný image (myinvoice:latest, bez registru) → source mode → build
+#   - běžící lokálně stavěný image (myucto:latest, bez registru) → source mode → build
 #   - nic neběží → fallback podle přítomných souborů (.git + build: → source, jinak registry)
 # Přebití: MYINVOICE_UPDATE_MODE=registry|source.
 MODE="${MYINVOICE_UPDATE_MODE:-}"
 
-running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myinvoice | head -1)"
+running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myucto | head -1)"
 
 if [[ -z "$MODE" ]]; then
   if [[ -n "$running_image" ]]; then
     case "$running_image" in
-      */*) MODE="registry" ;;   # má registry/namespace → např. ghcr.io/radekhulan/myinvoice
-      *)   MODE="source"   ;;   # bare lokální tag → myinvoice:latest
+      */*) MODE="registry" ;;   # má registry/namespace → např. ghcr.io/radekhulan/myucto
+      *)   MODE="source"   ;;   # bare lokální tag → myucto:latest
     esac
-  elif docker images --format '{{.Repository}}' 2>/dev/null | grep -qiE 'ghcr\.io/.*myinvoice'; then
+  elif docker images --format '{{.Repository}}' 2>/dev/null | grep -qiE 'ghcr\.io/.*myucto'; then
     # Stack neběží, ALE lokálně je stažený GHCR image → dřív se pullovalo = registry deploy.
     # (Bez tohohle by se u zhasnutého GHCR stacku v git klonu spadlo na source/build.)
     MODE="registry"
@@ -73,6 +73,23 @@ echo "    (přebít lze přes MYINVOICE_UPDATE_MODE=registry|source)"
 
 DC=(docker compose)
 [[ -n "$COMPOSE_ARGS" ]] && DC+=($COMPOSE_ARGS)
+
+# --- helpers pro robustní restart -----------------------------------------
+app_log_tail() { "${DC[@]}" logs --no-color --tail "${1:-40}" app 2>&1 || true; }
+app_network_broken() {
+  app_log_tail 40 | grep -qiE 'getaddrinfo (for )?db failed|getaddrinfo failed|php_network_getaddresses|Temporary failure in name resolution|Name or service not known'
+}
+port_holder_status() {
+  local port="$1" out name image ports
+  out="$(docker ps --format '{{.Names}}|{{.Image}}|{{.Ports}}' 2>/dev/null || true)"
+  while IFS='|' read -r name image ports; do
+    [[ -z "${ports:-}" ]] && continue
+    case "$ports" in *":${port}->"*) ;; *) continue ;; esac
+    if [[ "$name" == *myucto* || "$image" == *myucto* ]]; then echo "OURS $name";
+    else echo "FOREIGN $name $image"; fi
+    return 0
+  done <<< "$out"
+}
 
 # --- 1. fetch new code/image ---------------------------------------------
 if [[ "${MODE}" == "source" ]]; then
@@ -131,34 +148,64 @@ if [[ "$has_old" == "true" ]] && [[ "$has_new" == "false" ]]; then
   echo ""
 fi
 
-# --- 2. restart -----------------------------------------------------------
-echo "==> Restarting stack…"
-"${DC[@]}" up -d db app
+# --- pre-flight: hostový port aplikace ------------------------------------
+APP_PORT="${APP_PORT:-8080}"
+echo "==> Pre-flight: kontrola hostového portu ${APP_PORT}…"
+holder="$(port_holder_status "${APP_PORT}")"
+if [[ "$holder" == FOREIGN* ]]; then
+  echo "ERROR: Host port ${APP_PORT} drží CIZÍ Docker kontejner: ${holder#FOREIGN }" >&2
+  echo "       Uvolni ho ('docker stop …') nebo změň APP_PORT v .env a spusť znovu." >&2
+  exit 1
+elif [[ "$holder" == OURS* ]]; then
+  echo "    Port ${APP_PORT} drží vlastní myucto kontejner (${holder#OURS }) — OK."
+fi
 
-# --- 3. wait for DB + migrate --------------------------------------------
+# --- 2. restart -----------------------------------------------------------
+# --remove-orphans: uklidí stale kontejnery z jiného compose souboru; jinak
+# zbylý app kontejner drží port a nový se nepřipojí k síti ('port already
+# allocated' → app nepřeloží 'db' → migrace v cyklu padají).
+echo "==> Restarting database…"
+"${DC[@]}" up -d --remove-orphans db
+
+# --- 3. wait for DB health -----------------------------------------------
 echo "==> Waiting for database to become healthy…"
-for i in {1..30}; do
+for i in {1..45}; do
   status=$("${DC[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4)
   if [[ "$status" == "healthy" ]]; then echo "    DB ready."; break; fi
+  [[ "$status" == "unhealthy" ]] && echo "    DB hlásí 'unhealthy' — čekám dál (attempt $i/45)…"
   sleep 2
-  if [[ $i -eq 30 ]]; then
-    echo "ERROR: DB failed to become healthy in 60s. Check '${DC[*]} logs db'." >&2
+  if [[ $i -eq 45 ]]; then
+    echo "ERROR: DB failed to become healthy in ~90s. Check '${DC[*]} logs db'." >&2
     exit 1
   fi
 done
 
-# Migrace běží automaticky z `docker-entrypoint.sh` před apache2-foreground.
-# Místo druhého explicitního migrate (= race condition s entrypointem) jen
-# čekáme, až app odpoví na /api/health (v ALLOWED_PATHS pro FirstRunLockMiddleware).
+# App až po zdravé DB. Nový image → compose app tak jako tak rekreuje; s
+# --remove-orphans + auto-recovery níže je restart odolný proti kolizi portu/sítě.
+echo "==> Restarting app…"
+"${DC[@]}" up -d --remove-orphans app
+
+# --- 3b. wait for app (+ auto-recovery při chybějící síti) ---------------
+# Migrace běží automaticky z entrypointu. Místo druhého explicitního migrate
+# (= race condition s entrypointem) jen čekáme na /api/health.
 echo "==> Waiting for app to become available (entrypoint runs migrations)…"
-for i in {1..60}; do
-  if curl -fsS -o /dev/null "http://localhost:${APP_PORT:-8080}/api/health"; then
+recovered=0
+for i in {1..90}; do
+  if curl -fsS -m 3 -o /dev/null "http://localhost:${APP_PORT}/api/health"; then
     echo "    App ready."
     break
   fi
+  if (( i % 5 == 0 )) && [[ "$recovered" == "0" ]] && app_network_broken; then
+    echo "    App běží, ale nemá compose síť (DNS 'db' selhává) → auto-recovery: force-recreate app." >&2
+    "${DC[@]}" up -d --remove-orphans --force-recreate app >/dev/null 2>&1 || true
+    recovered=1
+    sleep 3
+    continue
+  fi
   sleep 2
-  if [[ $i -eq 60 ]]; then
-    echo "ERROR: App failed to respond in 120s. Check '${DC[*]} logs app'." >&2
+  if [[ $i -eq 90 ]]; then
+    echo "ERROR: App failed to respond in time. Check '${DC[*]} logs app':" >&2
+    app_log_tail 25 >&2
     exit 1
   fi
 done

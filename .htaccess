@@ -1,4 +1,4 @@
-# MyInvoice.cz — Apache configuration
+# MyUcto.cz — Apache configuration
 #
 # /api/*        → api/public/index.php (Slim FrontController)
 # statika       → /styles/, /assets/ a PWA soubory napřímo
@@ -24,11 +24,23 @@ Options -Indexes -MultiViews
     RewriteCond %{HTTP_HOST} !\.local(:[0-9]+)?$ [NC]
     RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
 
-    # 2) Bezpečnostní bariéra: blokovat citlivé složky
-    RewriteRule ^(private|db|log|source|storage|tools|node_modules|api/(src|vendor|templates|tests|bin))(/|$) - [F,L]
+    # 2) Bezpečnostní bariéra: blokovat citlivé a vývojové složky.
+    # `(?:\.[^/]*)?` za jménem složky je ZÁMĚRNÉ: na disku reálně existuje
+    # `api/vendor.prod/` (produkční autoloader) a holé `vendor(/|$)` ho nematchne
+    # (dostane '.', ne '/'). Pokrývá i `private.bak/`, `db.old/` apod. Suffix se
+    # kotví na tečku, takže legitimní `/dbxyz` zůstává dostupné.
+    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
 
-    # 2b) Blokovat cfg.php, composer.* a markdown v rootu
-    RewriteRule ^(cfg\.php|cfg\.local\.php|composer\.(json|lock)|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
+    # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
+    # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné
+    # soubory a root-kotvený regex je minul.
+    RewriteRule ^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
+
+    # 2c) VCS metadata KDEKOLI v cestě. `.git/config` + `.git/HEAD` stačí na
+    # rekonstrukci celého repa (zdrojáky, historie, dřív commitnuté secrety).
+    # Pravidlo 2b blokuje jen `.gitignore` v rootu, samotný adresář `.git/` ne.
+    # IIS to řeší přes hiddenSegments (web.config), Docker přes .dockerignore.
+    RewriteRule (^|/)\.(git|svn|hg|bzr)(/|$) - [F,L]
 
     # 3a) /assets/* → web/dist/assets/* (Vite generuje absolutní URL `/assets/foo.css`,
     # ale skutečné soubory jsou v `web/dist/assets/`. V IIS to řeší alias z web.config,
@@ -121,6 +133,14 @@ Options -Indexes -MultiViews
 <FilesMatch "\.(env|sql|pem|log|lock|md)$">
     Require all denied
 </FilesMatch>
+
+# VCS metadata — fallback pro případ, že mod_rewrite není načtený (pravidlo 2c
+# výše by pak vůbec neplatilo a `.git/HEAD` by se servírovalo jako statika).
+# mod_alias je jiný modul, takže obě cesty musí selhat, aby došlo k úniku.
+# Vracíme 404 (ne 403), ať se nepotvrzuje existence repa.
+<IfModule mod_alias.c>
+    RedirectMatch 404 (^|/)\.(git|svn|hg|bzr)(/|$)
+</IfModule>
 
 # Skrýt cfg.php přímo
 <Files "cfg.php">

@@ -7,9 +7,12 @@ namespace MyInvoice\Action\Report;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\SouhrnneHlaseniBuilder;
+use MyInvoice\Service\Report\TaxSubmissionFilename;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -35,7 +38,7 @@ final class SouhrnneHlaseniAction
     public function preview(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -54,7 +57,7 @@ final class SouhrnneHlaseniAction
     public function download(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -64,11 +67,15 @@ final class SouhrnneHlaseniAction
         }
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period);
-            // #238: chybí-li u cizoměnných dokladů kurz, doplň z ČNB (oficiální kurz
-            // k DUZP) a přebuildi. Tvrdá chyba jen když ČNB kurz nezná ani po doplnění.
+            // #238: chybí-li u cizoměnných dokladů kurz, doplň z ČNB (oficiální kurz k DUZP)
+            // a přebuildi. Fill JE zápis do účetního stavu → v souladu s B8/HIGH#1 (readonly
+            // download nemutuje) ho spustíme jen když má uživatel WRITE — stejná brána jako
+            // posun zámku v archiveru. READ-only nebo když ČNB kurz nezná → tvrdá chyba 422.
             if (!empty($result['missing_rates'])) {
-                $this->rateFiller->fill($supplierId, $result['missing_rates']);
-                $result = $this->builder->build($supplierId, $year, $month, $period);
+                if (RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
+                    $this->rateFiller->fill($supplierId, $result['missing_rates']);
+                    $result = $this->builder->build($supplierId, $year, $month, $period);
+                }
                 if (!empty($result['missing_rates'])) {
                     $labels = \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($result['missing_rates']);
                     return Json::error($response, 'exchange_rate_missing',
@@ -86,6 +93,9 @@ final class SouhrnneHlaseniAction
         $archived = $this->archiver->archive(
             $supplierId, 'dphshv', $year, $isQuarterly ? null : $month, $quarter,
             $result['xml'], $result['summary'], $userId ?: null,
+            // readonly GET/download nesmí mutovat účetní stav — dorevize B8, HIGH#1.
+            // (dphshv navíc zámek neposouvá vůbec — viz TaxSubmissionArchiver::VAT_LOCK_FORMS.)
+            RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE),
         );
         $periodLabel = $isQuarterly ? sprintf('%04d-Q%d', $year, $quarter) : sprintf('%04d-%02d', $year, $month);
         $this->logger->log('report.dphshv_downloaded', $userId, null, null, [
@@ -95,9 +105,13 @@ final class SouhrnneHlaseniAction
             'validation_status' => $archived['validation_status'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        $filename = $isQuarterly
-            ? sprintf('dphshv-%04d-Q%d.xml', $year, $quarter)
-            : sprintf('dphshv-%04d-%02d.xml', $year, $month);
+        $filename = TaxSubmissionFilename::forSnapshot([
+            'id' => $archived['submission_id'],
+            'form_code' => 'dphshv',
+            'period_year' => $year,
+            'period_month' => $isQuarterly ? null : $month,
+            'period_quarter' => $quarter,
+        ], 'xml');
         $response->getBody()->write($result['xml']);
         return $response
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')

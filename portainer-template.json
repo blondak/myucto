@@ -3,15 +3,15 @@
   "templates": [
     {
       "type": 3,
-      "title": "MyInvoice.cz",
-      "name": "myinvoice",
+      "title": "MyUcto.cz",
+      "name": "myucto",
       "description": "Český fakturační systém (PHP 8.5 + Vue 3 + MariaDB). Vydané i přijaté faktury, DPH/kontrolní/souhrnné hlášení, daň z příjmů, banka, upomínky, AI extrakce dokladů, multi-supplier. Self-hosted, jeden veřejný image z GHCR.",
       "note": "Vyplň povinné proměnné (DB_PASSWORD, DB_ROOT_PASSWORD, MYINVOICE_PEPPER) — hesla vygeneruj přes <code>openssl rand -base64 28</code> a pepper/secret přes <code>openssl rand -base64 32</code>. Po nasazení otevři http://&lt;host&gt;:&lt;APP_PORT&gt; a doběhne setup wizard. Migrace DB se spustí automaticky při startu. Pro produkci za HTTPS reverse proxy nastav navíc MYINVOICE_APP_URL, MYINVOICE_SESSION_COOKIE_SECURE=true a MYINVOICE_SESSION_COOKIE_NAME=__Host-myinvoice_session.",
       "categories": ["Finance", "Invoicing", "Accounting"],
       "platform": "linux",
-      "logo": "https://raw.githubusercontent.com/radekhulan/myinvoice/master/styles/logo.svg",
+      "logo": "https://raw.githubusercontent.com/radekhulan/myucto/master/styles/logo.svg",
       "repository": {
-        "url": "https://github.com/radekhulan/myinvoice",
+        "url": "https://github.com/radekhulan/myucto",
         "stackfile": "docker-compose.portainer.yml"
       },
       "env": [

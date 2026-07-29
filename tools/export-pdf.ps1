@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    MyInvoice.cz manuál: Markdown -> PDF (md2pdf engine) — lokální runner.
+    MyUcto.cz manuál: Markdown -> PDF (md2pdf engine) — lokální runner.
 
 .DESCRIPTION
     Tenký spouštěč nad sdíleným MD2PDF enginem. Sloučí kapitoly manuálu

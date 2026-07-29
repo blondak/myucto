@@ -12,7 +12,7 @@
 {# ─── PAGE FOOTER (každá stránka) — attribution ─── #}
 <htmlpagefooter name="attribution">
   <div class="page-attribution">
-    {% if locale == 'en' %}Powered by <a href="https://myinvoice.cz/">MyInvoice.cz</a> invoicing system by <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% else %}Používá fakturační systém <a href="https://myinvoice.cz/">MyInvoice.cz</a> od <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% endif %}
+    {% if locale == 'en' %}Powered by <a href="https://myucto.cz/">MyÚčto.cz</a> invoicing system by <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% else %}Používá fakturační systém <a href="https://myucto.cz/">MyÚčto.cz</a> od <a href="https://mywebdesign.cz/">MyWebdesign.cz</a>{% endif %}
   </div>
 </htmlpagefooter>
 <sethtmlpagefooter name="attribution" value="on" />
@@ -447,6 +447,57 @@
     <td class="tot-num nowrap">{{ invoice.czk_recap.total_with_vat_czk|number_format(2, decimal_sep, thousand_sep) }} CZK</td>
   </tr>
 </table>
+{% endif %}
+
+{# ─── ROZPIS PLATEB (§ 31a ZDPH) ───
+   Právě tenhle rozpis dělá z platebního kalendáře daňový doklad. Bez něj se doklad
+   tiskl jako běžná faktura s jediným datem splatnosti — tedy bez toho jediného, kvůli
+   čemu vzniká. Kalendář BEZ rozpisu se ani nedá vystavit (validace při vystavení), takže
+   prázdná tabulka tady znamená doklad v konceptu; vypíše se proto věta, ne prázdný rám. #}
+{% if invoice.invoice_type == 'payment_calendar' %}
+<table class="schedule-table">
+  <tr>
+    <td colspan="5" class="schedule-title">
+      {{ t('Rozpis plateb', 'Payment schedule') }}
+      <span class="schedule-legal">{{ t('§ 31a zákona o DPH', 'Section 31a of the Czech VAT Act') }}</span>
+    </td>
+  </tr>
+  {% if payment_schedule is empty %}
+  <tr>
+    <td colspan="5" class="schedule-empty">
+      {{ t('Rozpis plateb zatím není vyplněn.', 'The payment schedule has not been filled in yet.') }}
+    </td>
+  </tr>
+  {% else %}
+  <tr class="schedule-head">
+    <th class="schedule-th">{{ t('Splatnost', 'Due date') }}</th>
+    <th class="schedule-th right">{{ t('Základ', 'Base') }}</th>
+    <th class="schedule-th right">{{ t('DPH', 'VAT') }}</th>
+    <th class="schedule-th right">{{ t('Celkem', 'Total') }}</th>
+    <th class="schedule-th">{{ t('Poznámka', 'Note') }}</th>
+  </tr>
+  {% for row in payment_schedule %}
+  <tr>
+    <td class="schedule-td nowrap">{{ row.due_on|date(date_format) }}</td>
+    <td class="schedule-td right nowrap">{{ row.base_amount|number_format(2, decimal_sep, thousand_sep) }}</td>
+    <td class="schedule-td right nowrap">{{ row.vat_amount|number_format(2, decimal_sep, thousand_sep) }}</td>
+    <td class="schedule-td right nowrap">{{ row.total_amount|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+    <td class="schedule-td">{{ row.note }}</td>
+  </tr>
+  {% endfor %}
+  <tr class="schedule-total">
+    <td class="schedule-td">{{ t('Celkem za období', 'Total for the period') }}</td>
+    <td class="schedule-td right nowrap">{{ payment_schedule|reduce((s, r) => s + r.base_amount, 0)|number_format(2, decimal_sep, thousand_sep) }}</td>
+    <td class="schedule-td right nowrap">{{ payment_schedule|reduce((s, r) => s + r.vat_amount, 0)|number_format(2, decimal_sep, thousand_sep) }}</td>
+    <td class="schedule-td right nowrap">{{ payment_schedule|reduce((s, r) => s + r.total_amount, 0)|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+    <td class="schedule-td"></td>
+  </tr>
+  {% endif %}
+</table>
+<div class="note schedule-note">
+  {{ t('Každá platba uvedená v rozpisu je samostatným zdanitelným plněním; daň se uplatní ke dni její splatnosti nebo přijetí úplaty podle toho, který nastane dříve.',
+       'Each payment listed in the schedule is a separate taxable supply; VAT applies on its due date or on receipt of payment, whichever occurs first.') }}
+</div>
 {% endif %}
 
 {% if invoice.note_below_items %}

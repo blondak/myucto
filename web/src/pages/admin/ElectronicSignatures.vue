@@ -13,8 +13,11 @@ import {
   type SigningProfileUsage,
   type SigningSettings,
 } from '@/api/settings'
+import type { EpoSigningCredential } from '@/api/epoSubmissions'
 import { useToast } from '@/composables/useToast'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useAuthStore } from '@/stores/auth'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -30,7 +33,8 @@ const pdfOutputSettings = ref<PdfSignatureOutputSetting[]>([])
 const outputTypes = ref<string[]>([])
 const userDefaults = ref<PdfSignatureUserDefault[]>([])
 const userDefaultSaving = ref<string | null>(null)
-const pdfOutputSettingsSaving = ref<string | null>(null)
+const pdfOutputSettingsSaving = ref(false)
+const pdfOutputSettingBaseline = ref<Record<string, string>>({})
 const pdfOutputSettingsTesting = ref<string | null>(null)
 const signingProfileCredential = ref<SigningProfileCredentialMeta | null>(null)
 const signingProfileCredentialLoading = ref(false)
@@ -40,6 +44,11 @@ const signingProfileCertPassword = ref('')
 const signingProfileCertPolicy = ref<SigningCredentialPassphrasePolicy>('encrypted_store')
 const signingProfileCertPassphraseProfileId = ref('')
 const signingProfileCertUploading = ref(false)
+const personalCertificates = ref<EpoSigningCredential[]>([])
+const signingProfileCredentialSource = ref<'personal_vault' | 'uploaded_file'>('uploaded_file')
+const signingProfileVaultCredentialId = ref<number | null>(null)
+const signingProfileVaultPassword = ref('')
+const signingProfileVaultTotp = ref('')
 const showSigningProfileForm = ref(false)
 const editingSigningProfile = ref<number | null>(null)
 const signingProfileTsaEnabled = ref(false)
@@ -64,14 +73,25 @@ const signingProfileDraft = reactive<SigningProfilePayload & { owner_user_id: nu
   pdf_reason: null,
   is_active: true,
 })
-const isAdmin = computed(() => auth.user?.role === 'admin')
-const isAccountant = computed(() => auth.user?.role === 'accountant')
+const signingProfileSlug = useAutoSlug(
+  slug => { signingProfileDraft.code = slug },
+  { maxLen: 80 },
+)
+const isAdmin = computed(() => auth.isSuperadmin)
+const isAccountant = computed(() => auth.canRead('settings.signing') && !auth.isSuperadmin)
 const accountantProfilesEnabled = computed(() => signingSettings.value?.accountant_profiles_enabled === true)
 const canManageSigningProfiles = computed(() => isAdmin.value || (isAccountant.value && accountantProfilesEnabled.value))
 const canUseUserDefaults = computed(() => isAdmin.value || (isAccountant.value && accountantProfilesEnabled.value))
 const contentVisible = computed(() => isAdmin.value || accountantProfilesEnabled.value)
 const signingProfileCredentialUsesUnsupportedPrompt = computed(() =>
   signingProfileCredential.value?.passphrase_policy === 'prompt_on_use',
+)
+const currentUserPersonalProfile = computed(() =>
+  signingProfileOwnerMode.value === 'current_user'
+  || signingProfileDraft.owner_user_id === (auth.user?.id ?? null),
+)
+const usablePersonalCertificates = computed(() =>
+  personalCertificates.value.filter(item => item.enabled_for_supplier && item.valid_now),
 )
 
 async function load() {
@@ -109,6 +129,7 @@ async function loadSigningProfiles(silent = true) {
     if (!isAdmin.value && !settings.accountant_profiles_enabled) {
       signingProfiles.value = []
       pdfOutputSettings.value = []
+      pdfOutputSettingBaseline.value = {}
       outputTypes.value = []
       userDefaults.value = []
       return
@@ -121,7 +142,7 @@ async function loadSigningProfiles(silent = true) {
         settingsApi.getPdfSigningUserDefaults(),
       ])
       signingProfiles.value = profiles
-      pdfOutputSettings.value = pdfSettings.output_settings
+      replacePdfOutputSettings(pdfSettings.output_settings)
       outputTypes.value = defaults.output_types
       userDefaults.value = defaults.user_defaults
       return
@@ -132,7 +153,7 @@ async function loadSigningProfiles(silent = true) {
       settingsApi.getPdfSigningUserDefaults(),
     ])
     signingProfiles.value = profiles
-    pdfOutputSettings.value = defaults.output_settings
+    replacePdfOutputSettings(defaults.output_settings)
     outputTypes.value = defaults.output_types
     userDefaults.value = defaults.user_defaults
   } catch (e: any) {
@@ -249,6 +270,10 @@ function resetSigningProfileDraft() {
   signingProfileCertPassword.value = ''
   signingProfileCertPolicy.value = 'encrypted_store'
   signingProfileCertPassphraseProfileId.value = ''
+  signingProfileCredentialSource.value = 'uploaded_file'
+  signingProfileVaultCredentialId.value = null
+  signingProfileVaultPassword.value = ''
+  signingProfileVaultTotp.value = ''
   if (signingProfileCertFileInput.value) signingProfileCertFileInput.value.value = ''
   Object.assign(signingProfileDraft, {
     owner_user_id: null,
@@ -262,13 +287,17 @@ function resetSigningProfileDraft() {
     pdf_reason: null,
     is_active: true,
   })
+  signingProfileSlug.init('', false)
 }
 
 async function loadSigningProfileCredential(profileId: number, silent = true) {
   signingProfileCredentialLoading.value = true
   try {
     const meta = await settingsApi.getSigningProfileCredential(profileId)
+    await loadPersonalCertificates()
     signingProfileCredential.value = meta
+    signingProfileCredentialSource.value = meta.certificate_source || 'uploaded_file'
+    signingProfileVaultCredentialId.value = meta.vault_credential_id || null
     signingProfileCertPolicy.value = meta.passphrase_policy === 'prompt_on_use'
       ? 'encrypted_store'
       : (meta.passphrase_policy || 'encrypted_store')
@@ -281,9 +310,18 @@ async function loadSigningProfileCredential(profileId: number, silent = true) {
   }
 }
 
+async function loadPersonalCertificates() {
+  try {
+    personalCertificates.value = await settingsApi.listPersonalSigningCertificates()
+  } catch {
+    personalCertificates.value = []
+  }
+}
+
 function startCreateSigningProfile() {
   resetSigningProfileDraft()
   showSigningProfileForm.value = true
+  loadPersonalCertificates()
 }
 
 function startEditSigningProfile(profile: SigningProfile) {
@@ -308,8 +346,21 @@ function startEditSigningProfile(profile: SigningProfile) {
     pdf_reason: profile.pdf_reason,
     is_active: profile.is_active,
   })
+  signingProfileSlug.init(profile.code, true)
   showSigningProfileForm.value = true
   loadSigningProfileCredential(profile.id, true)
+}
+
+function onSigningProfileNameInput(event: Event) {
+  const name = (event.target as HTMLInputElement).value
+  signingProfileDraft.name = name
+  signingProfileSlug.fromName(name)
+}
+
+function onSigningProfileCodeInput(event: Event) {
+  const code = (event.target as HTMLInputElement).value
+  signingProfileDraft.code = code
+  signingProfileSlug.markManual(code)
 }
 
 function cancelSigningProfileEdit() {
@@ -410,6 +461,10 @@ function onSigningProfileCertSelected(ev: Event) {
 }
 
 function hasPendingSigningProfileCredentialSave(): boolean {
+  if (signingProfileCredentialSource.value === 'personal_vault') {
+    return signingProfileVaultCredentialId.value !== null
+      && signingProfileVaultCredentialId.value !== (signingProfileCredential.value?.vault_credential_id || null)
+  }
   return signingProfileCertFile.value !== null
     || signingProfileCertPassword.value !== ''
     || hasSigningProfileCredentialSettingsChange()
@@ -434,6 +489,25 @@ function hasSigningProfileCredentialSettingsChange(): boolean {
 }
 
 function validateSigningProfileCredentialSave(): boolean {
+  if (signingProfileCredentialSource.value === 'personal_vault') {
+    if (!currentUserPersonalProfile.value) {
+      toast.error(t('settings.signing_vault_personal_profile_required'))
+      return false
+    }
+    if (!signingProfileVaultCredentialId.value) {
+      toast.error(t('settings.signing_vault_certificate_required'))
+      return false
+    }
+    if (!signingProfileVaultPassword.value) {
+      toast.error(t('settings.signing_vault_password_required'))
+      return false
+    }
+    if (auth.user?.totp_enabled === true && !/^\d{6}$/.test(signingProfileVaultTotp.value.trim())) {
+      toast.error(t('settings.signing_vault_totp_required'))
+      return false
+    }
+    return true
+  }
   const hasNewFile = signingProfileCertFile.value !== null
   const password = signingProfileCertPassword.value
   if (hasNewFile && password === '') {
@@ -461,6 +535,17 @@ function validateSigningProfileCredentialSave(): boolean {
 }
 
 async function saveSigningProfileCertFor(profileId: number) {
+  if (signingProfileCredentialSource.value === 'personal_vault') {
+    signingProfileCredential.value = await settingsApi.linkPersonalSigningCertificate(
+      profileId,
+      signingProfileVaultCredentialId.value as number,
+      signingProfileVaultPassword.value,
+      signingProfileVaultTotp.value,
+    )
+    signingProfileVaultPassword.value = ''
+    signingProfileVaultTotp.value = ''
+    return
+  }
   const passphraseProfileId = signingProfileCertPolicy.value === 'passphrase_file'
     ? signingProfileCertPassphraseProfileId.value.trim()
     : null
@@ -579,26 +664,55 @@ function onSigningProfileTsaToggle() {
   signingProfileDraft.pdf_tsa_password = ''
 }
 
-async function savePdfOutputSetting(setting: PdfSignatureOutputSetting) {
-  pdfOutputSettingsSaving.value = setting.output_type
+function pdfOutputSettingPayload(setting: PdfSignatureOutputSetting) {
+  const signatureConfig = signingOutputUsage(setting.output_type) === 'email_smime'
+    ? {
+        ...(setting.signature_config || {}),
+        smime_identity_policy: smimeIdentityPolicy(setting),
+      }
+    : (setting.signature_config || {})
+
+  return {
+    enabled: setting.enabled,
+    backend: setting.backend || defaultBackendForOutput(setting.output_type),
+    selection_source: setting.selection_source,
+    user_profile_fallback: setting.user_profile_fallback,
+    default_profile_id: outputUsesAdminProfile(setting) ? setting.default_profile_id : null,
+    failure_policy: setting.failure_policy,
+    signature_config: signatureConfig,
+  }
+}
+
+function replacePdfOutputSettings(settings: PdfSignatureOutputSetting[]) {
+  pdfOutputSettings.value = settings
+  pdfOutputSettingBaseline.value = Object.fromEntries(
+    settings.map(setting => [setting.output_type, JSON.stringify(pdfOutputSettingPayload(setting))]),
+  )
+}
+
+async function saveAllPdfOutputSettings() {
+  if (pdfOutputSettingsSaving.value) return
+  pdfOutputSettingsSaving.value = true
   try {
-    const payload = {
-      enabled: setting.enabled,
-      backend: setting.backend || defaultBackendForOutput(setting.output_type),
-      selection_source: setting.selection_source,
-      user_profile_fallback: setting.user_profile_fallback,
-      default_profile_id: outputUsesAdminProfile(setting) ? setting.default_profile_id : null,
-      failure_policy: setting.failure_policy,
-      signature_config: setting.signature_config || {},
+    const changed = pdfOutputSettings.value.flatMap(setting => {
+      const payload = pdfOutputSettingPayload(setting)
+      return pdfOutputSettingBaseline.value[setting.output_type] !== JSON.stringify(payload)
+        ? [{ output_type: setting.output_type, ...payload }]
+        : []
+    })
+    if (changed.length > 0) {
+      const result = await settingsApi.updatePdfSignatureOutputSettings(changed)
+      const updatedByType = new Map(result.output_settings.map(setting => [setting.output_type, setting]))
+      replacePdfOutputSettings(
+        pdfOutputSettings.value.map(setting => updatedByType.get(setting.output_type) || setting),
+      )
     }
-    const updated = await settingsApi.updatePdfSignatureOutputSetting(setting.output_type, payload)
-    pdfOutputSettings.value = pdfOutputSettings.value.map(row => row.output_type === updated.output_type ? updated : row)
-    toast.success(t('settings.signing_output_saved'))
+    toast.success(t('settings.signing_outputs_saved'))
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     await loadSigningProfiles(true)
   } finally {
-    pdfOutputSettingsSaving.value = null
+    pdfOutputSettingsSaving.value = false
   }
 }
 
@@ -659,9 +773,9 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
             <h3 class="text-sm font-medium text-neutral-800">{{ t('settings.signing_profiles_title') }}</h3>
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.signing_profiles_hint') }}</p>
           </div>
-          <button @click="startCreateSigningProfile" type="button"
-            class="cursor-pointer inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
-            + {{ t('settings.signing_profiles_new') }}
+          <button @click="startCreateSigningProfile" type="button" :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('settings.signing_profiles_new') }}
           </button>
         </div>
 
@@ -717,12 +831,14 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
           <div class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.signing_profile_name') }}</label>
-              <input v-model="signingProfileDraft.name" type="text" maxlength="120" required
+              <input :value="signingProfileDraft.name" @input="onSigningProfileNameInput"
+                type="text" maxlength="120" required
                 class="h-9 w-full px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.signing_profile_code') }}</label>
-              <input v-model="signingProfileDraft.code" type="text" maxlength="80" required pattern="[A-Za-z0-9_.-]+"
+              <input :value="signingProfileDraft.code" @input="onSigningProfileCodeInput"
+                type="text" maxlength="80" required pattern="[A-Za-z0-9_.-]+"
                 class="h-9 w-full px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
             </div>
             <div>
@@ -811,6 +927,13 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
               </div>
               <div v-else-if="signingProfileCredentialLoading" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
               <div v-else-if="signingProfileCredential?.has_certificate" class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
+                <div class="mb-1">
+                  <span class="inline-flex rounded-full border border-primary-500/30 bg-primary-50 px-2 py-0.5 text-[11px] text-primary-700">
+                    {{ signingProfileCredential.certificate_source === 'personal_vault'
+                      ? t('settings.signing_vault_source')
+                      : t('settings.signing_uploaded_source') }}
+                  </span>
+                </div>
                 <div><span class="text-neutral-500">{{ t('settings.signing_profile_cert_subject') }}:</span> <span class="font-medium">{{ signingProfileCredential.certificate_subject || '—' }}</span></div>
                 <div v-if="signingProfileCredential.certificate_email"><span class="text-neutral-500">{{ t('settings.signing_profile_cert_email') }}:</span> {{ signingProfileCredential.certificate_email }}</div>
                 <div>
@@ -820,12 +943,59 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                     <template v-if="signingProfileCredential.expired"> ({{ t('settings.signing_cert_expired') }})</template>
                   </span>
                 </div>
-                <div><span class="text-neutral-500">{{ t('settings.signing_profile_cert_passphrase_policy') }}:</span> <span class="font-mono">{{ signingProfileCredential.passphrase_policy }}</span></div>
+                <div v-if="signingProfileCredential.certificate_source !== 'personal_vault'"><span class="text-neutral-500">{{ t('settings.signing_profile_cert_passphrase_policy') }}:</span> <span class="font-mono">{{ signingProfileCredential.passphrase_policy }}</span></div>
                 <div class="font-mono text-[10px] text-neutral-400 mt-1 break-all">SHA-256: {{ signingProfileCredential.certificate_fingerprint }}</div>
               </div>
-              <div class="grid gap-2 lg:grid-cols-[auto_minmax(10rem,1fr)_minmax(10rem,12rem)_minmax(10rem,13rem)] lg:items-center">
+              <div v-if="currentUserPersonalProfile" class="mb-3 flex flex-wrap gap-2">
+                <button type="button"
+                  :class="signingProfileCredentialSource === 'personal_vault' ? btnFilled('primary') : btnOutline('primary')"
+                  @click="signingProfileCredentialSource = 'personal_vault'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+                  {{ t('settings.signing_use_personal_vault') }}
+                </button>
+                <button type="button"
+                  :class="signingProfileCredentialSource === 'uploaded_file' ? btnFilled('neutral') : btnOutline('neutral')"
+                  @click="signingProfileCredentialSource = 'uploaded_file'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+                  {{ t('settings.signing_upload_separate') }}
+                </button>
+              </div>
+              <div v-if="signingProfileCredentialSource === 'personal_vault' && currentUserPersonalProfile"
+                class="rounded-lg border border-primary-500/25 bg-primary-50/40 p-3">
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="text-xs text-neutral-700">
+                    {{ t('settings.signing_vault_certificate') }}
+                    <select v-model="signingProfileVaultCredentialId"
+                      class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                      <option :value="null">{{ t('settings.signing_vault_choose') }}</option>
+                      <option v-for="credential in usablePersonalCertificates" :key="credential.id" :value="credential.id">
+                        {{ credential.label }} · {{ credential.subject_dn }}
+                      </option>
+                    </select>
+                  </label>
+                  <div class="grid grid-cols-2 gap-2">
+                    <label class="text-xs text-neutral-700">
+                      {{ t('reports.submissions.current_password') }}
+                      <input v-model="signingProfileVaultPassword" type="password" autocomplete="current-password"
+                        class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                    </label>
+                    <label class="text-xs text-neutral-700">
+                      {{ t('reports.submissions.totp_optional') }}
+                      <input v-model="signingProfileVaultTotp" type="text" inputmode="numeric" maxlength="6"
+                        autocomplete="one-time-code"
+                        class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                    </label>
+                  </div>
+                </div>
+                <p class="mt-2 text-xs text-neutral-600">{{ t('settings.signing_vault_hint') }}</p>
+                <RouterLink to="/reports/submissions" class="mt-2 inline-flex text-xs font-medium text-primary-700 hover:underline">
+                  {{ t('settings.signing_vault_manage') }}
+                </RouterLink>
+              </div>
+              <div v-else class="grid gap-2 lg:grid-cols-[auto_minmax(10rem,1fr)_minmax(10rem,12rem)_minmax(10rem,13rem)] lg:items-center">
                 <button @click="pickSigningProfileCert" type="button"
-                  class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">
+                  :class="btnOutline('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
                   {{ t('settings.signing_cert_choose') }}
                 </button>
                 <span class="text-xs truncate" :class="signingProfileCertFile ? 'text-neutral-700 font-medium' : 'text-neutral-400'">
@@ -839,10 +1009,10 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <option value="passphrase_file">{{ t('settings.signing_profile_cert_policy_passphrase_file') }}</option>
                 </select>
               </div>
-              <p v-if="signingProfileCredentialUsesUnsupportedPrompt" class="mt-2 text-xs text-warning-700">
+              <p v-if="signingProfileCredentialSource === 'uploaded_file' && signingProfileCredentialUsesUnsupportedPrompt" class="mt-2 text-xs text-warning-700">
                 {{ t('settings.signing_profile_cert_prompt_on_use_hint') }}
               </p>
-              <input v-if="signingProfileCertPolicy === 'passphrase_file'" v-model="signingProfileCertPassphraseProfileId"
+              <input v-if="signingProfileCredentialSource === 'uploaded_file' && signingProfileCertPolicy === 'passphrase_file'" v-model="signingProfileCertPassphraseProfileId"
                 type="text" :placeholder="t('settings.signing_profile_cert_passphrase_profile_id')"
                 class="mt-2 h-9 w-full max-w-sm px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
               <input ref="signingProfileCertFileInput" @change="onSigningProfileCertSelected" type="file" accept=".p12,.pfx,application/x-pkcs12" class="hidden" />
@@ -850,11 +1020,13 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
           </div>
           <div class="flex justify-end gap-2 pt-4">
             <button @click="cancelSigningProfileEdit" type="button"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">
+              :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
             <button type="submit" :disabled="signingProfileSaving"
-              class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed">
+              :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ signingProfileSaving ? t('common.loading') : (editingSigningProfile === null ? t('settings.signing_profile_create') : t('settings.signing_profile_update')) }}
             </button>
           </div>
@@ -924,7 +1096,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_user_fallback') }}</th>
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_failure_policy') }}</th>
                   <th class="px-3 py-2 text-left font-medium">{{ t('settings.signing_output_identity_policy') }}</th>
-                  <th class="px-3 py-2 w-40"></th>
+                  <th class="px-3 py-2 w-24"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
@@ -1006,20 +1178,24 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                     <span v-else class="text-neutral-400">{{ t('settings.signing_output_identity_policy_not_applicable') }}</span>
                   </td>
                   <td class="px-3 py-2 text-right whitespace-nowrap">
-                    <button @click="savePdfOutputSetting(setting)" type="button"
-                      :disabled="pdfOutputSettingsSaving === setting.output_type"
-                      class="cursor-pointer text-primary-600 hover:text-primary-700 disabled:opacity-50">
-                      {{ pdfOutputSettingsSaving === setting.output_type ? t('common.loading') : t('common.save') }}
-                    </button>
                     <button v-if="signingOutputUsage(setting.output_type) === 'pdf'" @click="testPdfOutputSetting(setting)" type="button"
                       :disabled="pdfOutputSettingsTesting === setting.output_type"
-                      class="cursor-pointer ml-3 text-neutral-600 hover:text-neutral-800 disabled:opacity-50">
+                      class="cursor-pointer text-neutral-600 hover:text-neutral-800 disabled:opacity-50">
                       {{ pdfOutputSettingsTesting === setting.output_type ? t('common.loading') : t('settings.signing_output_test') }}
                     </button>
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div v-if="!signingProfilesLoading" class="mt-4 flex flex-wrap justify-end">
+            <button type="button" :class="btnFilled('primary')" :disabled="pdfOutputSettingsSaving"
+              @click="saveAllPdfOutputSettings">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+              </svg>
+              {{ pdfOutputSettingsSaving ? t('common.saving') : t('settings.signing_outputs_save_all') }}
+            </button>
           </div>
       </section>
 

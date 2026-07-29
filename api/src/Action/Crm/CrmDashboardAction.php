@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Crm;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Crm\CrmAggregationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -151,8 +153,7 @@ final class CrmDashboardAction
 
     public function recompute(Request $request, Response $response): Response
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'dashboard', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -169,6 +170,20 @@ final class CrmDashboardAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         return Json::ok($response, $this->crm->actionItems($supplierId, $userId));
+    }
+
+    /**
+     * Daňový kalendář (Fáze F, audit 2026-07 P2/S) — širší okno než action-items:
+     * DPH/KH/SH + zálohy (E9) + roční termín DPFO/DPPO, každá se stavem "podáno"
+     * dle archivu tax_submissions.
+     */
+    public function taxCalendar(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $q = $request->getQueryParams();
+        $maxDaysAhead = max(1, min(365, (int) ($q['max_days_ahead'] ?? 90)));
+        $items = $this->crm->taxCalendarItems($supplierId, new \DateTimeImmutable(), $maxDaysAhead);
+        return Json::ok($response, ['items' => $items, 'total' => count($items)]);
     }
 
     /** Dismiss action item (day / week / forever / historical). */

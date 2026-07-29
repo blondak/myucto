@@ -4,12 +4,19 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
@@ -25,6 +32,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class UpdateInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
+    use GuardsDocumentLock;
 
     public function __construct(
         private readonly InvoiceRepository $repo,
@@ -38,7 +46,27 @@ final class UpdateInvoiceAction
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly VarsymbolGenerator $varsymbol,
         private readonly Connection $db,
+        private readonly DocumentLockService $locks,
+        private readonly DocumentJournalSync $journalSync,
+        private readonly CnbRateDeviationChecker $rateChecker,
+        private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
     ) {}
+
+    /**
+     * Účetní/amountová/DPH pole faktury (audit 2026-07 B11). Změna kteréhokoli z nich
+     * v force-editu zaúčtovaného dokladu v uzavřeném období rozejde doklad × deník →
+     * vyžaduje force_mode='reconcile'. force_mode='notes_only' povoluje jen zbytek
+     * (poznámky, projekt, jazyk). exchange_rate zde ve výčtu není záměrně — řeší se
+     * NUMERICKÝM porovnáním v financialFieldsChanged() (ruční override kurzu přepisuje
+     * CZK hodnotu; string compare by falešně blokoval formátové neshody 25.00 vs 25).
+     */
+    private const FINANCIAL_FIELDS = [
+        'client_id', 'currency_id', 'revenue_category_id',
+        'issue_date', 'tax_date', 'due_date', 'varsymbol',
+        'invoice_type', 'payment_method', 'discount_percent', 'advance_paid_amount',
+        'reverse_charge', 'prices_include_vat', 'vat_classification_code', 'income_tax_exempt',
+        'is_simplified',
+    ];
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
@@ -50,7 +78,24 @@ final class UpdateInvoiceAction
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $isForce = $request->getQueryParams()['force'] ?? null;
-        $isAdmin = (($user['role'] ?? '') === 'admin');
+        $isAdmin = RequestAuthorization::isSuperadmin($request);
+
+        $body = (array) ($request->getParsedBody() ?? []);
+
+        // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
+        // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
+        // klient nesmí datem do uzavřeného období „utéct" ani ho tam přesunout.
+        $lock = $this->locks->forInvoice($existing);
+        if ($deny = $this->denyIfLocked($request, $response, $lock, 'invoice', $id)) {
+            return $deny;
+        }
+        $newRefDate = DocumentLockService::invoiceRefDate($body) ?? DocumentLockService::invoiceRefDate($existing);
+        if ($newRefDate !== null) {
+            $newLock = $this->locks->forDate((int) $existing['supplier_id'], $newRefDate);
+            if ($deny = $this->denyIfLocked($request, $response, $newLock, 'invoice', $id)) {
+                return $deny;
+            }
+        }
 
         if ($existing['status'] !== 'draft') {
             // Pouze admin smí upravovat vystavenou fakturu, a to jen s explicit ?force=1.
@@ -63,11 +108,50 @@ final class UpdateInvoiceAction
             }
         }
 
-        $body = (array) ($request->getParsedBody() ?? []);
+        // B11 (audit 2026-07): force-edit dokladu s AKTIVNÍM zaúčtovaným zápisem v UZAVŘENÉM
+        // období rozejde doklad × deník (zápis v closed období nelze přepsat). Vynucená volba:
+        //   reconcile  → doklad se opraví a zápis se stornuje + přeúčtuje do běžného období
+        //   notes_only → povolena jen neúčetní pole (poznámky/projekt/jazyk)
+        $forceMode = null;
+        if ($isAdmin && $isForce && $lock->inClosedPeriod && $lock->posted) {
+            $forceMode = trim((string) ($request->getQueryParams()['force_mode'] ?? $body['force_mode'] ?? ''));
+            if (!in_array($forceMode, ['reconcile', 'notes_only'], true)) {
+                return Json::error(
+                    $response,
+                    'force_mode_required',
+                    'Doklad má aktivní zaúčtovaný zápis v uzavřeném období. Zvolte force_mode: '
+                        . '"reconcile" (doklad se opraví, původní zápis se stornuje a doklad se přeúčtuje do '
+                        . 'aktuálního otevřeného období — čísla uzavřeného roku zůstanou nedotčena), nebo '
+                        . '"notes_only" (povolí změnu jen neúčetních polí: poznámky, projekt, jazyk).',
+                    422,
+                );
+            }
+            if ($forceMode === 'notes_only') {
+                $changed = self::financialFieldsChanged($body, $existing);
+                if ($changed !== []) {
+                    return Json::error(
+                        $response,
+                        'financial_change_not_allowed',
+                        'force_mode="notes_only" povoluje jen neúčetní pole. Účetní/částková/DPH pole ke změně: '
+                            . implode(', ', $changed) . '. Pro opravu účetních polí použijte force_mode="reconcile".',
+                        422,
+                    );
+                }
+            }
+        }
+        $repostOpenForceEdit = $isAdmin
+            && (bool) $isForce
+            && $lock->posted
+            && !$lock->inClosedPeriod
+            && self::financialFieldsChanged($body, $existing) !== [];
+
         // parent_invoice_id se nikdy nemění při update (vazba dobropisu na původní doklad).
         $body['parent_invoice_id'] = $existing['parent_invoice_id'];
 
         $validTypes    = ['invoice', 'proforma', 'credit_note'];
+        // Kalendář (§ 31) smí měnit typ jen DRAFT: vlastní číselnou řadu nemá, takže
+        // přečíslování vystaveného dokladu na kalendář by spadlo na generátoru varsymbolu.
+        $draftTypes    = [...$validTypes, 'payment_calendar'];
         $requestedType = (string) ($body['invoice_type'] ?? '');
         $isIssued      = $existing['status'] !== 'draft';
         $existingType  = (string) $existing['invoice_type'];
@@ -130,7 +214,7 @@ final class UpdateInvoiceAction
         } else {
             // Bez přečíslování: typ je u vystavené faktury immutable (číslo + auditní stopa),
             // u draftu lze přepnout mezi invoice/proforma/dobropis (ne na storno/cancellation).
-            if ($isIssued || !in_array($requestedType, $validTypes, true)) {
+            if ($isIssued || !in_array($requestedType, $draftTypes, true)) {
                 $body['invoice_type'] = $existingType;
             }
             // Varsymbol vystavené faktury je immutable bez změny typu (snapshot pro účetní
@@ -154,7 +238,17 @@ final class UpdateInvoiceAction
         $this->applyVatClassificationDefaults($body, \MyInvoice\Http\SupplierGuard::currentId($request));
 
         try {
-            $this->repo->updateDraft($id, $body);
+            // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
+            // účetní mohla doklad zaúčtovat mezi guard-checkem a zápisem.
+            $requireUnbooked = RequestAuthorization::isClientType($request);
+            if (!$this->repo->updateDraft($id, $body, $requireUnbooked)) {
+                return Json::error(
+                    $response,
+                    'document_locked',
+                    'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                    409,
+                );
+            }
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         } catch (\PDOException $e) {
@@ -164,6 +258,7 @@ final class UpdateInvoiceAction
             throw $e;
         }
         $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        $this->paymentSchedule->saveFromPayload(\MyInvoice\Http\SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
 
         // Exchange rate logika:
@@ -219,13 +314,91 @@ final class UpdateInvoiceAction
         if ($renumber !== null) {
             $payload = ($payload ?? []) + ['renumber' => $renumber];
         }
+        // B11: zvolený režim force-editu (reconcile/notes_only) do auditní stopy.
+        if ($forceMode !== null) {
+            $payload = ($payload ?? []) + ['force_mode' => $forceMode];
+        }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $action = ($existing['status'] !== 'draft') ? 'invoice.force_updated' : 'invoice.updated';
         $this->logger->log($action, $user['id'] ?? null, 'invoice', $id, $payload, $ip, $request->getHeaderLine('User-Agent'));
 
+        // B11 reconcile: po opravě dokladu stornuj původní zápis a přeúčtuj opravený doklad
+        // do aktuálního otevřeného období (deník začne sedět na nový doklad; PostingService
+        // sám zaloguje accounting.reversed/posted).
+        if ($forceMode === 'reconcile') {
+            try {
+                $reconcile = $this->journalSync->reconcileForceEdit(
+                    (int) $existing['supplier_id'],
+                    'invoice',
+                    $id,
+                    ['user_id' => $user['id'] ?? null, 'posted_by' => $user['id'] ?? null,
+                     'ip' => $ip, 'user_agent' => $request->getHeaderLine('User-Agent')],
+                );
+            } catch (PostingException | UnbalancedEntryException $e) {
+                $code = $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry';
+                $status = $e instanceof PostingException ? $e->httpStatus : 422;
+                return Json::error($response, $code,
+                    'Doklad byl opraven, ale přeúčtování deníku selhalo: ' . $e->getMessage()
+                        . ' Deník dorovnej ručně (storno + zaúčtování do otevřeného období).',
+                    $status);
+            }
+            if ($reconcile !== null) {
+                $invoice['_reconcile'] = $reconcile;
+            }
+        } elseif ($repostOpenForceEdit) {
+            try {
+                $repostedEntryId = $this->journalSync->repostForceEdit(
+                    (int) $existing['supplier_id'],
+                    'invoice',
+                    $id,
+                    [
+                        'entry_date' => (string) ($invoice['tax_date'] ?? $invoice['issue_date']),
+                        'document_date' => (string) ($invoice['tax_date'] ?? $invoice['issue_date']),
+                        'document_no' => (string) ($invoice['varsymbol'] ?? ''),
+                        'user_id' => $user['id'] ?? null,
+                        'posted_by' => $user['id'] ?? null,
+                        'ip' => $ip,
+                        'user_agent' => $request->getHeaderLine('User-Agent'),
+                    ],
+                );
+            } catch (PostingException | UnbalancedEntryException $e) {
+                $code = $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry';
+                $status = $e instanceof PostingException ? $e->httpStatus : 422;
+                return Json::error(
+                    $response,
+                    $code,
+                    'Doklad byl opraven, ale přeúčtování deníku selhalo: ' . $e->getMessage()
+                        . ' Deník dorovnej ručně.',
+                    $status,
+                );
+            }
+            if ($repostedEntryId !== null) {
+                $invoice['_repost'] = ['entry_id' => $repostedEntryId];
+            }
+        }
+
         if ($rateMeta !== null) {
             $invoice['_meta'] = ['exchange_rate' => $rateMeta];
+        }
+        // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k DUZP. NEBLOKUJE
+        // (§24/7 pevný kurz legitimní); §73/6 se netýká — jen účetní přepočet 563/663.
+        if (is_array($invoice)) {
+            // Akumulovat, ne přiřazovat — jinak by poslední zapisovatel přebil ostatní.
+            $warnings = InvoiceValidation::warnings($invoice);
+            $dev = $this->rateChecker->deviationWarning(
+                SupplierGuard::currentId($request),
+                (string) ($invoice['currency'] ?? ''),
+                (string) ($invoice['effective_tax_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
+            );
+            if ($dev !== null) {
+                $warnings[] = 'exchange_rate_cnb_deviation';
+                $invoice['_warning_meta'] = ['exchange_rate_cnb_deviation' => $dev];
+            }
+            if ($warnings !== []) {
+                $invoice['_warnings'] = $warnings;
+            }
         }
         return Json::ok($response, $invoice);
     }
@@ -248,6 +421,7 @@ final class UpdateInvoiceAction
             'invoice_type', 'payment_method', 'note_above_items', 'note_below_items',
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',
+            'is_simplified',
         ];
 
         $changed = [];
@@ -258,6 +432,41 @@ final class UpdateInvoiceAction
             }
         }
         if (self::itemsChanged((array) ($old['items'] ?? []), (array) ($new['items'] ?? []))) {
+            $changed[] = 'items';
+        }
+        return $changed;
+    }
+
+    /**
+     * B11: seznam ÚČETNÍCH polí, která se v requestu reálně mění proti uloženému dokladu.
+     * Porovnává hodnotu (ne pouhou přítomnost) — FE smí poslat celý objekt, blokujeme jen
+     * skutečnou změnu částkového/DPH/položkového pole (režim notes_only).
+     *
+     * @return list<string>
+     */
+    private static function financialFieldsChanged(array $body, array $existing): array
+    {
+        $changed = [];
+        foreach (self::FINANCIAL_FIELDS as $col) {
+            if (array_key_exists($col, $body)
+                && (string) ($body[$col] ?? '') !== (string) ($existing[$col] ?? '')
+            ) {
+                $changed[] = $col;
+            }
+        }
+        // exchange_rate: ruční override kurzu přepíše CZK hodnotu dokladu (PostingService:
+        // total_czk = total_with_vat * rate), takže reálná změna kurzu pod notes_only rozejde
+        // doklad × deník stejně jako změna currency. Porovnáváme NUMERICKY (ne stringem), aby
+        // formátové neshody (25.00 vs 25) legitimní notes_only neblokovaly — jen skutečná změna.
+        if (array_key_exists('exchange_rate', $body)
+            && is_numeric($body['exchange_rate'])
+            && abs((float) $body['exchange_rate'] - (float) ($existing['exchange_rate'] ?? 0)) > 1e-9
+        ) {
+            $changed[] = 'exchange_rate';
+        }
+        if (array_key_exists('items', $body)
+            && self::itemsChanged((array) ($existing['items'] ?? []), (array) $body['items'])
+        ) {
             $changed[] = 'items';
         }
         return $changed;

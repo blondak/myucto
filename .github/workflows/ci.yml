@@ -7,6 +7,18 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Rychlá série commitů do masteru (běžné při dávkových opravách) spouštěla plný běh
+# na KAŽDÝ push — backend job trvá ~12 min, takže 20 commitů = ~4 hodiny strojového
+# času, z toho drtivá většina na mezistavech, o které nikdo nestojí. Nedokončené běhy
+# se proto ruší a doběhne jen ten poslední.
+#
+# Vědomý kompromis: přeskočené commity nedostanou vlastní zelenou značku. Pro dohledání
+# regrese je pak potřeba `git bisect` nebo ruční `workflow_dispatch`, ne historie CI.
+# Pull requesty se ruší podle své větve, aby si master a PR navzájem nerušily běhy.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend (PHP 8.5 + PHPUnit)
@@ -63,9 +75,6 @@ jobs:
         working-directory: api
         run: composer install --prefer-dist --no-interaction --no-progress
 
-      # cfg.php je gitignored. Používáme stejnou ENV-only cestu jako Docker
-      # deploy (prázdný cfg + MYINVOICE_* override), takže se tu netestuje
-      # jiná konfigurační větev než v produkci.
       # cfg.php je gitignored, CI si ho generuje. Píšeme ho jako soubor, ne přes
       # MYINVOICE_* proměnné — ty by prosákly i do unit testů Configu, které
       # ověřují právě chování ENV override, a rozbily by je.
@@ -96,21 +105,67 @@ jobs:
                   'prefix'  => 'myinvoice:ci:',
               ],
               'captcha' => ['provider' => 'none'],
+              // Fallback číselných řad. Reálná instalace je má buď tady, nebo na
+              // dodavateli (Systém → Dodavatelé → Číslování faktur); ci-seed staví
+              // holého tenanta, takže bez nich neprojde vystavení žádného dokladu.
+              // Hodnoty shodné s cfg.sample.php.
+              'varsymbol' => [
+                  'templates' => [
+                      'invoice'     => '{YY}{MM}{CCC}',
+                      'proforma'    => '9{YY}{MM}{CCC}',
+                      'credit_note' => '7{YY}{MM}{CCC}',
+                  ],
+              ],
           ];
           PHPCFG
           php api/bin/migrate.php
           php api/bin/ci-seed.php
 
+      # tests/bootstrap.php odmítá běžet proti DB z cfg.php a vynucuje `<cfg-db>_test`
+      # (pojistka, aby testy nikdy nesáhly na ostrá data). CI proto musí tu izolovanou
+      # databázi opravdu mít — bez ní skončí celá Integration suita na
+      # `Unknown database 'myinvoice_ci_test'`.
+      #
+      # Zakládá se přes PDO, ne přes `mysql` klienta: PHP s pdo_mysql je na runneru
+      # jistota, kdežto verze klienta se s MariaDB rozchází.
+      - name: Prepare isolated test database
+        run: |
+          php -r "(new PDO('mysql:host=127.0.0.1;port=3306', 'root', 'ci'))->exec(
+            'CREATE DATABASE IF NOT EXISTS myinvoice_ci_test
+             CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');"
+          MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/migrate.php
+          MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/ci-seed.php
+
       # Část integračních testů mluví na běžící instanci přes HTTP (bearer auth,
       # rate-limit hlavičky, cross-tenant vazba tokenu). Bez serveru se přeskočí.
+      #
+      # Server MUSÍ jet nad toutéž `_test` databází jako PHPUnit — fixtury zakládá
+      # test, ověřuje je HTTP volání. Nad cfg.php databází by viděl prázdno.
       - name: Start test server
         run: |
-          php -S 127.0.0.1:8080 api/bin/dev-server-router.php >/tmp/php-server.log 2>&1 &
+          MYINVOICE_DB_NAME=myinvoice_ci_test \
+            php -S 127.0.0.1:8080 api/bin/dev-server-router.php >/tmp/php-server.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then exit 0; fi
             sleep 1
           done
           echo "Server se nerozeběhl:"; cat /tmp/php-server.log; exit 1
+
+      # Auditní brána běží PŘED plnou sadou a jako samostatné kroky. Důvod je praktický:
+      # guardy a invarianty jsou obrana proti třídě chyb, která se do kódu vrací (pravidlo
+      # implementované jen na jedné větvi, SSOT obejitý vlastní kopií, tichá degradace).
+      # Kdyby běžely uprostřed 6 800 testů, jejich selhání by se ve výpisu ztratilo
+      # a nebylo by z něj poznat, že se rozbila právě obrana, ne funkce.
+      #
+      # AuditGateCoverageTest je čistě statický a hlásí, když z auditní vrstvy zmizí
+      # guard nebo ji přestane spouštět tenhle workflow.
+      - name: Auditní brána — guardy (L0)
+        working-directory: api
+        run: vendor/bin/phpunit --no-coverage --testsuite Architecture
+
+      - name: Auditní brána — invarianty a fuzz (L3)
+        working-directory: api
+        run: vendor/bin/phpunit --no-coverage --testsuite Invariants
 
       - name: Run PHPUnit
         working-directory: api

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Pokladní doklad</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #15131D; }
+    .doc-title { font-size: 16pt; font-weight: bold; }
+    .doc-number { font-size: 12pt; font-weight: bold; text-align: right; }
+    .doc-status { font-size: 9pt; font-weight: bold; color: #B42318; }
+    table.head { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.head td { vertical-align: top; padding: 0; }
+    .party-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .party-table td { vertical-align: top; width: 50%; padding: 2.5mm 3mm; border: 0.3pt solid #ccc; }
+    .party-label { font-size: 7.5pt; color: #777; margin-bottom: 1mm; }
+    .party-name { font-size: 10pt; font-weight: bold; }
+    .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .meta-table td { padding: 1.2mm 3mm; font-size: 9pt; border-bottom: 0.2pt solid #eee; }
+    .meta-label { color: #777; width: 40mm; }
+    .amount-box { border: 0.6pt solid #333; padding: 3mm; margin-bottom: 5mm; }
+    .amount-label { font-size: 8pt; color: #777; }
+    .amount-value { font-size: 15pt; font-weight: bold; text-align: right; }
+    table.vat { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.vat th { font-size: 7.5pt; color: #555; text-align: right; padding: 1.2mm 2mm; border-bottom: 0.3pt solid #ccc; }
+    table.vat th.thl { text-align: left; }
+    table.vat td { font-size: 9pt; padding: 1.2mm 2mm; border-bottom: 0.2pt solid #eee; text-align: right; }
+    table.vat tfoot td { font-weight: bold; border-top: 0.5pt solid #333; }
+    table.posting { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+    table.posting th { font-size: 7.5pt; color: #555; text-align: left; padding: 1.2mm 2mm; border-bottom: 0.3pt solid #ccc; }
+    table.posting td { font-size: 9pt; padding: 1.2mm 2mm; border-bottom: 0.2pt solid #eee; }
+    .section-title { font-size: 8pt; color: #777; font-weight: bold; margin-bottom: 1.5mm; }
+    table.sign { width: 100%; border-collapse: collapse; margin-top: 8mm; }
+    table.sign td { width: 25%; padding: 0 3mm; font-size: 8pt; color: #555; text-align: center; vertical-align: top; }
+    .sign-line { border-top: 0.4pt solid #999; padding-top: 1.5mm; }
+    .num { text-align: right; }
+</style>
+</head>
+<body>
+
+{% set is_in = document.doc_type == 'in' %}
+{% set purpose_labels = {
+    'sale': 'Prodej (tržba)',
+    'purchase': 'Nákup',
+    'invoice_payment': 'Úhrada vydané faktury',
+    'purchase_payment': 'Úhrada přijaté faktury',
+    'transfer': 'Převod (banka ↔ pokladna)',
+    'other': 'Ostatní'
+} %}
+
+<table class="head">
+    <tr>
+        <td style="width:60%;">
+            <div class="doc-title">{{ is_in ? 'Příjmový pokladní doklad' : 'Výdajový pokladní doklad' }}</div>
+            {% if document.register %}<div class="party-label">{{ document.register.name }} · účet {{ document.register.account_code }}</div>{% endif %}
+        </td>
+        <td style="width:40%;">
+            <div class="doc-number">{{ document.doc_number }}</div>
+            {% if document.status == 'reversed' %}<div class="doc-status">STORNOVÁNO</div>{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table class="party-table">
+    <tr>
+        <td>
+            <div class="party-label">Firma</div>
+            <div class="party-name">{{ supplier.company_name }}</div>
+            {% if supplier.street %}<div>{{ supplier.street }}</div>{% endif %}
+            {% if supplier.zip or supplier.city %}<div>{{ supplier.zip }} {{ supplier.city }}</div>{% endif %}
+            {% if supplier.ic %}<div>IČ: {{ supplier.ic }}</div>{% endif %}
+            {% if supplier.dic %}<div>DIČ: {{ supplier.dic }}</div>{% endif %}
+        </td>
+        <td>
+            <div class="party-label">{{ is_in ? 'Přijato od' : 'Vyplaceno komu' }}</div>
+            <div class="party-name">{{ document.partner_name ?: '—' }}</div>
+            {% if document.partner_ic %}<div>IČ: {{ document.partner_ic }}</div>{% endif %}
+            {% if document.partner_dic %}<div>DIČ: {{ document.partner_dic }}</div>{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table class="meta-table">
+    <tr>
+        <td class="meta-label">Datum vystavení</td>
+        <td>{{ document.issue_date|cz_date }}</td>
+    </tr>
+    {% if document.vat_mode == 'vat' %}
+    <tr>
+        <td class="meta-label">DUZP</td>
+        <td>{{ (document.tax_date ?: document.issue_date)|cz_date }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <td class="meta-label">Účel platby</td>
+        <td>{{ purpose_labels[document.purpose] ?? document.purpose }}</td>
+    </tr>
+    <tr>
+        <td class="meta-label">Účel účetního případu</td>
+        <td>{{ document.description }}</td>
+    </tr>
+    {% if document.invoice_number %}
+    <tr>
+        <td class="meta-label">Vydaná faktura</td>
+        <td>{{ document.invoice_number }}</td>
+    </tr>
+    {% endif %}
+    {% if document.purchase_invoice_number %}
+    <tr>
+        <td class="meta-label">Přijatá faktura</td>
+        <td>{{ document.purchase_invoice_number }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<div class="amount-box">
+    <table style="width:100%; border-collapse:collapse;">
+        {% if document.currency_code != 'CZK' and document.amount_foreign is not null %}
+        <tr>
+            <td style="vertical-align:middle;"><span class="amount-label">Částka celkem</span></td>
+            <td class="amount-value">{{ document.amount_foreign|cz_money }} {{ document.currency_code }}</td>
+        </tr>
+        <tr>
+            <td style="vertical-align:middle;"><span class="amount-label">Ekvivalent v CZK</span></td>
+            <td class="amount-value">{{ document.total_amount|cz_money }} CZK
+                <span style="font-size:8pt; font-weight:normal;">(kurz {{ document.fx_rate|cz_money }} CZK/{{ document.currency_code }})</span></td>
+        </tr>
+        {% else %}
+        <tr>
+            <td style="vertical-align:middle;"><span class="amount-label">Částka celkem</span></td>
+            <td class="amount-value">{{ document.total_amount|cz_money }} {{ document.currency_code }}</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+
+{% if document.vat_mode == 'vat' and document.vat_lines is not empty %}
+<div class="section-title">Rekapitulace DPH{% if document.currency_code != 'CZK' %} (v CZK){% endif %}</div>
+<table class="vat">
+    <thead>
+        <tr>
+            <th class="thl">Sazba</th>
+            <th>Základ</th>
+            <th>Daň</th>
+            <th>Celkem</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for vl in document.vat_lines %}
+            <tr>
+                <td class="thl" style="text-align:left;">{{ vl.vat_rate|cz_money }} %</td>
+                <td>{{ vl.base_amount|cz_money }}</td>
+                <td>{{ vl.vat_amount|cz_money }}</td>
+                <td>{{ (vl.base_amount + vl.vat_amount)|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td class="thl" style="text-align:left;">Celkem</td>
+            <td></td>
+            <td></td>
+            <td>{{ document.total_amount|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+{% endif %}
+
+{% if posting is not empty %}
+<div class="section-title">Zaúčtování</div>
+<table class="posting">
+    <thead>
+        <tr>
+            <th style="width:20mm;">Strana</th>
+            <th>Účet</th>
+            <th class="num" style="width:35mm; text-align:right;">Částka</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for l in posting %}
+            <tr>
+                <td>{{ l.side == 'debit' ? 'MD' : 'D' }}</td>
+                <td>{{ l.account_code }}{% if l.account_name %} — {{ l.account_name }}{% endif %}</td>
+                <td class="num">{{ l.amount|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<table class="sign">
+    <tr>
+        <td><div class="sign-line">Vystavil</div></td>
+        <td><div class="sign-line">Schválil</div></td>
+        <td><div class="sign-line">Pokladník</div></td>
+        <td><div class="sign-line">{{ is_in ? 'Odevzdal' : 'Příjemce' }}</div></td>
+    </tr>
+</table>
+
+</body>
+</html>

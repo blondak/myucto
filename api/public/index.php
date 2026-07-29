@@ -57,7 +57,7 @@ try {
     <html lang="cs">
     <head>
       <meta charset="utf-8">
-      <title>MyInvoice.cz</title>
+      <title>MyÚčto.cz</title>
       <style>
         body { font: 14px/1.5 system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; color: #15131D; }
         h1 { color: #3B2D83; }
@@ -71,7 +71,7 @@ try {
         <h1>Aplikace nedostupná</h1>
         <p>Došlo k dočasné chybě. Kontaktujte administrátora.</p>
       <?php else: ?>
-        <h1>MyInvoice.cz — chybí konfigurace</h1>
+        <h1>MyÚčto.cz — chybí konfigurace</h1>
         <div class="err"><strong>Chyba:</strong> <?= htmlspecialchars($publicMsg, ENT_QUOTES) ?></div>
         <?php if ($missingCfg): ?>
           <h2>Postup</h2>

@@ -55,9 +55,25 @@ if (($msg = BackupEncryption::unsupportedReason($zipPassword)) !== null) {
     exit(1);
 }
 
-$documentsRoot = RuntimePaths::storage('documents');
-if (!is_dir($documentsRoot)) {
-    echo "[" . date('Y-m-d H:i:s') . "] backup-documents: storage/documents/ neexistuje, nic k záloze.\n";
+// Dvojice [adresář, prefix uvnitř ZIPu].
+//
+// `storage/journal` nese PŘÍLOHY ÚČETNÍHO DENÍKU (§ 33a ZoÚ — účetní záznamy
+// dokládající zápis). Dosud nebyly v ŽÁDNÉ záloze: tenhle skript uměl jen
+// storage/documents a cron-backup-pdf.php filtruje podle přípony, kterou
+// content-addressed soubory (`sup-{id}/{sha[0:2]}/{sha256}`) nemají.
+// Zachytil je jen per-firma export přes ArchiveService, který se cronem nespouští.
+//
+// Cesta uvnitř ZIPu se ořezává VLASTNÍM zdrojovým adresářem a doplňuje pevným
+// prefixem, ne substr($abs, strlen($rootDir)): při nastaveném MYINVOICE_DATA_DIR
+// (Docker/PaaS) leží storage/ mimo kořen aplikace, takže by substr() uřízl špatný
+// počet znaků a v ZIPu by byly useknuté cesty. Rozbalovacím kořenem je vždy kořen
+// aplikace. Stejný vzorec jako v cron-backup-pdf.php.
+$sources = [
+    [RuntimePaths::storage('documents'), 'storage/documents'],
+    [RuntimePaths::storage('journal'),   'storage/journal'],
+];
+if (!array_filter($sources, static fn (array $s): bool => is_dir($s[0]))) {
+    echo "[" . date('Y-m-d H:i:s') . "] backup-documents: storage/documents/ ani storage/journal/ neexistuje, nic k záloze.\n";
     $run->finish('ok', ['files' => 0, 'note' => 'no documents dir']);
     exit(0);
 }
@@ -65,22 +81,15 @@ if (!is_dir($documentsRoot)) {
 $date = date('Y-m-d_H-i');
 $file = "$backupDir/$dbName-documents-$date.zip";
 
-// Sesbírej všechny soubory (kromě _thumbs/ a .tmp-*).
-$files = [];
-$it = new RecursiveIteratorIterator(
-    new RecursiveDirectoryIterator($documentsRoot, FilesystemIterator::SKIP_DOTS),
-    RecursiveIteratorIterator::LEAVES_ONLY
+// Sesbírej všechny soubory (kromě _thumbs/, _jobs/ a .tmp-*) — sdílená logika
+// s cron-backup-pdf.php (BackupFileCollector). Přípony se tu nefiltrují: přílohy
+// deníku jsou content-addressed (`sup-{id}/{sha[0:2]}/{sha256}`) a příponu nemají.
+$files = \MyInvoice\Service\Backup\BackupFileCollector::collect(
+    array_map(static fn (array $s): array => [$s[0], null, $s[1]], $sources),
+    ['/_thumbs/', '/_jobs/'],
+    ['.tmp-'],
+    static fn (string $abs): int => fprintf(STDERR, "  ✗ soubor mimo zdrojový adresář, přeskočen: %s\n", $abs),
 );
-foreach ($it as $entry) {
-    if (!$entry->isFile()) continue;
-    $abs = $entry->getPathname();
-    $norm = str_replace('\\', '/', $abs);
-    if (str_contains($norm, '/_thumbs/')) continue;        // regenerovatelné náhledy
-    if (str_contains($norm, '/_jobs/')) continue;          // dočasné artefakty jobů
-    if (str_starts_with($entry->getFilename(), '.tmp-')) continue; // dočasné soubory
-    $rel = ltrim(str_replace('\\', '/', substr($abs, strlen($rootDir))), '/');
-    $files[$abs] = $rel;
-}
 
 if (count($files) === 0) {
     echo "[" . date('Y-m-d H:i:s') . "] backup-documents: žádné dokumenty k záloze.\n";

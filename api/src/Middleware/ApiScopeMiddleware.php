@@ -59,6 +59,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/recurring(/|$)#',
         '#^/api/bank-statements(/|$)#',
         '#^/api/bank-transactions(/|$)#',
+        '#^/api/bank-match-suggestions(/|$)#',
         '#^/api/logbook(/|$)#',
         '#^/api/documents(/|$)#',
         '#^/api/document-folders(/|$)#',
@@ -66,6 +67,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // Dashboard / CRM / reporty (čtení + exporty)
         '#^/api/dashboard(/|$)#',
         '#^/api/crm(/|$)#',
+        '#^/api/portfolio(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
         '#^/api/search$#',
@@ -84,6 +86,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/settings/vat-rates(/|$)#',
         '#^/api/settings/units(/|$)#',
         '#^/api/settings/countries(/|$)#',
+        '#^/api/settings/nace-codes$#',
     ];
 
     public function __construct(

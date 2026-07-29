@@ -7,7 +7,10 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\MergedInvoicePdfExporter;
 use MyInvoice\Service\IpMatcher;
@@ -37,7 +40,7 @@ final class ExportSelectedPdfAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'utilities.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
 
@@ -81,7 +84,13 @@ final class ExportSelectedPdfAction
         ini_set('html_errors', '0');
         ob_start();
         try {
-            $result = $this->exporter->export($ids, ['id' => $supplierId], $userId, $sign);
+            $result = $this->exporter->export(
+                $ids,
+                ['id' => $supplierId],
+                $userId,
+                $sign,
+                !DemoReadOnlyMiddleware::enabled($request),
+            );
         } catch (\DomainException $e) {
             ob_end_clean();
             return Json::error($response, 'signature_unavailable', $e->getMessage(), 422);
@@ -110,7 +119,7 @@ final class ExportSelectedPdfAction
             'signed_pdf' => $result['signed'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        $filename = 'myinvoice-vybrane-faktury-' . date('Y-m-d') . '.pdf';
+        $filename = 'myucto-vybrane-faktury-' . date('Y-m-d') . '.pdf';
         $response->getBody()->write($content);
         return $response
             ->withHeader('Content-Type', 'application/pdf')

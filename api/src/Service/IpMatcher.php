@@ -19,6 +19,17 @@ use MyInvoice\Infrastructure\Config\Config;
  */
 final class IpMatcher
 {
+    /**
+     * Server parametr se skutečnou client IP, který nastavuje sám web server.
+     *
+     * Klientské hlavičky se do FastCGI/CGI vždy mapují s prefixem `HTTP_`, takže
+     * parametr BEZ tohoto prefixu nelze zvenčí podvrhnout — na rozdíl od
+     * `HTTP_X_FORWARDED_FOR`, který k nám dorazí přesně tak, jak ho klient poslal.
+     * Nastavuje ho docker/nginx.conf (`fastcgi_param MYUCTO_CLIENT_IP $remote_addr`).
+     * Když je přítomný, je autoritativní a X-Forwarded-For se vůbec neřeší.
+     */
+    public const TRUSTED_CLIENT_IP_PARAM = 'MYUCTO_CLIENT_IP';
+
     public function __construct(
         private readonly ?Config $config = null,
     ) {}
@@ -129,6 +140,52 @@ final class IpMatcher
     }
 
     /**
+     * Normalizuje JEDNU položku X-Forwarded-For chainu.
+     *
+     * Některé proxy (a RFC 7239 „Forwarded" implementace) zapisují i port —
+     * `203.0.113.7:41234` — nebo IPv6 v hranatých závorkách (`[2001:db8::1]`,
+     * `[2001:db8::1]:443`). Holé `inet_pton()` takový tvar odmítne, což by
+     * fail-closed shodilo celý chain na IP proxy a reálného klienta zahodilo.
+     * Proto tady port a závorky odloupneme; na pravidla z konfigurace se tahle
+     * tolerance nevztahuje (`normalize()` zůstává striktní).
+     */
+    private function normalizeChainEntry(string $entry): ?string
+    {
+        $entry = trim($entry);
+        if ($entry === '') {
+            return null;
+        }
+
+        // Bracketed IPv6: "[2001:db8::1]" nebo "[2001:db8::1]:443"
+        if ($entry[0] === '[') {
+            $end = strpos($entry, ']');
+            if ($end === false) {
+                return null;
+            }
+            $rest = substr($entry, $end + 1);
+            // Za závorkou smí následovat jen prázdno nebo ":port" — nic jiného.
+            if ($rest !== '' && preg_match('/^:\d{1,5}$/', $rest) !== 1) {
+                return null;
+            }
+            return $this->normalize(substr($entry, 1, $end - 1));
+        }
+
+        // IPv4 s portem: právě jedna dvojtečka. Holé IPv6 jich má víc, toho se
+        // nedotkneme (`::1` má dvě).
+        if (substr_count($entry, ':') === 1) {
+            [$host, $port] = explode(':', $entry, 2);
+            if (preg_match('/^\d{1,5}$/', $port) === 1) {
+                $normalized = $this->normalize($host);
+                if ($normalized !== null) {
+                    return $normalized;
+                }
+            }
+        }
+
+        return $this->normalize($entry);
+    }
+
+    /**
      * Získá skutečnou client IP s ohledem na cfg.ip_allowlist.trusted_proxies + header.
      * Použití: `$this->ipMatcher->clientIpFromRequest($request->getServerParams())`.
      *
@@ -143,32 +200,76 @@ final class IpMatcher
 
     /**
      * Získá skutečnou client IP s ohledem na trusted proxies.
+     *
+     * Chain hlavičky se prochází ZPRAVA a odloupávají se jen známé trusted hopy;
+     * první netrusted položka zprava je skutečný klient. Brát první položku zleva
+     * je nebezpečné: pokud edge proxy klientskou hlavičku jen *appenduje* (a ne
+     * přepisuje), levé položky si zapsal sám útočník a mohl by si tak zvolit
+     * libovolnou IP — a tím obejít IP allowlist i rate-limit/brute-force buckety
+     * a podvrhnout auditní logy.
+     *
+     * ⚠️ Průchod zprava sám o sobě NESTAČÍ — jen posouvá páku z levého konce
+     * chainu na pravý. Když edge proxy hlavičku jen appenduje (nebo ji vůbec
+     * nesahá, jako holý nginx→FastCGI), útočník ovládá i nejpravější položku.
+     * Edge proxy (ta, která jako první přijímá provoz z internetu) proto MUSÍ
+     * hlavičku PŘEPISOVAT: `proxy_set_header X-Forwarded-For $remote_addr`
+     * (`proxy_add_x_forwarded_for` naopak appenduje). Cloudflare přepisuje.
+     *
+     * Spolehlivější než hlavička je {@see self::TRUSTED_CLIENT_IP_PARAM}, který
+     * klient podvrhnout nemůže; `clientIpFromRequest()` ho preferuje.
      */
     public function clientIp(array $serverParams, array $trustedProxies, string $header = 'X-Forwarded-For'): string
     {
-        $remote = (string) ($serverParams['REMOTE_ADDR'] ?? '');
+        // Nepodvrhnutelný server parametr (nginx ho plní přes `fastcgi_param`; klientské
+        // hlavičky se do FastCGI mapují jako HTTP_*, takže ho zvenčí přepsat nejde) je
+        // SPOLEHLIVĚJŠÍ ZDROJ REMOTE_ADDR — ne hotová odpověď. Kdyby se vracel rovnou,
+        // rozbije se nasazení, kde před kontejnerem stojí další reverse proxy: uvnitř
+        // je pak v parametru IP té proxy, chain by se nikdy neprošel a všichni klienti
+        // by splynuli do jedné IP (globální rate-limit bucket, nefunkční IP allowlist).
+        // Bere se proto jako výchozí bod a dál se pokračuje běžnou trusted-proxy logikou.
+        // Kontrola je schválně TADY (a ne až v clientIpFromRequest), protože middleware
+        // i některé Action volají clientIp() přímo.
+        $trustedParam = $this->normalize((string) ($serverParams[self::TRUSTED_CLIENT_IP_PARAM] ?? ''));
+
+        $remote     = $trustedParam ?? (string) ($serverParams['REMOTE_ADDR'] ?? '');
+        $remoteNorm = $this->normalize($remote) ?? $remote;
 
         if ($remote === '' || empty($trustedProxies)) {
-            return $this->normalize($remote) ?? $remote;
+            return $remoteNorm;
         }
 
+        // Hlavičce věříme jen tehdy, když k nám požadavek přišel od trusted proxy
         if (!$this->matches($remote, $trustedProxies)) {
-            return $this->normalize($remote) ?? $remote;
+            return $remoteNorm;
         }
 
         $headerKey = 'HTTP_' . str_replace('-', '_', strtoupper($header));
         $forwarded = (string) ($serverParams[$headerKey] ?? '');
-        if ($forwarded === '') {
-            return $this->normalize($remote) ?? $remote;
+        if (trim($forwarded) === '') {
+            return $remoteNorm;
         }
 
-        // X-Forwarded-For může mít více IP oddělených čárkou; první je původní client
         $parts = array_map('trim', explode(',', $forwarded));
-        $first = $parts[0] ?? '';
-        if ($first === '') {
-            return $this->normalize($remote) ?? $remote;
+
+        // Nejpravější položku zapsal náš nejbližší (už ověřený) trusted proxy,
+        // takže je důvěryhodná. Postupujeme doleva a odloupáváme trusted hopy.
+        for ($i = count($parts) - 1; $i >= 0; $i--) {
+            $candidate = $this->normalizeChainEntry($parts[$i]);
+
+            // Prázdná nebo neplatná položka → chain je rozbitý a klienta nelze
+            // bezpečně určit. Fail-closed: zůstaneme u (důvěryhodné) IP proxy.
+            if ($candidate === null) {
+                return $remoteNorm;
+            }
+
+            if (!$this->matches($candidate, $trustedProxies)) {
+                return $candidate;
+            }
         }
 
-        return $this->normalize($first) ?? $first;
+        // Celý chain jsou samé trusted proxy → požadavek vznikl na některé z nich.
+        // Klientem je pak nejlevější (nejvzdálenější) položka; všechny jsou validní,
+        // protože smyčka výše je už znormalizovala.
+        return $this->normalizeChainEntry($parts[0]) ?? $remoteNorm;
     }
 }

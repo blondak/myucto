@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Migrate MyInvoice.cz Docker volumes z 3-volume layoutu (3.5.x a starší)
+# Migrate MyUcto.cz Docker volumes z 3-volume layoutu (3.5.x a starší)
 # na single-volume layout (od 3.6.0 default).
 #
 # Single-volume layout (`MYINVOICE_DATA_DIR=/data`) drží VŠECHEN stateful
@@ -148,7 +148,7 @@ fi
 
 # --- 5. start stack -------------------------------------------------------
 echo "==> Startuji stack (${DC[*]} up -d)…"
-"${DC[@]}" up -d
+"${DC[@]}" up -d --remove-orphans
 echo ""
 
 # --- 6. report -----------------------------------------------------------

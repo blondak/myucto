@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -22,11 +28,16 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class DeletePurchaseInvoiceAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Config $config,
+        private readonly DocumentLockService $locks,
+        private readonly Connection $db,
+        private readonly DocumentJournalSync $journalSync,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -42,11 +53,18 @@ final class DeletePurchaseInvoiceAction
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
         }
 
+        // Zámek dokladu (Epic F6) — PŘED status guardem: zaúčtovaný/uzavřený doklad
+        // klient nesmaže (403 document_locked), účetní v zavřeném období 409, admin
+        // ?force=1 (client nikdy admin větev — M6).
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($existing), 'purchase_invoice', $id)) {
+            return $deny;
+        }
+
         // Default: jen draft lze smazat. Force=1 (admin) povolí smazat received/booked
         // (paid/cancelled stále chráněné — auditní stopa).
         $force = (string) ($request->getQueryParams()['force'] ?? '') === '1';
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = ($user['role'] ?? '') === 'admin';
+        $isAdmin = RequestAuthorization::isSuperadmin($request);
         $allowedForce = ['received', 'booked'];
         if ($existing['status'] !== 'draft') {
             if (!($force && $isAdmin && in_array($existing['status'], $allowedForce, true))) {
@@ -62,8 +80,44 @@ final class DeletePurchaseInvoiceAction
         // Před DB delete uchovat info o PDF (k orphan cleanup)
         $pdfPath = (string) ($existing['pdf_path'] ?? '');
         $pdfHash = (string) ($existing['pdf_hash'] ?? '');
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
 
-        $this->repo->delete($id, $supplierId);
+        // A3 (audit H4): mazání zaúčtované PF nesmí nechat v deníku aktivní sirotčí zápis.
+        // Reverze aktivního zápisu + vlastní delete v JEDNÉ transakci — reverze první;
+        // při uzavřeném období vyhodí PostingException → rollback + 409, doklad zůstane.
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->journalSync->onDelete($supplierId, 'purchase_invoice', $id, [
+                'user_id'    => $user['id'] ?? null,
+                'posted_by'  => $user['id'] ?? null,
+                'ip'         => $ip,
+                'user_agent' => $request->getHeaderLine('User-Agent'),
+            ]);
+            $this->repo->delete($id, $supplierId);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (PostingException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error(
+                $response,
+                'journal_' . $e->errorCode,
+                'Přijatou fakturu nelze smazat — má zaúčtovaný zápis, který nelze stornovat ('
+                    . $e->getMessage() . '). Nejdřív vyřešte zaúčtování v deníku.',
+                409,
+            );
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
 
         // Orphan PDF cleanup — pokud žádná jiná faktura tenanta nemá stejný hash,
         // smaž soubor (s realpath check pro path traversal).
@@ -75,7 +129,6 @@ final class DeletePurchaseInvoiceAction
             }
         }
 
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.deleted', $user['id'] ?? null, 'purchase_invoice', $id,
             [
                 'varsymbol'   => $existing['varsymbol'] ?? null,

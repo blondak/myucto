@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
@@ -22,6 +25,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class CreateInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
+    use GuardsDocumentLock;
 
     public function __construct(
         private readonly InvoiceRepository $repo,
@@ -32,6 +36,9 @@ final class CreateInvoiceAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly ExchangeRateApplier $rateApplier,
+        private readonly DocumentLockService $locks,
+        private readonly CnbRateDeviationChecker $rateChecker,
+        private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -56,6 +63,15 @@ final class CreateInvoiceAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
 
+        // H1: datum nového dokladu nesmí spadat do uzavřeného období (client 403, účetní 409).
+        $refDate = DocumentLockService::invoiceRefDate($body);
+        if ($refDate !== null) {
+            $lock = $this->locks->forDate(SupplierGuard::currentId($request), $refDate);
+            if ($deny = $this->denyIfLocked($request, $response, $lock, 'invoice', null)) {
+                return $deny;
+            }
+        }
+
         // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
         $this->applyVatClassificationDefaults($body, SupplierGuard::currentId($request));
 
@@ -70,6 +86,7 @@ final class CreateInvoiceAction
             throw $e;
         }
         $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        $this->paymentSchedule->saveFromPayload(SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
         $rateMeta = $this->rateApplier->applyToInvoice($id);
 
@@ -82,6 +99,25 @@ final class CreateInvoiceAction
         $invoice = $this->repo->find($id);
         if ($rateMeta !== null) {
             $invoice['_meta'] = ['exchange_rate' => $rateMeta];
+        }
+        // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k DUZP. NEBLOKUJE
+        // (§24/7 pevný kurz legitimní); §73/6 se netýká — jen účetní přepočet 563/663.
+        if (is_array($invoice)) {
+            // Akumulovat, ne přiřazovat — jinak by poslední zapisovatel přebil ostatní.
+            $warnings = InvoiceValidation::warnings($invoice);
+            $dev = $this->rateChecker->deviationWarning(
+                SupplierGuard::currentId($request),
+                (string) ($invoice['currency'] ?? ''),
+                (string) ($invoice['effective_tax_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
+            );
+            if ($dev !== null) {
+                $warnings[] = 'exchange_rate_cnb_deviation';
+                $invoice['_warning_meta'] = ['exchange_rate_cnb_deviation' => $dev];
+            }
+            if ($warnings !== []) {
+                $invoice['_warnings'] = $warnings;
+            }
         }
         return Json::ok($response, $invoice, 201);
     }

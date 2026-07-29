@@ -127,11 +127,17 @@ final class EmailNoticeReconcilerTest extends TestCase
     {
         $pdo = $this->db->pdo();
         $d = '2099-06-15';
+        // `supplier_id` je POVINNÝ: kandidátní dotaz reconcileru ho od SEC-01 tenant
+        // scopingu (5f5c7183, migrace 1136) filtruje tvrdě — `bs.supplier_id = ?`.
+        // Bez něj zůstane NULL, `NULL = 1` není nikdy true, kandidátů je nula a převzetí
+        // se nikdy neprovede. Fixture pocházela z doby před tou změnou a testy padaly
+        // od 21. 7.; maskoval to skip kvůli prázdné testovací DB.
         $pdo->prepare(
             "INSERT INTO bank_statements
-                (source, file_name, file_hash, account_number, bank_code, currency, statement_date)
-             VALUES (?, ?, ?, ?, ?, 'CZK', ?)"
+                (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_date)
+             VALUES (?, ?, ?, ?, ?, ?, 'CZK', ?)"
         )->execute([
+            $this->supplierId,
             $source,
             self::FILE_MARKER . $tag . '.gpc',
             hash('sha256', self::FILE_MARKER . $tag . $amount . $vs),

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Support\PaymentMethods;
 use PDO;
 
 /**
@@ -30,7 +32,8 @@ final class InvoiceRepository
     private function supportsIncomeTaxExempt(): bool
     {
         if ($this->hasIncomeTaxExempt === null) {
-            $this->hasIncomeTaxExempt = $this->db->hasColumn('invoices', 'income_tax_exempt');
+            $col = $this->db->pdo()->query("SHOW COLUMNS FROM invoices LIKE 'income_tax_exempt'")->fetch();
+            $this->hasIncomeTaxExempt = $col !== false;
         }
         return $this->hasIncomeTaxExempt;
     }
@@ -46,12 +49,29 @@ final class InvoiceRepository
     private function supportsAutoSendReminders(): bool
     {
         if ($this->hasAutoSendReminders === null) {
-            $this->hasAutoSendReminders = $this->db->hasColumn('invoices', 'auto_send_reminders');
+            $col = $this->db->pdo()->query("SHOW COLUMNS FROM invoices LIKE 'auto_send_reminders'")->fetch();
+            $this->hasAutoSendReminders = $col !== false;
         }
         return $this->hasAutoSendReminders;
     }
 
-    /** Cache existence OSS sloupců na invoice_items (migrace 0137). */
+    /**
+     * Cache existence sloupce is_simplified (migrace 1170, § 30 ZDPH). Stejná obrana jako
+     * u income_tax_exempt: instalace pozadu s migrací sloupec nemá a bez detekce by
+     * každé uložení faktury spadlo. Bez sloupce se doklad uloží jako běžný — příznak je
+     * úleva od náležitostí, jeho absence tedy nic nerozbije.
+     */
+    private ?bool $hasSimplified = null;
+
+    private function supportsSimplified(): bool
+    {
+        if ($this->hasSimplified === null) {
+            $col = $this->db->pdo()->query("SHOW COLUMNS FROM invoices LIKE 'is_simplified'")->fetch();
+            $this->hasSimplified = $col !== false;
+        }
+        return $this->hasSimplified;
+    }
+
     private ?bool $hasOssItemColumns = null;
 
     private function supportsOssItemColumns(): bool
@@ -321,6 +341,12 @@ final class InvoiceRepository
         if ((int) $final['client_id'] !== (int) $advance['client_id']) {
             throw new \RuntimeException('Záloha i finální faktura musí mít stejného odběratele.');
         }
+        if (($advance['status'] ?? '') === 'cancelled') {
+            throw new \RuntimeException('Stornovanou zálohovou fakturu nelze propojit.');
+        }
+        if ((int) $final['currency_id'] !== (int) $advance['currency_id']) {
+            throw new \RuntimeException('Záloha i finální faktura musí být ve stejné měně.');
+        }
 
         // Záloha s vystavenými daňovými doklady k přijaté platbě (#89) se ručně
         // párovat nedá — finál by musel nést § 37a záporné odpočtové řádky (snižují
@@ -372,13 +398,39 @@ final class InvoiceRepository
      */
     public function unlinkAdvance(int $finalId, int $supplierId): void
     {
-        $type = $this->db->pdo()->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');
+        $type = $this->db->pdo()->prepare(
+            'SELECT invoice_type, parent_invoice_id FROM invoices WHERE id = ? AND supplier_id = ?'
+        );
         $type->execute([$finalId, $supplierId]);
-        if ($type->fetchColumn() === 'tax_document') {
+        $row = $type->fetch(PDO::FETCH_ASSOC);
+        if (($row['invoice_type'] ?? null) === 'tax_document') {
             throw new \RuntimeException(
                 'Daňový doklad k přijaté platbě je vázaný na platbu zálohové faktury — propojení nelze zrušit. '
                 . 'Pokud doklad nemá existovat, smaž koncept nebo ho stornuj.'
             );
+        }
+        if (($row['invoice_type'] ?? null) === 'invoice' && !empty($row['parent_invoice_id'])) {
+            $taxDocs = $this->db->pdo()->prepare(
+                "SELECT 1 FROM invoices
+                  WHERE supplier_id = ? AND invoice_type = 'tax_document'
+                    AND status NOT IN ('draft', 'cancelled')
+                    AND (parent_invoice_id = ? OR id IN (
+                        SELECT tax_document_invoice_id FROM invoice_payments
+                         WHERE invoice_id = ? AND tax_document_invoice_id IS NOT NULL
+                    ))
+                  LIMIT 1"
+            );
+            $taxDocs->execute([
+                $supplierId,
+                (int) $row['parent_invoice_id'],
+                (int) $row['parent_invoice_id'],
+            ]);
+            if ($taxDocs->fetchColumn() !== false) {
+                throw new \RuntimeException(
+                    'Finální faktura obsahuje odpočty záloh podle § 37a — propojení nelze zrušit. '
+                    . 'Chybný finál nejdřív stornujte.'
+                );
+            }
         }
         $this->db->pdo()->prepare(
             "UPDATE invoices f
@@ -446,7 +498,7 @@ final class InvoiceRepository
                     ii.unit_price_without_vat, ii.vat_rate_id, ii.vat_rate_snapshot,
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
                     ii.order_index, ii.item_kind, ii.linked_work_report_id,
-                    ii.vat_classification_code' . $ossSelect . ',
+                    ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id' . $ossSelect . ',
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM invoice_items ii
                JOIN vat_rates vr ON vr.id = ii.vat_rate_id
@@ -534,19 +586,23 @@ final class InvoiceRepository
             $params[] = (int) $filters['project_id'];
         }
         if (!empty($filters['year'])) {
-            $where[] = 'YEAR(COALESCE(i.tax_date, i.issue_date)) = ?';
-            $params[] = (int) $filters['year'];
+            // Sargovatelný půlotevřený rozsah místo YEAR(...) — využije idx_inv_supplier_efftax.
+            $y = (int) $filters['year'];
+            $where[] = 'i.effective_tax_date >= ? AND i.effective_tax_date < ?';
+            $params[] = sprintf('%04d-01-01', $y);
+            $params[] = sprintf('%04d-01-01', $y + 1);
         }
         if (!empty($filters['month'])) {
-            $where[] = 'MONTH(COALESCE(i.tax_date, i.issue_date)) = ?';
+            // MONTH() napříč roky nelze převést na souvislý rozsah — ponecháno na gen-col.
+            $where[] = 'MONTH(i.effective_tax_date) = ?';
             $params[] = (int) $filters['month'];
         }
         if (!empty($filters['date_from'])) {
-            $where[] = 'COALESCE(i.tax_date, i.issue_date) >= ?';
+            $where[] = 'i.effective_tax_date >= ?';
             $params[] = (string) $filters['date_from'];
         }
         if (!empty($filters['date_to'])) {
-            $where[] = 'COALESCE(i.tax_date, i.issue_date) <= ?';
+            $where[] = 'i.effective_tax_date <= ?';
             $params[] = (string) $filters['date_to'];
         }
         if (!empty($filters['currency'])) {
@@ -578,11 +634,36 @@ final class InvoiceRepository
                 . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
             $where[] = "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
         }
+        // Zaúčtováno / nezaúčtováno (podvojné účetnictví) — '1' = zaúčtováno (booked_at IS NOT NULL),
+        // '0' = nezaúčtováno (IS NULL). V daňové evidenci je booked_at vždy NULL, filtr tam nemá smysl
+        // (FE ho zobrazuje jen pro double_entry firmy).
+        // Fronta „k zaúčtování" smí nabízet jen typy, které engine umí zaúčtovat — jinak slibuje akci,
+        // která skončí chybou. Proforma není účetní doklad (účtuje se až inkaso zálohy 221/324 a finální
+        // faktura), takže booked_at zůstane NULL navždy a bez tohoto filtru by ve frontě visela věčně.
+        // Sdílená konstanta místo opisování seznamu — shodně s DocumentBackfill a PendingBackfillCounter.
+        if (isset($filters['booked']) && $filters['booked'] !== null && $filters['booked'] !== '') {
+            if ((string) $filters['booked'] === '1') {
+                $where[] = 'i.booked_at IS NOT NULL';
+            } else {
+                $types = PostingService::POSTABLE_ISSUED_INVOICE_TYPES;
+                $where[] = 'i.booked_at IS NULL AND i.invoice_type IN ('
+                    . implode(',', array_fill(0, count($types), '?')) . ')';
+                foreach ($types as $t) {
+                    $params[] = $t;
+                }
+            }
+        }
         if (!empty($filters['q'])) {
             // Escape % a _ wildcards aby uživatelský input nedělal slow-query DoS / nečekanou shodu
             $q = addcslashes((string) $filters['q'], '%_\\');
-            $where[] = '(i.varsymbol LIKE ? OR c.company_name LIKE ?)';
+            // Hledá i v TEXTU POLOŽEK faktury (EXISTS, ne JOIN — JOIN by fakturu znásobil na
+            // počet položek a rozbil COUNT i stránkování). $whereSql je sdílený mezi count
+            // i hlavním dotazem, takže stačí doplnit tady jednou.
+            $where[] = '(i.varsymbol LIKE ? OR c.company_name LIKE ?'
+                . ' OR EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.invoice_id = i.id'
+                . ' AND ii.description LIKE ?))';
             $params[] = $q . '%';
+            $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
         }
 
@@ -607,20 +688,20 @@ final class InvoiceRepository
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                        i.total_without_vat, i.total_vat, i.total_with_vat,
                        i.advance_paid_amount, i.amount_to_pay, i.paid_total,
-                       i.status, i.payment_method, i.revenue_category_id,
+                       i.status, i.payment_method, i.revenue_category_id, i.exchange_rate,
                        i.sent_at, i.last_reminder_at, i.reminder_count,
-                       i.paid_at, i.cancelled_at,
+                       i.paid_at, i.cancelled_at, i.booked_at,
                        c.company_name AS client_company_name,
                        p.name AS project_name,
                        p.requires_work_report_approval AS project_requires_approval,
                        EXISTS (SELECT 1 FROM work_reports wr WHERE wr.invoice_id = i.id) AS has_work_report,
-                       DATE_FORMAT(COALESCE(i.tax_date, i.issue_date), '%Y-%m') AS month_bucket
+                       DATE_FORMAT(i.effective_tax_date, '%Y-%m') AS month_bucket
                   FROM invoices i
                   JOIN clients c ON c.id = i.client_id
              LEFT JOIN projects p ON p.id = i.project_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE $whereSql
-                 ORDER BY COALESCE(i.tax_date, i.issue_date) DESC, i.id DESC";
+                 ORDER BY i.effective_tax_date DESC, i.id DESC";
 
         if ($perPage > 0) {
             $offset = max(0, ($page - 1) * $perPage);
@@ -670,20 +751,30 @@ final class InvoiceRepository
                     'draft_with_vat'    => 0.0,
                 ];
             }
-            // Do obratu počítáme jen vystavené faktury + dobropisy (credit_note má záporné částky → odečte se)
-            // + daňové doklady k přijaté platbě (finál k záloze pak nese jen zbytek přes odpočtové řádky).
+            // Do obratu počítáme jen vystavené faktury + dobropisy + daňové doklady
+            // k přijaté platbě (finál k záloze pak nese jen zbytek přes odpočtové řádky).
             // Vyloučeno: draft (koncepty), proforma (zálohovky), cancelled (storno), cancellation (interní storno).
+            //
+            // Dobropis obrat vždy SNIŽUJE (§ 4a ZDPH), proto se u něj znaménko vynucuje.
+            // Dřív se jen spoléhalo na to, že má záporné částky — u dobropisu chybně
+            // zadaného s kladným součtem (žádná negace; blokovaná je jen dvojí, viz
+            // InvoiceAmountPolicy) by se obrat NAVÝŠIL. To je citlivé: obrat rozhoduje
+            // o limitu registrace k DPH. Pro správně zadaný dobropis je to no-op.
+            $sign = static fn (float $v): float => $v;
+            if ($row['invoice_type'] === 'credit_note') {
+                $sign = static fn (float $v): float => -abs($v);
+            }
             if (in_array($row['status'], ['issued', 'sent', 'reminded', 'paid'], true)
                 && in_array($row['invoice_type'], ['invoice', 'credit_note', 'tax_document'], true)) {
-                $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += $row['total_without_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['vat']         += $row['total_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += $row['total_with_vat'];
+                $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += $sign((float) $row['total_without_vat']);
+                $grouped[$month]['totals_per_currency'][$cur]['vat']         += $sign((float) $row['total_vat']);
+                $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += $sign((float) $row['total_with_vat']);
             } elseif ($row['status'] === 'draft'
                 && in_array($row['invoice_type'], ['invoice', 'credit_note', 'tax_document'], true)) {
                 // Koncepty do samostatné „predikce" (sčítají se k obratu až na FE pro predikovaný součet).
-                $grouped[$month]['totals_per_currency'][$cur]['draft_without_vat'] += $row['total_without_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['draft_vat']         += $row['total_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['draft_with_vat']    += $row['total_with_vat'];
+                $grouped[$month]['totals_per_currency'][$cur]['draft_without_vat'] += $sign((float) $row['total_without_vat']);
+                $grouped[$month]['totals_per_currency'][$cur]['draft_vat']         += $sign((float) $row['total_vat']);
+                $grouped[$month]['totals_per_currency'][$cur]['draft_with_vat']    += $sign((float) $row['total_with_vat']);
             }
         }
 
@@ -754,13 +845,11 @@ final class InvoiceRepository
             throw new \InvalidArgumentException('varsymbol má max 20 znaků');
         }
 
-        $paymentMethod = (string) ($data['payment_method'] ?? 'bank_transfer');
-        if (!in_array($paymentMethod, ['bank_transfer', 'card', 'cash', 'other'], true)) {
-            $paymentMethod = 'bank_transfer';
-        }
+        $paymentMethod = PaymentMethods::normalize($data['payment_method'] ?? null);
 
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
+        $hasSimplified = $this->supportsSimplified();
         $sql = 'INSERT INTO invoices
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
@@ -768,10 +857,12 @@ final class InvoiceRepository
              payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
+            . ($hasSimplified ? ' is_simplified,' : '')
             . ' created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
+            . ($hasSimplified ? ' ?,' : '')
             . ' ?)';
 
         $params = [
@@ -805,6 +896,9 @@ final class InvoiceRepository
         if ($hasReminders) {
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
         }
+        if ($hasSimplified) {
+            $params[] = !empty($data['is_simplified']) ? 1 : 0;
+        }
         $params[] = $userId;
 
         $pdo->prepare($sql)->execute($params);
@@ -817,7 +911,12 @@ final class InvoiceRepository
      * (audit „co se změnilo" v historii faktury). Přidáš-li sem user-facing sloupec,
      * přidej ho i tam, jinak ho audit detail tiše neuvede.
      */
-    public function updateDraft(int $id, array $data): void
+    /**
+     * @param bool $requireUnbooked Optimistický zámek (Epic F6, L1): UPDATE podmíněný
+     *                              `booked_at IS NULL`. Vrací false, když doklad mezitím
+     *                              někdo zaúčtoval (řádek existuje, ale booked_at je set).
+     */
+    public function updateDraft(int $id, array $data, bool $requireUnbooked = false): bool
     {
         // Varsymbol — měníme jen pokud je v payloadu klíč 'varsymbol' (allow null = vyčištění,
         // missing = nepsát vůbec). UpdateInvoiceAction klíč u vystavené faktury odstraní.
@@ -835,19 +934,20 @@ final class InvoiceRepository
         $hasPaymentMethod = array_key_exists('payment_method', $data);
         $paymentMethod = null;
         if ($hasPaymentMethod) {
-            $paymentMethod = (string) $data['payment_method'];
-            if (!in_array($paymentMethod, ['bank_transfer', 'card', 'cash', 'other'], true)) {
-                $paymentMethod = 'bank_transfer';
-            }
+            $paymentMethod = PaymentMethods::normalize($data['payment_method']);
         }
 
         // Typ dokladu lze měnit jen u draftu (faktura/proforma/dobropis) — viz UpdateInvoiceAction,
         // který u vystavené faktury posílá nezměněný typ. Storno/cancellation se přes update nenastaví.
         $hasType = array_key_exists('invoice_type', $data)
-            && in_array((string) $data['invoice_type'], ['invoice', 'proforma', 'credit_note'], true);
+            && in_array((string) $data['invoice_type'], ['invoice', 'proforma', 'credit_note', 'payment_calendar'], true);
 
         $hasExempt = $this->supportsIncomeTaxExempt();
         $hasReminders = $this->supportsAutoSendReminders();
+        // Na rozdíl od `income_tax_exempt` se `is_simplified` zapisuje jen když klíč v
+        // payloadu JE. Příznak nastavuje editor faktury, ale doklad ukládají i jiné cesty
+        // (import, opakovaná fakturace) — ty by ho bez tohoto rozlišení tiše shodily na 0.
+        $hasSimplified = $this->supportsSimplified() && array_key_exists('is_simplified', $data);
         $currentStmt = $this->db->pdo()->prepare('SELECT supplier_id, branding_profile_id FROM invoices WHERE id = ?');
         $currentStmt->execute([$id]);
         $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
@@ -867,10 +967,12 @@ final class InvoiceRepository
                 vat_classification_code = ?, revenue_category = ?, revenue_category_id = ?'
               . ($hasExempt ? ', income_tax_exempt = ?, income_tax_exempt_reason = ?' : '')
               . ($hasReminders ? ', auto_send_reminders = ?' : '')
+              . ($hasSimplified ? ', is_simplified = ?' : '')
               . ($hasVarsymbol ? ', varsymbol = ?' : '')
               . ($hasPaymentMethod ? ', payment_method = ?' : '')
               . ($hasType ? ', invoice_type = ?' : '')
-              . ' WHERE id = ?';
+              . ' WHERE id = ?'
+              . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
 
         $params = [
             (int) $data['client_id'],
@@ -898,12 +1000,26 @@ final class InvoiceRepository
         if ($hasReminders) {
             $params[] = array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1;
         }
+        if ($hasSimplified) $params[] = !empty($data['is_simplified']) ? 1 : 0;
         if ($hasVarsymbol) $params[] = $manualVarsymbol;
         if ($hasPaymentMethod) $params[] = $paymentMethod;
         if ($hasType) $params[] = (string) $data['invoice_type'];
         $params[] = $id;
 
-        $this->db->pdo()->prepare($sql)->execute($params);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        if ($requireUnbooked && $stmt->rowCount() === 0) {
+            // rowCount 0 = buď booked_at podmínka nesedla, nebo identická data (MySQL
+            // počítá changed rows). Rozliš dotazem — locked jen když booked_at není NULL.
+            // Vědomě akceptovaný double-race: mezi UPDATE a tímto SELECTem může účetní
+            // doklad zase odemknout → falešné 200 u no-op zápisu (ms okno, bez dopadu
+            // na data — UPDATE nic nezměnil).
+            $check = $this->db->pdo()->prepare('SELECT 1 FROM invoices WHERE id = ? AND booked_at IS NULL');
+            $check->execute([$id]);
+            return $check->fetchColumn() !== false;
+        }
+        return true;
     }
 
     public function delete(int $id): void
@@ -933,17 +1049,19 @@ final class InvoiceRepository
                     (invoice_id, description, quantity, unit, unit_price_without_vat,
                      vat_rate_id, vat_rate_snapshot,
                      total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
+                     stock_item_id, warehouse_id,
                      oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
                      oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
                      oss_vat_amount_return, oss_original_period)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )
             : $pdo->prepare(
                 'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
-                 total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)'
+                 total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
+                 stock_item_id, warehouse_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)'
             );
 
         $vatRates = $this->loadVatRates();
@@ -993,6 +1111,9 @@ final class InvoiceRepository
                 $orderIndex,
                 'standard',
                 $code !== null ? (string) $code : null,
+                // Vazba na skladovou kartu (Epic SKLAD, B5) — řídí auto-výdejku.
+                isset($item['stock_item_id']) && (int) $item['stock_item_id'] > 0 ? (int) $item['stock_item_id'] : null,
+                isset($item['warehouse_id']) && (int) $item['warehouse_id'] > 0 ? (int) $item['warehouse_id'] : null,
             ];
             if ($supportsOss) {
                 $params = array_merge($params, self::ossItemParams($item));
@@ -1080,6 +1201,9 @@ final class InvoiceRepository
                 $order++,
                 'discount',
                 $g['code'] !== null ? (string) $g['code'] : null,
+                // Slevový řádek nikdy nenese skladovou vazbu.
+                null,
+                null,
             ];
             if ($supportsOss && isset($g['oss']) && is_array($g['oss'])) {
                 $oss = $g['oss'];
@@ -1104,32 +1228,22 @@ final class InvoiceRepository
 
         $country = strtoupper(trim((string) ($item['oss_consumer_country'] ?? '')));
         $country = preg_match('/^[A-Z]{2}$/', $country) ? $country : null;
-
-        $rateType = trim((string) ($item['oss_rate_type'] ?? ''));
-        $rateType = in_array($rateType, ['standard', 'reduced', 'second_reduced', 'parking'], true)
-            ? $rateType
-            : null;
-
+        $rateType = trim((string) ($item['oss_rate_type'] ?? '')) ?: null;
         $supplyType = (string) ($item['oss_supply_type'] ?? '');
         $supplyType = in_array($supplyType, ['goods', 'services'], true) ? $supplyType : null;
-
         $rate = isset($item['oss_exchange_rate']) && is_numeric($item['oss_exchange_rate'])
-            ? (float) $item['oss_exchange_rate']
-            : null;
+            ? (float) $item['oss_exchange_rate'] : null;
         $rateDate = self::dateOrNull($item['oss_exchange_rate_date'] ?? null);
         $taxable = isset($item['oss_taxable_amount_return']) && is_numeric($item['oss_taxable_amount_return'])
-            ? (float) $item['oss_taxable_amount_return']
-            : null;
+            ? (float) $item['oss_taxable_amount_return'] : null;
         $vat = isset($item['oss_vat_amount_return']) && is_numeric($item['oss_vat_amount_return'])
-            ? (float) $item['oss_vat_amount_return']
-            : null;
-        $period = trim((string) ($item['oss_original_period'] ?? ''));
+            ? (float) $item['oss_vat_amount_return'] : null;
+        $period = strtoupper(trim((string) ($item['oss_original_period'] ?? '')));
         if ($period !== '' && (!preg_match('/^[0-9]{4}Q[1-4]$/', $period) || $period < '2021Q3')) {
-            $period = '';
+            throw new \InvalidArgumentException('Původní OSS období musí mít formát RRRRQn a nesmí být před Q3 2021.');
         }
-        $period = $period !== '' ? $period : null;
 
-        return [$applicable, $country, $rateType, $supplyType, $rate, $rateDate, $taxable, $vat, $period];
+        return [$applicable, $country, $rateType, $supplyType, $rate, $rateDate, $taxable, $vat, $period ?: null];
     }
 
     private static function dateOrNull(mixed $value): ?string
@@ -1236,18 +1350,61 @@ final class InvoiceRepository
         return $this->loadVatRates();
     }
 
-    /**
-     * Sazba → stát. Validace potřebuje zemi, aby zahraniční sazba neprošla na řádku bez OSS
-     * (jinak by ji tuzemská evidence vykázala jako českou — viz InvoiceValidation).
-     *
-     * @return array<int, string>
-     */
+    /** @return array<int, string> */
     public function vatRateCountryMap(): array
     {
         $rows = $this->db->pdo()->query('SELECT id, country FROM vat_rates')->fetchAll(PDO::FETCH_ASSOC);
         $out = [];
-        foreach ($rows as $r) $out[(int) $r['id']] = strtoupper((string) ($r['country'] ?? 'CZ'));
+        foreach ($rows as $row) {
+            $out[(int) $row['id']] = strtoupper((string) ($row['country'] ?? 'CZ'));
+        }
         return $out;
+    }
+
+    /**
+     * Chronologicky agregované úhrady vydané faktury pro výpočet úroku z prodlení.
+     * Částky jsou v měně faktury (InvoicePaymentService je tak ukládá).
+     *
+     * @return list<array{paid_on:string, amount:float}>
+     */
+    public function paymentTimeline(int $invoiceId, int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT paid_on, SUM(amount) AS amount
+               FROM invoice_payments
+              WHERE invoice_id = ? AND supplier_id = ?
+              GROUP BY paid_on
+              ORDER BY paid_on'
+        );
+        $stmt->execute([$invoiceId, $supplierId]);
+        return array_map(static fn (array $row) => [
+            'paid_on' => (string) $row['paid_on'],
+            'amount'  => (float) $row['amount'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Poslední den prodlení pokrytý dřívější (nestornovanou) penalizační fakturou
+     * k dané zdrojové faktuře — ochrana proti dvojímu vyúčtování téhož období
+     * (PenaltyInvoiceService). NULL = žádná dřívější penalizace.
+     */
+    public function lastPenaltyCoveredThrough(int $parentInvoiceId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MAX(penalty_covered_through) FROM invoices
+              WHERE parent_invoice_id = ? AND invoice_type = 'penalty' AND status != 'cancelled'"
+        );
+        $stmt->execute([$parentInvoiceId]);
+        $value = $stmt->fetchColumn();
+        return ($value === false || $value === null) ? null : (string) $value;
+    }
+
+    /** Uloží den, do kterého (včetně) penalizační faktura pokrývá prodlení. */
+    public function setPenaltyCoveredThrough(int $invoiceId, string $coveredThrough): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET penalty_covered_through = ? WHERE id = ?'
+        )->execute([$coveredThrough, $invoiceId]);
     }
 
     /**
@@ -1279,6 +1436,9 @@ final class InvoiceRepository
         if (isset($row['currency_id']))   $row['currency_id'] = (int) $row['currency_id'];
         if (isset($row['supplier_id']))   $row['supplier_id'] = (int) $row['supplier_id'];
         $row['reverse_charge']      = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;
+        // Vždy klíč vrátit, i na instalaci bez migrace 1170 — editor by jinak checkbox
+        // po načtení dokladu tiše zrušil (undefined → false → uložení jako běžný doklad).
+        $row['is_simplified']       = isset($row['is_simplified']) ? (bool) $row['is_simplified'] : false;
         $row['prices_include_vat']  = isset($row['prices_include_vat']) ? (bool) $row['prices_include_vat'] : false;
         if (array_key_exists('income_tax_exempt', $row)) {
             $row['income_tax_exempt'] = (bool) $row['income_tax_exempt'];
@@ -1701,10 +1861,16 @@ final class InvoiceRepository
         }
         $row['linked_work_report_id'] = $row['linked_work_report_id'] !== null ? (int) $row['linked_work_report_id'] : null;
         $row['item_kind'] = (string) ($row['item_kind'] ?? 'standard');
+        if (array_key_exists('stock_item_id', $row)) {
+            $row['stock_item_id'] = $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null;
+        }
+        if (array_key_exists('warehouse_id', $row)) {
+            $row['warehouse_id'] = $row['warehouse_id'] !== null ? (int) $row['warehouse_id'] : null;
+        }
         if (array_key_exists('oss_applicable', $row)) {
             $row['oss_applicable'] = (bool) $row['oss_applicable'];
-            foreach (['oss_exchange_rate', 'oss_taxable_amount_return', 'oss_vat_amount_return'] as $f) {
-                $row[$f] = $row[$f] !== null ? (float) $row[$f] : null;
+            foreach (['oss_exchange_rate', 'oss_taxable_amount_return', 'oss_vat_amount_return'] as $field) {
+                $row[$field] = $row[$field] !== null ? (float) $row[$field] : null;
             }
         }
         return $row;

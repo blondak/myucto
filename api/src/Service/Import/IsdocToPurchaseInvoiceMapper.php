@@ -86,6 +86,9 @@ final class IsdocToPurchaseInvoiceMapper
             'tax_date'              => $parsed['tax_date'] !== null ? (string) $parsed['tax_date'] : null,
             'due_date'              => (string) ($parsed['due_date'] ?? date('Y-m-d', strtotime('+14 days'))),
             'received_at'           => date('Y-m-d'),
+            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
+            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at_source'    => 'import',
             'currency_id'           => $currencyId,
             'exchange_rate'         => isset($parsed['exchange_rate']) && $parsed['exchange_rate'] !== null
                 ? (float) $parsed['exchange_rate']

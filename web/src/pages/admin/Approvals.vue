@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import { adminApi, type ApprovalInboxItem } from '@/api/admin'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -214,9 +215,9 @@ function daysSince(date: string | null): number | null {
       <div v-if="items.length" class="px-4 py-3 border-t border-neutral-200 flex items-center justify-between text-sm">
         <span class="text-neutral-500">{{ t('common.loaded_count', { loaded: items.length, total: total }) }}</span>
         <button v-if="page < pages" @click="load(false)" :disabled="loadingMore"
-          class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-1.5">
+          :class="btnFilled('primary')">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
         </button>
       </div>
     </div>

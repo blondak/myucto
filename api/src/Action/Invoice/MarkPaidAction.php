@@ -9,6 +9,8 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
@@ -30,6 +32,7 @@ final class MarkPaidAction
         private readonly InvoicePdfRenderer $pdf,
         private readonly PaymentThanksMailer $paymentThanks,
         private readonly InvoicePaymentService $payments,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -53,6 +56,13 @@ final class MarkPaidAction
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+
+        // Epic F6 (R8/M5): platba je fakt — mark-paid je na zamčeném dokladu povolený
+        // i klientovi, ale POVINNĚ se audituje (u proforem spouští vznik daňového dokladu).
+        // Zámek se vyhodnotí teď, audit se zapíše až PO úspěšném provedení platby —
+        // jinak by selhání zápisu nechalo falešný audit záznam.
+        $clientLock = RequestAuthorization::isClientType($request) ? $this->locks->forInvoice($invoice) : null;
+        $auditLockedPayment = $clientLock !== null && $clientLock->lockedForClient();
 
         // Mark-paid = zkratka „platba na zbývající částku" (#89) — evidence plateb
         // zůstává konzistentní (paid_total = amount_to_pay) a označení lze vrátit
@@ -81,6 +91,17 @@ final class MarkPaidAction
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        if ($auditLockedPayment) {
+            $this->logger->log(
+                'invoice.payment_on_locked_document',
+                isset($user['id']) ? (int) $user['id'] : null,
+                'invoice',
+                $id,
+                ['trigger' => 'mark_paid', 'reasons' => $clientLock->reasons()],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
         $this->logger->log('invoice.paid', $user['id'] ?? null, 'invoice', $id, [
             'paid_at' => $paidAt,
         ], $ip, $request->getHeaderLine('User-Agent'));

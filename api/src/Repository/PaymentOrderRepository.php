@@ -145,19 +145,28 @@ final class PaymentOrderRepository
     }
 
     /**
-     * Historie dávek tenanta (bez položek; položky jen v detailu/downloadu).
+     * Historie dávek tenanta (bez položek; položky jen v detailu/downloadu), stránkovaně.
      *
      * @return list<array<string,mixed>>
      */
-    public function history(int $supplierId, int $limit = 200): array
+    public function history(int $supplierId, int $limit = 50, int $offset = 0): array
     {
+        // LIMIT/OFFSET inlinujeme jako validované inty (vzor StockItemRepository::list) —
+        // native prepared statements neumí LIMIT/OFFSET s parametrem typu string.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payment_orders WHERE supplier_id = ? ORDER BY created_at DESC, id DESC LIMIT ?'
+            'SELECT * FROM payment_orders WHERE supplier_id = ? ORDER BY created_at DESC, id DESC'
+            . ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset)
         );
-        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue(2, $limit, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([$supplierId]);
         return array_map([$this, 'castOrder'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /** COUNT(*) dávek tenanta (bez LIMIT), pro paginaci historie. */
+    public function countHistory(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payment_orders WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /** @return list<array<string,mixed>> */

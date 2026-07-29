@@ -7,7 +7,7 @@ REM
 REM  Vyzaduje v PATH: mariadb-dump (nebo mysqldump).
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice Backup" ^
+REM    schtasks /create /tn "MyUcto Backup" ^
 REM      /tr "%~f0" /sc daily /st 02:00 /ru SYSTEM
 REM ============================================================================
 setlocal

@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Settings;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\IpMatcher;
@@ -41,7 +43,7 @@ final class SupplierInvoiceCounterAction
     public function __invoke(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 

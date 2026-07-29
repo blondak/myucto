@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use PDO;
-use Psr\Log\LoggerInterface;
 
 /**
  * Persist naparsovaného výpisu do DB (GPC nebo bank-specifický PDF parser — obojí
@@ -21,7 +22,10 @@ final class StatementImporter
         // Cross-source dedup GPC ← e-mailové avízo: převezme párování (i manuální/split)
         // z už spárované avízo-transakce místo dvojího párování téže platby.
         private readonly EmailNoticeReconciler $reconciler,
-        private readonly LoggerInterface $logger,
+        // Automatizace (mini-epic): po (re)match/importu zkusí zaúčtovat transakci.
+        // Nullable — best-effort hook, fakturační tenant / tax_evidence = no-op.
+        private readonly ?BankPostingService $bankPosting = null,
+        private readonly ?SupplierBankAccountRepository $ownAccounts = null,
     ) {}
 
     /**
@@ -91,13 +95,30 @@ final class StatementImporter
         // nenese (na rozdíl od e-mailových avíz) → doplníme ho z konfigurovaného účtu,
         // ať jsou data normalizovaná napříč zdroji (jinak GPC výpis bank_code = NULL).
         // Explicitně zvolený měnový účet (#167) je autoritativní; jinak lookup podle čísla.
-        $account = $currencyId !== null
+        $explicitAccount = $currencyId !== null;
+        $account = $explicitAccount
             ? $this->loadCurrencyById($currencyId)
             : $this->lookupAccount($h['account_number']);
+        $registeredOwner = $this->lookupRegisteredOwner($h['account_number']);
+        $statementSupplierId = $explicitAccount
+            ? (isset($account['supplier_id']) && (int) $account['supplier_id'] > 0
+                ? (int) $account['supplier_id']
+                : null)
+            : ($registeredOwner['supplier_id'] ?? null);
         $accountCurrency = $account['code'] ?? null;
-        $accountBankCode = $account['bank_code'] ?? null;
+        $accountBankCode = $account['bank_code'] ?? $registeredOwner['bank_code'] ?? null;
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
+
+        if ($statementSupplierId !== null) {
+            $this->ownAccounts?->registerSeen(
+                $statementSupplierId,
+                (string) $h['account_number'],
+                $accountBankCode,
+                $statementCurrency,
+                isset($account['id']) ? (int) $account['id'] : null,
+            );
+        }
 
         // GPC: raw bajty jdou do file_content (zpětně stažitelný originál). PDF: do
         // pdf_content (existující sloupce z migrace 0052 — „Stáhnout PDF" tak funguje
@@ -113,13 +134,13 @@ final class StatementImporter
         $pdo->prepare(
             'INSERT INTO bank_statements
                  (source, file_name, file_hash, file_content, pdf_content, pdf_name, pdf_hash, pdf_size_bytes, pdf_uploaded_at,
-                  account_number, bank_code, currency,
+                  supplier_id, account_number, bank_code, currency,
                   statement_number, statement_date,
                   prev_balance, curr_balance, credit_total, debit_total, transaction_count, imported_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $source, $fileName, $hash, $fileContent, $pdfContent, $pdfName, $pdfHash, $pdfSize, $pdfUploadedAt,
-            $h['account_number'], $accountBankCode, $statementCurrency,
+            $statementSupplierId, $h['account_number'], $accountBankCode, $statementCurrency,
             $h['statement_number'], $h['statement_date'],
             $h['prev_balance'], $h['curr_balance'], $h['credit_total'], $h['debit_total'],
             count($parsed['transactions']), $userId,
@@ -129,11 +150,15 @@ final class StatementImporter
         $insertTx = $pdo->prepare(
             'INSERT INTO bank_transactions
                  (statement_id, posted_at, amount, currency, variable_symbol, constant_symbol, specific_symbol,
-                  counterparty_account, counterparty_bank, counterparty_name, description, bank_ref)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+                  counterparty_account, counterparty_bank, counterparty_name, description, bank_ref, import_fingerprint)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        $findDuplicateTx = $pdo->prepare(
+            'SELECT id FROM bank_transactions WHERE import_fingerprint = ? LIMIT 1'
         );
 
         $matched = 0;
+        $inserted = 0;
         foreach ($parsed['transactions'] as $tx) {
             // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
             // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
@@ -141,13 +166,32 @@ final class StatementImporter
             // jen jako fallback, když účet není registrovaný (CREDITAS/KB ho
             // plní reálně) — aby se EUR transakce neztratila.
             $txCurrency = $accountCurrency ?? $tx['currency'] ?? $statementCurrency;
-            $insertTx->execute([
-                $statementId, $tx['posted_at'], $tx['amount'], $txCurrency,
-                $tx['variable_symbol'], $tx['constant_symbol'], $tx['specific_symbol'],
-                $tx['counterparty_account'], $tx['counterparty_bank'], $tx['counterparty_name'],
-                $tx['description'], $tx['bank_ref'],
-            ]);
+            $fingerprint = $this->transactionFingerprint(
+                (string) $h['account_number'],
+                $accountBankCode,
+                $txCurrency,
+                $tx,
+            );
+            $findDuplicateTx->execute([$fingerprint]);
+            if ($findDuplicateTx->fetchColumn() !== false) {
+                continue;
+            }
+            try {
+                $insertTx->execute([
+                    $statementId, $tx['posted_at'], $tx['amount'], $txCurrency,
+                    $tx['variable_symbol'], $tx['constant_symbol'], $tx['specific_symbol'],
+                    $tx['counterparty_account'], $tx['counterparty_bank'], $tx['counterparty_name'],
+                    $tx['description'], $tx['bank_ref'], $fingerprint,
+                ]);
+            } catch (\PDOException $e) {
+                if (($e->errorInfo[0] ?? null) === '23000'
+                    && str_contains($e->getMessage(), 'uq_bt_import_fingerprint')) {
+                    continue;
+                }
+                throw $e;
+            }
             $txId = (int) $pdo->lastInsertId();
+            $inserted++;
 
             // Cross-source dedup: pokud tato platba už dorazila e-mailovým avízem a je
             // spárovaná, převezmi párování (i manuální/split) na oficiální GPC transakci
@@ -155,6 +199,7 @@ final class StatementImporter
             $takeover = $this->reconciler->takeOverFromEmailNotice($txId);
             if ($takeover !== null) {
                 $matched++;
+                $this->bankPosting?->handleTransaction($txId, $userId);
                 continue;
             }
 
@@ -162,17 +207,56 @@ final class StatementImporter
             if (in_array($r['status'], ['auto_exact', 'auto_partial'], true)) {
                 $matched++;
             }
+            $this->bankPosting?->handleTransaction($txId, $userId, !empty($r['requires_review']));
         }
 
-        $pdo->prepare('UPDATE bank_statements SET matched_count = ? WHERE id = ?')
-            ->execute([$matched, $statementId]);
+        $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
+            ->execute([$matched, $inserted, $statementId]);
 
         return [
             'statement_id' => $statementId,
-            'transactions' => count($parsed['transactions']),
+            'transactions' => $inserted,
             'matched'      => $matched,
             'duplicate'    => false,
         ];
+    }
+
+    /**
+     * Stabilní identita pohybu napříč překrývajícími se výpisy. Bankovní reference
+     * je nejsilnější klíč; bez ní použijeme celý konzervativní otisk pohybu, aby dvě
+     * legitimní platby stejné částky a dne nesplynuly jen kvůli částce/VS.
+     *
+     * @param array<string,mixed> $tx
+     */
+    private function transactionFingerprint(
+        string $accountNumber,
+        ?string $bankCode,
+        ?string $currency,
+        array $tx,
+    ): string {
+        $account = AccountNumberNormalizer::normalize($accountNumber);
+        $reference = trim((string) ($tx['bank_ref'] ?? ''));
+        $identity = $reference !== ''
+            ? ['bank_ref', $reference]
+            : [
+                'fallback',
+                trim((string) ($tx['variable_symbol'] ?? '')),
+                trim((string) ($tx['constant_symbol'] ?? '')),
+                trim((string) ($tx['specific_symbol'] ?? '')),
+                AccountNumberNormalizer::normalize((string) ($tx['counterparty_account'] ?? '')),
+                trim((string) ($tx['counterparty_bank'] ?? '')),
+                mb_strtoupper(trim((string) ($tx['counterparty_name'] ?? '')), 'UTF-8'),
+                mb_strtoupper(trim((string) ($tx['description'] ?? '')), 'UTF-8'),
+            ];
+        return hash('sha256', json_encode([
+            'v' => 1,
+            'account' => $account,
+            'bank' => $bankCode,
+            'currency' => strtoupper((string) $currency),
+            'date' => (string) ($tx['posted_at'] ?? ''),
+            'amount' => number_format((float) ($tx['amount'] ?? 0), 2, '.', ''),
+            'identity' => $identity,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
     }
 
     /**
@@ -200,22 +284,22 @@ final class StatementImporter
     /**
      * Lookup currency podle account_number v `currencies` tabulce. Pro případy,
      * kdy banka nevyplňuje 075.currency (= per-tx detection selže) — vezmeme
-     * měnu prvního nalezeného currencies řádku se stejným číslem účtu (napříč
-     * tenanty; multi-supplier separace je doménou caller — StatementImporter
-     * pracuje bez tenant kontextu, ale account_number je defakto unikátní).
+     * měnu jednoznačnou napříč nalezenými currencies řádky se stejným číslem
+     * účtu. Vlastník výpisu se určuje odděleně přes sjednocený registr
+     * currencies + supplier_bank_accounts.
      *
      * AccountNumberNormalizer::equals normalizuje leading zeros / dashes pro
      * porovnání (např. `0000000123456789` z GPC vs `123456789` z UI inputu).
      * Porovnává se i domácí část IBANu (#109) — cizoměnové účty bývají
      * evidované jen IBANem a bez toho EUR výpis spadl na CZK fallback.
      *
-     * @return array{code:string, bank_code:?string}|null
+     * @return array{id:?int,supplier_id:?int,code:?string,bank_code:?string}|null
      */
     private function lookupAccount(string $accountNumber): ?array
     {
         if ($accountNumber === '') return null;
         $stmt = $this->db->pdo()->query(
-            'SELECT account_number, iban, code, bank_code FROM currencies
+            'SELECT id, supplier_id, account_number, iban, code, bank_code FROM currencies
               WHERE account_number IS NOT NULL OR iban IS NOT NULL'
         );
         if ($stmt === false) return null;
@@ -223,40 +307,23 @@ final class StatementImporter
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $iban = isset($row['iban']) && is_string($row['iban']) ? $row['iban'] : null;
             if (AccountNumberNormalizer::matchesAny($accountNumber, $row['account_number'] ?? null, $iban)) {
-                $matches[] = [
-                    'code'      => (string) $row['code'],
-                    'bank_code' => isset($row['bank_code']) && (string) $row['bank_code'] !== '' ? (string) $row['bank_code'] : null,
-                ];
+                $matches[] = $row;
             }
         }
         if ($matches === []) return null;
-
-        // #206: víc účtů se stejným číslem účtu, lišících se kódem banky (příp. měnou),
-        // nelze v NEINTERAKTIVNÍ cestě (folder scan / fallback měny) jednoznačně
-        // rozlišit — GPC hlavička kód banky vlastního účtu nenese. Interaktivní upload
-        // to řeší volbou účtu (BankStatementAction::resolveTargetCurrency → 409
-        // ambiguous_account_currency). Tady jen zalogujeme varování a vezmeme první
-        // shodu (zachování chování), ať se adresářový sken nezasekne.
-        if (count($matches) > 1) {
-            $variants = [];
-            foreach ($matches as $m) {
-                $variants[($m['bank_code'] ?? '?') . '/' . $m['code']] = true;
-            }
-            if (count($variants) > 1) {
-                $this->logger->warning(
-                    'Nejednoznačný účet při importu výpisu — použita první varianta. '
-                    . 'U interaktivního uploadu zvolte cílový účet ručně.',
-                    [
-                        'account_number' => $accountNumber,
-                        'match_count'    => count($matches),
-                        'variants'       => array_keys($variants),
-                        'used_bank_code' => $matches[0]['bank_code'] ?? '?',
-                        'used_currency'  => $matches[0]['code'],
-                    ]
-                );
-            }
-        }
-        return $matches[0];
+        $supplierIds = array_values(array_unique(array_map(static fn (array $r): int => (int) $r['supplier_id'], $matches)));
+        $codes = array_values(array_unique(array_map(static fn (array $r): string => (string) $r['code'], $matches)));
+        $bankCodes = array_values(array_unique(array_filter(array_map(
+            static fn (array $r): string => trim((string) ($r['bank_code'] ?? '')),
+            $matches,
+        ))));
+        $first = $matches[0];
+        return [
+            'id'          => count($matches) === 1 ? (int) $first['id'] : null,
+            'supplier_id' => count($supplierIds) === 1 ? $supplierIds[0] : null,
+            'code'        => count($codes) === 1 ? $codes[0] : null,
+            'bank_code'   => count($bankCodes) === 1 ? $bankCodes[0] : null,
+        ];
     }
 
     /**
@@ -265,17 +332,63 @@ final class StatementImporter
      * první z N měnových variant). Příslušnost k supplierovi a shodu čísla účtu
      * ověřuje caller (BankStatementAction); tady už jen načteme řádek.
      *
-     * @return array{code:string, bank_code:?string}|null
+     * @return array{id:int,supplier_id:int,code:string,bank_code:?string}|null
      */
     private function loadCurrencyById(int $currencyId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT code, bank_code FROM currencies WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT id, supplier_id, code, bank_code FROM currencies WHERE id = ?');
         $stmt->execute([$currencyId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
         return [
+            'id'        => (int) $row['id'],
+            'supplier_id' => (int) $row['supplier_id'],
             'code'      => (string) $row['code'],
             'bank_code' => isset($row['bank_code']) && (string) $row['bank_code'] !== '' ? (string) $row['bank_code'] : null,
+        ];
+    }
+
+    /**
+     * Automatický import smí přiřadit tenant jen při právě jednom vlastníkovi
+     * napříč oběma registry vlastních účtů. Konflikt mezi registry je stejně
+     * nejednoznačný jako dvě shody uvnitř jednoho registru.
+     *
+     * @return array{supplier_id:?int,bank_code:?string}|null
+     */
+    private function lookupRegisteredOwner(string $accountNumber): ?array
+    {
+        if ($accountNumber === '') {
+            return null;
+        }
+        $stmt = $this->db->pdo()->query(
+            'SELECT supplier_id, account_number, iban, bank_code
+               FROM currencies
+              WHERE account_number IS NOT NULL OR iban IS NOT NULL
+              UNION ALL
+             SELECT supplier_id, account_number, iban, bank_code
+               FROM supplier_bank_accounts
+              WHERE is_active = 1'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $matches = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (AccountNumberNormalizer::matchesAny($accountNumber, $row['account_number'] ?? null, $row['iban'] ?? null)) {
+                $matches[] = $row;
+            }
+        }
+        $supplierIds = array_values(array_unique(array_filter(
+            array_map(static fn (array $row): int => (int) $row['supplier_id'], $matches),
+            static fn (int $supplierId): bool => $supplierId > 0,
+        )));
+        $bankCodes = array_values(array_unique(array_filter(array_map(
+            static fn (array $row): string => trim((string) ($row['bank_code'] ?? '')),
+            $matches,
+        ))));
+        return [
+            'supplier_id' => count($supplierIds) === 1 ? $supplierIds[0] : null,
+            'bank_code' => count($bankCodes) === 1 ? $bankCodes[0] : null,
         ];
     }
 }

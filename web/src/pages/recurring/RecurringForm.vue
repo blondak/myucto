@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency } from '@/api/recurring'
+import type { PaymentMethod } from '@/api/invoices'
 import { apiErrorMessage } from '@/api/errors'
 import { clientsApi, type Client, type ViesLookupResult } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
@@ -11,6 +12,7 @@ import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategor
 import { priceListApi, type CatalogDescriptionSource, type CatalogPolicy, type PriceListItem, type ResolvedPriceListItem } from '@/api/priceList'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { formatMoney } from '@/composables/useFormat'
 import { focusLastRow } from '@/composables/useRowFocus'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -22,6 +24,7 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 
 // Aktivní dodavatel — neplátce DPH fakturuje bez DPH (žádné DPH UI ani sazba), stejně
 // jako u ruční faktury (InvoiceEditor). Backend (RecurringInvoiceGenerator) to navíc
@@ -29,6 +32,7 @@ const supplierStore = useSupplierStore()
 const supplierIsVatPayer = computed(() => supplierStore.currentSupplier?.is_vat_payer ?? true)
 // Identifikovaná osoba (§ 6g–6l ZDPH, #94) — neplátce s RC u služeb do EU.
 const supplierIsIdentified = computed(() => supplierStore.currentSupplier?.is_identified ?? false)
+const priceListEnabled = computed(() => !auth.hasCommercialFeatures || supplierStore.currentSupplier?.stock_enabled !== true)
 // RC checkbox: plátce vždy, IO taky (její hlavní use-case); čistý neplátce ne.
 const showReverseChargeUI = computed(() => supplierIsVatPayer.value || supplierIsIdentified.value)
 
@@ -86,11 +90,13 @@ const units = ref<Unit[]>([])
 const revenueCategories = ref<RevenueCategory[]>([])
 const priceListItems = ref<PriceListItem[]>([])
 const catalogResolving = ref<number | null>(null)
-// Ceníkové ovládání v řádcích skryj, dokud dodavatel nemá žádnou použitelnou položku
-// (existující napojené řádky zůstanou editovatelné i tak).
-const hasPriceList = computed(() => priceListItems.value.length > 0)
+const hasPriceList = computed(() => priceListEnabled.value && priceListItems.value.length > 0)
 
 async function loadPriceListItems() {
+  if (!priceListEnabled.value) {
+    priceListItems.value = []
+    return
+  }
   const currency = currencies.value.find(item => item.id === form.value.currency_id)?.code
   if (!currency) return
   try {
@@ -144,7 +150,7 @@ const form = ref<{
   invoice_type: 'invoice' | 'proforma'
   currency_id: number
   language: 'cs' | 'en'
-  payment_method: 'bank_transfer' | 'card' | 'cash' | 'other'
+  payment_method: PaymentMethod
   reverse_charge: boolean
   prices_include_vat: boolean
   discount_percent: number
@@ -333,7 +339,10 @@ function vatBuckets(): Map<number, { rate: number; base: number; vat: number }> 
       base = round2(amount - vat)
     } else {
       base = amount
-      vat = round2(base * (vatRate / 100))
+      // Dělit AŽ NAKONEC (issue #82): `base * (rate/100)` spočítá koeficient ve floatu
+      // a při 21 % dá jiný haléř u 676 z 500 000 částek (např. 29,50 → 6,19 místo 6,20).
+      // Náhled šablony by se pak rozešel s fakturou, kterou vygeneruje InvoiceMath.
+      vat = round2(base * vatRate / 100)
     }
     if (!buckets.has(vatRate)) buckets.set(vatRate, { rate: vatRate, base: 0, vat: 0 })
     const b = buckets.get(vatRate)!
@@ -358,13 +367,13 @@ const computedAmountToPay = computed(() => {
       if (pricesIncl) {
         // Sleva z hrubé částky; daň dopočtena shora z hrubé částky po slevě.
         const gross = round2(base + vat)
-        const newGross = round2(gross - round2(gross * (pct / 100)))
+        const newGross = round2(gross - round2(gross * pct / 100))
         vat = round2(newGross * b.rate / (100 + b.rate))
         base = round2(newGross - vat)
       } else {
-        const disc = round2(base * (pct / 100))
+        const disc = round2(base * pct / 100)
         base = round2(base - disc)
-        vat = round2(vat - round2(disc * (b.rate / 100)))
+        vat = round2(vat - round2(disc * b.rate / 100))
       }
     }
     totalBase = round2(totalBase + base)
@@ -390,11 +399,11 @@ const computedDiscountAmount = computed(() => {
   for (const b of vatBuckets().values()) {
     if (form.value.prices_include_vat) {
       const gross = round2(b.base + b.vat)
-      const newGross = round2(gross - round2(gross * (pct / 100)))
+      const newGross = round2(gross - round2(gross * pct / 100))
       const newVat = round2(newGross * b.rate / (100 + b.rate))
       disc = round2(disc + round2(b.base - round2(newGross - newVat)))
     } else {
-      disc = round2(disc + round2(b.base * (pct / 100)))
+      disc = round2(disc + round2(b.base * pct / 100))
     }
   }
   return disc
@@ -412,11 +421,16 @@ function itemHasBothNegative(item: { quantity: number, unit_price_without_vat: n
 }
 
 async function loadProjectsForClient(clientId: number) {
-  if (!clientId) {
+  // Role client (F6): GET /clients/{id}/projects je pro klienta zakázaný (403) — zakázky nenačítat.
+  if (!clientId || auth.isClientRole) {
     projects.value = []
     return
   }
-  projects.value = await projectsApi.listForClient(clientId)
+  try {
+    projects.value = await projectsApi.listForClient(clientId)
+  } catch {
+    projects.value = []
+  }
 }
 
 // VIES ověření DIČ vybraného klienta (jen pokud má DIČ) — zrcadlí InvoiceEditor.
@@ -678,7 +692,7 @@ onMounted(async () => {
     loading.value = false
     await loadPriceListItems()
     await Promise.all(form.value.items.map(async item => {
-      if (!item.price_list_item_id || item.catalog_policy !== 'review_required' || !form.value.client_id || !form.value.currency_id) return
+      if (!priceListEnabled.value || !item.price_list_item_id || item.catalog_policy !== 'review_required' || !form.value.client_id || !form.value.currency_id) return
       try {
         item.catalog_current = await priceListApi.resolve(item.price_list_item_id, {
           client_id: form.value.client_id,
@@ -845,7 +859,7 @@ async function submit() {
               </template>
             </div>
           </div>
-          <div>
+          <div v-if="!auth.isClientRole">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('recurring.project') }}</label>
             <div class="flex gap-2">
               <div class="flex-1 min-w-0">
@@ -1052,7 +1066,7 @@ async function submit() {
           <tbody>
             <tr v-for="(it, idx) in form.items" :key="idx" :class="['border-t border-neutral-200', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
               <td class="py-1.5 pr-2">
-                <div v-if="hasPriceList || it.price_list_item_id" class="mb-1 grid gap-1 xl:grid-cols-3">
+                <div v-if="priceListEnabled && (hasPriceList || it.price_list_item_id)" class="mb-1 grid gap-1 xl:grid-cols-3">
                   <select v-model.number="it.price_list_item_id" class="h-8 min-w-0 px-2 border border-neutral-300 rounded bg-surface text-xs" @change="applyCatalogItem(it, idx)">
                     <option :value="null">{{ t('recurring.catalog_manual') }}</option>
                     <option v-for="catalogItem in priceListItems" :key="catalogItem.id" :value="catalogItem.id">{{ catalogItem.code }} · {{ catalogItem.name }}</option>
@@ -1067,27 +1081,27 @@ async function submit() {
                     <option value="template">{{ t('recurring.catalog_description_template') }}</option>
                   </select>
                 </div>
-                <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="!!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100" />
-                <p v-if="it.price_list_item_id" class="mt-1 text-xs text-neutral-500">
+                <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="priceListEnabled && !!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100" />
+                <p v-if="priceListEnabled && it.price_list_item_id" class="mt-1 text-xs text-neutral-500">
                   {{ catalogResolving === idx ? t('common.loading') : t('recurring.catalog_snapshot', { currency: it.catalog_source_currency_code ?? '—', price: it.catalog_source_unit_price ?? '—' }) }}
                   <button v-if="it.catalog_policy === 'review_required'" type="button" class="ml-2 text-primary-700 hover:underline" @click="applyCatalogItem(it, idx, true)">
                     {{ t('recurring.catalog_accept_changes') }}
                   </button>
                 </p>
-                <p v-if="it.catalog_policy === 'review_required' && catalogSnapshotChanged(it)" class="mt-1 text-xs text-warning-700">
+                <p v-if="priceListEnabled && it.catalog_policy === 'review_required' && catalogSnapshotChanged(it)" class="mt-1 text-xs text-warning-700">
                   {{ catalogCurrentLabel(it) }}
                 </p>
               </td>
               <td class="py-1.5 pr-2"><input v-model="it.quantity" v-math type="text" inputmode="decimal" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td class="py-1.5 pr-2">
-                <select v-model="it.unit" :disabled="!!it.price_list_item_id" class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
+                <select v-model="it.unit" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
                 </select>
               </td>
-              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="!!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
+              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td v-if="supplierIsVatPayer" class="py-1.5 pr-2">
-                <select v-model.number="it.vat_rate_id" :disabled="!!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
+                <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
                   <option v-for="r in vatRates" :key="r.id" :value="r.id">
                     {{ Number(r.rate_percent) > 0 ? r.rate_percent + ' %' : (r.is_reverse_charge ? 'RC' : '0 %') }}
                   </option>
@@ -1108,7 +1122,7 @@ async function submit() {
               <span class="font-mono">#{{ idx + 1 }}</span>
               <button type="button" @click="removeItem(idx)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
             </div>
-            <div v-if="hasPriceList || it.price_list_item_id" class="space-y-2">
+            <div v-if="priceListEnabled && (hasPriceList || it.price_list_item_id)" class="space-y-2">
               <label class="block text-xs font-medium text-neutral-600">{{ t('recurring.catalog_item') }}</label>
               <select v-model.number="it.price_list_item_id" class="w-full h-10 px-3 border border-neutral-300 rounded bg-surface text-sm" @change="applyCatalogItem(it, idx)">
                 <option :value="null">{{ t('recurring.catalog_manual') }}</option>
@@ -1137,7 +1151,7 @@ async function submit() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.description') }}</label>
-              <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="!!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-10 px-3 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100" />
+              <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="priceListEnabled && !!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-10 px-3 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100" />
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
@@ -1146,7 +1160,7 @@ async function submit() {
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.unit') }}</label>
-                <select v-model="it.unit" :disabled="!!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
+                <select v-model="it.unit" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ u.code }}</option>
                   <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
                 </select>
@@ -1155,11 +1169,11 @@ async function submit() {
             <div :class="supplierIsVatPayer ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="!!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
+                <input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div v-if="supplierIsVatPayer">
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.vat') ?? 'DPH' }}</label>
-                <select v-model.number="it.vat_rate_id" :disabled="!!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
+                <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
                   <option v-for="r in vatRates" :key="r.id" :value="r.id">
                     {{ Number(r.rate_percent) > 0 ? r.rate_percent + ' %' : (r.is_reverse_charge ? 'RC' : '0 %') }}
                   </option>

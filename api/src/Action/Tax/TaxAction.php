@@ -10,6 +10,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Service\Tax\TaxOptimizer;
+use MyInvoice\Service\TaxEvidence\CashJournalService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +27,7 @@ final class TaxAction
         private readonly TaxProfileRepository $profiles,
         private readonly TaxOptimizer $optimizer,
         private readonly TaxConstantsRepository $constants,
+        private readonly CashJournalService $cashJournal,
     ) {}
 
     /** GET /api/tax/analysis */
@@ -48,6 +50,18 @@ final class TaxAction
         $publicProfile = $this->publicProfile($profileRow, $flags);
         $engineProfile = $publicProfile + ['is_vat_payer' => $isVat];
 
+        // Epic DE (A4, §8.1 / R12): volitelně použít SKUTEČNÉ výdaje z peněžního deníku
+        // (kasová báze) místo výdajového paušálu / ručně zadaných actual_expenses.
+        // Jen daňová evidence + FO, aktivované explicitním requestem `use_evidence_expenses=1`.
+        // BEZ write-backu do tax_profiles — deník je runtime override, ne uložená pravda
+        // (tax_profiles.use_actual_expenses/actual_expenses zůstává ruční override uživatele).
+        // taxpayer_type u daňové evidence je typicky FO; NULL/prázdné bereme jako FO
+        // (shodně s IncomeTaxBuilder, který DPFDP5 defaultuje na type='fo'). Explicitní
+        // 'po' vyloučeno. Sjednocuje gate obou wiringů (A4 review).
+        $useEvidence = ((string) ($request->getQueryParams()['use_evidence_expenses'] ?? '') === '1')
+            && $flags['accounting_mode'] === 'tax_evidence'
+            && in_array($flags['taxpayer_type'], ['fo', '', null], true);
+
         $c = $this->constants->forYear($year);
         $payload = [
             'year'            => $year,
@@ -66,6 +80,31 @@ final class TaxAction
         if ($year < $currentYear) {
             // Uzavřený rok → retrospektiva (srovnání režimů na skutečném příjmu)
             $income = $this->profiles->annualIncome($sid, $year, $isVat);
+
+            if ($useEvidence) {
+                // §8.1: deníkový daňový výdaj (a příjem) spočten za běhu z CashJournalService.
+                $denik = $this->cashJournal->build(
+                    $sid,
+                    sprintf('%04d-01-01', $year),
+                    sprintf('%04d-12-31', $year),
+                    ['year' => $year],
+                );
+                $denikExpense = round((float) ($denik['totals']['vydaj_danovy'] ?? 0), 2);
+                $denikIncome  = round((float) ($denik['totals']['prijem_danovy'] ?? 0), 2);
+                $income = $denikIncome;
+                // Skutečné výdaje z evidence → do computeRegular přes existující mechanismus
+                // use_actual_expenses/actual_expenses (jen v paměti, NE do DB). Příjem i paušál
+                // kandidát zůstávají na annualIncome (§8.1: „paušál kandidát beze změny").
+                $engineProfile['use_actual_expenses'] = true;
+                $engineProfile['actual_expenses']     = $denikExpense;
+                // Deníkový příjem vystaven pro transparentnost/reconciliaci (income-side).
+                $payload['evidence_expenses'] = [
+                    'applied'             => true,
+                    'denik_vydaj_danovy'  => $denikExpense,
+                    'denik_prijem_danovy' => $denikIncome,
+                ];
+            }
+
             $payload['mode']    = 'retrospective';
             $payload['income']  = $income;
             $payload['compare'] = $this->optimizer->compare($engineProfile, $income, $c);
@@ -77,7 +116,9 @@ final class TaxAction
                 : null;
         } else {
             // Běžící rok → projekce a sledování limitů
-            $monthly = $this->profiles->monthlyIncome($sid, $year, $isVat);
+            $monthly = $flags['accounting_mode'] === 'tax_evidence'
+                ? $this->cashJournal->monthlyIncomeForFlatTax($sid, $year)
+                : $this->profiles->monthlyIncome($sid, $year, $isVat);
             [$ytd, $months] = $this->ytd($monthly, $year, $currentYear, (int) date('n'));
             $payload['mode']           = 'forecast';
             $payload['ytd_income']     = $ytd;
@@ -107,15 +148,19 @@ final class TaxAction
         return Json::ok($response, ['profile' => $saved]);
     }
 
-    /** @return array{is_vat_payer: bool, flat_tax_band: string} */
+    /** @return array{is_vat_payer: bool, flat_tax_band: string, accounting_mode: string, taxpayer_type: string} */
     private function supplierFlags(int $sid): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer, flat_tax_band FROM supplier WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT is_vat_payer, flat_tax_band, accounting_mode, taxpayer_type FROM supplier WHERE id = ?'
+        );
         $stmt->execute([$sid]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         return [
-            'is_vat_payer'  => (bool) ($row['is_vat_payer'] ?? false),
-            'flat_tax_band' => (string) ($row['flat_tax_band'] ?? 'none'),
+            'is_vat_payer'    => (bool) ($row['is_vat_payer'] ?? false),
+            'flat_tax_band'   => (string) ($row['flat_tax_band'] ?? 'none'),
+            'accounting_mode' => (string) ($row['accounting_mode'] ?? 'double_entry'),
+            'taxpayer_type'   => (string) ($row['taxpayer_type'] ?? ''),
         ];
     }
 
@@ -137,9 +182,20 @@ final class TaxAction
             'spouse_credit'     => (bool) ($row['spouse_credit'] ?? false),
             'children_count'    => (int) ($row['children_count'] ?? 0),
             'mortgage_interest' => (float) ($row['mortgage_interest'] ?? 0),
+            'mortgage_pre_2021' => (bool) ($row['mortgage_pre_2021'] ?? false),
+            'mortgage_months'   => (int) ($row['mortgage_months'] ?? 12),
             'pension_contrib'   => (float) ($row['pension_contrib'] ?? 0),
             'life_insurance'    => (float) ($row['life_insurance'] ?? 0),
+            'dip_contrib'       => (float) ($row['dip_contrib'] ?? 0),
+            'long_term_care'    => (float) ($row['long_term_care'] ?? 0),
+            'disability_12_months' => (int) ($row['disability_12_months'] ?? 0),
+            'disability_3_months' => (int) ($row['disability_3_months'] ?? 0),
+            'ztpp_months'       => (int) ($row['ztpp_months'] ?? 0),
             'donations'         => (float) ($row['donations'] ?? 0),
+            'activities'        => (array) ($row['activities'] ?? []),
+            'children'          => (array) ($row['children'] ?? []),
+            'spouse_claim'      => $row['spouse_claim'] ?? null,
+            'osvc_months'       => (array) ($row['osvc_months'] ?? []),
             'saved'             => $row !== null,
         ];
     }

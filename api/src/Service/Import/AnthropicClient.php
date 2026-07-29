@@ -23,7 +23,7 @@ use Psr\Log\LoggerInterface;
  *
  * Strict JSON output přes structured response — anti-hallucination.
  */
-final class AnthropicClient
+final class AnthropicClient implements LlmGatewayInterface
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -118,6 +118,25 @@ final class AnthropicClient
     }
 
     /**
+     * F7 §3.3 — provider si sám určí upgrade na silnější model. Anthropic: haiku →
+     * sonnet (hoist hard-coded upgradu z AiPdfExtractor). Vrací null, když upgrade
+     * nedává smysl. Odstranění duplicity z AiPdfExtractor je Commit 2.
+     */
+    public function strongerModel(int $supplierId, ?string $currentModel): ?string
+    {
+        return $this->capabilities($supplierId)->strongerModel($currentModel);
+    }
+
+    /**
+     * F7 §3.2 — descriptor schopností Anthropic providera pro daného tenanta.
+     * Anthropic default region = 'us' (EU jen dedikovaným endpointem, mimo Commit 1).
+     */
+    public function capabilities(int $supplierId): LlmProviderCapabilities
+    {
+        return LlmProviderCapabilities::anthropic('us');
+    }
+
+    /**
      * Extrahuje strukturovaná data z PDF faktury pomocí Claude vision.
      *
      * Workflow:
@@ -185,11 +204,14 @@ JSON schema:
   "payment": {
     "bank_account": string|null,
     "iban": string|null,
-    "variable_symbol": string|null
+    "variable_symbol": string|null,
+    "method": "bank_transfer"|"direct_debit"|"card"|"cash"|"cash_on_delivery"|"offset"|"other"|null,
+    "method_confidence": number
   },
   "vendor_invoice_number": string|null,
+  "corrected_invoice_number": string|null,
   "varsymbol": string|null,
-  "document_kind": "invoice"|"credit_note"|"advance"|"receipt",
+  "document_kind": "invoice"|"credit_note"|"advance"|"receipt"|"tax_document",
   "issue_date": "YYYY-MM-DD",
   "tax_date": "YYYY-MM-DD"|null,
   "due_date": "YYYY-MM-DD"|null,
@@ -201,7 +223,10 @@ JSON schema:
       "unit": string,
       "unit_price_without_vat": number,
       "line_total_without_vat": number|null,
-      "vat_rate": number
+      "vat_rate": number,
+      "expense_kind": "service"|"material"|"small_asset"|"fixed_asset"|null,
+      "expense_kind_confidence": number,
+      "expense_kind_reasoning": string|null
     }
   ],
   "unit_prices_include_vat": boolean,
@@ -241,7 +266,17 @@ DŮLEŽITÉ k poli `document_kind`:
   nebo doklad jinak signalizuje vrácení / opravu předchozí faktury
   (např. záporné částky, odkaz na opravovanou fakturu) → vrať `"credit_note"`.
 - Pokud doklad je "Zálohová faktura", "Proforma", "Proforma faktura",
-  "Zálohový list", "Advance invoice" → vrať `"advance"`.
+  "Zálohový list", "Výzva k platbě", "Advance invoice" → vrať `"advance"`. Toto je VÝZVA
+  k zaplacení zálohy PŘED plněním a sama o sobě není daňový doklad.
+- Pokud doklad je "Daňový doklad k přijaté platbě", "Daňový doklad k záloze",
+  "Doklad o přijaté úhradě k záloze" nebo "Daňový doklad – přijatá platba" → vrať
+  `"tax_document"`. Je to daňový doklad, který dodavatel vystavil PO přijetí zálohy jen
+  na DPH z té zálohy (§28 ZDPH) — vyčísluje DPH ze zaplacené zálohy a odkazuje na
+  zálohovou fakturu/proformu, ale NENÍ to konečné vyúčtování celého plnění. Neúčtuje se
+  jako náklad, jen jako nárok na odpočet DPH.
+- Pokud doklad je "Konečná faktura", "Vyúčtovací faktura" nebo "Konečné vyúčtování"
+  (odečítá zaplacené zálohy a vyúčtovává celé plnění) → vrať `"invoice"`, NIKOLI
+  `"tax_document"` ani `"advance"`.
 - Pokud doklad je "Účtenka", "Paragon", "Pokladní doklad", "Receipt" → vrať `"receipt"`.
 - Jinak (běžná faktura / daňový doklad) → vrať `"invoice"`.
 
@@ -274,6 +309,33 @@ DŮLEŽITÉ k poli `supply_nature` (povaha plnění — zboží vs. služba):
 - Pole je důležité hlavně u zahraničních dokladů bez DPH (reverse charge) —
   rozhoduje o zařazení do DPH přiznání (pořízení zboží z EU vs. přijetí služby).
 
+DŮLEŽITÉ k poli `expense_kind` (druh nákladu, NA KAŽDÉM ŘÁDKU ZVLÁŠŤ):
+- Je to NÁVRH pro účetní, nic se podle něj neúčtuje automaticky. Radši `null` než tip naslepo.
+- Klasifikuj VÝHRADNĚ těmito hodnotami; význam je ZÁVAZNÝ, neřiď se vlastní představou
+  o tom, co ta anglická slova obvykle znamenají:
+  - `"service"`     = Služba. Plnění, po kterém nezůstane věc: doprava, poštovné, balné,
+                      záruka, licence, předplatné, hosting, nájem/pronájem, tarif a
+                      vyúčtování operátora, servis, oprava, školení, poradenství, montáž.
+  - `"material"`    = Spotřební materiál. Věc, která se spotřebuje: PHM (natural, diesel,
+                      benzin, nafta), toner, cartridge, papír, kancelářské potřeby, kabeláž.
+                      POZOR: PHM je `"material"`, NIKDY `"small_asset"`.
+  - `"small_asset"` = Drobný majetek. Samostatná věc dlouhodobého užívání pod hranicí
+                      dlouhodobého majetku: notebook, tablet, mobilní telefon, monitor,
+                      tiskárna, router, kávovar, skartovačka, sluchátka, flash disk.
+  - `"fixed_asset"` = Dlouhodobý majetek. Hmotná věc s cenou za kus nad 80 000 Kč bez DPH
+                      (vozidlo, stroj, sestava). Při pochybnosti o ceně vrať `"small_asset"`,
+                      hranici si ohlídáme sami.
+- ROZHODUJE POVAHA ŘÁDKU, NE DODAVATEL. Jedna faktura běžně míchá druhy: na faktuře z
+  Alzy je notebook `"small_asset"`, brašna `"material"`, doprava a prodloužená záruka `"service"`.
+- Když řádek zmiňuje službu (doprava, doručení, záruka, licence, pronájem, vyúčtování),
+  NIKDY to není `"small_asset"`, ani kdyby v textu byl název zařízení.
+- „telefon"/„mobil" samo o sobě nestačí: „mobilní telefon Samsung" (nákup přístroje) je
+  `"small_asset"`, ale „Vyúčtování telefonních služeb" je `"service"`.
+- Když si nejsi jistý → `expense_kind: null` a `expense_kind_confidence: 0`.
+- `expense_kind_confidence` = tvoje jistota 0..1. `expense_kind_reasoning` = jedna krátká
+  česká věta PROČ, s citací slova z dokladu (např. „řádek uvádí tablet Galaxy Tab").
+  Nevkládej do zdůvodnění osobní údaje (jména, e-maily, telefonní čísla).
+
 DŮLEŽITÉ k poli `vendor.is_vat_payer` (plátcovství dodavatele):
 - `false` pokud doklad jasně značí, že DODAVATEL je neplátce DPH — typicky text
   „Neplátce DPH" / „Nejsem plátce DPH" u DIČ dodavatele, NEBO dodavatel nemá DIČ
@@ -287,6 +349,16 @@ DŮLEŽITÉ k poli `vendor_invoice_number` (číslo dokladu):
 - Účtenka / paragon NEMUSÍ mít žádné jednoznačné číslo dokladu. Pokud na dokladu
   ŽÁDNÉ použitelné číslo NENÍ → vrať `null`. NEVYMÝŠLEJ ho a NEPOUŽÍVEJ náhražky
   jako číslo pokladny, IČO, DIČ, datum nebo telefon — to číslo dokladu není.
+- U DOBROPISU / opravného daňového dokladu (`document_kind = "credit_note"`) vrať do
+  `vendor_invoice_number` VLASTNÍ číslo opravného dokladu — číslo u textu „Opravný
+  daňový doklad č.", „Dobropis č.", „Číslo dobropisu", „Doklad č.". NIKDY sem nedávej
+  číslo OPRAVOVANÉ faktury z odkazu („k faktuře č.", „Opravovaný doklad č.",
+  „Původní doklad č.", „k dokladu č.") — to patří VÝHRADNĚ do `corrected_invoice_number`.
+
+DŮLEŽITÉ k poli `corrected_invoice_number` (číslo opravované faktury — JEN u dobropisu):
+- Číslo PŮVODNÍ (opravované) faktury, na kterou se dobropis odkazuje — text „k faktuře
+  č.", „Opravovaný doklad č.", „Původní doklad č.", „k dokladu č.". U běžné faktury,
+  účtenky i zálohy → `null`. NEVYMÝŠLEJ; když odkaz na opravovaný doklad NENÍ → `null`.
 
 DŮLEŽITÉ k poli `payment` (platební údaje DODAVATELE pro QR platbu):
 - `bank_account` = číslo bankovního účtu dodavatele v ČESKÉM formátu
@@ -321,12 +393,34 @@ DŮLEŽITÉ k poli `already_paid`:
   nebo podobné indikátory že faktura už byla zaplacena → vrať `true`.
 - Pokud žádný takový text není (default scénář) → vrať `false`.
 
+DŮLEŽITÉ k poli `payment.method` (FORMA ÚHRADY) — ČTI POZORNĚ:
+- Hledej VÝSLOVNÝ text o formě úhrady. Popisky: "Forma úhrady", "Způsob platby",
+  "Způsob úhrady", "Forma platby", "Úhrada", "Platba", "Spôsob úhrady" (SK),
+  "Payment method", "Method of payment".
+- "Inkaso", "Inkasem", "Souhlas s inkasem", "Svolení k inkasu", "SIPO", "Direct debit",
+  "bude uhrazena inkasem", "částka bude stržena z vašeho účtu", "Neplaťte" (ve smyslu
+  „nezadávejte příkaz, strhneme si sami") → `"direct_debit"`.
+- "Převodem", "Bankovním převodem", "Příkazem k úhradě", "Bank transfer" → `"bank_transfer"`.
+- "Kartou", "Platební kartou", "Card" → `"card"`.
+- "Hotově", "V hotovosti", "Cash" → `"cash"`.
+- "Dobírka", "Na dobírku", "Cash on delivery", "COD" → `"cash_on_delivery"`.
+- "Zápočtem", "Vzájemný zápočet", "Offset" → `"offset"`.
+- VAROVÁNÍ — TOHLE JE NEJČASTĚJŠÍ CHYBA: inkasní doklad má TÉMĚŘ VŽDY uvedené i číslo
+  účtu, variabilní symbol a konstantní symbol (často i QR kód). Slouží k IDENTIFIKACI
+  platby, NE jako pokyn k převodu. Přítomnost bankovního spojení, VS, KS ani QR kódu
+  NENÍ důkaz, že se platí převodem. Rozhoduje VÝHRADNĚ výslovný text o formě úhrady.
+- Pokud forma úhrady na dokladu výslovně UVEDENÁ NENÍ → vrať `null`. NEHÁDEJ ji a
+  NEODVOZUJ ji z přítomnosti bankovního spojení ani z typu dodavatele.
+- `payment.method_confidence` = číslo 0..1, jak jistě jsi formu vyčetl (0 když vracíš null).
+
 DŮLEŽITÉ k poli `advance_reference`:
 - Pokud doklad odkazuje na zaplacenou zálohu / proformu (typicky "Odečet zálohy",
   "Zaplaceno zálohou č. ...", "Uhrazeno zálohovou fakturou ...", "k zálohové
   faktuře č. ...", "Hradí se ze zálohy ...", "paid by advance ...", "proforma
   no. ...") → vrať identifikátor té zálohy/proformy jak je uveden na dokladu
   (číslo faktury / variabilní symbol), např. `"2026/0042"` nebo `"PF2026001"`.
+- U daňového dokladu k přijaté platbě (`document_kind="tax_document"`) sem VŽDY dej
+  číslo zálohové faktury / proformy, ke které se doklad váže (číslo té zálohy / VS).
 - Pokud žádný odkaz na zálohu není → vrať `null`. Nevymýšlej hodnoty.
 
 DŮLEŽITÉ k zaokrouhlení:

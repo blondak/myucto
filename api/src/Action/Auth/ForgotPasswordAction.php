@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Auth;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Captcha\TurnstileVerifier;
@@ -21,6 +22,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class ForgotPasswordAction
 {
+    /** Kolik nejnovějších reset tokenů necháváme současně platných (viz úklid níže). */
+    private const KEEP_VALID_RESETS = 3;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Mailer $mailer,
@@ -29,6 +33,7 @@ final class ForgotPasswordAction
         private readonly Config $config,
         private readonly BruteForceGuard $bf,
         private readonly TurnstileVerifier $turnstile,
+        private readonly RateLimitMiddleware $rateLimit,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -66,16 +71,49 @@ final class ForgotPasswordAction
         $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$user) {
-            // Tichý exit
+            // Tichý exit. Per-email bucket tu VĚDOMĚ nekonzumujeme — jinak by
+            // enumerace neexistujících adres zaplňovala čítače. Spam na neznámé
+            // adresy brzdí per-IP limit v RateLimitMiddleware.
             $this->logger->log('auth.forgot_unknown', null, null, null, ['email' => $email], $ip, $request->getHeaderLine('User-Agent'));
             return Json::ok($response, ['ok' => true], 204);
         }
 
-        // Invalidate předchozí (nepoužité, neexpirované) reset tokeny tohoto usera —
-        // nový request musí starý link okamžitě vyřadit (i kdyby ho útočník odposlechl).
-        $this->db->pdo()->prepare(
-            'UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL'
-        )->execute([(int) $user['id']]);
+        // Per-email limit. RateLimitMiddleware ho vybrat neumí — běží před
+        // BodyParsingMiddleware, takže na `email` z JSON body nedosáhne (per-IP
+        // bucket řeší tam). Tady je tělo zparsované, takže limit konzumujeme sami,
+        // atomicky přes stejný čítač (Redis, jinak DB fallback).
+        //
+        // Konzumujeme AŽ TEĎ, po ověření existence účtu — dřív to bylo před ním,
+        // takže spam na neexistující adresy zbytečně žral sloty.
+        //
+        // Dva buckety, aby cizí spam nezablokoval legitimní obnovu:
+        //   1. per (e-mail, /24 odesílatele) — jeden útočný zdroj vyčerpá jen
+        //      SVŮJ bucket; oběť ze své vlastní IP má pořád volné sloty,
+        //   2. globální per e-mail se štědřejším stropem — pojistka proti
+        //      distribuovanému mailbombingu do cizí schránky.
+        //
+        // Při překročení vracíme STEJNÝCH 204 jako u neznámého účtu, ne 429:
+        // 429 by po přesunu za ověření existence bylo orákulum na enumeraci
+        // (nastalo by výhradně u existujícího účtu).
+        $perEmail = max(1, (int) $this->config->get('rate_limits.forgot_per_hour_per_email', 3));
+        $perEmailGlobal = max($perEmail, (int) $this->config->get(
+            'rate_limits.forgot_per_hour_per_email_global',
+            $perEmail * 5,
+        ));
+        $emailHash = sha1(strtolower($email));
+        $sourceBucket = sha1($emailHash . '|' . $this->rateLimit->ipBucket($ip));
+
+        $throttled = $this->rateLimit->consume('rl:forgot:email-ip:' . $sourceBucket, $perEmail, 3600) !== null
+            // Globální strop konzumujeme jen když zdrojový bucket prošel — jinak
+            // by jeden zablokovaný útočník vyčerpal i celoemailový limit.
+            || $this->rateLimit->consume('rl:forgot:email:' . $emailHash, $perEmailGlobal, 3600) !== null;
+
+        if ($throttled) {
+            $this->logger->log('auth.forgot_throttled', (int) $user['id'], 'user', (int) $user['id'], [
+                'email' => $email,
+            ], $ip, $userAgent);
+            return Json::ok($response, ['ok' => true], 204);
+        }
 
         // Vygeneruj token
         $tokenRaw = bin2hex(random_bytes(32));
@@ -85,11 +123,13 @@ final class ForgotPasswordAction
         $this->db->pdo()->prepare(
             'INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES (?, ?, ?, ?)'
         )->execute([(int) $user['id'], $tokenHash, $expiresAt, @inet_pton($ip) ?: '']);
+        $newResetId = (int) $this->db->pdo()->lastInsertId();
 
         // Pošli email
         $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
         $resetLink = $appUrl . '/reset?token=' . $tokenRaw;
 
+        $sent = true;
         try {
             $this->mailer->sendTemplate(
                 'password_reset',
@@ -103,12 +143,42 @@ final class ForgotPasswordAction
             );
         } catch (\Throwable $e) {
             // Email se nepovedl, ale uživateli dál tváříme úspěch
+            $sent = false;
             $this->logger->log('auth.forgot_mail_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'error' => $e->getMessage(),
             ], $ip, $request->getHeaderLine('User-Agent'));
         }
 
-        // Forgot rate-limit per email + per IP řeší RateLimitMiddleware (cfg.rate_limits.forgot_per_hour_per_email).
+        // Úklid starých tokenů AŽ TEĎ, ne před odesláním.
+        //
+        // Dřív se všechny předchozí tokeny rušily hned na začátku requestu, takže
+        // kdokoli znalý e-mailu mohl opakovaným voláním /forgot držet cizí účet
+        // trvale bez použitelného reset linku (každý request zabil ten předchozí).
+        //
+        // Teď: (a) když se mail neodeslal, zneplatníme jen ten nový a starý platný
+        // link zůstává funkční; (b) když se odeslal, necháme platných N nejnovějších,
+        // takže uživateli funguje i link z předchozího e-mailu. Počet je shora
+        // omezený per-email limitem (forgot_per_hour_per_email).
+        if (!$sent) {
+            $this->db->pdo()->prepare('UPDATE password_resets SET used_at = NOW() WHERE id = ?')
+                ->execute([$newResetId]);
+        } else {
+            // Derived table je kvůli MySQL/MariaDB omezení "can't specify target
+            // table for update in FROM clause".
+            $this->db->pdo()->prepare(
+                'UPDATE password_resets SET used_at = NOW()
+                  WHERE user_id = ? AND used_at IS NULL
+                    AND id NOT IN (
+                        SELECT id FROM (
+                            SELECT id FROM password_resets
+                             WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW()
+                             ORDER BY id DESC LIMIT ' . self::KEEP_VALID_RESETS . '
+                        ) AS keep
+                    )'
+            )->execute([(int) $user['id'], (int) $user['id']]);
+        }
+
+        // Per-IP limit řeší RateLimitMiddleware, per-email buckety výše.
         // Dříve jsme zde volali recordFailure i při success — matoucí semantika, RateLimit teď pokrývá lépe.
         $this->logger->log('auth.forgot_sent', (int) $user['id'], 'user', (int) $user['id'], null, $ip, $request->getHeaderLine('User-Agent'));
 

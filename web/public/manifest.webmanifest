@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "MyInvoice.cz",
-  "short_name": "MyInvoice",
-  "description": "Self-hosted fakturační a účetní systém",
+  "name": "MyÚčto.cz",
+  "short_name": "MyÚčto",
+  "description": "Self-hosted fakturační, účetní a mzdový systém",
   "lang": "cs",
   "start_url": "/",
   "scope": "/",

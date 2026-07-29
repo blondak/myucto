@@ -1,4 +1,4 @@
-# MyInvoice.cz — multi-stage Docker build
+# MyUcto.cz — multi-stage Docker build
 #
 # Stage 1: build Vue frontend (web/dist)
 # Stage 2: install PHP dependencies (api/vendor)
@@ -50,7 +50,7 @@ ARG INSTALL_RSVG=1
 COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensions /usr/local/bin/
 
 RUN install-php-extensions \
-        pdo_mysql gd mbstring intl zip opcache exif bcmath redis \
+        pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium \
  && apt-get update \
  && apt-get install -y --no-install-recommends tini cron mariadb-client \
  && if [ "$INSTALL_RSVG" = "1" ]; then \
@@ -77,7 +77,7 @@ RUN { \
         echo 'opcache.memory_consumption = 128'; \
         echo 'opcache.max_accelerated_files = 20000'; \
         echo 'opcache.validate_timestamps = 0'; \
-    } > /usr/local/etc/php/conf.d/myinvoice.ini
+    } > /usr/local/etc/php/conf.d/myucto.ini
 
 # Apache: doc root → /var/www/html, allow .htaccess, dynamický port přes ${PORT}
 # (Apache 2.4 expanduje ${PORT} z env při parsingu konfigurace — funguje
@@ -106,10 +106,10 @@ RUN php tools/generateManualHtml.php \
 # Vestavěný cron (volitelný, MYINVOICE_ENABLE_CRON=1 default). Wrapper + crontab
 # generovaný z CronCatalog (jediný zdroj pravdy — viz tools/generateDockerCrontab.php),
 # takže obsahuje všechny úlohy + frekvence z UI „Plánované úlohy". Daemon pouští entrypoint.
-RUN cp docker/cron-run.sh /usr/local/bin/myinvoice-cron-run \
- && chmod 0755 /usr/local/bin/myinvoice-cron-run \
- && php tools/generateDockerCrontab.php > /etc/cron.d/myinvoice \
- && chmod 0644 /etc/cron.d/myinvoice
+RUN cp docker/cron-run.sh /usr/local/bin/myucto-cron-run \
+ && chmod 0755 /usr/local/bin/myucto-cron-run \
+ && php tools/generateDockerCrontab.php > /etc/cron.d/myucto \
+ && chmod 0644 /etc/cron.d/myucto
 
 # Stub cfg.php — image je samostatný a `/var/www/html` může běžet jako read-only.
 # Veškerou konfiguraci lze předat přes ENV (viz api/src/Infrastructure/Config/Config.php).

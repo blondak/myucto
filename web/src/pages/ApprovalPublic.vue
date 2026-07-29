@@ -56,7 +56,7 @@ onMounted(async () => {
     data.value = await approvalApi.get(token.value)
     if (lang.value === 'en') localStorage.setItem('locale', 'en')
     else localStorage.setItem('locale', 'cs')
-    document.title = tt('Schválení výkazu — MyInvoice.cz', 'Approve work report — MyInvoice.cz')
+    document.title = tt('Schválení výkazu — MyÚčto.cz', 'Approve work report — MyÚčto.cz')
   } catch (e: any) {
     loadError.value = e?.response?.data?.error?.message
       || tt('Tento odkaz není platný nebo již byl použit.',
@@ -130,7 +130,7 @@ async function submit(decision: 'approve' | 'reject') {
       <div class="max-w-2xl mx-auto flex items-center gap-3">
         <div class="w-8 h-8 bg-primary-600 rounded-md flex items-center justify-center text-white font-bold">M</div>
         <div class="text-sm">
-          <div class="font-semibold">My<span class="text-primary-700">Invoice</span><span class="text-neutral-500">.cz</span></div>
+          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ tt('Schválení výkazu práce', 'Work report approval') }}</div>
         </div>
       </div>
@@ -342,7 +342,7 @@ async function submit(decision: 'approve' | 'reject') {
     </main>
 
     <footer class="border-t border-neutral-200 bg-surface px-4 py-3 text-center text-xs text-neutral-500">
-      MyInvoice.cz · {{ tt('Automatizovaný systém schvalování', 'Automated approval system') }}
+      MyÚčto.cz · {{ tt('Automatizovaný systém schvalování', 'Automated approval system') }}
     </footer>
   </div>
 </template>

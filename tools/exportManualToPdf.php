@@ -21,6 +21,12 @@
 
 declare(strict_types=1);
 
+// Manuál postupně roste (51+ kapitol) — mPDF prochází celé sloučené HTML
+// regexy (AdjustHTML) a defaultní pcre.backtrack_limit (1 000 000) na to
+// přestal stačit ("HTML code size is larger than pcre.backtrack_limit").
+// Zvedáme jen pro tento CLI běh, ne globálně v php.ini.
+ini_set('pcre.backtrack_limit', '10000000');
+
 require __DIR__ . '/../api/vendor/autoload.php';
 
 $root     = realpath(__DIR__ . '/..');
@@ -486,27 +492,27 @@ $tocHtml .= "</div>\n";
 // ---------- Titulní strana ----------
 $today    = date('j. n. Y');
 $logoSrc  = is_file($logoPath) ? htmlspecialchars($logoPath, ENT_QUOTES | ENT_HTML5, 'UTF-8') : '';
-$logoTag  = $logoSrc !== '' ? '<img src="' . $logoSrc . '" alt="MyInvoice.cz logo" />' : '';
+$logoTag  = $logoSrc !== '' ? '<img src="' . $logoSrc . '" alt="MyÚčto.cz logo" />' : '';
 
 $cover = <<<HTML
 <div class="cover">
   <div class="cover-inner">
     <div class="cover-logo">{$logoTag}</div>
     <div class="cover-eyebrow">Uživatelský manuál</div>
-    <h1 class="cover-title">MyInvoice.cz</h1>
-    <div class="cover-subtitle">Český fakturační systém pro freelancery,<br/>OSVČ a malé firmy — instalace, vystavování<br/>dokladů, banka, exporty, multi-supplier</div>
+    <h1 class="cover-title">MyÚčto.cz</h1>
+    <div class="cover-subtitle">Český účetní systém pro freelancery,<br/>OSVČ a malé firmy — instalace, vystavování<br/>dokladů, banka, účetnictví, sklad, exporty, multi-supplier</div>
     <table class="cover-meta" cellspacing="0" cellpadding="0">
-      <tr><td class="cover-meta-label">Dokument</td><td class="cover-meta-value">MyInvoice.cz — uživatelský manuál</td></tr>
+      <tr><td class="cover-meta-label">Dokument</td><td class="cover-meta-value">MyÚčto.cz — uživatelský manuál</td></tr>
       <tr><td class="cover-meta-label">Datum</td><td class="cover-meta-value">{$today}</td></tr>
-      <tr><td class="cover-meta-label">Web</td><td class="cover-meta-value"><a href="https://myinvoice.cz/" class="cover-link">myinvoice.cz</a></td></tr>
-      <tr><td class="cover-meta-label">GitHub</td><td class="cover-meta-value"><a href="https://github.com/radekhulan/myinvoice" class="cover-link">github.com/radekhulan/myinvoice</a></td></tr>
+      <tr><td class="cover-meta-label">Web</td><td class="cover-meta-value"><a href="https://myucto.cz/" class="cover-link">myucto.cz</a></td></tr>
+      <tr><td class="cover-meta-label">GitHub</td><td class="cover-meta-value"><a href="https://github.com/radekhulan/myucto" class="cover-link">github.com/radekhulan/myucto</a></td></tr>
       <tr><td class="cover-meta-label">Vyvíjí</td><td class="cover-meta-value"><a href="https://mywebdesign.cz/" class="cover-link">MyWebdesign.cz s.r.o.</a></td></tr>
     </table>
   </div>
 </div>
 HTML;
 
-// ---------- CSS — MyInvoice purple branding ----------
+// ---------- CSS — MyÚčto purple branding ----------
 $css = <<<CSS
 body {
   font-family: montserrat, sans-serif;
@@ -804,16 +810,16 @@ $mpdf = new \Mpdf\Mpdf(array_merge([
     'tempDir'           => $tmpDir,
 ], $fontOpts));
 
-$mpdf->SetTitle('MyInvoice.cz — uživatelský manuál');
+$mpdf->SetTitle('MyÚčto.cz — uživatelský manuál');
 $mpdf->SetAuthor('MyWebdesign.cz s.r.o.');
-$mpdf->SetSubject('MyInvoice.cz — fakturační systém, uživatelská dokumentace');
-$mpdf->SetCreator('MyInvoice.cz exportManualToPdf.php');
+$mpdf->SetSubject('MyÚčto.cz — účetní systém, uživatelská dokumentace');
+$mpdf->SetCreator('MyÚčto.cz exportManualToPdf.php');
 
 $mpdf->defaultfooterline = 0;
 
 $mpdf->SetHTMLHeader(
     '<div style="border-bottom:1px solid #d1d5db;padding-bottom:2mm;color:#6b7280;font-size:8pt;">'
-    . '<span style="color:#4c1d95;font-weight:700;">MyInvoice.cz</span>'
+    . '<span style="color:#4c1d95;font-weight:700;">MyÚčto.cz</span>'
     . ' &nbsp;·&nbsp; Uživatelský manuál'
     . '</div>'
 );
@@ -821,7 +827,7 @@ $mpdf->SetHTMLFooter(
     '<div style="font-size:8pt;color:#6b7280;border-top:0.3pt solid #d1d5db;padding-top:2mm;">'
     . '<a href="https://mywebdesign.cz/" style="color:#4c1d95;font-weight:700;text-decoration:none;">MyWebdesign.cz s.r.o.</a>'
     . ' &nbsp;·&nbsp; Strana {PAGENO} / {nbpg}'
-    . ' &nbsp;·&nbsp; <a href="https://myinvoice.cz/" style="color:#6c5ce7;text-decoration:none;">myinvoice.cz</a>'
+    . ' &nbsp;·&nbsp; <a href="https://myucto.cz/" style="color:#6c5ce7;text-decoration:none;">myucto.cz</a>'
     . '</div>'
 );
 

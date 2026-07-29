@@ -34,7 +34,7 @@ final class VersionService
         'last_check_error',
     ];
 
-    private const RELEASES_API = 'https://api.github.com/repos/radekhulan/myinvoice/releases/latest';
+    private const RELEASES_API = 'https://api.github.com/repos/radekhulan/myucto/releases/latest';
     private const HTTP_TIMEOUT = 10;
 
     private readonly PDO $db;
@@ -348,7 +348,7 @@ final class VersionService
         $ctx = stream_context_create([
             'http' => [
                 'method'  => 'GET',
-                'header'  => "User-Agent: MyInvoice.cz/version-check\r\nAccept: application/vnd.github+json\r\n",
+                'header'  => "User-Agent: MyUcto.cz/version-check\r\nAccept: application/vnd.github+json\r\n",
                 'timeout' => self::HTTP_TIMEOUT,
                 'ignore_errors' => true,
             ],

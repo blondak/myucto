@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 9.5pt; color: #1a1a1a; }
+    h1 { font-size: 15pt; margin: 0 0 2mm; }
+    h2 { font-size: 11.5pt; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1.5px solid #333; }
+    .sub { color: #555; font-size: 9pt; margin-bottom: 4mm; }
+    .legal { font-size: 9pt; color: #444; margin: 2mm 0 4mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 1.4mm 2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.r { text-align: right; white-space: nowrap; }
+    tr.total td { font-weight: bold; border-top: 1px solid #333; border-bottom: 1px solid #333; }
+    tr.due td { font-weight: bold; }
+    .paid { color: #171; font-size: 8pt; }
+    .note { font-size: 8pt; color: #666; margin: 1.5mm 0; font-style: italic; }
+    .disclaimer { margin-top: 6mm; font-size: 8pt; color: #777; border-top: 0.5px solid #ccc; padding-top: 2mm; }
+    .pos { color: #a11; } .neg { color: #171; }
+</style>
+</head>
+<body>
+    <div class="sub">
+        {{ data.supplier.company_name }}{% if data.supplier.dic %} · DIČ {{ data.supplier.dic }}{% endif %}{% if data.supplier.ic %} · IČO {{ data.supplier.ic }}{% endif %}
+    </div>
+
+    <h1>Placení záloh dle §38a zákona č. 586/1992 Sb.</h1>
+
+    <div class="legal">
+        {% if data.regime == 'quarterly' %}
+            Poplatník, jehož poslední známá daňová povinnost přesáhla 150 000 Kč, platí zálohy na daň
+            čtvrtletně ve výši 1/4 poslední známé daňové povinnosti. Zálohy jsou splatné do 15. dne
+            třetího, šestého, devátého a dvanáctého měsíce zdaňovacího období.
+        {% elseif data.regime == 'semiannual' %}
+            Poplatník, jehož poslední známá daňová povinnost činila 30 000 Kč až 150 000 Kč, platí
+            zálohy na daň pololetně ve výši 2/5 poslední známé daňové povinnosti. Zálohy jsou splatné
+            do 15. dne šestého a dvanáctého měsíce zdaňovacího období.
+        {% elseif data.regime == 'annual' or data.regime == 'other' %}
+            Výše a periodicita záloh na daň byla stanovena rozhodnutím finančního úřadu (§174
+            zákona č. 280/2009 Sb., daňový řád).
+        {% else %}
+            Poslední známá daňová povinnost nepřesáhla 30 000 Kč — zálohy na daň se dle §38a odst. 1
+            zákona o daních z příjmů neplatí.
+        {% endif %}
+    </div>
+
+    <h2>Celková daňová povinnost za rok {{ data.year }}: {{ data.total_tax|cz_money }} Kč</h2>
+
+    {% if data.advances|length %}
+    <h2>Termíny a výše záloh</h2>
+    <table>
+        {% for a in data.advances %}
+        <tr>
+            <td>do {{ a.due_date|cz_date }}</td>
+            <td class="r">{{ a.amount|number_format(0, ',', ' ') }},- Kč</td>
+            <td>{% if a.status == 'paid' %}<span class="paid">zaplaceno</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    <h2>{% if data.balance_due >= 0 %}Doplatek daně za rok {{ data.year }}{% else %}Přeplatek daně za rok {{ data.year }}{% endif %}</h2>
+    <table>
+        <tr class="due">
+            <td>{% if data.balance_due >= 0 %}Kolik je třeba zaplatit (doplatek daně po odečtení zaplacených záloh){% else %}Přeplatek na dani (vznikl nárok na vrácení){% endif %}</td>
+            <td class="r {% if data.balance_due >= 0 %}pos{% else %}neg{% endif %}">{{ data.balance_due|abs|cz_money }} Kč</td>
+        </tr>
+    </table>
+
+    <h2>Poznámka</h2>
+    <div class="disclaimer">
+        Sestava je orientační pomůckou k placení záloh na daň z příjmů dle §38a zákona
+        č. 586/1992 Sb., o daních z příjmů. Výše záloh vychází z poslední známé daňové
+        povinnosti (přiznání za rok {{ data.year }}){% if data.regime == 'annual' or data.regime == 'other' %},
+        upravené rozhodnutím finančního úřadu (§174 daňového řádu){% endif %}. Skutečnou výši a
+        splatnost záloh na následující zdaňovací období ověřte i s daňovým poradcem — zejména
+        dojde-li v mezidobí ke změně poslední známé daňové povinnosti (dodatečné přiznání) nebo
+        k novému rozhodnutí finančního úřadu. Vygenerováno systémem MyÚčto.cz.
+    </div>
+</body>
+</html>

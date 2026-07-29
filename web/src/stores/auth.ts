@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi, type User, type SetupStatus, type SessionState } from '@/api/auth'
+import type { LicenseSummary } from '@/api/license'
 import { setCsrfToken } from '@/api/client'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
 import { useSupplierStore } from './supplier'
+import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -12,6 +14,10 @@ export const useAuthStore = defineStore('auth', () => {
   const allowedMfaMethods = ref<Array<'passkey' | 'totp'>>([])
   const requireMfa = ref(false)
   const loading = ref(false)
+  const permissions = ref<Partial<Record<PermissionKey, PermissionValue>>>({})
+  const permissionCatalogVersion = ref('')
+  const permissionsLoading = ref(false)
+  const license = ref<LicenseSummary | null>(null)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
   let logoutRetryCsrfToken = ''
@@ -19,14 +25,27 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => user.value !== null)
   const needsSetup = computed(() => setupStatus.value?.needs_setup === true)
+  const isDemo = computed(() => setupStatus.value?.demo?.enabled === true)
   const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
   const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
+  const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
 
-  // Role helpers. readonly vidí vše co účetní (vč. exportů a DPH výkazů — vše jsou GETy),
-  // ale nesmí nic měnit → canWrite gatuje všechna zápisová tlačítka v UI.
-  const isAdmin = computed(() => user.value?.role === 'admin')
-  const isReadonly = computed(() => user.value?.role === 'readonly')
-  const canWrite = computed(() => user.value != null && user.value.role !== 'readonly')
+  const isSuperadmin = computed(() => user.value?.is_superadmin === true)
+  const isClientRole = computed(() => user.value?.role?.type === 'client')
+  // Systémová role „účetní" — mění jen výchozí pořadí sekcí v menu, ne oprávnění.
+  const isAccountantRole = computed(() => user.value?.role?.system_key === 'accountant')
+
+  function can(permission: PermissionKey, level: AccessLevel = 'read'): boolean {
+    if (permissionsLoading.value) return false
+    if (isSuperadmin.value) return true
+    return (permissions.value[permission] ?? 0) >= accessLevelValue[level]
+  }
+  function canRead(permission: PermissionKey): boolean { return can(permission, 'read') }
+  function canWrite(permission: PermissionKey): boolean { return can(permission, 'write') }
+  function clearPermissions(): void {
+    permissions.value = {}
+    permissionCatalogVersion.value = ''
+  }
 
   async function fetchSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
@@ -45,11 +64,16 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refresh() {
+    permissionsLoading.value = true
+    clearPermissions()
     try {
       const data = await authApi.me()
       user.value = data.user
       setSessionCsrfToken(data.csrf_token)
       setMfaPolicy(data.require_mfa, data.allowed_mfa_methods)
+      permissions.value = data.permissions || {}
+      permissionCatalogVersion.value = data.permission_catalog_version || ''
+      license.value = data.license || null
       lockedSession.value = null
       profileHydrated.value = true
       useSupplierStore().setAvailable(data.suppliers || [], data.current_supplier_id || 0)
@@ -74,9 +98,13 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       setSessionCsrfToken('')
       setMfaPolicy(false, [])
+      license.value = null
       lockedSession.value = null
       profileHydrated.value = false
+      useSupplierStore().setAvailable([], 0)
       return false
+    } finally {
+      permissionsLoading.value = false
     }
   }
 
@@ -103,6 +131,7 @@ export const useAuthStore = defineStore('auth', () => {
       setMfaPolicy(data.require_mfa, data.allowed_mfa_methods)
       lockedSession.value = null
       profileHydrated.value = false
+      if (isDemo.value) localStorage.removeItem('myinvoice.current_supplier_id')
       // Po loginu načti suppliery (login response je nemá, /me je vrátí)
       await refresh()
       return data.user
@@ -118,6 +147,8 @@ export const useAuthStore = defineStore('auth', () => {
     setMfaPolicy(false, [])
     lockedSession.value = null
     profileHydrated.value = false
+    license.value = null
+    clearPermissions()
     useSupplierStore().setAvailable([], 0)
   }
 
@@ -164,15 +195,25 @@ export const useAuthStore = defineStore('auth', () => {
     allowedMfaMethods,
     requireMfa,
     loading,
+    license,
     lockedSession,
     profileHydrated,
     isAuthenticated,
     needsSetup,
+    isDemo,
     mustSetupTotp,
     mustSetupMfa,
-    isAdmin,
-    isReadonly,
+    hasCommercialFeatures,
+    permissions,
+    permissionCatalogVersion,
+    permissionsLoading,
+    isSuperadmin,
+    isClientRole,
+    isAccountantRole,
+    can,
+    canRead,
     canWrite,
+    clearPermissions,
     fetchSetupStatus,
     setSessionCsrfToken,
     setMfaPolicy,

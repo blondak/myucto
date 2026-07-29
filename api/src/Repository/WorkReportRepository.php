@@ -47,6 +47,126 @@ final class WorkReportRepository
         return $wr;
     }
 
+    /**
+     * Batch varianta findByInvoice() — načte výkazy pro dané ID faktur v jednom
+     * dotazu (+ dávkově items, materials, sazby DPH), keyed by invoice_id. Nahrazuje
+     * N+1 smyčku `foreach ($rows as $row) findByInvoice($row['id'])` v buildPreview.
+     * Transformace per-výkaz jsou identické s findByInvoice().
+     *
+     * @param list<int> $invoiceIds
+     * @return array<int, array<string,mixed>> invoice_id → výkaz (jako findByInvoice)
+     */
+    public function findByInvoiceIds(array $invoiceIds): array
+    {
+        $invoiceIds = array_values(array_unique(array_map('intval', $invoiceIds)));
+        if ($invoiceIds === []) {
+            return [];
+        }
+        $pdo = $this->db->pdo();
+        $place = implode(',', array_fill(0, count($invoiceIds), '?'));
+
+        $stmt = $pdo->prepare("SELECT * FROM work_reports WHERE invoice_id IN ($place)");
+        $stmt->execute($invoiceIds);
+        $reports = [];        // invoice_id → wr
+        $wrIds = [];          // work_report id list (pro items/materials)
+        $rateIds = [];        // material_vat_rate_id set (pro batched ratePercent)
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $wr) {
+            $invoiceId = (int) $wr['invoice_id'];
+            if (isset($reports[$invoiceId])) {
+                continue; // zachovej první výskyt (jako fetch() ve findByInvoice)
+            }
+            $wr['total_hours']          = (float) $wr['total_hours'];
+            $wr['total_amount']         = (float) $wr['total_amount'];
+            $wr['vat_rate_id']          = isset($wr['vat_rate_id']) ? (int) $wr['vat_rate_id'] : null;
+            $wr['material_title']       = $wr['material_title'] !== null ? (string) $wr['material_title'] : null;
+            $wr['material_total']       = (float) ($wr['material_total'] ?? 0);
+            $wr['material_vat_rate_id'] = isset($wr['material_vat_rate_id']) ? (int) $wr['material_vat_rate_id'] : null;
+            $wr['material_vat_rate']       = null;
+            $wr['material_total_with_vat'] = $wr['material_total'];
+            if ($wr['material_vat_rate_id'] !== null) {
+                $rateIds[$wr['material_vat_rate_id']] = $wr['material_vat_rate_id'];
+            }
+            $reports[$invoiceId] = $wr;
+            $wrIds[] = (int) $wr['id'];
+        }
+
+        if ($reports === []) {
+            return [];
+        }
+
+        // Sazby DPH materiálu dávkově.
+        $rates = [];
+        if ($rateIds !== []) {
+            $rateIds = array_values($rateIds);
+            $rp = implode(',', array_fill(0, count($rateIds), '?'));
+            $rstmt = $pdo->prepare("SELECT id, rate_percent FROM vat_rates WHERE id IN ($rp)");
+            $rstmt->execute($rateIds);
+            foreach ($rstmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $rates[(int) $r['id']] = (float) $r['rate_percent'];
+            }
+        }
+
+        // Items + materials všech výkazů dávkově, seskupené po work_report_id.
+        $wp = implode(',', array_fill(0, count($wrIds), '?'));
+        $itemsBy = [];
+        $istmt = $pdo->prepare(
+            "SELECT id, work_report_id, description, work_date, hours, rate, total_amount, order_index
+               FROM work_report_items
+              WHERE work_report_id IN ($wp)
+           ORDER BY work_report_id, order_index, id"
+        );
+        $istmt->execute($wrIds);
+        foreach ($istmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $wrid = (int) $r['work_report_id'];
+            unset($r['work_report_id']);
+            $r['hours']        = (float) $r['hours'];
+            $r['rate']         = (float) $r['rate'];
+            $r['total_amount'] = (float) $r['total_amount'];
+            $r['order_index']  = (int) $r['order_index'];
+            $r['id']           = (int) $r['id'];
+            $r['work_date']    = $r['work_date'] ?: null;
+            $itemsBy[$wrid][] = $r;
+        }
+
+        $matsBy = [];
+        $mstmt = $pdo->prepare(
+            "SELECT id, work_report_id, description, quantity, unit, unit_price, total_amount, order_index
+               FROM work_report_materials
+              WHERE work_report_id IN ($wp)
+           ORDER BY work_report_id, order_index, id"
+        );
+        $mstmt->execute($wrIds);
+        foreach ($mstmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $wrid = (int) $r['work_report_id'];
+            unset($r['work_report_id']);
+            $r['id']           = (int) $r['id'];
+            $r['quantity']     = (float) $r['quantity'];
+            $r['unit']         = (string) $r['unit'];
+            $r['unit_price']   = (float) $r['unit_price'];
+            $r['total_amount'] = (float) $r['total_amount'];
+            $r['order_index']  = (int) $r['order_index'];
+            $matsBy[$wrid][] = $r;
+        }
+
+        // Dopočet sazby materiálu + items/materials per výkaz (identicky s findByInvoice).
+        foreach ($reports as $invoiceId => $wr) {
+            $wrid = (int) $wr['id'];
+            if ($wr['material_vat_rate_id'] !== null && isset($rates[$wr['material_vat_rate_id']])) {
+                $rate = $rates[$wr['material_vat_rate_id']];
+                $wr['material_vat_rate']       = $rate;
+                $wr['material_total_with_vat'] = round(
+                    $wr['material_total'] + round($wr['material_total'] * $rate / 100, 2),
+                    2
+                );
+            }
+            $wr['items']     = $itemsBy[$wrid] ?? [];
+            $wr['materials'] = $matsBy[$wrid] ?? [];
+            $reports[$invoiceId] = $wr;
+        }
+
+        return $reports;
+    }
+
     /** Procentní sazba DPH z číselníku (rate_percent), nebo null když ID neexistuje. */
     private function ratePercent(int $vatRateId): ?float
     {

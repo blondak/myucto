@@ -7,10 +7,10 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
-/** Polymorfní vazba dokument ↔ entita (client/invoice/purchase_invoice/project). */
+/** Polymorfní vazba dokument ↔ entita (client/invoice/purchase_invoice/project/journal_entry/bank_transaction). */
 final class DocumentLinkRepository
 {
-    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project'];
+    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -22,6 +22,10 @@ final class DocumentLinkRepository
         );
         $stmt->execute([$documentId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        // Popisky dávkově — jeden dotaz na typ entity místo N+1 (labelFor per řádek).
+        $labels = $this->labelsForBatch($rows, $supplierId);
+
         $out = [];
         foreach ($rows as $r) {
             $type = (string) $r['entity_type'];
@@ -29,7 +33,7 @@ final class DocumentLinkRepository
             $out[] = [
                 'entity_type' => $type,
                 'entity_id'   => $eid,
-                'label'       => $this->labelFor($type, $eid, $supplierId),
+                'label'       => $labels[$type . ':' . $eid] ?? ('#' . $eid),
             ];
         }
         return $out;
@@ -50,6 +54,9 @@ final class DocumentLinkRepository
             'invoice'          => 'SELECT 1 FROM invoices WHERE id = ? AND supplier_id = ? LIMIT 1',
             'purchase_invoice' => 'SELECT 1 FROM purchase_invoices WHERE id = ? AND supplier_id = ? LIMIT 1',
             'project'          => 'SELECT 1 FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ? AND c.supplier_id = ? LIMIT 1',
+            'journal_entry'    => 'SELECT 1 FROM journal_entries WHERE id = ? AND supplier_id = ? LIMIT 1',
+            // bank_transactions nemá supplier_id přímo — scope jde přes bank_statements (viz BankPostingSuggestionRepository).
+            'bank_transaction' => 'SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ? AND bs.supplier_id = ? LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -74,63 +81,123 @@ final class DocumentLinkRepository
     }
 
     /**
-     * Lidsky čitelný popisek entity (per-supplier ověřeno joinem).
-     * Vrací bohatší informaci než jen číslo — např. „VS · firma · částka".
+     * Dávkově složí lidsky čitelné popisky entit (per-supplier ověřeno joinem) —
+     * jeden dotaz na typ entity místo jednoho na řádek (odstranění N+1 z labelFor).
+     * Zrcadlí přesně logiku formátu původního labelFor(); chybějící/erroru → bez klíče
+     * (volající pak dá fallback '#id').
+     *
+     * @param list<array{entity_type?:mixed,entity_id?:mixed}> $rows
+     * @return array<string,string> klíč "type:id" → popisek
      */
-    private function labelFor(string $type, int $id, int $supplierId): string
+    private function labelsForBatch(array $rows, int $supplierId): array
     {
-        $pdo = $this->db->pdo();
-        try {
-            switch ($type) {
-                case 'client':
-                    $stmt = $pdo->prepare('SELECT company_name, ic FROM clients WHERE id = ? AND supplier_id = ?');
-                    $stmt->execute([$id, $supplierId]);
-                    $r = $stmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$r) return '#' . $id;
-                    return trim((string) $r['company_name'] . ($r['ic'] ? ' · IČ ' . $r['ic'] : ''));
-                case 'invoice':
-                    $stmt = $pdo->prepare(
-                        'SELECT i.varsymbol, i.issue_date, i.total_with_vat, c.company_name,
-                                COALESCE(cur.code, \'CZK\') AS currency
-                           FROM invoices i
-                           JOIN clients c ON c.id = i.client_id
-                      LEFT JOIN currencies cur ON cur.id = i.currency_id
-                          WHERE i.id = ? AND i.supplier_id = ?'
-                    );
-                    $stmt->execute([$id, $supplierId]);
-                    $r = $stmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$r) return '#' . $id;
-                    return $this->invoiceLabel((string) ($r['varsymbol'] ?? ''), (string) $r['company_name'], $r['issue_date'], $r['total_with_vat'], (string) $r['currency'], $id);
-                case 'purchase_invoice':
-                    $stmt = $pdo->prepare(
-                        'SELECT pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.total_with_vat,
-                                c.company_name, COALESCE(cur.code, \'CZK\') AS currency
-                           FROM purchase_invoices pi
-                           JOIN clients c ON c.id = pi.vendor_id
-                      LEFT JOIN currencies cur ON cur.id = pi.currency_id
-                          WHERE pi.id = ? AND pi.supplier_id = ?'
-                    );
-                    $stmt->execute([$id, $supplierId]);
-                    $r = $stmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$r) return '#' . $id;
-                    $num = (string) ($r['varsymbol'] ?: $r['vendor_invoice_number'] ?: '');
-                    return $this->invoiceLabel($num, (string) $r['company_name'], $r['issue_date'], $r['total_with_vat'], (string) $r['currency'], $id);
-                case 'project':
-                    // projects nemá supplier_id — scope přes klienta.
-                    $stmt = $pdo->prepare(
-                        'SELECT p.name, p.project_number, c.company_name
-                           FROM projects p JOIN clients c ON c.id = p.client_id
-                          WHERE p.id = ? AND c.supplier_id = ?'
-                    );
-                    $stmt->execute([$id, $supplierId]);
-                    $r = $stmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$r) return '#' . $id;
-                    return trim((string) $r['name'] . ($r['company_name'] ? ' · ' . $r['company_name'] : ''));
+        // ID seskupené po typu entity.
+        $byType = [];
+        foreach ($rows as $r) {
+            $type = (string) $r['entity_type'];
+            $eid  = (int) $r['entity_id'];
+            if (!in_array($type, self::ENTITY_TYPES, true) || $eid <= 0) {
+                continue;
             }
-        } catch (\Throwable) {
-            // snášíme — sloupec/tabulka se může lišit; fallback na #id
+            $byType[$type][$eid] = $eid;
         }
-        return '#' . $id;
+
+        $pdo = $this->db->pdo();
+        $labels = [];
+        foreach ($byType as $type => $ids) {
+            $ids = array_values($ids);
+            $place = implode(',', array_fill(0, count($ids), '?'));
+            try {
+                switch ($type) {
+                    case 'client':
+                        $stmt = $pdo->prepare("SELECT id, company_name, ic FROM clients WHERE supplier_id = ? AND id IN ($place)");
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $labels['client:' . (int) $r['id']] = trim((string) $r['company_name'] . ($r['ic'] ? ' · IČ ' . $r['ic'] : ''));
+                        }
+                        break;
+                    case 'invoice':
+                        $stmt = $pdo->prepare(
+                            "SELECT i.id, i.varsymbol, i.issue_date, i.total_with_vat, c.company_name,
+                                    COALESCE(cur.code, 'CZK') AS currency
+                               FROM invoices i
+                               JOIN clients c ON c.id = i.client_id
+                          LEFT JOIN currencies cur ON cur.id = i.currency_id
+                              WHERE i.supplier_id = ? AND i.id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $labels['invoice:' . $id] = $this->invoiceLabel((string) ($r['varsymbol'] ?? ''), (string) $r['company_name'], $r['issue_date'], $r['total_with_vat'], (string) $r['currency'], $id);
+                        }
+                        break;
+                    case 'purchase_invoice':
+                        $stmt = $pdo->prepare(
+                            "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.total_with_vat,
+                                    c.company_name, COALESCE(cur.code, 'CZK') AS currency
+                               FROM purchase_invoices pi
+                               JOIN clients c ON c.id = pi.vendor_id
+                          LEFT JOIN currencies cur ON cur.id = pi.currency_id
+                              WHERE pi.supplier_id = ? AND pi.id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $num = (string) ($r['varsymbol'] ?: $r['vendor_invoice_number'] ?: '');
+                            $labels['purchase_invoice:' . $id] = $this->invoiceLabel($num, (string) $r['company_name'], $r['issue_date'], $r['total_with_vat'], (string) $r['currency'], $id);
+                        }
+                        break;
+                    case 'project':
+                        // projects nemá supplier_id — scope přes klienta.
+                        $stmt = $pdo->prepare(
+                            "SELECT p.id, p.name, p.project_number, c.company_name
+                               FROM projects p JOIN clients c ON c.id = p.client_id
+                              WHERE c.supplier_id = ? AND p.id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $labels['project:' . (int) $r['id']] = trim((string) $r['name'] . ($r['company_name'] ? ' · ' . $r['company_name'] : ''));
+                        }
+                        break;
+                    case 'journal_entry':
+                        $stmt = $pdo->prepare(
+                            "SELECT id, entry_date, document_no, description FROM journal_entries WHERE supplier_id = ? AND id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $parts = [];
+                            $parts[] = $r['document_no'] ? (string) $r['document_no'] : ('#' . $id);
+                            if ($r['description']) $parts[] = (string) $r['description'];
+                            if ($r['entry_date']) $parts[] = (string) $r['entry_date'];
+                            $labels['journal_entry:' . $id] = implode(' · ', $parts);
+                        }
+                        break;
+                    case 'bank_transaction':
+                        // bank_transactions nemá supplier_id — scope přes bank_statements.
+                        $stmt = $pdo->prepare(
+                            "SELECT bt.id, bt.posted_at, bt.amount, COALESCE(bt.currency, bs.currency, 'CZK') AS currency,
+                                    bt.counterparty_name
+                               FROM bank_transactions bt
+                               JOIN bank_statements bs ON bs.id = bt.statement_id
+                              WHERE bs.supplier_id = ? AND bt.id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $parts = [];
+                            $parts[] = (string) $r['posted_at'];
+                            $parts[] = number_format((float) $r['amount'], 2, ',', ' ') . ' ' . (string) $r['currency'];
+                            if ($r['counterparty_name']) $parts[] = (string) $r['counterparty_name'];
+                            $labels['bank_transaction:' . $id] = implode(' · ', $parts);
+                        }
+                        break;
+                }
+            } catch (\Throwable) {
+                // snášíme — sloupec/tabulka se může lišit; volající dá fallback '#id'
+            }
+        }
+        return $labels;
     }
 
     private function invoiceLabel(string $num, string $company, mixed $date, mixed $total, string $currency, int $id): string

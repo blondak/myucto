@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Logbook\Fuel;
 
-use MyInvoice\Service\Import\AnthropicClient;
+use MyInvoice\Service\Import\LlmGatewayInterface;
 
 /**
  * Univerzální AI fallback — vytěží transakce přes Claude, když interní parser nevyšel.
@@ -13,7 +13,7 @@ use MyInvoice\Service\Import\AnthropicClient;
  */
 final class AiFuelStatementParser implements FuelStatementParser
 {
-    public function __construct(private readonly AnthropicClient $anthropic) {}
+    public function __construct(private readonly LlmGatewayInterface $anthropic) {}
 
     public function name(): string
     {

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Výkaz zisku a ztráty</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-title { font-size: 14pt; font-weight: bold; }
+    .header-scope { font-size: 9pt; margin-top: 1mm; }
+    .header-meta { font-size: 8pt; color: #555; margin-top: 0.5mm; }
+    .entity-info { text-align: right; font-size: 9pt; }
+    table.statement { width: 100%; border-collapse: collapse; margin-top: 2mm; margin-bottom: 3mm; }
+    table.statement thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.statement thead th.thl { text-align: left; }
+    table.statement tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.statement tbody tr.row-strong td {
+        font-weight: bold;
+        border-bottom: 0.3pt solid #ccc;
+    }
+    .num { text-align: right; }
+    .col-code { width: 18mm; }
+    .col-num { width: 28mm; }
+    .checks-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
+    .check-line { font-size: 8pt; margin-top: 0.5mm; }
+</style>
+</head>
+<body>
+
+{% set scope_label = scope == 'full'
+    ? 'v plném rozsahu'
+    : (scope == 'small' ? 've zkráceném rozsahu (malá účetní jednotka)' : 've zkráceném rozsahu (mikro účetní jednotka)') %}
+
+{# Šablonu sdílí obě členění výsledovky. Popisek byl natvrdo „druhové", takže účelový
+   výkaz se tiskl s hlavičkou druhového — a to jsou dvě různé přílohy závěrky (příloha
+   č. 2 část I vs. část II vyhl. 500/2002). Nikdo si toho nevšiml, protože na účelovou
+   verzi do teď nevedlo tlačítko exportu a tudy nikdo neprošel. #}
+{% set structure_label = statement_type == 'income_statement_purpose'
+    ? 'účelové členění (příloha č. 2 část II vyhl. 500/2002 Sb.)'
+    : 'druhové členění' %}
+
+<table class="header-table">
+    <tr>
+        <td style="width:55%;">
+            <div class="header-title">VÝKAZ ZISKU A ZTRÁTY</div>
+            <div class="header-scope">{{ scope_label }}, {{ structure_label }}</div>
+            <div class="header-meta">ke dni {{ as_of|cz_date }} (v celých tisících Kč)</div>
+            <div class="header-meta">Fiskální rok {{ period.fiscal_year }}{% if prev_period %}, minulé období: fiskální rok {{ prev_period.fiscal_year }}{% endif %}</div>
+            <div class="header-meta">Okamžik sestavení: {{ entity.prepared_at }} · verze výkazu: {{ version_code }}</div>
+        </td>
+        <td style="width:45%;" class="entity-info">
+            <strong>{{ entity.name }}</strong><br>
+            IČO: {{ entity.ico }}<br>
+            {{ entity.address }}
+        </td>
+    </tr>
+</table>
+
+<table class="statement">
+    <thead>
+        <tr>
+            <th class="thl col-code">Označení</th>
+            <th class="thl">Položka</th>
+            <th class="col-num">Běžné obd.</th>
+            <th class="col-num">Minulé obd.</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+            <tr class="{{ row.row_type != 'detail' ? 'row-strong' : '' }}">
+                <td>{{ row.display_code }}</td>
+                <td style="padding-left: {{ 1.5 + row.level * 4 }}mm;">{{ row.label }}</td>
+                <td class="num">{{ row.amount|number_format(0, ',', ' ') }}</td>
+                <td class="num">{{ row.prev_amount|number_format(0, ',', ' ') }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="checks-title">Souhrn</div>
+<div class="check-line">Výsledek hospodaření za účetní období: {{ checks.profit_current|number_format(0, ',', ' ') }}</div>
+<div class="check-line">Čistý obrat za účetní období: {{ checks.net_turnover|number_format(0, ',', ' ') }}</div>
+<div class="check-line">
+    Hodnoty jsou v celých tisících Kč, zaokrouhleny po řádcích (§4 odst. 3 vyhl. č. 500/2002 Sb.);
+    součtové řádky se počítají z hodnot v Kč — proti součtu zaokrouhlených položek může vzniknout rozdíl ±1 tis. Kč.
+</div>
+
+</body>
+</html>

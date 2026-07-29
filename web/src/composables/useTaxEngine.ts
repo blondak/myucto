@@ -122,8 +122,20 @@ export function regular(p: EngineProfile, income: number, c: TaxConstantsData): 
   const exp = p.use_actual_expenses
     ? Math.max(0, p.actual_expenses || 0)
     : Math.min(income * p.activity_rate / 100, c.expense_caps[p.activity_rate])
-  const ded = Math.min(p.mortgage_interest, c.mortgage_cap) + Math.min(p.pension_contrib, c.pension_cap)
-    + (p.life_insurance || 0) + (p.donations || 0)
+  // §15 odpočty se zákonnými stropy (jeden zdroj pravdy s DpfoCalculator/DpfoReturnCalculator).
+  // §15/3-4: strop úroků 300k pro bytovou potřebu obstaranou do 31. 12. 2020, jinak 150k.
+  const mortgageCap = p.mortgage_pre_2021 ? (c.mortgage_cap_pre2021 ?? 300000) : c.mortgage_cap
+  const uroky = Math.min(p.mortgage_interest, mortgageCap)
+  // §15a: penzijko + životko sdílejí JEDEN společný strop 48 000 Kč (napřed penzijko, zbytek životko).
+  const penzijko = Math.min(p.pension_contrib, c.pension_cap)
+  const zivotko = Math.min(p.life_insurance || 0, Math.max(0, c.pension_cap - penzijko))
+  // Dary §15/1: jen když ≥ spodní limit (1 000 Kč / 2 % ZD), max 30 % ZD (základ = §7 před §15).
+  const section7Base = Math.max(0, income - exp)
+  const donations = p.donations || 0
+  const donationMin = Math.min(c.donation_min_fo ?? 1000, 0.02 * section7Base)
+  const donationCap = (c.donation_cap_fo_pct ?? 0.30) * section7Base
+  const dary = donations > 0 && donations >= donationMin ? Math.min(donations, donationCap) : 0
+  const ded = uroky + penzijko + zivotko + dary
   const base = Math.max(0, income - exp - ded)
   const tax = base <= c.tax_high_threshold
     ? base * c.tax_rate_low
@@ -134,8 +146,13 @@ export function regular(p: EngineProfile, income: number, c: TaxConstantsData): 
   const incomeTax = afterNonRef - kids
   const profit = income - exp
   // Sociální 55 % zisku, zdravotní 50 % zisku (od 2024 odlišné), s ročními minimy.
-  const soc = Math.max(profit * c.social_assessment_pct, p.is_secondary ? c.social_min_base_secondary : c.social_min_base_main) * c.social_rate
-  const hea = Math.max(profit * c.health_assessment_pct, c.health_min_base) * c.health_rate
+  // Vedlejší SVČ pod rozhodnou částkou → sociální 0 (bez povinné účasti); u vedlejší se
+  // navíc neuplatní minimální VZ zdravotního (souběh se zaměstnáním) — stejná pravidla
+  // jako Social/HealthInsuranceCalculator (jeden zdroj pravdy).
+  const soc = p.is_secondary && profit < (c.social_secondary_participation_threshold ?? 0)
+    ? 0
+    : Math.max(profit * c.social_assessment_pct, p.is_secondary ? c.social_min_base_secondary : c.social_min_base_main) * c.social_rate
+  const hea = Math.max(profit * c.health_assessment_pct, p.is_secondary ? 0 : c.health_min_base) * c.health_rate
   const total = incomeTax + soc + hea
   // Čistý příjem = co reálně zbyde (paušální výdaje nejsou reálný výdaj); eff = odvody/příjem.
   return { exp, ded, base, tax, kids, incomeTax, isBonus: incomeTax < 0, soc, hea, total, net: income - total, eff: income > 0 ? total / income : 0, useActual: !!p.use_actual_expenses }

@@ -7,7 +7,7 @@
 #  Vyžaduje v PATH: mariadb-dump (nebo mysqldump).
 #
 #  crontab:
-#    0 2 * * *  /var/www/myinvoice.cz/cmd/cron-backup.sh
+#    0 2 * * *  /var/www/myucto.cz/cmd/cron-backup.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

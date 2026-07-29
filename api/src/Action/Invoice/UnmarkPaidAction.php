@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
@@ -29,6 +32,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class UnmarkPaidAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Connection $db,
@@ -37,12 +42,13 @@ final class UnmarkPaidAction
         private readonly StatsRecomputer $stats,
         private readonly InvoicePdfRenderer $pdf,
         private readonly InvoicePaymentService $payments,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 
@@ -53,6 +59,12 @@ final class UnmarkPaidAction
         }
         if ($invoice['status'] !== 'paid') {
             return Json::error($response, 'invalid_state', 'Lze vrátit zpět jen zaplacenou fakturu.', 409);
+        }
+
+        // Zámek dokladu (Epic F6): unmark-paid mění účetní fakt — v zavřeném období
+        // jen admin s ?force=1 (klient sem přes admin-only check výše nedojde).
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id)) {
+            return $deny;
         }
 
         // Guard: nesmí být spárovaná aktivní bankovní transakce — uživatel má

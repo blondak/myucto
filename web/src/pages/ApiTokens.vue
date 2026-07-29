@@ -26,10 +26,13 @@ const passkeyStepUpToken = ref('')
 const passkeySupported = isWebAuthnAvailable()
 const form = ref({
   name: '',
+  // Re-auth současným heslem — backend ho vyžaduje vždy (SEC-09 step-up).
+  password: '',
   supplier_id: null as number | null,
   // Default least-privilege — sladěno s backendem (CreateTokenAction).
   scope: 'read' as 'read' | 'read_write',
   expires_at: '' as string,
+  never_expires: false,
   totp_code: '',
 })
 
@@ -39,6 +42,10 @@ const copied = ref(false)
 const confirmCopied = ref(false)
 
 const needsTotp = computed(() => auth.user?.totp_enabled === true)
+const canManageTokens = computed(() => auth.canWrite('profile.tokens'))
+// Token bez expirace smí razit jen superadmin (CreateTokenAction) — ostatním
+// volbu vůbec nenabízíme, ať nedostanou 403 až po step-up ověření.
+const canNeverExpire = computed(() => auth.user?.is_superadmin === true)
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true
   || (auth.user?.passkey_count ?? 0) > 0,
@@ -58,11 +65,14 @@ async function load() {
 }
 
 function openCreate() {
+  if (!canManageTokens.value) return
   form.value = {
     name: '',
+    password: '',
     supplier_id: suppliers.currentSupplierId || null,
     scope: 'read',
     expires_at: '',
+    never_expires: false,
     totp_code: '',
   }
   createError.value = ''
@@ -99,6 +109,7 @@ function closeCreate() {
 }
 
 async function submitCreate() {
+  if (!canManageTokens.value) return
   if (form.value.name.trim() === '') {
     createError.value = t('api_tokens.name_required')
     return
@@ -108,18 +119,29 @@ async function submitCreate() {
     createError.value = t('api_tokens.step_up_required')
     return
   }
+  // Účet bez passkey i TOTP nemá čím udělat step-up — backend v takovém případě
+  // vyžaduje re-auth heslem, ať na vydání tokenu nestačí samotná session.
+  if (!needsStepUp.value && form.value.password === '') {
+    createError.value = t('api_tokens.password_required')
+    return
+  }
   createBusy.value = true
   createError.value = ''
   const proof = passkeyStepUpToken.value
   try {
     const res = await tokensApi.create({
       name: form.value.name.trim(),
+      password: form.value.password,
       supplier_id: form.value.supplier_id,
       scope: form.value.scope,
+      // never_expires posíláme jen bez konkrétního data — backend jinak vrátí 400.
       expires_at: form.value.expires_at || null,
+      never_expires: canNeverExpire.value && !form.value.expires_at && form.value.never_expires,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
     })
+    // Heslo nedržíme v paměti déle, než je nutné.
+    form.value.password = ''
     passkeyStepUpToken.value = ''
     showCreate.value = false
     revealed.value = res
@@ -159,6 +181,7 @@ function closeReveal() {
 }
 
 async function revoke(id: number, name: string) {
+  if (!canManageTokens.value) return
   if (!confirm(t('api_tokens.confirm_revoke', { name }))) return
   try {
     await tokensApi.revoke(id)
@@ -197,6 +220,7 @@ onMounted(load)
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('api_tokens.subtitle') }}</p>
       </div>
       <button
+        v-if="canManageTokens"
         @click="openCreate"
         class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md"
       >
@@ -252,7 +276,7 @@ onMounted(load)
             </td>
             <td class="px-3 py-2 text-right">
               <button
-                v-if="!tk.is_revoked"
+                v-if="canManageTokens && !tk.is_revoked"
                 @click="revoke(tk.id, tk.name)"
                 class="cursor-pointer text-danger-500 hover:text-danger-600 text-sm"
               >
@@ -309,8 +333,26 @@ onMounted(load)
 
           <label class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.col_expires') }} <span class="text-neutral-400">{{ t('common.optional') }}</span></span>
-            <input v-model="form.expires_at" type="date"
+            <input v-model="form.expires_at" type="date" :disabled="form.never_expires"
+              class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-100" />
+            <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.expires_hint') }}</p>
+          </label>
+
+          <label v-if="canNeverExpire" class="flex items-start gap-2 text-sm">
+            <input type="checkbox" v-model="form.never_expires" :disabled="form.expires_at !== ''" class="mt-0.5" />
+            <span>
+              {{ t('api_tokens.never_expires') }}
+              <span class="block text-xs text-neutral-500">{{ t('api_tokens.never_expires_hint') }}</span>
+            </span>
+          </label>
+
+          <!-- Účet s passkey nebo TOTP se prokáže step-upem; heslo se ptá jen tam,
+               kde uživatel žádný silný faktor nemá (jinak by session stačila sama). -->
+          <label v-if="!needsStepUp" class="block text-sm">
+            <span class="text-neutral-700 font-medium">{{ t('api_tokens.password') }}</span>
+            <input v-model="form.password" type="password" autocomplete="current-password"
               class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
+            <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.password_hint') }}</p>
           </label>
 
           <div v-if="hasPasskey" class="rounded-md border border-neutral-200 bg-neutral-50 p-3">

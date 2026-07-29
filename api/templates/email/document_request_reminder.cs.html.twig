@@ -1,0 +1,56 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  Chybí doklad — čekáme na vás
+</h1>
+
+<p style="margin:0 0 12px;">Dobrý den,</p>
+
+<p style="margin:0 0 16px;">
+  ve firmě <strong>{{ supplier_name }}</strong> stále čekáme na doklad, o který jsme
+  vás požádali {{ requested_days_ago }} {{ requested_days_ago == 1 ? 'den' : (requested_days_ago < 5 ? 'dny' : 'dní') }} zpět:
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#F4F2FA;border:1px solid #D9D3EC;border-radius:8px;margin:16px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#403B52;">
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;width:40%;">Chybí</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ description }}</td>
+        </tr>
+        {% if amount %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Částka</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;font-family:monospace;">{{ amount|number_format(2, ',', ' ') }} Kč</td>
+        </tr>
+        {% endif %}
+        {% if deadline %}
+        <tr>
+          <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #D9D3EC;">Termín</td>
+          <td style="padding:8px 0 0;border-top:1px solid #D9D3EC;font-weight:600;color:{{ accent }};">{{ deadline|date('j.n.Y') }}</td>
+        </tr>
+        {% endif %}
+      </table>
+    </td>
+  </tr>
+</table>
+
+{% if portal_link %}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px;">
+  <tr>
+    <td style="border-radius:8px;background:{{ accent }};">
+      <a href="{{ portal_link }}" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">
+        Nahrát doklad
+      </a>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  Stačí vyfotit nebo naskenovat doklad a nahrát ho přes klientský portál — o zbytek se
+  postaráme my.
+</p>
+{% endblock %}

@@ -68,8 +68,8 @@ final class StereoXmlExporter
         $root = $xml->appendChild($xml->createElement('DocumentPack'));
         $header = $root->appendChild($xml->createElement('HEADER'));
         $source = $header->appendChild($xml->createElement('Source'));
-        $this->el($xml, $source, 'SoftwareVendor', 'myinvoice.cz');
-        $this->el($xml, $source, 'SoftwareProduct', 'myinvoice.cz');
+        $this->el($xml, $source, 'SoftwareVendor', 'myucto.cz');
+        $this->el($xml, $source, 'SoftwareProduct', 'myucto.cz');
         $this->el($xml, $source, 'SoftwareVersion', date('YmdHis'));
 
         $root->appendChild($xml->createElement('PARAMETERS'));
@@ -350,13 +350,22 @@ final class StereoXmlExporter
         };
     }
 
+    /**
+     * Mapování na `PaymentType` ve Stereo XML. Hodnoty z migrace 1128 jsou uvedené
+     * EXPLICITNĚ, i když končí na 'Other': slovník Stereo pro ně nemá vlastní token a
+     * tipovat neexistující ('DirectDebit'…) by import rozbil. 'Other' je ztrátové, ale
+     * bezpečné — hlavně se inkaso NESMÍ vyexportovat jako 'BankTransfer'.
+     */
     private function paymentType(string $paymentMethod): string
     {
         return match ($paymentMethod) {
-            'bank_transfer' => 'BankTransfer',
-            'cash' => 'Cash',
-            'card' => 'CreditCard',
-            default => 'Other',
+            'bank_transfer'    => 'BankTransfer',
+            'cash'             => 'Cash',
+            'card'             => 'CreditCard',
+            'direct_debit'     => 'Other',
+            'cash_on_delivery' => 'Other',
+            'offset'           => 'Other',
+            default            => 'Other',
         };
     }
 

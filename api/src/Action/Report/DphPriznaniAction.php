@@ -7,10 +7,13 @@ namespace MyInvoice\Action\Report;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
+use MyInvoice\Service\Report\TaxSubmissionFilename;
 use MyInvoice\Service\Report\VatClassificationMapper;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -34,7 +37,15 @@ final class DphPriznaniAction
         private readonly IpMatcher $ipMatcher,
         private readonly \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver,
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
+        private readonly \MyInvoice\Service\Report\VatCrossCheckService $crossCheck,
+        private readonly \MyInvoice\Service\Report\VatPostFilingChangesService $postFilingChanges,
     ) {}
+
+    /**
+     * Povolené typy podání DPHDP3 (C7'): řádné, opravné (§138), dodatečné (§141),
+     * dodatečné/opravné. Dodatečné (D/E) vyžaduje datum zjištění (d_zjist).
+     */
+    private const DPH_VARIANTS = ['radne', 'opravne', 'dodatecne', 'dodatecne_opravne'];
 
     /**
      * GET /api/reports/dphdp3/settings → { vat_period, is_vat_payer }
@@ -43,7 +54,7 @@ final class DphPriznaniAction
     public function settings(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -87,7 +98,7 @@ final class DphPriznaniAction
     public function draftsPrediction(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -125,7 +136,7 @@ final class DphPriznaniAction
     public function trend(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -136,7 +147,7 @@ final class DphPriznaniAction
     public function preview(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -149,22 +160,49 @@ final class DphPriznaniAction
 
         $period = (string) ($q['period'] ?? '');
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : null;
+
+        $variant = (string) ($q['variant'] ?? 'radne');
+        if (!in_array($variant, self::DPH_VARIANTS, true)) {
+            return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
+        }
+        $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
         } catch (\Throwable $e) {
             return Json::error($response, 'build_failed', $e->getMessage(), 500);
         }
 
+        // Křížová kontrola DPHDP3↔KH↔SH↔343 (C8') — jen pro řádné/opravné (plné přiznání).
+        // Dodatečné (D/E) vykazuje POUZE rozdíly, takže smír s plným KH/SH by vždy „nesouhlasil".
+        $crossCheck = [];
+        if ($variant === 'radne' || $variant === 'opravne') {
+            try {
+                $crossCheck = $this->crossCheck->check($supplierId, $year, $month, $period);
+            } catch (\Throwable) {
+                $crossCheck = [];
+            }
+        }
+
+        // Fronta „doklady změněné po podání" — podklad pro rozhodnutí o dodatečném přiznání.
+        $postFiling = ['has_filing' => false, 'snapshot_available' => false, 'submission' => null, 'documents' => []];
+        try {
+            $postFiling = $this->postFilingChanges->changes($supplierId, $year, $month, $period ?? 'monthly');
+        } catch (\Throwable) {
+            // fail-open — fronta je informativní, její selhání nesmí shodit preview
+        }
+
         return Json::ok($response, [
-            'summary'  => $result['summary'],
-            'warnings' => $result['warnings'],
+            'summary'            => $result['summary'],
+            'warnings'           => $result['warnings'],
+            'cross_check'        => $crossCheck,
+            'post_filing_changes' => $postFiling,
         ]);
     }
 
     public function download(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant', 'readonly'], true)) {
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -177,12 +215,22 @@ final class DphPriznaniAction
 
         $period = (string) ($q['period'] ?? '');
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : null;
+
+        $variant = (string) ($q['variant'] ?? 'radne');
+        if (!in_array($variant, self::DPH_VARIANTS, true)) {
+            return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
+        }
+        $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period);
-            // #238: doplň chybějící kurzy z ČNB a přebuildi; tvrdá chyba jen když ČNB nemá.
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
+            // #238: doplň chybějící kurzy z ČNB a přebuildi. Fill JE zápis → v souladu
+            // s B8/HIGH#1 (readonly download nemutuje) jen s WRITE oprávněním; READ-only
+            // nebo když ČNB kurz nezná → tvrdá chyba 422.
             if (!empty($result['missing_rates'])) {
-                $this->rateFiller->fill($supplierId, $result['missing_rates']);
-                $result = $this->builder->build($supplierId, $year, $month, $period);
+                if (RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
+                    $this->rateFiller->fill($supplierId, $result['missing_rates']);
+                    $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
+                }
                 if (!empty($result['missing_rates'])) {
                     $labels = \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($result['missing_rates']);
                     return Json::error($response, 'exchange_rate_missing',
@@ -193,9 +241,43 @@ final class DphPriznaniAction
         } catch (\Throwable $e) {
             return Json::error($response, 'build_failed', $e->getMessage(), 500);
         }
+        $forma = (string) ($result['summary']['dapdph_forma'] ?? 'B');
+        $isAmendment = (bool) ($result['summary']['is_amendment'] ?? false);
 
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+
+        // Brána křížové kontroly (C8'): nenulový tvrdý rozdíl vs KH/SH/343 → 409 s daty,
+        // ať FE ukáže tabulku a nabídne „Přesto stáhnout". S ?acknowledge_mismatch=1 projde
+        // (vědomá volba účetní — kontrola má false-positive hrany, tvrdý blok těsně před
+        // lhůtou by byl horší než falešný poplach), a fakt, že o rozdílu věděla, se zaloguje.
+        // Smír je čistě čtení — jeho selhání NESMÍ blokovat podání (fail-open).
+        // Dodatečné (D/E) vykazuje jen rozdíly → plný smír s KH/SH/343 se NEaplikuje.
+        $acknowledged = in_array((string) ($q['acknowledge_mismatch'] ?? ''), ['1', 'true'], true);
+        if (!$isAmendment) {
+            try {
+                $crossCheck = $this->crossCheck->check($supplierId, $year, $month, $period);
+            } catch (\Throwable) {
+                $crossCheck = [];
+            }
+            $hasBlocking = $this->crossCheck->hasBlockingMismatch($crossCheck);
+            if ($hasBlocking && !$acknowledged) {
+                return Json::error(
+                    $response,
+                    'vat_cross_check_mismatch',
+                    'Přiznání se rozchází s kontrolním/souhrnným hlášením nebo obratem účtu 343. '
+                        . 'Zkontroluj rozdíly, nebo stáhni znovu s potvrzením (acknowledge_mismatch=1).',
+                    409,
+                    ['cross_check' => $crossCheck],
+                );
+            }
+            if ($hasBlocking && $acknowledged) {
+                $this->logger->log('report.dphdp3_mismatch_acknowledged', $userId, null, null, [
+                    'period'      => sprintf('%04d-%02d', $year, $month),
+                    'cross_check' => $crossCheck,
+                ], $ip, $request->getHeaderLine('User-Agent'));
+            }
+        }
 
         // Archivovat + XSD validation
         $isQuarterly = ($result['summary']['period_type'] ?? 'monthly') === 'quarterly';
@@ -204,22 +286,60 @@ final class DphPriznaniAction
             $isQuarterly ? null : $month,
             $isQuarterly ? (int) ceil($month / 3) : null,
             $result['xml'], $result['summary'], $userId ?: null,
+            // readonly GET/download nesmí mutovat účetní stav (posun zámku) — dorevize B8, HIGH#1.
+            RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE),
+            $forma,
         );
 
         $this->logger->log('report.dphdp3_downloaded', $userId, null, null, [
             'period'            => sprintf('%04d-%02d', $year, $month),
             'period_type'       => $result['summary']['period_type'] ?? 'monthly',
+            'variant'           => $variant,
+            'dapdph_forma'      => $forma,
             'submission_id'     => $archived['submission_id'],
             'validation_status' => $archived['validation_status'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        $filename = $isQuarterly
-            ? sprintf('dphdp3-%04d-Q%d.xml', $year, (int) ceil($month / 3))
-            : sprintf('dphdp3-%04d-%02d.xml', $year, $month);
+        $filename = TaxSubmissionFilename::forSnapshot([
+            'id' => $archived['submission_id'],
+            'form_code' => 'dphdp3',
+            'form_variant' => $forma,
+            'period_year' => $year,
+            'period_month' => $isQuarterly ? null : $month,
+            'period_quarter' => $isQuarterly ? (int) ceil($month / 3) : null,
+        ], 'xml');
         $response->getBody()->write($result['xml']);
         return $response
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * GET /api/reports/dphdp3/post-filing-changes?year=&month=&period= → fronta „doklady
+     * změněné po podání" (C7'): doklady spadající do období posledního archivovaného přiznání,
+     * které byly změněny/přibyly až po jeho vygenerování (kandidáti na dodatečné přiznání).
+     */
+    public function postFilingChanges(Request $request, Response $response): Response
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $q = $request->getQueryParams();
+        $year  = (int) ($q['year']  ?? date('Y'));
+        $month = (int) ($q['month'] ?? date('n'));
+        if ($month < 1 || $month > 12 || $year < 2020 || $year > 2050) {
+            return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
+        }
+        $period = (string) ($q['period'] ?? '');
+        $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : 'monthly';
+        try {
+            $result = $this->postFilingChanges->changes($supplierId, $year, $month, $period);
+        } catch (\Throwable $e) {
+            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+        }
+        return Json::ok($response, $result);
     }
 }

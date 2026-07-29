@@ -1,0 +1,394 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Stock;
+
+use MyInvoice\Action\Accounting\AccountingActionSupport;
+use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockItemRepository;
+use MyInvoice\Repository\StockLevelRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
+use MyInvoice\Service\Stock\StockReportXlsxExporter;
+use MyInvoice\Service\Stock\StockValuation;
+use MyInvoice\Support\Pagination;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+/**
+ * Skladové karty (Epic SKLAD).
+ *
+ *   GET    /api/stock/items/search                 — našeptávač (autocomplete)
+ *   GET    /api/stock/items                        — seznam, stránkovaný (filtry: type, active, q, only_below_min)
+ *   POST   /api/stock/items                        — nová karta
+ *   GET    /api/stock/items/{id}                   — detail
+ *   PUT    /api/stock/items/{id}                   — úprava
+ *   DELETE /api/stock/items/{id}                   — smazání (jen bez pohybů; jinak deaktivace)
+ *   GET    /api/stock/items/{id}/movements         — skladová kniha karty (stránkovaná, s běžnou bilancí)
+ *   GET    /api/stock/items/{id}/movements/export  — export skladové karty (?format=pdf|xlsx)
+ */
+final class StockItemAction
+{
+    use AccountingActionSupport;
+    use GuardsStockEnabled;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly StockItemRepository $items,
+        private readonly StockLevelRepository $levels,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+        private readonly StockItemMovementsPdfRenderer $movementsPdf,
+        private readonly StockReportXlsxExporter $xlsx,
+    ) {}
+
+    public function list(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $q = $request->getQueryParams();
+        $filters = [];
+        if (!empty($q['type'])) {
+            $filters['type'] = (string) $q['type'];
+        }
+        if (array_key_exists('active', $q) && $q['active'] !== '') {
+            $filters['active'] = (bool) (int) $q['active'];
+        }
+        if (!empty($q['q'])) {
+            $filters['q'] = (string) $q['q'];
+        }
+        if (!empty($q['only_below_min'])) {
+            $filters['only_below_min'] = true;
+        }
+
+        $p = Pagination::fromQuery($q, 50);
+        [$rows, $total] = $this->items->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
+        return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
+    }
+
+    public function search(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $q = $request->getQueryParams();
+        $limit = max(1, min(200, (int) ($q['limit'] ?? 50)));
+        return Json::ok($response, $this->items->search($supplierId, (string) ($q['q'] ?? ''), $limit));
+    }
+
+    public function get(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $item = $this->items->find($supplierId, (int) $args['id']);
+        if ($item === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        return Json::ok($response, $item);
+    }
+
+    public function create(Request $request, Response $response): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        [$data, $validationErr] = $this->validate($response, $body);
+        if ($validationErr !== null) {
+            return $validationErr;
+        }
+        if ($this->items->findBySku($supplierId, $data['sku']) !== null) {
+            return Json::error($response, 'sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
+        }
+        $id = $this->items->insert($supplierId, $data);
+        $this->log($request, 'stock.item_created', $id, ['sku' => $data['sku']]);
+        return Json::ok($response, $this->items->find($supplierId, $id), 201);
+    }
+
+    public function update(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $id = (int) $args['id'];
+        $existing = $this->items->find($supplierId, $id);
+        if ($existing === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        [$data, $validationErr] = $this->validate($response, $body, $existing);
+        if ($validationErr !== null) {
+            return $validationErr;
+        }
+        $bySku = $this->items->findBySku($supplierId, $data['sku']);
+        if ($bySku !== null && (int) $bySku['id'] !== $id) {
+            return Json::error($response, 'sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
+        }
+        $this->items->update($supplierId, $id, $data);
+        $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']]);
+        return Json::ok($response, $this->items->find($supplierId, $id));
+    }
+
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $id = (int) $args['id'];
+        $existing = $this->items->find($supplierId, $id);
+        if ($existing === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        if ($this->items->hasMovements($supplierId, $id)) {
+            return Json::error(
+                $response,
+                'item_in_use',
+                'Skladovou kartu nelze smazat — má skladové pohyby. Deaktivujte ji místo mazání.',
+                409,
+                ['suggestion' => 'deactivate'],
+            );
+        }
+        $this->items->delete($supplierId, $id);
+        $this->log($request, 'stock.item_deleted', $id, []);
+        return Json::ok($response, ['deleted' => true]);
+    }
+
+    /** Skladová kniha karty (stránkovaná) s běžnou bilancí (running balance). */
+    public function movements(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $itemId = (int) $args['id'];
+        if ($this->items->find($supplierId, $itemId) === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+
+        $q = $request->getQueryParams();
+        $limit  = max(1, min(500, (int) ($q['limit'] ?? 100)));
+        $offset = max(0, (int) ($q['offset'] ?? 0));
+        $warehouseId = !empty($q['warehouse_id']) ? (int) $q['warehouse_id'] : null;
+        $from = !empty($q['from']) ? (string) $q['from'] : null;
+        $to   = !empty($q['to']) ? (string) $q['to'] : null;
+
+        $baseOpts = array_filter([
+            'warehouse_id' => $warehouseId,
+            'from'         => $from,
+            'to'           => $to,
+        ], static fn ($v): bool => $v !== null);
+
+        // Počáteční bilance = součet qty_signed VŠECH řádků PŘED touto stránkou
+        // (stejné filtry). Počítáno v celočíselných tisícinách (StockValuation),
+        // ne floatem — money-safe vzor napříč appkou.
+        $openingT = 0;
+        if ($offset > 0) {
+            $prior = $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $offset, 'offset' => 0]);
+            foreach ($prior as $p) {
+                $openingT += StockValuation::qtyToT((string) $p['qty_signed']);
+            }
+        }
+
+        $rows = $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $limit, 'offset' => $offset]);
+        $runningT = $openingT;
+        foreach ($rows as &$r) {
+            $runningT += StockValuation::qtyToT((string) $r['qty_signed']);
+            $r['balance_after'] = StockValuation::tToDecimal($runningT);
+        }
+        unset($r);
+
+        return Json::ok($response, [
+            'items'           => $rows,
+            'opening_balance' => StockValuation::tToDecimal($openingT),
+            'limit'           => $limit,
+            'offset'          => $offset,
+        ]);
+    }
+
+    /** Export skladové karty (PDF/XLSX) — kompletní historie (batch fetch přes ledgerForItem, repo limit 500/page). */
+    public function movementsExport(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $itemId = (int) $args['id'];
+        $item = $this->items->find($supplierId, $itemId);
+        if ($item === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+
+        $format = strtolower(trim((string) ($request->getQueryParams()['format'] ?? '')));
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
+        }
+
+        $q = $request->getQueryParams();
+        $baseOpts = array_filter([
+            'warehouse_id' => !empty($q['warehouse_id']) ? (int) $q['warehouse_id'] : null,
+            'from'         => !empty($q['from']) ? (string) $q['from'] : null,
+            'to'           => !empty($q['to']) ? (string) $q['to'] : null,
+        ], static fn ($v): bool => $v !== null);
+
+        $movements = $this->fetchAllMovements($supplierId, $itemId, $baseOpts);
+
+        $out = $format === 'pdf'
+            ? [
+                'bytes'    => $this->movementsPdf->render(['item' => $item, 'movements' => $movements]),
+                'filename' => 'skladova-karta-' . (string) $item['sku'] . '.pdf',
+                'mime'     => 'application/pdf',
+            ]
+            : $this->xlsx->itemMovements($item, $movements);
+
+        $this->log($request, 'stock.item_movements_exported', $itemId, ['format' => $format]);
+
+        // Sanitizace názvu souboru — SKU je uživatelský vstup (bez charset filtru),
+        // syrově by umožnilo header/Content-Disposition injection (uvozovka, /, \, CR/LF).
+        $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '-', (string) $out['filename']) ?? 'export';
+
+        $response->getBody()->write($out['bytes']);
+        return $response
+            ->withHeader('Content-Type', $out['mime'])
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $safeName . '"')
+            ->withHeader('Content-Length', (string) strlen($out['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Kompletní skladová kniha karty (bez stránkování) — batch přes ledgerForItem
+     * po 500 (interní cap repo), s běžnou bilancí od začátku (A6, money-safe tisíciny).
+     *
+     * @param array<string,mixed> $baseOpts
+     * @return array{items:list<array<string,mixed>>, opening_balance:string}
+     */
+    private function fetchAllMovements(int $supplierId, int $itemId, array $baseOpts): array
+    {
+        $rows = [];
+        $offset = 0;
+        $batch = 500;
+        for ($i = 0; $i < 100; $i++) { // pojistka proti nekonečné smyčce (max 50 000 řádků)
+            $page = $this->levels->ledgerForItem($supplierId, $itemId, $baseOpts + ['limit' => $batch, 'offset' => $offset]);
+            if ($page === []) {
+                break;
+            }
+            $rows = array_merge($rows, $page);
+            $offset += $batch;
+            if (count($page) < $batch) {
+                break;
+            }
+        }
+
+        $runningT = 0;
+        foreach ($rows as &$r) {
+            $runningT += StockValuation::qtyToT((string) $r['qty_signed']);
+            $r['balance_after'] = StockValuation::tToDecimal($runningT);
+        }
+        unset($r);
+
+        return ['items' => $rows, 'opening_balance' => StockValuation::tToDecimal(0)];
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @param array<string,mixed>|null $existing
+     * @return array{0:array<string,mixed>, 1:?Response}
+     */
+    private function validate(Response $response, array $body, ?array $existing = null): array
+    {
+        $name = trim((string) ($body['name'] ?? $existing['name'] ?? ''));
+        if ($name === '' || mb_strlen($name) > 255) {
+            return [[], Json::error($response, 'validation_failed', 'Název karty je povinný (max 255 znaků).', 400)];
+        }
+
+        $sku = trim((string) ($body['sku'] ?? ($existing['sku'] ?? '')));
+        if ($sku === '') {
+            $sku = $this->slugFromName($name);
+        }
+        if (mb_strlen($sku) > 50) {
+            return [[], Json::error($response, 'validation_failed', 'SKU má max 50 znaků.', 400)];
+        }
+
+        $itemType = (string) ($body['item_type'] ?? $existing['item_type'] ?? 'goods');
+        if (!in_array($itemType, ['material', 'goods', 'product'], true)) {
+            return [[], Json::error($response, 'validation_failed', "item_type musí být 'material', 'goods' nebo 'product'.", 400)];
+        }
+
+        $unit = trim((string) ($body['unit'] ?? $existing['unit'] ?? 'ks'));
+        if ($unit === '') {
+            $unit = 'ks';
+        }
+
+        $data = [
+            'sku'                    => $sku,
+            'name'                   => $name,
+            'item_type'              => $itemType,
+            'unit'                   => $unit,
+            'ean'                    => array_key_exists('ean', $body)
+                ? $this->nullable($body['ean']) : ($existing['ean'] ?? null),
+            'vat_rate_id'            => array_key_exists('vat_rate_id', $body)
+                ? (($body['vat_rate_id'] !== null && $body['vat_rate_id'] !== '') ? (int) $body['vat_rate_id'] : null)
+                : ($existing['vat_rate_id'] ?? null),
+            'sale_price_without_vat' => array_key_exists('sale_price_without_vat', $body)
+                ? (($body['sale_price_without_vat'] !== null && $body['sale_price_without_vat'] !== '') ? (string) $body['sale_price_without_vat'] : null)
+                : ($existing['sale_price_without_vat'] ?? null),
+            'min_qty'                => array_key_exists('min_qty', $body)
+                ? (($body['min_qty'] !== null && $body['min_qty'] !== '') ? (string) $body['min_qty'] : null)
+                : ($existing['min_qty'] ?? null),
+            'is_active'              => array_key_exists('is_active', $body) ? (bool) $body['is_active'] : (bool) ($existing['is_active'] ?? true),
+            'note'                   => array_key_exists('note', $body)
+                ? (trim((string) $body['note']) !== '' ? trim((string) $body['note']) : null)
+                : ($existing['note'] ?? null),
+        ];
+        return [$data, null];
+    }
+
+    private function nullable(mixed $v): ?string
+    {
+        $s = trim((string) $v);
+        return $s === '' ? null : $s;
+    }
+
+    /** Jednoduchý slug z názvu (bez diakritiky, VELKÁ, jen [A-Z0-9-]) — fallback SKU. */
+    private function slugFromName(string $name): string
+    {
+        $s = \MyInvoice\Support\Slugifier::slug($name, '-', 'upper', 50);
+        if ($s === '') {
+            $s = 'SKU-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+        }
+        return $s;
+    }
+
+    private function log(Request $request, string $action, int $id, array $payload): void
+    {
+        $this->logger->log(
+            $action,
+            $this->userId($request),
+            'stock_item',
+            $id,
+            $payload,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $this->currentSupplierId($request),
+        );
+    }
+}

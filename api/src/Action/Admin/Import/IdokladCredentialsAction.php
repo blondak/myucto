@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Admin\Import;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\IdokladClient;
 use MyInvoice\Service\IpMatcher;
@@ -33,7 +35,7 @@ final class IdokladCredentialsAction
     public function status(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'utilities.import', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -48,7 +50,7 @@ final class IdokladCredentialsAction
     public function update(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'utilities.import', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -88,7 +90,7 @@ final class IdokladCredentialsAction
     public function delete(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'utilities.import', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);

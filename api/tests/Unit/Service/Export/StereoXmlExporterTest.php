@@ -83,8 +83,8 @@ final class StereoXmlExporterTest extends TestCase
         self::assertSame('EUR', $this->xpathOne($xml, '//Rows/Row/CurrencyCode'));
         self::assertSame('', $this->xpathOne($xml, '//Payment/ConstantSymbol'));
         self::assertSame('Jan Novak', $this->xpathOne($xml, '//Issue/IssuePerson'));
-        self::assertSame('myinvoice.cz', $this->xpathOne($xml, '//HEADER/Source/SoftwareVendor'));
-        self::assertSame('myinvoice.cz', $this->xpathOne($xml, '//HEADER/Source/SoftwareProduct'));
+        self::assertSame('myucto.cz', $this->xpathOne($xml, '//HEADER/Source/SoftwareVendor'));
+        self::assertSame('myucto.cz', $this->xpathOne($xml, '//HEADER/Source/SoftwareProduct'));
         self::assertNull($this->xpathOne($xml, '//DocumentTotals/TypeOfOperation'));
         self::assertNull($this->xpathOne($xml, '//Rows/Row/TypeOfOperation'));
     }

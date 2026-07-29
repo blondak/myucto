@@ -28,7 +28,9 @@ final class SetupCrpDphLookupAction
     public function __invoke(Request $request, Response $response): Response
     {
         $adminCount = (int) $this->db->pdo()
-            ->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")
+            ->query("SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id
+                      WHERE r.system_key = 'superadmin' AND r.role_type = 'superadmin'
+                        AND r.is_active = 1 AND u.is_active = 1")
             ->fetchColumn();
         if ($adminCount > 0) {
             return Json::error($response, 'setup_done', 'Setup je dokončený, použij /api/clients/lookup-bank.', 403);

@@ -44,7 +44,7 @@ final class PaymentOrderPdfRenderer
             ...MpdfFontConfig::options(),
         ]);
         $mpdf->SetTitle('Platební příkaz ' . (string) ($data['payment_date'] ?? ''));
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }
@@ -58,8 +58,7 @@ final class PaymentOrderPdfRenderer
             $this->twig = new Environment($loader, [
                 'autoescape'       => 'html',
                 'strict_variables' => false,
-                'cache'            => false,
-            ]);
+            ] + TwigCache::options('payment-order'));
             $this->twig->addFilter(new \Twig\TwigFilter('cz_money', static function ($v) {
                 return number_format((float) $v, 2, ',', ' ');
             }));

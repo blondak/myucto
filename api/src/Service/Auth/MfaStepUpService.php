@@ -11,6 +11,12 @@ final class MfaStepUpService
 {
     public const OPERATION_API_TOKEN_CREATE = 'api_token.create';
     public const OPERATION_PASSKEY_REGISTER = 'passkey.register';
+    /**
+     * MyÚčto: správa osobního kvalifikovaného certifikátu pro EPO a přímé podání.
+     * Soukromý klíč podepisuje daňová podání jménem uživatele, takže sem patří
+     * stejně účelový jednorázový proof jako k vydání API tokenu.
+     */
+    public const OPERATION_EPO_CERTIFICATE = 'epo.certificate';
 
     private const METHODS = ['passkey', 'totp'];
 
@@ -28,6 +34,7 @@ final class MfaStepUpService
         }
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
+            && $operation !== self::OPERATION_EPO_CERTIFICATE
             && preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $matches) !== 1
         ) {
             throw new StepUpOperationException('Nepovolený účel step-up ověření.');

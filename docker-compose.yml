@@ -1,12 +1,12 @@
-# MyInvoice.cz — Docker Compose
+# MyUcto.cz — Docker Compose
 #
 # Services:
 #   app     — PHP 8.5 + nginx + php-fpm (built from Dockerfile.alpine)
-#   db      — MariaDB 11 with persistent volume
-#   redis   — optional cache/rate-limit backend (profile: redis)
+#   db      — MariaDB 11.8 with persistent volume
+#   redis   — optional cache/session/rate-limit backend (profile: redis)
 #
 # Default image je alpine/nginx (~92 MB, méně RAM). Debian/Apache fallback:
-# `docker build -f Dockerfile -t myinvoice:latest .` (Dockerfile zůstává v repu, CI ho nepublikuje).
+# `docker build -f Dockerfile -t myucto:latest .` (Dockerfile zůstává v repu, CI ho nepublikuje).
 #
 # First run:   cmd/docker-install.{sh,ps1}     (creates cfg.php, brings stack up, runs migrations)
 # Build:       cmd/docker-build.{sh,ps1}       (rebuilds the app image)
@@ -28,7 +28,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.alpine
-    image: myinvoice:latest
+    image: myucto:latest
     restart: unless-stopped
     depends_on:
       db:
@@ -50,6 +50,14 @@ services:
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0
       # v jedné běžící replice ho nech zapnutý, jinak by úlohy běžely vícenásobně.
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}
+      # Redis (profil `redis`). Bez tohoto wiringu by `--profile redis` sice Redis
+      # spustil, ale aplikace by o něm nevěděla a jela dál na DB fallbacku.
+      MYINVOICE_REDIS_ENABLED: ${MYINVOICE_REDIS_ENABLED:-0}
+      MYINVOICE_REDIS_HOST: ${MYINVOICE_REDIS_HOST:-redis}
+      MYINVOICE_REDIS_PORT: ${MYINVOICE_REDIS_PORT:-6379}
+      MYINVOICE_REDIS_AUTH: ${MYINVOICE_REDIS_AUTH:-}
+      MYINVOICE_REDIS_DB: ${MYINVOICE_REDIS_DB:-0}
+      MYINVOICE_REDIS_PREFIX: ${MYINVOICE_REDIS_PREFIX:-myinvoice:}
       # Prázdné hodnoty nepřebíjí cfg.docker.php; politiku lze nastavit v .env.
       MYINVOICE_AUTH_REQUIRE_MFA: ${MYINVOICE_AUTH_REQUIRE_MFA:-}
       MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}
@@ -57,7 +65,7 @@ services:
       MYINVOICE_SESSION_LOCK_AFTER_MINUTES: ${MYINVOICE_SESSION_LOCK_AFTER_MINUTES:-}
 
   db:
-    image: mariadb:11
+    image: mariadb:11.8
     restart: unless-stopped
     # Tuning pro hosting s málo pamětí/diskem:
     #   - performance_schema OFF → ~100–200 MB méně RAM
@@ -72,8 +80,8 @@ services:
       # Fail-closed: bez .env se stack nespustí (žádný předvídatelný default).
       # docker-install.{sh,ps1} vygeneruje .env s náhodnými hesly před `up`.
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD required — spusť cmd/docker-install nebo vytvoř .env}
-      MARIADB_DATABASE: ${DB_NAME:-myinvoice}
-      MARIADB_USER: ${DB_USER:-myinvoice}
+      MARIADB_DATABASE: ${DB_NAME:-myucto}
+      MARIADB_USER: ${DB_USER:-myucto}
       MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required — spusť cmd/docker-install nebo vytvoř .env}
       TZ: Europe/Prague
     volumes:
@@ -92,9 +100,24 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     profiles: ["redis"]
-    command: ["redis-server", "--appendonly", "yes"]
+    # maxmemory + policy jsou povinné: bez limitu si Redis s AOF vezme veškerou
+    # RAM a nechá se OOM-killnout místo evikce. `volatile-lru` navíc evikuje jen
+    # klíče s TTL — sessiony (SETEX) ano, ale nic bez TTL se nezahodí.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - volatile-lru
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db-data:

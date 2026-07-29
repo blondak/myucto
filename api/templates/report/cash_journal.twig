@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Peněžní deník</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .warn-block {
+        background-color: #fee2e2;
+        border: 0.4pt solid #b91c1c;
+        color: #7f1d1d;
+        padding: 2mm 2.5mm;
+        margin-bottom: 3mm;
+    }
+    .warn-title { font-weight: bold; font-size: 9pt; margin-bottom: 1mm; }
+    .warn-line { font-size: 8pt; margin-top: 0.5mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    .num { text-align: right; }
+    .row-unclassified td { background-color: #fef3c7; }
+    .col-date { width: 18mm; }
+    .col-doc { width: 28mm; }
+    .col-partner { width: 45mm; }
+    .totals-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
+    table.totals { width: 60%; border-collapse: collapse; }
+    table.totals td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; }
+    table.totals td.num { text-align: right; }
+    table.totals tr.net td { font-weight: bold; border-top: 0.5pt solid #333; }
+</style>
+</head>
+<body>
+
+{% set bucket_labels = {
+    'income_taxable': 'Daňový příjem',
+    'income_exempt': 'Osvobozený příjem',
+    'income_nontax': 'Nedaňový příjem',
+    'expense_taxable': 'Daňový výdaj',
+    'expense_nontax': 'Nedaňový výdaj',
+    'transfer': 'Převod',
+    'private': 'Soukromé',
+    'nezarazeno': 'NEZAŘAZENO'
+} %}
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Peněžní deník</div>
+            <div class="header-period">Rok {{ year }}</div>
+            <div class="header-sub">Za období: {{ from|cz_date }} – {{ to|cz_date }}</div>
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+{% if warnings is not empty %}
+    <div class="warn-block">
+        <div class="warn-title">⚠ Nezařazené pohyby ({{ warnings|length }}) — mimo daňový základ, riziko podhodnocení příjmu</div>
+        {% for w in warnings %}
+            <div class="warn-line">
+                {{ w.blocking ? '● ' : '○ ' }}{{ w.date|cz_date }}
+                {% if w.count is defined %}({{ w.count }}×){% endif %}
+                {{ w.message }}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+{% if rows is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">
+        Pro zvolené období nejsou v peněžním deníku žádné pohyby.
+    </p>
+{% else %}
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-date">Datum</th>
+            <th class="thl col-doc">Doklad</th>
+            <th class="thl col-partner">Protistrana</th>
+            <th class="thl">Popis</th>
+            <th>Příjem</th>
+            <th>Výdaj</th>
+            <th>Zůstatek</th>
+            <th class="thl">Klasifikace</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+            <tr class="{{ row.unclassified ? 'row-unclassified' : '' }}">
+                <td>{{ row.date|cz_date }}</td>
+                <td>{{ row.doc_no }}</td>
+                <td>{{ row.partner|slice(0, 40) }}</td>
+                <td>{{ row.description|slice(0, 40) }}</td>
+                <td class="num">{{ row.income is not null ? row.income|cz_money : '' }}</td>
+                <td class="num">{{ row.expense is not null ? row.expense|cz_money : '' }}</td>
+                <td class="num">{{ row.running_balance|cz_money }}</td>
+                <td>{{ bucket_labels[row.bucket] ?? row.bucket }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="6" class="num" style="font-weight:bold; border-top:0.5pt solid #333;">Konečný zůstatek</td>
+            <td class="num" style="font-weight:bold; border-top:0.5pt solid #333;">{{ closing_balance|cz_money }}</td>
+            <td style="border-top:0.5pt solid #333;"></td>
+        </tr>
+    </tfoot>
+</table>
+
+<div class="totals-title">Součty za období</div>
+<table class="totals">
+    <tr><td>Počáteční zůstatek</td><td class="num">{{ opening_balance|cz_money }}</td></tr>
+    <tr><td>Daňové příjmy</td><td class="num">{{ totals.prijem_danovy|cz_money }}</td></tr>
+    <tr><td>Osvobozené příjmy</td><td class="num">{{ totals.prijem_osvobozeny|cz_money }}</td></tr>
+    <tr><td>Nedaňové příjmy</td><td class="num">{{ totals.prijem_nedanovy|cz_money }}</td></tr>
+    <tr><td>Daňové výdaje</td><td class="num">{{ totals.vydaj_danovy|cz_money }}</td></tr>
+    <tr><td>Nedaňové výdaje</td><td class="num">{{ totals.vydaj_nedanovy|cz_money }}</td></tr>
+    <tr><td>Převody</td><td class="num">{{ totals.prevody|cz_money }}</td></tr>
+    <tr><td>Soukromé</td><td class="num">{{ totals.private|cz_money }}</td></tr>
+    <tr><td>Nezařazeno (mimo základ)</td><td class="num">{{ totals.nezarazeno|cz_money }}</td></tr>
+    <tr class="net"><td>Daňový základ (příjmy − výdaje)</td><td class="num">{{ totals.net|cz_money }}</td></tr>
+</table>
+{% endif %}
+
+</body>
+</html>

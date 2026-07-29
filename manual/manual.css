@@ -152,30 +152,22 @@ a:hover { text-decoration: underline; }
 }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
-/* Theme toggle — skupina 3 ikon (System / Light / Dark) jako v apce */
-.theme-group {
-    display: inline-flex;
-    align-items: center;
+/* Theme toggle — jedna ikona slunce/měsíc jako v apce (ThemeToggle.vue) */
+.theme-toggle {
+    appearance: none;
     border: 1px solid var(--border);
     border-radius: 6px;
-    overflow: hidden;
     background: var(--surface);
-}
-.theme-btn {
-    appearance: none;
-    border: 0;
-    background: transparent;
     cursor: pointer;
     height: 32px;
-    padding: 0 9px;
+    width: 32px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     color: var(--muted);
 }
-.theme-btn + .theme-btn { border-left: 1px solid var(--border); }
-.theme-btn:hover { background: var(--surface-2); color: var(--text-2); }
-.theme-btn.active { background: var(--prim-soft); color: var(--prim); }
-.theme-btn svg { width: 17px; height: 17px; }
+.theme-toggle:hover { background: var(--surface-2); color: var(--text-2); }
+.theme-toggle svg { width: 17px; height: 17px; }
 
 /* Tlačítka */
 .btn {
@@ -693,23 +685,25 @@ a:hover { text-decoration: underline; }
 }
 /* Pořadí drží sync s index.php $ACCENTS a menu sekcemi aplikace:
    1 Instalace a start=sky, 2 Prodej=primary, 3 Nákup=warning, 4 Finance=success,
-   5 Dokumenty=neutral, 6 Daně=danger, 7 Systém=neutral, 8 Reference=neutral. */
-.landing h3:nth-of-type(1) { background: var(--acc-sky-bg);     color: var(--acc-sky-fg); }
-.landing h3:nth-of-type(2) { background: var(--acc-primary-bg); color: var(--acc-primary-fg); }
-.landing h3:nth-of-type(3) { background: var(--acc-warning-bg); color: var(--acc-warning-fg); }
-.landing h3:nth-of-type(4) { background: var(--acc-success-bg); color: var(--acc-success-fg); }
-.landing h3:nth-of-type(5) { background: var(--acc-neutral-bg); color: var(--acc-neutral-fg); }
-.landing h3:nth-of-type(6) { background: var(--acc-danger-bg);  color: var(--acc-danger-fg); }
-.landing h3:nth-of-type(7) { background: var(--acc-indigo-bg);    color: var(--acc-indigo-fg); }
-.landing h3:nth-of-type(8) { background: var(--acc-stone-bg);    color: var(--acc-stone-fg); }
-.landing ol:nth-of-type(1) li { --dot: var(--acc-sky-fg); }
-.landing ol:nth-of-type(2) li { --dot: var(--acc-primary-fg); }
-.landing ol:nth-of-type(3) li { --dot: var(--acc-warning-fg); }
-.landing ol:nth-of-type(4) li { --dot: var(--acc-success-fg); }
-.landing ol:nth-of-type(5) li { --dot: var(--acc-neutral-fg); }
-.landing ol:nth-of-type(6) li { --dot: var(--acc-danger-fg); }
-.landing ol:nth-of-type(7) li { --dot: var(--acc-indigo-fg); }
-.landing ol:nth-of-type(8) li { --dot: var(--acc-stone-fg); }
+   5 Dokumenty=neutral, 6 Daně=danger, 7 Systém=neutral, 8 Reference=neutral.
+   Skupin je víc než accentů, proto paleta cykluje po osmi — stejně jako pilulky
+   v sidebaru (index.php: $ACCENTS[$gi % count($ACCENTS)]). */
+.landing h3:nth-of-type(8n+1) { background: var(--acc-sky-bg);     color: var(--acc-sky-fg); }
+.landing h3:nth-of-type(8n+2) { background: var(--acc-primary-bg); color: var(--acc-primary-fg); }
+.landing h3:nth-of-type(8n+3) { background: var(--acc-warning-bg); color: var(--acc-warning-fg); }
+.landing h3:nth-of-type(8n+4) { background: var(--acc-success-bg); color: var(--acc-success-fg); }
+.landing h3:nth-of-type(8n+5) { background: var(--acc-neutral-bg); color: var(--acc-neutral-fg); }
+.landing h3:nth-of-type(8n+6) { background: var(--acc-danger-bg);  color: var(--acc-danger-fg); }
+.landing h3:nth-of-type(8n+7) { background: var(--acc-indigo-bg);    color: var(--acc-indigo-fg); }
+.landing h3:nth-of-type(8n+8) { background: var(--acc-stone-bg);    color: var(--acc-stone-fg); }
+.landing ol:nth-of-type(8n+1) li { --dot: var(--acc-sky-fg); }
+.landing ol:nth-of-type(8n+2) li { --dot: var(--acc-primary-fg); }
+.landing ol:nth-of-type(8n+3) li { --dot: var(--acc-warning-fg); }
+.landing ol:nth-of-type(8n+4) li { --dot: var(--acc-success-fg); }
+.landing ol:nth-of-type(8n+5) li { --dot: var(--acc-neutral-fg); }
+.landing ol:nth-of-type(8n+6) li { --dot: var(--acc-danger-fg); }
+.landing ol:nth-of-type(8n+7) li { --dot: var(--acc-indigo-fg); }
+.landing ol:nth-of-type(8n+8) li { --dot: var(--acc-stone-fg); }
 .landing ol {
     list-style: none;
     margin: 14px 0 6px;

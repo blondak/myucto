@@ -123,14 +123,14 @@ function rewriteContent(string $content, array $self, array $map): string {
     // Same-file (in-page) kotvy `](#NNN-...)` — odkaz uvnitř TÉŽE kapitoly nemá název
     // souboru, takže ho rewriteLinksToFile nechytí, ale číslo kapitoly je v kotvě zapečené
     // (např. `3.8` → `#38-...`). Přečíslujeme prefix kotvy podle vlastního labelu.
-    $oldDigits = preg_replace('/\D/', '', $self['old_label']);
-    $newDigits = preg_replace('/\D/', '', $self['new_label']);
-    if ($oldDigits !== '' && $oldDigits !== $newDigits) {
+    $oldAnchorPrefix = strtolower(preg_replace('/[^a-z0-9]/i', '', $self['old_label']));
+    $newAnchorPrefix = strtolower(preg_replace('/[^a-z0-9]/i', '', $self['new_label']));
+    if ($oldAnchorPrefix !== '' && $oldAnchorPrefix !== $newAnchorPrefix) {
         // `](#26` i `](#26-`/`](#268-…` (sekce) — leading číslo kapitoly nahradíme.
         // Lookahead [-\d] zajistí, že měníme jen prefix kotvy s číslem kapitoly.
         $content = preg_replace(
-            '/\]\(#' . preg_quote($oldDigits, '/') . '(?=[-\d])/u',
-            '](#' . $newDigits,
+            '/\]\(#' . preg_quote($oldAnchorPrefix, '/') . '(?=[-\d])/u',
+            '](#' . $newAnchorPrefix,
             $content
         );
     }
@@ -155,12 +155,12 @@ function rewriteLinksToFile(string $content, string $oldBase, array $oi): string
             $prefix = $m[1] ?? '';
             $anchor = $m[2] ?? '';
             if ($anchor !== '' && $oi['old_label'] !== $oi['new_label']) {
-                $oldDigits = preg_replace('/\D/', '', $oi['old_label']);
-                $newDigits = preg_replace('/\D/', '', $oi['new_label']);
-                if ($oldDigits !== '' && $oldDigits !== $newDigits) {
+                $oldAnchorPrefix = strtolower(preg_replace('/[^a-z0-9]/i', '', $oi['old_label']));
+                $newAnchorPrefix = strtolower(preg_replace('/[^a-z0-9]/i', '', $oi['new_label']));
+                if ($oldAnchorPrefix !== '' && $oldAnchorPrefix !== $newAnchorPrefix) {
                     $anchor = preg_replace(
-                        '/^#' . preg_quote($oldDigits, '/') . '(\d*)/',
-                        '#' . $newDigits . '$1',
+                        '/^#' . preg_quote($oldAnchorPrefix, '/') . '(\d*)/',
+                        '#' . $newAnchorPrefix . '$1',
                         $anchor
                     );
                 }

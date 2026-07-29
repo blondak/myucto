@@ -8,10 +8,14 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\PermissionCatalog;
+use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
+use MyInvoice\Service\License\LicenseService;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -21,6 +25,9 @@ final class MeAction
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
+        private readonly \MyInvoice\Repository\UserSupplierRepository $userSuppliers,
+        private readonly PermissionResolver $permissions,
+        private readonly LicenseService $license,
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $lockPolicy,
@@ -33,24 +40,50 @@ final class MeAction
         $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
         $currentSupplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
 
-        $ossSelect = $this->db->hasColumn('supplier', 'oss_enabled') ? 'oss_enabled' : '0 AS oss_enabled';
-        $supplierStatement = $this->db->pdo()->query(
-            'SELECT id, company_name, ic, is_vat_payer, is_identified, ' . $ossSelect . ', taxpayer_type,
-                    default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
-                    auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked
-               FROM supplier ORDER BY id'
-        );
-        if ($supplierStatement === false) {
-            throw new \RuntimeException('Seznam dodavatelů se nepodařilo načíst.');
+        // Epic F0/F6: membership filtr (zrcadlí SettingsAction::listSuppliers) —
+        // uživatel s membership řádky vidí jen přiřazené firmy; role 'client'
+        // VŽDY jen membership (0 řádků → prázdný seznam, fail-closed). Bez filtru
+        // by klient viděl názvy/IČO cizích firem instance.
+        $isSuperadmin = (bool) ($user['is_superadmin'] ?? false);
+        $allowed = $isSuperadmin
+            ? []
+            : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
+        if (!$isSuperadmin && $allowed === []) {
+            $suppliers = [];
+        } else {
+            $ossSelect = $this->db->hasColumn('supplier', 'oss_enabled')
+                ? 'oss_enabled'
+                : '0 AS oss_enabled';
+            $where  = '';
+            $params = [];
+            if ($allowed !== []) {
+                $where  = ' WHERE id IN (' . implode(',', array_fill(0, count($allowed), '?')) . ')';
+                $params = $allowed;
+            }
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, company_name, ic, is_vat_payer, is_identified, taxpayer_type,
+                        default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
+                        auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
+                        accounting_mode, stock_enabled, ' . $ossSelect . ',
+                        ai_provider, ai_data_region, ai_eu_residency_required
+                   FROM supplier' . $where . ' ORDER BY id'
+            );
+            $stmt->execute($params);
+            $suppliers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         }
-        $suppliers = $supplierStatement->fetchAll(\PDO::FETCH_ASSOC);
         foreach ($suppliers as &$s) {
             $s['id']                       = (int) $s['id'];
             $s['is_vat_payer']             = (bool) $s['is_vat_payer'];
+            // Režim účetnictví (Epic F1) — 'double_entry' zpřístupní účetní UI (deník,
+            // osnova, období). Nav sekce se řídí touto hodnotou přes supplier store.
+            $s['accounting_mode']          = (string) ($s['accounting_mode'] ?? 'tax_evidence');
+            // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; nav sekce Sklad se řídí
+            // touto hodnotou (stejný vzor jako accounting_mode výše).
+            $s['stock_enabled']            = (bool) ($s['stock_enabled'] ?? false);
+            $s['oss_enabled']              = (bool) ($s['oss_enabled'] ?? false);
             // Identifikovaná osoba (§ 6g–6l, issue #94) — neplátce s přeshraničními
             // povinnostmi; editor podle ní nabídne RC u zahraničních faktur.
             $s['is_identified']            = (bool) ($s['is_identified'] ?? false);
-            $s['oss_enabled']              = (bool) ($s['oss_enabled'] ?? false);
             // 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno.
             $s['taxpayer_type']            = $s['taxpayer_type'] !== null ? (string) $s['taxpayer_type'] : null;
             $s['default_payment_due_days'] = (int) $s['default_payment_due_days'];
@@ -62,11 +95,23 @@ final class MeAction
             // Děkovný e-mail (issue #57) — UI v mark-paid modalu podle nich zobrazí checkbox.
             $s['payment_thanks_enabled']         = (bool) ($s['payment_thanks_enabled'] ?? false);
             $s['payment_thanks_default_checked'] = (bool) ($s['payment_thanks_default_checked'] ?? false);
+            // F7 — AI provider selection (pro FE badge / Settings sekci; nav gate).
+            $s['ai_provider']                    = (string) ($s['ai_provider'] ?? 'anthropic');
+            $s['ai_data_region']                 = (string) ($s['ai_data_region'] ?? 'us');
+            $s['ai_eu_residency_required']       = (bool) ($s['ai_eu_residency_required'] ?? false);
         }
 
         $totpEnabled  = (bool) ($user['totp_enabled'] ?? false);
         $requireTotp  = (bool) $this->config->get('auth.require_totp', false);
         $mustSetupTotp = $requireTotp && !$totpEnabled;
+        $effectiveRole = $this->permissions->resolve($request);
+        $roleSummary = $effectiveRole->id > 0 ? [
+            'id' => $effectiveRole->id,
+            'name' => $effectiveRole->name,
+            'type' => $effectiveRole->type,
+            'is_active' => $effectiveRole->isActive,
+            'system_key' => $effectiveRole->systemKey,
+        ] : (array) ($user['role_summary'] ?? []);
         $userId = (int) ($user['id'] ?? 0);
         $passkeyCount = $userId > 0 ? $this->credentials->countActiveForUser($userId) : 0;
         $mfaMethods = [];
@@ -99,7 +144,8 @@ final class MeAction
                 'id'              => $userId,
                 'email'           => $user['email'] ?? '',
                 'name'            => $user['name'] ?? '',
-                'role'            => $user['role'] ?? 'readonly',
+                'role'            => $roleSummary,
+                'is_superadmin'   => $isSuperadmin,
                 'locale'          => $user['locale'] ?? 'cs',
                 'totp_enabled'    => $totpEnabled,
                 'must_setup_totp' => $mustSetupTotp,
@@ -111,6 +157,8 @@ final class MeAction
             'csrf_token'          => $session['csrf_token'] ?? '',
             'current_supplier_id' => $currentSupplierId,
             'suppliers'           => $suppliers,
+            'permissions'         => $effectiveRole->isSuperadmin() ? [] : $effectiveRole->permissions,
+            'permission_catalog_version' => PermissionCatalog::VERSION,
             'require_totp'        => $requireTotp,
             'require_mfa'         => $this->mfaPolicy->isRequired(),
             'allowed_mfa_methods' => $this->mfaPolicy->allowedMethods(),
@@ -118,6 +166,8 @@ final class MeAction
             'lock_after_minutes'  => $effectiveTimeout,
             'server_time'         => self::isoUtc($now),
             'idle_expires_at'     => $idleExpiresAt,
+            // Stav licence (E4) pro FE bannery (trial odpočet, overage, degraded).
+            'license'             => (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary(),
         ]);
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Oss;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Report\EpoEnvelope;
 
 /**
  * XML builder pro OSS EU režim (OSSEI1) pro EPO.
@@ -48,18 +49,7 @@ final class OssXmlExporter
         $rows = $this->aggregateRows($preview, $supplier, $warnings);
         $corrections = $this->correctionRows($preview, $warnings);
 
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        $dom->preserveWhiteSpace = false;
-        $dom->formatOutput = true;
-
-        $pisemnost = $dom->createElement('Pisemnost');
-        $pisemnost->setAttribute('nazevSW', 'MyInvoice.cz');
-        $pisemnost->setAttribute('verzeSW', (string) ($this->loadAppVersion() ?? '0'));
-        $dom->appendChild($pisemnost);
-
-        $oss = $dom->createElement('OSSEI1');
-        $oss->setAttribute('verzePis', '01.01.04');
-        $pisemnost->appendChild($oss);
+        [$dom, $oss] = EpoEnvelope::create('OSSEI1', '01.01.04');
 
         $period = (array) $preview['period'];
         $vetaD = $dom->createElement('VetaD');
@@ -76,10 +66,10 @@ final class OssXmlExporter
         $validFrom = (string) ($preview['settings']['oss_valid_from'] ?? '');
         $validTo = (string) ($preview['settings']['oss_valid_to'] ?? '');
         if ($validFrom !== '' && $validFrom > $periodStart && $validFrom <= $periodEnd) {
-            $vetaD->setAttribute('period_start_date', $validFrom);
+            $vetaD->setAttribute('period_start_date', $this->formatEpoDate($validFrom));
         }
         if ($validTo !== '' && $validTo >= $periodStart && $validTo < $periodEnd) {
-            $vetaD->setAttribute('period_end_date', $validTo);
+            $vetaD->setAttribute('period_end_date', $this->formatEpoDate($validTo));
         }
         if (($bank['iban'] ?? '') !== '') {
             $vetaD->setAttribute('iban_code', (string) $bank['iban']);
@@ -300,9 +290,13 @@ final class OssXmlExporter
         return number_format(round($rate, 2), 2, '.', '');
     }
 
-    private function loadAppVersion(): ?string
+    private function formatEpoDate(string $date): string
     {
-        $verFile = __DIR__ . '/../../../../VERSION';
-        return is_file($verFile) ? trim((string) file_get_contents($verFile)) : null;
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $date) {
+            throw new \RuntimeException('OSS XML nelze vytvořit: neplatné datum registrace OSS.');
+        }
+        return $parsed->format('j.n.Y');
     }
+
 }

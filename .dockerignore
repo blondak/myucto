@@ -40,9 +40,6 @@ aspnet_client
 # IIS config — Docker image servíruje přes nginx (alpine) / .htaccess (Debian fallback)
 web.config
 
-# Jednorázový externí migrační nástroj (Money S3) — runtime ho nespouští, do image nepatří
-tools/money-s3-import
-
 # Build artefacts
 *.log
 .DS_Store

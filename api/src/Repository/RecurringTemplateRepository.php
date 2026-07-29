@@ -65,6 +65,7 @@ final class RecurringTemplateRepository
                     i.catalog_exchange_rate, i.catalog_exchange_rate_date,
                     i.description, i.quantity, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.order_index,
+                    i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
                     pli.code AS price_list_item_code, pli.name AS price_list_item_name,
                     pli.archived AS price_list_item_archived
@@ -309,17 +310,14 @@ final class RecurringTemplateRepository
                 AND (
                       t.next_run_date <= CURDATE()
                    OR (t.draft_open_mode = 'period_start'
-                       AND DATE_FORMAT(t.next_run_date, '%Y-%m-01') <= CURDATE())
+                       -- Sargovatelně: měsíc next_run_date <= aktuální měsíc
+                       -- ⟺ next_run_date < 1. den příštího měsíce.
+                       AND t.next_run_date < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH))
                 )
               ORDER BY t.next_run_date ASC, t.id ASC"
         );
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
-        $out = [];
-        foreach ($ids as $id) {
-            $tpl = $this->find($id);
-            if ($tpl !== null) $out[] = $tpl;
-        }
-        return $out;
+        return $this->findMany($ids);
     }
 
     /**
@@ -369,10 +367,70 @@ final class RecurringTemplateRepository
               ORDER BY t.next_run_date ASC, t.id ASC"
         );
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        return $this->findMany($ids);
+    }
+
+    /**
+     * Batch varianta find() — načte šablony pro dané ID v jednom dotazu (+ jeden
+     * dotaz na položky všech šablon), zachová pořadí vstupních ID. Nahrazuje
+     * N+1 smyčku `foreach ($ids as $id) find($id)` ve findDue/findReminderDue.
+     *
+     * @param list<int> $ids
+     * @return list<array<string,mixed>>
+     */
+    private function findMany(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT t.*,
+                    c.company_name AS client_company_name,
+                    c.main_email AS client_main_email,
+                    c.language AS client_language,
+                    p.name AS project_name,
+                    cur.code AS currency, cur.symbol AS currency_symbol,
+                    rc.label AS revenue_category_label, rc.code AS revenue_category_code
+               FROM recurring_invoice_templates t
+               JOIN clients c ON c.id = t.client_id
+          LEFT JOIN projects p ON p.id = t.project_id
+               JOIN currencies cur ON cur.id = t.currency_id
+          LEFT JOIN revenue_categories rc ON rc.id = t.revenue_category_id
+              WHERE t.id IN (' . $place . ')'
+        );
+        $stmt->execute($ids);
+        $byId = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $byId[(int) $row['id']] = $this->cast($row);
+        }
+
+        // Položky všech šablon jedním dotazem, seskupené po template_id.
+        $itemsStmt = $this->db->pdo()->prepare(
+            'SELECT i.id, i.template_id, i.description, i.quantity, i.unit,
+                    i.unit_price_without_vat, i.vat_rate_id, i.order_index,
+                    i.stock_item_id, i.warehouse_id,
+                    vr.code AS vat_code, vr.rate_percent AS vat_rate_percent
+               FROM recurring_invoice_template_items i
+               JOIN vat_rates vr ON vr.id = i.vat_rate_id
+              WHERE i.template_id IN (' . $place . ')
+              ORDER BY i.template_id, i.order_index, i.id'
+        );
+        $itemsStmt->execute($ids);
+        $itemsByTemplate = [];
+        foreach ($itemsStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            $itemsByTemplate[(int) $item['template_id']][] = $this->castItem($item);
+        }
+
+        // Zachovej pořadí vstupních ID (dané ORDER BY volajícího dotazu).
         $out = [];
         foreach ($ids as $id) {
-            $tpl = $this->find($id);
-            if ($tpl !== null) $out[] = $tpl;
+            if (!isset($byId[$id])) {
+                continue;
+            }
+            $tpl = $byId[$id];
+            $tpl['items'] = $itemsByTemplate[$id] ?? [];
+            $out[] = $tpl;
         }
         return $out;
     }
@@ -708,13 +766,21 @@ final class RecurringTemplateRepository
     {
         $row['id']                     = (int) $row['id'];
         $row['template_id']            = (int) $row['template_id'];
-        $row['price_list_item_id']     = $row['price_list_item_id'] !== null ? (int) $row['price_list_item_id'] : null;
+        if (array_key_exists('price_list_item_id', $row)) {
+            $row['price_list_item_id'] = $row['price_list_item_id'] !== null ? (int) $row['price_list_item_id'] : null;
+        }
         $row['vat_rate_id']            = (int) $row['vat_rate_id'];
         $row['order_index']            = (int) $row['order_index'];
         $row['quantity']               = (float) $row['quantity'];
         $row['unit_price_without_vat'] = (float) $row['unit_price_without_vat'];
         if (isset($row['vat_rate_percent'])) {
             $row['vat_rate_percent'] = (float) $row['vat_rate_percent'];
+        }
+        if (array_key_exists('stock_item_id', $row)) {
+            $row['stock_item_id'] = $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null;
+        }
+        if (array_key_exists('warehouse_id', $row)) {
+            $row['warehouse_id'] = $row['warehouse_id'] !== null ? (int) $row['warehouse_id'] : null;
         }
         foreach (['catalog_source_unit_price', 'catalog_exchange_rate'] as $key) {
             if (array_key_exists($key, $row)) {

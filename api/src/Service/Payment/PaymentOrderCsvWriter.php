@@ -9,7 +9,7 @@ namespace MyInvoice\Service\Payment;
  * banky nebo archiv. Sloupce kryjí vše potřebné k platbě i ověření účtu příjemce.
  *
  * Bezpečnost: OWASP CSV-injection guard (prefix `'` u buněk začínajících `= + - @ TAB CR`),
- * shodně s `Action\Invoice\ExportCsvAction`.
+ * shodně s `Service\Export\CsvWriter`.
  */
 final class PaymentOrderCsvWriter
 {

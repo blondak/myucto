@@ -18,6 +18,7 @@ use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\TrustedDeviceService;
+use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\IpMatcher;
 use PDO;
 use PDOStatement;
@@ -95,6 +96,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             $credentials,
             new MfaPolicyService($config),
             new SessionLockPolicy($config),
+            $this->roleProfileStub(),
         );
         $terminal = new class ($issuer, $context) implements RequestHandlerInterface {
             public function __construct(
@@ -275,6 +277,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             new ResponseFactory(),
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
+            $this->roleProfileStub(),
         );
     }
 
@@ -298,5 +301,20 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
                 return $this->guard->process($request, $this->terminal);
             }
         };
+    }
+
+    /**
+     * MyÚčto doplňuje k účtu jemnozrnnou roli z tabulky `roles`. Tyhle testy
+     * ověřují přechody session, ne autorizaci — profil proto vrací prázdno
+     * a uživatele propouští beze změny.
+     */
+    private function roleProfileStub(): UserRoleProfile
+    {
+        $roleProfile = $this->createMock(UserRoleProfile::class);
+        $roleProfile->method('enrich')->willReturnArgument(0);
+        $roleProfile->method('forUser')->willReturn(
+            ['id' => 0, 'name' => '', 'type' => '', 'is_active' => false, 'system_key' => null],
+        );
+        return $roleProfile;
     }
 }

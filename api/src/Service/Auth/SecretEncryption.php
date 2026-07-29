@@ -18,6 +18,7 @@ use MyInvoice\Infrastructure\Config\Config;
 final class SecretEncryption
 {
     private const PREFIX = 'enc:v1:';
+    private const CONTEXT_PREFIX = 'enc:v2:';
     private const NONCE_LEN = 12; // GCM standard
 
     public function __construct(private readonly Config $config) {}
@@ -42,6 +43,9 @@ final class SecretEncryption
 
     public function decrypt(string $stored): string
     {
+        if (str_starts_with($stored, self::CONTEXT_PREFIX)) {
+            throw new \RuntimeException('Context-bound ciphertext requires decryptFor().');
+        }
         // Legacy plaintext — bez prefixu se vrátí jak je
         if (!str_starts_with($stored, self::PREFIX)) {
             return $stored;
@@ -53,7 +57,75 @@ final class SecretEncryption
         $nonce = substr($blob, 0, self::NONCE_LEN);
         $tag   = substr($blob, -16);
         $ct    = substr($blob, self::NONCE_LEN, -16);
-        $pt = openssl_decrypt($ct, 'aes-256-gcm', $this->key(), OPENSSL_RAW_DATA, $nonce, $tag);
+        foreach ($this->keyRing() as $key) {
+            $pt = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $nonce, $tag);
+            if ($pt !== false) {
+                return $pt;
+            }
+        }
+        throw new \RuntimeException('Decryption failed');
+    }
+
+    public function encryptFor(string $plaintext, string $context): string
+    {
+        $context = trim($context);
+        if ($context === '') {
+            throw new \InvalidArgumentException('Encryption context is required.');
+        }
+        $key = $this->key();
+        $keyId = $this->keyId($key);
+        $nonce = random_bytes(self::NONCE_LEN);
+        $tag = '';
+        $ct = openssl_encrypt(
+            $plaintext,
+            'aes-256-gcm',
+            $key,
+            OPENSSL_RAW_DATA,
+            $nonce,
+            $tag,
+            $context,
+        );
+        if ($ct === false) {
+            throw new \RuntimeException('Encryption failed');
+        }
+        return self::CONTEXT_PREFIX . $keyId . ':' . base64_encode($nonce . $ct . $tag);
+    }
+
+    public function decryptFor(string $stored, string $context): string
+    {
+        $context = trim($context);
+        if ($context === '') {
+            throw new \InvalidArgumentException('Encryption context is required.');
+        }
+        if (!str_starts_with($stored, self::CONTEXT_PREFIX)) {
+            return $this->decrypt($stored);
+        }
+        $encoded = substr($stored, strlen(self::CONTEXT_PREFIX));
+        $separator = strpos($encoded, ':');
+        if ($separator === false) {
+            throw new \RuntimeException('Invalid ciphertext');
+        }
+        $keyId = substr($encoded, 0, $separator);
+        $blob = base64_decode(substr($encoded, $separator + 1), true);
+        if ($blob === false || strlen($blob) < self::NONCE_LEN + 16) {
+            throw new \RuntimeException('Invalid ciphertext');
+        }
+        $key = $this->keyRing()[$keyId] ?? null;
+        if ($key === null) {
+            throw new \RuntimeException('Encryption key is unavailable');
+        }
+        $nonce = substr($blob, 0, self::NONCE_LEN);
+        $tag = substr($blob, -16);
+        $ct = substr($blob, self::NONCE_LEN, -16);
+        $pt = openssl_decrypt(
+            $ct,
+            'aes-256-gcm',
+            $key,
+            OPENSSL_RAW_DATA,
+            $nonce,
+            $tag,
+            $context,
+        );
         if ($pt === false) {
             throw new \RuntimeException('Decryption failed');
         }
@@ -63,7 +135,8 @@ final class SecretEncryption
     /** @internal Pomáhá testům / migracím rozpoznat encrypted vs legacy plaintext */
     public function isEncrypted(string $stored): bool
     {
-        return str_starts_with($stored, self::PREFIX);
+        return str_starts_with($stored, self::PREFIX)
+            || str_starts_with($stored, self::CONTEXT_PREFIX);
     }
 
     /**
@@ -77,6 +150,12 @@ final class SecretEncryption
             $key = base64_decode($b64, true);
             if ($key === false || strlen($key) !== 32) {
                 return 'cfg.app.secret_encryption_key musí být base64 klíč o délce 32B po dekódování.';
+            }
+            foreach ($this->previousKeyValues() as $previous) {
+                $decoded = base64_decode($previous, true);
+                if ($decoded === false || strlen($decoded) !== 32) {
+                    return 'cfg.app.secret_encryption_previous_keys musí obsahovat jen base64 klíče o délce 32B.';
+                }
             }
             return null;
         }
@@ -105,5 +184,43 @@ final class SecretEncryption
             throw new \RuntimeException('Ani secret_encryption_key, ani app.pepper nejsou nastaveny.');
         }
         return hash_hkdf('sha256', $pepper, 32, 'totp-secret');
+    }
+
+    /** @return array<string,string> */
+    private function keyRing(): array
+    {
+        $keys = [$this->key()];
+        foreach ($this->previousKeyValues() as $encoded) {
+            $key = base64_decode($encoded, true);
+            if ($key === false || strlen($key) !== 32) {
+                continue;
+            }
+            $keys[] = $key;
+        }
+        $result = [];
+        foreach ($keys as $key) {
+            $result[$this->keyId($key)] = $key;
+        }
+        return $result;
+    }
+
+    /** @return list<string> */
+    private function previousKeyValues(): array
+    {
+        $values = $this->config->get('app.secret_encryption_previous_keys', []);
+        if (is_string($values)) {
+            $values = array_filter(array_map('trim', explode(',', $values)));
+        }
+        if (!is_array($values)) {
+            return [];
+        }
+        return array_values(array_filter(
+            array_map(static fn (mixed $value): string => is_string($value) ? trim($value) : '', $values),
+        ));
+    }
+
+    private function keyId(string $key): string
+    {
+        return substr(hash('sha256', $key), 0, 16);
     }
 }

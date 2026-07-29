@@ -118,10 +118,10 @@ async function deleteProject() {
 const projectActions = computed<ActionItem[]>(() => {
   const p = project.value
   if (!p) return []
-  const w = auth.canWrite
+  const w = auth.canWrite('projects')
   return [
     { key: 'new-invoice', label: t('project.new_invoice'), icon: 'plus', tier: 'primary', variant: 'primary',
-      show: p.status === 'active' && w, to: `/invoices/new?client_id=${p.client_id}&project_id=${p.id}` },
+      show: p.status === 'active' && auth.canWrite('invoices.create'), to: `/invoices/new?client_id=${p.client_id}&project_id=${p.id}` },
     { key: 'edit', label: t('project.edit_project'), icon: 'edit', tier: 'secondary', variant: 'success',
       show: w, to: `/projects/${p.id}/edit` },
     { key: 'client', label: t('project.client_detail'), icon: 'user', tier: 'secondary', variant: 'warning',
@@ -133,7 +133,7 @@ const projectActions = computed<ActionItem[]>(() => {
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
       show: canDelete.value && w, run: deleteProject },
     { key: 'archive', label: t('common.archive'), icon: 'archive', tier: 'advanced', variant: 'warning',
-      show: w, run: archive },
+      show: auth.canWrite('projects.archive'), run: archive },
   ]
 })
 </script>
@@ -273,7 +273,7 @@ const projectActions = computed<ActionItem[]>(() => {
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
         <h3 class="font-semibold">{{ t('nav.invoices') }} <span v-if="invoicesTotal" class="text-neutral-400 font-normal">({{ invoicesTotal }})</span></h3>
-        <RouterLink v-if="(project.status === 'active') && auth.canWrite"
+        <RouterLink v-if="(project.status === 'active') && auth.canWrite('invoices.create')"
           :to="`/invoices/new?client_id=${project.client_id}&project_id=${project.id}`"
           class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md inline-flex items-center">
           {{ t('invoice.new') }}

@@ -61,9 +61,13 @@ final class ReminderService
         if (!InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)) {
             throw new \DomainException(InvoiceAmountPolicy::NON_POSITIVE_REMINDER_MESSAGE);
         }
-        // Card/cash/other = úhrada mimo bankovní převod. QR ani bankovní spojení se na
+        // Cokoliv jiného než bankovní převod (karta, hotovost, inkaso, dobírka, zápočet,
+        // jiné — migrace 1128) = úhrada mimo převod. QR ani bankovní spojení se na
         // PDF/emailu nepoužívají; upomínka „zaplaťte převodem" by klienta jen mátla.
-        // Cron filtruje už v SQL; tahle pojistka chrání i bulk/manual cestu.
+        // U inkasa je to navíc věcně špatně — peníze si strháváme sami.
+        // Cron filtruje už v SQL (`payment_method = 'bank_transfer'`, tedy pozitivní
+        // whitelist → nové hodnoty jsou vyloučené automaticky); tahle pojistka chrání
+        // i bulk/manual cestu.
         $paymentMethod = (string) ($invoice['payment_method'] ?? 'bank_transfer');
         if ($paymentMethod !== 'bank_transfer') {
             throw new \DomainException('Upomínat lze jen faktury s platbou bankovním převodem.');

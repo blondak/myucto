@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,6 +23,7 @@ final class ListPurchaseInvoicesAction
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly Config $config,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -41,8 +43,10 @@ final class ListPurchaseInvoicesAction
             'currency'      => $filter['currency']      ?? null,
             'unpaid_only'   => !empty($filter['unpaid_only']),
             'overdue'       => !empty($filter['overdue']),
+            'unmatched'     => !empty($filter['unmatched']),
             'needs_review'  => !empty($filter['needs_review']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
+            'booked'        => $filter['booked'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
@@ -58,6 +62,29 @@ final class ListPurchaseInvoicesAction
         $default = (int) $this->config->get('pagination.invoices_per_page', 50);
         $perPage = min(200, max(5, (int) ($q['per_page'] ?? $default)));
 
-        return Json::ok($response, $this->repo->listGroupedByMonth($filters, $page, $perPage));
+        $result = $this->repo->listGroupedByMonth($filters, $page, $perPage);
+
+        // Jednotný kontrakt zámku per-row (Epic F6, §4.5) — batch přes lockedMapForSources,
+        // jeden IN dotaz na posted zápisy, žádné N+1.
+        $ids = [];
+        foreach ($result['data'] as $group) {
+            foreach ($group['invoices'] as $row) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+        if ($ids !== []) {
+            $map = $this->locks->lockedMapForSources((int) $filters['supplier_id'], 'purchase_invoice', $ids);
+            foreach ($result['data'] as &$group) {
+                foreach ($group['invoices'] as &$row) {
+                    $lock = $map[(int) $row['id']] ?? null;
+                    if ($lock !== null) {
+                        $row['locked'] = $lock->toArray();
+                    }
+                }
+            }
+            unset($group, $row);
+        }
+
+        return Json::ok($response, $result);
     }
 }

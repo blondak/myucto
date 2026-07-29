@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -16,6 +17,7 @@ final class ListInvoicesAction
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Config $config,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -36,6 +38,7 @@ final class ListInvoicesAction
             'currency'    => $filter['currency']    ?? null,
             'unpaid_only' => !empty($filter['unpaid_only']),
             'overdue'     => !empty($filter['overdue']),
+            'booked'      => $filter['booked']      ?? null,
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
 
@@ -50,6 +53,29 @@ final class ListInvoicesAction
         $default = (int) $this->config->get('pagination.invoices_per_page', 50);
         $perPage = min(200, max(5, (int) ($q['per_page'] ?? $default)));
 
-        return Json::ok($response, $this->repo->listGroupedByMonth($filters, $page, $perPage));
+        $result = $this->repo->listGroupedByMonth($filters, $page, $perPage);
+
+        // Jednotný kontrakt zámku per-row (Epic F6, §4.5) — batch přes lockedMapForSources,
+        // jeden IN dotaz na posted zápisy, žádné N+1.
+        $ids = [];
+        foreach ($result['data'] as $group) {
+            foreach ($group['invoices'] as $row) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+        if ($ids !== []) {
+            $map = $this->locks->lockedMapForSources((int) $filters['supplier_id'], 'invoice', $ids);
+            foreach ($result['data'] as &$group) {
+                foreach ($group['invoices'] as &$row) {
+                    $lock = $map[(int) $row['id']] ?? null;
+                    if ($lock !== null) {
+                        $row['locked'] = $lock->toArray();
+                    }
+                }
+            }
+            unset($group, $row);
+        }
+
+        return Json::ok($response, $result);
     }
 }

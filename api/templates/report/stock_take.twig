@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="cs"><head><meta charset="utf-8"><title>Inventurní soupis</title>
+<style>
+body{font-family:montserrat,dejavusans,sans-serif;font-size:8pt;color:#15131d}h1{font-size:16pt;margin:0 0 4mm}.meta{width:100%;border-collapse:collapse;margin-bottom:4mm}.meta td{padding:1mm 2mm;border-bottom:.2pt solid #ddd}.label{color:#666;width:38mm}.lines{width:100%;border-collapse:collapse}.lines th,.lines td{padding:1mm 1.5mm;border-bottom:.2pt solid #ddd}.lines th{background:#f3f4f6;text-align:left}.num{text-align:right}.sign{width:100%;margin-top:12mm;border-collapse:collapse}.sign td{width:50%;padding:0 8mm;text-align:center}.sign-line{border-top:.4pt solid #777;padding-top:2mm}
+</style></head><body>
+<h1>Inventurní soupis #{{ take.id }}</h1>
+<table class="meta">
+<tr><td class="label">Účetní jednotka</td><td>{{ supplier.company_name }}{% if supplier.ic %}, IČ {{ supplier.ic }}{% endif %}</td><td class="label">Sklad</td><td>{{ warehouse.code }} — {{ warehouse.name }}</td></tr>
+<tr><td class="label">Rozhodný den</td><td>{{ take.take_date|cz_date }}</td><td class="label">Způsob zjištění</td><td>{{ counting_method_label }}</td></tr>
+<tr><td class="label">Zahájení</td><td>{{ take.started_at }}</td><td class="label">Ukončení</td><td>{{ take.closed_at }}</td></tr>
+<tr><td class="label">Osoba zjišťující stav</td><td>{{ take.responsible_count_name }}</td><td class="label">Osoba odpovědná za inventuru</td><td>{{ take.responsible_inventory_name }}</td></tr>
+{% if take.note %}<tr><td class="label">Poznámka</td><td colspan="3">{{ take.note }}</td></tr>{% endif %}
+</table>
+<table class="lines"><thead><tr><th>SKU</th><th>Název</th><th>MJ</th><th class="num">Účetní stav</th><th class="num">Skutečný stav</th><th class="num">Rozdíl</th><th class="num">Cena přebytku</th></tr></thead><tbody>
+{% for line in take.lines %}<tr><td>{{ line.item_sku }}</td><td>{{ line.item_name }}</td><td>{{ line.item_unit }}</td><td class="num">{{ line.expected_qty }}</td><td class="num">{{ line.counted_qty is null ? '—' : line.counted_qty }}</td><td class="num">{{ line.diff_qty is null ? '—' : line.diff_qty }}</td><td class="num">{{ line.surplus_unit_cost is null ? '—' : (line.surplus_unit_cost|cz_money) }}</td></tr>{% endfor %}
+</tbody></table>
+<table class="sign"><tr><td><div class="sign-line">{{ take.responsible_count_name }}<br>podpisový záznam osoby odpovědné za zjištění skutečností</div></td><td><div class="sign-line">{{ take.responsible_inventory_name }}<br>podpisový záznam osoby odpovědné za provedení inventury</div></td></tr></table>
+</body></html>

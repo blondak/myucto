@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 9.5pt; color: #1a1a1a; }
+    h1 { font-size: 15pt; margin: 0 0 2mm; }
+    h2 { font-size: 11.5pt; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1.5px solid #333; }
+    .sub { color: #555; font-size: 9pt; margin-bottom: 4mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 1.4mm 2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.r { text-align: right; white-space: nowrap; }
+    tr.total td { font-weight: bold; border-top: 1px solid #333; border-bottom: 1px solid #333; }
+    tr.due td { font-weight: bold; }
+    .note { font-size: 8pt; color: #666; margin: 1.5mm 0; font-style: italic; }
+    .disclaimer { margin-top: 6mm; font-size: 8pt; color: #777; border-top: 0.5px solid #ccc; padding-top: 2mm; }
+    .pos { color: #a11; } .neg { color: #171; }
+</style>
+</head>
+<body>
+    <h1>Přehledy pojistného OSVČ — {{ summary.year }}</h1>
+    <div class="sub">
+        {{ supplier.name }}{% if supplier.ic %} · IČO {{ supplier.ic }}{% endif %}{% if supplier.dic %} · DIČ {{ supplier.dic }}{% endif %}<br>
+        Daňový základ ze samostatné činnosti (§7): <strong>{{ summary.tax_base_7|cz_money }} Kč</strong>
+        {% if summary.is_secondary %}· vedlejší činnost{% endif %}
+    </div>
+
+    <h2>Sociální (důchodové) pojištění — Přehled OSVČ ČSSZ</h2>
+    {% if summary.social.note %}<div class="note">{{ summary.social.note }}</div>{% endif %}
+    <table>
+        <tr><td>Vyměřovací základ ({{ (summary.rates.social_assessment_pct * 100)|round }} % základu, min. {{ summary.social.min_base|cz_money }} Kč)</td><td class="r">{{ summary.social.assessment_base|cz_money }} Kč</td></tr>
+        <tr class="total"><td>Pojistné ({{ (summary.rates.social * 100)|round(1) }} %)</td><td class="r">{{ summary.social.insurance|cz_money }} Kč</td></tr>
+        <tr><td>Zaplacené zálohy</td><td class="r">− {{ summary.social.advances_paid|cz_money }} Kč</td></tr>
+        <tr class="due"><td>{% if summary.social.balance_due >= 0 %}Doplatek{% else %}Přeplatek{% endif %}</td><td class="r {% if summary.social.balance_due >= 0 %}pos{% else %}neg{% endif %}">{{ summary.social.balance_due|abs|cz_money }} Kč</td></tr>
+        <tr><td>Nová měsíční záloha</td><td class="r">{{ summary.social.monthly_advance|cz_money }} Kč</td></tr>
+        {% if summary.social.sickness.insured %}
+        <tr><td>Nemocenské pojištění (dobrovolné, {{ (summary.rates.sickness * 100)|round(1) }} % z {{ summary.social.sickness.monthly_base|cz_money }} Kč/měs)</td><td class="r">{{ summary.social.sickness.monthly_premium|cz_money }} Kč/měs</td></tr>
+        {% endif %}
+    </table>
+
+    <h2>Zdravotní pojištění — Přehled pro zdravotní pojišťovnu</h2>
+    {% if summary.health.note %}<div class="note">{{ summary.health.note }}</div>{% endif %}
+    <table>
+        <tr><td>Vyměřovací základ ({{ (summary.rates.health_assessment_pct * 100)|round }} % základu{% if summary.health.min_applies %}, min. {{ summary.health.min_base|cz_money }} Kč{% endif %})</td><td class="r">{{ summary.health.assessment_base|cz_money }} Kč</td></tr>
+        <tr class="total"><td>Pojistné ({{ (summary.rates.health * 100)|round(1) }} %)</td><td class="r">{{ summary.health.insurance|cz_money }} Kč</td></tr>
+        <tr><td>Zaplacené zálohy</td><td class="r">− {{ summary.health.advances_paid|cz_money }} Kč</td></tr>
+        <tr class="due"><td>{% if summary.health.balance_due >= 0 %}Doplatek{% else %}Přeplatek{% endif %}</td><td class="r {% if summary.health.balance_due >= 0 %}pos{% else %}neg{% endif %}">{{ summary.health.balance_due|abs|cz_money }} Kč</td></tr>
+        <tr><td>Nová měsíční záloha</td><td class="r">{{ summary.health.monthly_advance|cz_money }} Kč</td></tr>
+    </table>
+
+    <div class="note" style="margin-top:4mm">{{ summary.deadlines.note }}</div>
+
+    <div class="disclaimer">
+        Orientační pomůcka pro vyplnění oficiálních Přehledů OSVČ (ČSSZ, zdravotní pojišťovna).
+        Sazby, minima a rozhodné částky se každý rok mění — ověřte aktuální hodnoty a případně s daňovým poradcem.
+        Vygenerováno systémem MyÚčto.cz.
+    </div>
+</body>
+</html>

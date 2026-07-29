@@ -60,7 +60,7 @@ final class SessionSecurityTest extends TestCase
                 'cs',
             ]);
             $this->userId = (int) $this->db->pdo()->lastInsertId();
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             $this->markTestSkipped('DB unavailable: ' . $e->getMessage());
         }
 
@@ -84,6 +84,12 @@ final class SessionSecurityTest extends TestCase
             $this->db->pdo()->prepare('DELETE FROM users WHERE id = ?')->execute([$this->userId]);
         }
         if (isset($this->db)) {
+            // Testy níž přepínají session time_zone (+09:00 / -07:00), aby ověřily
+            // chování mimo UTC. Connection PDO handle se v procesu sdílí, takže bez
+            // téhle obnovy by posunutá zóna prosákla do všech dalších testů a
+            // NOW() by jim posunulo „čerstvost" záznamů (reálně padaly reapStale
+            // a work-report OTP). Connection ji nastavuje z date('P') při připojení.
+            $this->db->pdo()->exec("SET time_zone = '" . date('P') . "'");
             $this->db->close();
         }
     }

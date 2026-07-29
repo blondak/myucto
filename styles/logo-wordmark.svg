@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-label="MyInvoice.cz">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-label="MyÚčto.cz">
   <defs>
     <linearGradient id="mi-bg2" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#6753AE"/>
@@ -8,7 +8,7 @@
   <rect x="4" y="4" width="56" height="56" rx="10" fill="url(#mi-bg2)"/>
   <path d="M14 46 V18 L24 18 L32 34 L40 18 L50 18 V46 H43 V28 L34 44 L30 44 L21 28 V46 Z" fill="#FFFFFF"/>
   <circle cx="50" cy="14" r="8" fill="#FFFFFF"/>
-  <path d="M46.5 14 L49 16.5 L53.5 11.5" fill="none" stroke="#3B2D83" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="76" y="42" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="28" fill="#15131D">My<tspan fill="#3B2D83">Invoice</tspan></text>
+  <path d="M43.95 17.68V10.33H45.43V13.59L48.43 10.33H50.43L47.66 13.19L50.58 17.68H48.66L46.64 14.23L45.43 15.46V17.68ZM55.98 13.93 54.59 14.18Q54.52 13.76 54.27 13.55Q54.02 13.34 53.63 13.34Q53.1 13.34 52.79 13.7Q52.47 14.07 52.47 14.92Q52.47 15.87 52.79 16.26Q53.11 16.65 53.65 16.65Q54.05 16.65 54.3 16.42Q54.56 16.19 54.67 15.64L56.05 15.87Q55.83 16.83 55.22 17.31Q54.61 17.8 53.58 17.8Q52.41 17.8 51.72 17.06Q51.03 16.32 51.03 15.02Q51.03 13.7 51.72 12.97Q52.42 12.23 53.61 12.23Q54.58 12.23 55.15 12.65Q55.73 13.07 55.98 13.93ZM51.97 10.2H53.11L53.65 10.95L54.23 10.2H55.37L54.33 11.68H53.03Z" fill="#3B2D83"/>
+  <text x="76" y="42" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="28" fill="#15131D">My<tspan fill="#3B2D83">Účto</tspan></text>
   <text x="76" y="56" font-family="Inter, system-ui, sans-serif" font-weight="500" font-size="11" fill="#7A748C" letter-spacing="2">FAKTURY · QR · ARES</text>
 </svg>

@@ -11,8 +11,12 @@ export const api = axios.create({
 
 // CSRF token interceptor — token žije v Pinia auth store
 let csrfToken: string | null = null
+let forbiddenPermissionHandler: (() => void | Promise<void>) | null = null
 export function setCsrfToken(token: string | null) {
   csrfToken = token
+}
+export function setForbiddenPermissionHandler(handler: () => void | Promise<void>) {
+  forbiddenPermissionHandler = handler
 }
 
 api.interceptors.request.use((config) => {
@@ -27,7 +31,7 @@ api.interceptors.request.use((config) => {
   // Multi-supplier — aktuální supplier z localStorage (Pinia persist).
   // Server fallbackuje na MIN(supplier.id) když chybí/neplatný.
   const sid = localStorage.getItem('myinvoice.current_supplier_id')
-  if (sid && /^\d+$/.test(sid)) {
+  if (sid && /^\d+$/.test(sid) && !config.headers.has('X-Supplier-Id')) {
     config.headers.set('X-Supplier-Id', sid)
   }
   return config
@@ -74,6 +78,21 @@ api.interceptors.response.use(
       }
     }
 
+    // 403 forbidden_supplier (Epic F0) = v localStorage je stale supplier, ke kterému
+    // uživatel ztratil membership (admin ho odebral). Bez zásahu by selhal i /auth/me
+    // (interceptor hlavičku posílá vždy) a uživatel by se do aplikace vůbec nedostal.
+    // Smaž stale výběr a reloadni — server bez hlavičky fallbackne na první přiřazenou
+    // firmu. Reload jen když klíč existoval → žádná smyčka.
+    if (status === 403 && code === 'forbidden_supplier') {
+      if (localStorage.getItem('myinvoice.current_supplier_id') !== null) {
+        localStorage.removeItem('myinvoice.current_supplier_id')
+        window.location.reload()
+      }
+    }
+    if (status === 403 && code === 'forbidden_permission') {
+      void forbiddenPermissionHandler?.()
+    }
+
     // 503 config_missing / bootstrap_failed = backend není nakonfigurovaný
     // (chybí cfg.php nebo nelze do DB). Zobrazíme fullscreen overlay s návodem,
     // ať uživatel nedostane jen prázdný login form bez vysvětlení.
@@ -100,7 +119,7 @@ function showBootstrapErrorOverlay(title: string, detail: string, hint: string):
   div.innerHTML = `
     <div style="background:#fff;max-width:560px;width:90%;padding:32px;border-radius:12px;
                 box-shadow:0 8px 32px rgba(0,0,0,0.3);">
-      <h2 style="margin:0 0 12px;color:#3B2D83;font-size:24px;">⚠ MyInvoice.cz</h2>
+      <h2 style="margin:0 0 12px;color:#3B2D83;font-size:24px;">⚠ MyÚčto.cz</h2>
       <p style="margin:0 0 16px;color:#15131D;font-weight:600;">${escapeHtml(title)}</p>
       ${detail ? `<p style="margin:0 0 12px;color:#5A5470;font-family:monospace;
         background:#F4F2F8;padding:8px 12px;border-radius:6px;font-size:13px;">${escapeHtml(detail)}</p>` : ''}

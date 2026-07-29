@@ -70,6 +70,11 @@ onMounted(async () => {
     router.replace('/setup')
     return
   }
+  const demo = auth.setupStatus?.demo
+  if (demo?.enabled) {
+    email.value = demo.email
+    password.value = demo.password
+  }
   // Stale session detection: pokud uživatel přijde na /login s platnou cookie,
   // hodíme ho rovnou kam patří (`/` nebo `/setup-totp`). Bez toho by submit
   // formuláře probíhal v rozjetém stavu a UX by byl matoucí.
@@ -77,6 +82,15 @@ onMounted(async () => {
   if (stillAuthed) {
     router.replace((auth.mustSetupMfa || auth.mustSetupTotp) ? '/setup-mfa' : '/')
     return
+  }
+  if (demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
+    try {
+      await auth.login(demo.email, demo.password)
+      router.replace('/')
+      return
+    } catch {
+      error.value = t('auth.demo_login_failed')
+    }
   }
   if (auth.setupStatus?.captcha.provider === 'turnstile') {
     captchaSiteKey.value = auth.setupStatus.captcha.site_key
@@ -91,6 +105,13 @@ onMounted(async () => {
     }
   }
 })
+
+function demoLoginCanRun(): boolean {
+  const key = 'myinvoice.demo_auto_login_attempted'
+  if (sessionStorage.getItem(key) === '1') return false
+  sessionStorage.setItem(key, '1')
+  return auth.setupStatus?.captcha.provider === 'none'
+}
 
 async function submit() {
   if (passwordlessBusy.value) return
@@ -109,7 +130,7 @@ async function submit() {
       emailOtp: emailOtp.value || undefined,
       rememberDevice: rememberDevice.value,
     })
-    router.push('/')
+    router.push(auth.isClientRole ? '/portal' : '/')
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
     const msg  = e?.response?.data?.error?.message
@@ -267,6 +288,10 @@ async function resendCode() {
         <h2 class="text-xl font-semibold mb-1">{{ t('auth.login_title') }}</h2>
         <p class="text-sm text-neutral-500 mb-6">{{ t('auth.login_subtitle') }}</p>
 
+        <div v-if="auth.isDemo" class="mb-5 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800">
+          {{ t('auth.demo_login_hint') }}
+        </div>
+
         <form @submit.prevent="submit" class="space-y-4">
           <div v-if="auth.setupStatus?.passwordless_login_enabled" class="space-y-3">
             <button
@@ -400,7 +425,7 @@ async function resendCode() {
             {{ auth.loading ? '…' : t('auth.login') }}
           </button>
 
-          <div class="text-center pt-2">
+          <div v-if="!auth.isDemo" class="text-center pt-2">
             <router-link to="/forgot" class="text-sm text-primary-600 hover:underline">
               {{ t('auth.forgot') }}
             </router-link>

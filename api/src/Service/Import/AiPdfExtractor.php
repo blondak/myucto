@@ -9,7 +9,10 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
+use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Support\PaymentMethods;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -34,21 +37,34 @@ final class AiPdfExtractor
 
     public function __construct(
         private readonly Connection $db,
-        private readonly AnthropicClient $anthropic,
+        private readonly LlmGatewayInterface $anthropic,
         private readonly ClientResolver $clientResolver,
         private readonly PurchaseInvoiceRepository $repo,
         private readonly PurchaseInvoiceCalculator $calc,
-        private readonly PdfIsdocExtractor $pdfIsdoc,
-        private readonly IsdocParser $isdoc,
+        private readonly InvoiceExtractionRouter $router,
         private readonly IsdocToPurchaseInvoiceMapper $isdocMapper,
         private readonly Config $config,
         private readonly \MyInvoice\Service\Currency\CnbExchangeRateClient $cnb,
         private readonly ImageToPdfConverter $imageToPdf,
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
+        // §DM: deterministická vrstva klasifikace druhu výdaje. Pure (bez DB), pravidla
+        // tenanta se sem záměrně netahají — ta se vyhodnotí až v editoru nad uloženým
+        // dokladem (endpoint expense-suggestions), kde je uživatel potvrzuje.
+        private readonly ExpenseKindClassifier $expenseClassifier,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
+    }
+
+    /**
+     * Schopnosti aktivního providera pro daného tenanta (whitelist modelů atd.) —
+     * proxy na bránu, aby caller (AiExtractPdfAction) mohl validovat `?model=` override
+     * proti povolenému whitelistu bez znalosti konkrétního providera.
+     */
+    public function capabilities(int $supplierId): LlmProviderCapabilities
+    {
+        return $this->anthropic->capabilities($supplierId);
     }
 
     /**
@@ -60,15 +76,34 @@ final class AiPdfExtractor
      */
     public function extractAndCreate(int $supplierId, int $userId, string $pdfBytes, ?string $modelOverride = null, ?string $originalFilename = null, ?string $importBatchId = null): array
     {
+        // ISDOC-first rozhodnutí (F7 §3.9) — sdílený router (stejný jako inbox scanner).
+        // Detekuje isdocx balíček, embedded ISDOC v PDF, a rozhoduje o AI fallbacku
+        // s OPRAVENOU sémantikou: validní ISDOC ⇒ AI se NIKDY nevolá; přítomný ISDOC
+        // který selhal parse ⇒ zaloguj a přesto fallback na AI (nikdy nebrickovat).
+        $decision = $this->router->decide($pdfBytes);
+
         // ISDOCX balíček (ZIP s vnitřním .isdoc + čitelným PDF) nahraný napřímo →
         // deterministický import přes ISDOC parser (0 AI cost), PDF z balíčku archivujeme.
-        // Magic check je levný; unwrap zapíše temp jen pro skutečný ZIP.
-        if (IsdocxExtractor::isZip($pdfBytes)) {
-            $pkg = (new IsdocxExtractor())->unwrap($pdfBytes);
-            if ($pkg !== null) {
+        if ($decision->source === 'isdocx') {
+            if (!$decision->useLlm) {
                 // $pdfBytes = ORIGINÁLNÍ .isdocx (předáme dál k archivaci as-is).
-                return $this->createFromIsdocx($pkg, $supplierId, $userId, $originalFilename, $pdfBytes, $importBatchId);
+                return $this->createFromIsdocx(
+                    (array) $decision->isdocxPackage, (array) $decision->parsed,
+                    $supplierId, $userId, $originalFilename, $pdfBytes, $importBatchId,
+                );
             }
+            // Vnitřní ISDOC selhal parse → fallback na AI nad čitelným vnitřním PDF
+            // (nikdy nebrickovat). Bez vnitřního PDF nemáme co poslat AI → chyba.
+            $innerPdf = $decision->isdocxPackage['pdf'] ?? null;
+            if ($innerPdf === null) {
+                return [
+                    'ok'     => false,
+                    'error'  => 'ISDOCX: vnitřní ISDOC se nepodařilo načíst: ' . ($decision->parseError ?? 'neznámá chyba'),
+                    'source' => 'isdocx_invalid',
+                ];
+            }
+            $pdfBytes = $innerPdf;
+            $decision = null; // dále už jen AI cesta nad vnitřním PDF
         }
 
         // Obrázek (fotka z telefonu, issue #75) → normalizuj na PDF; downstream
@@ -102,32 +137,43 @@ final class AiPdfExtractor
             ];
         }
 
-        // ISDOC priorita — pokud PDF/A-3 obsahuje embedded ISDOC, použij parser (přesnější, zdarma).
-        $isdocXml = $this->pdfIsdoc->extract($pdfBytes);
-        if ($isdocXml !== null) {
+        // ISDOC priorita — pokud PDF/A-3 obsahuje embedded ISDOC a parse uspěl, použij
+        // parser (přesnější, zdarma). Rozhodnutí + parse vlastní router (§3.9). Genuine
+        // parse failure už router zalogoval a signalizuje useLlm=true → spadneme do AI.
+        if ($decision !== null && $decision->source === 'isdoc_embedded' && !$decision->useLlm) {
             try {
-                $parsed = $this->isdoc->parse($isdocXml);
-                if (!empty($parsed['invoices'])) {
-                    $r = $this->isdocMapper->map($parsed['invoices'][0], $supplierId, $userId);
-                    // Attach PDF k vytvořené přijaté faktuře
-                    $this->attachPdf((int) $r['purchase_invoice_id'], $supplierId, $pdfBytes, $originalFilename);
-                    // Zdrojový artefakt = vytažený ISDOC XML (embedded v PDF/A-3) — issue #175.
-                    $srcName = ($originalFilename !== null && $originalFilename !== '')
-                        ? preg_replace('/\.[^.\\/]+$/', '.isdoc', $originalFilename)
-                        : 'source.isdoc';
-                    $this->pdfArchiver->archiveSourceBytes(
-                        (int) $r['purchase_invoice_id'], $supplierId, $isdocXml, $srcName, 'isdoc',
-                    );
-                    $this->tagImportBatch((int) $r['purchase_invoice_id'], $supplierId, $importBatchId);
-                    return [
-                        'ok'                  => true,
-                        'purchase_invoice_id' => $r['purchase_invoice_id'],
-                        'vendor_id'           => $r['vendor_id'],
-                        'source'              => 'isdoc_embedded',
-                    ];
-                }
+                $r = $this->isdocMapper->map(((array) $decision->parsed)['invoices'][0], $supplierId, $userId);
+                // Attach PDF k vytvořené přijaté faktuře
+                $this->attachPdf((int) $r['purchase_invoice_id'], $supplierId, $pdfBytes, $originalFilename);
+                // Zdrojový artefakt = vytažený ISDOC XML (embedded v PDF/A-3) — issue #175.
+                $srcName = ($originalFilename !== null && $originalFilename !== '')
+                    ? preg_replace('/\.[^.\\/]+$/', '.isdoc', $originalFilename)
+                    : 'source.isdoc';
+                $this->pdfArchiver->archiveSourceBytes(
+                    (int) $r['purchase_invoice_id'], $supplierId, (string) $decision->isdocXml, $srcName, 'isdoc',
+                );
+                $this->tagImportBatch((int) $r['purchase_invoice_id'], $supplierId, $importBatchId);
+                return [
+                    'ok'                  => true,
+                    'purchase_invoice_id' => $r['purchase_invoice_id'],
+                    'vendor_id'           => $r['vendor_id'],
+                    'source'              => 'isdoc_embedded',
+                ];
             } catch (\Throwable $e) {
-                // ISDOC fail → spadnout do AI fallback
+                // Validní ISDOC, ale mapování selhalo — typicky wrong-tenant (ISDOC patří
+                // jinému plátci) nebo chybějící IČO dodavatele; IsdocToPurchaseInvoiceMapper
+                // vyhazuje InvalidArgumentException. §3.9: validní ISDOC ⇒ AI se NIKDY nevolá,
+                // takže vracíme STRUKTUROVANOU chybu (ne bublinu do HTTP 500) — stejně jako
+                // isdocx cesta (isdocx_map_failed). Bez pokusu o AI fallback.
+                $this->logger->warning('ISDOC embedded: mapování selhalo', [
+                    'supplier_id' => $supplierId,
+                    'error'       => $e->getMessage(),
+                ]);
+                return [
+                    'ok'     => false,
+                    'error'  => $e->getMessage(),
+                    'source' => 'isdoc_map_failed',
+                ];
             }
         }
 
@@ -141,18 +187,22 @@ final class AiPdfExtractor
         // nebo katastrofální items mismatch). Sonnet 4.6 čte komplexní PDF (autoservisy,
         // multi-column layouts) výrazně lépe za cenu ~4× vyšší. Pokud uživatel už má
         // Sonnet/Opus jako default, retry nemá smysl (už by ho použil).
+        // Auto-upgrade řídí provider (§3.3 hoist): strongerModel() vrátí silnější model
+        // pro daného tenanta (Anthropic: haiku → sonnet-4-6) nebo null = žádný upgrade.
+        // Extrakci retry provedeme JEN když je návrat non-null; jinak chování identické.
         $modelUsed = (string) ($extracted['model'] ?? '');
-        $isHaiku = str_contains($modelUsed, 'haiku');
-        if ($isHaiku) {
+        $strongerModel = $this->anthropic->strongerModel($supplierId, $modelUsed);
+        if ($strongerModel !== null) {
             $tenantIc = $this->fetchTenantIc($supplierId);
             $weakness = $this->detectWeakExtraction($extracted['data'], $tenantIc);
             if ($weakness !== null) {
-                $this->logger->info('AI extractor: Haiku vrátil slabý výsledek, retry se Sonnetem 4.6', [
-                    'supplier_id' => $supplierId,
-                    'reason' => $weakness,
-                    'haiku_model' => $modelUsed,
+                $this->logger->info('AI extractor: slabý výsledek, retry silnějším modelem', [
+                    'supplier_id'    => $supplierId,
+                    'reason'         => $weakness,
+                    'weak_model'     => $modelUsed,
+                    'stronger_model' => $strongerModel,
                 ]);
-                $upgrade = $this->anthropic->extractInvoice($supplierId, $pdfBytes, 'claude-sonnet-4-6');
+                $upgrade = $this->anthropic->extractInvoice($supplierId, $pdfBytes, $strongerModel);
                 if ($upgrade['ok']) {
                     $extracted = $upgrade;
                 }
@@ -260,6 +310,10 @@ final class AiPdfExtractor
                 'source'              => 'ai',
                 'model'               => $extracted['model'] ?? null,
                 'usage'               => $extracted['usage'] ?? null,
+                // Provenance badge (F7 §3.7) — router doplňuje provider/region do
+                // extrakčního návratu; protáhneme je do response i activity_logu.
+                'provider'            => $extracted['provider'] ?? null,
+                'region'              => $extracted['region'] ?? null,
                 'ai_data'             => $data,
             ];
         } catch (\Throwable $e) {
@@ -279,9 +333,11 @@ final class AiPdfExtractor
      * kdyby přišel samotný .pdf / ISDOC.PDF); balíček bez PDF se nededupuje hashem.
      *
      * @param array{isdoc:string, isdoc_name:string, pdf:?string, pdf_name:?string} $pkg
+     * @param array{supplier_ic:?string, invoices:list<array<string,mixed>>} $parsed vyřešený ISDOC
+     *        (router už naparsoval; validní faktura je garantována — viz {@see InvoiceExtractionRouter})
      * @return array{ok:bool, purchase_invoice_id?:int, vendor_id?:int, source:string, error?:string, duplicate?:bool, message?:string}
      */
-    private function createFromIsdocx(array $pkg, int $supplierId, int $userId, ?string $originalFilename, ?string $isdocxBytes = null, ?string $importBatchId = null): array
+    private function createFromIsdocx(array $pkg, array $parsed, int $supplierId, int $userId, ?string $originalFilename, ?string $isdocxBytes = null, ?string $importBatchId = null): array
     {
         $innerPdf = $pkg['pdf'];
 
@@ -297,16 +353,6 @@ final class AiPdfExtractor
                     'message'             => 'ISDOCX je již importován jako faktura #' . $existingId,
                 ];
             }
-        }
-
-        try {
-            $parsed = $this->isdoc->parse($pkg['isdoc']);
-        } catch (\Throwable $e) {
-            return ['ok' => false, 'error' => 'ISDOCX: vnitřní ISDOC se nepodařilo načíst: ' . $e->getMessage(), 'source' => 'isdocx_invalid'];
-        }
-        if (empty($parsed['invoices']) || isset($parsed['invoices'][0]['__error'])) {
-            $err = $parsed['invoices'][0]['__error'] ?? 'ISDOCX neobsahuje fakturu';
-            return ['ok' => false, 'error' => (string) $err, 'source' => 'isdocx_invalid'];
         }
 
         try {
@@ -450,13 +496,31 @@ final class AiPdfExtractor
         // kalkulátor koeficientem shora (§37 ZDPH) → celek sedí na haléř.
         $pricesIncludeVat = self::resolvePricesIncludeVat($data, $documentKind);
 
+        // §DM „AI import" — návrh druhu nákladu per řádek. Počítá se TEĎ, z původních
+        // (nesloučených) řádků: níž je collapse může nahradit jediným součtovým řádkem,
+        // na kterém už povahu jednotlivých plnění nikdo nezjistí.
+        //
+        // Rok pořízení rozhoduje o limitu §26/2 ZDP (mění se), takže bereme datum plnění
+        // dokladu, ne dnešek — doklad se běžně importuje zpětně.
+        $acqDate = (string) ($data['tax_date'] ?? $data['issue_date'] ?? '');
+        $assetLimit = $this->fixedAssetLimit($acqDate !== '' ? (int) substr($acqDate, 0, 4) : (int) date('Y'));
+        // Cena za kus je v měně dokladu; práh §26/2 ZDP je v Kč. U cizoměnového dokladu proto
+        // přepočteme cenu na CZK kurzem ČNB k DUZP (shodně s applyCnbRate), jinak by EUR/USD
+        // položka porovnala cizoměnovou cenu s korunovým limitem a majetek se překlopil špatně.
+        $kindFxRate = $this->classificationFxRate($data);
+        $vendorNameForKind = self::str($data['vendor']['company_name'] ?? null);
+        /** @var list<ExpenseKindSuggestion|null> $kindProposals index řádku => návrh (nebo null) */
+        $kindProposals = [];
+
         $items = [];
-        foreach ($data['items'] as $idx => $line) {
+        // array_values: validace zaručuje jen `is_array`, ne souvislé klíče. Bez přeindexování
+        // by se u řídkého pole rozešel $idx (→ order_index, $kindProposals) s pozicí v $items.
+        foreach (array_values($data['items']) as $idx => $line) {
             $rate = (float) ($line['vat_rate'] ?? 0);
             $qtyAi = (float) ($line['quantity'] ?? 0);
             $priceAi = (float) ($line['unit_price_without_vat'] ?? 0);
             // Doklad s explicitní řádkovou částkou bez DPH (sloupec „Částka"/„Celkem bez
-            // DPH"/„Základ") — autoservisy NC Auto/BMW, kde „Cena" NENÍ jednotková cena
+            // DPH"/„Základ") — typicky autoservisy, kde „Cena" NENÍ jednotková cena
             // k násobení množstvím a qty×cena nesedí na řádkovou částku. Vezmeme částku
             // jako pravdu (1 ks × částka), aby se zachovala itemizace a součet řádků sedl
             // na základ z rekapitulace (jinak by se doklad sloučil na jediný řádek).
@@ -477,6 +541,22 @@ final class AiPdfExtractor
                 $qty = $qtyAi;
                 $price = $priceAi;
             }
+            // Deterministická vrstva má PŘEDNOST, AI je až fallback — rozhoduje o tom
+            // AiExpenseKindProposal::resolve(), ať je vrstvení na jednom místě (§DM).
+            $priceCzk = $price * $kindFxRate; // cena za kus v Kč pro práh §26/2 (§26/2 je o vstupní ceně jedné věci)
+            $kindProposals[$idx] = AiExpenseKindProposal::resolve(
+                $this->expenseClassifier->classify(
+                    (string) $line['description'],
+                    $vendorNameForKind,
+                    $vendorId,
+                    $priceCzk,
+                    $assetLimit,
+                ),
+                is_array($line) ? $line : [],
+                $priceCzk,
+                $assetLimit,
+            );
+
             $items[] = [
                 'description'            => (string) $line['description'],
                 'quantity'               => $qty,
@@ -517,6 +597,9 @@ final class AiPdfExtractor
         //   - JEDNOŘÁDKOVÝ doklad → authoritativeRecapBaseLine ho nahradí 1 ks × základ
         //     z rekapitulace (čistší než 1 brutto řádek + koeficientové dorovnání).
         $grossLinesPricesInclVat = false;
+        // Sledujeme, jestli řádky nahradil jediný součtový řádek — per-položkový druh výdaje
+        // tím ztrácí smysl (viz AiExpenseKindProposal::mergeForCollapsedLine()).
+        $itemsCollapsed = false;
         if (!$vendorNonPayer) {
             if (!$pricesIncludeVat && count($items) > 1 && self::linesAreGrossSingleRate($items, $data, $isCredit)) {
                 $this->logger->info('AI extractor: víceřádkové brutto ceny dle rekapitulace → režim ceny s DPH, řádky zachovány', [
@@ -537,6 +620,7 @@ final class AiPdfExtractor
                         'recap_total'           => $data['total_with_vat'] ?? null,
                     ]);
                     $items = $authoritative;
+                    $itemsCollapsed = true;
                     // Základ je základ; DPH připne override → žádná „shora" math z brutto.
                     $pricesIncludeVat = false;
                 }
@@ -556,8 +640,26 @@ final class AiPdfExtractor
                     'summary_base'          => $data['total_without_vat'] ?? null,
                 ]);
                 $items = $collapsed;
+                $itemsCollapsed = true;
             }
         }
+
+        // Návrhy druhu výdaje srovnáme s FINÁLNÍMI řádky. Po sloučení drží jediný řádek
+        // součet věcně různých plnění, takže se návrh udrží jen při shodě všech původních
+        // řádků; jinak zůstane doklad neurčený (= 518, dnešní chování).
+        if ($itemsCollapsed) {
+            $merged = AiExpenseKindProposal::mergeForCollapsedLine($kindProposals);
+            $this->logger->info('AI extractor: řádky sloučeny → druh výdaje ' . ($merged !== null ? 'sjednocen' : 'zahozen'), [
+                'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
+                'proposals_before'      => count($kindProposals),
+                'merged_kind'           => $merged?->kind->value,
+            ]);
+            $kindProposals = $merged !== null ? [0 => $merged] : [];
+        }
+        // Návrh NEZAPISUJEME na řádek — §DM „Návrh se ukáže v editoru, uživatel potvrdí,
+        // neúčtovat naslepo". Uživateli ho doručí varování dokladu (níž).
+        $kindProposals = array_filter($kindProposals, static fn (?ExpenseKindSuggestion $p): bool => $p !== null);
+        $expenseKindWarning = AiExpenseKindProposal::warningText($kindProposals, $items);
 
         // Reverse charge auto-detect: vendor je v EU/3.zemi A všechny řádky mají vat_rate=0
         // → typicky přenesená daňová povinnost (Čech přijímá službu/zboží ze zahraničí).
@@ -661,10 +763,23 @@ final class AiPdfExtractor
                 'source'          => 'ai',
             ],
             'document_kind'         => $documentKind,
+            // Vazba dobropisu na opravovanou fakturu (migrace 1096, task #7): AI vrací číslo
+            // opravované faktury v `corrected_invoice_number` (odděleně od vlastního čísla
+            // dobropisu ve `vendor_invoice_number`). Navážeme JEN když je kandidát JEDINÝ —
+            // stejná opatrnost jako jednorázové předvyplnění v migraci; víc shod = dohad.
+            'parent_purchase_invoice_id' => $this->resolveCorrectedInvoiceParent(
+                $isCredit,
+                $data['corrected_invoice_number'] ?? null,
+                $supplierId,
+                $vendorId,
+            ),
             'issue_date'            => (string) $data['issue_date'],
             'tax_date'              => isset($data['tax_date']) && $data['tax_date'] ? (string) $data['tax_date'] : null,
             'due_date'              => (string) ($data['due_date'] ?? $data['issue_date']),
             'received_at'           => date('Y-m-d'),
+            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
+            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) $data['currency'], $supplierId),
             'exchange_rate'         => null,
             'exchange_rate_source'  => 'manual',
@@ -725,9 +840,12 @@ final class AiPdfExtractor
         if (!empty($data['already_paid'])) {
             $this->markAlreadyPaid($id, $supplierId);
         }
+        // Forma úhrady z dokladu (migrace 1128) — hlavně INKASO: takovou fakturu nesmíme
+        // nabídnout do platebního příkazu, jinak zaplatíme podruhé.
+        $this->applyPaymentMethod($id, $supplierId, $data);
         // Sanity check: rozdíl mezi součtem řádků a AI-vráceným totalem >2 % → varování.
         // Typicky odhalí faktury kde AI sečetla subtotaly jako další items
-        // (např. NC Auto BMW Service → 4977 reálně vs 22442 jako duplicitní subtotaly).
+        // (např. faktura autoservisu, kde se subtotaly zdvojují).
         $this->maybeFlagTotalsMismatch($id, $supplierId, $data, $items, $pricesIncludeVat);
         // Dodavatel neplátce → vysvětlující varování (má přednost před mismatch hláškou).
         // U reverse charge se NEuvádí: dodavatel je sice neplátce české DPH, ale příjemce
@@ -748,6 +866,10 @@ final class AiPdfExtractor
         }
         // Finální faktura odkazující na zálohu ("zaplaceno zálohou č. X") → zkus najít
         // shodnou přijatou zálohu a NAVRHNI propojení (uživatel potvrdí v detailu).
+        // Týká se i DDKP (daňový doklad k přijaté platbě, document_kind='tax_document'):
+        // ten se rovněž váže na poskytnutou zálohu přes advance_reference, takže sdílí
+        // stejný návrhový mechanismus (advance_link_suggested_id). Vyloučená je jen
+        // samotná záloha ('advance'), která se na nic nenavazuje.
         if ($documentKind !== 'advance') {
             $this->maybeSuggestAdvanceLink($id, $supplierId, $vendorId, $data);
         }
@@ -766,6 +888,15 @@ final class AiPdfExtractor
         if ($rcWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $rcWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        // §DM „AI import": návrhy druhu nákladu. Append (ne set) ze stejného důvodu jako výš —
+        // ostatní hlášky ho nesmí přepsat. Doklad je bez nich uložený správně (neurčeno = 518).
+        if ($expenseKindWarning !== null) {
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, $expenseKindWarning);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }
@@ -1194,6 +1325,42 @@ final class AiPdfExtractor
      * historicky uzavřená, intermediate stavy nemají smysl. Selhání logujeme (ne silently),
      * aby debugování bylo viditelné.
      */
+    /**
+     * Zapíše formu úhrady vyčtenou AI (`payment.method`, migrace 1128).
+     *
+     * Klíčové pravidlo: zapisuje se se zdrojem 'ai', takže repository ji NEPUSTÍ přes
+     * hodnotu nastavenou ručně ('manual') — účetní má vždycky poslední slovo. Když AI
+     * formu na dokladu nenašla, vrací null a my nezapisujeme NIC (doklad si nechá default
+     * nebo předvolbu dodavatele) — hádat formu úhrady je horší než ji neznat.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function applyPaymentMethod(int $id, int $supplierId, array $data): void
+    {
+        $payment = is_array($data['payment'] ?? null) ? $data['payment'] : [];
+        $method = PaymentMethods::normalizeNullable($payment['method'] ?? null);
+        if ($method === null) {
+            return;
+        }
+        // Nízká jistota = doklad formu nejspíš neuvádí a model ji dovodil (typicky
+        // z bankovního spojení, což je přesně ta chyba, před kterou prompt varuje).
+        // Radši nechat default a nechat účetní rozhodnout, než tiše přepnout na inkaso.
+        $confidence = $payment['method_confidence'] ?? null;
+        if (is_numeric($confidence) && (float) $confidence < 0.7) {
+            return;
+        }
+        try {
+            $this->repo->setPaymentMethod($id, $supplierId, $method, 'ai');
+        } catch (\Throwable $e) {
+            // Forma úhrady je „nice to have" — faktura je jinak naimportovaná správně.
+            $this->logger->error('AI extractor: zápis payment_method selhal', [
+                'purchase_invoice_id' => $id,
+                'method'              => $method,
+                'error'               => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function markAlreadyPaid(int $id, int $supplierId): void
     {
         try {
@@ -1317,6 +1484,55 @@ final class AiPdfExtractor
         $ic = $stmt->fetchColumn();
         if ($ic === false || $ic === '' || $ic === null) return null;
         return $this->normalizeIc((string) $ic);
+    }
+
+    /**
+     * Limit §26/2 ZDP pro rok POŘÍZENÍ (default 80 000). Shodný zdroj i fallback jako
+     * {@see \MyInvoice\Service\Accounting\Expense\ExpenseClassificationService} — limit se
+     * mění, takže natvrdo nikde.
+     */
+    private function fixedAssetLimit(int $year): float
+    {
+        try {
+            return (float) ($this->taxConstants->forYear($year)['fixed_asset_limit'] ?? 80000.0);
+        } catch (\Throwable) {
+            // Chybějící číselník nesmí shodit import — druh výdaje je jen návrh.
+            return 80000.0;
+        }
+    }
+
+    /**
+     * Kurz pro přepočet ceny za kus na CZK při návrhu druhu nákladu (§26/2 ZDP). Práh majetku
+     * je v korunách, doklad může být v cizí měně. Kurz bereme z ČNB k DUZP (fallback vystavení),
+     * shodně s {@see applyCnbRate}. CZK doklad, chybějící datum nebo výpadek ČNB ⇒ 1,0 —
+     * konzervativně: návrh je jen k potvrzení a v editoru se přepočte přesným kurzem dokladu.
+     */
+    private function classificationFxRate(array $data): float
+    {
+        $currency = strtoupper((string) ($data['currency'] ?? 'CZK'));
+        if ($currency === 'CZK' || $currency === '') {
+            return 1.0;
+        }
+        $dateStr = (string) ($data['tax_date'] ?? $data['issue_date'] ?? '');
+        if ($dateStr === '') {
+            return 1.0;
+        }
+        try {
+            $result = $this->cnb->getRate($currency, new \DateTimeImmutable($dateStr));
+        } catch (\Throwable) {
+            return 1.0; // ČNB timeout / neplatné datum — návrh nesmí shodit import
+        }
+        $rate = is_array($result) && isset($result['rate']) ? (float) $result['rate'] : 0.0;
+        return $rate > 0 ? $rate : 1.0;
+    }
+
+    private static function str(mixed $v): ?string
+    {
+        if (!is_string($v)) {
+            return null;
+        }
+        $s = trim($v);
+        return $s === '' ? null : $s;
     }
 
     private function normalizeIc(string $ic): ?string
@@ -1541,7 +1757,7 @@ final class AiPdfExtractor
     private function normalizeDocumentKind(string $kind): string
     {
         $k = strtolower(trim($kind));
-        return in_array($k, ['invoice', 'credit_note', 'advance', 'receipt'], true)
+        return in_array($k, ['invoice', 'credit_note', 'advance', 'receipt', 'tax_document'], true)
             ? $k
             : 'invoice';
     }
@@ -1552,6 +1768,32 @@ final class AiPdfExtractor
         if ($vn === '') $vn = 'AI-import';
         $vn = (string) preg_replace('/[\x00-\x1F\x7F]/', '', $vn);
         return strlen($vn) > 50 ? substr($vn, 0, 50) : $vn;
+    }
+
+    /**
+     * Dohledá opravovanou fakturu dobropisu z AI pole `corrected_invoice_number`.
+     * Vrací id JEN u dobropisu s neprázdným číslem a JEDINÝM kandidátem (běžná faktura
+     * téhož dodavatele s tímtéž číslem) — jinak null. Opatrnost dle migrace 1096: víc
+     * shod = dohad, ten do vazby nepatří; uživatel ji může doplnit ručně v editoru.
+     */
+    private function resolveCorrectedInvoiceParent(bool $isCredit, mixed $correctedNumber, int $supplierId, int $vendorId): ?int
+    {
+        if (!$isCredit || !is_scalar($correctedNumber)) {
+            return null;
+        }
+        $number = trim((string) $correctedNumber);
+        if ($number === '') {
+            return null;
+        }
+        $parentId = $this->repo->findUniqueInvoiceIdByVendorNumber($supplierId, $vendorId, $number);
+        if ($parentId !== null) {
+            $this->logger->info('AI extractor: dobropis navázán na opravovanou fakturu dle corrected_invoice_number', [
+                'corrected_invoice_number' => $number,
+                'parent_purchase_invoice_id' => $parentId,
+                'vendor_id' => $vendorId,
+            ]);
+        }
+        return $parentId;
     }
 
     /**

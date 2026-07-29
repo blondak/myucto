@@ -81,6 +81,32 @@ final class MergedInvoicePdfExporterTest extends TestCase
         $this->exporter()->export([12], ['id' => 7], 3, false);
     }
 
+    public function testDemoExportResolvesMissingRateWithoutPersistence(): void
+    {
+        $this->invoices->method('find')->willReturn([
+            'id' => 12,
+            'supplier_id' => 7,
+            'currency' => 'EUR',
+            'exchange_rate' => null,
+        ]);
+        $this->rateApplier->expects(self::once())
+            ->method('ensureRate')
+            ->with(12, false);
+        $this->renderer->method('renderUnsignedInvoiceOnly')
+            ->willReturnCallback(static function (int $id, string $path): void {
+                $pdf = new Mpdf(['tempDir' => sys_get_temp_dir(), 'default_font' => 'dejavusans']);
+                $pdf->WriteHTML("<p style=\"font-family:dejavusans\">Invoice {$id}</p>");
+                $pdf->Output($path, \Mpdf\Output\Destination::FILE);
+            });
+
+        $result = $this->exporter()->export([12], ['id' => 7], 3, false, false);
+        try {
+            self::assertFileExists($result['path']);
+        } finally {
+            @unlink($result['path']);
+        }
+    }
+
     public function testSigningMustBeAvailableBeforeRendering(): void
     {
         $this->signing->expects(self::once())

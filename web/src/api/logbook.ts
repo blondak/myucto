@@ -278,6 +278,27 @@ export interface LogbookSummary {
   monthly: MonthlyKm
 }
 
+export interface PagedMeta {
+  total: number
+  page: number
+  per_page: number
+  pages: number
+}
+
+export interface TripListResponse {
+  data: Trip[]
+  meta: PagedMeta
+  /** Distinct roky jízd v rámci scope (auto), NEZÁVISLE na aktuálním year/month filtru — pro dropdown. */
+  years: number[]
+}
+
+export interface FuelingListResponse {
+  data: Fueling[]
+  meta: PagedMeta
+  /** Distinct roky tankování v rámci scope (auto), NEZÁVISLE na aktuálním year/month filtru — pro dropdown. */
+  years: number[]
+}
+
 export const logbookApi = {
   // Cars
   listCars: (includeArchived = false) =>
@@ -295,7 +316,7 @@ export const logbookApi = {
   deleteCategory: (id: number) => api.delete<{ deleted: boolean; archived: boolean; usage_count?: number }>(`/logbook/trip-categories/${id}`).then(r => r.data),
 
   // Trips
-  listTrips: (params?: Record<string, string | number>) => api.get<Trip[]>('/logbook/trips', { params }).then(r => r.data),
+  listTrips: (params?: Record<string, string | number>) => api.get<TripListResponse>('/logbook/trips', { params }).then(r => r.data),
   tripPurposes: () => api.get<string[]>('/logbook/trips/purposes').then(r => r.data),
   tripPlaces: () => api.get<string[]>('/logbook/trips/places').then(r => r.data),
   getTrip: (id: number) => api.get<Trip>(`/logbook/trips/${id}`).then(r => r.data),
@@ -314,7 +335,7 @@ export const logbookApi = {
     api.get('/logbook/trips/export', { params: { format, ...params }, responseType: 'blob' }),
 
   // Fuelings
-  listFuelings: (params?: Record<string, string | number>) => api.get<Fueling[]>('/logbook/fuelings', { params }).then(r => r.data),
+  listFuelings: (params?: Record<string, string | number>) => api.get<FuelingListResponse>('/logbook/fuelings', { params }).then(r => r.data),
   createFueling: (data: FuelingPayload) => api.post<Fueling>('/logbook/fuelings', data).then(r => r.data),
   updateFueling: (id: number, data: FuelingPayload) => api.put<Fueling>(`/logbook/fuelings/${id}`, data).then(r => r.data),
   deleteFueling: (id: number) => api.delete<{ deleted: boolean }>(`/logbook/fuelings/${id}`).then(r => r.data),

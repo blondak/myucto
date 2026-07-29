@@ -47,6 +47,22 @@ final class VarsymbolGenerator
     /** Maximální počet pokusů přeskočit obsazené číslo, než to vzdáme (poslední pojistka). */
     private const MAX_SKIP = 1000;
 
+    /**
+     * Typy, které se číslují v řadě FAKTUR (sdílí template i counter s 'invoice') —
+     * žádná dodatečná konfigurace, žádné kolize čísel.
+     *
+     * Daňový doklad k přijaté platbě, penalizační faktura (úrok z prodlení) a platební
+     * či splátkový kalendář (§ 31/31a ZDPH). Normalizace je na JEDNOM místě záměrně:
+     * dřív ji každá metoda dělala po svém a `releaseIfLatest()` s 'penalty' tiše
+     * nevracela číslo do řady, ze které ho `next()` vzal.
+     */
+    private const INVOICE_SERIES_ALIASES = ['tax_document', 'penalty', 'payment_calendar'];
+
+    private static function normalizeType(string $invoiceType): string
+    {
+        return in_array($invoiceType, self::INVOICE_SERIES_ALIASES, true) ? 'invoice' : $invoiceType;
+    }
+
     public function __construct(
         private readonly Config $config,
         private readonly Connection $db,
@@ -69,11 +85,7 @@ final class VarsymbolGenerator
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException("Neplatný supplier_id: {$supplierId}");
         }
-        // Daňový doklad k přijaté platbě se čísluje v řadě faktur (sdílí template
-        // i counter s 'invoice') — žádná dodatečná konfigurace, žádné kolize čísel.
-        if ($invoiceType === 'tax_document') {
-            $invoiceType = 'invoice';
-        }
+        $invoiceType = self::normalizeType($invoiceType);
         if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             throw new \InvalidArgumentException("Nepodporovaný typ pro varsymbol: {$invoiceType}");
         }
@@ -146,9 +158,7 @@ final class VarsymbolGenerator
      */
     public function syncCounter(int $supplierId, string $invoiceType, ?\DateTimeInterface $for = null, int $clientId = 0): int
     {
-        if ($invoiceType === 'tax_document') {
-            $invoiceType = 'invoice'; // sdílená řada s fakturami (viz next())
-        }
+        $invoiceType = self::normalizeType($invoiceType);
         if ($supplierId <= 0 || !in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             return 0;
         }
@@ -186,9 +196,7 @@ final class VarsymbolGenerator
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException("Neplatný supplier_id: {$supplierId}");
         }
-        if ($invoiceType === 'tax_document') {
-            $invoiceType = 'invoice'; // sdílená řada s fakturami (viz next())
-        }
+        $invoiceType = self::normalizeType($invoiceType);
         if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             throw new \InvalidArgumentException("Nepodporovaný typ pro varsymbol: {$invoiceType}");
         }
@@ -335,6 +343,7 @@ final class VarsymbolGenerator
     public function preview(int $supplierId, string $invoiceType, ?\DateTimeInterface $for = null, int $clientId = 0): string
     {
         if ($supplierId <= 0) return '';
+        $invoiceType = self::normalizeType($invoiceType);
         if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) return '';
 
         [$template, $period, $counterClientId] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId);
@@ -366,6 +375,7 @@ final class VarsymbolGenerator
      */
     public function releaseIfLatest(int $supplierId, string $invoiceType, string $varsymbol, ?\DateTimeInterface $for = null, int $clientId = 0): bool
     {
+        $invoiceType = self::normalizeType($invoiceType);
         if ($supplierId <= 0 || $varsymbol === '' || !in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             return false;
         }

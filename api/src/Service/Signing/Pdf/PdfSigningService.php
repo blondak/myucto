@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\SigningProfileRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Pdf\SigningConfig;
+use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use MyInvoice\Service\Signing\SigningProfile;
 use MyInvoice\Service\Signing\SigningPassphraseProviderInterface;
 
@@ -19,6 +20,7 @@ final class PdfSigningService
         private readonly NativePdfSignatureBackend $nativeBackend,
         private readonly ?SigningProfileRepository $profiles = null,
         private readonly ?SigningPassphraseProviderInterface $passphrases = null,
+        private readonly ?PersonalCertificateVaultService $certificateVault = null,
     ) {}
 
     /**
@@ -476,9 +478,28 @@ final class PdfSigningService
         if ($credential === null || !($credential['is_active'] ?? false)) {
             return null;
         }
-        $passwordEnc = $this->encryptedPassphraseForCredential($credential);
-        if ($passwordEnc === null) {
-            return null;
+        $certBytes = null;
+        if (($credential['vault_credential_id'] ?? null) !== null) {
+            $ownerUserId = (int) ($profile['owner_user_id'] ?? 0);
+            if ($ownerUserId <= 0 || $this->certificateVault === null) {
+                return null;
+            }
+            try {
+                $resolved = $this->certificateVault->resolve(
+                    (int) $credential['vault_credential_id'],
+                    $ownerUserId,
+                    $supplierId,
+                );
+            } catch (\Throwable) {
+                return null;
+            }
+            $passwordEnc = $resolved['password_enc'];
+            $certBytes = $resolved['pfx'];
+        } else {
+            $passwordEnc = $this->encryptedPassphraseForCredential($credential);
+            if ($passwordEnc === null) {
+                return null;
+            }
         }
 
         $tsa = $this->stringOrNull($profile['pdf_tsa_url'] ?? null);
@@ -493,6 +514,7 @@ final class PdfSigningService
             reason: $reason,
             tsaUsername: ($tsaUser !== null && $tsaUser !== '') ? (string) $tsaUser : null,
             tsaPasswordEnc: (string) ($tsaPasswordEnc ?? ''),
+            certBytes: $certBytes,
         );
 
         return new SigningProfile(
@@ -505,6 +527,7 @@ final class PdfSigningService
                 'source' => $source,
                 'profile_id' => $profileId,
                 'passphrase_policy' => $credential['passphrase_policy'],
+                'certificate_source' => $certBytes !== null ? 'personal_vault' : 'uploaded_file',
             ],
         );
     }

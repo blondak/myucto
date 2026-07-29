@@ -8,8 +8,11 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\VatClassificationRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Report\DphPriznaniBuilder;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -41,7 +44,7 @@ final class VatClassificationsAction
     public function create(Request $request, Response $response): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -66,7 +69,7 @@ final class VatClassificationsAction
     public function update(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -85,7 +88,7 @@ final class VatClassificationsAction
     public function delete(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -118,10 +121,38 @@ final class VatClassificationsAction
             && !in_array($body['kh_regime_code'], ['0', '1', '2'], true)) {
             return 'kh_regime_code musí být 0|1|2 nebo null.';
         }
+        // Kód předmětu plnění (§ 92b–92f) — jde do KH A.1/B.1. Hodnotový výčet je
+        // v EXTERNÍM číselníku MFČR, ne v XSD (to omezuje jen délku na 3 znaky), takže se
+        // kontroluje TVAR, ne členství v seznamu. Vlastní seznam kódů by se s číselníkem
+        // rozešel a odmítal by legitimní hodnoty — to je horší než žádná kontrola.
+        if (array_key_exists('kod_pred_pl', $body)
+            && $body['kod_pred_pl'] !== null
+            && $body['kod_pred_pl'] !== ''
+            && !preg_match('/^\d{1,3}$/', (string) $body['kod_pred_pl'])) {
+            return 'kod_pred_pl musí být 1–3 číslice (kód z číselníku MFČR) nebo prázdné.';
+        }
         if (array_key_exists('kh_bad_debt', $body)
             && $body['kh_bad_debt'] !== null
             && !in_array($body['kh_bad_debt'], ['N', 'P'], true)) {
             return 'kh_bad_debt musí být N|P nebo null.';
+        }
+        // Řádek přiznání, který generátor neumí, by se do XML nedostal — základ i daň
+        // by tiše zmizely (builder na to sice varuje, ale až při sestavení výkazu).
+        // Whitelist je proto přímo u zdroje pravdy, DphPriznaniBuilder::USER_SELECTABLE_LINES;
+        // vědomě z něj vypadává '34' (jeho base slot nese daň, plní ho interní injekce
+        // § 74b) a krácené 40k/41k/42k (tvoří si je VatLedgerService sám).
+        foreach (['dphdp3_line', 'dphdp3_line_secondary'] as $field) {
+            if (!array_key_exists($field, $body)) {
+                continue;
+            }
+            $value = $body[$field];
+            if ($value === null || $value === '') {
+                continue;
+            }
+            if (!in_array((string) $value, DphPriznaniBuilder::USER_SELECTABLE_LINES, true)) {
+                return $field . ' musí být jeden z podporovaných řádků přiznání ('
+                    . implode(', ', DphPriznaniBuilder::USER_SELECTABLE_LINES) . ') nebo prázdné.';
+            }
         }
         return null;
     }

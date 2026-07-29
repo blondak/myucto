@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://schemas.cssz.cz/OSVC2025" targetNamespace="http://schemas.cssz.cz/OSVC2025"
+  xmlns:bt="http://schemas.cssz.cz/baseTypes/v2" elementFormDefault="qualified" attributeFormDefault="unqualified"
+  version="1.0">
+
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd" />
+
+  <xs:element name="OSVC" type="osvcType" />
+  <xs:complexType name="osvcType">
+    <xs:sequence>
+      <xs:element name="VENDOR" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string" />
+          <xs:attribute name="productVersion" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SENDER" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string" />
+          <xs:attribute name="ISDSreport" type="xs:string" />
+          <xs:attribute name="VerzeProtokolu" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element  name="prehledosvc" type="prehledosvcType" minOccurs="1" maxOccurs="1" />
+    </xs:sequence>
+    <xs:attribute name="version" type="xs:string" use="required" fixed="1.0" />
+    <xs:attribute name="partialAccept" type="xs:string" />
+  </xs:complexType>
+
+  <xs:element name="prehledosvc" type="prehledosvcType" />
+  <xs:complexType name="prehledosvcType">
+    <xs:sequence>
+      <xs:element name="client" minOccurs="1" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="name" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="sur" type="xs:string" use="required" />
+                <xs:attribute name="fir" type="xs:string" use="required" />
+                <xs:attribute name="tit" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="birth" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="bno" type="xs:string" use="required" />
+                <xs:attribute name="den" type="xs:string" use="required" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="adr" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="str" type="xs:string" />
+                <xs:attribute name="num" type="xs:string" use="required" />
+                <xs:attribute name="pnu" type="xs:string" use="required" />
+                <xs:attribute name="cit" type="xs:string" use="required" />
+                <xs:attribute name="cnt" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="idds" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="email" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="tel" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="druc" type="xs:string" minOccurs="1" maxOccurs="1" />
+            <xs:element name="hlavc" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="m1" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m2" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m3" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m4" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m5" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m6" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m7" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m8" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m9" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m10" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m11" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m12" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m13" type="xs:string" minOccurs="0" maxOccurs="1" />
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="vedc" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="m1" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m2" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m3" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m4" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m5" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m6" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m7" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m8" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m9" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m10" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m11" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m12" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m13" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="zam" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                  <xs:element name="duchod" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                  <xs:element name="pdite" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                  <xs:element name="ppm" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                  <xs:element name="pece" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                  <xs:element name="ndite" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="narok" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="m1" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m2" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m3" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m4" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m5" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m6" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m7" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m8" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m9" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m10" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m11" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m12" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m13" type="xs:string" minOccurs="0" maxOccurs="1" />
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="sleva" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="m1" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m2" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m3" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m4" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m5" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m6" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m7" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m8" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m9" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m10" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m11" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m12" type="xs:string" minOccurs="0" maxOccurs="1" />
+                  <xs:element name="m13" type="xs:string" minOccurs="0" maxOccurs="1" />
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="vzpm" type="xs:string" minOccurs="0" maxOccurs="1"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="pvv" minOccurs="1" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="mesc" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="h" type="xs:string" />
+                <xs:attribute name="v" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="mesv" minOccurs="0" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="h" type="xs:string" />
+                <xs:attribute name="v" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="mesp" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="rdza" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="h" type="xs:string" />
+                <xs:attribute name="v" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="vvz" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="h" type="xs:string" />
+                <xs:attribute name="v" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="dvz" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="h" type="xs:string" />
+                <xs:attribute name="v" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="mvz" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="uvz" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="vzza" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="vzsu" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="vzsvc" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="poj" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="slev" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="pojposlev" type="xs:string" minOccurs="0" maxOccurs="1" />
+            <xs:element name="zal" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="ned" type="xs:string" minOccurs="0" maxOccurs="1" />
+          </xs:sequence>
+          <xs:attribute name="pri" type="xs:string" use="required" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="prihldp" type="xs:string" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="zal" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:attribute name="ved" type="xs:string" />
+          <xs:attribute name="pau" type="xs:string" />
+          <xs:attribute name="vzpm" type="xs:string" />
+          <xs:attribute name="duch" type="xs:string" /> 
+          <xs:attribute name="vz" type="xs:string" />
+          <xs:attribute name="dp" type="xs:string" />
+          <xs:attribute name="np" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="pre" minOccurs="1" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="rok" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="iban" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="bs" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="pu" type="xs:string" />
+                <xs:attribute name="cu" type="xs:string" />
+                <xs:attribute name="kb" type="xs:string" />
+                <xs:attribute name="ss" type="xs:string" />
+                <xs:attribute name="vs" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="adr" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="str" type="xs:string" />
+                <xs:attribute name="num" type="xs:string" />
+                <xs:attribute name="pnu" type="xs:string" />
+                <xs:attribute name="cit" type="xs:string" />
+                <xs:attribute name="cnt" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+          <xs:attribute name="vra" type="xs:string" />
+          <xs:attribute name="kam" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="prizn" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="pau" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="pov" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="elektr" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="por" type="xs:string" minOccurs="0" maxOccurs="1"/>
+            <xs:element name="meldat" type="xs:string" minOccurs="0" maxOccurs="1"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="opr" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:attribute name="datopr" type="xs:string"/>
+          <xs:attribute name="duvod" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="spo" minOccurs="1" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="name" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="sur" type="xs:string" />
+                <xs:attribute name="fir" type="xs:string" />
+                <xs:attribute name="tit" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="adr" minOccurs="1" maxOccurs="1">
+              <xs:complexType>
+                <xs:attribute name="str" type="xs:string" />
+                <xs:attribute name="num" type="xs:string" />
+                <xs:attribute name="pnu" type="xs:string" />
+                <xs:attribute name="cit" type="xs:string" />
+                <xs:attribute name="cnt" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+          <xs:attribute name="bno" type="xs:string" />
+          <xs:attribute name="den" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="dat" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:attribute name="dre" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="prilo" minOccurs="0" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="img" minOccurs="0" maxOccurs="unbounded">
+              <xs:complexType>
+                <xs:attribute name="nazev" type="xs:string" />
+                <xs:attribute name="base64data" type="xs:string" />
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+          <xs:attribute name="coun" type="xs:string" />
+          <xs:attribute name="plnamoc" type="xs:string" />
+          <xs:attribute name="jina" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="for" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:pattern value=".{11,11}"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="dep" use="required">
+      <xs:simpleType>
+        <xs:restriction base="bt:simpleNType">
+          <xs:pattern value=".{3,3}"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="vsdp" type="xs:string" />
+    <xs:attribute name="rok" type="xs:string" use="required" />
+    <xs:attribute name="dat" type="xs:string" />
+    <xs:attribute name="typ" type="xs:string" use="required" />
+  </xs:complexType>
+</xs:schema>

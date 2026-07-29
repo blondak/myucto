@@ -1,0 +1,27 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  Měsíční přehled — {{ period_label }}
+</h1>
+
+<p style="margin:0 0 16px;">Dobrý den,</p>
+<p style="margin:0 0 16px;">v příloze zasíláme měsíční přehled hospodaření za <strong>{{ period_label }}</strong> (výsledovka, rozvaha, pohledávky a závazky po splatnosti{% if has_vat %}, DPH{% endif %}).</p>
+
+{% if note_lines is defined and note_lines|length %}
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:{{ accent_soft }};border-radius:8px;margin:16px 0;">
+    <tr>
+      <td style="padding:14px 18px;font-size:14px;color:#403B52;">
+        <div style="color:#7A748C;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Komentář účetní</div>
+        {% for line in note_lines %}<p style="margin:0 0 6px;">{{ line }}</p>{% endfor %}
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+<p style="margin:16px 0 8px;font-size:14px;color:#5A5470;">Kompletní přehled je v příloze tohoto emailu ve formátu PDF.</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  Děkujeme za spolupráci.
+</p>
+{% endblock %}

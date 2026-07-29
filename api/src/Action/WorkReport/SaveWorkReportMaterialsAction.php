@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\WorkReport;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\WorkReportRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -30,6 +33,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SaveWorkReportMaterialsAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $invoices,
         private readonly WorkReportRepository $repo,
@@ -37,6 +42,7 @@ final class SaveWorkReportMaterialsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $pdf,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -48,8 +54,13 @@ final class SaveWorkReportMaterialsAction
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = (($user['role'] ?? '') === 'admin');
+        $isAdmin = RequestAuthorization::isSuperadmin($request);
         $isForce = !empty($request->getQueryParams()['force']);
+
+        // Zámek dokladu (Epic F6) — PŘED status guardem: výkaz materiálu je součást dokladu.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $invoiceId)) {
+            return $deny;
+        }
 
         if ($invoice['status'] !== 'draft' && !($isAdmin && $isForce)) {
             return Json::error($response, 'not_editable', 'Výkaz lze upravit pouze v draftu (admin: ?force=1).', 409);

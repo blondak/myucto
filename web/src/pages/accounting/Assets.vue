@@ -1,0 +1,392 @@
+<script setup lang="ts">
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRouter, useRoute } from 'vue-router'
+import { assetsApi, type AssetListItem, type AssetStatus, type PurchaseCandidate } from '@/api/assets'
+import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { formatDate, formatMoney } from '@/composables/useFormat'
+import Modal from '@/components/ui/Modal.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import CodebookImportDialog from '@/components/accounting/CodebookImportDialog.vue'
+import { codebookTransferApi } from '@/api/codebookTransfer'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+
+const { t } = useI18n()
+const auth = useAuthStore()
+const toast = useToast()
+const router = useRouter()
+const route = useRoute()
+
+const items = ref<AssetListItem[]>([])
+const loading = ref(false)
+
+const page = ref(1)
+const total = ref(0)
+const perPage = ref(50)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const rangeFrom = computed(() => (total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1))
+const rangeTo = computed(() => Math.min(page.value * perPage.value, total.value))
+
+const filters = reactive({
+  status: '' as AssetStatus | '',
+  q: '',
+})
+
+async function load() {
+  loading.value = true
+  try {
+    const r = await assetsApi.list({
+      status: filters.status || undefined,
+      q: filters.q || undefined,
+      page: page.value,
+      // Aktivní řazení = natáhnout celý dataset (BE cap 200), jinak by se řadila jen stránka.
+      per_page: tbl.sort.value ? 200 : undefined,
+    })
+    items.value = r.items
+    total.value = r.total
+    perPage.value = r.per_page
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+function applyFilters() {
+  page.value = 1
+  load()
+}
+function resetFilters() {
+  filters.status = ''
+  filters.q = ''
+  applyFilters()
+}
+function goToPage(p: number) {
+  const np = Math.min(Math.max(1, p), totalPages.value)
+  if (np !== page.value) { page.value = np; load() }
+}
+
+function buildQuery(): Record<string, string> {
+  const q: Record<string, string> = {}
+  if (filters.status) q.status = filters.status
+  if (filters.q) q.q = filters.q
+  return q
+}
+
+function applyQueryToPage(q: Record<string, string>) {
+  filters.status = (q.status as AssetStatus) || ''
+  filters.q = q.q ?? ''
+  applyFilters()
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'inventory_number', labelKey: 'accounting.assets.col_inventory_number', required: true, sortable: true },
+  { key: 'name', labelKey: 'accounting.assets.col_name', required: true, sortable: true },
+  { key: 'account', labelKey: 'accounting.assets.col_account' },
+  { key: 'put_into_use', labelKey: 'accounting.assets.col_put_into_use', sortable: true },
+  { key: 'input_price', labelKey: 'accounting.assets.col_input_price', sortable: true },
+  { key: 'tax_residual', labelKey: 'accounting.assets.col_tax_residual' },
+  { key: 'acc_residual', labelKey: 'accounting.assets.col_acc_residual' },
+  { key: 'status', labelKey: 'accounting.assets.col_status', sortable: true },
+  { key: 'tax_method', labelKey: 'accounting.assets.col_tax_method', defaultHidden: true },
+  { key: 'tax_group', labelKey: 'accounting.assets.col_tax_group', defaultHidden: true },
+  { key: 'disposal_date', labelKey: 'accounting.assets.col_disposal_date', defaultHidden: true },
+]
+const tbl = useTablePrefs('assets', COLUMNS)
+const saved = useSavedFilters('assets', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+
+// R10: client-side sort — jen nad KOMPLETNÍM datasetem (load při sortu táhne až 200
+// položek; nad 200 karet by řazení stránky lhalo, tak se neaplikuje).
+watch(() => tbl.sort.value, () => { page.value = 1; load() })
+
+const sortedItems = computed<AssetListItem[]>(() => {
+  const s = tbl.sort.value
+  if (!s || total.value > items.value.length) return items.value
+  const dir = s.dir === 'desc' ? -1 : 1
+  const arr = items.value.slice()
+  arr.sort((a, b) => {
+    let av: string | number = ''
+    let bv: string | number = ''
+    switch (s.key) {
+      case 'inventory_number': av = a.inventory_number; bv = b.inventory_number; break
+      case 'name': av = a.name; bv = b.name; break
+      case 'put_into_use': av = a.put_into_use_date ?? ''; bv = b.put_into_use_date ?? ''; break
+      case 'input_price': av = increasedPrice(a); bv = increasedPrice(b); break
+      case 'status': av = a.status; bv = b.status; break
+      default: return 0
+    }
+    if (av < bv) return -1 * dir
+    if (av > bv) return 1 * dir
+    return 0
+  })
+  return arr
+})
+
+const importOpen = ref(false)
+
+onMounted(async () => {
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  await load()
+})
+
+const num = (v: unknown): number => Number(v ?? 0) || 0
+
+/** Zvýšená vstupní cena = VC + Σ TZ (počítá repository, fallback FE). */
+function increasedPrice(a: AssetListItem): number {
+  if (a.increased_input_price != null) return num(a.increased_input_price)
+  return num(a.input_price) + num(a.improvements_total)
+}
+function taxResidual(a: AssetListItem): number {
+  if (a.tax_residual != null) return num(a.tax_residual)
+  return Math.max(0, increasedPrice(a) - num(a.opening_tax_amount) - num(a.tax_full_sum))
+}
+function accResidual(a: AssetListItem): number {
+  if (a.acc_residual != null) return num(a.acc_residual)
+  return Math.max(0, increasedPrice(a) - num(a.opening_acc_amount) - num(a.acc_amount_sum))
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  draft: 'bg-neutral-100 text-neutral-600',
+  in_use: 'bg-success-50 text-success-600',
+  disposed: 'bg-neutral-100 text-neutral-400',
+}
+
+function openDetail(a: AssetListItem) {
+  router.push({ name: 'accounting-asset-detail', params: { id: a.id } })
+}
+
+// ── Modal: založení z přijaté faktury ──────────────────────────────────────
+const showCandidates = ref(false)
+const candidates = ref<PurchaseCandidate[]>([])
+const candidatesLoading = ref(false)
+
+async function openCandidates() {
+  showCandidates.value = true
+  candidatesLoading.value = true
+  try {
+    candidates.value = await assetsApi.purchaseCandidates()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    showCandidates.value = false
+  } finally {
+    candidatesLoading.value = false
+  }
+}
+
+function pickCandidate(c: PurchaseCandidate) {
+  showCandidates.value = false
+  router.push({ name: 'accounting-asset-new', query: { invoice_id: c.id } })
+}
+
+// ── Modal: zaúčtování odpisů roku ──────────────────────────────────────────
+const showBook = ref(false)
+const bookYear = ref(new Date().getFullYear() - 1)
+const booking = ref(false)
+const yearOptions = computed(() => {
+  const y = new Date().getFullYear() - 1
+  const arr: number[] = []
+  for (let i = y; i >= y - 6; i--) arr.push(i)
+  return arr
+})
+
+async function runBook() {
+  booking.value = true
+  try {
+    const r = await assetsApi.bookYear(bookYear.value)
+    showBook.value = false
+    if (r.errors && r.errors.length > 0) {
+      toast.warning(t('accounting.assets.book.result_with_errors', {
+        booked: r.booked, skipped: r.skipped, errors: r.errors.length,
+      }))
+    } else {
+      toast.success(t('accounting.assets.book.result', { booked: r.booked, skipped: r.skipped }))
+    }
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    booking.value = false
+  }
+}
+</script>
+
+<template>
+  <div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <h1 class="text-2xl font-semibold">{{ t('accounting.assets.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.assets.subtitle') }}</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button @click="codebookTransferApi.download('assets')" :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+          {{ t('codebookTransfer.export') }}
+        </button>
+        <button v-if="auth.canWrite('assets.write')" @click="importOpen = true" :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+          {{ t('codebookTransfer.import') }}
+        </button>
+        <template v-if="auth.canWrite('assets.write')">
+          <button @click="showBook = true" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
+            {{ t('accounting.assets.book_year') }}
+          </button>
+          <button @click="openCandidates" :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+            {{ t('accounting.assets.from_invoice') }}
+          </button>
+          <RouterLink :to="{ name: 'accounting-asset-new' }" :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('accounting.assets.new') }}
+          </RouterLink>
+        </template>
+      </div>
+    </div>
+
+    <!-- Filtry -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.filter_status') }}</label>
+          <select v-model="filters.status" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="draft">{{ t('accounting.assets.status.draft') }}</option>
+            <option value="in_use">{{ t('accounting.assets.status.in_use') }}</option>
+            <option value="disposed">{{ t('accounting.assets.status.disposed') }}</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.filter_q') }}</label>
+          <input v-model="filters.q" type="text" :placeholder="t('accounting.assets.filter_q_placeholder')"
+            @keyup.enter="applyFilters" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+        <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.assets.reset_filters') }}</button>
+        <SavedFiltersMenu :ctrl="saved" />
+        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <DensityToggle class="hidden md:block" :ctrl="tbl" />
+      </div>
+    </div>
+
+    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+
+    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.assets.empty') }}</div>
+
+    <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" :class="tbl.densityClass.value">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+            <tr>
+              <SortableTh v-if="tbl.isVisible('inventory_number')" :label="t('accounting.assets.col_inventory_number')" sort-key="inventory_number" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <SortableTh v-if="tbl.isVisible('name')" :label="t('accounting.assets.col_name')" sort-key="name" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <th v-if="tbl.isVisible('account')" class="px-3 py-2 text-left font-medium w-20">{{ t('accounting.assets.col_account') }}</th>
+              <SortableTh v-if="tbl.isVisible('put_into_use')" :label="t('accounting.assets.col_put_into_use')" sort-key="put_into_use" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <SortableTh v-if="tbl.isVisible('input_price')" :label="t('accounting.assets.col_input_price')" sort-key="input_price" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
+              <th v-if="tbl.isVisible('tax_residual')" class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.assets.col_tax_residual') }}</th>
+              <th v-if="tbl.isVisible('acc_residual')" class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.assets.col_acc_residual') }}</th>
+              <SortableTh v-if="tbl.isVisible('status')" :label="t('accounting.assets.col_status')" sort-key="status" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+              <th v-if="tbl.isVisible('tax_method')" class="px-3 py-2 text-left font-medium w-32">{{ t('accounting.assets.col_tax_method') }}</th>
+              <th v-if="tbl.isVisible('tax_group')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.assets.col_tax_group') }}</th>
+              <th v-if="tbl.isVisible('disposal_date')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.assets.col_disposal_date') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="a in sortedItems" :key="a.id" class="cursor-pointer hover:bg-neutral-50" @click="openDetail(a)">
+              <td v-if="tbl.isVisible('inventory_number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ a.inventory_number }}</td>
+              <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ a.name }}</td>
+              <td v-if="tbl.isVisible('account')" class="px-3 py-2 font-mono text-xs">{{ a.asset_account_code }}</td>
+              <td v-if="tbl.isVisible('put_into_use')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(a.put_into_use_date) }}</td>
+              <td v-if="tbl.isVisible('input_price')" class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                {{ formatMoney(increasedPrice(a)) }}
+                <div v-if="num(a.improvements_total) > 0" class="text-xs text-neutral-400">{{ t('accounting.assets.incl_improvements') }}</div>
+              </td>
+              <td v-if="tbl.isVisible('tax_residual')" class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                <template v-if="a.tax_method === 'none'">—</template>
+                <template v-else>{{ formatMoney(taxResidual(a)) }}</template>
+              </td>
+              <td v-if="tbl.isVisible('acc_residual')" class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                <template v-if="!a.accumulated_account_code">—</template>
+                <template v-else>{{ formatMoney(accResidual(a)) }}</template>
+              </td>
+              <td v-if="tbl.isVisible('status')" class="px-3 py-2 text-center">
+                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[a.status]">
+                  {{ t(`accounting.assets.status.${a.status}`) }}
+                </span>
+              </td>
+              <td v-if="tbl.isVisible('tax_method')" class="px-3 py-2 whitespace-nowrap">{{ t(`accounting.assets.method.${a.tax_method}`) }}</td>
+              <td v-if="tbl.isVisible('tax_group')" class="px-3 py-2 whitespace-nowrap">{{ a.tax_group ? t(`accounting.assets.group.${a.tax_group}`) : '—' }}</td>
+              <td v-if="tbl.isVisible('disposal_date')" class="px-3 py-2 whitespace-nowrap">{{ a.disposal_date ? formatDate(a.disposal_date) : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <CodebookImportDialog v-model="importOpen" kind="assets" :title="t('codebookTransfer.title_assets')" @imported="load" />
+
+    <nav v-if="!loading && total > perPage" class="mt-4 flex items-center justify-between gap-3 text-sm">
+      <span class="text-neutral-500">{{ t('common.pagination_range', { from: rangeFrom, to: rangeTo, total }) }}</span>
+      <div class="flex items-center gap-1">
+        <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"
+          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
+        <span class="px-2 text-neutral-600">{{ page }} / {{ totalPages }}</span>
+        <button type="button" :disabled="page >= totalPages" @click="goToPage(page + 1)"
+          class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+      </div>
+    </nav>
+
+    <!-- Modal: kandidáti z přijatých faktur -->
+    <Modal v-if="showCandidates" :title="t('accounting.assets.candidates.title')" widthClass="max-w-4xl" @close="showCandidates = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.assets.candidates.hint') }}</p>
+      <div v-if="candidatesLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('common.loading') }}</div>
+      <div v-else-if="candidates.length === 0" class="text-center text-neutral-500 py-8 text-sm">{{ t('accounting.assets.candidates.empty') }}</div>
+      <table v-else class="w-full text-sm">
+        <thead class="text-xs text-neutral-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-2 py-1 text-left font-medium">{{ t('accounting.assets.candidates.col_number') }}</th>
+            <th class="px-2 py-1 text-left font-medium">{{ t('accounting.assets.candidates.col_vendor') }}</th>
+            <th class="px-2 py-1 text-left font-medium w-28">{{ t('accounting.assets.candidates.col_date') }}</th>
+            <th class="px-2 py-1 text-right font-medium w-36">{{ t('accounting.assets.candidates.col_amount') }}</th>
+            <th class="px-2 py-1 w-28"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-neutral-100">
+          <tr v-for="c in candidates" :key="c.id" class="cursor-pointer hover:bg-neutral-50" @click="pickCandidate(c)">
+            <td class="px-2 py-2 font-mono text-xs">{{ c.varsymbol || c.vendor_invoice_number || `#${c.id}` }}</td>
+            <td class="px-2 py-2">{{ c.vendor || '—' }}</td>
+            <td class="px-2 py-2 whitespace-nowrap">{{ formatDate(c.tax_date || c.issue_date) }}</td>
+            <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(c.total_without_vat), c.currency || 'CZK') }}</td>
+            <td class="px-2 py-2 text-right">
+              <span v-if="c.has_asset" class="text-xs px-2 py-0.5 rounded font-medium bg-warning-50 text-warning-600">{{ t('accounting.assets.candidates.has_asset') }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Modal>
+
+    <!-- Modal: zaúčtování odpisů roku -->
+    <Modal v-if="showBook" :title="t('accounting.assets.book.title')" widthClass="max-w-md" @close="showBook = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.assets.book.hint') }}</p>
+      <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.book.fiscal_year') }}</label>
+      <select v-model.number="bookYear" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface mb-4">
+        <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+      </select>
+      <div class="flex justify-end gap-2">
+        <button @click="showBook = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+        <button :disabled="booking" @click="runBook" :class="btnFilled('success')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+          {{ booking ? t('common.loading') : t('accounting.assets.book.run') }}
+        </button>
+      </div>
+    </Modal>
+  </div>
+</template>

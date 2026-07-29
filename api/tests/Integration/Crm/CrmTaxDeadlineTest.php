@@ -18,8 +18,8 @@ use PHPUnit\Framework\TestCase;
  *   - KH se u právnické osoby (PO) podává VŽDY měsíčně → u čtvrtletní PO je KH
  *     samostatná měsíční položka oddělená od čtvrtletního DPH.
  *
- * Izolace: mění jen vat_period/taxpayer_type/is_vat_payer prvního dodavatele a
- * v tearDown je vrací zpět. userId = null → žádné dismissals. Soft-skip bez DB.
+ * Izolace: každý test používá vlastního prázdného dodavatele. userId = null →
+ * žádné dismissals. Soft-skip bez DB.
  */
 #[Group('integration')]
 final class CrmTaxDeadlineTest extends TestCase
@@ -27,9 +27,6 @@ final class CrmTaxDeadlineTest extends TestCase
     private Connection $db;
     private CrmAggregationService $crm;
     private int $supplierId = 0;
-    private int $origVatPayer = 0;
-    private ?string $origTaxpayerType = null;
-    private ?string $origVatPeriod = null;
 
     protected function setUp(): void
     {
@@ -45,25 +42,44 @@ final class CrmTaxDeadlineTest extends TestCase
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
         $pdo = $this->db->pdo();
-        $this->supplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        if ($this->supplierId === 0) {
-            $this->markTestSkipped('Chybí supplier.');
+        $countryId = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
+        $vatRateId = (int) ($pdo->query("SELECT id FROM vat_rates WHERE code = 'CZ-21' LIMIT 1")->fetchColumn() ?: 0);
+        $currencyId = (int) ($pdo->query('SELECT id FROM currencies ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        if ($countryId === 0 || $vatRateId === 0 || $currencyId === 0) {
+            $this->markTestSkipped('Chybí předpoklady (country/vat/currency).');
         }
-        $row = $pdo->query("SELECT is_vat_payer, taxpayer_type, vat_period FROM supplier WHERE id = {$this->supplierId}")
-            ->fetch(\PDO::FETCH_ASSOC) ?: [];
-        $this->origVatPayer = (int) ($row['is_vat_payer'] ?? 0);
-        $this->origTaxpayerType = $row['taxpayer_type'] ?? null;
-        $this->origVatPeriod = $row['vat_period'] ?? null;
+        $pdo->prepare(
+            'INSERT INTO supplier
+                (company_name, street, city, zip, country_id, email, default_currency_id,
+                 default_vat_rate_id, taxpayer_type, is_vat_payer, vat_period)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)'
+        )->execute([
+            '__CRM_TAX_DEADLINE_TEST__', 'Test 1', 'Praha', '11000', $countryId,
+            'crm-action-deadline@example.invalid', $currencyId, $vatRateId, 'po', 'monthly',
+        ]);
+        $this->supplierId = (int) $pdo->lastInsertId();
     }
 
     protected function tearDown(): void
     {
         if (isset($this->db) && $this->supplierId > 0) {
-            $stmt = $this->db->pdo()->prepare(
-                'UPDATE supplier SET is_vat_payer = ?, taxpayer_type = ?, vat_period = ? WHERE id = ?'
-            );
-            $stmt->execute([$this->origVatPayer, $this->origTaxpayerType, $this->origVatPeriod, $this->supplierId]);
+            $this->db->pdo()->prepare('DELETE FROM tax_submissions WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $this->db->pdo()->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
         }
+    }
+
+    /** Archivuje "podání" (tax_submissions) daného výkazu pro danou periodu. */
+    private function markSubmitted(string $formCode, int $year, ?int $month, ?int $quarter): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO tax_submissions
+                (supplier_id, form_code, period_year, period_month, period_quarter,
+                 xml_content, xml_size_bytes, xml_sha256)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId, $formCode, $year, $month, $quarter,
+            '<x/>', 4, str_repeat('0', 64),
+        ]);
     }
 
     private function configure(string $vatPeriod, string $taxpayerType): void
@@ -128,5 +144,37 @@ final class CrmTaxDeadlineTest extends TestCase
         self::assertArrayHasKey('kh_deadline', $july, 'KH za červen.');
         self::assertArrayHasKey('tax_deadline', $july, 'DPH za Q2.');
         self::assertSame('DPH za 2. čtvrtletí 2026', $july['tax_deadline']['title']);
+    }
+
+    public function testQuarterlyPoSkryjeUzPodaneKhIDph(): void
+    {
+        $this->configure('quarterly', 'po');
+
+        // Podané KH za červen (měsíčně) → měsíční KH výzva zmizí, DPH za Q2 zůstává.
+        $this->markSubmitted('dphkh1', 2026, 6, null);
+        $afterKh = $this->taxItems('2026-07-20');
+        self::assertArrayNotHasKey('kh_deadline', $afterKh, 'Podané KH už do Akcí pro tebe nepatří.');
+        self::assertArrayHasKey('tax_deadline', $afterKh, 'DPH za Q2 zatím podané není — zůstává.');
+
+        // Podané i DPH za Q2 (čtvrtletně) → zmizí obojí.
+        $this->markSubmitted('dphdp3', 2026, null, 2);
+        $afterBoth = $this->taxItems('2026-07-20');
+        self::assertArrayNotHasKey('kh_deadline', $afterBoth);
+        self::assertArrayNotHasKey('tax_deadline', $afterBoth, 'Po podání DPH zmizí i čtvrtletní výzva.');
+    }
+
+    public function testMonthlySloucenaVyzvaZmiziAzPoPodaniObou(): void
+    {
+        $this->configure('monthly', 'po');
+
+        // Jen DPH podané, KH ne → sloučená výzva DPH+KH stále svítí (KH chybí).
+        $this->markSubmitted('dphdp3', 2026, 5, null);
+        $partial = $this->taxItems('2026-06-19');
+        self::assertArrayHasKey('tax_deadline', $partial, 'Dokud chybí KH, sloučená výzva zůstává.');
+
+        // Podané i KH → sloučená výzva zmizí.
+        $this->markSubmitted('dphkh1', 2026, 5, null);
+        $full = $this->taxItems('2026-06-19');
+        self::assertArrayNotHasKey('tax_deadline', $full, 'Po podání DPH i KH sloučená výzva zmizí.');
     }
 }

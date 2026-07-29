@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -20,14 +23,21 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * nepočítal dvakrát (záloha + vyúčtovací faktura). Vazba se ukládá na finální
  * fakturu; spárovaná záloha pak vypadne z nákladů/CRM/daně z příjmů.
  *
- * Vrací aktualizovaný invoice payload (vč. linked_advance).
+ * Vrací aktualizovaný invoice payload (vč. linked_advance) a `_warnings` ve stejném
+ * tvaru jako create/update — zejména `advance_has_tax_document`. Bez něj by uživatel,
+ * který nejdřív založí vyúčtovací fakturu v plné výši a AŽ POTOM na ni naváže zálohu
+ * s DDKP, varování o dvojím odpočtu DPH nikdy neviděl (create/update už proběhly).
  */
 final class LinkAdvancePurchaseInvoiceAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
+        private readonly Connection $db,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -37,8 +47,14 @@ final class LinkAdvancePurchaseInvoiceAction
             return Json::error($response, 'invalid_id', 'Neplatné ID', 400);
         }
         $supplierId = SupplierGuard::currentId($request);
-        if ($this->repo->find($id, $supplierId) === null) {
+        $existing = $this->repo->find($id, $supplierId);
+        if ($existing === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+
+        // Zámek dokladu (Epic F6): vazba na zálohu mění doklad.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($existing), 'purchase_invoice', $id)) {
+            return $deny;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -59,6 +75,13 @@ final class LinkAdvancePurchaseInvoiceAction
             'advance_id' => $advanceId,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, $this->repo->find($id, $supplierId));
+        $invoice = $this->repo->find($id, $supplierId);
+        if (is_array($invoice)
+            && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
+            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $advanceId, $supplierId)) {
+            $invoice['_warnings'] = ['advance_has_tax_document'];
+        }
+
+        return Json::ok($response, $invoice);
     }
 }

@@ -34,7 +34,7 @@ Na Linuxu nainstaluj **Docker Engine + compose-plugin** z balíčkovacího syst�
 ## 2.2 Spuštění
 
 ```bash
-git clone https://github.com/radekhulan/myinvoice.git myinvoice
+git clone https://github.com/radekhulan/myucto.git myinvoice
 cd myinvoice
 
 # Linux / macOS

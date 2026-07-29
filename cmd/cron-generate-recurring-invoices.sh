@@ -15,7 +15,7 @@
 #    --dry-run       jen vypíše, co by se vygenerovalo
 #
 #  crontab (každý den 06:30):
-#    30 6 * * *  /var/www/myinvoice.cz/cmd/cron-generate-recurring-invoices.sh
+#    30 6 * * *  /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Soupis drobného majetku</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .legal-note { font-size: 7pt; color: #555; margin-bottom: 3mm; }
+    .group-title { font-size: 9pt; font-weight: bold; margin-top: 3mm; margin-bottom: 1mm; }
+    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.book tfoot td {
+        font-weight: bold;
+        font-size: 8pt;
+        padding: 1.5mm 1.5mm;
+        border-top: 0.5pt solid #333;
+        border-bottom: 0.5pt solid #333;
+    }
+    .num { text-align: right; }
+    .col-name { width: 58mm; }
+    .col-doc { width: 30mm; }
+    .col-vendor { width: 40mm; }
+    .col-date { width: 20mm; }
+    .col-person { width: 38mm; }
+    .sign-table { width: 100%; border-collapse: collapse; margin-top: 12mm; }
+    .sign-cell { width: 50%; font-size: 8pt; color: #555; padding-top: 8mm; border-top: 0.3pt solid #999; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">{{ entity.name }}</div>
+            <div class="header-meta">IČO: {{ entity.ico }}</div>
+            <div class="header-meta">{{ entity.address }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Soupis drobného majetku</div>
+            <div class="header-period">ke dni {{ as_of|cz_date }}</div>
+            <div class="header-sub">Sestaveno: {{ entity.prepared_at }}</div>
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="legal-note">
+    Evidence drobného majetku dle §28 odst. 5 zákona č. 563/1991 Sb. o účetnictví a ČÚS 013 —
+    majetek pod hranicí 80 000 Kč (§26 odst. 2 ZDP) účtovaný jednorázově do spotřeby na účet 501.
+</div>
+
+{% if groups is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">
+        K uvedenému dni není v evidenci žádný drobný majetek.
+    </p>
+{% else %}
+{% for group in groups %}
+    <div class="group-title">Umístění: {{ group.location|default('— neurčeno —') }}</div>
+    <table class="book">
+        <thead>
+            <tr>
+                <th class="thl col-name">Název</th>
+                <th class="thl col-doc">Doklad</th>
+                <th class="thl col-vendor">Dodavatel</th>
+                <th class="thl col-date">Pořízeno</th>
+                <th>Množství</th>
+                <th>Cena bez DPH</th>
+                <th class="thl col-person">Odpovědná osoba</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in group.rows %}
+                <tr>
+                    <td>{{ row.name|slice(0, 60) }}{% if row.inventory_number %} ({{ row.inventory_number }}){% endif %}</td>
+                    <td>{{ row.document_ref|default('—') }}</td>
+                    <td>{{ row.vendor_name|default('—')|slice(0, 38) }}</td>
+                    <td>{{ row.acquisition_date|cz_date }}</td>
+                    <td class="num">{{ row.quantity|number_format(3, ',', ' ') }}</td>
+                    <td class="num">{{ row.price|cz_money }}</td>
+                    <td>{{ row.responsible_person|default('—')|slice(0, 36) }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="5">Mezisoučet — {{ group.location|default('neurčeno') }}</td>
+                <td class="num">{{ group.total|cz_money }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+{% endfor %}
+
+<table class="book">
+    <tfoot>
+        <tr>
+            <td colspan="5">CELKEM ({{ count }} položek)</td>
+            <td class="num" style="width:26mm;">{{ total|cz_money }}</td>
+            <td style="width:38mm;"></td>
+        </tr>
+    </tfoot>
+</table>
+
+<table class="sign-table">
+    <tr>
+        <td class="sign-cell">Inventarizaci provedl (datum, podpis)</td>
+        <td class="sign-cell">Schválil (datum, podpis)</td>
+    </tr>
+</table>
+{% endif %}
+
+</body>
+</html>

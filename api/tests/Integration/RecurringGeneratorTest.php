@@ -929,7 +929,8 @@ final class RecurringGeneratorTest extends TestCase
         $due = $this->repo->findDue();
         $dueIds = array_map(fn ($t) => (int) $t['id'], $due);
 
-        $this->assertContains($activeId, $dueIds, 'Aktivní šablona s dnešním next_run_date musí být due');
+        $this->assertContains($activeId, $dueIds,
+            'Aktivní šablona s dnešním next_run_date musí být due. ' . $this->dueDiagnostics($activeId));
         $this->assertNotContains($pausedId, $dueIds, 'Pozastavená šablona nesmí být due');
         $this->assertNotContains($futureId, $dueIds, 'Budoucí next_run_date nesmí být due');
     }
@@ -942,6 +943,38 @@ final class RecurringGeneratorTest extends TestCase
      * Vytvoří period_start šablonu s jednou fixní SLA položkou (5000) a daným
      * next_run_date (= plánované datum vystavení / konec období).
      */
+    /**
+     * Kontext k selhání `findDue()` — bez něj z hlášky „array neobsahuje 14" nejde
+     * poznat, jestli šablonu vyřadila podmínka data, kill-switch dodavatele, nebo až
+     * INNER JOIN v findMany() (chybějící klient/měna).
+     */
+    private function dueDiagnostics(int $templateId): string
+    {
+        $pdo = $this->db->pdo();
+        $t = $pdo->prepare(
+            'SELECT t.status, t.next_run_date, t.end_date, t.draft_open_mode, t.client_id, t.currency_id,
+                    s.auto_generate_recurring,
+                    (SELECT COUNT(*) FROM clients c WHERE c.id = t.client_id) AS client_rows,
+                    (SELECT COUNT(*) FROM currencies cur WHERE cur.id = t.currency_id) AS currency_rows
+               FROM recurring_invoice_templates t
+               JOIN supplier s ON s.id = t.supplier_id
+              WHERE t.id = ?'
+        );
+        $t->execute([$templateId]);
+        $row = $t->fetch(PDO::FETCH_ASSOC) ?: [];
+        $env = $pdo->query('SELECT CURDATE() AS curdate, @@session.time_zone AS tz')->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return sprintf(
+            'DIAG tpl=%d %s | CURDATE=%s tz=%s | PHP today=%s tz=%s',
+            $templateId,
+            json_encode($row, JSON_UNESCAPED_UNICODE),
+            $env['curdate'] ?? '?',
+            $env['tz'] ?? '?',
+            date('Y-m-d'),
+            date_default_timezone_get(),
+        );
+    }
+
     private function createPeriodTemplate(string $nextRun, array $overrides = []): int
     {
         $base = [
@@ -1103,6 +1136,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class),
             $container->get(\MyInvoice\Service\Stats\StatsRecomputer::class),
             $container->get(\MyInvoice\Service\ActivityLogger::class),
+            $container->get(\MyInvoice\Service\Stock\StockIssueService::class),
             $container->get(\MyInvoice\Service\Invoice\RecurringPriceListService::class),
         );
 
@@ -1213,7 +1247,8 @@ final class RecurringGeneratorTest extends TestCase
         $farId  = $this->createPeriodTemplate($inFiveDays, ['reminder_days_before' => 1]);
 
         $reminderIds = array_map(fn ($t) => (int) $t['id'], $this->repo->findReminderDue());
-        $this->assertContains($soonId, $reminderIds, 'next_run = zítra a reminder=1 → v reminder okně');
+        $this->assertContains($soonId, $reminderIds,
+            'next_run = zítra a reminder=1 → v reminder okně. ' . $this->dueDiagnostics($soonId));
         $this->assertNotContains($farId, $reminderIds, 'next_run za 5 dní a reminder=1 → mimo okno');
 
         // Guard: po označení odeslání pro toto období už znovu nepřijde.

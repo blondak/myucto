@@ -10,6 +10,7 @@ import {
 } from '@/api/recurring'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
@@ -17,27 +18,49 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+const priceListEnabled = computed(() => !auth.hasCommercialFeatures || supplierStore.currentSupplier?.stock_enabled !== true)
 
 const id = computed(() => Number(route.params.id))
 const loading = ref(false)
 const busy = ref(false)
 const tpl = ref<RecurringTemplate | null>(null)
 const invoices = ref<GeneratedInvoiceRow[]>([])
+const invoicesTotal = ref(0)
+const invoicesPage = ref(1)
+const invoicesPages = ref(1)
+const loadingMoreInvoices = ref(false)
 
 async function load() {
   loading.value = true
   try {
     const [t1, inv] = await Promise.all([
       recurringApi.get(id.value),
-      recurringApi.invoices(id.value),
+      recurringApi.invoices(id.value, { page: 1 }),
     ])
     tpl.value = t1
-    invoices.value = inv
+    invoices.value = inv.data
+    invoicesTotal.value = inv.meta.total
+    invoicesPage.value = inv.meta.page
+    invoicesPages.value = inv.meta.pages
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || 'Error')
     router.push({ name: 'recurring' })
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMoreInvoices() {
+  loadingMoreInvoices.value = true
+  try {
+    const inv = await recurringApi.invoices(id.value, { page: invoicesPage.value + 1 })
+    invoices.value.push(...inv.data)
+    invoicesTotal.value = inv.meta.total
+    invoicesPage.value = inv.meta.page
+    invoicesPages.value = inv.meta.pages
+  } finally {
+    loadingMoreInvoices.value = false
   }
 }
 
@@ -77,7 +100,7 @@ const totals = computed(() => {
       vat += lineVat
     } else {
       base += amount
-      vat += round2(amount * (ratePct / 100))
+      vat += round2(amount * ratePct / 100)
     }
   }
   return { base: round2(base), vat: round2(vat), total: round2(base + vat) }
@@ -196,22 +219,24 @@ async function removeAction() {
 const recurringActions = computed<ActionItem[]>(() => {
   const r = tpl.value
   if (!r) return []
-  const w = auth.canWrite
+  const w = auth.canWrite('recurring')
+  const canRun = auth.canWrite('recurring.run')
+  const canPause = auth.canWrite('recurring.pause')
   const active = r.status === 'active'
   const paused = r.status === 'paused'
   return [
     { key: 'run', label: t('recurring.actions.run_now'), icon: 'play', tier: 'primary', variant: 'primary',
-      show: active && w, disabled: busy.value, run: () => openRunNow('issue') },
+      show: active && canRun, disabled: busy.value, run: () => openRunNow('issue') },
     { key: 'resume', label: t('recurring.actions.resume'), icon: 'play', tier: 'primary', variant: 'success',
-      show: paused && w, disabled: busy.value, run: resumeAction },
+      show: paused && canPause, disabled: busy.value, run: resumeAction },
     { key: 'edit', label: t('recurring.actions.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
       show: w, to: { name: 'recurring-edit', params: { id: r.id } } },
     { key: 'run-draft', label: t('recurring.actions.run_now_draft'), icon: 'doc', tier: 'secondary', variant: 'primary',
-      show: active && w, disabled: busy.value, run: () => openRunNow('draft') },
+      show: active && canRun, disabled: busy.value, run: () => openRunNow('draft') },
     { key: 'pause', label: t('recurring.actions.pause'), icon: 'pause', tier: 'overflow', variant: 'warning',
-      show: active && w, disabled: busy.value, run: pauseAction },
+      show: active && canPause, disabled: busy.value, run: pauseAction },
     { key: 'delete', label: t('recurring.actions.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-      show: w, disabled: busy.value, run: removeAction },
+      show: auth.canWrite('recurring.delete'), disabled: busy.value, run: removeAction },
   ]
 })
 </script>
@@ -300,7 +325,7 @@ const recurringActions = computed<ActionItem[]>(() => {
         </div>
       </div>
 
-      <div v-if="tpl.catalog_state && tpl.catalog_state !== 'ok'" class="rounded-md border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700" :title="tpl.catalog_error ?? ''">
+      <div v-if="priceListEnabled && tpl.catalog_state && tpl.catalog_state !== 'ok'" class="rounded-md border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700" :title="tpl.catalog_error ?? ''">
         <strong>{{ t('recurring.catalog_state_' + tpl.catalog_state) }}</strong>
         <span v-if="tpl.catalog_error"> · {{ tpl.catalog_error }}</span>
       </div>
@@ -331,7 +356,7 @@ const recurringActions = computed<ActionItem[]>(() => {
             <tr v-for="it in tpl.items" :key="it.id">
               <td class="px-4 py-2">
                 <div>{{ it.description }}</div>
-                <div v-if="it.price_list_item_id" class="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                <div v-if="priceListEnabled && it.price_list_item_id" class="mt-1 flex flex-wrap items-center gap-1 text-xs">
                   <span class="status-badge bg-primary-50 text-primary-700">{{ t('recurring.catalog_badge') }}</span>
                   <span class="text-neutral-500">{{ it.price_list_item_code }} · {{ t('recurring.catalog_policy_' + (it.catalog_policy ?? 'fixed')) }}</span>
                   <span v-if="it.price_list_item_archived" class="status-badge bg-warning-50 text-warning-700">{{ t('recurring.catalog_archived') }}</span>
@@ -376,7 +401,7 @@ const recurringActions = computed<ActionItem[]>(() => {
         <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
           <h3 class="font-semibold">
             {{ t('recurring.generated_invoices') }}
-            <span class="text-neutral-400 font-normal">({{ invoices.length }})</span>
+            <span class="text-neutral-400 font-normal">({{ invoicesTotal }})</span>
           </h3>
         </div>
 
@@ -430,6 +455,13 @@ const recurringActions = computed<ActionItem[]>(() => {
               <span class="font-mono">{{ formatDate(inv.issue_date) }}</span>
             </div>
           </div>
+        </div>
+
+        <div v-if="invoicesPage < invoicesPages" class="text-center py-3 border-t border-neutral-200">
+          <button @click="loadMoreInvoices" :disabled="loadingMoreInvoices"
+            class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
+            {{ loadingMoreInvoices ? t('common.loading_more') : t('common.load_more') }}
+          </button>
         </div>
       </div>
     </div>

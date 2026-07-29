@@ -11,12 +11,23 @@ use ReflectionClass;
 
 final class SecretEncryptionTest extends TestCase
 {
-    private function makeWithConfig(string $base64Key, string $pepper): SecretEncryption
+    /** @param list<string> $previousKeys */
+    private function makeWithConfig(
+        string $base64Key,
+        string $pepper,
+        array $previousKeys = [],
+    ): SecretEncryption
     {
         $config = (new ReflectionClass(Config::class))->newInstanceWithoutConstructor();
         // Inject config table přes reflexi — keep test bez DI containeru
         $prop = new \ReflectionProperty($config, 'data');
-        $prop->setValue($config, ['app' => ['secret_encryption_key' => $base64Key, 'pepper' => $pepper]]);
+        $prop->setValue($config, [
+            'app' => [
+                'secret_encryption_key' => $base64Key,
+                'secret_encryption_previous_keys' => $previousKeys,
+                'pepper' => $pepper,
+            ],
+        ]);
         return new SecretEncryption($config);
     }
 
@@ -40,6 +51,52 @@ final class SecretEncryptionTest extends TestCase
         $svc = $this->makeWithKey(base64_encode(random_bytes(32)));
         self::assertFalse($svc->isEncrypted('plain-text-secret'));
         self::assertTrue($svc->isEncrypted($svc->encrypt('plain-text-secret')));
+        self::assertTrue($svc->isEncrypted($svc->encryptFor('plain-text-secret', 'epo:test')));
+    }
+
+    public function testContextBoundEncryptionRoundtrip(): void
+    {
+        $svc = $this->makeWithKey(base64_encode(random_bytes(32)));
+        $cipher = $svc->encryptFor('sensitive-payload', 'epo:submitted-payload');
+
+        self::assertStringStartsWith('enc:v2:', $cipher);
+        self::assertSame(
+            'sensitive-payload',
+            $svc->decryptFor($cipher, 'epo:submitted-payload'),
+        );
+    }
+
+    public function testContextBoundEncryptionRejectsWrongContext(): void
+    {
+        $svc = $this->makeWithKey(base64_encode(random_bytes(32)));
+        $cipher = $svc->encryptFor('sensitive-payload', 'epo:submitted-payload');
+
+        $this->expectException(\RuntimeException::class);
+        $svc->decryptFor($cipher, 'epo:confirmation');
+    }
+
+    public function testPreviousKeyDecryptsV1AndV2DuringRotation(): void
+    {
+        $oldKey = base64_encode(random_bytes(32));
+        $newKey = base64_encode(random_bytes(32));
+        $old = $this->makeWithKey($oldKey);
+        $rotated = $this->makeWithConfig($newKey, '', [$oldKey]);
+
+        self::assertSame(
+            'legacy-secret',
+            $rotated->decrypt($old->encrypt('legacy-secret')),
+        );
+        self::assertSame(
+            'context-secret',
+            $rotated->decryptFor(
+                $old->encryptFor('context-secret', 'epo:credential-pfx'),
+                'epo:credential-pfx',
+            ),
+        );
+        self::assertNotSame(
+            explode(':', $old->encryptFor('old', 'epo:test'), 4)[2],
+            explode(':', $rotated->encryptFor('new', 'epo:test'), 4)[2],
+        );
     }
 
     public function testLegacyPlaintextPassesThrough(): void

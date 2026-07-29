@@ -30,7 +30,7 @@ final class TrustedDeviceServiceTest extends TestCase
         try {
             $config = Config::load($rootDir);
             $this->db = new Connection($config);
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             $this->markTestSkipped('DB unavailable: ' . $e->getMessage());
         }
 

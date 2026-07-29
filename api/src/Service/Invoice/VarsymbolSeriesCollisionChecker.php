@@ -1,0 +1,211 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Invoice;
+
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
+use PDO;
+
+/**
+ * Featura G (private/REAL_data_followup_UX.md) — detekce kolize variabilních symbolů
+ * napříč číselnými řadami.
+ *
+ * Proč: `invoices.varsymbol` neslouží jen jako číslo dokladu, ale i jako VS pro
+ * bankovní párování (StatementMatcher) — porovnává se PO NORMALIZACI na číslice
+ * (VariableSymbolNormalizer::forMatching() / SQL `CAST(REGEXP_REPLACE(...) AS UNSIGNED)`),
+ * takže nečíselné znaky šablony (písmena, pomlčky, lomítka) ZE SROVNÁNÍ ZMIZÍ. Dvě
+ * šablony různých typů dokladů (faktura/proforma/dobropis), lišící se jen v takových
+ * znacích, tak pro stejné datum+počítadlo vygenerují STEJNÝ VS — reálný incident
+ * v produkci (proforma `Z2406002` × faktura `2406002`, viz REAL_data_followup_UX.md §G).
+ * Až vznikne, nedá se opravit — klient už platí pod cizím VS.
+ *
+ * Read-only — nic neopravuje/nemění, jen hlásí. Surfacing: nastavení dodavatele
+ * (Systém → Dodavatelé → Číslování faktur), NE monthly-check — kolize řad je
+ * setup-level (vzniká při ZAKLÁDÁNÍ/EDITACI šablony, ne periodicky jako uzávěrkové
+ * kontroly v {@see \MyInvoice\Service\Accounting\Closing\ClosingService::buildChecks()}).
+ *
+ * Srovnáváme jen invoice/proforma/credit_note — to je jediná trojice, která sdílí
+ * VS-namespace tabulky `invoices` použitý při párování PŘÍCHOZÍCH plateb
+ * (viz {@see \MyInvoice\Service\Bank\StatementMatcher}). Přijaté faktury
+ * (`purchase_invoice_number_format`) mají VLASTNÍ tabulku (`purchase_invoices`)
+ * i vlastní unique constraint — s vydanými doklady nekolidují.
+ */
+final class VarsymbolSeriesCollisionChecker
+{
+    /** Typy dokladů sdílející VS-namespace tabulky `invoices` (StatementMatcher). */
+    public const SHARED_TYPES = ['invoice', 'proforma', 'credit_note'];
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly Config $config,
+    ) {}
+
+    /**
+     * Kolize mezi supplier-wide šablonami a všemi per-client přepsáními daného
+     * dodavatele (clients.{type}_number_format — viz ClientForm.vue).
+     *
+     * @return list<array{
+     *   a: array{type:string, client_id:?int, client_name:?string, template:string},
+     *   b: array{type:string, client_id:?int, client_name:?string, template:string},
+     * }>
+     */
+    public function findForSupplier(int $supplierId): array
+    {
+        return self::findCollisions($this->collectSeries($supplierId));
+    }
+
+    /**
+     * @return list<array{type:string, client_id:?int, client_name:?string, template:string}>
+     */
+    private function collectSeries(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT invoice_number_format, proforma_number_format, credit_note_number_format
+               FROM supplier WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId]);
+        $sup = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $series = [];
+        foreach (self::SHARED_TYPES as $type) {
+            $tpl = trim((string) ($sup["{$type}_number_format"] ?? ''));
+            if ($tpl === '') {
+                // Supplier nemá vlastní šablonu — dosadí se globální cfg fallback (stejná
+                // priorita jako ve VarsymbolGenerator::resolveTemplateAndPeriod()).
+                $tpl = trim((string) $this->config->get("varsymbol.templates.{$type}", ''));
+            }
+            if ($tpl !== '') {
+                $series[] = ['type' => $type, 'client_id' => null, 'client_name' => null, 'template' => $tpl];
+            }
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, company_name, invoice_number_format, proforma_number_format, credit_note_number_format
+                 FROM clients
+                WHERE supplier_id = ?
+                  AND (COALESCE(invoice_number_format, '') <> ''
+                    OR COALESCE(proforma_number_format, '') <> ''
+                    OR COALESCE(credit_note_number_format, '') <> '')"
+        );
+        $stmt->execute([$supplierId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $cli) {
+            foreach (self::SHARED_TYPES as $type) {
+                $tpl = trim((string) ($cli["{$type}_number_format"] ?? ''));
+                if ($tpl !== '') {
+                    $series[] = [
+                        'type' => $type,
+                        'client_id' => (int) $cli['id'],
+                        'client_name' => (string) $cli['company_name'],
+                        'template' => $tpl,
+                    ];
+                }
+            }
+        }
+
+        return $series;
+    }
+
+    /**
+     * Najde všechny kolidující dvojice v dané sadě řad (pure — bez DB, unit-testovatelné).
+     *
+     * @param list<array{type:string, client_id:?int, client_name:?string, template:string}> $series
+     * @return list<array{
+     *   a: array{type:string, client_id:?int, client_name:?string, template:string},
+     *   b: array{type:string, client_id:?int, client_name:?string, template:string},
+     * }>
+     */
+    public static function findCollisions(array $series): array
+    {
+        $collisions = [];
+        $n = count($series);
+        for ($i = 0; $i < $n; $i++) {
+            for ($j = $i + 1; $j < $n; $j++) {
+                if ($series[$i]['template'] === '' || $series[$j]['template'] === '') {
+                    continue;
+                }
+                if (self::templatesCollide($series[$i]['template'], $series[$j]['template'])) {
+                    $collisions[] = ['a' => $series[$i], 'b' => $series[$j]];
+                }
+            }
+        }
+        return $collisions;
+    }
+
+    /**
+     * Dvě šablony kolidují, pokud po zahození nečíselných literálů — přesně to, co dělá
+     * bankovní matcher při párování VS — vyprodukují STEJNOU strukturu číslic: pro
+     * shodné datum a počítadlo tak vygenerují IDENTICKÝ výsledný VS.
+     */
+    public static function templatesCollide(string $a, string $b): bool
+    {
+        $ta = trim($a);
+        $tb = trim($b);
+        if ($ta === '' || $tb === '') {
+            return false;
+        }
+        if ($ta === $tb) {
+            return true;
+        }
+        return self::digitSkeleton($ta) === self::digitSkeleton($tb);
+    }
+
+    /**
+     * "Digitální skeleton" šablony — jen to, co v renderovaném VS přežije normalizaci na
+     * číslice (viz {@see \MyInvoice\Service\Bank\VariableSymbolNormalizer::digits()}).
+     * Placeholdery: `{YYYY}` → `Y4`, `{YY}` → `Y2`, `{MM}` → `M2`, `{C+}` (n znaků) → `Cn`,
+     * `{PP}` (přijaté faktury — vždy 2 písmena PF/PN/KU/KN/NU/NN) → zahozeno. Literální
+     * znaky: číslice zůstávají (jako `L<digits>` segment ve svém pořadí), cokoliv jiného
+     * (písmena, pomlčky, lomítka, mezery) se zahodí — přesně jako `\D` v normalizeru.
+     *
+     * Omezení (vědomý kompromis): různě široká počítadla (`{CCC}` vs `{CCCC}`) NEflagujeme,
+     * i když `CAST(...AS UNSIGNED)` teoreticky ořízne vodicí nuly na začátku CELÉHO VS a
+     * mohly by se pro malé hodnoty counteru shodovat — jde o okrajový a nepravděpodobný
+     * překryv (jiná struktura, jiná řada), ne skutečnou kolizi. Cílem je chytit reálný
+     * vzor incidentu (stejná struktura, jen jiné/chybějící oddělovací znaky), ne každý
+     * teoreticky možný numerický průnik — Featura G výslovně žádá "flagni jen skutečné
+     * kolize, ne řady s disjunktními prefixy".
+     */
+    public static function digitSkeleton(string $template): string
+    {
+        $parts = preg_split(
+            '/(\{YYYY\}|\{YY\}|\{MM\}|\{C+\}|\{PP\})/',
+            $template,
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE,
+        ) ?: [$template];
+
+        $tokens = [];
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+            if ($part === '{YYYY}') {
+                $tokens[] = 'Y4';
+                continue;
+            }
+            if ($part === '{YY}') {
+                $tokens[] = 'Y2';
+                continue;
+            }
+            if ($part === '{MM}') {
+                $tokens[] = 'M2';
+                continue;
+            }
+            if ($part === '{PP}') {
+                continue; // vždy písmena — normalizace na číslice je odstraní
+            }
+            if (preg_match('/^\{(C+)\}$/', $part, $m) === 1) {
+                $tokens[] = 'C' . strlen($m[1]);
+                continue;
+            }
+            $digits = preg_replace('/\D+/', '', $part) ?? '';
+            if ($digits !== '') {
+                $tokens[] = 'L' . $digits;
+            }
+        }
+
+        return implode('|', $tokens);
+    }
+}

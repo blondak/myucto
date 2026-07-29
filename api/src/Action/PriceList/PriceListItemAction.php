@@ -7,27 +7,32 @@ namespace MyInvoice\Action\PriceList;
 use DateTimeImmutable;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PriceListItemRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PriceListItemResolver;
 use MyInvoice\Service\Invoice\PriceListResolutionException;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\CommercialFeatureAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class PriceListItemAction
 {
     public function __construct(
+        private readonly Connection $db,
         private readonly PriceListItemRepository $repo,
         private readonly PriceListItemResolver $resolver,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly CommercialFeatureAccess $commercialFeatures,
     ) {}
 
     public function list(Request $request, Response $response): Response
     {
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $q = $request->getQueryParams();
         $page = max(1, (int) ($q['page'] ?? 1));
         $perPage = min(200, max(1, (int) ($q['per_page'] ?? 50)));
@@ -128,6 +133,7 @@ final class PriceListItemAction
     public function get(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $item = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
         if ($item === null) return Json::error($response, 'not_found', 'Ceníková položka nebyla nalezena.', 404);
         $item['customer_overrides'] = $this->repo->customerOverrides($supplierId, (int) $item['id']);
@@ -138,6 +144,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $body = $this->normalizeBody((array) ($request->getParsedBody() ?? []));
         $error = $this->validateItem($supplierId, $body, true);
         if ($error !== null) return Json::error($response, 'validation_failed', $error, 400);
@@ -166,6 +173,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $before = $this->repo->find($id, $supplierId);
         if ($before === null) {
@@ -196,6 +204,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         if ($this->repo->find($id, $supplierId) === null) {
             return Json::error($response, 'not_found', 'Ceníková položka nebyla nalezena.', 404);
@@ -209,6 +218,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $currency = strtoupper((string) ($args['currencyCode'] ?? ''));
         if ($this->repo->find($id, $supplierId) === null) {
@@ -231,6 +241,7 @@ final class PriceListItemAction
     public function prices(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $item = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
         if ($item === null) return Json::error($response, 'not_found', 'Ceníková položka nebyla nalezena.', 404);
         return Json::ok($response, $item['prices']);
@@ -240,6 +251,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $currency = strtoupper((string) ($args['currencyCode'] ?? ''));
         if ($this->repo->find($id, $supplierId) === null) {
@@ -259,6 +271,7 @@ final class PriceListItemAction
     public function customerOverrides(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         if ($this->repo->find($id, $supplierId) === null) {
             return Json::error($response, 'not_found', 'Ceníková položka nebyla nalezena.', 404);
@@ -270,6 +283,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $clientId = (int) ($args['clientId'] ?? 0);
         $currency = strtoupper((string) ($args['currencyCode'] ?? ''));
@@ -302,6 +316,7 @@ final class PriceListItemAction
     {
         if (!$this->isAdmin($request)) return $this->adminOnly($response);
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $clientId = (int) ($args['clientId'] ?? 0);
         $currency = strtoupper((string) ($args['currencyCode'] ?? ''));
@@ -320,6 +335,7 @@ final class PriceListItemAction
     public function resolve(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);
+        if ($unavailable = $this->unavailableForStock($supplierId, $response)) return $unavailable;
         $id = (int) ($args['id'] ?? 0);
         $q = $request->getQueryParams();
         $clientId = (int) ($q['client_id'] ?? 0);
@@ -421,7 +437,23 @@ final class PriceListItemAction
     private function isAdmin(Request $request): bool
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return ($user['role'] ?? '') === 'admin';
+        return !empty($user['is_superadmin']) || ($user['role'] ?? '') === 'admin';
+    }
+
+    private function unavailableForStock(int $supplierId, Response $response): ?Response
+    {
+        if (!$this->commercialFeatures->isAvailable()) return null;
+
+        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        if (!(bool) $stmt->fetchColumn()) return null;
+
+        return Json::error(
+            $response,
+            'price_list_unavailable',
+            'Ceník není dostupný, protože firma používá skladový/e-shop modul.',
+            409,
+        );
     }
 
     private function adminOnly(Response $response): Response

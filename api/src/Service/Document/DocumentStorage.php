@@ -232,14 +232,19 @@ final class DocumentStorage
         ?string $thumbPath,
         DocumentRepository $repo,
         array $excludeIds,
+        array $excludeFileIds = [],
     ): void {
-        if ($repo->countBySha($supplierId, $sha256, $excludeIds) === 0) {
+        // Union ref-counting (documents + document_files) — bajt (i náhled) odpojíme jen
+        // když na sha neukazuje ani jeden z obou subsystémů A (§4.4). Náhled je pojmenovaný
+        // podle sha, takže ho smíme smazat JEN když jsou orphan i samotné bajty — jinak by
+        // přeživší doklad se stejným sha přišel o náhled.
+        if ($repo->countBySha($supplierId, $sha256, $excludeIds, $excludeFileIds) === 0) {
             $path = $this->pathFor($supplierId, $sha256, $filename);
             if (is_file($path)) @unlink($path);
-        }
-        if ($thumbPath !== null && $thumbPath !== '') {
-            $abs = self::thumbsDir($supplierId) . '/' . basename($thumbPath);
-            if (is_file($abs)) @unlink($abs);
+            if ($thumbPath !== null && $thumbPath !== '') {
+                $abs = self::thumbsDir($supplierId) . '/' . basename($thumbPath);
+                if (is_file($abs)) @unlink($abs);
+            }
         }
     }
 

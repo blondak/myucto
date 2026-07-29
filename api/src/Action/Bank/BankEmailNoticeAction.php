@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Bank;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
@@ -291,8 +293,7 @@ final class BankEmailNoticeAction
 
     private function admin(Request $request, Response $response, ?Response &$err): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'bank.import', AccessLevel::WRITE)) {
             $err = Json::error($response, 'forbidden', 'Pouze admin.', 403);
             return false;
         }

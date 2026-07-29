@@ -5,16 +5,26 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentJournalSync;
+use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
+use MyInvoice\Service\Ai\AiSuggestionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -28,6 +38,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class UpdatePurchaseInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
+    use GuardsDocumentLock;
 
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
@@ -36,7 +47,26 @@ final class UpdatePurchaseInvoiceAction
         private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
+        private readonly DocumentJournalSync $journalSync,
+        private readonly Connection $db,
+        private readonly AiSuggestionService $aiSuggestions,
+        private readonly SmallAssetService $smallAssets,
+        private readonly CnbRateDeviationChecker $rateChecker,
     ) {}
+
+    /**
+     * Účetní/amountová/DPH pole přijaté faktury (audit 2026-07 B11) — jejich změna ve
+     * force-editu zaúčtované PF v uzavřeném období vyžaduje force_mode='reconcile'.
+     * notes_only povoluje jen zbytek (poznámky, jazyk).
+     */
+    private const FINANCIAL_FIELDS = [
+        'vendor_id', 'vendor_invoice_number', 'document_kind',
+        'issue_date', 'tax_date', 'due_date', 'received_at', 'currency_id',
+        'reverse_charge', 'prices_include_vat', 'advance_paid_amount',
+        'vat_classification_code', 'vat_deduction', 'vat_deduction_percent',
+        'tax_deductible', 'is_fixed_asset', 'expense_category_id', 'varsymbol',
+    ];
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
@@ -52,8 +82,25 @@ final class UpdatePurchaseInvoiceAction
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = (($user['role'] ?? '') === 'admin');
+        $isAdmin = RequestAuthorization::isSuperadmin($request);
         $isForce = !empty($request->getQueryParams()['force']);
+
+        $body = (array) ($request->getParsedBody() ?? []);
+
+        // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
+        // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
+        // klient nesmí datem do uzavřeného období „utéct" ani ho tam přesunout.
+        $lock = $this->locks->forPurchaseInvoice($existing);
+        if ($deny = $this->denyIfLocked($request, $response, $lock, 'purchase_invoice', $id)) {
+            return $deny;
+        }
+        $newRefDate = DocumentLockService::purchaseRefDate($body) ?? DocumentLockService::purchaseRefDate($existing);
+        if ($newRefDate !== null) {
+            $newLock = $this->locks->forDate($supplierId, $newRefDate);
+            if ($deny = $this->denyIfLocked($request, $response, $newLock, 'purchase_invoice', $id)) {
+                return $deny;
+            }
+        }
 
         if ($existing['status'] !== 'draft') {
             // Force-update: admin smí upravit received / booked / paid (s ?force=1).
@@ -65,7 +112,39 @@ final class UpdatePurchaseInvoiceAction
             }
         }
 
-        $body = (array) ($request->getParsedBody() ?? []);
+        // B11 (audit 2026-07): force-edit PF s AKTIVNÍM zaúčtovaným zápisem v UZAVŘENÉM
+        // období rozejde doklad × deník — vynucený force_mode (reconcile | notes_only).
+        $forceMode = null;
+        if ($isAdmin && $isForce && $lock->inClosedPeriod && $lock->posted) {
+            $forceMode = trim((string) ($request->getQueryParams()['force_mode'] ?? $body['force_mode'] ?? ''));
+            if (!in_array($forceMode, ['reconcile', 'notes_only'], true)) {
+                return Json::error(
+                    $response,
+                    'force_mode_required',
+                    'Přijatá faktura má aktivní zaúčtovaný zápis v uzavřeném období. Zvolte force_mode: '
+                        . '"reconcile" (doklad se opraví, původní zápis se stornuje a doklad se přeúčtuje do '
+                        . 'aktuálního otevřeného období), nebo "notes_only" (jen neúčetní pole: poznámky, jazyk).',
+                    422,
+                );
+            }
+            if ($forceMode === 'notes_only') {
+                $changed = self::financialFieldsChanged($body, $existing);
+                if ($changed !== []) {
+                    return Json::error(
+                        $response,
+                        'financial_change_not_allowed',
+                        'force_mode="notes_only" povoluje jen neúčetní pole. Účetní/částková/DPH pole ke změně: '
+                            . implode(', ', $changed) . '. Pro opravu účetních polí použijte force_mode="reconcile".',
+                        422,
+                    );
+                }
+            }
+        }
+        $repostOpenForceEdit = $isAdmin
+            && (bool) $isForce
+            && $lock->posted
+            && !$lock->inClosedPeriod
+            && self::financialFieldsChanged($body, $existing) !== [];
 
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
@@ -97,37 +176,152 @@ final class UpdatePurchaseInvoiceAction
         // Auto-default VAT klasifikace pokud uživatel nezadal — na header i items (s multi-tenant scope).
         $this->applyVatClassificationDefaults($body, $supplierId);
 
+        // C6 (§ 73/1/a): ruční editace data přijetí ve formuláři je vědomý úkon účetní
+        // (i default dnešek z UI), ne slepý otisk importu → 'manual'. VatLedgerService pak
+        // smí uplatnit odpočet dle skutečného držení dokladu. Importy zůstávají 'import'.
+        if (array_key_exists('received_at', $body)) {
+            $body['received_at_source'] = 'manual';
+        }
+
+        // Forma úhrady (migrace 1128): přišla-li z formuláře, je to vědomá volba účetní →
+        // zdroj vždy 'manual', nikdy ne to, co poslal klient. Ruční volba pak přebije
+        // předvolbu dodavatele i AI a už ji nic automatického nepřepíše.
+        if (array_key_exists('payment_method', $body)) {
+            $body['payment_method_source'] = 'manual';
+        }
+
+        // Vazba dobropisu na opravovanou fakturu (migrace 1096) — validace tenanta/druhu/self.
+        if (array_key_exists('parent_purchase_invoice_id', $body)) {
+            $body['parent_purchase_invoice_id'] = CreatePurchaseInvoiceAction::sanitizeParentLink(
+                $this->db, $body['parent_purchase_invoice_id'] ?? null,
+                (string) ($body['document_kind'] ?? ''), $supplierId, $id,
+            );
+        }
+
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) $pdo->beginTransaction();
         try {
-            $this->repo->updateDraft($id, $body, $supplierId);
+            // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
+            // účetní mohla doklad zaúčtovat mezi guard-checkem a zápisem.
+            $requireUnbooked = RequestAuthorization::isClientType($request);
+            if (!$this->repo->updateDraft($id, $body, $supplierId, $requireUnbooked)) {
+                if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return Json::error(
+                    $response,
+                    'document_locked',
+                    'Doklad byl mezitím zaúčtován — změny vyřídí vaše účetní.',
+                    409,
+                );
+            }
+            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+            // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
+            // kalkulátor zapekl do řádkových totálů.
+            if (array_key_exists('vat_overrides', $body)) {
+                $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
+            }
+            $this->calc->recompute($id);
+            if (array_key_exists('rounding', $body)) {
+                $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
+            }
+            if (array_key_exists('vat_allocations', $body)) {
+                $this->repo->replaceVatAllocations(
+                    $id,
+                    $supplierId,
+                    is_array($body['vat_allocations']) ? $body['vat_allocations'] : [],
+                );
+            }
+            $this->repo->reprefixVarsymbol($id, $supplierId);
+            if ($ownTransaction) $pdo->commit();
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $code = str_contains($e->getMessage(), 'alokac') ? 'invalid_vat_allocations' : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         } catch (\PDOException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             // Ruční interní číslo koliduje s existujícím (uq_pi_supplier_varsymbol) → 409.
             if ($dupMsg = self::varsymbolDuplicateMessage($e, $body['varsymbol'] ?? null)) {
                 return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
             }
+            // Přesný duplikát PF: stejný dodavatel + číslo dokladu + datum (uq_pi_vendor_invoice) → 409.
+            if ($dupMsg = self::vendorInvoiceDuplicateMessage($e, $body['vendor_invoice_number'] ?? null)) {
+                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409);
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
-        $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
-        // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
-        // kalkulátor zapekl do řádkových totálů.
-        if (array_key_exists('vat_overrides', $body)) {
-            $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
-        }
-        $this->calc->recompute($id);
-        // Rounding override z body (uživatel může ručně upravit v editoru)
-        if (array_key_exists('rounding', $body)) {
-            $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
-        }
-        // Změna daňového uplatnění u už očíslované faktury → přepiš prefix interního
-        // čísla na odpovídající typ (PF2602001 → NN2602001). No-op u draftu / ručních čísel.
-        $this->repo->reprefixVarsymbol($id, $supplierId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $action = ($existing['status'] !== 'draft') ? 'purchase_invoice.force_updated' : 'purchase_invoice.updated';
-        $this->logger->log($action, $user['id'] ?? null, 'purchase_invoice', $id, null, $ip, $request->getHeaderLine('User-Agent'));
+        // B11: zvolený režim force-editu do auditní stopy.
+        $auditPayload = $forceMode !== null ? ['force_mode' => $forceMode] : null;
+        $this->logger->log($action, $user['id'] ?? null, 'purchase_invoice', $id, $auditPayload, $ip, $request->getHeaderLine('User-Agent'));
+        if ($existing['status'] === 'draft') {
+            try {
+                $this->aiSuggestions->invalidatePurchase($supplierId, $id);
+                $this->aiSuggestions->enqueuePurchase($supplierId, $id);
+            } catch (\Throwable) {
+            }
+        }
+
+        // B11 reconcile: stornuj původní zápis a přeúčtuj opravenou PF do otevřeného období.
+        $reconcile = null;
+        $repostedEntryId = null;
+        if ($forceMode === 'reconcile') {
+            try {
+                $reconcile = $this->journalSync->reconcileForceEdit($supplierId, 'purchase_invoice', $id, [
+                    'user_id' => $user['id'] ?? null, 'posted_by' => $user['id'] ?? null,
+                    'ip' => $ip, 'user_agent' => $request->getHeaderLine('User-Agent'),
+                ]);
+            } catch (PostingException | UnbalancedEntryException $e) {
+                $code = $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry';
+                $status = $e instanceof PostingException ? $e->httpStatus : 422;
+                return Json::error($response, $code,
+                    'Doklad byl opraven, ale přeúčtování deníku selhalo: ' . $e->getMessage()
+                        . ' Deník dorovnej ručně (storno + zaúčtování do otevřeného období).',
+                    $status);
+            }
+        } elseif ($repostOpenForceEdit) {
+            $updated = $this->repo->find($id, $supplierId);
+            try {
+                $repostedEntryId = $this->journalSync->repostForceEdit($supplierId, 'purchase_invoice', $id, [
+                    'entry_date' => (string) ($updated['tax_date'] ?? $updated['issue_date']),
+                    'document_date' => (string) ($updated['tax_date'] ?? $updated['issue_date']),
+                    'document_no' => (string) ($updated['varsymbol'] ?? ''),
+                    'user_id' => $user['id'] ?? null, 'posted_by' => $user['id'] ?? null,
+                    'ip' => $ip, 'user_agent' => $request->getHeaderLine('User-Agent'),
+                ]);
+            } catch (PostingException | UnbalancedEntryException $e) {
+                $code = $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry';
+                $status = $e instanceof PostingException ? $e->httpStatus : 422;
+                return Json::error($response, $code,
+                    'Doklad byl opraven, ale přeúčtování deníku selhalo: ' . $e->getMessage()
+                        . ' Deník dorovnej ručně.',
+                    $status);
+            }
+        }
+
+        // Sesynchronizuj evidenci drobného majetku s aktuálními položkami. Bez toho se
+        // změna klasifikace (uživatel označí položku jako majetek) do evidence nepromítne
+        // — karta by nevznikla, dokud někdo ručně nespustí generování. Draft se přeskakuje:
+        // rozpracovaný doklad ještě není pořízení, karty by vznikaly a mizely při každém
+        // rozmyšlení. Nesmí shodit uložení faktury — chyba evidence je vedlejší.
+        if (($existing['status'] ?? '') !== 'draft') {
+            try {
+                $this->smallAssets->syncFromPurchaseInvoice($supplierId, $id, $user['id'] ?? null);
+            } catch (\Throwable) {
+            }
+        }
 
         $invoice = $this->repo->find($id, $supplierId);
+        if ($reconcile !== null && $invoice !== null) {
+            $invoice['_reconcile'] = $reconcile;
+        }
+        if ($repostedEntryId !== null && $invoice !== null) {
+            $invoice['_repost'] = ['entry_id' => $repostedEntryId];
+        }
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
@@ -137,10 +331,78 @@ final class UpdatePurchaseInvoiceAction
         if ($vendorNonPayer && !PurchaseInvoiceValidation::isReverseCharge($invoice) && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
             $warnings[] = 'vendor_non_payer_deduction';
         }
+        // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k rozhodnému dni.
+        // NEBLOKUJE (§24/7 pevný kurz legitimní); §73/6 se netýká — jen účetní přepočet.
+        if (is_array($invoice)) {
+            $dev = $this->rateChecker->deviationWarning(
+                $supplierId,
+                (string) ($invoice['currency'] ?? ''),
+                (string) ($invoice['effective_cost_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
+            );
+            if ($dev !== null) {
+                $warnings[] = 'exchange_rate_cnb_deviation';
+                $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
+            }
+        }
+        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet).
+        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
+            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+            $warnings[] = 'advance_has_tax_document';
+        }
+        // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.
+        if (is_array($invoice)
+            && CreatePurchaseInvoiceAction::receiptLooksLikePrepayment($this->db, $invoice['id'] ?? null, (string) ($invoice['document_kind'] ?? ''))) {
+            $warnings[] = 'receipt_looks_like_prepayment';
+        }
         if (!empty($warnings)) {
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice);
+    }
+
+    /**
+     * B11: účetní pole PF, která se v requestu reálně mění proti uloženému dokladu.
+     * Porovnává hodnotu (ne přítomnost). Položky, ruční rekapitulace DPH (vat_overrides)
+     * i ruční rounding jsou vždy účetní změny.
+     *
+     * @return list<string>
+     */
+    private static function financialFieldsChanged(array $body, array $existing): array
+    {
+        $changed = [];
+        foreach (self::FINANCIAL_FIELDS as $col) {
+            if (array_key_exists($col, $body)
+                && (string) ($body[$col] ?? '') !== (string) ($existing[$col] ?? '')
+            ) {
+                $changed[] = $col;
+            }
+        }
+        // exchange_rate: updateDraft() zapisuje kurz z body při každém update a PostingService
+        // z něj počítá CZK (total_with_vat * rate). Reálná změna kurzu pod notes_only proto
+        // rozejde doklad × deník stejně jako změna currency. Porovnáváme NUMERICKY, aby
+        // formátové neshody (25.00 vs 25) legitimní notes_only neblokovaly.
+        if (array_key_exists('exchange_rate', $body)
+            && is_numeric($body['exchange_rate'])
+            && abs((float) $body['exchange_rate'] - (float) ($existing['exchange_rate'] ?? 0)) > 1e-9
+        ) {
+            $changed[] = 'exchange_rate';
+        }
+        if (array_key_exists('items', $body)) {
+            $changed[] = 'items';
+        }
+        if (array_key_exists('vat_overrides', $body)) {
+            $changed[] = 'vat_overrides';
+        }
+        if (array_key_exists('vat_allocations', $body)) {
+            $changed[] = 'vat_allocations';
+        }
+        if (array_key_exists('rounding', $body)
+            && (string) ($body['rounding'] ?? '') !== (string) ($existing['rounding'] ?? '')
+        ) {
+            $changed[] = 'rounding';
+        }
+        return $changed;
     }
 
     /**

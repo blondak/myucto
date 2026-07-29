@@ -6,12 +6,17 @@ namespace MyInvoice\Service\Oss;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Currency\CurrencyConversionService;
+use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Report\VatLedgerService;
 
 final class OssLedgerService
 {
     public function __construct(
         private readonly Connection $db,
         private readonly CurrencyConversionService $currencyConverter,
+        private readonly VatLedgerService $vatLedger,
+        private readonly OssThresholdService $threshold,
+        private readonly OssRateCodebook $rateCodebook,
     ) {}
 
     /** @return array<string,mixed> */
@@ -30,7 +35,7 @@ final class OssLedgerService
         // Vypnutý OSS sem už nedojde — OssReportAction vrací 409 dřív, než se preview zavolá,
         // a UI stránku bez zapnutého režimu vůbec nezpřístupní. Varování proto odpadlo.
 
-        $rows = $this->fetchRows($supplierId, $start, $end);
+        $rows = $this->vatLedger->ossRows($supplierId, $start, $end);
         $countries = [];
         $corrections = [];
         $invoiceIds = [];
@@ -65,6 +70,19 @@ final class OssLedgerService
                 $vatReturn = 0.0;
             } elseif (abs($vatReturn - ($baseReturn * $rate / 100.0)) > 0.02) {
                 $warnings[] = 'Doklad ' . self::docLabel($r) . ' má OSS základ a DPH, které neodpovídají zadané sazbě.';
+            }
+
+            // Vnitřní konzistence (výše) říká jen to, že si základ a daň odpovídají —
+            // konzistentně ŠPATNÁ sazba jí projde. Teprve číselník ověří, že sazba
+            // vůbec platí ve státě spotřeby, a to k datu plnění.
+            $rateWarning = $this->rateCodebook->checkRate(
+                $country,
+                $rate,
+                $r['oss_rate_type'] !== null ? (string) $r['oss_rate_type'] : null,
+                (string) ($r['tax_date'] ?? $r['issue_date'] ?? date('Y-m-d')),
+            );
+            if ($rateWarning !== null) {
+                $warnings[] = 'Doklad ' . self::docLabel($r) . ': ' . $rateWarning;
             }
 
             $originalPeriod = strtoupper(trim((string) ($r['oss_original_period'] ?? '')));
@@ -208,36 +226,18 @@ final class OssLedgerService
             ],
             'countries' => $countryRows,
             'corrections' => $correctionRows,
-            'warnings' => array_values(array_unique($warnings)),
+            // Práh 10 000 EUR (§ 8 odst. 3 ZDPH) se sleduje za CELÝ kalendářní rok, ne za
+            // čtvrtletí podání — proto vlastní blok vedle kvartálních čísel.
+            'threshold' => $this->threshold->progress($supplierId, $year),
+            'warnings' => array_values(array_unique(array_merge(
+                $warnings,
+                $this->threshold->registrationSanityWarnings(
+                    $supplierId,
+                    $year,
+                    (bool) ($settings['oss_enabled'] ?? false),
+                ),
+            ))),
         ];
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function fetchRows(int $supplierId, string $start, string $end): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.invoice_type, i.status,
-                    COALESCE(i.tax_date, i.issue_date) AS tax_date, i.issue_date,
-                    COALESCE(cur.code, 'CZK') AS currency, c.company_name AS client_name,
-                    ii.id AS item_id, ii.description, ii.vat_rate_snapshot,
-                    ii.total_without_vat, ii.total_vat,
-                    ii.oss_consumer_country, ii.oss_rate_type, ii.oss_supply_type,
-                    ii.oss_exchange_rate, ii.oss_exchange_rate_date,
-                    ii.oss_taxable_amount_return, ii.oss_vat_amount_return,
-                    ii.oss_original_period
-               FROM invoice_items ii
-               JOIN invoices i ON i.id = ii.invoice_id
-               JOIN clients c ON c.id = i.client_id
-          LEFT JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.supplier_id = ?
-                AND ii.oss_applicable = 1
-                AND i.status NOT IN ('draft', 'cancelled')
-                AND i.invoice_type <> 'proforma'
-                AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
-           ORDER BY COALESCE(i.tax_date, i.issue_date), i.id, ii.order_index, ii.id"
-        );
-        $stmt->execute([$supplierId, $start, $end]);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
     }
 
     /**
@@ -286,7 +286,11 @@ final class OssLedgerService
             return (float) $row[$sourceField];
         }
         if ($row['oss_exchange_rate'] !== null) {
-            return round((float) $row[$sourceField] * (float) $row['oss_exchange_rate'], 2);
+            // HALF_UP přes bcmath, ne `round()`: tahle částka jde do PODÁNÍ (VetaR
+            // taxable_amount / vat_amount). `round()` kvůli binární nepřesnosti dá
+            // u součinu na půlhaléřové hranici o haléř míň — změřeno 603× na 1,6 mil.
+            // kombinací částek a reálných kurzů ČNB. SSOT je CzkRecap::multiplyHalfUp().
+            return CzkRecap::multiplyHalfUp((float) $row[$sourceField], (float) $row['oss_exchange_rate']);
         }
         $date = (string) ($row['tax_date'] ?? $row['issue_date'] ?? '');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
@@ -339,6 +343,13 @@ final class OssLedgerService
             ],
             'countries' => [],
             'corrections' => [],
+            // Bez OSS sloupců nelze práh počítat — nulový blok drží tvar odpovědi,
+            // ať se UI nemusí ptát, jestli klíč vůbec existuje.
+            'threshold' => [
+                'year' => $year, 'threshold_eur' => 0.0, 'total_eur' => 0.0, 'pct' => 0.0,
+                'exceeded' => false, 'exceeded_on' => null, 'near_threshold' => false,
+                'by_country' => [], 'unconverted_rows' => 0, 'warnings' => [],
+            ],
             'warnings' => $warnings,
         ];
     }

@@ -17,23 +17,52 @@ final class DocumentFolderRepository
 {
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array<string,mixed>> Aktivní složky daného rodiče (NULL = root). */
-    public function listChildren(int $supplierId, ?int $parentId): array
+    /**
+     * Per-user scope guard (Epic F7, §4.2) — shodná osa jako DocumentRepository::scopeClause.
+     * Vrací SQL fragment (`AND …`) + poziční parametry pro dokumenty:
+     *  - admin → prázdný fragment (vidí vše tenanta),
+     *  - user  → company + vlastní user doklady,
+     *  - user=NULL → fail-closed: jen company.
+     *
+     * @return array{0:string,1:list<int>}
+     */
+    private function scopeClause(DocumentViewerContext $viewer, string $alias = ''): array
     {
+        if ($viewer->isAdmin) {
+            return ['', []];
+        }
+        $col = $alias !== '' ? $alias . '.' : '';
+        if ($viewer->userId === null) {
+            return [" AND {$col}scope = 'company'", []];
+        }
+        return [
+            " AND ({$col}scope = 'company' OR ({$col}scope = 'user' AND {$col}owner_user_id = ?))",
+            [$viewer->userId],
+        ];
+    }
+
+    /** @return list<array<string,mixed>> Aktivní složky daného rodiče (NULL = root). */
+    public function listChildren(int $supplierId, ?int $parentId, DocumentViewerContext $viewer): array
+    {
+        // Čítače (file_count/total_bytes) respektují scope prohlížejícího — jinak by složka
+        // hlásila víc souborů, než jich uživatel ve výpisu reálně vidí (cizí user doklady).
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer, 'd');
         $sql = 'SELECT f.id, f.parent_id, f.name, f.created_at,
                        (SELECT COUNT(*) FROM document_folders c
                           WHERE c.parent_id = f.id AND c.deleted_at IS NULL) AS subfolder_count,
                        (SELECT COUNT(*) FROM documents d
                           WHERE d.folder_id = f.id AND d.deleted_at IS NULL
-                            AND d.parent_document_id IS NULL) AS file_count,
+                            AND d.parent_document_id IS NULL' . $scopeSql . ') AS file_count,
                        (SELECT COALESCE(SUM(d.size_bytes), 0) FROM documents d
                           WHERE d.folder_id = f.id AND d.deleted_at IS NULL
-                            AND d.parent_document_id IS NULL) AS total_bytes
+                            AND d.parent_document_id IS NULL' . $scopeSql . ') AS total_bytes
                   FROM document_folders f
                  WHERE f.supplier_id = ? AND f.deleted_at IS NULL
                    AND ' . ($parentId === null ? 'f.parent_id IS NULL' : 'f.parent_id = ?') . '
                  ORDER BY f.name';
-        $params = $parentId === null ? [$supplierId] : [$supplierId, $parentId];
+        // Pořadí placeholderů: file_count scope, total_bytes scope, pak supplier(, parent).
+        $tail = $parentId === null ? [$supplierId] : [$supplierId, $parentId];
+        $params = array_merge($scopeParams, $scopeParams, $tail);
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
@@ -135,8 +164,13 @@ final class DocumentFolderRepository
         return array_values(array_unique($result));
     }
 
-    /** Soft-delete složky včetně potomků a všech dokumentů v nich (do koše). */
-    public function softDeleteSubtree(int $id, int $supplierId, ?int $userId): array
+    /**
+     * Soft-delete složky včetně potomků a všech dokumentů v nich (do koše).
+     * Scope-aware (§4.2): non-admin smí smazat jen company + vlastní user doklady —
+     * cizí user-scoped doklad ve sdílené složce, který ani nevidí, nesmí poslat do koše.
+     * Složky samotné user-scope nemají, takže se maží bez scope filtru; admin bez omezení.
+     */
+    public function softDeleteSubtree(int $id, int $supplierId, ?int $userId, DocumentViewerContext $viewer): array
     {
         $ids = $this->descendantIds($id, $supplierId);
         $in = implode(',', array_fill(0, count($ids), '?'));
@@ -148,11 +182,12 @@ final class DocumentFolderRepository
         );
         $stmt->execute(array_merge([$supplierId], $ids));
 
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $pdo->prepare(
             "UPDATE documents SET deleted_at = CURRENT_TIMESTAMP, deleted_by = ?
-              WHERE supplier_id = ? AND deleted_at IS NULL AND folder_id IN ($in)"
+              WHERE supplier_id = ? AND deleted_at IS NULL AND folder_id IN ($in)" . $scopeSql
         );
-        $stmt->execute(array_merge([$userId, $supplierId], $ids));
+        $stmt->execute(array_merge([$userId, $supplierId], $ids, $scopeParams));
 
         return $ids;
     }

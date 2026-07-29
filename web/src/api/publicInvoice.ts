@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { PaymentMethod } from './invoices'
 
 // Samostatný axios klient — web faktura je veřejná (bez přihlášení), proto
 // neimplementujeme 401 redirect na /login (to dělá @/api/client). Vzor approval.ts,
@@ -44,7 +45,7 @@ export interface PublicInvoiceHeader {
   tax_date: string | null
   due_date: string
   paid_at: string | null
-  payment_method: 'bank_transfer' | 'card' | 'cash' | 'other'
+  payment_method: PaymentMethod
   reverse_charge: boolean
   prices_include_vat: boolean
   note_above_items: string | null

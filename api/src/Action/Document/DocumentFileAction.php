@@ -49,7 +49,7 @@ final class DocumentFileAction
         ini_set('display_errors', '0');
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $doc = $this->documents->findRaw($id, $sid, true);
+        $doc = $this->documents->findRaw($id, $sid, $this->viewer($request), true);
         if ($doc === null || ($doc['thumb_status'] ?? '') !== 'generated' || empty($doc['thumb_path'])) {
             return Json::error($response, 'not_found', 'Náhled není k dispozici.', 404);
         }
@@ -88,8 +88,9 @@ final class DocumentFileAction
         }
         $used = [];
         $added = 0;
+        $viewer = $this->viewer($request);
         foreach ($ids as $id) {
-            $doc = $this->documents->findRaw($id, $sid, false);
+            $doc = $this->documents->findRaw($id, $sid, $viewer, false);
             if ($doc === null) continue;
             $path = $this->storage->pathFor($sid, (string) $doc['sha256'], (string) $doc['filename']);
             if (!is_file($path)) continue;
@@ -129,7 +130,7 @@ final class DocumentFileAction
 
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $doc = $this->documents->findRaw($id, $sid, true);
+        $doc = $this->documents->findRaw($id, $sid, $this->viewer($request), true);
         if ($doc === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }

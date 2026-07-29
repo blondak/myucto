@@ -55,7 +55,7 @@ final class DphBookPdfRenderer
             ? $data['period']['year'] . '-Q' . $quarter
             : $data['period']['year'] . '-' . str_pad((string) $data['period']['month'], 2, '0', \STR_PAD_LEFT);
         $mpdf->SetTitle('Kniha DPH ' . $period);
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
 
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
@@ -70,8 +70,7 @@ final class DphBookPdfRenderer
             $this->twig = new Environment($loader, [
                 'autoescape' => 'html',
                 'strict_variables' => false,
-                'cache' => false,
-            ]);
+            ] + TwigCache::options('report'));
             // Twig filter pro CZK formátování
             $this->twig->addFilter(new \Twig\TwigFilter('cz_money', function ($v) {
                 return number_format((float) $v, 2, ',', ' ');

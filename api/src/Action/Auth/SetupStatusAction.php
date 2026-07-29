@@ -27,6 +27,10 @@ final class SetupStatusAction
 
     public function __invoke(Request $request, Response $response): Response
     {
+        $demoEnabled = (bool) $this->config->get('demo.enabled', false);
+        $demoEmail = $demoEnabled ? trim((string) $this->config->get('demo.login_email', '')) : '';
+        $demoPassword = $demoEnabled ? (string) $this->config->get('demo.login_password', '') : '';
+
         return Json::ok($response, [
             'needs_setup' => $this->lockProbe->needsSetup(),
             'version'     => '0.1.0',
@@ -38,6 +42,15 @@ final class SetupStatusAction
                 'provider'   => $this->config->get('captcha.provider', 'none'),
                 'site_key'   => $this->config->get('captcha.site_key', ''),
                 'script_url' => $this->config->get('captcha.script_url', ''),
+            ],
+            'demo'        => [
+                'enabled'    => $demoEnabled,
+                'auto_login' => $demoEnabled
+                    && (bool) $this->config->get('demo.auto_login', true)
+                    && $demoEmail !== ''
+                    && $demoPassword !== '',
+                'email'       => $demoEmail,
+                'password'    => $demoPassword,
             ],
         ]);
     }

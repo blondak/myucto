@@ -10,8 +10,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
+use MyInvoice\Service\License\LicenseService;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
@@ -30,11 +34,17 @@ final class MeActionTest extends TestCase
             ->willReturn([]);
         $pdo = $this->createMock(\PDO::class);
         $pdo->expects(self::once())
-            ->method('query')
+            ->method('prepare')
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
         $db->expects(self::once())->method('hasColumn')->with('supplier', 'oss_enabled')->willReturn(true);
         $db->expects(self::once())->method('pdo')->willReturn($pdo);
+
+        // MyÚčto filtruje firmy podle membershipu; superadmin projde bez omezení.
+        $userSuppliers = $this->createMock(UserSupplierRepository::class);
+        $permissions = $this->createMock(PermissionResolver::class);
+        $permissions->method('resolve')->willReturn(EffectiveRole::denied());
+        $license = $this->createMock(LicenseService::class);
 
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
         $credentials->expects(self::once())
@@ -56,6 +66,9 @@ final class MeActionTest extends TestCase
         $action = new MeAction(
             $db,
             $config,
+            $userSuppliers,
+            $permissions,
+            $license,
             $credentials,
             new MfaPolicyService($config),
             new SessionLockPolicy($config),
@@ -68,6 +81,7 @@ final class MeActionTest extends TestCase
                 'email' => 'synthetic@example.invalid',
                 'name' => 'Synthetic User',
                 'role' => 'admin',
+                'is_superadmin' => true,
                 'locale' => 'cs',
                 'totp_enabled' => true,
                 'session_lock_after_minutes' => 5,

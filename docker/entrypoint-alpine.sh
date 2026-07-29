@@ -13,12 +13,12 @@ fi
 # Default 8 (rozumný strop); PHP_FPM_MAX_CHILDREN=4 pro ~512 MB–1 GB RAM stroje.
 if [ -n "${PHP_FPM_MAX_CHILDREN:-}" ]; then
   sed -i "s/^pm.max_children = .*/pm.max_children = ${PHP_FPM_MAX_CHILDREN}/" \
-    /usr/local/etc/php-fpm.d/zz-myinvoice.conf
+    /usr/local/etc/php-fpm.d/zz-myucto.conf
 fi
 # Volitelně sniž opcache shared paměť (default 128 MB) — OPCACHE_MEMORY=64 pro tiny host.
 if [ -n "${OPCACHE_MEMORY:-}" ]; then
   sed -i "s/^opcache.memory_consumption = .*/opcache.memory_consumption = ${OPCACHE_MEMORY}/" \
-    /usr/local/etc/php/conf.d/myinvoice.ini
+    /usr/local/etc/php/conf.d/myucto.ini
 fi
 
 # --- migrace (stejný kontrakt jako Debian entrypoint) ----------------------
@@ -42,11 +42,11 @@ fi
 
 # --- vestavěný cron (cronie) -----------------------------------------------
 # Cron nedědí ENV kontejneru → vydumpujeme ho pro wrapper (0640 root:www-data,
-# obsahuje tajemství). cronie čte /etc/cron.d/myinvoice (Vixie formát s user polem).
+# obsahuje tajemství). cronie čte /etc/cron.d/myucto (Vixie formát s user polem).
 if [ "${MYINVOICE_ENABLE_CRON:-1}" != "0" ]; then
-  export -p > /etc/myinvoice-cron.env
-  chmod 0640 /etc/myinvoice-cron.env
-  chown root:www-data /etc/myinvoice-cron.env 2>/dev/null || true
+  export -p > /etc/myucto-cron.env
+  chmod 0640 /etc/myucto-cron.env
+  chown root:www-data /etc/myucto-cron.env 2>/dev/null || true
   # Selhání cronu nesmí shodit kontejner (web poběží dál). cronie crond daemonizuje sám.
   if crond; then
     echo "[entrypoint] vestavěný cron spuštěn (logy v \${MYINVOICE_DATA_DIR}/log/cron)"

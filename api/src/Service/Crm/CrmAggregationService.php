@@ -5,6 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Crm;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankPostingSuggestionRepository;
+use MyInvoice\Service\Accounting\JournalIntegrityService;
+use MyInvoice\Service\Report\CzechWorkingDays;
+use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Tax\Return\TaxReturnService;
+use MyInvoice\Support\Sql\PayablePredicate;
 
 /**
  * CRM dashboard aggregation queries.
@@ -19,22 +25,48 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class CrmAggregationService
 {
-    public function __construct(private readonly Connection $db) {}
+    // $taxReturns je nullable — PHP-DI autowiring volitelný class-param nevyplní
+    // (viz Bootstrap.php), proto má explicitní binding s reálnou instancí; testy,
+    // které CrmAggregationService staví ručně jen s Connection (a actionItems()
+    // nevolají), zůstávají funkční i bez něj (dppoBalanceDueItem() se sama-gatuje).
+    public function __construct(
+        private readonly Connection $db,
+        private readonly ?TaxReturnService $taxReturns = null,
+        private readonly ?JournalIntegrityService $journalIntegrity = null,
+    ) {}
 
     // ── Sjednocená metodika s Tržbami/Náklady (Stats/PurchaseSummary) ──────────
     // Tržby/náklady/zisk se prezentují BEZ DPH pro plátce (DPH je průběžná položka),
     // GROSS jen pro neplátce. Datová báze = DUZP s fallbackem na vystavení, ať
     // období sedí s „Obratem" ve Tržbách. Cash metriky (cashflow, aging) zůstávají
     // gross — řeší se vlastními dotazy níže.
-    /** Datum pro zařazení tržby do období (DUZP, fallback vystavení) — jako Stats. */
-    private const REV_DATE  = "COALESCE(i.tax_date, i.issue_date)";
-    /** Datum nákladu (pozdější z DUZP/vystavení) — jako Náklady. */
-    private const COST_DATE = "GREATEST(COALESCE(pi.tax_date, pi.issue_date), pi.issue_date)";
+    /** Datum pro zařazení tržby do období (DUZP, fallback vystavení) — jako Stats.
+     *  PERSISTENT gen-col effective_tax_date = COALESCE(tax_date, issue_date) (mig. 1009). */
+    private const REV_DATE  = "i.effective_tax_date";
+    /** Datum nákladu (pozdější z DUZP/vystavení) — jako Náklady.
+     *  PERSISTENT gen-col effective_cost_date = GREATEST(COALESCE(tax_date,issue_date),issue_date) (mig. 1010). */
+    private const COST_DATE = "pi.effective_cost_date";
     private const REV_STATUS  = "('issued', 'sent', 'reminded', 'paid')";
     // tax_document = daňový doklad k přijaté platbě (#89): patří do tržeb; finál
     // k záloze pak nese jen zbytek (záporné odpočtové řádky) → žádné dvojí započtení.
     private const REV_TYPES   = "('invoice', 'credit_note', 'tax_document')";
     private const COST_STATUS = "('received', 'booked', 'paid')";
+
+    /**
+     * Datum o `$months` měsíců zpět, BEZ přetečení konce měsíce.
+     *
+     * `(new DateTimeImmutable())->modify('-1 month')` nad 31. dnem přeteče: 31. 7.
+     * mínus měsíc je 31. 6., což se normalizuje na 1. 7. — okno se pak posune
+     * o CELÝ měsíc a statistiky za „posledních 12 měsíců" počítaly 29.–31. dne
+     * jinak než ve zbytku měsíce. Den se proto ořízne na délku cílového měsíce
+     * (31. 7. − 1 měsíc = 30. 6.), jak to odpovídá běžnému chápání „o měsíc zpět".
+     */
+    private static function monthsBack(\DateTimeImmutable $from, int $months): \DateTimeImmutable
+    {
+        $anchor = $from->modify('first day of this month')->modify('-' . $months . ' months');
+        $day = min((int) $from->format('j'), (int) $anchor->format('t'));
+        return $anchor->setDate((int) $anchor->format('Y'), (int) $anchor->format('n'), $day);
+    }
 
     /** Je dodavatel plátce DPH? Určuje net (plátce) vs gross (neplátce) bázi. */
     private function isVatPayer(int $supplierId): bool
@@ -48,13 +80,26 @@ final class CrmAggregationService
      * Zálohovou (advance) přijatou fakturu vyřaď z nákladů, pokud není zaplacená
      * NEBO je spárovaná s vyúčtovací fakturou (proti dvojímu započtení) — shodně
      * s PurchaseSummaryAction::advanceCostExclude.
+     *
+     * ZÁMĚRNĚ OPAČNĚ NEŽ ÚČETNÍ POHLED — nesjednocovat:
+     *   - CRM a dashboard jsou INFORMATIVNÍ predikce pro uživatele, takže zaplacená
+     *     a dosud nespárovaná záloha do nákladů patří (peníze odešly, vyúčtovací
+     *     faktura ještě nedorazila).
+     *   - PurchaseInvoiceRepository (měsíční hlavičky seznamu) a ClientRepository jsou
+     *     ÚČETNÍ pohled, kde zaplacená záloha náklad nezakládá (sedí na 314) — počítá
+     *     se tam naopak nezaplacená jako očekávaný náklad.
+     * Táž záloha se proto v CRM a v seznamu chová jinak; je to rozhodnutí, ne chyba
+     * (viz private/checks/NALEZY.md, N-019). Hlídá AdvanceCostPredicateParityTest.
      */
     private function advanceCostExclude(): string
     {
         return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
              . " AND (pi.status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))";
+             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))"
+             // DDKP (daňový doklad k platbě) není náklad — jen odpočet DPH ze zálohy (343/314);
+             // náklad vzniká až u vyúčtovací faktury. Bezpodmínečně ven z nákladů dodavatele.
+             . " AND COALESCE(pi.document_kind, '') <> 'tax_document'";
     }
 
     /** @return array<string,float|int> nulový akumulátor pro merge tržeb a nákladů per měna */
@@ -422,7 +467,7 @@ final class CrmAggregationService
         unset($currency);
         // Net pro plátce (DPH se vrací), gross pro neplátce — shodně s ostatními tržbami.
         $rev = $this->isVatPayer($supplierId) ? 'i.total_without_vat' : 'i.total_with_vat';
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-01');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-01');
         $params = [$supplierId, $start];
         $sql = "
             SELECT i.client_id, c.company_name,
@@ -535,7 +580,7 @@ final class CrmAggregationService
         unset($currency);
         // Net pro plátce (vstupní DPH je odpočitatelná), gross pro neplátce — jako Náklady.
         $cost = $this->isVatPayer($supplierId) ? 'pi.total_without_vat' : 'pi.total_with_vat';
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-01');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-01');
         $params = [$supplierId, $start];
         $sql = "
             SELECT pi.vendor_id, c.company_name,
@@ -549,11 +594,7 @@ final class CrmAggregationService
              WHERE pi.supplier_id = ?
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
-               -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit
-               AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                        AND (pi.status = 'paid'
-                             OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+               " . $this->advanceCostExclude() . "
           GROUP BY pi.vendor_id, c.company_name
           ORDER BY costs_czk DESC
              LIMIT " . (int) $limit;
@@ -658,7 +699,7 @@ final class CrmAggregationService
               FROM purchase_invoices pi
          LEFT JOIN currencies c ON c.id = pi.currency_id
              WHERE pi.supplier_id = ?
-               AND pi.status IN ('received', 'booked')
+               AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument() . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";
@@ -680,7 +721,7 @@ final class CrmAggregationService
      */
     public function daysSalesOutstanding(int $supplierId, int $monthsBack = 12): array
     {
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-d');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) AS avg_days, COUNT(*) AS sample
                FROM invoices
@@ -704,7 +745,7 @@ final class CrmAggregationService
      */
     public function paymentPunctuality(int $supplierId, int $monthsBack = 12): array
     {
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-d');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
             "SELECT
                 SUM(CASE WHEN paid_at <= due_date THEN 1 ELSE 0 END) AS on_time,
@@ -821,7 +862,7 @@ final class CrmAggregationService
      */
     public function daysPayableOutstanding(int $supplierId, int $monthsBack = 12): array
     {
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-d');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) AS avg_days, COUNT(*) AS sample
                FROM purchase_invoices
@@ -850,7 +891,7 @@ final class CrmAggregationService
         // (100 EUR + 50 000 CZK = 50 100). Parametr $currency BC, vždy CZK.
         unset($currency);
         $cost = $this->isVatPayer($supplierId) ? 'pi.total_without_vat' : 'pi.total_with_vat';
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-d');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $params = [$supplierId, $start];
         $sql = "
             SELECT pi.expense_category_id, ec.code, ec.label,
@@ -862,11 +903,7 @@ final class CrmAggregationService
              WHERE pi.supplier_id = ?
                AND pi.issue_date >= ?
                AND pi.status NOT IN ('draft', 'cancelled')
-               -- Spárovaná/zaplacená záloha (advance) nese náklad finální faktura → vyřadit (jako topVendors)
-               AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                        AND (pi.status = 'paid'
-                             OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                         WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+               " . $this->advanceCostExclude() . "
           GROUP BY pi.expense_category_id, ec.code, ec.label
           ORDER BY total DESC
         ";
@@ -896,7 +933,7 @@ final class CrmAggregationService
         // Parametr $currency BC, vždy CZK (jako expenseBreakdown).
         unset($currency);
         $rev = $this->isVatPayer($supplierId) ? 'i.total_without_vat' : 'i.total_with_vat';
-        $start = (new \DateTimeImmutable())->modify('-' . $monthsBack . ' months')->format('Y-m-d');
+        $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $params = [$supplierId, $start];
         $sql = "
             SELECT i.revenue_category_id, rc.code, rc.label,
@@ -1019,8 +1056,8 @@ final class CrmAggregationService
         }
 
         // 1b. Nespárované příchozí platby z banky — spáruj s vystavenými fakturami.
-        // Scope banky je přes account_number z currencies dodavatele (bank_statements
-        // nemá supplier_id) — stejný predikát jako BankStatementAction::list().
+        // Scope banky řeší BankStatementOwnershipResolver (SEC-01) — starý predikát
+        // podle shody account_number pouštěl do dashboardu i cizí transakce.
         // Jen příchozí (amount > 0) za posledních 90 dní, aby se nevynořovaly prastaré
         // vlastní převody/poplatky; starší šum lze i tak skrýt přes dismiss „historická".
         $stmt = $pdo->prepare(
@@ -1029,15 +1066,12 @@ final class CrmAggregationService
               WHERE bt.match_status = 'unmatched'
                 AND bt.amount > 0
                 AND bt.posted_at >= DATE_SUB(?, INTERVAL 90 DAY)
-                AND EXISTS (
-                    SELECT 1 FROM currencies cur
-                     WHERE cur.supplier_id = ?
-                       AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                         = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                       AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                )"
+                AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
         );
-        $stmt->execute([$today, $supplierId]);
+        $stmt->execute(array_merge(
+            [$today],
+            \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+        ));
         $bankIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
         $bankIds = $this->filterByDismissal($bankIds, $dismissals, 'bank_unmatched');
         $bankCount = count($bankIds);
@@ -1082,7 +1116,7 @@ final class CrmAggregationService
         $stmt = $pdo->prepare(
             "SELECT id FROM purchase_invoices
               WHERE supplier_id = ?
-                AND status IN ('received', 'booked')
+                AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument('') . "
                 AND due_date < ?"
         );
         $stmt->execute([$supplierId, $today]);
@@ -1122,6 +1156,151 @@ final class CrmAggregationService
             ];
         }
 
+        // 3c. Zbývá zaúčtovat — vystavené (FV) + přijaté (PF) doklady bez zaúčtování
+        // (booked_at IS NULL), plus fronta návrhů zaúčtování z banky. JEN pro firmy
+        // v podvojném účetnictví (accounting_mode='double_entry') — v daňové evidenci
+        // je booked_at vždy NULL a „zaúčtování do deníku" nedává smysl.
+        //
+        // WHERE predikát `booked_at IS NULL` je shodný s filtrem `booked=0` v seznamech
+        // (ListInvoicesAction / ListPurchaseInvoicesAction, Epic 0.9) — prokliky vedou
+        // rovnou na ?booked=0. Navíc scope na finalizované bookovatelné doklady:
+        // vynechání draft/cancelled (koncept se řeší purchase_drafts / se ještě vystaví)
+        // a proforem (zálohovka není daňový doklad, do deníku se neúčtuje → booked_at
+        // by u ní zůstal NULL napořád a kartu by falešně nafukoval). Proto se count může
+        // mírně lišit od syrového ?booked=0 listu (ten typové/stavové guardy nemá).
+        //
+        // Banka: bankovní transakce NEMAJÍ vlastní booked_at, takže ekvivalent
+        // `booked_at IS NULL` je „neexistuje živý journal_entry (source_type='bank')" —
+        // přesně to počítá BankPostingSuggestionRepository::unpostedCount(), na jehož
+        // seznam proklik vede a který plní i badge tabu „K zaúčtování".
+        $modeStmt = $pdo->prepare('SELECT accounting_mode, taxpayer_type FROM supplier WHERE id = ?');
+        $modeStmt->execute([$supplierId]);
+        $supplierModeRow = $modeStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $isDoubleEntry = (string) ($supplierModeRow['accounting_mode'] ?? '') === 'double_entry';
+        $taxpayerType = (string) ($supplierModeRow['taxpayer_type'] ?? '');
+        if ($isDoubleEntry && !$this->isFullyDismissed($dismissals, 'unbooked_documents')) {
+            // Rozsah dokladů musí sedět 1:1 s filtrem `booked=0` v repozitářích, jinak
+            // karta slibuje akci, která v seznamu není vidět. Typy vydaných ber ze sdílené
+            // konstanty (InvoiceRepository, DocumentBackfill, PendingBackfillCounter čtou
+            // tutéž) — opsaný seznam se rozjel a chyběla v něm 'penalty'.
+            $issuedTypes = PostingService::POSTABLE_ISSUED_INVOICE_TYPES;
+            $issuedPlaceholders = implode(',', array_fill(0, count($issuedTypes), '?'));
+            $invStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM invoices
+                  WHERE supplier_id = ?
+                    AND booked_at IS NULL
+                    AND status NOT IN ('draft', 'cancelled')
+                    AND invoice_type IN ({$issuedPlaceholders})"
+            );
+            $invStmt->execute(array_merge([$supplierId], $issuedTypes));
+            $invUnbooked = (int) $invStmt->fetchColumn();
+
+            // Zálohové faktury se neúčtují (účtuje se inkaso zálohy a vyúčtování), engine
+            // je odmítá — viz PostingService::post() a PendingBackfillCounter.
+            $piStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM purchase_invoices
+                  WHERE supplier_id = ?
+                    AND booked_at IS NULL
+                    AND status NOT IN ('draft', 'cancelled')
+                    AND COALESCE(document_kind, 'invoice') <> 'advance'"
+            );
+            $piStmt->execute([$supplierId]);
+            $piUnbooked = (int) $piStmt->fetchColumn();
+
+            // Banka se počítá TÝMŽ dotazem, na který proklik vede — unpostedCount() je
+            // zdroj i pro badge tabu „K zaúčtování" (BankPage.vue). Dřív se tu počítaly
+            // pending návrhy (`bank_posting_suggestions.status='pending'`), jenže stav
+            // návrhu je jen proxy, která se od reality rozchází: na ostrých datech bylo
+            // 88 pending návrhů k transakcím, které UŽ měly živý zápis v deníku, takže
+            // karta hlásila 88 a tab pod prokliknutím poctivě 0. Autoritativní je
+            // „transakce nemá živý journal_entry (source_type='bank')", ne stav fronty.
+            $bankPending = (new BankPostingSuggestionRepository($this->db))->unpostedCount($supplierId);
+
+            $unbookedTotal = $invUnbooked + $piUnbooked + $bankPending;
+            if ($unbookedTotal > 0) {
+                $breakdown = [];
+                if ($invUnbooked > 0) {
+                    $breakdown[] = ['key' => 'invoices', 'count' => $invUnbooked, 'link' => '/invoices?booked=0'];
+                }
+                if ($piUnbooked > 0) {
+                    $breakdown[] = ['key' => 'purchase_invoices', 'count' => $piUnbooked, 'link' => '/purchase-invoices?booked=0'];
+                }
+                if ($bankPending > 0) {
+                    $breakdown[] = ['key' => 'bank', 'count' => $bankPending, 'link' => '/bank?tab=posting'];
+                }
+                $parts = [];
+                if ($invUnbooked > 0) {
+                    $parts[] = sprintf('%d vydaných', $invUnbooked);
+                }
+                if ($piUnbooked > 0) {
+                    $parts[] = sprintf('%d přijatých', $piUnbooked);
+                }
+                if ($bankPending > 0) {
+                    $parts[] = sprintf('%d z banky', $bankPending);
+                }
+                $items[] = [
+                    'type'      => 'unbooked_documents',
+                    'severity'  => $unbookedTotal > 10 ? 'medium' : 'low',
+                    'title'     => 'Zaúčtuj doklady',
+                    'hint'      => implode(' + ', $parts) . ' k zaúčtování',
+                    'link'      => $breakdown[0]['link'],
+                    'count'     => $unbookedTotal,
+                    'breakdown' => $breakdown,
+                ];
+            }
+        }
+
+        // 3d. Integrita deníku (A6) — poslední výsledek nočního integrity jobu
+        // (cron-journal-integrity-check → journal_integrity_findings). JEN podvojné
+        // účetnictví. Nepočítá se nic naživo; čte se poslední uložený běh, ať plný
+        // sweep deníku nezdržuje dashboard request. Vysoká závažnost — díra v
+        // konzistenci doklad ↔ deník je účetně vážná (sirotčí zápis, Σ MD ≠ Σ D,
+        // booked_at bez zápisu a naopak, doklad ≠ zápis částkou). Proklik do deníku.
+        if ($isDoubleEntry && $this->journalIntegrity !== null && !$this->isFullyDismissed($dismissals, 'journal_integrity')) {
+            try {
+                // Přes službu, ne vlastním SQL: latestFindings() filtruje na MAX(checked_at),
+                // takže se do karty nepřimíchají osiřelé počty z DŘÍVĚJŠÍHO běhu (typ, který
+                // cron už neprodukuje, nebo částečný/zkolabovaný běh). Vlastní dotaz tady
+                // tenhle guard neměl a byl to druhý, rozcházející se opis téhož čtení.
+                $intRows = $this->journalIntegrity->latestFindings($supplierId);
+                $integrityTotal = 0;
+                $intBreakdown = [];
+                $singleLink = null;
+                foreach ($intRows as $row) {
+                    $cnt = (int) $row['finding_count'];
+                    if ($cnt <= 0) {
+                        continue;
+                    }
+                    $integrityTotal += $cnt;
+                    $link = $this->journalIntegrityLink($cnt, $row['detail']);
+                    $singleLink = $link;
+                    $intBreakdown[] = [
+                        'key'   => (string) $row['finding_type'],
+                        'count' => $cnt,
+                        'link'  => $link,
+                    ];
+                }
+                if ($integrityTotal > 0) {
+                    $items[] = [
+                        'type'      => 'journal_integrity',
+                        'severity'  => 'high',
+                        'title'     => 'Zkontroluj integritu deníku',
+                        'hint'      => sprintf('%d %s konzistence doklad ↔ deník', $integrityTotal,
+                            $integrityTotal === 1 ? 'nález' : ($integrityTotal < 5 ? 'nálezy' : 'nálezů')),
+                        // Jediný nález napříč všemi typy → hlavní odkaz míří rovnou na něj.
+                        'link'      => (count($intRows) === 1 && $integrityTotal === 1 && $singleLink !== null)
+                            ? $singleLink
+                            : '/accounting/journal',
+                        'count'     => $integrityTotal,
+                        'breakdown' => $intBreakdown,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // journal_integrity_findings ještě neexistuje (migrace 1034 nedoběhla)
+                // nebo jiná chyba — dashboard nesmí spadnout kvůli diagnostické kartě.
+            }
+        }
+
         // 4. Reports deadlines — DPH přiznání + Kontrolní hlášení se podávají 25. dne
         // po skončení zdaňovacího období. Respektuje periodicitu dodavatele
         // (supplier.vat_period + taxpayer_type) — viz taxDeadlineItems().
@@ -1140,34 +1319,10 @@ final class CrmAggregationService
         // mírně přepomenuty, lze skrýt přes dismiss.
         if (!$this->isFullyDismissed($dismissals, 'shv_deadline')) {
             $now = new \DateTimeImmutable($today);
-            $deadlineDate = sprintf('%04d-%02d-25', (int) $now->format('Y'), (int) $now->format('n'));
+            $deadlineDate = CzechWorkingDays::deadline((int) $now->format('Y'), (int) $now->format('n'));
             $daysToDeadline = (int) $now->diff(new \DateTimeImmutable($deadlineDate))->format('%r%a');
             if ($daysToDeadline >= -3 && $daysToDeadline <= 7) {
-                $prevMonth = $now->modify('first day of last month');
-                $periodStart = $prevMonth->format('Y-m-01');
-                $periodEnd = $prevMonth->format('Y-m-t');
-                $stmt = $pdo->prepare(
-                    "SELECT 1
-                       FROM invoices i
-                       JOIN clients c ON c.id = i.client_id
-                  LEFT JOIN countries co ON co.id = c.country_id
-                       JOIN invoice_items ii ON ii.invoice_id = i.id
-                      WHERE i.supplier_id = ?
-                        AND i.status IN ('issued','sent','reminded','paid')
-                        AND i.invoice_type IN ('invoice','credit_note','tax_document')
-                        AND COALESCE(co.is_eu, 0) = 1
-                        AND COALESCE(co.iso2, 'CZ') <> 'CZ'
-                        AND c.dic IS NOT NULL AND c.dic <> ''
-                        AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
-                        AND (
-                              COALESCE(ii.vat_classification_code, i.vat_classification_code) IN ('20','22','31')
-                              OR i.reverse_charge = 1
-                        )
-                      LIMIT 1"
-                );
-                $stmt->execute([$supplierId, $periodStart, $periodEnd]);
-                $hasEuSupplies = (bool) $stmt->fetchColumn();
-                if ($hasEuSupplies) {
+                if ($this->hasEuSuppliesForMonthBefore($supplierId, $now)) {
                     $items[] = [
                         'type'     => 'shv_deadline',
                         'severity' => $daysToDeadline < 0 ? 'high' : ($daysToDeadline <= 2 ? 'high' : 'medium'),
@@ -1181,6 +1336,63 @@ final class CrmAggregationService
                         'days'     => $daysToDeadline,
                     ];
                 }
+            }
+        }
+
+        // 4c. Doplatek/přeplatek DPPO + jeho splatnost (Epic #48) — jen podvojné
+        // účetnictví, právnická osoba (FO/daňová evidence mají vlastní widget „co mi
+        // zbyde", TaxNetWidget). Radši skutečná daňová povinnost z UŽ FINALIZOVANÉHO
+        // přiznání za předchozí rok (splatnost už běží/proběhla); jinak živá projekce
+        // BĚŽÍCÍHO (draft) přiznání za aktuální rok — stejný náhled jako na
+        // /reports/income-tax, ať dopředu ví, kolik si na doplatek odložit. Přeplatek
+        // (balance_due <= 0) se nezobrazuje — akce je jen pro NEZAPLACENÝ doplatek.
+        if ($isDoubleEntry && $taxpayerType === 'po' && !$this->isFullyDismissed($dismissals, 'dppo_balance_due')) {
+            $balanceItem = $this->dppoBalanceDueItem($supplierId, $nowDt);
+            if ($balanceItem !== null) {
+                $items[] = $balanceItem;
+            }
+        }
+
+        // 4d. Nezaplacené (nadcházející/po splatnosti) zálohy na daň §38a — z fronty
+        // předpisů (tax_advance_schedules, E9); po #46 má předpis stav zaplaceno
+        // (paid_amount/status) + auto-párování dle účtu FÚ, takže `status='planned'`
+        // spolehlivě znamená nezaplaceno. Okno 60 dní dopředu (shodné s Daňovým
+        // kalendářem) + libovolně staré nezaplacené (už po splatnosti).
+        if ($isDoubleEntry && $taxpayerType === 'po' && !$this->isFullyDismissed($dismissals, 'tax_advance_due')) {
+            $advStmt = $pdo->prepare(
+                "SELECT due_date, amount FROM tax_advance_schedules
+                  WHERE supplier_id = ? AND taxpayer_type = 'po' AND advance_kind = 'tax' AND status = 'planned'
+                    AND due_date <= DATE_ADD(?, INTERVAL 14 DAY)
+                  ORDER BY due_date"
+            );
+            $advStmt->execute([$supplierId, $today]);
+            $advRows = $advStmt->fetchAll(\PDO::FETCH_ASSOC);
+            if ($advRows !== []) {
+                $advTotal = 0.0;
+                $hasOverdue = false;
+                foreach ($advRows as $advRow) {
+                    $advTotal += round((float) $advRow['amount'], 2);
+                    if ((string) $advRow['due_date'] < $today) {
+                        $hasOverdue = true;
+                    }
+                }
+                $nearestDue = (string) $advRows[0]['due_date'];
+                $nearestDays = (int) $nowDt->diff(new \DateTimeImmutable($nearestDue))->format('%r%a');
+                $advCount = count($advRows);
+                $items[] = [
+                    'type'     => 'tax_advance_due',
+                    'severity' => $hasOverdue || $nearestDays <= 7 ? 'high' : 'medium',
+                    'title'    => 'Zaplať zálohu na daň (§38a)',
+                    'hint'     => $hasOverdue
+                        ? sprintf('%d %s v celkové výši %s Kč — nejbližší splatnost %s (po splatnosti)', $advCount,
+                            $advCount === 1 ? 'záloha' : ($advCount < 5 ? 'zálohy' : 'záloh'),
+                            number_format($advTotal, 0, ',', ' '), $nearestDue)
+                        : sprintf('%d %s v celkové výši %s Kč — nejbližší splatnost %s', $advCount,
+                            $advCount === 1 ? 'záloha' : ($advCount < 5 ? 'zálohy' : 'záloh'),
+                            number_format($advTotal, 0, ',', ' '), $nearestDue),
+                    'link'     => '/reports/income-tax',
+                    'count'    => $advCount,
+                ];
             }
         }
 
@@ -1234,11 +1446,12 @@ final class CrmAggregationService
      * (měsíční plátce, nebo čtvrtletní FO). U čtvrtletní PO se KH (měsíční) a DPH
      * (čtvrtletní) zobrazí jako dvě samostatné položky s odlišnou periodou.
      *
-     * Položka se zobrazí jen v okně −3..+7 dní kolem termínu.
+     * Položka se zobrazí jen v okně −3..+$maxDaysAhead dní kolem termínu
+     * (default +7 pro action items; portál F6 používá širší okno 35 dní).
      *
      * @return list<array<string,mixed>>
      */
-    private function taxDeadlineItems(int $supplierId, \DateTimeImmutable $now): array
+    public function taxDeadlineItems(int $supplierId, \DateTimeImmutable $now, int $maxDaysAhead = 7): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT is_vat_payer, taxpayer_type, vat_period FROM supplier WHERE id = ?'
@@ -1260,12 +1473,12 @@ final class CrmAggregationService
         // DPH termín + popis období
         if ($vatPeriod === 'monthly') {
             $dphActive = true;
-            $dphDeadline = sprintf('%04d-%02d-25', $y, $m);
+            $dphDeadline = CzechWorkingDays::deadline($y, $m);
             $dphPeriod = 'za uplynulý měsíc';
         } else {
             // Čtvrtletní termín existuje jen v měsících 1/4/7/10.
             $dphActive = in_array($m, [1, 4, 7, 10], true);
-            $dphDeadline = sprintf('%04d-%02d-25', $y, $m);
+            $dphDeadline = CzechWorkingDays::deadline($y, $m);
             $endedQuarter = $m === 1 ? 4 : (int) (($m - 1) / 3); // 4→Q1, 7→Q2, 10→Q3, 1→Q4
             $quarterYear = $m === 1 ? $y - 1 : $y;
             $dphPeriod = sprintf('za %d. čtvrtletí %d', $endedQuarter, $quarterYear);
@@ -1274,27 +1487,41 @@ final class CrmAggregationService
         // Sloučit DPH+KH? Jen pokud sdílí periodu (měsíční plátce nebo čtvrtletní FO).
         $combine = $vatPeriod === 'monthly' || !$khMonthly;
 
+        // Už archivované podání (tax_submissions) do "Akcí pro tebe" nepatří — stejný
+        // zdroj i logika period jako v taxCalendarItems() (badge „Podáno"). KH kopíruje
+        // periodu DPH jen u čtvrtletního FO; jinak je měsíční.
+        $khDeadline = CzechWorkingDays::deadline($y, $m);
+        $dphP = $vatPeriod === 'monthly'
+            ? $this->periodForMonthlyDeadline($dphDeadline)
+            : $this->periodForQuarterlyDeadline($dphDeadline);
+        $khP = $khMonthly ? $this->periodForMonthlyDeadline($khDeadline) : $dphP;
+        $dphSubmitted = $this->submittedAt($supplierId, 'dphdp3', $dphP['year'], $dphP['month'], $dphP['quarter']) !== null;
+        $khSubmitted = $this->submittedAt($supplierId, 'dphkh1', $khP['year'], $khP['month'], $khP['quarter']) !== null;
+
         $items = [];
         if ($combine) {
-            if ($dphActive) {
+            // Sloučená položka zmizí, až když jsou podané OBĚ povinnosti (DPH i KH).
+            if ($dphActive && !($dphSubmitted && $khSubmitted)) {
                 $title = $vatPeriod === 'monthly'
                     ? 'DPH + KH za uplynulý měsíc'
                     : 'DPH + KH ' . $dphPeriod;
-                $item = $this->buildDeadlineItem('tax_deadline', $title, $dphDeadline, '/reports/dph', $now);
+                $item = $this->buildDeadlineItem('tax_deadline', $title, $dphDeadline, '/reports/dph', $now, $maxDaysAhead);
                 if ($item !== null) {
                     $items[] = $item;
                 }
             }
         } else {
             // Čtvrtletní PO: KH měsíčně + DPH čtvrtletně, dvě samostatné položky.
-            $khItem = $this->buildDeadlineItem('kh_deadline', 'Kontrolní hlášení za uplynulý měsíc',
-                sprintf('%04d-%02d-25', $y, $m), '/reports/kh', $now);
-            if ($khItem !== null) {
-                $items[] = $khItem;
+            if (!$khSubmitted) {
+                $khItem = $this->buildDeadlineItem('kh_deadline', 'Kontrolní hlášení za uplynulý měsíc',
+                    $khDeadline, '/reports/kh', $now, $maxDaysAhead);
+                if ($khItem !== null) {
+                    $items[] = $khItem;
+                }
             }
-            if ($dphActive) {
+            if ($dphActive && !$dphSubmitted) {
                 $dphItem = $this->buildDeadlineItem('tax_deadline', 'DPH ' . $dphPeriod,
-                    $dphDeadline, '/reports/dph', $now);
+                    $dphDeadline, '/reports/dph', $now, $maxDaysAhead);
                 if ($dphItem !== null) {
                     $items[] = $dphItem;
                 }
@@ -1305,14 +1532,14 @@ final class CrmAggregationService
     }
 
     /**
-     * Sestaví action item pro daňový termín, nebo null mimo okno −3..+7 dní.
+     * Sestaví action item pro daňový termín, nebo null mimo okno −3..+$maxDaysAhead dní.
      *
      * @return array<string,mixed>|null
      */
-    private function buildDeadlineItem(string $type, string $title, string $deadline, string $link, \DateTimeImmutable $now): ?array
+    private function buildDeadlineItem(string $type, string $title, string $deadline, string $link, \DateTimeImmutable $now, int $maxDaysAhead = 7): ?array
     {
         $days = (int) $now->diff(new \DateTimeImmutable($deadline))->format('%r%a');
-        if ($days < -3 || $days > 7) {
+        if ($days < -3 || $days > $maxDaysAhead) {
             return null;
         }
         return [
@@ -1327,6 +1554,421 @@ final class CrmAggregationService
             'link'     => $link,
             'days'     => $days,
         ];
+    }
+
+    /**
+     * Zjistí, zda dodavatel měl za měsíc PŘED $referenceDate (typicky termín SHV, tj.
+     * "first day of last month" od reference) EU B2B plnění zakládající povinnost
+     * Souhrnného hlášení. Sdíleno mezi actionItems() (4b) a taxCalendarItems()
+     * (Fáze F, audit 2026-07, P2/S).
+     */
+    private function hasEuSuppliesForMonthBefore(int $supplierId, \DateTimeImmutable $referenceDate): bool
+    {
+        $prevMonth = $referenceDate->modify('first day of last month');
+        $periodStart = $prevMonth->format('Y-m-01');
+        $periodEnd = $prevMonth->format('Y-m-t');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id
+          LEFT JOIN countries co ON co.id = c.country_id
+               JOIN invoice_items ii ON ii.invoice_id = i.id
+              WHERE i.supplier_id = ?
+                AND i.status IN ('issued','sent','reminded','paid')
+                AND i.invoice_type IN ('invoice','credit_note','tax_document')
+                AND COALESCE(co.is_eu, 0) = 1
+                AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                AND c.dic IS NOT NULL AND c.dic <> ''
+                AND i.effective_tax_date BETWEEN ? AND ?
+                AND (
+                      COALESCE(ii.vat_classification_code, i.vat_classification_code) IN ('20','22','31')
+                      OR i.reverse_charge = 1
+                    )
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $periodStart, $periodEnd]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Doplatek/přeplatek DPPO pro action item 4c — viz volání v actionItems(). Zkusí
+     * nejdřív PŘEDCHOZÍ rok (finalizovaný = skutečná povinnost, splatnost už běží
+     * nebo proběhla); pokud tam není nezaplacený doplatek, zkusí živou projekci
+     * BĚŽÍCÍHO roku (draft). Vrací null, když ani jeden nemá kladný (nezaplacený)
+     * doplatek, nebo když $taxReturns není k dispozici (viz konstruktor).
+     */
+    private function dppoBalanceDueItem(int $supplierId, \DateTimeImmutable $now): ?array
+    {
+        if ($this->taxReturns === null) {
+            return null;
+        }
+        $y = (int) $now->format('Y');
+        $prevYear = $y - 1;
+
+        $prev = $this->safeBalancePreview($supplierId, $prevYear, 'po');
+        if ($prev !== null && $prev['balance_due'] > 0.5) {
+            $deadline = $this->dppoDeadlineFromInput($prev['filing_deadline_input'], $y);
+            return $this->buildDppoBalanceDueItem($prev['balance_due'], $deadline, $now, $prevYear);
+        }
+
+        $current = $this->safeBalancePreview($supplierId, $y, 'po');
+        if ($current !== null && $current['balance_due'] > 0.5) {
+            $deadline = $this->dppoDeadlineFromInput($current['filing_deadline_input'], $y + 1);
+            return $this->buildDppoBalanceDueItem($current['balance_due'], $deadline, $now, $y);
+        }
+        return null;
+    }
+
+    /** Obalí {@see TaxReturnService::balanceDuePreview()} — chyba výpočtu nesmí shodit dashboard. */
+    private function safeBalancePreview(int $supplierId, int $year, string $type): ?array
+    {
+        if ($this->taxReturns === null) {
+            return null;
+        }
+        try {
+            return $this->taxReturns->balanceDuePreview($supplierId, $year, $type);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Splatnost doplatku = lhůta podání přiznání. Ruční vstup (`filing_deadline`,
+     * typicky s daňovým poradcem — 1. 7.) má přednost; jinak standardní elektronický
+     * termín (~1. 5. roku $filingYear, posunuto z pevného svátku na nejbližší
+     * pracovní den) — stejná logika jako taxCalendarItems().
+     */
+    private function dppoDeadlineFromInput(string $manualDeadline, int $filingYear): string
+    {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $manualDeadline) === 1) {
+            return $manualDeadline;
+        }
+        return $this->nextBusinessDayCz(sprintf('%04d-05-01', $filingYear));
+    }
+
+    /** @return array<string,mixed> */
+    private function buildDppoBalanceDueItem(float $balanceDue, string $deadline, \DateTimeImmutable $now, int $periodYear): ?array
+    {
+        $days = (int) $now->diff(new \DateTimeImmutable($deadline))->format('%r%a');
+        // Připomínku ukaž až ~14 dní před splatností (nebo po splatnosti). Doplatek
+        // splatný měsíce dopředu (běžící draft rok, ~1.5.N+1) na dashboard nepatří —
+        // jen zbytečně straší; hodí se pár dní/týdnů před termínem.
+        if ($days > 14) {
+            return null;
+        }
+        $amountFmt = number_format($balanceDue, 0, ',', ' ');
+        return [
+            'type'     => 'dppo_balance_due',
+            'severity' => $days < 0 ? 'high' : ($days <= 14 ? 'high' : 'medium'),
+            'title'    => 'Doplatek daně z příjmů',
+            'hint'     => $days < 0
+                ? sprintf('DPPO %d: doplatek %s Kč — splatnost byla %s (%d dní zpět)', $periodYear, $amountFmt, $deadline, abs($days))
+                : sprintf('DPPO %d: doplatek %s Kč — splatnost %s (za %d %s)', $periodYear, $amountFmt, $deadline, $days,
+                    $days === 1 ? 'den' : ($days < 5 ? 'dny' : 'dní')),
+            'link'     => '/reports/income-tax',
+            'days'     => $days,
+        ];
+    }
+
+    /**
+     * Nejbližší 25. den měsíčního/čtvrtletního cyklu (Y-m-d), počítáno DOPŘEDU od
+     * $now (na rozdíl od buildDeadlineItem, který jen filtruje okolo AKTUÁLNÍHO
+     * měsíce). Používá se pro "nejbližší termín" napříč firmami (Přehled firem,
+     * Fáze F) i pro širší kalendářní okno (taxCalendarItems).
+     */
+    private function nextPeriodicDeadline(\DateTimeImmutable $now, string $period): string
+    {
+        $today = $now->format('Y-m-d');
+        if ($period !== 'quarterly') {
+            $thisMonth = CzechWorkingDays::deadline((int) $now->format('Y'), (int) $now->format('n'));
+            if ($today <= $thisMonth) {
+                return $thisMonth;
+            }
+            $next = $now->modify('first day of next month');
+            return CzechWorkingDays::deadline((int) $next->format('Y'), (int) $next->format('n'));
+        }
+        $m = (int) $now->format('n');
+        $y = (int) $now->format('Y');
+        foreach ([1, 4, 7, 10] as $dm) {
+            if ($dm < $m) {
+                continue;
+            }
+            $candidate = CzechWorkingDays::deadline($y, $dm);
+            if ($dm > $m || $today <= $candidate) {
+                return $candidate;
+            }
+        }
+        return sprintf('%04d-01-25', $y + 1);
+    }
+
+    /**
+     * Nejbližší datum, které NENÍ víkend ani 1. 5. (Svátek práce — pevný český
+     * svátek, na který typicky padá elektronický termín DP). Zjednodušené: neřeší
+     * plný kalendář státních svátků (viz taxCalendarItems), jen nejčastější kolizi.
+     */
+    private function nextBusinessDayCz(string $ymd): string
+    {
+        $d = new \DateTimeImmutable($ymd);
+        while ((int) $d->format('N') >= 6 || $d->format('m-d') === '05-01') {
+            $d = $d->modify('+1 day');
+        }
+        return $d->format('Y-m-d');
+    }
+
+    /**
+     * Nejbližší termín DPH/KH/SHV napříč typy (bez ohledu na okno ±N dní) —
+     * pro "Přehled firem" (cross-supplier dashboard, Fáze F, audit 2026-07 P2/M).
+     * Vrací null, pokud firma není plátce DPH.
+     *
+     * @return array{label:string, date:string, days:int, shv_pending:bool}|null
+     */
+    public function nextTaxDeadline(int $supplierId, \DateTimeImmutable $now): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT is_vat_payer, taxpayer_type, vat_period FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        if (!(bool) ($row['is_vat_payer'] ?? false)) {
+            return null;
+        }
+        $taxpayerType = (string) ($row['taxpayer_type'] ?? '');
+        $vatPeriod = ((string) ($row['vat_period'] ?? 'monthly')) === 'quarterly' ? 'quarterly' : 'monthly';
+        $khMonthly = $taxpayerType === 'po' || $vatPeriod === 'monthly';
+
+        $dphDate = $this->nextPeriodicDeadline($now, $vatPeriod);
+        $khDate  = $this->nextPeriodicDeadline($now, $khMonthly ? 'monthly' : 'quarterly');
+        $shvDate = $this->nextPeriodicDeadline($now, 'monthly');
+        $shvPending = $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate));
+
+        $earliest = $dphDate < $khDate ? $dphDate : $khDate;
+        $labels = [];
+        if ($dphDate === $earliest) {
+            $labels[] = 'DPH';
+        }
+        if ($khDate === $earliest) {
+            $labels[] = 'KH';
+        }
+        if ($shvPending) {
+            if ($shvDate < $earliest) {
+                $earliest = $shvDate;
+                $labels = ['SH'];
+            } elseif ($shvDate === $earliest) {
+                $labels[] = 'SH';
+            }
+        }
+
+        $days = (int) $now->diff(new \DateTimeImmutable($earliest))->format('%r%a');
+        return [
+            'label'       => implode(' + ', $labels),
+            'date'        => $earliest,
+            'days'        => $days,
+            'shv_pending' => $shvPending,
+        ];
+    }
+
+    /** @return array{year:int, month:?int, quarter:?int} */
+    private function periodForMonthlyDeadline(string $deadlineYmd): array
+    {
+        $prev = (new \DateTimeImmutable($deadlineYmd))->modify('first day of last month');
+        return ['year' => (int) $prev->format('Y'), 'month' => (int) $prev->format('n'), 'quarter' => null];
+    }
+
+    /** @return array{year:int, month:?int, quarter:?int} */
+    private function periodForQuarterlyDeadline(string $deadlineYmd): array
+    {
+        $d = new \DateTimeImmutable($deadlineYmd);
+        $m = (int) $d->format('n');
+        $y = (int) $d->format('Y');
+        $q = match ($m) {
+            1 => 4,
+            4 => 1,
+            7 => 2,
+            10 => 3,
+            default => 1,
+        };
+        $qy = $m === 1 ? $y - 1 : $y;
+        return ['year' => $qy, 'month' => null, 'quarter' => $q];
+    }
+
+    /**
+     * Datum posledního archivovaného podání (tax_submissions) pro dané období, nebo
+     * null pokud v systému žádné podání dané formy/období není archivováno.
+     * `tax_submissions` archivuje generování EPO XML (C7' — proxy pro "podáno",
+     * reálné podání proběhne na portálu EPO/datovkou mimo aplikaci).
+     */
+    private function submittedAt(int $supplierId, string $formCode, int $periodYear, ?int $periodMonth, ?int $periodQuarter): ?string
+    {
+        $sql = 'SELECT generated_at FROM tax_submissions WHERE supplier_id = ? AND form_code = ? AND period_year = ?';
+        $params = [$supplierId, $formCode, $periodYear];
+        if ($periodMonth === null) {
+            $sql .= ' AND period_month IS NULL';
+        } else {
+            $sql .= ' AND period_month = ?';
+            $params[] = $periodMonth;
+        }
+        if ($periodQuarter === null) {
+            $sql .= ' AND period_quarter IS NULL';
+        } else {
+            $sql .= ' AND period_quarter = ?';
+            $params[] = $periodQuarter;
+        }
+        $sql .= ' ORDER BY generated_at DESC LIMIT 1';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $v = $stmt->fetchColumn();
+        return $v === false ? null : (string) $v;
+    }
+
+    /**
+     * Rozšířený daňový kalendář pro dashboard widget (Fáze F, audit 2026-07, P2/S):
+     * DPH/KH/SH (širší okno než actionItems) + nadcházející zálohy na daň/pojistné
+     * (E9, tax_advance_schedules) + roční termín DPFO/DPPO. Každá položka nese
+     * `submitted`/`submitted_at` podle archivu tax_submissions (u záloh místo toho
+     * `status` planned|paid — zálohy se "podávají" platbou, ne přiznáním).
+     *
+     * Roční termín DP: STANDARDNÍ termíny bez ohledu na "má poradce" — aplikace
+     * nemá takový příznak v nastavení (audit ověřil), termín 1. 7. s poradcem se
+     * proto nezobrazuje. Ukazujeme papírový (1. 4.) i elektronický (~1.–2. 5.,
+     * posunuto z pevného svátku 1. 5. na nejbližší pracovní den) termín zvlášť.
+     * Vynechává OSVČ v paušálním režimu (flat_tax_band <> 'none') — ty DPFO nepodávají.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function taxCalendarItems(int $supplierId, \DateTimeImmutable $now, int $maxDaysAhead = 90): array
+    {
+        $items = [];
+        $today = $now->format('Y-m-d');
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT is_vat_payer, taxpayer_type, vat_period, flat_tax_band FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $isVatPayer = (bool) ($row['is_vat_payer'] ?? false);
+        $taxpayerType = (string) ($row['taxpayer_type'] ?? '');
+        $vatPeriod = ((string) ($row['vat_period'] ?? 'monthly')) === 'quarterly' ? 'quarterly' : 'monthly';
+        $flatTaxBand = (string) ($row['flat_tax_band'] ?? 'none');
+
+        if ($isVatPayer) {
+            $khMonthly = $taxpayerType === 'po' || $vatPeriod === 'monthly';
+
+            $dphDate = $this->nextPeriodicDeadline($now, $vatPeriod);
+            $dphDays = (int) $now->diff(new \DateTimeImmutable($dphDate))->format('%r%a');
+            if ($dphDays >= -3 && $dphDays <= $maxDaysAhead) {
+                $p = $vatPeriod === 'quarterly' ? $this->periodForQuarterlyDeadline($dphDate) : $this->periodForMonthlyDeadline($dphDate);
+                $sub = $this->submittedAt($supplierId, 'dphdp3', $p['year'], $p['month'], $p['quarter']);
+                $items[] = [
+                    'type'         => 'tax_deadline',
+                    'title'        => 'DPH přiznání',
+                    'deadline'     => $dphDate,
+                    'days'         => $dphDays,
+                    'link'         => '/reports/dph',
+                    'submitted'    => $sub !== null,
+                    'submitted_at' => $sub,
+                ];
+            }
+
+            $khDate = $this->nextPeriodicDeadline($now, $khMonthly ? 'monthly' : 'quarterly');
+            $khDays = (int) $now->diff(new \DateTimeImmutable($khDate))->format('%r%a');
+            if ($khDays >= -3 && $khDays <= $maxDaysAhead) {
+                $p = $khMonthly ? $this->periodForMonthlyDeadline($khDate) : $this->periodForQuarterlyDeadline($khDate);
+                $sub = $this->submittedAt($supplierId, 'dphkh1', $p['year'], $p['month'], $p['quarter']);
+                $items[] = [
+                    'type'         => 'kh_deadline',
+                    'title'        => 'Kontrolní hlášení',
+                    'deadline'     => $khDate,
+                    'days'         => $khDays,
+                    'link'         => '/reports/kh',
+                    'submitted'    => $sub !== null,
+                    'submitted_at' => $sub,
+                ];
+            }
+
+            $shvDate = $this->nextPeriodicDeadline($now, 'monthly');
+            $shvDays = (int) $now->diff(new \DateTimeImmutable($shvDate))->format('%r%a');
+            if ($shvDays >= -3 && $shvDays <= $maxDaysAhead && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate))) {
+                $p = $this->periodForMonthlyDeadline($shvDate);
+                $sub = $this->submittedAt($supplierId, 'dphshv', $p['year'], $p['month'], $p['quarter']);
+                $items[] = [
+                    'type'         => 'shv_deadline',
+                    'title'        => 'Souhrnné hlášení',
+                    'deadline'     => $shvDate,
+                    'days'         => $shvDays,
+                    'link'         => '/reports/shv',
+                    'submitted'    => $sub !== null,
+                    'submitted_at' => $sub,
+                ];
+            }
+        }
+
+        // Zálohy na daň/pojistné (E9) — planned = ještě nezaplacené, v okně.
+        $advStmt = $this->db->pdo()->prepare(
+            "SELECT id, advance_kind, due_date, amount, status
+               FROM tax_advance_schedules
+              WHERE supplier_id = ? AND status = 'planned'
+                AND due_date <= DATE_ADD(?, INTERVAL ? DAY)
+                AND due_date >= DATE_SUB(?, INTERVAL 3 DAY)
+              ORDER BY due_date"
+        );
+        $advStmt->execute([$supplierId, $today, $maxDaysAhead, $today]);
+        $kindLabels = ['tax' => 'Záloha na daň', 'social' => 'Záloha na sociální pojištění', 'health' => 'Záloha na zdravotní pojištění'];
+        foreach ($advStmt->fetchAll(\PDO::FETCH_ASSOC) as $adv) {
+            $dueDate = (string) $adv['due_date'];
+            $days = (int) $now->diff(new \DateTimeImmutable($dueDate))->format('%r%a');
+            $items[] = [
+                'type'         => 'tax_advance',
+                'title'        => $kindLabels[(string) $adv['advance_kind']] ?? 'Záloha',
+                'deadline'     => $dueDate,
+                'days'         => $days,
+                'link'         => '/reports/income-tax',
+                'amount'       => round((float) $adv['amount'], 2),
+                'submitted'    => null,
+                'status'       => (string) $adv['status'],
+            ];
+        }
+
+        // Roční termín DPFO/DPPO — standardní termíny (bez "s poradcem", viz docblock).
+        if ($taxpayerType === 'po' || ($taxpayerType === 'fo' && $flatTaxBand === 'none')) {
+            $y = (int) $now->format('Y');
+            $formCode = $taxpayerType === 'po' ? 'dppdp9' : 'dpfdp5';
+            $taxLabel = $taxpayerType === 'po' ? 'DPPO' : 'DPFO';
+            $periodYear = $y - 1;
+
+            // Obě varianty sdílí stejný archiv (jedno podání za period_year) — vypočti jednou.
+            $sub = $this->submittedAt($supplierId, $formCode, $periodYear, null, null);
+
+            $paperDate = sprintf('%04d-04-01', $y);
+            $paperDays = (int) $now->diff(new \DateTimeImmutable($paperDate))->format('%r%a');
+            if ($paperDays >= -3 && $paperDays <= $maxDaysAhead) {
+                $items[] = [
+                    'type'         => 'income_tax_deadline',
+                    'title'        => "Přiznání $taxLabel (papírově)",
+                    'deadline'     => $paperDate,
+                    'days'         => $paperDays,
+                    'link'         => '/reports/income-tax',
+                    'submitted'    => $sub !== null,
+                    'submitted_at' => $sub,
+                ];
+            }
+
+            $elecDate = $this->nextBusinessDayCz(sprintf('%04d-05-01', $y));
+            $elecDays = (int) $now->diff(new \DateTimeImmutable($elecDate))->format('%r%a');
+            if ($elecDays >= -3 && $elecDays <= $maxDaysAhead) {
+                $items[] = [
+                    'type'         => 'income_tax_deadline',
+                    'title'        => "Přiznání $taxLabel (elektronicky)",
+                    'deadline'     => $elecDate,
+                    'days'         => $elecDays,
+                    'link'         => '/reports/income-tax',
+                    'submitted'    => $sub !== null,
+                    'submitted_at' => $sub,
+                ];
+            }
+        }
+
+        usort($items, static fn (array $a, array $b) => $a['deadline'] <=> $b['deadline']);
+        return $items;
     }
 
     /**
@@ -1409,6 +2051,41 @@ final class CrmAggregationService
     }
 
     /**
+     * Odkaz na konkrétní nález integrity deníku. `journal_integrity_findings.detail`
+     * nese JSON vzorek nálezů (viz migrace 1034) — u JEDINÉHO nálezu z něj složíme
+     * deep-link, aby uživatel neskončil na nefiltrovaném seznamu celého deníku.
+     * U více nálezů se odkazuje na deník bez filtru (stránka umí jen jedno ID).
+     *
+     * Volba parametru je daná typem nálezu:
+     *   - `entry_id` (preferováno — Journal.vue rovnou rozbalí detail zápisu). Chybí
+     *     u `booked_without_entry`, kde zápis z definice neexistuje.
+     *   - `source_type` + `source_id` jako fallback. NEPOUŽITELNÉ u `orphan_entry`,
+     *     kde `source_id` ukazuje na neexistující doklad — tam ale `entry_id` je.
+     */
+    private function journalIntegrityLink(int $count, mixed $detailJson): string
+    {
+        $base = '/accounting/journal';
+        if ($count !== 1 || !is_string($detailJson) || $detailJson === '') {
+            return $base;
+        }
+        $sample = json_decode($detailJson, true);
+        if (!is_array($sample) || !isset($sample[0]) || !is_array($sample[0])) {
+            return $base;
+        }
+        $first = $sample[0];
+        $entryId = (int) ($first['entry_id'] ?? 0);
+        if ($entryId > 0) {
+            return $base . '?entry_id=' . $entryId;
+        }
+        $sourceType = (string) ($first['source_type'] ?? '');
+        $sourceId   = (int) ($first['source_id'] ?? 0);
+        if ($sourceId > 0 && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
+            return $base . '?source_type=' . $sourceType . '&source_id=' . $sourceId;
+        }
+        return $base;
+    }
+
+    /**
      * True pokud daný item type je plně skrytý (forever / historical bez baseline nebo s aktivním day/week).
      */
     private function isFullyDismissed(array $dismissals, string $itemType): bool
@@ -1437,7 +2114,8 @@ final class CrmAggregationService
     public function dismissActionItem(int $supplierId, int $userId, string $itemType, string $mode): void
     {
         $validTypes = ['overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
-            'purchase_drafts', 'tax_deadline', 'kh_deadline', 'shv_deadline', 'churn_risk'];
+            'purchase_drafts', 'unbooked_documents', 'journal_integrity', 'tax_deadline', 'kh_deadline',
+            'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due'];
         $validModes = ['day', 'week', 'forever', 'historical'];
         if (!in_array($itemType, $validTypes, true)) {
             throw new \InvalidArgumentException("Invalid item_type: {$itemType}");
@@ -1545,15 +2223,14 @@ final class CrmAggregationService
                       WHERE bt.match_status = 'unmatched'
                         AND bt.amount > 0
                         AND bt.posted_at >= DATE_SUB(?, INTERVAL 90 DAY)
-                        AND EXISTS (
-                            SELECT 1 FROM currencies cur
-                             WHERE cur.supplier_id = ?
-                               AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(cur.account_number, ''), '[^0-9]', ''))
-                                 = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''),  '[^0-9]', ''))
-                               AND (bs.bank_code IS NULL OR cur.bank_code IS NULL OR cur.bank_code = bs.bank_code)
-                        )"
+                        AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
                 );
-                $stmt->execute([$today, $supplierId]);
+                // SEC-01: shodný scope jako v buildFeed() — jinak by drill-down
+                // ukázal transakce, které agregace nezapočítala.
+                $stmt->execute(array_merge(
+                    [$today],
+                    \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+                ));
                 break;
             case 'recurring_due':
                 $stmt = $pdo->prepare(
@@ -1570,7 +2247,7 @@ final class CrmAggregationService
                 $stmt = $pdo->prepare(
                     "SELECT id FROM purchase_invoices
                       WHERE supplier_id = ?
-                        AND status IN ('received','booked')
+                        AND status IN ('received','booked')" . PayablePredicate::excludeAdvanceVatDocument('') . "
                         AND due_date < ?"
                 );
                 $stmt->execute([$supplierId, $today]);
@@ -1620,53 +2297,99 @@ final class CrmAggregationService
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
 
-        // Build week buckets
-        $weeks = [];
-        $running = 0.0;
-        $totalIn = 0.0;
-        $totalOut = 0.0;
-
+        // Hranice týdenních bucketů — identická logika jako dřív: 1. týden začíná
+        // dneškem (ne pondělím), další týdny Po–Ne. Buckety jsou souvislé (konec
+        // týdne + 1 den = začátek dalšího), takže každé due_date padne právě do jednoho.
+        $bounds = [];
         for ($w = 0; $w < $weeksAhead; $w++) {
             $weekStart = $today->modify("+{$w} weeks")->modify('Monday this week');
             if ($w === 0) {
-                // První týden začíná dneškem (ne pondělím)
                 $weekStart = $today;
             }
             $weekEnd = $weekStart->modify('Sunday this week');
             if ($w === 0 && $weekEnd < $weekStart) {
                 $weekEnd = $weekStart->modify('+6 days');
             }
+            $bounds[] = [$weekStart, $weekEnd];
+        }
 
-            // In: nezaplacené vystavené faktury s due_date v tomto týdnu — očekávané
-            // inkaso = zbývající částka (amount_to_pay - paid_total): částečné úhrady
-            // i odpočty záloh už dorazily, podruhé nepřitečou (#89).
-            $stmt = $pdo->prepare(
-                "SELECT COALESCE(SUM(i.amount_to_pay - i.paid_total), 0) AS amt
-                   FROM invoices i
-              LEFT JOIN currencies c ON c.id = i.currency_id
-                  WHERE i.supplier_id = ?
-                    AND i.status IN ('issued', 'sent', 'reminded')
-                    AND i.invoice_type != 'proforma'
-                    AND (i.invoice_type NOT IN ('invoice','tax_document') OR i.amount_to_pay - i.paid_total > 0)
-                    AND i.due_date BETWEEN ? AND ?
-                    AND COALESCE(c.code, 'CZK') = ?"
-            );
-            $stmt->execute([$supplierId, $weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'), $currency]);
-            $in = (float) $stmt->fetchColumn();
+        if ($bounds === []) {
+            return [
+                'currency'  => $currency,
+                'weeks'     => [],
+                'total_in'  => 0.0,
+                'total_out' => 0.0,
+                'total_net' => 0.0,
+            ];
+        }
 
-            // Out: nezaplacené přijaté faktury s due_date v tomto týdnu
-            $stmt = $pdo->prepare(
-                "SELECT COALESCE(SUM(pi.total_with_vat), 0) AS amt
-                   FROM purchase_invoices pi
-              LEFT JOIN currencies c ON c.id = pi.currency_id
-                  WHERE pi.supplier_id = ?
-                    AND pi.status IN ('received', 'booked')
-                    AND pi.due_date BETWEEN ? AND ?
-                    AND COALESCE(c.code, 'CZK') = ?"
-            );
-            $stmt->execute([$supplierId, $weekStart->format('Y-m-d'), $weekEnd->format('Y-m-d'), $currency]);
-            $out = (float) $stmt->fetchColumn();
+        $globalStart = $bounds[0][0]->format('Y-m-d');
+        $globalEnd   = $bounds[count($bounds) - 1][1]->format('Y-m-d');
 
+        // CASE mapující due_date na index bucketu (vzor SummaryAction::dueBuckets) —
+        // jeden GROUP BY dotaz na stranu místo 2×weeksAhead dotazů v PHP smyčce.
+        $buildCase = static function (string $alias) use ($bounds): string {
+            $sql = '';
+            foreach (array_keys($bounds) as $idx) {
+                $sql .= " WHEN {$alias}.due_date BETWEEN ? AND ? THEN {$idx}";
+            }
+            return $sql;
+        };
+        $caseParams = [];
+        foreach ($bounds as [$s, $e]) {
+            $caseParams[] = $s->format('Y-m-d');
+            $caseParams[] = $e->format('Y-m-d');
+        }
+
+        // In: nezaplacené vystavené faktury s due_date v okně — očekávané inkaso =
+        // zbývající částka (amount_to_pay - paid_total): částečné úhrady i odpočty
+        // záloh už dorazily, podruhé nepřitečou (#89).
+        $inStmt = $pdo->prepare(
+            "SELECT CASE{$buildCase('i')} END AS bucket,
+                    SUM(i.amount_to_pay - i.paid_total) AS amt
+               FROM invoices i
+          LEFT JOIN currencies c ON c.id = i.currency_id
+              WHERE i.supplier_id = ?
+                AND i.status IN ('issued', 'sent', 'reminded')
+                AND i.invoice_type != 'proforma'
+                AND (i.invoice_type NOT IN ('invoice','tax_document') OR i.amount_to_pay - i.paid_total > 0)
+                AND i.due_date BETWEEN ? AND ?
+                AND COALESCE(c.code, 'CZK') = ?
+           GROUP BY bucket"
+        );
+        $inStmt->execute([...$caseParams, $supplierId, $globalStart, $globalEnd, $currency]);
+        $inByBucket = [];
+        foreach ($inStmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            if ($r['bucket'] === null) continue;
+            $inByBucket[(int) $r['bucket']] = (float) $r['amt'];
+        }
+
+        // Out: nezaplacené přijaté faktury s due_date v okně.
+        $outStmt = $pdo->prepare(
+            "SELECT CASE{$buildCase('pi')} END AS bucket,
+                    SUM(pi.total_with_vat) AS amt
+               FROM purchase_invoices pi
+          LEFT JOIN currencies c ON c.id = pi.currency_id
+              WHERE pi.supplier_id = ?
+                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument() . "
+                AND pi.due_date BETWEEN ? AND ?
+                AND COALESCE(c.code, 'CZK') = ?
+           GROUP BY bucket"
+        );
+        $outStmt->execute([...$caseParams, $supplierId, $globalStart, $globalEnd, $currency]);
+        $outByBucket = [];
+        foreach ($outStmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            if ($r['bucket'] === null) continue;
+            $outByBucket[(int) $r['bucket']] = (float) $r['amt'];
+        }
+
+        $weeks = [];
+        $running = 0.0;
+        $totalIn = 0.0;
+        $totalOut = 0.0;
+        foreach ($bounds as $idx => [$weekStart, $weekEnd]) {
+            $in  = $inByBucket[$idx]  ?? 0.0;
+            $out = $outByBucket[$idx] ?? 0.0;
             $net = $in - $out;
             $running += $net;
             $totalIn += $in;

@@ -55,7 +55,7 @@ final class SouhrnneHlaseniBuilder
     ) {}
 
     /**
-     * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>}
+     * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
      */
     public function build(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
@@ -109,18 +109,7 @@ final class SouhrnneHlaseniBuilder
             }
         }
 
-        $dom = new \DOMDocument('1.0', 'UTF-8');
-        $dom->preserveWhiteSpace = false;
-        $dom->formatOutput = true;
-
-        $pisemnost = $dom->createElement('Pisemnost');
-        $pisemnost->setAttribute('nazevSW', 'MyInvoice.cz');
-        $pisemnost->setAttribute('verzeSW', (string) ($this->loadAppVersion() ?? '0'));
-        $dom->appendChild($pisemnost);
-
-        $shv = $dom->createElement('DPHSHV');
-        $shv->setAttribute('verzePis', '06.01');
-        $pisemnost->appendChild($shv);
+        [$dom, $shv] = EpoEnvelope::create('DPHSHV', '06.01');
 
         // VetaD — typ podání + perioda (mesic pro měsíční, ctvrt pro kvartální)
         $vetaD = $dom->createElement('VetaD');
@@ -177,7 +166,8 @@ final class SouhrnneHlaseniBuilder
         $deadlineMonth = $endMonth + 1;
         $deadlineYear = $year;
         if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
-        $deadline = sprintf('%04d-%02d-25', $deadlineYear, $deadlineMonth);
+        // § 33/4 DŘ: termín padající na víkend/svátek se posouvá na další pracovní den.
+        $deadline = CzechWorkingDays::deadline($deadlineYear, $deadlineMonth);
 
         return [
             'xml'     => $dom->saveXML() ?: '',
@@ -286,31 +276,9 @@ final class SouhrnneHlaseniBuilder
 
     private function loadSupplier(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT s.id, s.company_name, s.street, s.city, s.zip,
-                    COALESCE(c.iso2, 'CZ') AS country_iso2,
-                    s.ic, s.dic, s.is_vat_payer, s.is_identified,
-                    s.taxpayer_type, s.financial_office_code,
-                    s.workplace_code, s.data_box_id,
-                    s.email, s.phone, s.cz_nace_code,
-                    s.street_number_pop, s.street_number_orient,
-                    s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,
-                    s.sest_jmeno, s.sest_prijmeni, s.sest_telefon, s.sest_email, s.sest_funkce
-               FROM supplier s
-          LEFT JOIN countries c ON c.id = s.country_id
-              WHERE s.id = ?"
-        );
-        $stmt->execute([$supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false) throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
-        return $row;
+        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
     }
 
-    private function loadAppVersion(): ?string
-    {
-        $verFile = __DIR__ . '/../../../../VERSION';
-        return is_file($verFile) ? trim((string) file_get_contents($verFile)) : null;
-    }
 
     private function formatAmount(float $amount): string
     {

@@ -205,15 +205,17 @@ final class BulkReissueAction
                        (invoice_id, description, quantity, unit, unit_price_without_vat,
                         vat_rate_id, vat_rate_snapshot,
                         total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
+                        stock_item_id, warehouse_id,
                         oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )
                 : $pdo->prepare(
                     'INSERT INTO invoice_items
                        (invoice_id, description, quantity, unit, unit_price_without_vat,
                         vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)'
+                        total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
+                        stock_item_id, warehouse_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)'
                 );
             foreach ($source['items'] as $item) {
                 $kind = (string) ($item['item_kind'] ?? 'standard');
@@ -238,6 +240,9 @@ final class BulkReissueAction
                     $item['order_index'],
                     $kind,
                     $code !== null ? (string) $code : null,
+                    // Klon přenáší vazbu na skladovou kartu (Epic SKLAD A15).
+                    $item['stock_item_id'] ?? null,
+                    $item['warehouse_id'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);

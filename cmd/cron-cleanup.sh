@@ -7,7 +7,7 @@
 #         ARES/VIES cache >30 dní, PDF cache >90 dní, log files nad max_files.
 #
 #  crontab:
-#    0 3 * * *  /var/www/myinvoice.cz/cmd/cron-cleanup.sh
+#    0 3 * * *  /var/www/myucto.cz/cmd/cron-cleanup.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

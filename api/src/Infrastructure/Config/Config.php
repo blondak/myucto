@@ -204,6 +204,12 @@ final class Config
     private static function baselineDefaults(): array
     {
         return [
+            'epo_test' => false,
+            'epo' => [
+                'ca_bundle_path' => '',
+                'receipt_signer_fingerprints_sha256' => [],
+                'test_receipt_signer_fingerprints_sha256' => [],
+            ],
             'session' => [
                 'lock_after_minutes' => 0,
             ],
@@ -213,6 +219,10 @@ final class Config
                 'passwordless_login'  => [
                     'enabled' => false,
                 ],
+            ],
+            'app' => [
+                'name'   => 'MyÚčto.cz',
+                'domain' => 'myucto.cz',
             ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
@@ -297,6 +307,10 @@ final class Config
             'MYINVOICE_AUTH_REQUIRE_MFA'     => ['auth.require_mfa', 'bool'],
             'MYINVOICE_AUTH_MFA_METHODS'     => ['auth.allowed_mfa_methods', 'csv'],
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
+            'MYINVOICE_DEMO_ENABLED'         => ['demo.enabled', 'bool'],
+            'MYINVOICE_EPO_TEST'             => ['epo_test', 'bool'],
+            'MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256'
+                => ['epo.test_receipt_signer_fingerprints_sha256', 'csv'],
 
             // SMTP
             'MYINVOICE_SMTP_HOST'       => ['smtp.host', 'string'],

@@ -68,9 +68,21 @@ export interface WrSupplier {
   web: string | null
 }
 
+/** Odběratel v hlavičce náhledu — stejný rozsah, jaký o sobě klient vidí na faktuře. */
+export interface WrClient {
+  company_name: string
+  street: string | null
+  city: string | null
+  zip: string | null
+  country: string | null
+  ic: string | null
+  dic: string | null
+}
+
 export interface WrPreview {
   scope: 'client' | 'project'
   client_company_name: string
+  client?: WrClient
   project_name: string | null
   language: 'cs' | 'en'
   supplier_name: string

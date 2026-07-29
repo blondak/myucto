@@ -12,6 +12,7 @@ use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentTagRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -34,29 +35,40 @@ final class DocumentsAction
     public function list(Request $request, Response $response): Response
     {
         $sid = $this->supplierId($request);
+        $viewer = $this->viewer($request);
         $q = $request->getQueryParams();
         $folderId = array_key_exists('folder_id', $q) ? $this->optInt($q['folder_id']) : null;
         $docType = isset($q['doc_type']) ? (string) $q['doc_type'] : null;
         $tag = isset($q['tag']) ? trim((string) $q['tag']) : '';
+        // Aditivní scope filtr (Firemní/Osobní taby, §6) — jen platné hodnoty; owner_user_id
+        // ctíme jen pro admina (non-admin scopeClause stejně omezí na vlastní user doklady).
+        $scopeFilter = (isset($q['scope']) && in_array($q['scope'], ['company', 'user'], true))
+            ? (string) $q['scope'] : null;
+        $ownerFilter = ($viewer->isAdmin && isset($q['owner_user_id'])) ? $this->optInt($q['owner_user_id']) : null;
+        $p = Pagination::fromQuery($q, 50);
 
-        // Filtr tagem je globální (napříč složkami) — vrátíme plochý seznam.
+        // Filtr tagem je globální (napříč složkami) — vrátíme plochý (nestránkovaný)
+        // seznam; kontrakt {data,meta} zůstává jednotný, jen meta.pages je vždy 1.
         if ($tag !== '') {
-            return Json::ok($response, [
-                'breadcrumb'     => [],
-                'folders'        => [],
-                'documents'      => $this->documents->listByTag($sid, $tag),
-                'tag'            => $tag,
-                'max_file_bytes' => $this->storage->maxFileBytes(),
-            ]);
+            $docs = $this->documents->listByTag($sid, $tag, $viewer);
+            $meta = Pagination::meta(count($docs), 1, max(count($docs), 1));
+            $meta['breadcrumb']     = [];
+            $meta['folders']        = [];
+            $meta['tag']            = $tag;
+            $meta['max_file_bytes'] = $this->storage->maxFileBytes();
+            return Json::ok($response, ['data' => $docs, 'meta' => $meta]);
         }
 
-        return Json::ok($response, [
-            'breadcrumb'          => $this->breadcrumb($sid, $folderId),
-            'folders'             => $this->folders->listChildren($sid, $folderId),
-            'documents'           => $this->documents->listInFolder($sid, $folderId, $docType),
-            'max_file_bytes'      => $this->storage->maxFileBytes(),
-            'php_max_upload_bytes' => $this->phpUploadLimit(),
-        ]);
+        $total = $this->documents->countInFolder($sid, $folderId, $viewer, $docType, $scopeFilter, $ownerFilter);
+        $rows = $this->documents->listInFolder(
+            $sid, $folderId, $viewer, $docType, $scopeFilter, $ownerFilter, $p['per_page'], $p['offset']
+        );
+        $meta = Pagination::meta($total, $p['page'], $p['per_page']);
+        $meta['breadcrumb']           = $this->breadcrumb($sid, $folderId);
+        $meta['folders']              = $this->folders->listChildren($sid, $folderId, $viewer);
+        $meta['max_file_bytes']       = $this->storage->maxFileBytes();
+        $meta['php_max_upload_bytes'] = $this->phpUploadLimit();
+        return Json::ok($response, ['data' => $rows, 'meta' => $meta]);
     }
 
     /** Efektivní per-request limit PHP = min(post_max_size, upload_max_filesize); 0 = neomezeno. */
@@ -86,14 +98,15 @@ final class DocumentsAction
     public function get(Request $request, Response $response, array $args): Response
     {
         $sid = $this->supplierId($request);
+        $viewer = $this->viewer($request);
         $id = (int) ($args['id'] ?? 0);
-        $doc = $this->documents->find($id, $sid, true);
+        $doc = $this->documents->find($id, $sid, $viewer, true);
         if ($doc === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $doc['tags']        = $this->tags->tagsForDocument($id);
         $doc['links']       = $this->links->linksForDocument($id, $sid);
-        $doc['attachments'] = $this->documents->listChildren($id, $sid);
+        $doc['attachments'] = $this->documents->listChildren($id, $sid, $viewer);
         $doc['breadcrumb']  = $this->breadcrumb($sid, $doc['folder_id']);
         if ($doc['doc_type'] === 'zfo') {
             $doc['dms_message'] = $this->dms->findByDocument($id);
@@ -106,7 +119,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $doc = $this->documents->find($id, $sid);
+        $doc = $this->documents->find($id, $sid, $this->viewer($request));
         if ($doc === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
@@ -138,7 +151,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->documents->find($id, $sid) === null) {
+        if ($this->documents->find($id, $sid, $this->viewer($request)) === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $body = (array) $request->getParsedBody();
@@ -155,7 +168,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->documents->find($id, $sid) === null) {
+        if ($this->documents->find($id, $sid, $this->viewer($request)) === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $this->documents->softDelete($id, $sid, $this->userId($request));
@@ -169,7 +182,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->documents->find($id, $sid, true) === null) {
+        if ($this->documents->find($id, $sid, $this->viewer($request), true) === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $this->documents->restore($id, $sid);
@@ -184,7 +197,7 @@ final class DocumentsAction
         if (mb_strlen($q) < 2) {
             return Json::ok($response, ['documents' => [], 'query' => $q]);
         }
-        return Json::ok($response, ['documents' => $this->documents->search($sid, $q), 'query' => $q]);
+        return Json::ok($response, ['documents' => $this->documents->search($sid, $q, $this->viewer($request)), 'query' => $q]);
     }
 
     /** GET /api/documents/by-entity/{type}/{id} */
@@ -196,7 +209,7 @@ final class DocumentsAction
         if (!in_array($type, DocumentLinkRepository::ENTITY_TYPES, true)) {
             return Json::error($response, 'bad_entity', 'Neplatný typ entity.', 400);
         }
-        return Json::ok($response, ['documents' => $this->documents->listByEntity($sid, $type, $eid)]);
+        return Json::ok($response, ['documents' => $this->documents->listByEntity($sid, $type, $eid, $this->viewer($request))]);
     }
 
     /** GET /api/documents/tags */
@@ -210,7 +223,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->documents->find($id, $sid) === null) {
+        if ($this->documents->find($id, $sid, $this->viewer($request)) === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $body = (array) $request->getParsedBody();
@@ -233,7 +246,7 @@ final class DocumentsAction
     {
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->documents->find($id, $sid) === null) {
+        if ($this->documents->find($id, $sid, $this->viewer($request)) === null) {
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $body = (array) $request->getParsedBody();
@@ -248,18 +261,26 @@ final class DocumentsAction
     public function trash(Request $request, Response $response): Response
     {
         $sid = $this->supplierId($request);
-        return Json::ok($response, [
-            'documents' => $this->documents->listTrash($sid),
-            'folders'   => $this->folders->listTrashed($sid),
-        ]);
+        $viewer = $this->viewer($request);
+        $p = Pagination::fromQuery($request->getQueryParams(), 50);
+
+        $total = $this->documents->countTrash($sid, $viewer);
+        $rows = $this->documents->listTrash($sid, $viewer, $p['per_page'], $p['offset']);
+        $meta = Pagination::meta($total, $p['page'], $p['per_page']);
+        $meta['folders'] = $this->folders->listTrashed($sid);
+        return Json::ok($response, ['data' => $rows, 'meta' => $meta]);
     }
 
     /** POST /api/documents/trash/empty — tvrdé smazání + dedup-aware mazání souborů. */
     public function emptyTrash(Request $request, Response $response): Response
     {
         $sid = $this->supplierId($request);
-        $rows = $this->documents->listTrashedRaw($sid);
-        $count = $this->documents->hardDeleteTrashed($sid);
+        $viewer = $this->viewer($request);
+        // Scope-aware (§4.2): non-admin vysype jen company + vlastní user doklady;
+        // cizí user doklady zůstanou v koši i s bajty (listTrashedRaw i hardDelete
+        // sdílejí stejný scope, aby se ref-counting nekřížil).
+        $rows = $this->documents->listTrashedRaw($sid, $viewer);
+        $count = $this->documents->hardDeleteTrashed($sid, $viewer);
         $this->folders->purgeTrashed($sid);
         $this->tags->purgeOrphans($sid); // osamocené tagy po skutečném smazání dokumentů
 
@@ -293,6 +314,7 @@ final class DocumentsAction
         }
 
         $userId = $this->userId($request);
+        $viewer = $this->viewer($request);
         $affected = 0;
 
         switch ($action) {
@@ -302,6 +324,8 @@ final class DocumentsAction
                     return Json::error($response, 'folder_not_found', 'Cílová složka nenalezena.', 404);
                 }
                 foreach ($ids as $id) {
+                    // Scope guard: nelze hromadně přesunout cizí user doklad.
+                    if ($this->documents->find($id, $sid, $viewer) === null) continue;
                     if ($this->documents->move($id, $sid, $folderId)) $affected++;
                 }
                 // Složky: zákaz přesunu do sebe / vlastního potomka (cyklus).
@@ -316,11 +340,13 @@ final class DocumentsAction
 
             case 'delete':
                 foreach ($ids as $id) {
+                    // Scope guard: nelze hromadně smazat cizí user doklad.
+                    if ($this->documents->find($id, $sid, $viewer) === null) continue;
                     if ($this->documents->softDelete($id, $sid, $userId)) $affected++;
                 }
                 foreach ($folderIds as $fid) {
                     if ($this->folders->find($fid, $sid) === null) continue;
-                    $this->folders->softDeleteSubtree($fid, $sid, $userId);
+                    $this->folders->softDeleteSubtree($fid, $sid, $userId, $viewer);
                     $affected++;
                 }
                 break;
@@ -328,7 +354,7 @@ final class DocumentsAction
             case 'tag':
                 $names = array_values(array_filter(array_map('strval', (array) ($body['tags'] ?? []))));
                 foreach ($ids as $id) {
-                    if ($this->documents->find($id, $sid) === null) continue;
+                    if ($this->documents->find($id, $sid, $viewer) === null) continue;
                     foreach ($names as $name) {
                         $name = mb_substr(trim($name), 0, 64);
                         if ($name === '') continue;

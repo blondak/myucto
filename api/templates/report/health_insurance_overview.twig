@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 9.5pt; color: #1a1a1a; }
+    h1 { font-size: 15pt; margin: 0 0 2mm; }
+    h2 { font-size: 11.5pt; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1.5px solid #333; }
+    .sub { color: #555; font-size: 9pt; margin-bottom: 4mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 1.4mm 2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.r { text-align: right; white-space: nowrap; }
+    td.k { color: #444; }
+    tr.total td { font-weight: bold; border-top: 1px solid #333; border-bottom: 1px solid #333; }
+    tr.due td { font-weight: bold; }
+    .ident td { border-bottom: 0.5px solid #eee; }
+    .note { font-size: 8pt; color: #666; margin: 1.5mm 0; font-style: italic; }
+    .disclaimer { margin-top: 6mm; font-size: 8pt; color: #777; border-top: 0.5px solid #ccc; padding-top: 2mm; }
+    .pos { color: #a11; } .neg { color: #171; }
+    .miss { color: #a11; font-style: italic; }
+</style>
+</head>
+<body>
+    <h1>Přehled OSVČ pro zdravotní pojišťovnu — {{ summary.year }}</h1>
+    <div class="sub">
+        Přehled o příjmech a výdajích ze samostatné výdělečné činnosti a úhrnu záloh
+        na pojistné za rok {{ summary.year }}.
+    </div>
+
+    <h2>Zdravotní pojišťovna a pojištěnec</h2>
+    <table class="ident">
+        <tr>
+            <td class="k">Zdravotní pojišťovna</td>
+            <td>{% if insurer.name %}{{ insurer.name }}{% if insurer.code %} · kód {{ insurer.code }}{% endif %}{% else %}<span class="miss">nevyplněna — doplňte kód ZP v Nastavení firmy</span>{% endif %}</td>
+        </tr>
+        <tr>
+            <td class="k">Jméno a příjmení OSVČ</td>
+            <td>{{ supplier.company_name }}</td>
+        </tr>
+        <tr>
+            <td class="k">Číslo pojištěnce</td>
+            <td>{% if supplier.health_insurance_number %}{{ supplier.health_insurance_number }}{% else %}<span class="miss">nevyplněno — doplňte v Nastavení firmy</span>{% endif %}</td>
+        </tr>
+        <tr>
+            <td class="k">Adresa</td>
+            <td>{{ supplier.street }}, {{ supplier.zip }} {{ supplier.city }}</td>
+        </tr>
+        <tr>
+            <td class="k">IČO / DIČ</td>
+            <td>{% if supplier.ic %}{{ supplier.ic }}{% endif %}{% if supplier.dic %} · {{ supplier.dic }}{% endif %}</td>
+        </tr>
+    </table>
+
+    <h2>Vyměřovací základ a pojistné</h2>
+    {% if summary.health.note %}<div class="note">{{ summary.health.note }}</div>{% endif %}
+    <table>
+        <tr>
+            <td>Daňový základ ze samostatné činnosti (§7){% if summary.is_secondary %} · vedlejší činnost{% endif %}</td>
+            <td class="r">{{ summary.tax_base_7|cz_money }} Kč</td>
+        </tr>
+        <tr>
+            <td>Vyměřovací základ ({{ (summary.rates.health_assessment_pct * 100)|round }} % základu{% if summary.health.min_applies %}, min. {{ summary.health.min_base|cz_money }} Kč{% endif %})</td>
+            <td class="r">{{ summary.health.assessment_base|cz_money }} Kč</td>
+        </tr>
+        <tr class="total">
+            <td>Pojistné ({{ (summary.rates.health * 100)|round(1) }} % z vyměřovacího základu)</td>
+            <td class="r">{{ summary.health.insurance|cz_money }} Kč</td>
+        </tr>
+        <tr>
+            <td>Úhrn zaplacených záloh</td>
+            <td class="r">− {{ summary.health.advances_paid|cz_money }} Kč</td>
+        </tr>
+        <tr class="due">
+            <td>{% if summary.health.balance_due >= 0 %}Doplatek pojistného{% else %}Přeplatek pojistného{% endif %}</td>
+            <td class="r {% if summary.health.balance_due >= 0 %}pos{% else %}neg{% endif %}">{{ summary.health.balance_due|abs|cz_money }} Kč</td>
+        </tr>
+        <tr>
+            <td>Nová měsíční záloha na pojistné</td>
+            <td class="r">{{ summary.health.monthly_advance|cz_money }} Kč</td>
+        </tr>
+    </table>
+
+    <div class="note" style="margin-top:4mm">{{ summary.deadlines.note }}</div>
+    <div class="note">
+        Doplatek pojistného je splatný do 8 dnů po dni, ve kterém byl (měl být) podán přehled.
+        Nová měsíční záloha se platí od měsíce podání přehledu do 8. dne následujícího měsíce.
+    </div>
+
+    <div class="disclaimer">
+        Orientační pomůcka pro vyplnení oficiálního Přehledu OSVČ zdravotní pojišťovny (VZP/VoZP/ČPZP/OZP/ZPŠ/ZPMV/RBP).
+        Čísla vycházejí ze stejného zdroje jako Přehled OSVČ pro ČSSZ. Sazby, minima a rozhodné částky se každý rok mění —
+        ověřte aktuální hodnoty a případně s daňovým poradcem. Vygenerováno systémem MyÚčto.cz.
+    </div>
+</body>
+</html>

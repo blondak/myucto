@@ -1,6 +1,6 @@
-# Přispívání do MyInvoice.cz
+# Přispívání do MyÚčto.cz
 
-Pull requesty, hlášení chyb i náměty vítáme. Díky, že chcete MyInvoice zlepšovat!
+Pull requesty, hlášení chyb i náměty vítáme. Díky, že chcete MyÚčto zlepšovat!
 
 ## Licenční pravidla příspěvků (důležité)
 
@@ -10,7 +10,19 @@ Pull requesty, hlášení chyb i náměty vítáme. Díky, že chcete MyInvoice 
   jinou odměnu.
 - Potvrzujete, že jste autorem příspěvku (nebo máte právo jej takto poskytnout)
   a že neobsahuje kód třetích stran pod licencí neslučitelnou s MIT.
+- Pravidlo platí i pro příspěvky do proprietárních částí produktu: váš
+  příspěvek je licencován MIT, výsledný celek zůstává v kombinovaném licenčním
+  režimu podle [LICENCE.txt](LICENCE.txt).
 - Pull requesty, které tato pravidla nesplňují, nemůžeme přijmout.
+
+## Odměna za významné příspěvky
+
+Autorům **významných pull requestů** nabízíme jako poděkování **doživotní
+licenci MyÚčto zdarma** pro osobní použití nebo vlastní firmu (jedna instalace,
+nepřenosná, nevztahuje se na provoz pro třetí strany). O významnosti příspěvku
+rozhoduje držitel práv — zpravidla se ozveme sami u PR, které přinášejí novou
+funkčnost, podstatné opravy nebo dlouhodobou údržbu. Připomenout se můžete na
+[info@myucto.cz](mailto:info@myucto.cz).
 
 ## Jak poslat pull request
 

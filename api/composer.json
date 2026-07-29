@@ -1,6 +1,6 @@
 {
-    "name": "myinvoice/api",
-    "description": "MyInvoice.cz — fakturační systém (PHP backend)",
+    "name": "myucto/api",
+    "description": "MyUcto.cz — fakturační systém (PHP backend)",
     "type": "project",
     "license": "proprietary",
     "require": {
@@ -56,10 +56,12 @@
     },
     "scripts": {
         "post-install-cmd": [
-            "@php bin/cleanup-mpdf-fonts.php"
+            "@php bin/cleanup-mpdf-fonts.php",
+            "@php bin/patch-mpdf-ttfontfile.php"
         ],
         "post-update-cmd": [
-            "@php bin/cleanup-mpdf-fonts.php"
+            "@php bin/cleanup-mpdf-fonts.php",
+            "@php bin/patch-mpdf-ttfontfile.php"
         ]
     },
     "minimum-stability": "stable",

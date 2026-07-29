@@ -17,14 +17,21 @@ final class RedisProbe
             return false;
         }
 
+        $params = [
+            'scheme'   => 'tcp',
+            'host'     => $this->config->get('redis.host', '127.0.0.1'),
+            'port'     => (int) $this->config->get('redis.port', 6379),
+            'database' => (int) $this->config->get('redis.db', 0),
+            'timeout'  => 1.5,
+        ];
+
+        $auth = $this->config->get('redis.auth');
+        if (is_string($auth) && $auth !== '') {
+            $params['password'] = $auth;
+        }
+
         try {
-            $client = new RedisClient([
-                'scheme' => 'tcp',
-                'host'   => $this->config->get('redis.host', '127.0.0.1'),
-                'port'   => (int) $this->config->get('redis.port', 6379),
-                'database' => (int) $this->config->get('redis.db', 0),
-                'timeout'  => 1.5,
-            ]);
+            $client = new RedisClient($params);
             $client->ping();
             return true;
         } catch (\Throwable) {

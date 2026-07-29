@@ -115,10 +115,14 @@ final class PurchaseInvoiceExportService
 
         return [
             'id'              => $pi['id'],
+            // Machine enum konzumovaný ISDOC/Pohoda/Stereo exportéry (NE zobrazovaný text).
+            // DDKP (tax_document) je skutečný daňový doklad nesoucí DPH → 'invoice'
+            // (na rozdíl od zálohy = 'proforma', kde TaxVoucher=false).
             'invoice_type'    => match ($pi['document_kind'] ?? 'invoice') {
-                'credit_note' => 'credit_note',
-                'advance'     => 'proforma',
-                default       => 'invoice',
+                'credit_note'  => 'credit_note',
+                'advance'      => 'proforma',
+                'tax_document' => 'invoice',
+                default        => 'invoice',
             },
             'document_number' => $pi['vendor_invoice_number'] ?? $pi['varsymbol'] ?? ('P-' . $pi['id']),
             'internal_document_number' => $pi['varsymbol'] ?? null,

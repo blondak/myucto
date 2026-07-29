@@ -34,6 +34,9 @@ final class InvoicePdfRenderer
 
     private ?Environment $twig = null;
 
+    /** Aktuální locale pro Twig funkci `t()` — přenastavuje renderHtml(). */
+    private string $locale = 'cs';
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Connection $db,
@@ -44,16 +47,24 @@ final class InvoicePdfRenderer
         private readonly PdfArchiveService $archive,
         private readonly IsdocExporter $isdoc,
         private readonly PdfSigningService $pdfSigning,
+        private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
     ) {}
 
     /**
      * Vyrendrované PDF do souboru a vrátí cestu.
      *
+     * @param array<string,mixed>|null $invoiceData
      * @return string  absolutní cesta k vygenerovanému PDF
      */
-    public function render(int $invoiceId, bool $forceRegenerate = false, ?int $userId = null): string
+    public function render(
+        int $invoiceId,
+        bool $forceRegenerate = false,
+        ?int $userId = null,
+        ?array $invoiceData = null,
+    ): string
     {
-        $invoice = $this->repo->find($invoiceId);
+        $persist = !(bool) $this->config->get('demo.enabled', false);
+        $invoice = $invoiceData ?? $this->repo->find($invoiceId);
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }
@@ -75,23 +86,33 @@ final class InvoicePdfRenderer
         $isFresh = static fn (string $p): bool =>
             is_file($p) && (@filemtime($p) ?: 0) >= $tplMtime;
 
-        if (!$forceRegenerate && !$signatureCacheDependsOnUser && $invoice['pdf_path'] && $isFresh($invoice['pdf_path'])) {
-            return $invoice['pdf_path'];
+        // pdf_path je uložený RELATIVNĚ ke storage/invoices (N-016) — na disk se
+        // sahá až přes resolvePdfPath(), která snese i legacy absolutní hodnoty.
+        $storedPdf = self::resolvePdfPath($invoice['pdf_path'] ?? null);
+        if (!$forceRegenerate && !$signatureCacheDependsOnUser && $storedPdf !== null && $isFresh($storedPdf)) {
+            return $storedPdf;
         }
         // cachePath fallback je orphan-recovery (pdf_path je null, ale soubor leží na
         // deterministické cestě). MUSÍ vyžadovat pdf_generated_at NOT NULL — jinak
         // by invalidate() s uzamčeným souborem (Windows: PDF otevřené v prohlížeči →
         // rename a unlink selžou) skončila s pdf_path=NULL ale původní soubor zůstal
         // na disku, a tahle větev by ho zde znovu pickla → stale PDF.
-        if (!$forceRegenerate && !$signatureCacheDependsOnUser && !empty($invoice['pdf_generated_at']) && $isFresh($cachedPath)) {
-            $this->updatePdfPath($invoiceId, $cachedPath);
+        if (
+            !$forceRegenerate
+            && !$signatureCacheDependsOnUser
+            && (!$persist || !empty($invoice['pdf_generated_at']))
+            && $isFresh($cachedPath)
+        ) {
+            if ($persist) {
+                $this->updatePdfPath($invoiceId, $cachedPath);
+            }
             return $cachedPath;
         }
 
         // Force regenerate = také obnov supplier/client/bank snapshoty z live dat.
         // (Snapshoty jsou primární zdroj pro issued+ faktury — bez tohoto by se
         // změny v supplier/client tabulkách neprojevily ani po regenerate.)
-        if ($forceRegenerate) {
+        if ($forceRegenerate && $persist) {
             $invoice = $this->refreshSnapshots($invoice);
         }
 
@@ -123,7 +144,7 @@ final class InvoicePdfRenderer
         // PDF metadata — bez Title/Author, aby Chrome viewer nezobrazoval text nad PDF.
         $mpdf->SetTitle('');
         $mpdf->SetAuthor('');
-        $mpdf->SetCreator('MyInvoice.cz');
+        $mpdf->SetCreator('MyÚčto.cz');
 
         // PDF/A-3 style associated file: zapsáno do /Names /EmbeddedFiles + /AF
         // catalog entry. Accounting SW (Pohoda, Money S3, …) skenuje tuhle cestu.
@@ -169,7 +190,9 @@ final class InvoicePdfRenderer
             $cachedPath = $tmpPath;
         }
 
-        $this->updatePdfPath($invoiceId, $cachedPath);
+        if ($persist) {
+            $this->updatePdfPath($invoiceId, $cachedPath);
+        }
 
         return $cachedPath;
     }
@@ -276,13 +299,17 @@ final class InvoicePdfRenderer
         $isPaid = ($invoice['status'] ?? '') === 'paid';
         $paymentMethod = (string) ($invoice['payment_method'] ?? 'bank_transfer');
         $isBankTransfer = $paymentMethod === 'bank_transfer';
-        if ($hasAmount && $bankData !== null && (!$isCzk || $hasVs) && !$isPaid && $isBankTransfer) {
+        // Platební kalendář QR kód nedostane. Žádná jedna platba se na něm nekoná —
+        // rozpis jich má dvanáct — takže QR na celkovou částku by vyzýval k úhradě
+        // celého roku najednou, přesně proti tomu, co doklad sjednává.
+        $isPaymentCalendar = ($invoice['invoice_type'] ?? '') === 'payment_calendar';
+        if ($hasAmount && $bankData !== null && (!$isCzk || $hasVs) && !$isPaid && $isBankTransfer && !$isPaymentCalendar) {
             $qrUri = $this->qr->generate(
                 (string) $invoice['currency'],
                 $remaining,
                 (string) ($invoice['varsymbol'] ?? ''),
                 $bankData,
-                (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyInvoice'),
+                (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyÚčto.cz'),
             );
         }
 
@@ -295,12 +322,9 @@ final class InvoicePdfRenderer
             $css .= $this->brandAccentCss($supplierData);
         }
 
+        // Locale pro `t()` — čte ho closure registrovaná v twig() (viz komentář tam).
+        $this->locale = (string) $locale;
         $twig = $this->twig();
-
-        // Translation helper
-        $twig->addFunction(new \Twig\TwigFunction('t', static function (string $cs, string $en) use ($locale) {
-            return $locale === 'en' ? $en : $cs;
-        }));
 
         $logoPath = $this->resolveLogoPath($supplierData, (int) ($invoice['supplier_id'] ?? 0));
 
@@ -335,6 +359,13 @@ final class InvoicePdfRenderer
             // reálně je — bez loga se název ukazuje vždy (textový brand-name fallback).
             'logo_show_name'    => $logoPath !== null && !empty($supplierData['pdf_logo_show_name']),
             'isdoc_attachment'  => $hasIsdocAttachment, // bool — badge gate
+            // § 31a ZDPH — rozpis plateb na předem stanovené období. Právě ten dělá
+            // z platebního kalendáře daňový doklad; bez něj se doklad tiskl jako běžná
+            // faktura s jediným datem splatnosti, tedy bez toho jediného, kvůli čemu
+            // vzniká. U ostatních typů dokladu zůstává prázdný.
+            'payment_schedule'  => ($invoice['invoice_type'] ?? '') === 'payment_calendar'
+                ? $this->paymentSchedule->forInvoice((int) $invoice['supplier_id'], (int) $invoice['id'])
+                : [],
         ];
         return $twig->render('invoice.twig', $vars);
     }
@@ -401,14 +432,24 @@ final class InvoicePdfRenderer
 
     private function twig(): Environment
     {
-        // Vždy nový Environment — addFunction() lze volat jen před init,
-        // a po jednom render() se environment zamkne. Cache=false stejně.
+        if ($this->twig !== null) {
+            return $this->twig;
+        }
+
         $loader = new FilesystemLoader(dirname(__DIR__, 3) . '/templates/invoice');
-        return new Environment($loader, [
+        $this->twig = new Environment($loader, [
             'autoescape' => 'html',
-            'cache' => false,
             'strict_variables' => false,
-        ]);
+        ] + TwigCache::options('invoice'));
+
+        // `t` se registruje jen jednou (addFunction() jde volat pouze před prvním
+        // renderem). Locale proto NESMÍ být zachycené `use ($locale)` — closure
+        // čte mutovatelný stav, který renderHtml() přenastaví před každým renderem.
+        $this->twig->addFunction(new \Twig\TwigFunction('t', function (string $cs, string $en) {
+            return $this->locale === 'en' ? $en : $cs;
+        }));
+
+        return $this->twig;
     }
 
     /** @param array<string,mixed> $supplier @param array<string,mixed> $invoice */
@@ -540,6 +581,10 @@ final class InvoicePdfRenderer
                 'credit_note'  => $isVatPayer ? 'Opravný daňový doklad' : 'Opravná faktura',
                 'cancellation' => 'Storno (interní)',
                 'tax_document' => 'Daňový doklad k přijaté platbě',
+                // § 31a ZDPH: platební kalendář JE daňový doklad, obsahuje-li rozpis plateb
+                // na předem stanovené období. Bez vlastního popisku se tiskl jako „Faktura"
+                // a příjemce z něj nepoznal, o jaký doklad jde.
+                'payment_calendar' => $isVatPayer ? 'Platební kalendář — daňový doklad' : 'Platební kalendář',
             ],
             'en' => [
                 'invoice'      => $isVatPayer ? 'Invoice — Tax document' : 'Invoice',
@@ -547,6 +592,7 @@ final class InvoicePdfRenderer
                 'credit_note'  => $isVatPayer ? 'Credit note — Tax adjustment' : 'Credit note',
                 'cancellation' => 'Cancellation (internal)',
                 'tax_document' => 'Tax document for payment received',
+                'payment_calendar' => $isVatPayer ? 'Payment calendar — Tax document' : 'Payment calendar',
             ],
         ];
         return $labels[$locale][$invoice['invoice_type']] ?? $labels['cs'][$invoice['invoice_type']] ?? '';
@@ -560,6 +606,7 @@ final class InvoicePdfRenderer
             'credit_note'  => 'Dobropis',
             'cancellation' => 'Storno',
             'tax_document' => 'Daňový doklad k platbě',
+            'payment_calendar' => 'Platební kalendář',
             default        => 'Faktura',
         };
         return "$t $vs";
@@ -719,7 +766,7 @@ final class InvoicePdfRenderer
         if ($invoice === null) return;
 
         $paths = array_unique(array_filter([
-            $invoice['pdf_path'] ?? null,
+            self::resolvePdfPath($invoice['pdf_path'] ?? null),
             $this->cachePath($invoice),
         ]));
         foreach ($paths as $p) {
@@ -774,6 +821,7 @@ final class InvoicePdfRenderer
             'credit_note'  => 'Dobropis',
             'cancellation' => 'Storno',
             'tax_document' => 'DanovyDoklad',
+            'payment_calendar' => 'PlatebniKalendar',
             default        => 'Faktura',
         };
         return "$dir/$type-$vs.pdf";
@@ -783,6 +831,53 @@ final class InvoicePdfRenderer
     {
         $this->db->pdo()->prepare(
             'UPDATE invoices SET pdf_path = ?, pdf_generated_at = NOW() WHERE id = ?'
-        )->execute([$path, $invoiceId]);
+        )->execute([self::toRelativePdfPath($path), $invoiceId]);
+    }
+
+    /**
+     * N-016: do `invoices.pdf_path` patří cesta RELATIVNÍ ke `storage/invoices`.
+     *
+     * Absolutní cesta přežije jen do prvního přesunu instance — v produkci se takhle
+     * nasbíralo 43 řádků ze dvou různých kořenů (instance byla přejmenována) a žádný
+     * z nich už netrefil existující soubor. Přijatá větev (`purchase_invoices.pdf_path`)
+     * relativní cesty ukládá odjakživa, tohle je dorovnání na stejný tvar.
+     *
+     * Ne-katastrofa jen shodou okolností: sloupec je cache renderu, takže netrefená
+     * cesta znamená zbytečné přegenerování PDF, ne ztracený doklad.
+     */
+    private static function toRelativePdfPath(string $absolute): string
+    {
+        $root = str_replace('\\', '/', \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices'));
+        $norm = str_replace('\\', '/', $absolute);
+        if ($root !== '' && str_starts_with($norm, rtrim($root, '/') . '/')) {
+            return ltrim(substr($norm, strlen(rtrim($root, '/'))), '/');
+        }
+        // Cesta mimo očekávaný kořen (jiná konfigurace, test) — ulož, jak přišla.
+        // Resolve níž si s absolutní hodnotou poradí.
+        return $norm;
+    }
+
+    /**
+     * Protějšek {@see toRelativePdfPath} — z uložené hodnoty udělá absolutní cestu.
+     *
+     * Musí snést i LEGACY absolutní hodnoty: backfill je převádí, ale řádky ze záloh
+     * a z jiných prostředí se můžou objevit kdykoliv. Rozpoznání absolutní cesty
+     * pokrývá i Windows (`C:/…`) a UNC (`//server/…`).
+     */
+    public static function resolvePdfPath(?string $stored): ?string
+    {
+        $stored = trim((string) $stored);
+        if ($stored === '') {
+            return null;
+        }
+        $norm = str_replace('\\', '/', $stored);
+        $isAbsolute = str_starts_with($norm, '/')
+            || str_starts_with($norm, '//')
+            || preg_match('#^[A-Za-z]:/#', $norm) === 1;
+
+        return $isAbsolute
+            ? $norm
+            : rtrim(str_replace('\\', '/', \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices')), '/')
+                . '/' . ltrim($norm, '/');
     }
 }

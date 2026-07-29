@@ -120,17 +120,21 @@ final class EpoSupplierBlockBuilderTest extends TestCase
     }
 
     /**
-     * typ_ds musí vycházet z `taxpayer_type` (typ daňového subjektu). Dřív se
-     * plnil z typu datové schránky, který nikdo nevyplňoval → u s.r.o. padalo
-     * "F" a EPO odmítlo podání kvůli kmenové části DIČ.
+     * typ_ds musí vycházet z `taxpayer_type` (typ daňového subjektu), ne z
+     * `data_box_type` (typ datové schránky). U s.r.o. s nevyplněnou datovkou
+     * dřív padalo "F" → EPO odmítlo podání kvůli kmenové části DIČ.
      */
     public function testTypDsPodleTypuDanovehoSubjektu(): void
     {
-        $po = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'Firma s.r.o.']);
+        $po = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'MyWebdesign.cz s.r.o.', 'data_box_type' => null]);
         $this->assertSame('P', $po->getAttribute('typ_ds'));
-        $this->assertSame('Firma s.r.o.', $po->getAttribute('zkrobchjm'));
+        $this->assertSame('MyWebdesign.cz s.r.o.', $po->getAttribute('zkrobchjm'));
 
-        $fo = $this->fillFor(['taxpayer_type' => 'fo', 'company_name' => 'Josef Novák']);
+        // data_box_type se do typ_ds nesmí promítnout ani když je vyplněný
+        $poSDatovkou = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'Firma s.r.o.', 'data_box_type' => 'OVM']);
+        $this->assertSame('P', $poSDatovkou->getAttribute('typ_ds'));
+
+        $fo = $this->fillFor(['taxpayer_type' => 'fo', 'company_name' => 'Josef Novák', 'data_box_type' => 'PO']);
         $this->assertSame('F', $fo->getAttribute('typ_ds'));
 
         $neznamy = $this->fillFor(['taxpayer_type' => null, 'company_name' => 'Josef Novák']);
@@ -143,14 +147,14 @@ final class EpoSupplierBlockBuilderTest extends TestCase
      */
     public function testContactAttributesEmittedByDefault(): void
     {
-        $v = $this->fillFor(['email' => 'a@b.cz', 'phone' => '+420 722 944 990']);
+        $v = $this->fillFor(['email' => 'a@b.cz', 'phone' => '+420 601 002 003']);
         $this->assertSame('a@b.cz', $v->getAttribute('email'));
-        $this->assertSame('722944990', $v->getAttribute('c_telef'));
+        $this->assertSame('601002003', $v->getAttribute('c_telef'));
     }
 
     public function testContactAttributesSuppressedForSouhrnneHlaseni(): void
     {
-        $v = $this->fillFor(['email' => 'a@b.cz', 'phone' => '+420 722 944 990'], includeContact: false);
+        $v = $this->fillFor(['email' => 'a@b.cz', 'phone' => '+420 601 002 003'], includeContact: false);
         $this->assertFalse($v->hasAttribute('email'), 'DPHSHV VetaP nesmí mít email');
         $this->assertFalse($v->hasAttribute('c_telef'), 'DPHSHV VetaP nesmí mít c_telef');
         // Ostatní atributy zůstávají vyplněné (kontrola, že jsme neshodili celý blok).
@@ -165,14 +169,29 @@ final class EpoSupplierBlockBuilderTest extends TestCase
         $this->assertSame('158', $v->getAttribute('c_pop'));
     }
 
-    /** @param array<string,mixed> $overrides */
+    /**
+     * Základní fixtura je ÚPLNÝ řádek dodavatele s prázdnými hodnotami — přesně to, co
+     * vrátí `EpoSupplierBlockBuilder::loadSupplier()` u nevyplněné firmy.
+     *
+     * Rozdíl proti dřívějšku je věcný, ne kosmetický: `fillVetaP()` od fáze F1 rozlišuje
+     * chybějící KLÍČ (chyba volajícího — zapomenutý sloupec v SELECTu, dřív tichá
+     * degradace podání) od prázdné HODNOTY (legitimní stav, dodavatel nemá telefon).
+     * Fixtura proto musí být úplná, jinak by testy ověřovaly právě tu volnost, kterou
+     * fáze F1 odstranila.
+     *
+     * @param array<string,mixed> $overrides
+     */
     private function fillFor(array $overrides, bool $includeContact = true): \DOMElement
     {
-        $supplier = array_merge([
-            'financial_office_code' => '451', 'dic' => 'CZ1234567890',
-            'taxpayer_type' => 'fo', 'company_name' => '', 'street' => 'Hlavní 1', 'city' => 'Praha',
-            'zip' => '11000', 'country_iso2' => 'CZ',
-        ], $overrides);
+        $supplier = array_merge(
+            array_fill_keys(EpoSupplierBlockBuilder::REQUIRED_SUPPLIER_KEYS, ''),
+            [
+                'financial_office_code' => '451', 'dic' => 'CZ1234567890', 'data_box_type' => 'F',
+                'taxpayer_type' => 'fo', 'company_name' => '', 'street' => 'Hlavní 1', 'city' => 'Praha',
+                'zip' => '11000', 'country_iso2' => 'CZ',
+            ],
+            $overrides,
+        );
         $dom = new \DOMDocument();
         $v = $dom->createElement('VetaP');
         EpoSupplierBlockBuilder::fillVetaP($v, $supplier, $includeContact);

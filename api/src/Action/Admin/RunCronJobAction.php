@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronCatalog;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -34,7 +35,7 @@ final class RunCronJobAction
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 

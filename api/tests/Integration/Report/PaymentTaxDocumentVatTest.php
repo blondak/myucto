@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Report;
 
+use MyInvoice\Action\Invoice\CancelInvoiceAction;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\AdvanceCycleLock;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Report\DphBookBuilder;
@@ -15,6 +21,8 @@ use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response as Psr7Response;
 
 /**
  * Daňová správnost částečných úhrad záloh (#89) end-to-end:
@@ -43,6 +51,10 @@ final class PaymentTaxDocumentVatTest extends TestCase
     private InvoicePaymentService $payments;
     private PaymentTaxDocumentCreator $taxDocCreator;
     private FinalFromProformaCreator $finalCreator;
+    private InvoiceRepository $invoices;
+    private CancelInvoiceAction $cancelInvoice;
+    private AdvanceCycleLock $cycleLock;
+    private Config $config;
     private DphBookBuilder $book;
     private DphPriznaniBuilder $dph;
     private KontrolniHlaseniBuilder $kh;
@@ -68,6 +80,10 @@ final class PaymentTaxDocumentVatTest extends TestCase
             $this->payments      = $c->get(InvoicePaymentService::class);
             $this->taxDocCreator = $c->get(PaymentTaxDocumentCreator::class);
             $this->finalCreator  = $c->get(FinalFromProformaCreator::class);
+            $this->invoices      = $c->get(InvoiceRepository::class);
+            $this->cancelInvoice = $c->get(CancelInvoiceAction::class);
+            $this->cycleLock     = $c->get(AdvanceCycleLock::class);
+            $this->config        = $c->get(Config::class);
             $this->book          = $c->get(DphBookBuilder::class);
             $this->dph           = $c->get(DphPriznaniBuilder::class);
             $this->kh            = $c->get(KontrolniHlaseniBuilder::class);
@@ -125,6 +141,7 @@ final class PaymentTaxDocumentVatTest extends TestCase
         if ($this->clientId > 0) {
             $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$this->clientId]);
         }
+        $pdo->exec("DELETE FROM exchange_rates WHERE rate_date = '2099-09-17' AND currency_code = 'EUR'");
         $this->db->close();
     }
 
@@ -278,6 +295,207 @@ final class PaymentTaxDocumentVatTest extends TestCase
         self::assertSame('issued', $this->col($proformaId, 'status'), 'Smazání platby vrací doklad mezi pohledávky.');
         self::assertSame(0.0, (float) $this->col($proformaId, 'paid_total'));
         self::assertNull($this->col($proformaId, 'paid_at'));
+    }
+
+    public function testCancelledFinalCanBeCreatedAgain(): void
+    {
+        $proformaId = $this->seedProforma('2099090931', '2099-09-04', [[1000.00, 210.00, 21.0]]);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid' WHERE id = ?")->execute([$proformaId]);
+
+        $first = $this->finalCreator->create($proformaId, $this->userId, '2099-09-20', '2099-09-20');
+        $this->invoiceIds[] = $first;
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$first]);
+
+        $replacement = $this->finalCreator->create($proformaId, $this->userId, '2099-09-21', '2099-09-21');
+        $this->invoiceIds[] = $replacement;
+        self::assertNotSame($first, $replacement);
+        self::assertSame('draft', $this->col($replacement, 'status'));
+    }
+
+    public function testTaxDocumentAndSection37aFinalCannotBeDisconnectedOrCancelled(): void
+    {
+        $proformaId = $this->seedProforma('2099090941', '2099-09-05', [[1000.00, 210.00, 21.0]]);
+        $payment = $this->payments->recordPayment($proformaId, 1210.00, '2099-09-15', ['source' => 'manual']);
+        $taxDocId = $this->taxDocCreator->createForPayment($payment['payment_id'], $this->userId);
+        $this->invoiceIds[] = $taxDocId;
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET varsymbol = '2099090942', status = 'paid', paid_at = tax_date WHERE id = ?"
+        )->execute([$taxDocId]);
+
+        $finalId = $this->finalCreator->create($proformaId, $this->userId, '2099-09-22', '2099-09-22');
+        $this->invoiceIds[] = $finalId;
+
+        try {
+            $this->invoices->unlinkAdvance($finalId, $this->supplierId);
+            self::fail('Finál s odpočtovými řádky § 37a nesmí jít rozpojit.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('§ 37a', $e->getMessage());
+        }
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/invoices/' . $taxDocId . '/cancel')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withParsedBody(['mode' => 'internal', 'reason' => 'EP-2 test']);
+        $response = ($this->cancelInvoice)($request, new Psr7Response(), ['id' => (string) $taxDocId]);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('paid', $this->col($taxDocId, 'status'));
+    }
+
+    public function testFinalCreationRejectsExpiredPositiveVatRate(): void
+    {
+        $expired = $this->db->pdo()->query(
+            "SELECT id FROM vat_rates WHERE valid_to IS NOT NULL AND valid_to < '2099-09-25' ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($expired === false) {
+            $this->markTestSkipped('Žádná vypršelá sazba DPH v DB.');
+        }
+
+        $proformaId = $this->seedProforma('2099090951', '2099-09-06', [[1000.00, 210.00, 21.0]]);
+        $this->db->pdo()->prepare('UPDATE invoice_items SET vat_rate_id = ? WHERE invoice_id = ?')
+            ->execute([(int) $expired, $proformaId]);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid' WHERE id = ?")->execute([$proformaId]);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessageMatches('/Sazba DPH není platná/');
+        $this->finalCreator->create($proformaId, $this->userId, '2099-09-25', '2099-09-25');
+    }
+
+    public function testManualAdvanceLinkRejectsCancelledOrDifferentCurrencyProforma(): void
+    {
+        $proformaId = $this->seedProforma('2099090955', '2099-09-06', [[1000.00, 210.00, 21.0]]);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid' WHERE id = ?")->execute([$proformaId]);
+        $finalId = $this->finalCreator->create($proformaId, $this->userId, '2099-09-24', '2099-09-24');
+        $this->invoiceIds[] = $finalId;
+        $this->invoices->unlinkAdvance($finalId, $this->supplierId);
+
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$proformaId]);
+        try {
+            $this->invoices->linkAdvance($finalId, $proformaId, $this->supplierId);
+            self::fail('Stornovanou proformu nesmí jít ručně propojit.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsStringIgnoringCase('stornovanou', $e->getMessage());
+        }
+
+        $foreignCurrency = $this->db->pdo()->query(
+            "SELECT id FROM currencies WHERE id <> {$this->currencyId} ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($foreignCurrency === false) {
+            $this->markTestSkipped('Chybí druhá měna pro validační test.');
+        }
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', currency_id = ? WHERE id = ?")
+            ->execute([(int) $foreignCurrency, $proformaId]);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/stejné měně/');
+        $this->invoices->linkAdvance($finalId, $proformaId, $this->supplierId);
+    }
+
+    public function testPaymentTaxDocumentUsesRateFromPaymentDate(): void
+    {
+        $mode = $this->db->pdo()->prepare(
+            'SELECT fx_rate_mode FROM accounting_supplier_settings WHERE supplier_id = ?'
+        );
+        $mode->execute([$this->supplierId]);
+        if (($mode->fetchColumn() ?: 'daily') !== 'daily') {
+            $this->markTestSkipped('Test denního kurzu vyžaduje fx_rate_mode=daily.');
+        }
+        $eurId = $this->db->pdo()->query(
+            "SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($eurId === false) {
+            $this->markTestSkipped('Měna EUR není v DB.');
+        }
+
+        $proformaId = $this->seedProforma('2099090961', '2099-09-07', [[1000.00, 210.00, 21.0]]);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET currency_id = ?, exchange_rate = 24.10, exchange_rate_date = ? WHERE id = ?'
+        )->execute([(int) $eurId, '2099-09-07', $proformaId]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO exchange_rates (rate_date, currency_code, rate)
+             VALUES ('2099-09-17', 'EUR', 25.50)
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)"
+        )->execute();
+
+        $payment = $this->payments->recordPayment($proformaId, 1210.00, '2099-09-17', ['source' => 'manual']);
+        $taxDocId = $this->taxDocCreator->createForPayment($payment['payment_id'], $this->userId);
+        $this->invoiceIds[] = $taxDocId;
+
+        self::assertEqualsWithDelta(25.50, (float) $this->col($taxDocId, 'exchange_rate'), 0.000001);
+        self::assertSame('2099-09-17', $this->col($taxDocId, 'exchange_rate_date'));
+        $this->db->pdo()->exec("DELETE FROM exchange_rates WHERE rate_date = '2099-09-17' AND currency_code = 'EUR'");
+    }
+
+    public function testAdvanceCycleLockSerializesSecondConnection(): void
+    {
+        $proformaId = $this->seedProforma('2099090971', '2099-09-08', [[1000.00, 210.00, 21.0]]);
+        // Nesdílená zóna: GET_LOCK je re-entrantní v rámci JEDNÉ session, takže na
+        // recyklovaném testovacím spojení by druhé „spojení" zámek dostalo vždy
+        // a test by neměřil nic.
+        $second = Connection::withoutSharedTestConnection(fn (): Connection => new Connection($this->config));
+        $name = 'myinvoice:advance-cycle:' . $proformaId;
+
+        $this->cycleLock->synchronized($proformaId, function () use ($second, $name): void {
+            $stmt = $second->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+            $stmt->execute([$name]);
+            self::assertSame(0, (int) $stmt->fetchColumn(), 'Druhé spojení nesmí vstoupit do stejného cyklu.');
+        });
+
+        $stmt = $second->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+        $stmt->execute([$name]);
+        self::assertSame(1, (int) $stmt->fetchColumn(), 'Po dokončení cyklu musí být zámek uvolněný.');
+        $release = $second->pdo()->prepare('SELECT RELEASE_LOCK(?)');
+        $release->execute([$name]);
+        $second->close();
+    }
+
+    public function testPaymentTaxDocumentCreationUsesSavepointInsideCallerTransaction(): void
+    {
+        $proformaId = $this->seedProforma('2099090981', '2099-09-09', [[1000.00, 210.00, 21.0]]);
+        $payment = $this->payments->recordPayment($proformaId, 1210.00, '2099-09-18', ['source' => 'manual']);
+
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        $taxDocId = $this->taxDocCreator->createForPayment($payment['payment_id'], $this->userId);
+        self::assertTrue($pdo->inTransaction());
+        self::assertSame($taxDocId, (int) $pdo->query(
+            "SELECT tax_document_invoice_id FROM invoice_payments WHERE id = {$payment['payment_id']}"
+        )->fetchColumn());
+        $pdo->rollBack();
+
+        self::assertFalse($pdo->inTransaction());
+        self::assertFalse($pdo->query("SELECT id FROM invoices WHERE id = {$taxDocId}")->fetchColumn());
+        self::assertNull($pdo->query(
+            "SELECT tax_document_invoice_id FROM invoice_payments WHERE id = {$payment['payment_id']}"
+        )->fetchColumn());
+    }
+
+    public function testAdvanceCycleLockSurvivesOuterTransactionCallback(): void
+    {
+        $proformaId = $this->seedProforma('2099090991', '2099-09-10', [[1000.00, 210.00, 21.0]]);
+        $name = 'myinvoice:advance-cycle:' . $proformaId;
+        // Nesdílená zóna — viz testAdvanceCycleLockSerializesSecondConnection().
+        $second = Connection::withoutSharedTestConnection(fn (): Connection => new Connection($this->config));
+        $pdo = $this->db->pdo();
+
+        $pdo->beginTransaction();
+        try {
+            $this->cycleLock->synchronized($proformaId, static fn (): bool => true);
+            $probe = $second->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+            $probe->execute([$name]);
+            self::assertSame(
+                0,
+                (int) $probe->fetchColumn(),
+                'Named lock se nesmí uvolnit před COMMIT callerovy transakce.',
+            );
+            $pdo->rollBack();
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+            $release->execute([$name]);
+            $second->close();
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

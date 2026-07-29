@@ -55,7 +55,7 @@ final class PasskeyPersistenceTest extends TestCase
                 'cs',
             ]);
             $this->userId = (int) $this->db->pdo()->lastInsertId();
-        } catch (\Throwable $e) {
+        } catch (\Exception $e) {
             $this->markTestSkipped('DB unavailable: ' . $e->getMessage());
         }
 

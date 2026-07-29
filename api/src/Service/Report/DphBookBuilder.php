@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Tax\BadDebt\Section74bService;
 
 /**
  * Builder pro **Knihu DPH** (interní VAT žurnál).
@@ -42,6 +43,8 @@ final class DphBookBuilder
         private readonly Connection $db,
         private readonly VatLedgerService $ledger,
         private readonly TaxConstantsRepository $taxConstants,
+        // § 74b ZDPH — evidované korekce odpočtu dlužníka (ř. 40/41, KH B.2 zdph_44='P').
+        private readonly Section74bService $section74b,
     ) {}
 
     /**
@@ -128,6 +131,11 @@ final class DphBookBuilder
                 }
             }
         }
+
+        // EVIDOVANÉ korekce §74b (dlužník) — snížení/obnovení odpočtu za období vstupují do
+        // sekcí přijatých ř.40/41 se znaménkem z periodCorrectionLines (snížení záporně,
+        // obnova kladně), aby součet odpočtu Knihy DPH seděl s ř. 40/41 DPHDP3 po korekci.
+        $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period);
 
         // Convert sections asociativní mapy → indexované pole, seřazené.
         $sectionList = array_values($sections);
@@ -222,6 +230,75 @@ final class DphBookBuilder
     }
 
     /**
+     * Přimíchá EVIDOVANÉ korekce §74b (dlužník) do sekcí přijatých plnění. Per doklad a sazba
+     * (21 % → ř.40 sekce 15.040, 12 % → ř.41 sekce 15.041) přidá řádek se znaménkem z
+     * {@see Section74bService::periodCorrectionLines()} (snížení záporně, obnova kladně).
+     * Doklad je označen jako oprava (KH B.2, zdph_44='P') analogicky KontrolniHlaseniBuilder.
+     * Když za období nic evidováno není, `invoices` je prázdné → sekce beze změny.
+     *
+     * @param array<string,array<string,mixed>> $sections by-ref
+     */
+    private function appendSection74bCorrections(array &$sections, int $supplierId, int $year, int $month, string $period): void
+    {
+        $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
+        foreach ($s74b['invoices'] as $inv) {
+            $buckets = [
+                ['40', 21.0, (float) $inv['base21'], (float) $inv['vat21']],
+                ['41', 12.0, (float) $inv['base12'], (float) $inv['vat12']],
+            ];
+            foreach ($buckets as [$line, $rate, $base, $vat]) {
+                if (round($base, 2) == 0.0 && round($vat, 2) == 0.0) {
+                    continue;
+                }
+                $cls = [
+                    'code'                  => '',
+                    'label'                 => 'Oprava odpočtu §74b',
+                    'dphdp3_line'           => $line,
+                    'dphdp3_line_secondary' => null,
+                    'kh_section'            => 'B.2',
+                    'vat_rate'              => $rate,
+                ];
+                $this->addToSection($sections, 'received', $cls, $this->section74bBookRow($inv, $rate, $base, $vat));
+            }
+        }
+    }
+
+    /**
+     * Řádek Knihy DPH pro jednu sazbovou korekci §74b (base/vat už nesou znaménko pohybu).
+     *
+     * @param array<string,mixed> $inv položka periodCorrectionLines()['invoices']
+     * @return array<string,mixed>
+     */
+    private function section74bBookRow(array $inv, float $rate, float $base, float $vat): array
+    {
+        $doc = (string) ($inv['vendor_invoice_number'] ?? '');
+        $desc = $inv['movement'] === 'reduction'
+            ? 'Oprava odpočtu §74b - snížení'
+            : 'Oprava odpočtu §74b - obnovení';
+        return [
+            'invoice_id'              => (int) $inv['purchase_invoice_id'],
+            'direction'               => 'received',
+            'doc_number'              => $doc,
+            'original_doc_number'     => $doc !== '' ? $doc : null,
+            'tax_date'                => $inv['tax_date'],
+            'accounting_date'         => $inv['tax_date'],
+            'description'             => $desc,
+            'counterparty_name'       => '',
+            'counterparty_dic'        => (string) ($inv['vendor_dic'] ?? ''),
+            'vat_classification_code' => null,
+            'vat_rate'                => $rate,
+            'currency'                => 'CZK',
+            'exchange_rate'           => 1.0,
+            'base'                    => $base,
+            'vat'                     => $vat,
+            'total'                   => $base + $vat,
+            'status'                  => 'posted',
+            'is_draft'                => false,
+            'is_fixed_asset'          => false,
+        ];
+    }
+
+    /**
      * Kanonické řádky ze služby seskupené per (zdroj, doklad, kód, sazba) — jeden
      * řádek přehledu Knihy DPH. Vč. draftů.
      *
@@ -231,7 +308,7 @@ final class DphBookBuilder
     {
         $grouped = [];
         foreach ($this->ledger->rows($supplierId, $start, $end, includeDrafts: true) as $r) {
-            $key = $r['source'] . ':' . $r['invoice_id'] . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
+            $key = $r['source'] . ':' . ($r['document_kind'] ?? '') . ':' . $r['invoice_id'] . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
             if (!isset($grouped[$key])) {
                 $grouped[$key] = $r;
                 $grouped[$key]['base_czk'] = 0.0;

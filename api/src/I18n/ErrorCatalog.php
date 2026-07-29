@@ -27,6 +27,7 @@ final class ErrorCatalog
         'Chyba konfigurace serveru.' => 'Server configuration error.',
         'DIČ musí mít prefix země a 2-12 znaků (např. CZ12345678, NL123456789B01).' => 'VAT ID must have a country prefix and 2–12 characters (e.g. CZ12345678, NL123456789B01).',
         'Dobropis ani storno nelze stornovat.' => 'Credit note and cancellation cannot be cancelled.',
+        'Demo režim umožňuje funkce vyzkoušet, změny se ale neukládají.' => 'Demo mode lets you try features, but changes are not saved.',
         'Email je už registrovaný.' => 'Email is already registered.',
         'Email se nepodařilo odeslat: ' => 'Failed to send email: ',
         'Faktura byla mezitím změněna.' => 'Invoice has been modified in the meantime.',

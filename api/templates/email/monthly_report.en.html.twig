@@ -1,0 +1,27 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  Monthly report — {{ period_label }}
+</h1>
+
+<p style="margin:0 0 16px;">Hello,</p>
+<p style="margin:0 0 16px;">please find attached the monthly financial report for <strong>{{ period_label }}</strong> (income statement, balance sheet, overdue receivables and payables{% if has_vat %}, VAT{% endif %}).</p>
+
+{% if note_lines is defined and note_lines|length %}
+  <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:{{ accent_soft }};border-radius:8px;margin:16px 0;">
+    <tr>
+      <td style="padding:14px 18px;font-size:14px;color:#403B52;">
+        <div style="color:#7A748C;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Accountant's note</div>
+        {% for line in note_lines %}<p style="margin:0 0 6px;">{{ line }}</p>{% endfor %}
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+<p style="margin:16px 0 8px;font-size:14px;color:#5A5470;">The full report is attached to this email as a PDF.</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  Thank you for your cooperation.
+</p>
+{% endblock %}

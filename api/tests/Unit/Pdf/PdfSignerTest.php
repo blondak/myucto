@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Pdf;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundUrlGuard;
+use MyInvoice\Service\Http\TsaUrlPolicy;
 use MyInvoice\Service\Pdf\PdfSigner;
 use MyInvoice\Service\Pdf\SigningConfig;
 use MyInvoice\Tests\Support\OpensslConfigTrait;
@@ -62,7 +64,10 @@ final class PdfSignerTest extends TestCase
         // Prázdný Config stačí — testy používají plaintext heslo (bez enc:v1: prefixu),
         // takže SecretEncryption::decrypt() vrací as-is a šifrovací klíč se nevyžaduje.
         // Tím test nezávisí na cfg.php (v CI checkoutu neexistuje).
-        return new PdfSigner(new SecretEncryption(new Config([])));
+        return new PdfSigner(
+            new SecretEncryption(new Config([])),
+            new TsaUrlPolicy(new OutboundUrlGuard(), new Config([])),
+        );
     }
 
     private function cfg(?string $tsa = null): SigningConfig
@@ -96,6 +101,24 @@ final class PdfSignerTest extends TestCase
         self::assertStringStartsWith($orig, $signed, 'incremental update změnil originál');
         // ByteRange už nesmí obsahovat placeholder mezery
         self::assertDoesNotMatchRegularExpression('/\/ByteRange \[0 {10,}/', $signed);
+    }
+
+    public function testSignsFromCertificateBytesWithoutCertificateFile(): void
+    {
+        $p12 = file_get_contents(self::$p12Path);
+        self::assertIsString($p12);
+        $config = new SigningConfig(
+            certPath: '',
+            passwordEnc: self::PASS,
+            tsaUrl: null,
+            reason: 'Faktura',
+            certBytes: $p12,
+        );
+
+        $signed = $this->signer()->sign($this->makeMpdf(), $config);
+
+        self::assertStringContainsString('/Type /Sig', $signed);
+        self::assertStringContainsString('/SubFilter /adbe.pkcs7.detached', $signed);
     }
 
     public function testByteRangeCoversWholeFileExceptContents(): void

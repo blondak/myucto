@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type ActivityLogEntry } from '@/api/admin'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 
@@ -82,7 +83,8 @@ function goPage(delta: number) {
         <option value="project">project</option>
         <option value="work_report">work_report</option>
       </select>
-      <button @click="load" class="cursor-pointer h-9 px-3 border border-neutral-300 rounded-md text-sm hover:bg-neutral-50">
+      <button @click="load" :class="btnOutline('neutral')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
         {{ t('activity_log.refresh') }}
       </button>
       <span class="ml-auto text-xs text-neutral-500">{{ t('activity_log.total', { n: total, p: currentPage, tp: totalPages }) }}</span>

@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AutoIssueAndSendService;
 use MyInvoice\Service\IpMatcher;
@@ -44,7 +46,7 @@ final class UpdateApprovalStatusAction
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (($user['role'] ?? '') !== 'admin') {
+        if (!RequestAuthorization::allows($request, 'invoices.approval', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Změnu stavu schválení může provést jen admin.', 403);
         }
 

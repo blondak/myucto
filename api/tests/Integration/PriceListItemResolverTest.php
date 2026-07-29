@@ -34,6 +34,7 @@ final class PriceListItemResolverTest extends TestCase
     private string $currencyCode;
     private int $vatRateId;
     private ?int $createdItemId = null;
+    private ?bool $originalStockEnabled = null;
 
     protected function setUp(): void
     {
@@ -71,10 +72,27 @@ final class PriceListItemResolverTest extends TestCase
             'SELECT id FROM vat_rates WHERE is_reverse_charge = 0 ORDER BY is_default DESC, id LIMIT 1'
         )->fetchColumn();
         if ($this->vatRateId <= 0) $this->markTestSkipped('Missing VAT rate');
+
+        // Ceník je dostupný jen firmě BEZ skladového modulu (PriceListItemAction::
+        // unavailableForStock → 409 price_list_unavailable). Normalizace tenanta
+        // v tests/bootstrap.php ale `stock_enabled` zapíná kvůli skladovým testům,
+        // takže se na okolní stav spoléhat nelze — nastavíme si ho explicitně.
+        // Původní hodnotu si držíme pro tearDown; snímá se JEN tady, ať ji pozdější
+        // zapnutí skladu uvnitř testu nepřepsalo (jinak by tenant zůstal s vypnutým
+        // skladem a rozbil skladové testy, které běží po nás).
+        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplierId]);
+        $this->originalStockEnabled = (bool) $stmt->fetchColumn();
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 0 WHERE id = ?')
+            ->execute([$this->supplierId]);
     }
 
     protected function tearDown(): void
     {
+        if (isset($this->db) && $this->originalStockEnabled !== null && isset($this->supplierId)) {
+            $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = ? WHERE id = ?')
+                ->execute([$this->originalStockEnabled ? 1 : 0, $this->supplierId]);
+        }
         if (isset($this->db) && $this->createdItemId !== null) {
             $this->db->pdo()->prepare('DELETE FROM price_list_items WHERE id = ?')->execute([$this->createdItemId]);
         }
@@ -234,6 +252,27 @@ final class PriceListItemResolverTest extends TestCase
         } catch (PriceListResolutionException $e) {
             self::assertSame('price_list_review_required', $e->errorCode);
         }
+
+        // Druhá polovina scénáře: se ZAPNUTÝM skladem. Původní hodnota už je sejmutá
+        // ze setUp(), tady se jen přepíná — opětovné snímání by ji přepsalo nulou
+        // a tearDown by tenanta vrátil do špatného stavu.
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')
+            ->execute([$this->supplierId]);
+
+        $stockSnapshot = $this->recurringPrices->resolveForGeneration(
+            [$snapshots['current']], $this->supplierId, $this->clientId,
+            $this->currencyId, false, $referenceDate,
+        )[0];
+        self::assertSame(1250.00, $stockSnapshot['unit_price_without_vat']);
+        self::assertSame('fixed', $stockSnapshot['catalog_policy']);
+
+        $savedWithStock = $this->recurringPrices->prepareForSave(
+            [$snapshots['current']], $this->supplierId, $this->clientId,
+            $this->currencyId, false, $referenceDate, false,
+        )[0];
+        self::assertNull($savedWithStock['price_list_item_id']);
+        self::assertSame('fixed', $savedWithStock['catalog_policy']);
+        self::assertSame(1250.00, $savedWithStock['unit_price_without_vat']);
     }
 
     private function createItem(bool $pricesIncludeVat, float $price): int

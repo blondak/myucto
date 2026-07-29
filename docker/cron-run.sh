@@ -1,15 +1,15 @@
 #!/usr/bin/env sh
-# Wrapper pro vestavěný cron v Docker image (instaluje se jako /usr/local/bin/myinvoice-cron-run).
+# Wrapper pro vestavěný cron v Docker image (instaluje se jako /usr/local/bin/myucto-cron-run).
 #
 # Systémový cron v Debianu NEdědí ENV proměnné kontejneru, proto je docker-entrypoint.sh
-# při startu vydumpuje do /etc/myinvoice-cron.env (0640 root:www-data) a tento wrapper je
+# při startu vydumpuje do /etc/myucto-cron.env (0640 root:www-data) a tento wrapper je
 # před spuštěním PHP skriptu načte. Skript běží jako www-data (viz user pole v cron.d),
 # v pracovním adresáři aplikace, s logem do ${MYINVOICE_DATA_DIR}/log/cron/<skript>.log.
 set -eu
 
-if [ -f /etc/myinvoice-cron.env ]; then
+if [ -f /etc/myucto-cron.env ]; then
   # Soubor je `export VAR='value'` (z `export -p`) → bezpečně sourcovatelný.
-  . /etc/myinvoice-cron.env
+  . /etc/myucto-cron.env
 fi
 
 cd /var/www/html

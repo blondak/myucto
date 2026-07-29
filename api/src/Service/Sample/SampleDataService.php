@@ -10,8 +10,8 @@ use PDO;
 /**
  * Práce s evidencí ukázkových (sample) dat — zjištění existence, souhrn a přesné odebrání.
  *
- * Sample data (klienti, zakázky, faktury, dobropisy, dodavatelé, přijaté faktury,
- * pravidelné fakturace, kniha jízd) zapisuje {@see SampleDataGenerator} a každou kořenovou
+     * Sample data (obchodní doklady, deník, banka včetně nového registru účtu, sklad,
+     * dlouhodobý i drobný majetek, pravidelné fakturace a kniha jízd) zapisuje {@see SampleDataGenerator} a každou kořenovou
  * entitu eviduje v tabulce `sample_data_entries`. Díky tomu je lze později smazat na milimetr
  * přesně (issue #162) a tatáž evidence řídí zobrazení tlačítka „Odebrat ukázková data" v UI.
  *
@@ -68,7 +68,7 @@ final class SampleDataService
      * řádků po hlavních tabulkách. Atomické — při FK konfliktu (sample entita navázaná na
      * reálná data) se transakce vrátí a vyhodí výjimku.
      *
-     * @return array{clients:int, projects:int, invoices:int, purchase_invoices:int, recurring:int, cars:int, fuelings:int, trips:int}
+     * @return array<string,int>
      */
     public function purge(int $supplierId): array
     {
@@ -90,6 +90,18 @@ final class SampleDataService
         $purchaseIds = $idsOf(['purchase_invoice']);
         $recurringIds = $idsOf(['recurring_template']);
         $carIds      = $idsOf(['car']);
+        $journalIds  = $idsOf(['journal_entry']);
+        $statementIds = $idsOf(['bank_statement']);
+        $bankAccountIds = $idsOf(['supplier_bank_account']);
+        $assetIds    = $idsOf(['asset']);
+        $smallAssetIds = $idsOf(['small_asset']);
+        $stockDocumentIds = $idsOf(['stock_document']);
+        $stockItemIds = $idsOf(['stock_item']);
+        $warehouseIds = $idsOf(['warehouse']);
+        $cashDocumentIds = $idsOf(['cash_document']);
+        $cashRegisterIds = $idsOf(['cash_register']);
+        $manufacturerIds = $idsOf(['manufacturer']);
+        $stockCategoryIds = $idsOf(['stock_category']);
 
         // Smaže rodičovské řádky podle id seznamu; děti padají kaskádou (viz třídní docblock).
         // $hasSupplierCol=false pro tabulky bez supplier_id (projects se váže přes client_id);
@@ -110,11 +122,100 @@ final class SampleDataService
         $result = [
             'clients' => 0, 'projects' => 0, 'invoices' => 0, 'purchase_invoices' => 0,
             'recurring' => 0, 'cars' => 0, 'fuelings' => 0, 'trips' => 0,
+            'journal_entries' => 0, 'bank_statements' => 0, 'assets' => 0,
+            'small_assets' => 0,
+            'bank_accounts' => 0, 'activity_logs' => 0, 'stock_documents' => 0,
+            'stock_items' => 0, 'warehouses' => 0, 'cash_documents' => 0,
+            'cash_registers' => 0, 'manufacturers' => 0, 'eshop_categories' => 0,
+            'ai_jobs' => 0, 'accounting_corrections' => 0,
+            'invoice_counters' => 0, 'purchase_invoice_counters' => 0,
         ];
 
         $pdo->beginTransaction();
         try {
-            // 1) Kniha jízd: tankování PŘED autem (fk_fuelings_car je SET NULL → jinak osiří),
+            // Auditní log nemá FK na polymorfní entity. Odstraň jen záznamy, které
+            // prokazatelně vznikly nad sledovanými sample zápisy a bankovními pohyby.
+            if ($journalIds !== []) {
+                $place = implode(',', array_fill(0, count($journalIds), '?'));
+                $delActivity = $pdo->prepare(
+                    "DELETE FROM activity_log
+                      WHERE supplier_id = ? AND entity_type = 'journal_entry' AND entity_id IN ($place)"
+                );
+                $delActivity->execute([$supplierId, ...$journalIds]);
+                $result['activity_logs'] += $delActivity->rowCount();
+            }
+            if ($statementIds !== []) {
+                $place = implode(',', array_fill(0, count($statementIds), '?'));
+                $delActivity = $pdo->prepare(
+                    "DELETE al FROM activity_log al
+                       JOIN bank_transactions bt ON bt.id = al.entity_id
+                       JOIN bank_statements bs ON bs.id = bt.statement_id
+                      WHERE al.supplier_id = ? AND al.entity_type = 'bank_transaction'
+                        AND bs.supplier_id = ? AND bs.id IN ($place)"
+                );
+                $delActivity->execute([$supplierId, $supplierId, ...$statementIds]);
+                $result['activity_logs'] += $delActivity->rowCount();
+            }
+
+            // AI joby a účetní korekce se váží polymorfně (entity_type/entity_id) a nemají
+            // FK, takže smazáním dokladů nezmizí. Mažeme je PODLE EVIDENCE, dokud existuje —
+            // po purge by už nešlo poznat, které patřily ukázkovým datům.
+            foreach (['ai_jobs', 'accounting_corrections'] as $polymorphic) {
+                // a) entity evidované přímo (purchase_invoice, invoice, journal_entry…)
+                $del = $pdo->prepare(
+                    "DELETE t FROM `$polymorphic` t
+                       JOIN sample_data_entries sde
+                         ON sde.supplier_id = t.supplier_id
+                        AND sde.entity_id   = t.entity_id
+                        AND sde.entity_type = t.entity_type
+                      WHERE t.supplier_id = ?"
+                );
+                $del->execute([$supplierId]);
+                $result[$polymorphic] = $del->rowCount();
+
+                // b) bankovní pohyby se needvidují jednotlivě (patří pod výpis), takže
+                //    se na evidenci dojde až přes bank_transactions → bank_statements.
+                //    Stejná cesta, jakou výš používá úklid activity_log.
+                $delBt = $pdo->prepare(
+                    "DELETE t FROM `$polymorphic` t
+                       JOIN bank_transactions bt ON bt.id = t.entity_id
+                       JOIN bank_statements bs   ON bs.id = bt.statement_id
+                       JOIN sample_data_entries sde
+                         ON sde.supplier_id = bs.supplier_id
+                        AND sde.entity_type = 'bank_statement'
+                        AND sde.entity_id   = bs.id
+                      WHERE t.supplier_id = ? AND t.entity_type = 'bank_transaction'"
+                );
+                $delBt->execute([$supplierId]);
+                $result[$polymorphic] += $delBt->rowCount();
+            }
+
+            // Účetní zápisy nemají FK na polymorfní zdroj. Musí zmizet před doklady,
+            // jinak by po purge zůstaly aktivní sirotky v hlavní knize.
+            $result['journal_entries'] = $deleteByIds('journal_entries', $journalIds);
+
+            // Majetek před zdrojovými přijatými fakturami; odpisové řádky kaskádují.
+            $result['small_assets'] = $deleteByIds('small_assets', $smallAssetIds);
+            $result['assets'] = $deleteByIds('assets', $assetIds);
+
+            // Výpisy kaskádují pohyby a payment_matches; bankovní vazby plateb se nulují.
+            $result['bank_statements'] = $deleteByIds('bank_statements', $statementIds);
+            $result['bank_accounts'] = $deleteByIds('supplier_bank_accounts', $bankAccountIds);
+
+            // Pokladní doklady před pokladnou (FK register_id je RESTRICT).
+            $result['cash_documents'] = $deleteByIds('cash_documents', $cashDocumentIds);
+            $result['cash_registers'] = $deleteByIds('cash_registers', $cashRegisterIds);
+
+            // Skladové doklady před kartami. Materializované stavy nejsou odvozené FK,
+            // proto je odstraňujeme explicitně podle evidovaných sample karet.
+            $result['stock_documents'] = $deleteByIds('stock_documents', $stockDocumentIds);
+            if ($stockItemIds !== []) {
+                $place = implode(',', array_fill(0, count($stockItemIds), '?'));
+                $pdo->prepare("DELETE FROM stock_levels WHERE supplier_id = ? AND stock_item_id IN ($place)")
+                    ->execute([$supplierId, ...$stockItemIds]);
+            }
+
+            // Kniha jízd: tankování PŘED autem (fk_fuelings_car je SET NULL → jinak osiří),
             //    trips padají kaskádou s autem.
             if ($carIds !== []) {
                 $place = implode(',', array_fill(0, count($carIds), '?'));
@@ -133,24 +234,57 @@ final class SampleDataService
                 $result['cars'] = $deleteByIds('cars', $carIds); // kaskáduje trips
             }
 
-            // 2) Faktury + dobropisy (dobropis padá kaskádou přes parent_invoice_id, ale máme
+            // Faktury + dobropisy (dobropis padá kaskádou přes parent_invoice_id, ale máme
             //    je evidované zvlášť → smažou se i tak). Kaskáduje items/PDF/přílohy/platby.
             $result['invoices'] = $deleteByIds('invoices', $invoiceIds);
 
-            // 3) Pravidelné fakturace (kaskáduje items) — před klienty (RESTRICT).
+            // Pravidelné fakturace (kaskáduje items) — před klienty (RESTRICT).
             $result['recurring'] = $deleteByIds('recurring_invoice_templates', $recurringIds);
 
-            // 4) Přijaté faktury (kaskáduje items/scans/matches) — před dodavateli (RESTRICT).
+            // Přijaté faktury (kaskáduje items/scans/matches) — před dodavateli (RESTRICT).
             $result['purchase_invoices'] = $deleteByIds('purchase_invoices', $purchaseIds);
 
-            // 5) Zakázky — po fakturách (RESTRICT), kaskáduje billing_emails/revenue_cache.
+            $result['stock_items'] = $deleteByIds('stock_items', $stockItemIds);
+            $result['manufacturers'] = $deleteByIds('manufacturers', $manufacturerIds);
+            $result['eshop_categories'] = $deleteByIds('stock_categories', $stockCategoryIds);
+            $result['warehouses'] = $deleteByIds('warehouses', $warehouseIds);
+
+            // Zakázky — po fakturách (RESTRICT), kaskáduje billing_emails/revenue_cache.
             //    projects nemá supplier_id (váže se přes client_id) → maž jen podle id.
             $result['projects'] = $deleteByIds('projects', $projectIds, false);
 
-            // 6) Klienti + dodavatelé — naposled, kaskáduje email_contacts/revenue_cache.
+            // Klienti + dodavatelé — naposled, kaskáduje email_contacts/revenue_cache.
             $result['clients'] = $deleteByIds('clients', $clientIds);
 
-            // 7) Vyčisti evidenci.
+            // Čítače číselných řad. Ukázkové faktury je vyhnaly nahoru a bez tohohle by
+            // první REÁLNÁ faktura navázala číslováním až za smazanými ukázkami.
+            // Čítač nemá `id` (PK je složený), nejde tedy evidovat jako entita — mažeme
+            // proto řady, po kterých nezbyl ŽÁDNÝ doklad. Když má firma v téže řadě
+            // vlastní doklady, čítač zůstane a číslování se nerozbije.
+            $delCounters = $pdo->prepare(
+                'DELETE c FROM invoice_counters c
+                  WHERE c.supplier_id = ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM invoices i
+                         WHERE i.supplier_id = c.supplier_id
+                           AND i.invoice_type = c.invoice_type
+                           AND (c.client_id IS NULL OR i.client_id = c.client_id)
+                    )'
+            );
+            $delCounters->execute([$supplierId]);
+            $result['invoice_counters'] = $delCounters->rowCount();
+
+            $delPurchaseCounters = $pdo->prepare(
+                'DELETE c FROM purchase_invoice_counters c
+                  WHERE c.supplier_id = ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM purchase_invoices p WHERE p.supplier_id = c.supplier_id
+                    )'
+            );
+            $delPurchaseCounters->execute([$supplierId]);
+            $result['purchase_invoice_counters'] = $delPurchaseCounters->rowCount();
+
+            // Vyčisti evidenci.
             $pdo->prepare('DELETE FROM sample_data_entries WHERE supplier_id = ?')
                 ->execute([$supplierId]);
 

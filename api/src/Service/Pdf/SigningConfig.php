@@ -21,6 +21,7 @@ final class SigningConfig
         public readonly string $reason,
         public readonly ?string $tsaUsername = null,
         public readonly string $tsaPasswordEnc = '',
+        public readonly ?string $certBytes = null,
     ) {}
 
     public static function defaultReason(string $documentType): string

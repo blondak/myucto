@@ -14,7 +14,7 @@
 #    --dry-run   jen vypíše, co by se odeslalo
 #
 #  crontab (každý pracovní den 09:00):
-#    0 9 * * 1-5  /var/www/myinvoice.cz/cmd/cron-send-approval-reminders.sh
+#    0 9 * * 1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

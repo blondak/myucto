@@ -1,0 +1,290 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Epo;
+
+use MyInvoice\Repository\EpoSigningCredentialRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
+use PDOException;
+
+final class EpoSigningCredentialService
+{
+    private const MAX_PFX_BYTES = 262144;
+
+    public function __construct(
+        private readonly EpoSigningCredentialRepository $credentials,
+        private readonly SecretEncryption $crypto,
+        private readonly EpoCertificateInspector $certificateInspector,
+    ) {}
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listOwnedForSupplier(int $ownerUserId, int $supplierId): array
+    {
+        $items = $this->credentials->listOwnedForSupplier($ownerUserId, $supplierId);
+        if ($this->crypto->validateKey() !== null || !function_exists('openssl_pkcs12_read')) {
+            return $items;
+        }
+        foreach ($items as &$item) {
+            if ((bool) $item['ik_mpsv_present']) {
+                continue;
+            }
+            $credentialId = (int) $item['id'];
+            $credential = $this->credentials->findOwned($credentialId, $ownerUserId);
+            if ($credential === null || !$this->storedCertificateContainsIkMpsv($credential)) {
+                continue;
+            }
+            $this->credentials->markIkMpsvPresent($credentialId, $ownerUserId);
+            $item['ik_mpsv_present'] = true;
+        }
+        unset($item);
+        return $items;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function import(
+        int $ownerUserId,
+        int $supplierId,
+        string $label,
+        string $pfxBytes,
+        string $pfxPassword,
+    ): array {
+        $configurationError = $this->crypto->validateKey();
+        if ($configurationError !== null) {
+            throw new EpoSubmissionException(
+                'encryption_key_required',
+                'Pro uložení soukromého klíče nastavte samostatný app.secret_encryption_key.',
+                503,
+            );
+        }
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 120) {
+            throw new EpoSubmissionException(
+                'validation_failed',
+                'Název certifikátu musí mít 1 až 120 znaků.',
+                400,
+            );
+        }
+        $size = strlen($pfxBytes);
+        if ($size <= 0 || $size > self::MAX_PFX_BYTES) {
+            throw new EpoSubmissionException(
+                'invalid_certificate_file',
+                'Soubor P12/PFX je prázdný nebo příliš velký.',
+                400,
+            );
+        }
+        if ($pfxPassword === '') {
+            throw new EpoSubmissionException(
+                'pfx_password_required',
+                'Zadejte heslo k souboru P12/PFX.',
+                400,
+            );
+        }
+        if (!function_exists('openssl_pkcs12_read')) {
+            throw new EpoSubmissionException(
+                'openssl_unavailable',
+                'Server nepodporuje práci s certifikáty PKCS#12.',
+                503,
+            );
+        }
+
+        $bundle = [];
+        while (openssl_error_string() !== false) {
+        }
+        if (!@openssl_pkcs12_read($pfxBytes, $bundle, $pfxPassword)) {
+            throw new EpoSubmissionException(
+                'invalid_certificate',
+                'Soubor P12/PFX nelze otevřít. Zkontrolujte soubor a jeho heslo.',
+                400,
+            );
+        }
+        $certificate = (string) ($bundle['cert'] ?? '');
+        $privateKey = (string) ($bundle['pkey'] ?? '');
+        if ($certificate === '' || $privateKey === '') {
+            throw new EpoSubmissionException(
+                'private_key_missing',
+                'Soubor neobsahuje certifikát se soukromým klíčem.',
+                400,
+            );
+        }
+        $parsed = openssl_x509_parse($certificate, false);
+        $fingerprint = openssl_x509_fingerprint($certificate, 'sha256');
+        if (!is_array($parsed) || !is_string($fingerprint) || $fingerprint === '') {
+            throw new EpoSubmissionException(
+                'invalid_certificate',
+                'Certifikát se nepodařilo přečíst.',
+                400,
+            );
+        }
+
+        $validFrom = (int) ($parsed['validFrom_time_t'] ?? 0);
+        $validTo = (int) ($parsed['validTo_time_t'] ?? 0);
+        if ($validFrom <= 0 || $validTo <= 0) {
+            throw new EpoSubmissionException(
+                'invalid_certificate',
+                'Certifikát neobsahuje platné období.',
+                400,
+            );
+        }
+        $keyUsage = strtolower((string) (($parsed['extensions']['keyUsage'] ?? '')));
+        if ($keyUsage !== '' && !str_contains($keyUsage, 'digital signature')) {
+            throw new EpoSubmissionException(
+                'certificate_cannot_sign',
+                'Certifikát není určen pro elektronický podpis.',
+                400,
+            );
+        }
+
+        $subject = $this->dn((array) ($parsed['subject'] ?? []));
+        $issuer = $this->dn((array) ($parsed['issuer'] ?? []));
+        $ikMpsvPresent = $this->certificateInspector->containsIkMpsv($certificate, $parsed);
+        try {
+            $credentialId = $this->credentials->createForSupplier($ownerUserId, $supplierId, [
+                'label' => $label,
+                'pfx_ciphertext' => $this->crypto->encryptFor(
+                    base64_encode($pfxBytes),
+                    'epo:credential-pfx',
+                ),
+                'passphrase_ciphertext' => $this->crypto->encryptFor(
+                    $pfxPassword,
+                    'epo:credential-passphrase',
+                ),
+                'fingerprint_sha256' => strtolower(str_replace(':', '', $fingerprint)),
+                'subject_dn' => $subject,
+                'issuer_dn' => $issuer,
+                'serial_hex' => isset($parsed['serialNumberHex'])
+                    ? mb_substr((string) $parsed['serialNumberHex'], 0, 128)
+                    : null,
+                'valid_from' => date('Y-m-d H:i:s', $validFrom),
+                'valid_to' => date('Y-m-d H:i:s', $validTo),
+                'ik_mpsv_present' => $ikMpsvPresent,
+            ]);
+        } catch (PDOException $e) {
+            if ((string) $e->getCode() === '23000') {
+                throw new EpoSubmissionException(
+                    'certificate_exists',
+                    'Tento certifikát už je v trezoru uložen.',
+                    409,
+                );
+            }
+            throw $e;
+        }
+        foreach ($this->credentials->listOwnedForSupplier($ownerUserId, $supplierId) as $item) {
+            if ((int) $item['id'] === $credentialId) {
+                return $item;
+            }
+        }
+        throw new EpoSubmissionException(
+            'credential_store_failed',
+            'Certifikát byl uložen, ale nelze jej znovu načíst.',
+            500,
+        );
+    }
+
+    /**
+     * @return array{pfx:string,password:string,credential:array<string,mixed>}
+     */
+    public function unlockForSigning(int $credentialId, int $ownerUserId, int $supplierId): array
+    {
+        if ($this->crypto->validateKey() !== null) {
+            throw new EpoSubmissionException(
+                'encryption_key_required',
+                'Pro použití soukromého klíče nastavte samostatný app.secret_encryption_key.',
+                503,
+            );
+        }
+        $credential = $this->credentials->findUsable($credentialId, $ownerUserId, $supplierId);
+        if ($credential === null) {
+            throw new EpoSubmissionException(
+                'credential_not_found',
+                'Certifikát není dostupný pro tuto firmu.',
+                404,
+            );
+        }
+        $validFrom = strtotime((string) $credential['valid_from']);
+        $validTo = strtotime((string) $credential['valid_to']);
+        if ($validFrom === false || $validTo === false || $validFrom > time() || $validTo < time()) {
+            throw new EpoSubmissionException(
+                'certificate_expired',
+                'Certifikát dosud není platný nebo už vypršel.',
+                422,
+            );
+        }
+        try {
+            $pfx = base64_decode(
+                $this->crypto->decryptFor(
+                    (string) $credential['pfx_ciphertext'],
+                    'epo:credential-pfx',
+                ),
+                true,
+            );
+            $password = $this->crypto->decryptFor(
+                (string) $credential['passphrase_ciphertext'],
+                'epo:credential-passphrase',
+            );
+        } catch (\RuntimeException) {
+            throw new EpoSubmissionException(
+                'credential_decryption_failed',
+                'Soukromý klíč nelze dešifrovat.',
+                500,
+            );
+        }
+        if ($pfx === false || $pfx === '') {
+            throw new EpoSubmissionException(
+                'credential_decryption_failed',
+                'Soukromý klíč nelze dešifrovat.',
+                500,
+            );
+        }
+        return ['pfx' => $pfx, 'password' => $password, 'credential' => $credential];
+    }
+
+    /** @param array<string,mixed> $dn */
+    private function dn(array $dn): string
+    {
+        $parts = [];
+        foreach ($dn as $key => $value) {
+            if (is_scalar($value)) {
+                $parts[] = $key . '=' . trim((string) $value);
+            }
+        }
+        return mb_substr(implode(', ', $parts), 0, 1000);
+    }
+
+    /** @param array<string,mixed> $credential */
+    private function storedCertificateContainsIkMpsv(array $credential): bool
+    {
+        try {
+            $pfx = base64_decode(
+                $this->crypto->decryptFor(
+                    (string) $credential['pfx_ciphertext'],
+                    'epo:credential-pfx',
+                ),
+                true,
+            );
+            $password = $this->crypto->decryptFor(
+                (string) $credential['passphrase_ciphertext'],
+                'epo:credential-passphrase',
+            );
+        } catch (\RuntimeException) {
+            return false;
+        }
+        if (!is_string($pfx) || $pfx === '') {
+            return false;
+        }
+        $bundle = [];
+        if (!@openssl_pkcs12_read($pfx, $bundle, $password)) {
+            return false;
+        }
+        $certificate = (string) ($bundle['cert'] ?? '');
+        $parsed = $certificate !== '' ? openssl_x509_parse($certificate, false) : false;
+        if ($certificate === '' || !is_array($parsed)) {
+            return false;
+        }
+        return $this->certificateInspector->containsIkMpsv($certificate, $parsed);
+    }
+}

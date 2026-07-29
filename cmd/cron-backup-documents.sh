@@ -7,7 +7,7 @@
 #  Retention: 30 denních + 12 měsíčních (1. v měsíci se zachová déle)
 #
 #  crontab:
-#    35 2 * * *  /var/www/myinvoice.cz/cmd/cron-backup-documents.sh
+#    35 2 * * *  /var/www/myucto.cz/cmd/cron-backup-documents.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

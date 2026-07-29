@@ -203,9 +203,16 @@ export const crmApi = {
     api.get<ReminderEffectiveness>('/crm/reminder-effectiveness', { params: { months } }).then(r => r.data),
   paymentTimeHistogram: (months = 12) =>
     api.get<PaymentTimeHistogram>('/crm/payment-time-histogram', { params: { months } }).then(r => r.data),
+  taxCalendar: (maxDaysAhead = 90) =>
+    api.get<TaxCalendarResult>('/crm/tax-calendar', { params: { max_days_ahead: maxDaysAhead } }).then(r => r.data),
 }
 
 // ─── Tier 1 types ─────────────────────────────────────────────────────
+export interface ActionItemBreakdown {
+  key: string
+  count: number
+  link: string
+}
 export interface ActionItem {
   type: string
   severity: 'low' | 'medium' | 'high'
@@ -214,6 +221,7 @@ export interface ActionItem {
   link: string
   count?: number
   days?: number
+  breakdown?: ActionItemBreakdown[]
 }
 export interface ActionItemsResult {
   items: ActionItem[]
@@ -256,6 +264,24 @@ export interface ReminderEffectiveness {
   after_third_plus: number
   never_paid: number
   avg_reminders_to_paid: number
+}
+
+export interface TaxCalendarItem {
+  type: 'tax_deadline' | 'kh_deadline' | 'shv_deadline' | 'tax_advance' | 'income_tax_deadline'
+  title: string
+  deadline: string
+  days: number
+  link: string
+  /** null u tax_advance (zálohy se "podávají" platbou — viz status). */
+  submitted: boolean | null
+  submitted_at?: string | null
+  /** jen tax_advance */
+  amount?: number
+  status?: 'planned' | 'paid'
+}
+export interface TaxCalendarResult {
+  items: TaxCalendarItem[]
+  total: number
 }
 
 export interface HistogramBucket {

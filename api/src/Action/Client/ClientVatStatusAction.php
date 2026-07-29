@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Client;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Service\Ares\VendorVatPayerResolver;
@@ -37,7 +38,9 @@ final class ClientVatStatusAction
 
         $ic  = isset($client['ic'])  ? (string) $client['ic']  : null;
         $dic = isset($client['dic']) ? (string) $client['dic'] : null;
-        $res = $this->vatPayer->resolveAndPersist($id, $ic, $dic);
+        $res = DemoReadOnlyMiddleware::enabled($request)
+            ? $this->vatPayer->resolve($ic, $dic)
+            : $this->vatPayer->resolveAndPersist($id, $ic, $dic);
 
         // Když registr nerozhodl (null), vrať dosud uložený příznak (beze změny).
         $isVatPayer = $res['is_vat_payer'] ?? (bool) ($client['is_vat_payer'] ?? true);

@@ -1,0 +1,211 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Portfolio;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Crm\CrmAggregationService;
+
+/**
+ * Přehled firem pro účetní kancelář — cross-supplier dashboard (Fáze F,
+ * audit 2026-07, finding "Účetní kancelář nemá pohled přes firmy" ~ř.1167,
+ * návrh "Přehled firem pro účetní kancelář" ~ř.1217).
+ *
+ * Agreguje PŘES `user_suppliers` — jen firmy, ke kterým má přihlášený uživatel
+ * přístup. Membership sémantika je stejná jako u SupplierAccessResolver (F0):
+ *   - globální admin: bez omezení (vidí všechny firmy)
+ *   - uživatel BEZ membership řádků: bez omezení (BC, stejné jako dnešní
+ *     chování zbytku appky)
+ *   - uživatel S membership: jen přiřazené firmy
+ * Role 'client' se sem vůbec nedostane — PermissionMiddleware ji na /api/portfolio
+ * nepustí (terminální client permission rules větev bez fallbacku).
+ */
+final class PortfolioAggregationService
+{
+    public function __construct(
+        private readonly Connection $db,
+        private readonly UserSupplierRepository $memberships,
+        private readonly CrmAggregationService $crm,
+    ) {}
+
+    /**
+     * @return array{companies: list<array<string,mixed>>, total: int, generated_at: string}
+     */
+    public function overview(int $userId, bool $isSuperadmin, \DateTimeImmutable $now): array
+    {
+        $supplierIds = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $companies = [];
+        foreach ($supplierIds as $sid) {
+            $row = $this->buildRow($sid, $now);
+            if ($row !== null) {
+                $companies[] = $row;
+            }
+        }
+
+        // Urgence: nejbližší termín nahoře (nejmenší `days`, i záporné/po termínu),
+        // firmy bez termínu (neplátci DPH) na konec, sekundárně dle jména.
+        usort($companies, static function (array $a, array $b): int {
+            $ad = $a['next_deadline']['days'] ?? null;
+            $bd = $b['next_deadline']['days'] ?? null;
+            if ($ad === null && $bd === null) {
+                return strcmp((string) $a['company_name'], (string) $b['company_name']);
+            }
+            if ($ad === null) {
+                return 1;
+            }
+            if ($bd === null) {
+                return -1;
+            }
+            return $ad <=> $bd;
+        });
+
+        return [
+            'companies'    => $companies,
+            'total'        => count($companies),
+            'generated_at' => $now->format(\DateTimeInterface::ATOM),
+        ];
+    }
+
+    /** @return list<int> */
+    private function allowedSupplierIds(int $userId, bool $isSuperadmin): array
+    {
+        if ($isSuperadmin) {
+            return $this->allSupplierIds();
+        }
+        $assignments = $this->memberships->assignmentsForUser($userId);
+        $ids = array_keys($assignments);
+        sort($ids);
+        return $ids;
+    }
+
+    /** @return list<int> */
+    private function allSupplierIds(): array
+    {
+        return array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /** @return array<string,mixed>|null */
+    private function buildRow(int $supplierId, \DateTimeImmutable $now): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, company_name, display_name, ic, accounting_mode, is_vat_payer FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $sup = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($sup === false) {
+            return null;
+        }
+
+        $accountingMode = (string) $sup['accounting_mode'];
+        $isDoubleEntry = $accountingMode === 'double_entry';
+
+        return [
+            'supplier_id'     => $supplierId,
+            'company_name'    => (string) ($sup['display_name'] !== null && $sup['display_name'] !== '' ? $sup['display_name'] : $sup['company_name']),
+            'ic'              => $sup['ic'] !== null ? (string) $sup['ic'] : null,
+            'is_vat_payer'    => (bool) $sup['is_vat_payer'],
+            'accounting_mode' => $accountingMode,
+            'next_deadline'   => $this->crm->nextTaxDeadline($supplierId, $now),
+            'unbooked_documents'          => $isDoubleEntry ? $this->unbookedDocumentsCount($supplierId) : 0,
+            'unmatched_bank_transactions' => $this->unmatchedBankCount($supplierId, $now),
+            'purchase_drafts'             => $this->purchaseDraftsCount($supplierId),
+            'period_status'      => $this->periodStatus($supplierId),
+            'last_bank_import_at' => $this->lastBankImportAt($supplierId),
+        ];
+    }
+
+    /**
+     * Nezaúčtované doklady (FV + PF + fronta bankovních návrhů) — stejná definice
+     * jako action item `unbooked_documents` (CrmAggregationService::actionItems 3c).
+     */
+    private function unbookedDocumentsCount(int $supplierId): int
+    {
+        $issuedTypes = PostingService::POSTABLE_ISSUED_INVOICE_TYPES;
+        $issuedPlaceholders = implode(',', array_fill(0, count($issuedTypes), '?'));
+        $invStmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM invoices
+              WHERE supplier_id = ? AND booked_at IS NULL
+                AND status NOT IN ('draft', 'cancelled')
+                AND invoice_type IN ({$issuedPlaceholders})"
+        );
+        $invStmt->execute(array_merge([$supplierId], $issuedTypes));
+        $inv = (int) $invStmt->fetchColumn();
+
+        // Zálohové PF se neúčtují (účtuje se inkaso a vyúčtování) — viz PostingService::post().
+        $piStmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoices
+              WHERE supplier_id = ? AND booked_at IS NULL AND status NOT IN ('draft', 'cancelled')
+                AND COALESCE(document_kind, 'invoice') <> 'advance'"
+        );
+        $piStmt->execute([$supplierId]);
+        $pi = (int) $piStmt->fetchColumn();
+
+        // Banka = pohyby bez živého zápisu v deníku, týž zdroj jako karta „Zaúčtuj doklady"
+        // a badge tabu „K zaúčtování" (stav návrhu je jen proxy a rozchází se s realitou).
+        $bank = (new \MyInvoice\Repository\BankPostingSuggestionRepository($this->db))->unpostedCount($supplierId);
+
+        return $inv + $pi + $bank;
+    }
+
+    /**
+     * Nespárované příchozí bankovní platby — stejný scope jako action item
+     * `bank_unmatched` (BankStatementOwnershipResolver, SEC-01). Jen posledních
+     * 90 dní (shoda se zdrojovým predikátem).
+     */
+    private function unmatchedBankCount(int $supplierId, \DateTimeImmutable $now): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.match_status = 'unmatched'
+                AND bt.amount > 0
+                AND bt.posted_at >= DATE_SUB(?, INTERVAL 90 DAY)
+                AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
+        );
+        $stmt->execute(array_merge(
+            [$now->format('Y-m-d')],
+            \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+        ));
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Koncepty přijatých faktur (draft) — shodné s action item `purchase_drafts`. */
+    private function purchaseDraftsCount(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft'"
+        );
+        $stmt->execute([$supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Stav aktuálního (nejvyššího fiscal_year) účetního období, nebo null (žádné/daňová evidence). */
+    private function periodStatus(int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT fiscal_year, status FROM accounting_periods
+              WHERE supplier_id = ? ORDER BY fiscal_year DESC LIMIT 1'
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        return ['fiscal_year' => (int) $row['fiscal_year'], 'status' => (string) $row['status']];
+    }
+
+    /** Datum posledního importu bankovního výpisu (stejný scope jako unmatchedBankCount). */
+    private function lastBankImportAt(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MAX(bs.imported_at) FROM bank_statements bs
+              WHERE " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
+        );
+        $stmt->execute(\MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId));
+        $v = $stmt->fetchColumn();
+        return $v === false || $v === null ? null : (string) $v;
+    }
+}

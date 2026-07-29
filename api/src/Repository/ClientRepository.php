@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\PaymentMethods;
 use PDO;
 
 final class ClientRepository
@@ -148,7 +149,7 @@ final class ClientRepository
                        c.currency_default_id, cur.code AS currency_default,
                        c.reverse_charge, c.is_vat_payer, c.is_customer, c.is_vendor, c.is_fuel_station,
                        c.auto_send_reminders,
-                       c.payment_due_default, c.payment_due_unit, c.hourly_rate,
+                       c.payment_due_default, c.payment_due_unit, c.default_payment_method, c.hourly_rate,
                        c.default_expense_category_id, c.default_revenue_category_id,
                        c.archived_at, co.iso2 AS country_iso2, co.is_eu AS country_is_eu,
                        (SELECT COUNT(*) FROM projects p WHERE p.client_id = c.id AND p.status = 'active' AND p.archived_at IS NULL) AS active_projects_count,
@@ -179,7 +180,10 @@ final class ClientRepository
                                      AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                                               AND (pi.status = 'paid'
                                                    OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id))),
+                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                                     -- DDKP (daňový doklad k platbě) = jen odpočet DPH ze zálohy,
+                                     -- nikdy náklad → bezpodmínečně ven (shoda s CRM/dashboard).
+                                     AND COALESCE(pi.document_kind, '') <> 'tax_document',
                                      pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
                                      0)) AS costs,
                               SUM(IF(pi.status != 'cancelled', 1, 0)) AS purchase_count,
@@ -242,11 +246,11 @@ final class ClientRepository
             (supplier_id, company_name, first_name, last_name, ic, dic, tax_number, street, city, zip, country_id,
              main_email, phone, language, currency_default_id, reverse_charge, is_vat_payer,
              is_customer, is_vendor, is_fuel_station,
-             auto_send_reminders, payment_due_default, payment_due_unit, hourly_rate, note,
+             auto_send_reminders, payment_due_default, payment_due_unit, default_payment_method, hourly_rate, note,
              default_expense_category_id, default_revenue_category_id,
              invoice_number_format, proforma_number_format, credit_note_number_format, invoice_number_period,
              default_branding_profile_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
             $supplierId,
@@ -276,6 +280,8 @@ final class ClientRepository
             array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1,
             isset($data['payment_due_default']) ? (int) $data['payment_due_default'] : null,
             $this->nullablePaymentDueUnit($data, 'payment_due_unit'),
+            // Předvolená forma úhrady (migrace 1128); NULL = dodavatel „nemá názor".
+            PaymentMethods::normalizeNullable($data['default_payment_method'] ?? null),
             (float) ($data['hourly_rate'] ?? 0),
             $this->nullable($data, 'note'),
             $defaultExpenseCategoryId,
@@ -435,9 +441,15 @@ final class ClientRepository
                 reverse_charge = ?, is_vat_payer = COALESCE(?, is_vat_payer), is_customer = ?, is_vendor = ?,
                 is_fuel_station = COALESCE(?, is_fuel_station),
                 auto_send_reminders = ?, payment_due_default = ?, payment_due_unit = ?,
+                default_payment_method = ?,
                 hourly_rate = ?, note = ?, default_expense_category_id = ?, default_revenue_category_id = ?,
                 invoice_number_format = ?, proforma_number_format = ?,
-                credit_note_number_format = ?, invoice_number_period = ?, default_branding_profile_id = ?
+                credit_note_number_format = ?, invoice_number_period = ?, default_branding_profile_id = ?,
+                -- § 36a ZDPH / § 23/7 ZDP: COALESCE jako u is_vat_payer — částečný update
+                -- (klient bez těchhle klíčů v payloadu) nesmí příznak spojené osoby shodit.
+                related_party = COALESCE(?, related_party),
+                related_party_type = COALESCE(?, related_party_type),
+                related_party_note = COALESCE(?, related_party_note)
                 WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -464,6 +476,8 @@ final class ClientRepository
             array_key_exists('auto_send_reminders', $data) ? ((int) (bool) $data['auto_send_reminders']) : 1,
             isset($data['payment_due_default']) ? (int) $data['payment_due_default'] : null,
             $this->nullablePaymentDueUnit($data, 'payment_due_unit'),
+            // Předvolená forma úhrady (migrace 1128); NULL = dodavatel „nemá názor".
+            PaymentMethods::normalizeNullable($data['default_payment_method'] ?? null),
             (float) ($data['hourly_rate'] ?? 0),
             $this->nullable($data, 'note'),
             $newDefaultCategory,
@@ -473,8 +487,18 @@ final class ClientRepository
             $this->nullableTemplate($data, 'credit_note_number_format'),
             $this->nullablePeriod($data, 'invoice_number_period'),
             $newDefaultBrandingProfileId,
+            array_key_exists('related_party', $data) ? (int) (bool) $data['related_party'] : null,
+            $this->nullable($data, 'related_party_type'),
+            $this->nullable($data, 'related_party_note'),
             $id,
         ]);
+
+        // Odznačení spojené osoby musí smazat i typ vztahu a doložení — COALESCE výš je
+        // udržet umí, ale tady by zůstala viset informace o vztahu, který už neplatí.
+        if (array_key_exists('related_party', $data) && !$data['related_party']) {
+            $pdo->prepare('UPDATE clients SET related_party_type = NULL, related_party_note = NULL WHERE id = ?')
+                ->execute([$id]);
+        }
 
         // Backfill: pokud byla nastavena/změněna výchozí kategorie, doplnit ji do všech
         // dokladů tohoto klienta, které kategorii nemají vyplněnou.

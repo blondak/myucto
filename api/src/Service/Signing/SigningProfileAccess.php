@@ -12,33 +12,34 @@ namespace MyInvoice\Service\Signing;
  */
 final class SigningProfileAccess
 {
-    public function canCreate(string $role, bool $accountantProfilesEnabled): bool
+    public function canCreate(bool $isSuperadmin, bool $canWrite, bool $accountantProfilesEnabled): bool
     {
-        if ($role === 'admin') {
+        if ($isSuperadmin) {
             return true;
         }
 
-        return $role === 'accountant' && $accountantProfilesEnabled;
+        return $canWrite && $accountantProfilesEnabled;
     }
 
     public function canManage(
-        string $role,
+        bool $isSuperadmin,
+        bool $canWrite,
         int $currentUserId,
         ?int $ownerUserId,
         bool $accountantProfilesEnabled,
     ): bool {
-        if ($role === 'admin') {
+        if ($isSuperadmin) {
             return true;
         }
 
-        return $role === 'accountant'
+        return $canWrite
             && $accountantProfilesEnabled
             && $ownerUserId !== null
             && $ownerUserId === $currentUserId;
     }
 
-    public function canManageSupplierDefaults(string $role): bool
+    public function canManageSupplierDefaults(bool $isSuperadmin): bool
     {
-        return $role === 'admin';
+        return $isSuperadmin;
     }
 }

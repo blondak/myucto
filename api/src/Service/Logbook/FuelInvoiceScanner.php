@@ -30,6 +30,7 @@ final class FuelInvoiceScanner
         private readonly PurchaseInvoicePdfReader $pdfReader,
         private readonly CarRepository $cars,
         private readonly FuelTransactionEnricher $enricher,
+        private readonly FuelExpenseReclassifier $reclassifier,
     ) {}
 
     /**
@@ -101,8 +102,22 @@ final class FuelInvoiceScanner
         $status = $result['status'] === 'failed' ? 'failed' : ($result['parser'] === 'summary' ? 'summary' : 'parsed');
         $this->scans->recordScan($supplierId, $invoiceId, $result['parser'], $fuelRows, $status);
 
+        // Rozpoznané palivo se musí promítnout i do ÚČETNICTVÍ, jinak jedna část systému
+        // vede řádek jako tankování a druhá ho účtuje na 518. Položky vyhodnocené jako PHM
+        // se proto překlasifikují natvrdo (force) a doklad se přeúčtuje — PostingService
+        // přepíše existující zápis in-place (žádné storno). Selhání nesmí shodit vytěžení.
+        $reclassified = [];
+        if ($fuelRows > 0) {
+            try {
+                $reclassified = $this->reclassifier->reclassifyFuelAndRepost($supplierId, $invoiceId, $userId);
+            } catch (\Throwable $e) {
+                $reclassified = ['error' => $e->getMessage()];
+            }
+        }
+
         return ['ok' => true, 'invoice_id' => $invoiceId, 'created' => $created, 'duplicates' => $dupes,
-                'updated' => $updated, 'fuel_rows' => $fuelRows, 'parser' => $result['parser'], 'status' => $status];
+                'updated' => $updated, 'fuel_rows' => $fuelRows, 'parser' => $result['parser'], 'status' => $status,
+                'reclassified' => $reclassified];
     }
 
     /**

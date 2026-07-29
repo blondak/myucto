@@ -22,6 +22,8 @@ final class SigningProfileRepositoryTest extends TestCase
     private array $createdProfiles = [];
     /** @var list<array{usage:string,entity_type:string,entity_id:int}> */
     private array $createdDocumentOverrides = [];
+    /** @var list<string> */
+    private array $createdOutputTypes = [];
     private ?array $originalSettings = null;
 
     protected function setUp(): void
@@ -73,6 +75,14 @@ final class SigningProfileRepositoryTest extends TestCase
                 $override['entity_type'],
                 $override['entity_id'],
             ]);
+        }
+
+        if ($this->createdOutputTypes !== []) {
+            $in = implode(',', array_fill(0, count($this->createdOutputTypes), '?'));
+            $this->pdo->prepare(
+                "DELETE FROM pdf_signature_output_settings
+                  WHERE supplier_id = ? AND output_type IN ($in)"
+            )->execute([$this->supplierId, ...$this->createdOutputTypes]);
         }
 
         if ($this->createdProfiles !== []) {
@@ -195,8 +205,13 @@ final class SigningProfileRepositoryTest extends TestCase
         self::assertSame('enc:v1:rotated', $credential['encrypted_passphrase']);
         self::assertSame('signing/pdf/itest.p12', $credential['certificate_path']);
 
-        self::assertTrue($this->profiles->softDeleteCredential($this->supplierId, $profileId));
+        self::assertTrue($this->profiles->deleteCredential($this->supplierId, $profileId));
         self::assertNull($this->profiles->credential($this->supplierId, $profileId));
+        $credentialCount = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM signing_credentials WHERE profile_id = ?'
+        );
+        $credentialCount->execute([$profileId]);
+        self::assertSame(0, (int) $credentialCount->fetchColumn());
 
         $this->profiles->upsertCredential($this->supplierId, $profileId, [
             'certificate_path' => 'signing/pdf/itest-restored.p12',
@@ -291,6 +306,40 @@ final class SigningProfileRepositoryTest extends TestCase
             'selection_source' => 'admin_profile_settings',
             'default_profile_id' => $pdfOnlyProfileId,
         ], 'email_smime');
+    }
+
+    public function testOutputSettingsBatchRollsBackAllRowsWhenOneIsInvalid(): void
+    {
+        $suffix = bin2hex(random_bytes(4));
+        $firstType = 'itest_batch_a_' . $suffix;
+        $secondType = 'itest_batch_b_' . $suffix;
+        $this->createdOutputTypes[] = $firstType;
+        $this->createdOutputTypes[] = $secondType;
+
+        try {
+            $this->profiles->upsertOutputSettingsAtomic($this->supplierId, [
+                [
+                    'output_type' => $firstType,
+                    'usage' => 'pdf',
+                    'data' => ['enabled' => false],
+                ],
+                [
+                    'output_type' => $secondType,
+                    'usage' => 'invalid',
+                    'data' => ['enabled' => true],
+                ],
+            ]);
+            self::fail('Invalid second row must abort the batch.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+               FROM pdf_signature_output_settings
+              WHERE supplier_id = ? AND output_type IN (?, ?)'
+        );
+        $stmt->execute([$this->supplierId, $firstType, $secondType]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
     }
 
     public function testSoftDeletedProfileCodeCanBeReused(): void

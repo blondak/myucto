@@ -5,7 +5,11 @@ import { reportsApi, type MonthlyExportPreview, type MonthlyExportPart, type Mon
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { useYearOptions } from '@/composables/useYearOptions'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
+
+// embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
+defineProps<{ embedded?: boolean }>()
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -185,7 +189,7 @@ onMounted(() => { loadPreview() })
   <div class="max-w-3xl space-y-4">
     <!-- Topbar -->
     <div class="flex items-center justify-between mb-1 gap-3 flex-wrap">
-      <div>
+      <div v-if="!embedded">
         <h1 class="text-2xl font-semibold">{{ t('reports.monthly_export.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('reports.monthly_export.subtitle') }}</p>
       </div>
@@ -276,9 +280,9 @@ onMounted(() => { loadPreview() })
           type="button"
           @click="startExport"
           :disabled="starting || loading || anyActive || !hasDownloadableSelection"
-          class="cursor-pointer px-4 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md inline-flex items-center gap-2"
+          :class="btnFilled('primary')"
         >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
           {{ t('reports.monthly_export.job.start') }}
         </button>
       </div>

@@ -78,8 +78,20 @@ final class XmlSchemaValidator
         'dphshv' => 'dphshv.xsd',
         'ossei1' => 'ossei1.xsd',
         'dpfdp5' => 'dpfdp5.xsd',
-        'dppdp9' => 'dppdp9.xsd',
+        // Epic DP (issue #18): reálné EPO2 formuláře daně z příjmů. Nové buildery
+        // (Service/Tax/Return/*XmlBuilder) mapují skutečné věty formulářů a validují
+        // proti těmto schématům. `dppdp9` je remapován ze staršího dppdp9.xsd na
+        // EPO2 verzi (starý MVP IncomeTaxBuilder generuje jen kostru — jeho XML
+        // se archivuje se statusem validation, download i tak funguje).
+        'dppdp9' => 'dppdp9_epo2.xsd',
+        'dpfdp7' => 'dpfdp7_epo2.xsd',
+        // Epic DP v2 (issue #19): ČSSZ přehled OSVČ (sociální pojištění, roční e-podání).
+        // Vlastní schéma ČSSZ (ns http://schemas.cssz.cz/OSVC2025), importuje baseTypes2.xsd
+        // (oba v api/xsd/). Jiný kanál i formát než EPO MFČR.
+        'osvc25' => 'osvc25.xsd',
         'isdoc'  => 'isdoc-invoice-6.0.2.xsd',
+        // SEPA Credit Transfer (platební příkazy pro EUR dávky) — ISO 20022, ne EPO/MFČR.
+        'pain001' => 'pain.001.001.03.xsd',
     ];
 
     private function resolveSchemaPath(string $formCode): ?string

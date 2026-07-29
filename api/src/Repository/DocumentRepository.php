@@ -18,14 +18,39 @@ final class DocumentRepository
     private const COLS = 'id, supplier_id, folder_id, title, description, original_name,
         filename, sha256, mime_type, size_bytes, doc_type, source, parent_document_id,
         signature_for_id, text_status, thumb_path, thumb_status, uploaded_by,
-        deleted_at, created_at';
+        scope, owner_user_id, deleted_at, created_at';
+
+    /**
+     * Per-user scope guard (Epic F7, §4.2 — bezpečnostní jádro). Vrací SQL fragment
+     * (`AND …`) + poziční parametry, které se PŘIPOJÍ na KONEC WHERE (před ORDER BY/LIMIT).
+     *  - admin → prázdný fragment (vidí vše tenanta),
+     *  - user  → company + vlastní user doklady,
+     *  - user=NULL → fail-closed: jen company.
+     * `supplier_id` zůstává VNĚJŠÍ guard beze změny; tohle je vnitřní osa.
+     *
+     * @return array{0:string,1:list<int>}
+     */
+    private function scopeClause(DocumentViewerContext $viewer, string $alias = ''): array
+    {
+        if ($viewer->isAdmin) {
+            return ['', []];
+        }
+        $col = $alias !== '' ? $alias . '.' : '';
+        if ($viewer->userId === null) {
+            return [" AND {$col}scope = 'company'", []];
+        }
+        return [
+            " AND ({$col}scope = 'company' OR ({$col}scope = 'user' AND {$col}owner_user_id = ?))",
+            [$viewer->userId],
+        ];
+    }
 
     /**
      * @param array{
      *   supplier_id:int, folder_id:?int, title:string, description:?string,
      *   original_name:string, filename:string, sha256:string, mime_type:string,
      *   size_bytes:int, doc_type:string, source?:string, parent_document_id?:?int,
-     *   signature_for_id?:?int, uploaded_by:?int
+     *   signature_for_id?:?int, uploaded_by:?int, scope?:string, owner_user_id?:?int
      * } $d
      */
     public function insert(array $d): int
@@ -34,9 +59,10 @@ final class DocumentRepository
             'INSERT INTO documents
                 (supplier_id, folder_id, title, description, original_name, filename,
                  sha256, mime_type, size_bytes, doc_type, source, parent_document_id,
-                 signature_for_id, uploaded_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 signature_for_id, uploaded_by, scope, owner_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
+        $scope = $d['scope'] ?? 'company';
         $stmt->execute([
             $d['supplier_id'],
             $d['folder_id'] ?? null,
@@ -52,38 +78,53 @@ final class DocumentRepository
             $d['parent_document_id'] ?? null,
             $d['signature_for_id'] ?? null,
             $d['uploaded_by'] ?? null,
+            $scope,
+            $scope === 'user' ? ($d['owner_user_id'] ?? null) : null,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    public function find(int $id, int $supplierId, bool $includeTrashed = false): ?array
+    public function find(int $id, int $supplierId, DocumentViewerContext $viewer, bool $includeTrashed = false): ?array
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $sql = 'SELECT * FROM documents WHERE id = ? AND supplier_id = ?'
-             . ($includeTrashed ? '' : ' AND deleted_at IS NULL');
+             . ($includeTrashed ? '' : ' AND deleted_at IS NULL')
+             . $scopeSql;
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$id, $supplierId]);
+        $stmt->execute(array_merge([$id, $supplierId], $scopeParams));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $this->hydrate($row) : null;
     }
 
     /** Surový řádek (vč. filename/sha) — pro download/preview. */
-    public function findRaw(int $id, int $supplierId, bool $includeTrashed = false): ?array
+    public function findRaw(int $id, int $supplierId, DocumentViewerContext $viewer, bool $includeTrashed = false): ?array
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $sql = 'SELECT * FROM documents WHERE id = ? AND supplier_id = ?'
-             . ($includeTrashed ? '' : ' AND deleted_at IS NULL');
+             . ($includeTrashed ? '' : ' AND deleted_at IS NULL')
+             . $scopeSql;
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$id, $supplierId]);
+        $stmt->execute(array_merge([$id, $supplierId], $scopeParams));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $row : null;
     }
 
     /**
-     * Aktivní dokumenty ve složce (top-level — ne přílohy ZFO).
-     * @return list<array<string,mixed>>
+     * WHERE fragment (bez SELECT/ORDER/LIMIT) pro aktivní dokumenty ve složce — sdílené
+     * mezi {@see listInFolder()} a {@see countInFolder()}, aby COUNT a data dotaz vždy
+     * viděly STEJNOU sadu řádků.
+     *
+     * @return array{0:string,1:list<mixed>}
      */
-    public function listInFolder(int $supplierId, ?int $folderId, ?string $docType = null): array
-    {
-        $sql = 'SELECT ' . self::COLS . ' FROM documents
+    private function folderWhere(
+        int $supplierId,
+        ?int $folderId,
+        DocumentViewerContext $viewer,
+        ?string $docType,
+        ?string $scopeFilter,
+        ?int $ownerFilter,
+    ): array {
+        $sql = 'FROM documents
                  WHERE supplier_id = ? AND deleted_at IS NULL AND parent_document_id IS NULL
                    AND ' . ($folderId === null ? 'folder_id IS NULL' : 'folder_id = ?');
         $params = $folderId === null ? [$supplierId] : [$supplierId, $folderId];
@@ -91,10 +132,60 @@ final class DocumentRepository
             $sql .= ' AND doc_type = ?';
             $params[] = $docType;
         }
-        $sql .= ' ORDER BY created_at DESC, id DESC';
+        // Aditivní scope FILTR (Epic F7 §6 — Firemní/Osobní taby). NIKDY nerozšiřuje
+        // viditelnost — scopeClause() guard se stejně připojí za ním. company → jen
+        // firemní; user → jen osobní (guard omezí na vlastní; admin může ownerFilter).
+        if ($scopeFilter === 'company') {
+            $sql .= " AND scope = 'company'";
+        } elseif ($scopeFilter === 'user') {
+            $sql .= " AND scope = 'user'";
+            if ($ownerFilter !== null && $ownerFilter > 0) {
+                $sql .= ' AND owner_user_id = ?';
+                $params[] = $ownerFilter;
+            }
+        }
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $sql .= $scopeSql;
+        $params = array_merge($params, $scopeParams);
+        return [$sql, $params];
+    }
+
+    /**
+     * Aktivní dokumenty ve složce (top-level — ne přílohy ZFO). Stránkované —
+     * $limit/$offset se inlinují jako validované inty (vzor {@see search()}).
+     * @return list<array<string,mixed>>
+     */
+    public function listInFolder(
+        int $supplierId,
+        ?int $folderId,
+        DocumentViewerContext $viewer,
+        ?string $docType = null,
+        ?string $scopeFilter = null,
+        ?int $ownerFilter = null,
+        int $limit = 50,
+        int $offset = 0,
+    ): array {
+        [$where, $params] = $this->folderWhere($supplierId, $folderId, $viewer, $docType, $scopeFilter, $ownerFilter);
+        $sql = 'SELECT ' . self::COLS . ' ' . $where . ' ORDER BY created_at DESC, id DESC'
+             . ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset);
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /** COUNT(*) se stejnými filtry jako {@see listInFolder()}, bez LIMIT — pro `meta.total`. */
+    public function countInFolder(
+        int $supplierId,
+        ?int $folderId,
+        DocumentViewerContext $viewer,
+        ?string $docType = null,
+        ?string $scopeFilter = null,
+        ?int $ownerFilter = null,
+    ): int {
+        [$where, $params] = $this->folderWhere($supplierId, $folderId, $viewer, $docType, $scopeFilter, $ownerFilter);
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) ' . $where);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
     }
 
     /**
@@ -104,42 +195,66 @@ final class DocumentRepository
      * @param int[] $folderIds
      * @return list<array{id:int,folder_id:int,sha256:string,filename:string,original_name:string}>
      */
-    public function rawByFolderIds(int $supplierId, array $folderIds): array
+    public function rawByFolderIds(int $supplierId, array $folderIds, DocumentViewerContext $viewer): array
     {
         $folderIds = array_values(array_filter(array_map('intval', $folderIds), static fn(int $v): bool => $v > 0));
         if ($folderIds === []) return [];
         $in = implode(',', array_fill(0, count($folderIds), '?'));
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, folder_id, sha256, filename, original_name FROM documents
               WHERE supplier_id = ? AND deleted_at IS NULL AND parent_document_id IS NULL
-                AND folder_id IN ($in)"
+                AND folder_id IN ($in)" . $scopeSql
         );
-        $stmt->execute(array_merge([$supplierId], $folderIds));
+        $stmt->execute(array_merge([$supplierId], $folderIds, $scopeParams));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     /** Přílohy ZFO kontejneru. @return list<array<string,mixed>> */
-    public function listChildren(int $parentId, int $supplierId): array
+    public function listChildren(int $parentId, int $supplierId, DocumentViewerContext $viewer): array
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLS . ' FROM documents
-              WHERE parent_document_id = ? AND supplier_id = ? AND deleted_at IS NULL
-              ORDER BY id'
+              WHERE parent_document_id = ? AND supplier_id = ? AND deleted_at IS NULL'
+              . $scopeSql . ' ORDER BY id'
         );
-        $stmt->execute([$parentId, $supplierId]);
+        $stmt->execute(array_merge([$parentId, $supplierId], $scopeParams));
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
-    /** @return list<array<string,mixed>> */
-    public function listTrash(int $supplierId): array
+    /**
+     * WHERE fragment (bez SELECT/ORDER/LIMIT) pro koš — sdílené mezi {@see listTrash()}
+     * a {@see countTrash()}.
+     * @return array{0:string,1:list<mixed>}
+     */
+    private function trashWhere(int $supplierId, DocumentViewerContext $viewer): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLS . ' FROM documents
-              WHERE supplier_id = ? AND deleted_at IS NOT NULL AND parent_document_id IS NULL
-              ORDER BY deleted_at DESC, id DESC'
-        );
-        $stmt->execute([$supplierId]);
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $sql = 'FROM documents
+                 WHERE supplier_id = ? AND deleted_at IS NOT NULL AND parent_document_id IS NULL'
+             . $scopeSql;
+        return [$sql, array_merge([$supplierId], $scopeParams)];
+    }
+
+    /** Stránkované — $limit/$offset se inlinují jako validované inty. @return list<array<string,mixed>> */
+    public function listTrash(int $supplierId, DocumentViewerContext $viewer, int $limit = 50, int $offset = 0): array
+    {
+        [$where, $params] = $this->trashWhere($supplierId, $viewer);
+        $sql = 'SELECT ' . self::COLS . ' ' . $where . ' ORDER BY deleted_at DESC, id DESC'
+             . ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /** COUNT(*) se stejnými filtry jako {@see listTrash()}, bez LIMIT — pro `meta.total`. */
+    public function countTrash(int $supplierId, DocumentViewerContext $viewer): int
+    {
+        [$where, $params] = $this->trashWhere($supplierId, $viewer);
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) ' . $where);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
     }
 
     /**
@@ -147,10 +262,11 @@ final class DocumentRepository
      * Fallback na LIKE pro krátké dotazy (pod min. délkou tokenu fulltextu).
      * @return list<array<string,mixed>>
      */
-    public function search(int $supplierId, string $q, int $limit = 50): array
+    public function search(int $supplierId, string $q, DocumentViewerContext $viewer, int $limit = 50): array
     {
         $q = trim($q);
         if ($q === '') return [];
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
 
         // LIMIT inlinujeme jako int (vlastní hodnota) — native prepared statements
         // neumí LIMIT s parametrem typu string. Placeholdery jsou poziční (?),
@@ -168,17 +284,19 @@ final class DocumentRepository
                      WHERE supplier_id = ? AND deleted_at IS NULL
                        AND (MATCH(title, description) AGAINST (? IN NATURAL LANGUAGE MODE)
                             OR MATCH(content_text) AGAINST (? IN NATURAL LANGUAGE MODE)
-                            OR title LIKE ? OR original_name LIKE ?)
+                            OR title LIKE ? OR original_name LIKE ?)'
+                     . $scopeSql . '
                      ORDER BY score DESC, created_at DESC
                      LIMIT ' . $lim;
-            $params = [$q, $q, $supplierId, $q, $q, $like, $like];
+            $params = array_merge([$q, $q, $supplierId, $q, $q, $like, $like], $scopeParams);
         } else {
             $sql = 'SELECT ' . self::COLS . ', 0 AS score FROM documents
                      WHERE supplier_id = ? AND deleted_at IS NULL
-                       AND (title LIKE ? OR original_name LIKE ? OR description LIKE ?)
+                       AND (title LIKE ? OR original_name LIKE ? OR description LIKE ?)'
+                     . $scopeSql . '
                      ORDER BY created_at DESC
                      LIMIT ' . $lim;
-            $params = [$supplierId, $like, $like, $like];
+            $params = array_merge([$supplierId, $like, $like, $like], $scopeParams);
         }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
@@ -250,72 +368,114 @@ final class DocumentRepository
         return $stmt->rowCount() > 0;
     }
 
-    /** Surové řádky v koši (vč. filename/sha) — pro fyzické mazání. @return list<array<string,mixed>> */
-    public function listTrashedRaw(int $supplierId): array
+    /**
+     * Surové řádky v koši (vč. filename/sha) — pro fyzické mazání. Scope-aware:
+     * non-admin vysype jen company + vlastní user doklady (nesmí odpojit cizí user bajty).
+     * @return list<array<string,mixed>>
+     */
+    public function listTrashedRaw(int $supplierId, DocumentViewerContext $viewer): array
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, sha256, filename, thumb_path FROM documents
-              WHERE supplier_id = ? AND deleted_at IS NOT NULL'
+              WHERE supplier_id = ? AND deleted_at IS NOT NULL' . $scopeSql
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute(array_merge([$supplierId], $scopeParams));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function hardDeleteTrashed(int $supplierId): int
+    public function hardDeleteTrashed(int $supplierId, DocumentViewerContext $viewer): int
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $this->db->pdo()->prepare(
-            'DELETE FROM documents WHERE supplier_id = ? AND deleted_at IS NOT NULL'
+            'DELETE FROM documents WHERE supplier_id = ? AND deleted_at IS NOT NULL' . $scopeSql
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute(array_merge([$supplierId], $scopeParams));
         return $stmt->rowCount();
     }
 
     /**
-     * Počet (i smazaných) dokumentů daného dodavatele se stejným sha256, kromě dané sady id.
-     * Pro dedup-aware fyzické mazání: soubor smažeme jen když je výsledek 0.
+     * Ref-counting (Epic F7, §4.4): union přes documents + document_files, protože
+     * oba subsystémy A sdílejí `sup-{id}` content-addressed sha strom. Bajt se odpojí
+     * teprve při součtu 0 — smazání jednoho document_files řádku NESMÍ odpojit bajt
+     * referencovaný jiným řádkem/dokumentem. Union je supplier-scoped (NE per-user):
+     * bajty jsou sdílené v rámci tenanta bez ohledu na scope company/user.
+     * `journal_entry_attachments` mají VLASTNÍ disk namespace → NEspadají do union.
+     *
+     * Počítáme VŠECHNY řádky (i soft-deleted/v koši), NE jen deleted_at IS NULL:
+     * hard-deleted řádky už v tabulce nejsou, takže každý zbylý řádek — smazaný v koši
+     * nebo aktivní — je živá reference na bajt, dokud i on není fyzicky smazán. Volající
+     * před hard-delete vylučuje právě mazaný řádek přes $excludeIds/$excludeFileIds.
+     * (Původní `deleted_at IS NULL` filtr odpojoval sdílený bajt, na který ještě ukazoval
+     * cizí doklad v koši → restore 404.)
+     *
+     * @param list<int> $excludeIds     documents.id právě mazaných řádků
+     * @param list<int> $excludeFileIds document_files.id právě mazaných řádků
      */
-    public function countBySha(int $supplierId, string $sha256, array $excludeIds = []): int
+    public function countBySha(int $supplierId, string $sha256, array $excludeIds = [], array $excludeFileIds = []): int
     {
-        $sql = 'SELECT COUNT(*) FROM documents WHERE supplier_id = ? AND sha256 = ?';
+        $sql1 = 'SELECT COUNT(*) FROM documents WHERE supplier_id = ? AND sha256 = ?';
         $params = [$supplierId, $sha256];
         if ($excludeIds !== []) {
             $in = implode(',', array_fill(0, count($excludeIds), '?'));
-            $sql .= " AND id NOT IN ($in)";
+            $sql1 .= " AND id NOT IN ($in)";
             $params = array_merge($params, array_map('intval', $excludeIds));
         }
-        $stmt = $this->db->pdo()->prepare($sql);
+
+        // document_files větev POČÍTÁ jen aktivní řádky (deleted_at IS NULL): remove() je
+        // tvrdý záměr bez restore cesty (L2), takže soft-deleted file řádek už bajt nedrží.
+        // (documents větev naopak drží i trashed řádky kvůli restore z koše — Commit-3 fix.)
+        $sql2 = 'SELECT COUNT(*) FROM document_files WHERE supplier_id = ? AND sha256 = ? AND deleted_at IS NULL';
+        $params[] = $supplierId;
+        $params[] = $sha256;
+        if ($excludeFileIds !== []) {
+            $in = implode(',', array_fill(0, count($excludeFileIds), '?'));
+            $sql2 .= " AND id NOT IN ($in)";
+            $params = array_merge($params, array_map('intval', $excludeFileIds));
+        }
+
+        // stock_media větev (Epic ESHOP) — produktová média sdílejí týž content-addressed
+        // sha pool (storage_key = sha256). Bez tohoto by DMS mazání odpojilo bajt, na který
+        // ještě ukazuje obrázek produktu (tichá ztráta dat). ESHOP nemá koš — počítá se vždy.
+        $sql3 = 'SELECT COUNT(*) FROM stock_media WHERE supplier_id = ? AND storage_key = ?';
+        $params[] = $supplierId;
+        $params[] = $sha256;
+
+        $stmt = $this->db->pdo()->prepare("SELECT ($sql1) + ($sql2) + ($sql3)");
         $stmt->execute($params);
         return (int) $stmt->fetchColumn();
     }
 
     /** Dokumenty s daným tagem (globálně přes všechny složky). @return list<array<string,mixed>> */
-    public function listByTag(int $supplierId, string $tag): array
+    public function listByTag(int $supplierId, string $tag, DocumentViewerContext $viewer): array
     {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer, 'd');
         $stmt = $this->db->pdo()->prepare(
             'SELECT d.* FROM documents d
                 JOIN document_tag_map m ON m.document_id = d.id
                 JOIN document_tags t ON t.id = m.tag_id
               WHERE d.supplier_id = ? AND d.deleted_at IS NULL AND d.parent_document_id IS NULL
-                AND t.name = ?
+                AND t.name = ?' . $scopeSql . '
               ORDER BY d.title'
         );
-        $stmt->execute([$supplierId, $tag]);
+        $stmt->execute(array_merge([$supplierId, $tag], $scopeParams));
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
     /** Dokumenty navázané na entitu (oboustranné provázání). @return list<array<string,mixed>> */
-    public function listByEntity(int $supplierId, string $entityType, int $entityId): array
+    public function listByEntity(int $supplierId, string $entityType, int $entityId, DocumentViewerContext $viewer): array
     {
         // d.* (ne self::COLS) — join s document_links zavádí sloupec created_at i tam,
         // takže nekvalifikované názvy by byly nejednoznačné. hydrate() si vybere potřebné.
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer, 'd');
         $stmt = $this->db->pdo()->prepare(
             'SELECT d.* FROM documents d
                 JOIN document_links l ON l.document_id = d.id
               WHERE d.supplier_id = ? AND d.deleted_at IS NULL
-                AND l.entity_type = ? AND l.entity_id = ?
+                AND l.entity_type = ? AND l.entity_id = ?' . $scopeSql . '
               ORDER BY d.created_at DESC'
         );
-        $stmt->execute([$supplierId, $entityType, $entityId]);
+        $stmt->execute(array_merge([$supplierId, $entityType, $entityId], $scopeParams));
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
@@ -341,6 +501,8 @@ final class DocumentRepository
             'thumb_status'       => (string) $r['thumb_status'],
             'has_thumb'          => ($r['thumb_status'] ?? '') === 'generated',
             'uploaded_by'        => $r['uploaded_by'] !== null ? (int) $r['uploaded_by'] : null,
+            'scope'              => (string) ($r['scope'] ?? 'company'),
+            'owner_user_id'      => isset($r['owner_user_id']) && $r['owner_user_id'] !== null ? (int) $r['owner_user_id'] : null,
             'deleted_at'         => $r['deleted_at'] !== null ? (string) $r['deleted_at'] : null,
             'created_at'         => (string) $r['created_at'],
         ];

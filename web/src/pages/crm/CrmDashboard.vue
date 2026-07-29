@@ -12,6 +12,7 @@ import { crmApi, type CrmKpi, type CrmOverview, type CrmMonthlyRow, type TopClie
   type ReminderEffectiveness, type PaymentTimeHistogram, type CrmYearlyRow } from '@/api/crm'
 import { formatMoney } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
 
@@ -429,13 +430,11 @@ onMounted(loadAll)
           <option :value="ALL_CURRENCIES">{{ t('crm.all_currencies') }}</option>
         </select>
         <button
-          v-if="auth.user?.role === 'admin'"
+          v-if="auth.canWrite('dashboard.portfolio')"
           type="button" @click="recompute" :disabled="recomputing"
           :title="t('crm.recompute_hint')"
-          class="cursor-pointer h-9 px-3 border border-neutral-300 hover:bg-neutral-50 text-sm rounded-md inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/>
-          </svg>
+          :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
           {{ recomputing ? '…' : t('crm.recompute') }}
         </button>
       </div>
@@ -448,8 +447,9 @@ onMounted(loadAll)
     <div v-else-if="!overview || overview.currencies.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center">
       <p class="text-neutral-600 mb-2">{{ t('crm.no_data') }}</p>
       <p class="text-sm text-neutral-500 mb-4">{{ t('crm.no_data_hint') }}</p>
-      <button v-if="auth.user?.role === 'admin'" type="button" @click="recompute" :disabled="recomputing"
-        class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
+      <button v-if="auth.canWrite('dashboard.portfolio')" type="button" @click="recompute" :disabled="recomputing"
+        :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
         {{ t('crm.recompute_now') }}
       </button>
     </div>

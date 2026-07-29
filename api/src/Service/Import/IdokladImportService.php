@@ -644,6 +644,9 @@ final class IdokladImportService
             'tax_date'              => $taxDate,
             'due_date'              => $dueDate,
             'received_at'           => date('Y-m-d'),
+            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
+            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId($currencyCode, $supplierId, isActive: false),
             'exchange_rate'         => self::idokladExchangeRate($i),
             'exchange_rate_source'  => 'manual',
@@ -839,6 +842,9 @@ final class IdokladImportService
             'tax_date'              => $taxDate,
             'due_date'              => $dueDate,
             'received_at'           => date('Y-m-d'),
+            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
+            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId($currencyCode, $supplierId, isActive: false),
             'exchange_rate'         => self::idokladExchangeRate($i),
             'exchange_rate_source'  => 'manual',

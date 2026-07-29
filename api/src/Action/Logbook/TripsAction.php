@@ -11,12 +11,13 @@ use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\TripRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Jízdy (kniha jízd):
- *   GET    /api/logbook/trips         — list (?car_id=&category_id=&year=&month=&date_from=&date_to=&q=)
+ *   GET    /api/logbook/trips         — list (?car_id=&category_id=&year=&month=&date_from=&date_to=&q=&page=&per_page=)
  *   GET    /api/logbook/trips/{id}
  *   POST   /api/logbook/trips
  *   PUT    /api/logbook/trips/{id}
@@ -36,7 +37,14 @@ final class TripsAction
         $supplierId = SupplierGuard::currentId($request);
         $q = $request->getQueryParams();
         $filters = array_intersect_key($q, array_flip(['car_id', 'category_id', 'year', 'month', 'date_from', 'date_to', 'q']));
-        return Json::ok($response, $this->repo->listForTenant($supplierId, $filters));
+        $p = Pagination::fromQuery($q, 50);
+        [$rows, $total] = $this->repo->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
+        $carId = !empty($filters['car_id']) ? (int) $filters['car_id'] : null;
+        $years = $this->repo->distinctYears($supplierId, $carId);
+        return Json::ok($response, array_merge(
+            Pagination::envelope($rows, $total, $p['page'], $p['per_page']),
+            ['years' => $years]
+        ));
     }
 
     public function get(Request $request, Response $response, array $args): Response

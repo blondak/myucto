@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type BrandingProfile, type EmailProfile } from '@/api/settings'
+import { settingsApi, type BrandingProfile, type EmailProfile, type Supplier } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
 const toast = useToast()
-const props = defineProps<{ enabled: boolean }>()
+const props = defineProps<{ enabled: boolean; supplier: Supplier | null }>()
 const emit = defineEmits<{
   (event: 'changed'): void
   (event: 'update:enabled', value: boolean): void
@@ -17,6 +17,16 @@ const editing = ref<Partial<BrandingProfile> | null>(null)
 const saving = ref(false)
 const emailProfiles = ref<EmailProfile[]>([])
 const emailPreview = ref<{ profile: BrandingProfile; locale: 'cs' | 'en'; html: string } | null>(null)
+
+// Dodavatel je implicitní výchozí profil (migrace 0141) — žádný řádek
+// v branding_profiles mu neodpovídá. Vykreslujeme ho proto jako read-only kartu,
+// aby po zapnutí modulu bylo vidět, co se použije, dokud vlastní profil nevznikne.
+const supplierIsDefault = computed(() => !profiles.value.some(profile => profile.is_default))
+const supplierSummary = computed(() => {
+  const s = props.supplier
+  if (!s) return ''
+  return [s.display_name || s.company_name, s.email, s.phone, s.web].filter(Boolean).join(' · ')
+})
 
 const emptyProfile = (): Partial<BrandingProfile> => ({
   name: '', display_name: null, tagline: null, email: null, reply_to: null,
@@ -163,6 +173,20 @@ onMounted(() => { if (props.enabled) load() })
     <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.branding_profiles.module_enabled_hint') }}</p>
 
     <template v-if="enabled">
+    <article v-if="supplier" class="border border-neutral-200 rounded-md p-3 mt-4 bg-neutral-50/50">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full border border-neutral-300" :style="{ backgroundColor: supplier.email_accent_color }" />
+            <strong class="text-sm truncate">{{ t('settings.branding_profiles.supplier_default') }}</strong>
+            <span v-if="supplierIsDefault" class="text-xs px-2 py-0.5 rounded-full bg-primary-50 text-primary-700">{{ t('settings.branding_profiles.default_badge') }}</span>
+          </div>
+          <p class="text-xs text-neutral-500 mt-1 truncate">{{ supplierSummary }}</p>
+        </div>
+      </div>
+      <p class="text-xs text-neutral-500 mt-2">{{ t('settings.branding_profiles.supplier_default_hint') }}</p>
+    </article>
+
     <div v-if="profiles.length" class="space-y-3 mt-4">
       <article v-for="profile in profiles" :key="profile.id" class="border border-neutral-200 rounded-md p-3">
         <div class="flex items-center justify-between gap-3">

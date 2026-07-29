@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Účetní deník</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .entity { font-size: 8pt; color: #333; margin-bottom: 3mm; }
+    table.entries { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+    tr.entry-head td {
+        padding: 1.2mm 1mm 0.5mm 1mm;
+        font-size: 7.5pt;
+        font-weight: bold;
+        border-top: 0.4pt solid #999;
+        background-color: #f7f7f7;
+    }
+    tr.entry-line td {
+        padding: 0.6mm 1mm;
+        font-size: 7.5pt;
+        border-bottom: 0.2pt solid #eee;
+    }
+    .col-desc { width: 48mm; }
+    .col-account { width: 14mm; }
+    .col-name { width: 60mm; }
+    .num { text-align: right; }
+    .badge { font-size: 6.5pt; color: #92400e; }
+    .totals { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+    .totals td { font-weight: bold; font-size: 8.5pt; padding: 1.5mm 1mm; border-top: 0.5pt solid #333; }
+    .empty { text-align: center; color: #888; padding: 10mm 0; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Účetní deník</div>
+            {% if filters.date_from or filters.date_to %}
+                <div class="header-sub">Za období: {{ filters.date_from|cz_date }} – {{ filters.date_to|cz_date }}</div>
+            {% endif %}
+            {% if filters.source_type %}
+                <div class="header-sub">Zdroj: {{ filters.source_type }}</div>
+            {% endif %}
+        </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="entity">{{ entity.name }}{% if entity.ico %} — IČO: {{ entity.ico }}{% endif %}{% if entity.address %} — {{ entity.address }}{% endif %}</div>
+
+{% if entries is empty %}
+    <p class="empty">Pro zvolené filtry deník neobsahuje žádné zápisy.</p>
+{% else %}
+<table class="entries">
+    <thead>
+        <tr>
+            <th class="thl" style="text-align:left;">Datum</th>
+            <th class="thl" style="text-align:left;">Doklad</th>
+            <th class="thl col-desc" style="text-align:left;">Popis</th>
+            <th class="thl" style="text-align:left;">Původ</th>
+            <th class="thl col-account" style="text-align:left;">Účet</th>
+            <th class="thl col-name" style="text-align:left;">Název</th>
+            <th style="text-align:right;">MD</th>
+            <th style="text-align:right;">Dal</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+        <tr class="entry-head">
+            <td>{{ e.entry_date|cz_date }}</td>
+            <td>{{ e.document_no ?: '—' }}</td>
+            <td class="col-desc">
+                {{ e.description ?: '—' }}
+                {% if e.reversed_by %}<span class="badge">[stornováno #{{ e.reversed_by }}]</span>{% endif %}
+                {% if not e.posted_at %}<span class="badge">[koncept]</span>{% endif %}
+            </td>
+            <td>{{ e.automation_origin ?: 'ručně' }}</td>
+            <td colspan="2"></td>
+            <td class="num">{{ e.amount|cz_money }}</td>
+            <td class="num">{{ e.amount|cz_money }}</td>
+        </tr>
+        {% for l in e.lines %}
+            <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>{{ l.account_code }}</td>
+                <td>{{ l.account_name|slice(0, 40) }}</td>
+                <td class="num">{% if l.side == 'debit' %}{{ l.amount|cz_money }}{% endif %}</td>
+                <td class="num">{% if l.side == 'credit' %}{{ l.amount|cz_money }}{% endif %}</td>
+            </tr>
+        {% endfor %}
+    {% endfor %}
+    </tbody>
+</table>
+
+<table class="totals">
+    <tr>
+        <td>Počet zápisů: {{ totals.count }}</td>
+        <td class="num" style="width:20%;">{{ totals.debit|cz_money }}</td>
+        <td class="num" style="width:20%;">{{ totals.credit|cz_money }}</td>
+    </tr>
+</table>
+{% endif %}
+
+</body>
+</html>

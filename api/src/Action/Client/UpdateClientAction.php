@@ -9,7 +9,9 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientEmailContactRepository;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation;
@@ -23,6 +25,8 @@ final class UpdateClientAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly ClientEmailContactRepository $emailContacts,
+        private readonly ClientBankAccountRepository $bankAccounts,
+        private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -56,6 +60,12 @@ final class UpdateClientAction
                 return Json::error($response, 'invalid_email_contacts', $e->getMessage(), 422);
             }
         }
+        if (!empty($body['is_vendor']) && !empty($body['dic'])) {
+            try {
+                $this->bankAccountRegistry->sync($id, $supplierId, (string) $body['dic']);
+            } catch (\Throwable) {
+            }
+        }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -67,8 +77,16 @@ final class UpdateClientAction
         // výchozí kategorie nákladu / tržby (frontend ukáže toast).
         $client = $this->repo->find($id) ?? [];
         $client['email_contacts'] = $this->emailContacts->listForClient($id, $supplierId);
+        $client['bank_accounts'] = $this->bankAccounts->listForClient($id, $supplierId);
         $client['expense_category_backfilled'] = $backfilled['expense'];
         $client['revenue_category_backfilled'] = $backfilled['revenue'];
+
+        // Non-blocking varování (IČO mod 11 / DIČ formát — audit 2026-07).
+        $warnings = Validation::clientWarnings($body);
+        if (!empty($warnings)) {
+            $client['_warnings'] = $warnings;
+        }
+
         return Json::ok($response, $client);
     }
 }

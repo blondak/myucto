@@ -1,0 +1,465 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Accounting;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\AssetRepository;
+use MyInvoice\Repository\DepreciationEntryRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Assets\AssetException;
+use MyInvoice\Service\Accounting\Assets\AssetService;
+use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Integrační testy životního cyklu majetku (Epic F3, spec §6.2 I1–I5).
+ *
+ * I1 celý řetěz PF → karta → zařazení → book → vyřazení + rozvahové invarianty
+ * (delta zůstatků 022/082 = 0 po vyřazení, každý zápis vyvážený), I2 idempotence
+ * re-booku, I3 revert vyřazení (R24), I4 přerušení §26/8 (R14), I5 tenant izolace.
+ *
+ * Vzor PostingServiceTest: vše v jedné transakci s rollbackem v tearDown,
+ * soft-skip bez cfg.php, seeder osnovy, roky 2098/2099.
+ */
+#[Group('integration')]
+final class AssetLifecycleTest extends TestCase
+{
+    private const YEAR = 2098;
+
+    private Connection $db;
+    private AssetService $service;
+    private DepreciationPostingService $depPosting;
+    private AssetRepository $assets;
+    private DepreciationEntryRepository $entries;
+    private JournalEntryRepository $journal;
+    private PostingService $posting;
+    private AccountingPeriodRepository $periods;
+
+    private int $supplierId = 0;
+    private int $currencyId = 0;
+    private int $vatRateId = 0;
+    private int $userId = 0;
+    private int $czId = 0;
+    private bool $inTx = false;
+
+    protected function setUp(): void
+    {
+        $rootDir = dirname(__DIR__, 4);
+        if (!is_file($rootDir . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        try {
+            $container = Bootstrap::buildApp()->getContainer();
+            $this->db         = $container->get(Connection::class);
+            $this->service    = $container->get(AssetService::class);
+            $this->depPosting = $container->get(DepreciationPostingService::class);
+            $this->assets     = $container->get(AssetRepository::class);
+            $this->entries    = $container->get(DepreciationEntryRepository::class);
+            $this->journal    = $container->get(JournalEntryRepository::class);
+            $this->posting    = $container->get(PostingService::class);
+            $this->periods    = $container->get(AccountingPeriodRepository::class);
+            $seeder           = $container->get(ChartOfAccountsSeeder::class);
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
+        }
+
+        $pdo = $this->db->pdo();
+        $this->supplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->currencyId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        $this->vatRateId  = (int) ($pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->userId     = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->czId       = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
+
+        if ($this->supplierId === 0 || $this->currencyId === 0 || $this->vatRateId === 0 || $this->userId === 0 || $this->czId === 0) {
+            $this->markTestSkipped('Chybí základní data (supplier/currency/vat_rate/user/country) v DB.');
+        }
+
+        $pdo->beginTransaction();
+        $this->inTx = true;
+
+        $seeder->seedForSupplier($this->supplierId);
+        $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->inTx) {
+            $pdo = $this->db->pdo();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $this->db->close();
+        }
+    }
+
+    // ── I1: celý řetěz PF → karta → zařazení → book → vyřazení ────────────────
+
+    public function testI1FullChainFromPurchaseInvoiceToDisposal(): void
+    {
+        $before022 = $this->accountBalance('022');
+        $before082 = $this->accountBalance('082');
+
+        // PF 500 000 + 105 000 DPH s příznakem majetku → 042/343/321
+        $vendor     = $this->client('Dodavatel majetku a.s.', false, true);
+        $purchaseId = $this->purchase('PF-2098-M1', $vendor, 500000.00, 105000.00, 21.00, true);
+
+        $lines   = $this->posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId);
+        $piEntry = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $purchaseId, $lines,
+            ['entry_date' => self::YEAR . '-03-10', 'posted_by' => $this->userId]);
+        $byAcc = $this->linesByAccountCode($this->journal->find($piEntry, $this->supplierId)['lines']);
+        self::assertEqualsWithDelta(500000.00, $byAcc['042']['debit'], 0.001, 'PF majetku → MD 042 (pořízení).');
+        self::assertEqualsWithDelta(605000.00, $byAcc['321']['credit'], 0.001, 'D 321 = závazek.');
+
+        // Karta: sk. 2 rovnoměrně, účetně 60 měsíců (022/082/042 mapou R18)
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => 'M-I1-001',
+            'name' => 'Testovací stroj I1',
+            'input_price' => 500000.00,
+            'acquisition_date' => self::YEAR . '-03-10',
+            'tax_method' => 'straight',
+            'tax_group' => 2,
+            'acc_useful_life_months' => 60,
+            'purchase_invoice_id' => $purchaseId,
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+        self::assertSame('082', $created['asset']['accumulated_account_code'], 'Oprávky odvozené mapou R18 (022 → 082).');
+
+        // Zařazení do užívání 20. 4. 2098 → ('asset', id) MD 022 / D 042
+        $this->service->putIntoUse($this->supplierId, $assetId, self::YEAR . '-04-20', true,
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $useEntry = $this->journal->findBySource($this->supplierId, 'asset', $assetId);
+        self::assertNotNull($useEntry, 'Zařazení má zápis ("asset", id).');
+        $useLines = $this->journal->linesForEntry((int) $useEntry['id'], $this->supplierId);
+        $byAcc = $this->linesByAccountCode($useLines);
+        self::assertEqualsWithDelta(500000.00, $byAcc['022']['debit'], 0.001, 'MD 022 = vstupní cena.');
+        self::assertEqualsWithDelta(500000.00, $byAcc['042']['credit'], 0.001, 'D 042.');
+        $this->assertBalanced($useLines);
+
+        // Book 2098: účetní odpis 5–12/2098 = 8 × round(500 000/60) = 66 664 → MD 551 / D 082
+        $result = $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        self::assertGreaterThanOrEqual(1, $result['booked']);
+        $accEntry = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        self::assertNotNull($accEntry);
+        self::assertEqualsWithDelta(66664.00, $accEntry['amount'], 0.001, '8 měsíců à 8 333.');
+        $depJournal = $this->journal->findBySource($this->supplierId, 'depreciation', (int) $accEntry['id']);
+        self::assertNotNull($depJournal, 'Odpis má zápis ("depreciation", entryId).');
+        $depLines = $this->journal->linesForEntry((int) $depJournal['id'], $this->supplierId);
+        $byAcc = $this->linesByAccountCode($depLines);
+        self::assertEqualsWithDelta(66664.00, $byAcc['551']['debit'], 0.001, 'MD 551 = účetní odpis.');
+        self::assertEqualsWithDelta(66664.00, $byAcc['082']['credit'], 0.001, 'D 082 = oprávky.');
+        $this->assertBalanced($depLines);
+
+        $taxEntry = $this->entries->findYear($assetId, 'tax', self::YEAR);
+        self::assertNotNull($taxEntry);
+        self::assertEqualsWithDelta(55000.00, $taxEntry['amount'], 0.001, 'Daňový odpis 2098 = 11 % z 500 000.');
+
+        // Vyřazení prodejem 15. 10. 2099: dopočet odpisu 1–10/2099 (83 330), půlodpis
+        // daňově (55 625), disposal zápis MD 541 ZC / D 082 + MD 082 PC / D 022.
+        $disposed = $this->service->dispose($this->supplierId, $assetId,
+            ['date' => (self::YEAR + 1) . '-10-15', 'type' => 'sold', 'price' => 250000.00],
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        self::assertSame('disposed', $disposed['asset']['status']);
+
+        $acc2099 = $this->entries->findYear($assetId, 'accounting', self::YEAR + 1);
+        self::assertNotNull($acc2099);
+        self::assertEqualsWithDelta(83330.00, $acc2099['amount'], 0.001, '10 měsíců à 8 333 do měsíce vyřazení včetně.');
+
+        $tax2099 = $this->entries->findYear($assetId, 'tax', self::YEAR + 1);
+        self::assertNotNull($tax2099);
+        self::assertTrue($tax2099['is_half'], 'Rok vyřazení = půlodpis §26/7.');
+        self::assertEqualsWithDelta(55625.00, $tax2099['amount'], 0.001, '½ z 111 250.');
+
+        $dispEntry = $this->journal->findBySource($this->supplierId, 'asset_disposal', $assetId);
+        self::assertNotNull($dispEntry, 'Vyřazení má zápis ("asset_disposal", id).');
+        $dispLines = $this->journal->linesForEntry((int) $dispEntry['id'], $this->supplierId);
+        $byAcc = $this->linesByAccountCode($dispLines);
+        self::assertEqualsWithDelta(350006.00, $byAcc['541']['debit'], 0.001, 'MD 541 = účetní ZC (500 000 − 66 664 − 83 330).');
+        self::assertEqualsWithDelta(500000.00, $byAcc['082']['debit'], 0.001, 'MD 082 = vyřazení z evidence v PC.');
+        self::assertEqualsWithDelta(350006.00, $byAcc['082']['credit'], 0.001, 'D 082 = doodepsání ZC.');
+        self::assertEqualsWithDelta(500000.00, $byAcc['022']['credit'], 0.001, 'D 022 = pořizovací cena.');
+        $this->assertBalanced($dispLines);
+
+        // Invarianty: delta zůstatků 022 a 082 po celém řetězu = 0 (haléře)
+        self::assertEqualsWithDelta($before022, $this->accountBalance('022'), 0.001, 'Zůstatek 022 po vyřazení = 0.');
+        self::assertEqualsWithDelta($before082, $this->accountBalance('082'), 0.001, 'Zůstatek 082 po vyřazení = 0.');
+    }
+
+    // ── I2: idempotence re-booku ───────────────────────────────────────────────
+
+    public function testI2RebookSameYearIsIdempotent(): void
+    {
+        $assetId = $this->createAssetInUse('M-I2-001', self::YEAR . '-01-15');
+
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        $accEntry = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        self::assertNotNull($accEntry);
+        self::assertEqualsWithDelta(91663.00, $accEntry['amount'], 0.001, '11 měsíců à 8 333 (2–12/2098).');
+        $firstJournal = $this->journal->findBySource($this->supplierId, 'depreciation', (int) $accEntry['id']);
+        self::assertNotNull($firstJournal);
+
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+
+        $accEntry2 = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        self::assertSame($accEntry['id'], $accEntry2['id'], 'Re-book přepisuje TÝŽ řádek odpisů (upsert).');
+        self::assertEqualsWithDelta($accEntry['amount'], $accEntry2['amount'], 0.001, 'Částka beze změny.');
+
+        $secondJournal = $this->journal->findBySource($this->supplierId, 'depreciation', (int) $accEntry['id']);
+        self::assertSame((int) $firstJournal['id'], (int) $secondJournal['id'], 'Týž journal entry id.');
+
+        $count = (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM journal_entries WHERE supplier_id = {$this->supplierId}
+              AND source_type = 'depreciation' AND source_id = {$accEntry['id']}"
+        )->fetchColumn();
+        self::assertSame(1, $count, 'Žádná duplicita zápisů.');
+
+        $lineCount = (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM journal_entry_lines WHERE entry_id = {$firstJournal['id']}"
+        )->fetchColumn();
+        self::assertSame(2, $lineCount, 'Řádky přepsány in-place, ne zdvojeny.');
+    }
+
+    // ── I3: revert vyřazení (R24) ──────────────────────────────────────────────
+
+    public function testI3RevertDisposalRestoresAssetAndReversesEntries(): void
+    {
+        $assetId = $this->createAssetInUse('M-I3-001', self::YEAR . '-02-10');
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        $this->service->dispose($this->supplierId, $assetId,
+            ['date' => self::YEAR . '-09-15', 'type' => 'liquidated'],
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $accEntry = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        self::assertNotNull($accEntry);
+        $dispJournalId = (int) $this->journal->findBySource($this->supplierId, 'asset_disposal', $assetId)['id'];
+        $depJournalId  = (int) $this->journal->findBySource($this->supplierId, 'depreciation', (int) $accEntry['id'])['id'];
+
+        $reverted = $this->service->revertDisposal($this->supplierId, $assetId,
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        self::assertSame('in_use', $reverted['asset']['status'], 'Status zpět in_use.');
+        self::assertNull($reverted['asset']['disposal_date']);
+        self::assertNull($reverted['asset']['disposal_type']);
+
+        self::assertNotNull($this->journal->find($dispJournalId, $this->supplierId)['reversed_by'],
+            'Disposal zápis má storno pár.');
+        self::assertNotNull($this->journal->find($depJournalId, $this->supplierId)['reversed_by'],
+            'Odpis roku vyřazení má storno pár.');
+
+        self::assertNull($this->entries->findYear($assetId, 'accounting', self::YEAR), 'Účetní řádek roku smazán.');
+        self::assertNull($this->entries->findYear($assetId, 'tax', self::YEAR), 'Daňový řádek roku smazán.');
+
+        // Regrese: stornovaný disposal zápis nesmí blokovat nové vyřazení
+        // (uvolněný source klíč) — dispose po revertu musí projít.
+        $again = $this->service->dispose($this->supplierId, $assetId,
+            ['date' => self::YEAR . '-11-20', 'type' => 'sold', 'price' => 1000.00],
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        self::assertSame('disposed', $again['asset']['status'], 'Opakované vyřazení po revertu projde.');
+        $newDisposal = $this->journal->findBySource($this->supplierId, 'asset_disposal', $assetId);
+        self::assertNotNull($newDisposal, 'Nový disposal zápis drží source klíč.');
+        self::assertNotSame($dispJournalId, (int) $newDisposal['id'], 'Vznikl NOVÝ zápis, starý zůstal jako storno pár.');
+        self::assertNull($newDisposal['reversed_by']);
+    }
+
+    // ── I4: přerušení §26/8 (R14) ─────────────────────────────────────────────
+
+    public function testI4PauseSkipsTaxBookingAndUnpauseAfterLaterYearRefused(): void
+    {
+        $assetId = $this->createAssetInUse('M-I4-001', self::YEAR . '-03-10', 90000.00, 1, 36);
+
+        $paused = $this->service->pauseYear($this->supplierId, $assetId, self::YEAR);
+        self::assertTrue($paused['entry']['is_paused']);
+        self::assertEqualsWithDelta(0.0, $paused['entry']['amount'], 0.001);
+
+        // Book roku s pauzou: tax krok se přeskočí (řádek zůstane pauza 0), acc se zaúčtuje
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        $tax = $this->entries->findYear($assetId, 'tax', self::YEAR);
+        self::assertTrue($tax['is_paused'], 'Pauza přežije book (R14).');
+        self::assertEqualsWithDelta(0.0, $tax['full_amount'], 0.001);
+        $acc = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        self::assertNotNull($acc, 'Účetní odpis pauzou dotčen není.');
+        self::assertGreaterThan(0, $acc['amount']);
+
+        // Potvrzení pozdějšího roku → unpause 2098 zamítnut
+        $this->depPosting->bookYear($this->supplierId, self::YEAR + 1, ['posted_by' => $this->userId]);
+        $taxNext = $this->entries->findYear($assetId, 'tax', self::YEAR + 1);
+        self::assertNotNull($taxNext);
+        self::assertGreaterThan(0, $taxNext['full_amount'], 'Po pauze odpisování pokračuje.');
+
+        try {
+            $this->service->unpauseYear($this->supplierId, $assetId, self::YEAR);
+            self::fail('Unpause po potvrzení pozdějšího roku musí selhat (R14).');
+        } catch (AssetException $e) {
+            self::assertSame('later_year_confirmed', $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+        }
+    }
+
+    public function testDonationReturnsVatOutputWarning(): void
+    {
+        $assetId = $this->createAssetInUse('M-EP4-DAR', self::YEAR . '-03-10', 90000.00, 1, 36);
+
+        $disposed = $this->service->dispose($this->supplierId, $assetId,
+            ['date' => self::YEAR . '-09-15', 'type' => 'donated'],
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        self::assertContains('donation_vat_output', array_column($disposed['warnings'], 'code'));
+    }
+
+    public function testRevertDisposalPreservesPausedTaxYear(): void
+    {
+        $assetId = $this->createAssetInUse('M-EP4-PAUSE', self::YEAR . '-03-10', 90000.00, 1, 36);
+        $this->service->pauseYear($this->supplierId, $assetId, self::YEAR);
+        $this->service->dispose($this->supplierId, $assetId,
+            ['date' => self::YEAR . '-09-15', 'type' => 'liquidated'],
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $this->service->revertDisposal($this->supplierId, $assetId,
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $tax = $this->entries->findYear($assetId, 'tax', self::YEAR);
+        self::assertNotNull($tax, 'Pauza založená před vyřazením zůstala zachována.');
+        self::assertTrue($tax['is_paused']);
+        self::assertEqualsWithDelta(0.0, $tax['amount'], 0.001);
+        self::assertNull($this->entries->findYear($assetId, 'accounting', self::YEAR));
+    }
+
+    // ── I5: tenant izolace ─────────────────────────────────────────────────────
+
+    public function testI5TenantIsolation(): void
+    {
+        $assetId = $this->createAssetInUse('M-I5-001', self::YEAR . '-02-10');
+        $otherSupplier = $this->supplierId + 99999;
+
+        self::assertNull($this->assets->find($otherSupplier, $assetId), 'Cross-tenant find vrací null.');
+
+        $list = $this->assets->list($otherSupplier, []);
+        self::assertNotContains($assetId, array_column($list['items'], 'id'), 'Cross-tenant list kartu nevrátí.');
+
+        try {
+            $this->service->plan($otherSupplier, $assetId);
+            self::fail('Cross-tenant plan musí skončit 404.');
+        } catch (AssetException $e) {
+            self::assertSame(404, $e->httpStatus);
+        }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function createAssetInUse(
+        string $inventoryNumber,
+        string $useDate,
+        float $price = 500000.00,
+        int $taxGroup = 2,
+        int $lifeMonths = 60,
+    ): int {
+        $created = $this->service->create($this->supplierId, [
+            'inventory_number' => $inventoryNumber,
+            'name' => 'Majetek ' . $inventoryNumber,
+            'input_price' => $price,
+            'acquisition_date' => $useDate,
+            'tax_method' => 'straight',
+            'tax_group' => $taxGroup,
+            'acc_useful_life_months' => $lifeMonths,
+        ], ['user_id' => $this->userId]);
+        $assetId = (int) $created['asset']['id'];
+        $this->service->putIntoUse($this->supplierId, $assetId, $useDate, true,
+            ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        return $assetId;
+    }
+
+    /** Zůstatek syntetického účtu (MD − D) přes všechny zápisy firmy. */
+    private function accountBalance(string $code): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ? AND a.account_code = ?"
+        );
+        $stmt->execute([$this->supplierId, $code]);
+        return (float) $stmt->fetchColumn();
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<string,array{debit:float,credit:float}>
+     */
+    private function linesByAccountCode(array $lines): array
+    {
+        $codeById = [];
+        $stmt = $this->db->pdo()->prepare('SELECT id, account_code FROM chart_of_accounts WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $codeById[(int) $r['id']] = (string) $r['account_code'];
+        }
+        $out = [];
+        foreach ($lines as $l) {
+            $code = $codeById[(int) $l['account_id']] ?? '?';
+            $out[$code] ??= ['debit' => 0.0, 'credit' => 0.0];
+            $out[$code][$l['side']] += (float) $l['amount'];
+        }
+        return $out;
+    }
+
+    /** @param list<array<string,mixed>> $lines */
+    private function assertBalanced(array $lines): void
+    {
+        $debit = 0;
+        $credit = 0;
+        foreach ($lines as $l) {
+            $cents = (int) round((float) $l['amount'] * 100);
+            if ($l['side'] === 'debit') {
+                $debit += $cents;
+            } else {
+                $credit += $cents;
+            }
+        }
+        self::assertSame($debit, $credit, 'Σ MD == Σ D (v haléřích).');
+    }
+
+    private function client(string $name, bool $customer, bool $vendor): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO clients
+                (supplier_id, company_name, street, city, zip, country_id, dic, main_email,
+                 language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, ?, "Test 1", "Praha", "11000", ?, "CZ12345678", "test@example.com", "cs", ?, ?, ?)'
+        );
+        $stmt->execute([$this->supplierId, $name, $this->czId, $this->currencyId, $customer ? 1 : 0, $vendor ? 1 : 0]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function purchase(string $number, int $vendorId, float $base, float $vat, float $rate, bool $fixedAsset): int
+    {
+        $with = $base + $vat;
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, vat_classification_code,
+                 vat_deduction, is_fixed_asset, created_by)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", ?, ?, ?, "received", "40", "full", ?, ?)'
+        );
+        $issue = self::YEAR . '-03-10';
+        $stmt->execute([$this->supplierId, $vendorId, $number, $issue, $issue, $issue, $issue,
+            $this->currencyId, $base, $vat, $with, $fixedAsset ? 1 : 0, $this->userId]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $itemStmt = $this->db->pdo()->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, is_fixed_asset, order_index)
+             VALUES (?, "Stroj", 1, "ks", ?, ?, ?, ?, ?, ?, ?, 0)'
+        );
+        $itemStmt->execute([$id, $base, $this->vatRateId, $rate, $base, $vat, $with, $fixedAsset ? 1 : 0]);
+        return $id;
+    }
+}

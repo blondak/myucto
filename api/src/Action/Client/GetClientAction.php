@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientEmailContactRepository;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -18,6 +19,7 @@ final class GetClientAction
         private readonly ClientRepository $repo,
         private readonly Connection $db,
         private readonly ClientEmailContactRepository $emailContacts,
+        private readonly ClientBankAccountRepository $bankAccounts,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -30,6 +32,7 @@ final class GetClientAction
         }
         $client['projects'] = $this->repo->projectsForClient($id);
         $client['email_contacts'] = $this->emailContacts->listForClient($id, $sid);
+        $client['bank_accounts'] = $this->bankAccounts->listForClient($id, $sid);
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM invoices WHERE client_id = ?');
         $stmt->execute([$id]);
@@ -179,6 +182,7 @@ final class GetClientAction
                          AND (pi.status = 'paid'
                               OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
                                           WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                AND COALESCE(pi.document_kind, '') <> 'tax_document'
                 AND pi.issue_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
               GROUP BY month, cur.code
               ORDER BY month"
@@ -209,6 +213,7 @@ final class GetClientAction
                          AND (pi.status = 'paid'
                               OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
                                           WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                AND COALESCE(pi.document_kind, '') <> 'tax_document'
               GROUP BY year, cur.code
               ORDER BY year DESC"
         );

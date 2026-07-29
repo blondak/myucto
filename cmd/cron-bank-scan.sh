@@ -6,7 +6,7 @@
 #  SHA256 dedupe — soubor co už byl naimportovaný se přeskočí.
 #
 #  crontab:
-#    */30 * * * *  /var/www/myinvoice.cz/cmd/cron-bank-scan.sh
+#    */30 * * * *  /var/www/myucto.cz/cmd/cron-bank-scan.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

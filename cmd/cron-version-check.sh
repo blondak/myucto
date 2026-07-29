@@ -4,12 +4,12 @@
 #  Frekvence: 1× denně (kdykoliv, nesnese více než 1× za 6h kvůli GitHub rate
 #  limitu pro anonymní volání = 60 req/h/IP, ale jednou denně bohatě stačí).
 #
-#  Volá GitHub Releases API (github.com/radekhulan/myinvoice/releases/latest),
+#  Volá GitHub Releases API (github.com/radekhulan/myucto/releases/latest),
 #  cachuje tag + release notes do tabulky `app_meta`. UI footer + Systém →
 #  Aktualizace pak čtou z cache (žádný blocking call při každém page loadu).
 #
 #  crontab:
-#    0 6 * * *  /var/www/myinvoice.cz/cmd/cron-version-check.sh
+#    0 6 * * *  /var/www/myucto.cz/cmd/cron-version-check.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

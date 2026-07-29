@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Pohledávky a závazky</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #15131D; }
+    .header-title { font-size: 14pt; font-weight: bold; text-align: center; }
+    .header-meta { font-size: 8pt; color: #555; text-align: center; margin-top: 1mm; margin-bottom: 5mm; }
+    .cur-title { font-size: 11pt; font-weight: bold; margin-top: 5mm; margin-bottom: 1.5mm; }
+    .side-title { font-size: 9pt; font-weight: bold; margin-top: 2mm; margin-bottom: 1mm; }
+    table.aging { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+    table.aging thead th {
+        font-size: 8pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc;
+    }
+    table.aging thead th.thl { text-align: left; }
+    table.aging tbody td { padding: 0.9mm 1.5mm; font-size: 9pt; border-bottom: 0.2pt solid #eee; }
+    table.aging tbody td.num { text-align: right; }
+    table.aging tfoot td { font-weight: bold; padding: 1mm 1.5mm; border-top: 0.5pt solid #333; }
+    table.aging tfoot td.num { text-align: right; }
+    .kpi-title { font-size: 10pt; font-weight: bold; margin-top: 6mm; margin-bottom: 1.5mm; }
+    table.kpi { width: 70%; border-collapse: collapse; }
+    table.kpi td { padding: 0.8mm 1.5mm; font-size: 9pt; border-bottom: 0.2pt solid #eee; }
+    table.kpi td.num { text-align: right; }
+    .note { font-size: 7.5pt; color: #92400e; margin-top: 1mm; }
+    .empty { text-align: center; color: #888; padding: 8mm 0; }
+</style>
+</head>
+<body>
+
+{% set bucket_labels = {
+    'not_due': 'Do splatnosti',
+    '1-30': '1–30 dní po splatnosti',
+    '31-90': '31–90 dní po splatnosti',
+    '90+': '90+ dní po splatnosti'
+} %}
+
+<div class="header-title">Pohledávky a závazky</div>
+<div class="header-meta">Ze dne: {{ "now"|date("d.m.Y") }} · aging podle splatnosti, nativně per měna</div>
+
+{% if currencies is empty %}
+    <p class="empty">Žádné nezaplacené pohledávky ani závazky.</p>
+{% else %}
+    {% for currency, block in currencies %}
+        <div class="cur-title">Měna: {{ currency }}</div>
+
+        <div class="side-title">Pohledávky</div>
+        {% if block.receivables is empty %}
+            <p class="note">Žádné otevřené pohledávky.</p>
+        {% else %}
+        <table class="aging">
+            <thead><tr><th class="thl">Kbelík</th><th>Počet</th><th>Částka ({{ currency }})</th></tr></thead>
+            <tbody>
+                {% set r_count = 0 %}{% set r_total = 0 %}
+                {% for b in bucket_order %}
+                    {% if block.receivables[b] is defined %}
+                        {% set r_count = r_count + block.receivables[b].count %}
+                        {% set r_total = r_total + block.receivables[b].total %}
+                        <tr>
+                            <td>{{ bucket_labels[b] ?? b }}</td>
+                            <td class="num">{{ block.receivables[b].count }}</td>
+                            <td class="num">{{ block.receivables[b].total|cz_money }}</td>
+                        </tr>
+                    {% endif %}
+                {% endfor %}
+            </tbody>
+            <tfoot><tr><td>Celkem</td><td class="num">{{ r_count }}</td><td class="num">{{ r_total|cz_money }}</td></tr></tfoot>
+        </table>
+        {% endif %}
+
+        <div class="side-title">Závazky</div>
+        {% if block.payables is empty %}
+            <p class="note">Žádné otevřené závazky.</p>
+        {% else %}
+        <table class="aging">
+            <thead><tr><th class="thl">Kbelík</th><th>Počet</th><th>Částka ({{ currency }})</th></tr></thead>
+            <tbody>
+                {% set p_count = 0 %}{% set p_total = 0 %}
+                {% for b in bucket_order %}
+                    {% if block.payables[b] is defined %}
+                        {% set p_count = p_count + block.payables[b].count %}
+                        {% set p_total = p_total + block.payables[b].total %}
+                        <tr>
+                            <td>{{ bucket_labels[b] ?? b }}</td>
+                            <td class="num">{{ block.payables[b].count }}</td>
+                            <td class="num">{{ block.payables[b].total|cz_money }}</td>
+                        </tr>
+                    {% endif %}
+                {% endfor %}
+            </tbody>
+            <tfoot><tr><td>Celkem</td><td class="num">{{ p_count }}</td><td class="num">{{ p_total|cz_money }}</td></tr></tfoot>
+        </table>
+        {% endif %}
+        <div class="note">Pozn.: přijaté faktury jsou all-or-nothing (bez částečných úhrad) — částečně uhrazená PF ukazuje plnou částku do stavu „zaplaceno".</div>
+    {% endfor %}
+{% endif %}
+
+<div class="kpi-title">Ukazatele</div>
+<table class="kpi">
+    <tr><td>DSO — průměrná doba inkasa (dní)</td><td class="num">{{ kpis.dso.avg_days ?? 0 }}</td></tr>
+    <tr><td>DPO — průměrná doba úhrady závazků (dní)</td><td class="num">{{ kpis.dpo.avg_days ?? 0 }}</td></tr>
+    <tr><td>Platební morálka (% včas)</td><td class="num">{{ kpis.punctuality.on_time_pct ?? 0 }}</td></tr>
+</table>
+
+</body>
+</html>

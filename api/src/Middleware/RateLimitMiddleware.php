@@ -7,6 +7,7 @@ namespace MyInvoice\Middleware;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -18,7 +19,11 @@ use Slim\Psr7\Factory\ResponseFactory;
  * Sliding-window rate limiter dle cfg.rate_limits.
  *
  *   login_per_min_per_ip      → 60s window, key = "rl:login:ip:{ip/24}"
+ *   forgot_per_hour_per_ip    → 3600s window, key = "rl:forgot:ip:{ip/24}"
  *   forgot_per_hour_per_email → 3600s window, key = "rl:forgot:email:{sha1}"
+ *                               (konzumuje ForgotPasswordAction přes consume() —
+ *                                tady na e-mail nedosáhneme, viz ruleFor())
+ *   token_create_per_hour     → 3600s window, key = "rl:pat:user:{id}"
  *   ares_per_min_per_user     → 60s window, key = "rl:ares:user:{id}"
  *   ai_per_5min_per_user      → 300s window, key = "rl:ai:user:{id}" (AI extract + inbox scan)
  *   setup_per_hour_per_ip     → 3600s window, key = "rl:setup:ip:{ip}"
@@ -27,7 +32,9 @@ use Slim\Psr7\Factory\ResponseFactory;
  *
  * Při překročení vrátí 429 Too Many Requests s Retry-After.
  *
- * Vyžaduje Redis. Bez Redis je rate limit no-op (BruteForceGuard pokrývá login).
+ * Primárně Redis; bez něj fallback na MEMORY tabulku `rate_limit_counters`
+ * (stejný vzor jako BruteForceGuard/login_attempts). Limiter tedy platí i na
+ * IIS a v Dockeru bez `--profile redis` — dřív se tam tiše vypínal celý.
  */
 final class RateLimitMiddleware implements MiddlewareInterface
 {
@@ -36,16 +43,19 @@ final class RateLimitMiddleware implements MiddlewareInterface
         private readonly RedisFactory $redis,
         private readonly ResponseFactory $responseFactory,
         private readonly IpMatcher $ipMatcher,
+        private readonly Connection $db,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
     {
-        $r = $this->redis->client();
-        if ($r === null) {
-            return $handler->handle($request); // bez Redis no-op
+        // Kill-switch (dev/test) — `rate_limits.enabled === false` vypne limiter úplně.
+        // Chybějící klíč = zapnuto (default true), takže PRODUKCE zůstává chráněná i bez
+        // explicitního nastavení; vypíná se jen lokálním overridem v cfg.local.php.
+        if ($this->config->get('rate_limits.enabled', true) === false) {
+            return $handler->handle($request);
         }
 
-        $path = $request->getUri()->getPath();
+        $path = $this->normalizePath($request->getUri()->getPath());
         $method = strtoupper($request->getMethod());
         $ip = $this->ipMatcher->clientIp(
             $request->getServerParams(),
@@ -65,40 +75,183 @@ final class RateLimitMiddleware implements MiddlewareInterface
         }
 
         [$key, $limit, $window] = $rule;
-        $count = (int) ($r->get($key) ?? 0);
-        $ttl = (int) $r->ttl($key);
-        if ($ttl < 0) $ttl = $window;  // -1/-2 = neexistuje nebo bez TTL
+
+        $state = $this->consumeState($key, $limit, $window);
+        $ttl = max(1, $state['ttl']);
 
         // Headers se posílají u všech bearer-authed requestů (rfc draft-rate-limit
         // používá X-RateLimit-*). U session/IP requestů nemá smysl — klient
         // nemůže selektivně self-throttle per uživatel.
         $sendHeaders = $tokenId > 0;
-        $remaining = max(0, $limit - $count);
 
-        if ($count >= $limit) {
+        if (!$state['allowed']) {
             $response = $this->responseFactory->createResponse(429);
-            $response = $response->withHeader('Retry-After', (string) max(1, $ttl));
+            $response = $response->withHeader('Retry-After', (string) $ttl);
             if ($sendHeaders) {
                 $response = $response
                     ->withHeader('X-RateLimit-Limit',     (string) $limit)
                     ->withHeader('X-RateLimit-Remaining', '0')
-                    ->withHeader('X-RateLimit-Reset',     (string) max(1, $ttl));
+                    ->withHeader('X-RateLimit-Reset',     (string) $ttl);
             }
             return Json::error($response, 'rate_limited', 'Příliš mnoho pokusů. Zkus to později.', 429);
         }
-
-        // Increment + set expiry (idempotentně)
-        $r->incr($key);
-        $r->expire($key, $window);
 
         $response = $handler->handle($request);
         if ($sendHeaders) {
             $response = $response
                 ->withHeader('X-RateLimit-Limit',     (string) $limit)
-                ->withHeader('X-RateLimit-Remaining', (string) max(0, $remaining - 1))
-                ->withHeader('X-RateLimit-Reset',     (string) max(1, $ttl));
+                ->withHeader('X-RateLimit-Remaining', (string) max(0, $limit - $state['count']))
+                ->withHeader('X-RateLimit-Reset',     (string) $ttl);
         }
         return $response;
+    }
+
+    /**
+     * Odečte jeden slot z bucketu. Určeno pro akce, které limit potřebují až po
+     * zparsovaném těle requestu (middleware běží PŘED BodyParsingMiddleware, takže
+     * na hodnoty z JSON body v `process()` nedosáhne — viz Bootstrap.php LIFO order).
+     *
+     * @return int|null  null = průchod povolen, jinak Retry-After v sekundách
+     */
+    public function consume(string $key, int $limit, int $window): ?int
+    {
+        // Stejný kill-switch jako v process() — bez něj měla instalace s vypnutým
+        // limiterem přesto per-email limit ve ForgotPasswordAction, který nečekala
+        // (a v testech proti sdílené DB rozbíjel scénáře, co limiter vypínají).
+        if ($this->config->get('rate_limits.enabled', true) === false) {
+            return null;
+        }
+
+        $state = $this->consumeState($key, $limit, $window);
+
+        return $state['allowed'] ? null : max(1, $state['ttl']);
+    }
+
+    /**
+     * Normalizace cesty pro matchování pravidel.
+     *
+     * Tenhle middleware běží PŘED RoutingMiddleware. `Slim\Psr7\Uri::filterPath()`
+     * percent-encoding ZACHOVÁVÁ, kdežto `Slim\Routing\RouteResolver` dělá před
+     * dispatchem `rawurldecode()`. Bez normalizace tedy `POST /api/auth/%66orgot`
+     * nematchlo žádné pravidlo (a generická větev celé /api/auth/ přeskakuje),
+     * takže endpoint běžel úplně BEZ limitu — router ho přitom normálně doručil
+     * do ForgotPasswordAction. Totéž `/api/auth/%74okens`.
+     *
+     * Dekódujeme PRÁVĚ JEDNOU, stejně jako router — vícenásobné dekódování je
+     * samo o sobě zranitelnost (`%252f` by se při druhém průchodu stalo `/`
+     * a rozsekalo cestu na segmenty, které router nikdy neviděl).
+     *
+     * Navíc srovnáme vícenásobná lomítka a `.` / `..` segmenty. Router tohle
+     * nedělá, takže jsme tu striktnější než dispatcher: v nejhorším případě
+     * uplatníme limit na cestu, kterou router stejně odmítne 404 — fail-closed.
+     */
+    private function normalizePath(string $path): string
+    {
+        $decoded = rawurldecode($path);
+
+        // Null byte v cestě není nikdy legitimní; ať neuřízne porovnání.
+        $decoded = str_replace("\0", '', $decoded);
+
+        $trailingSlash = $decoded !== '/' && str_ends_with($decoded, '/');
+
+        $out = [];
+        foreach (explode('/', $decoded) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($out);
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        $normalized = '/' . implode('/', $out);
+        if ($trailingSlash && $normalized !== '/') {
+            $normalized .= '/';
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Atomický check-and-increment.
+     *
+     * Dřív to byl neatomický GET → porovnání → INCR → EXPIRE: souběžná dávka
+     * requestů si přečetla stejný počet a všechny prošly (limit se dal překročit
+     * n-násobně), a EXPIRE při KAŽDÉM requestu okno donekonečna prodlužoval.
+     *
+     * Teď dvoufázově:
+     *   1. levný peek — když jsme už přes limit, odmítni BEZ zápisu (jinak by
+     *      útok nafukoval Redis klíč / MEMORY tabulku donekonečna),
+     *   2. atomický bump + re-check — souběžné requesty dostanou různá pořadová
+     *      čísla, takže přes limit se na hranici nikdo neprotlačí.
+     *
+     * @return array{allowed:bool,count:int,ttl:int}
+     */
+    private function consumeState(string $key, int $limit, int $window): array
+    {
+        $peek = $this->peek($key, $window);
+        if ($peek['count'] >= $limit) {
+            return ['allowed' => false, 'count' => $peek['count'], 'ttl' => $peek['ttl']];
+        }
+
+        $bumped = $this->bump($key, $window);
+
+        return [
+            'allowed' => $bumped['count'] <= $limit,
+            'count'   => $bumped['count'],
+            'ttl'     => $bumped['ttl'],
+        ];
+    }
+
+    /**
+     * Přečte stav bucketu bez zápisu. Redis primary, jinak DB fallback.
+     *
+     * @return array{count:int,ttl:int}
+     */
+    private function peek(string $key, int $window): array
+    {
+        $state = $this->redis->run(function ($r) use ($key, $window) {
+            $count = (int) ($r->get($key) ?? 0);
+            $ttl = (int) $r->ttl($key);
+            if ($ttl < 0) $ttl = $window;  // -1/-2 = neexistuje nebo bez TTL
+            return ['count' => $count, 'ttl' => $ttl];
+        });
+
+        return $state ?? $this->dbState($key, $window);
+    }
+
+    /**
+     * Zvýší čítač a vrátí NOVOU hodnotu.
+     *
+     * @return array{count:int,ttl:int}
+     */
+    private function bump(string $key, int $window): array
+    {
+        // INCR je v Redisu atomický → každý souběžný request dostane jiné číslo.
+        // EXPIRE nastavujeme jen u prvního requestu v okně (count === 1), jinak by
+        // se okno posouvalo s každým dalším a bucket by nikdy nevypršel. Pojistka
+        // `$ttl < 0` pokrývá pád mezi INCR a EXPIRE (klíč bez TTL = věčný).
+        $state = $this->redis->run(function ($r) use ($key, $window) {
+            $count = (int) $r->incr($key);
+            $ttl = (int) $r->ttl($key);
+            if ($count === 1 || $ttl < 0) {
+                $r->expire($key, $window);
+                $ttl = $window;
+            }
+            return ['count' => $count, 'ttl' => $ttl];
+        });
+        if ($state !== null) {
+            return $state;
+        }
+
+        // DB fallback: nejdřív INSERT, teprve pak COUNT. V tomhle pořadí se každý
+        // souběžný request započítá sám do sebe, takže se přes limit neprotlačí
+        // (MEMORY engine je netransakční — spoléháme na pořadí, ne na transakci).
+        $this->dbIncrement($key);
+
+        return $this->dbState($key, $window);
     }
 
     /**
@@ -146,13 +299,26 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:webauthn:' . sha1($path) . ':user:' . $userId, 20, 60];
         }
 
-        // Forgot — per email
+        // Forgot — per IP.
+        //
+        // Dřív se tu sahalo na getParsedBody() pro per-email bucket. Jenže tenhle
+        // middleware běží PŘED BodyParsingMiddleware (Slim LIFO, viz Bootstrap.php),
+        // takže u JSON requestů bylo tělo vždy null → e-mail prázdný → pravidlo se
+        // nevybralo a `/api/auth/forgot` neměl ŽÁDNÝ limit (generic per-user limit
+        // níže celý /api/auth/* přeskakuje).
+        //
+        // Per-IP bucket je nezávislý na těle, takže platí vždy. Per-email limit
+        // konzumuje ForgotPasswordAction přes consume(), kde už tělo zparsované je.
         if ($path === '/api/auth/forgot' && $method === 'POST') {
-            $body = (array) ($request->getParsedBody() ?? []);
-            $email = strtolower(trim((string) ($body['email'] ?? '')));
-            if ($email !== '') {
-                return ['rl:forgot:email:' . sha1($email), (int) ($rl['forgot_per_hour_per_email'] ?? 3), 3600];
-            }
+            return ['rl:forgot:ip:' . $this->ipBucket($ip), (int) ($rl['forgot_per_hour_per_ip'] ?? 10), 3600];
+        }
+
+        // Tvorba API tokenu (PAT) — /api/auth/* je z generic limitu vyňaté, takže
+        // bez tohohle pravidla neměl endpoint limit žádný. Brzdí i hádání hesla
+        // a TOTP kódu ve step-up kroku (doplněk k BruteForceGuard v akci).
+        if ($path === '/api/auth/tokens' && $method === 'POST') {
+            $bucket = $userId > 0 ? 'user:' . $userId : 'ip:' . $this->ipBucket($ip);
+            return ['rl:pat:' . $bucket, (int) ($rl['token_create_per_hour'] ?? 10), 3600];
         }
 
         // Setup
@@ -177,6 +343,24 @@ final class RateLimitMiddleware implements MiddlewareInterface
         // než approval: legit návštěva = 1 GET + PDF + N příloh.
         if (str_starts_with($path, '/api/public/invoice/')) {
             return ['rl:pubinv:ip:' . $this->ipBucket($ip), (int) ($rl['invoice_public_per_min_per_ip'] ?? 60), 60];
+        }
+
+        // Veřejný náhled výkazu práce (bez auth, jen token). GET je čtení jako
+        // u faktury; POST je citlivější: request-code ODESÍLÁ E-MAIL s ověřovacím
+        // kódem a verify je brute-force plocha na ten kód. Proto vlastní, přísnější
+        // bucket pro mutace.
+        //
+        // Captcha tuhle díru nekryje: výchozí `captcha.provider = 'none'` nechá
+        // TurnstileVerifier::verify() rovnou vrátit true, takže na běžném
+        // self-hostu nechrání nic. Generic per-user limit níž se taky neuplatní —
+        // userId je u veřejného odkazu vždy 0.
+        if (str_starts_with($path, '/api/public/work-report/')) {
+            if ($method === 'POST') {
+                return ['rl:pubwr-post:ip:' . $this->ipBucket($ip),
+                        (int) ($rl['work_report_public_post_per_min_per_ip'] ?? 10), 60];
+            }
+            return ['rl:pubwr:ip:' . $this->ipBucket($ip),
+                    (int) ($rl['work_report_public_per_min_per_ip'] ?? 60), 60];
         }
 
         // ARES / VIES / CRPDPH lookups (per user) — chrání 24h cache před zaplněním
@@ -206,7 +390,42 @@ final class RateLimitMiddleware implements MiddlewareInterface
         return null;
     }
 
-    private function ipBucket(string $ip): string
+    /**
+     * DB fallback čítače — sliding window nad MEMORY tabulkou, stejný vzor jako
+     * BruteForceGuard::check(). `ttl` odvozujeme od nejstaršího záznamu v okně,
+     * aby Retry-After odpovídal skutečnému uvolnění slotu.
+     *
+     * @return array{count:int,ttl:int,redis:bool}
+     */
+    private function dbState(string $key, int $window): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS c, COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()), 0) AS age
+               FROM rate_limit_counters
+              WHERE bucket_key = ? AND created_at >= NOW() - INTERVAL ? SECOND'
+        );
+        $stmt->execute([$key, $window]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['c' => 0, 'age' => 0];
+
+        $ttl = $window - (int) $row['age'];
+
+        return [
+            'count' => (int) $row['c'],
+            'ttl'   => $ttl > 0 ? $ttl : $window,
+            'redis' => false,
+        ];
+    }
+
+    private function dbIncrement(string $key): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO rate_limit_counters (bucket_key) VALUES (?)'
+        );
+        $stmt->execute([$key]);
+    }
+
+    /** Public kvůli ForgotPasswordAction — potřebuje stejné /24 (resp. /64) bucketování. */
+    public function ipBucket(string $ip): string
     {
         $packed = inet_pton($ip);
         if ($packed === false) return sha1($ip);

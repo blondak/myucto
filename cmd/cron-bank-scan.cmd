@@ -6,7 +6,7 @@ REM  Skenuje cfg.bank_import.scan_root + podadresare YYYY-MM/, hleda *.gpc/*.txt
 REM  SHA256 dedupe — soubor co uz byl naimportovany se preskoci.
 REM
 REM  Task Scheduler:
-REM    schtasks /create /tn "MyInvoice BankScan" ^
+REM    schtasks /create /tn "MyUcto BankScan" ^
 REM      /tr "%~f0" /sc minute /mo 30 /ru SYSTEM
 REM ============================================================================
 setlocal

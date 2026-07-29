@@ -1,16 +1,22 @@
 {
-  "name": "myinvoice-web",
+  "name": "myucto-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run check:i18n && npm run check:routes && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:pwa": "node --test \"tests/*.test.mjs\"",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check:routes": "node scripts/check-route-permissions.mjs",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "test:pwa": "node --test \"tests/*.test.mjs\""
   },
   "dependencies": {
+    "@vue/devtools-api": "^8.1.5",
     "@vueuse/core": "^14.3.0",
     "axios": "^1.18.1",
     "chart.js": "^4.5.1",
@@ -24,10 +30,13 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
     "lightningcss": "^1.32.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.1.5",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.3.7"
   }
 }

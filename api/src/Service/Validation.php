@@ -55,6 +55,79 @@ final class Validation
     }
 
     /**
+     * Non-blocking varování pro klienta/dodavatele (audit 2026-07, nález "IČO bez
+     * kontroly mod 11, DIČ se nevaliduje vůbec"). Na rozdíl od client() NIKDY
+     * neblokuje uložení — cizí subjekty (zahraniční VAT ID, subjekty bez IČO)
+     * musí projít beze zbytku. Volající vrátí kódy ve _warnings, FE je zobrazí
+     * jako non-blocking toast/banner (mapováno přes client.warning.<code>).
+     *
+     * @return string[]
+     */
+    public static function clientWarnings(array $data): array
+    {
+        $warn = [];
+
+        // IČO má formát ověřený už v client() (přesně 8 číslic); mod 11 kontrolujeme
+        // jen když regex prošel — jinak by šlo o duplicitní hlášku ke stejné chybě.
+        $ic = isset($data['ic']) ? trim((string) $data['ic']) : '';
+        if ($ic !== '' && preg_match('/^\d{8}$/', $ic) === 1 && !self::icChecksumValid($ic)) {
+            $warn[] = 'ic_checksum_invalid';
+        }
+
+        // DIČ: tuzemské CZ + 8-10 číslic (fyzické osoby mívají DIČ odvozené z rodného
+        // čísla, proto 8-10, ne jen 8 jako IČO). Zahraniční EU VAT ID je alfanumerické
+        // (IE 1234567X, AT U12345678, NL 123456789B01…) — kontrolujeme jen hrubý tvar
+        // (dvoupísmenný kód země + alfanumerické tělo), přesný formát ověří VIES lookup.
+        $dic = isset($data['dic']) ? strtoupper(trim((string) $data['dic'])) : '';
+        $dicDomesticDigits = null;
+        if ($dic !== '') {
+            if (str_starts_with($dic, 'CZ')) {
+                // Tuzemský prefix zavazuje k tuzemskému tvaru — nesmí propadnout do
+                // volnějšího zahraničního regexu (ten by "CZ123" mylně pustil jako
+                // platné EU VAT ID).
+                if (preg_match('/^CZ(\d{8,10})$/', $dic, $m) === 1) {
+                    $dicDomesticDigits = $m[1];
+                } else {
+                    $warn[] = 'dic_format_invalid';
+                }
+            } elseif (preg_match('/^[A-Z]{2}[A-Z0-9]{2,12}$/', $dic) !== 1) {
+                $warn[] = 'dic_format_invalid';
+            }
+        }
+
+        // Vazba DIČ↔IČO: jen když DIČ nese přesně 8 číslic (typický případ právnické
+        // osoby, kde CZ-DIČ = CZ + IČO) a IČO má platný formát — u DIČ fyzických osob
+        // (9-10 číslic, odvozeno z rodného čísla) shoda s IČO neplatí, tam nekontrolujeme.
+        if ($dicDomesticDigits !== null && strlen($dicDomesticDigits) === 8
+            && $ic !== '' && preg_match('/^\d{8}$/', $ic) === 1 && $dicDomesticDigits !== $ic) {
+            $warn[] = 'dic_ic_mismatch';
+        }
+
+        return $warn;
+    }
+
+    /**
+     * Modulo 11 kontrolní číslice IČO (algoritmus ČSÚ/ARES): vážený součet prvních
+     * 7 číslic s váhami 8..2, zbytek po 11 (a); kontrolní číslice: a=0 → 1, a=1 → 0,
+     * jinak 11-a. Volá se až po ověření, že $ic je přesně 8 číslic.
+     */
+    private static function icChecksumValid(string $ic): bool
+    {
+        $digits = array_map('intval', str_split($ic));
+        $sum = 0;
+        for ($i = 0; $i < 7; $i++) {
+            $sum += $digits[$i] * (8 - $i);
+        }
+        $a = $sum % 11;
+        $check = match (true) {
+            $a === 0 => 1,
+            $a === 1 => 0,
+            default => 11 - $a,
+        };
+        return $check === $digits[7];
+    }
+
+    /**
      * @return array<string, string[]>
      */
     public static function project(array $data): array

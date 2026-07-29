@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Pdf;
 
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Http\OutboundRequestException;
+use MyInvoice\Service\Http\TsaUrlPolicy;
 
 /**
  * Elektronický podpis PDF — PAdES-B (volitelně PAdES-T s RFC 3161 časovým razítkem),
@@ -36,7 +38,15 @@ final class PdfSigner
     private bool $lastTimestamped = false;
     private ?string $lastCertificateCommonName = null;
 
-    public function __construct(private readonly SecretEncryption $secrets) {}
+    /**
+     * `$tsaPolicy` je POVINNÝ (SEC-04): jako optional class-param by ho PHP-DI
+     * autowiring nevyplnil a default `new TsaUrlPolicy()` by běžel bez Configu,
+     * tedy trvale bez administrátorského allowlistu `signing.tsa_allowed_hosts`.
+     */
+    public function __construct(
+        private readonly SecretEncryption $secrets,
+        private readonly TsaUrlPolicy $tsaPolicy,
+    ) {}
 
     /** True, pokud poslední {@see sign()} reálně doplnil RFC 3161 timestamp (PAdES-T). */
     public function lastTimestamped(): bool
@@ -75,8 +85,8 @@ final class PdfSigner
 
         // 1) Načti cert + privátní klíč z P12 (heslo dešifruj až tady).
         $password = $this->secrets->decrypt($cfg->passwordEnc);
-        $p12 = @file_get_contents($cfg->certPath);
-        if ($p12 === false) {
+        $p12 = $cfg->certBytes ?? @file_get_contents($cfg->certPath);
+        if (!is_string($p12) || $p12 === '') {
             throw new \RuntimeException('Certifikát nelze načíst: ' . $cfg->certPath);
         }
         $certs = [];
@@ -349,6 +359,11 @@ final class PdfSigner
     /**
      * Pošle hash na TSA (RFC 3161), vrátí timeStampToken (ContentInfo DER). Timeout 5 s.
      * Volitelná HTTP Basic auth (jméno + zašifrované heslo) pro produkční/kvalifikované TSA.
+     *
+     * SEC-04: URL prochází {@see TsaUrlPolicy} — jen https, žádné userinfo/fragment,
+     * žádné redirecty, všechny A/AAAA adresy musí být veřejné a spojení jde na ověřenou
+     * IP. Heslo se dešifruje až po validaci cíle, aby se credentials nikdy nedostaly
+     * na loopback/privátní/metadata adresu.
      */
     private function requestTimestamp(string $data, string $tsaUrl, ?string $username = null, string $passwordEnc = ''): string
     {
@@ -358,27 +373,28 @@ final class PdfSigner
         $msgImprint = Asn1::tlv(0x30, $alg . Asn1::tlv(0x04, $hash));
         $tsq = Asn1::tlv(0x30, Asn1::tlv(0x02, chr(1)) . $msgImprint . Asn1::tlv(0x01, chr(0xFF)));
 
-        $ch = curl_init($tsaUrl);
-        $opts = [
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/timestamp-query'],
-            CURLOPT_POSTFIELDS => $tsq,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 5,
-        ];
-        // HTTP Basic auth k TSA (jméno+heslo) — heslo dešifruj až tady
+        // Nejdřív ověř cíl (bez credentials), teprve pak sáhni na tajemství.
+        try {
+            $this->tsaPolicy->assertStorable($tsaUrl);
+        } catch (OutboundRequestException $e) {
+            throw new \RuntimeException('TSA URL je nepřípustná: ' . $e->getMessage(), 0, $e);
+        }
+
+        $basicAuth = null;
         if ($username !== null && $username !== '') {
-            $opts[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-            $opts[CURLOPT_USERPWD] = $username . ':' . ($passwordEnc !== '' ? $this->secrets->decrypt($passwordEnc) : '');
+            $basicAuth = $username . ':' . ($passwordEnc !== '' ? $this->secrets->decrypt($passwordEnc) : '');
         }
-        curl_setopt_array($ch, $opts);
-        $resp = curl_exec($ch);
-        $err = curl_error($ch);
-        curl_close($ch);
-        if ($resp === false || $resp === '') {
-            throw new \RuntimeException('TSA nedostupná: ' . $err);
+
+        try {
+            $resp = $this->tsaPolicy->requestTimestamp($tsaUrl, $tsq, $basicAuth);
+        } catch (OutboundRequestException $e) {
+            throw new \RuntimeException('TSA nedostupná: ' . $e->getMessage(), 0, $e);
         }
-        return $this->tokenFromTsr((string) $resp);
+
+        if ($resp->status !== 200 || $resp->body === '') {
+            throw new \RuntimeException('TSA vrátila neplatnou odpověď (HTTP ' . $resp->status . ').');
+        }
+        return $this->tokenFromTsr($resp->body);
     }
 
     /** Z TimeStampResp vytáhne timeStampToken (ContentInfo). Ověří PKIStatus granted. */

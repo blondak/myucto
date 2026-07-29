@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Skladový doklad</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #15131D; }
+    .doc-title { font-size: 16pt; font-weight: bold; }
+    .doc-number { font-size: 12pt; font-weight: bold; text-align: right; }
+    .doc-status { font-size: 9pt; font-weight: bold; color: #B42318; }
+    table.head { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.head td { vertical-align: top; padding: 0; }
+    .party-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .party-table td { vertical-align: top; width: 50%; padding: 2.5mm 3mm; border: 0.3pt solid #ccc; }
+    .party-label { font-size: 7.5pt; color: #777; margin-bottom: 1mm; }
+    .party-name { font-size: 10pt; font-weight: bold; }
+    .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .meta-table td { padding: 1.2mm 3mm; font-size: 9pt; border-bottom: 0.2pt solid #eee; }
+    .meta-label { color: #777; width: 40mm; }
+    table.lines { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.lines th { font-size: 7.5pt; color: #555; text-align: left; padding: 1.2mm 2mm; border-bottom: 0.3pt solid #ccc; }
+    table.lines th.num { text-align: right; }
+    table.lines td { font-size: 9pt; padding: 1.2mm 2mm; border-bottom: 0.2pt solid #eee; }
+    table.lines td.num { text-align: right; }
+    table.lines tfoot td { font-weight: bold; border-top: 0.5pt solid #333; }
+    table.sign { width: 100%; border-collapse: collapse; margin-top: 8mm; }
+    table.sign td { width: 33.3%; padding: 0 3mm; font-size: 8pt; color: #555; text-align: center; vertical-align: top; }
+    .sign-line { border-top: 0.4pt solid #999; padding-top: 1.5mm; }
+    .num { text-align: right; }
+</style>
+</head>
+<body>
+
+<table class="head">
+    <tr>
+        <td style="width:60%;">
+            <div class="doc-title">{{ type_label }}</div>
+            {% if warehouse %}
+                <div class="party-label">
+                    Sklad {{ warehouse.code }} — {{ warehouse.name }}
+                    {% if warehouse_to %} → {{ warehouse_to.code }} — {{ warehouse_to.name }}{% endif %}
+                </div>
+            {% endif %}
+        </td>
+        <td style="width:40%;">
+            <div class="doc-number">{{ document.doc_number ?: ('draft #' ~ document.id) }}</div>
+            {% if document.status == 'reversed' %}<div class="doc-status">STORNOVÁNO</div>{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table class="party-table">
+    <tr>
+        <td>
+            <div class="party-label">Firma</div>
+            <div class="party-name">{{ supplier.company_name }}</div>
+            {% if supplier.street %}<div>{{ supplier.street }}</div>{% endif %}
+            {% if supplier.zip or supplier.city %}<div>{{ supplier.zip }} {{ supplier.city }}</div>{% endif %}
+            {% if supplier.ic %}<div>IČ: {{ supplier.ic }}</div>{% endif %}
+            {% if supplier.dic %}<div>DIČ: {{ supplier.dic }}</div>{% endif %}
+        </td>
+        <td>
+            <div class="party-label">Dodavatel/odběratel</div>
+            <div class="party-name">{{ document.partner_name ?: '—' }}</div>
+        </td>
+    </tr>
+</table>
+
+<table class="meta-table">
+    <tr>
+        <td class="meta-label">Datum dokladu</td>
+        <td>{{ document.doc_date|cz_date }}</td>
+    </tr>
+    <tr>
+        <td class="meta-label">Obsah účetního případu</td>
+        <td>{{ document.description }}</td>
+    </tr>
+</table>
+
+<table class="lines">
+    <thead>
+        <tr>
+            <th>SKU</th>
+            <th>Název</th>
+            <th class="num">Množství</th>
+            <th>MJ</th>
+            <th class="num">Cena/MJ</th>
+            <th class="num">Hodnota</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for l in document.lines %}
+            <tr>
+                <td>{{ l.sku }}</td>
+                <td>{{ l.name }}</td>
+                <td class="num">{{ l.qty|cz_money }}</td>
+                <td>{{ l.unit }}</td>
+                <td class="num">{{ l.unit_cost|cz_money }}</td>
+                <td class="num">{{ l.value_total|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="5">Celkem</td>
+            <td class="num">{{ total_value|cz_money }}</td>
+        </tr>
+    </tfoot>
+</table>
+
+<table class="sign">
+    <tr>
+        <td><div class="sign-line">Vystavil</div></td>
+        <td><div class="sign-line">Schválil</div></td>
+        <td><div class="sign-line">Převzal/vydal</div></td>
+    </tr>
+</table>
+
+</body>
+</html>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -8,16 +10,30 @@ import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, 
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import LockedBadge from '@/components/ui/LockedBadge.vue'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
+import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
+import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
+import { stockApi, type StockReceiptProposal } from '@/api/stock'
+import WhyChip from '@/components/automation/WhyChip.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+// Podvojné účetnictví zpřístupňuje účtování a související akce deníku.
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
 
 const invoice = ref<PurchaseInvoice | null>(null)
+// Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
+// nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
+const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
 const loading = ref(true)
 const error = ref('')
 const acting = ref(false)
@@ -175,6 +191,25 @@ async function load() {
   purchaseInvoicesApi.activity(id.value)
     .then(a => { activity.value = a })
     .catch(() => {})
+  // Sklad (Epic SKLAD) — „Přijato X/Y" badge + „PF se po příjmu změnila" warning (B6).
+  if (stockEnabled.value) {
+    stockApi.receiptPropose(id.value)
+      .then(p => { stockProposal.value = p })
+      .catch(() => { stockProposal.value = null })
+  }
+}
+
+// ───── Sklad (Epic SKLAD) — příjem na sklad z PF ───────────────────────
+const stockProposal = ref<StockReceiptProposal | null>(null)
+const stockReceiptOpen = ref(false)
+const stockReceivedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.already_received), 0))
+const stockRequestedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.quantity), 0))
+const stockFullyReceived = computed(() => !!stockProposal.value && stockRequestedTotal.value > 0 && stockReceivedTotal.value >= stockRequestedTotal.value)
+const hasStockReceiptLines = computed(() => (stockProposal.value?.lines ?? []).some(line =>
+  line.stock_item_id !== null && Number(line.remaining_qty) > 0))
+function onStockReceiptCreated() {
+  stockReceiptOpen.value = false
+  load()
 }
 
 async function deletePdf() {
@@ -219,6 +254,13 @@ function openMarkPaid() {
   markPaidOpen.value = true
 }
 
+// Pokladna/zápočet proběhly v modalu — jen dotáhnout aktuální stav faktury.
+async function onAltPayDone() {
+  markPaidOpen.value = false
+  invoice.value = await purchaseInvoicesApi.get(id.value)
+  purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+}
+
 async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   if (!invoice.value) return
   if (target === 'paid' && !paidDate) { openMarkPaid(); return }
@@ -254,7 +296,7 @@ async function remove() {
  */
 async function forceDelete() {
   if (!invoice.value) return
-  if (!auth.user || auth.user.role !== 'admin') return
+  if (!auth.user || !auth.isSuperadmin) return
   if (!confirm(t('purchase_invoice.confirm.force_delete_warning'))) return
   if (!confirm(t('purchase_invoice.confirm.force_delete_confirm'))) return
   try {
@@ -267,7 +309,7 @@ async function forceDelete() {
 }
 
 const canForceDelete = computed(() =>
-  invoice.value && auth.user?.role === 'admin'
+  invoice.value && auth.isSuperadmin
   && ['received', 'booked'].includes(invoice.value.status),
 )
 
@@ -284,20 +326,28 @@ const statusBadgeClass = (s: PurchaseInvoiceStatus): string => ({
 // Allowed transitions per status — sync s backend (TransitionPurchaseInvoiceStatusAction)
 const allowedTransitions = computed<PurchaseInvoiceStatus[]>(() => {
   if (!invoice.value) return []
+  let targets: PurchaseInvoiceStatus[]
   switch (invoice.value.status) {
-    case 'draft':     return ['received', 'cancelled']
-    case 'received':  return ['booked', 'paid', 'cancelled']
-    case 'booked':    return ['paid', 'cancelled']
-    case 'paid':      return ['received', 'cancelled']   // unmark paid / storno už uhrazené
-    case 'cancelled': return ['received']                  // un-cancel
-    default:          return []
+    case 'draft':     targets = ['received', 'cancelled']; break
+    case 'received':  targets = ['booked', 'paid', 'cancelled']; break
+    case 'booked':    targets = ['paid', 'cancelled']; break
+    case 'paid':      targets = ['received', 'cancelled']; break   // unmark paid / storno už uhrazené
+    case 'cancelled': targets = ['received']; break                  // un-cancel
+    default:          targets = []
   }
+  // Client (F6): whitelist cílů received ⇄ paid — booked/cancelled jsou pro klienta
+  // VŽDY 403 forbidden_transition; na zamčeném dokladu žádné přechody.
+  if (auth.isClientRole) {
+    if (lockedForMe.value) return []
+    targets = targets.filter(s => s === 'received' || s === 'paid')
+  }
+  return targets
 })
 
 const canEdit = computed(() => invoice.value?.status === 'draft')
 // Force-edit pro received/booked/paid — admin only (cancelled je immutable = audit trail)
 const canForceEdit = computed(() =>
-  auth.user?.role === 'admin' &&
+  auth.isSuperadmin &&
   invoice.value &&
   ['received', 'booked', 'paid'].includes(invoice.value.status)
 )
@@ -312,7 +362,7 @@ const canDelete = computed(() => invoice.value?.status === 'draft')
 
 // ── „Zaplatit pomocí QR" ──────────────────────────────────────────────────────
 // Tlačítko se zobrazí u nezaplacené faktury s kladnou částkou k úhradě (readonly
-// smí QR zobrazit z uloženého účtu; doplnění/editace účtu jen pro auth.canWrite).
+// smí QR zobrazit z uloženého účtu; doplnění/editace účtu jen pro auth.canWrite('purchase_invoices')).
 const canPayWithQr = computed(() => {
   const inv = invoice.value
   if (!inv || inv.status === 'paid' || inv.status === 'cancelled') return false
@@ -326,6 +376,12 @@ const hasStoredAccount = computed(() => {
   if (!inv) return false
   return (!!inv.payment_account_number && !!inv.payment_bank_code) || !!inv.payment_iban
 })
+
+// Jiný způsob úhrady než převod (inkaso, karta, zápočet…) — informace, kterou účetní
+// potřebuje vidět i tehdy, když u faktury žádný účet uložený není. Právě u inkasa je
+// bankovní spojení na dokladu často uvedené, ale nepodstatné (peníze si strhne dodavatel).
+const isNonTransferPayment = computed(() =>
+  !!invoice.value?.payment_method && invoice.value.payment_method !== 'bank_transfer')
 
 const qrOpen = ref(false)
 const qrLoading = ref(false)
@@ -353,8 +409,8 @@ async function openQr(): Promise<void> {
     qrData.value = res
     syncQrForm(res)
     // Jednorázová lazy extrakce účtu (ISDOC → AI) — jen pokud ji endpoint nabídl
-    // a uživatel smí zapisovat (readonly POST stejně neprojde RoleMiddlewarem).
-    if (res.needs_account && res.can_extract && auth.canWrite) {
+    // a uživatel smí zapisovat (readonly POST stejně neprojde PermissionMiddlewarem).
+    if (res.needs_account && res.can_extract && auth.canWrite('purchase_invoices')) {
       await runExtract()
     }
   } catch (e) {
@@ -436,20 +492,52 @@ function transitionLabel(target: PurchaseInvoiceStatus): string {
   return t(`purchase_invoice.actions.mark_${target}`)
 }
 
+// Zaúčtování do deníku (podvojné účetnictví). BE je idempotentní (source_type+source_id),
+// po úspěchu přenačteme detail (booked_at → badge „Zaúčtováno" + proklik do deníku).
+const canPostToJournal = computed(() =>
+  !!invoice.value
+  && isDoubleEntry.value
+  && !invoice.value.booked_at
+  && !invoice.value.locked?.journal_entry_id
+  && invoice.value.document_kind !== 'advance'
+  && invoice.value.status !== 'draft'
+  && invoice.value.status !== 'cancelled'
+  && auth.canWrite('purchase_invoices'))
+
+// Místo slepého confirm() se otevře náhled kontace — u dokladu v cizí měně nebo
+// v přenesené daňové povinnosti má zápis víc než dva řádky a odklepnout ho neviděný
+// znamená hledat případnou chybu až zpětně v deníku.
+const postingPreviewOpen = ref(false)
+
+function postToJournal() {
+  if (!invoice.value || !canPostToJournal.value) return
+  postingPreviewOpen.value = true
+}
+
+async function onPosted() {
+  await load()
+  toast.success(t('common.post_document_success'))
+}
+
 // ─── Lišta akcí (sdílená ActionBar) ───
 // Primární = hlavní dopředný stavový přechod (typicky „Uhrazeno"); zaúčtování je sekundární,
 // reverzní přechody sekundární/neutrální, storno + exporty + smazání v „…" overflow.
 const purchaseActions = computed<ActionItem[]>(() => {
   const inv = invoice.value
   if (!inv) return []
-  const w = auth.canWrite
+  const w = auth.canWrite('purchase_invoices')
+  const canTransition = auth.canWrite('purchase_invoices.transition')
+  const canDeletePermission = auth.canWrite('purchase_invoices.delete')
   const items: ActionItem[] = []
 
   items.push({ key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
-    show: canEdit.value && w, to: `/purchase-invoices/${inv.id}/edit` })
+    show: canEdit.value && w && !lockedForMe.value, to: `/purchase-invoices/${inv.id}/edit` })
 
-  if (w) {
+  if (canTransition) {
     for (const target of allowedTransitions.value) {
+      // Ruční „Označit jako zaúčtované" (received→booked) je vestigiální (dědictví z MyInvoice
+      // bez účetnictví) — z UI odstraněno v obou režimech. BE přechod + testy zůstávají.
+      if (target === 'booked') continue
       if (target === 'received' && (inv.status === 'paid' || inv.status === 'cancelled')) {
         items.push({ key: `t-${target}`, label: transitionLabel(target), icon: 'uturn', tier: 'secondary', variant: 'neutral',
           disabled: acting.value, run: () => transition('received') })
@@ -459,8 +547,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
       } else {
         const icon: ActionItem['icon'] = target === 'paid' ? 'checkCircle' : target === 'received' ? 'check' : 'inbox'
         items.push({ key: `t-${target}`, label: transitionLabel(target), icon,
-          tier: target === 'booked' ? 'secondary' : 'primary', variant: target === 'paid' ? 'success' : 'primary',
-          disabled: acting.value, title: target === 'booked' ? (t('purchase_invoice.actions.mark_booked_hint') as string) : undefined,
+          tier: 'primary', variant: target === 'paid' ? 'success' : 'primary',
+          disabled: acting.value,
           run: () => transition(target) })
       }
     }
@@ -468,6 +556,18 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'qr', label: t('purchase_invoice.qr.button'), icon: 'qr', tier: 'secondary', variant: 'primary',
     show: canPayWithQr.value, run: openQr })
+
+  items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
+    show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
+
+  items.push({ key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
+    show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+    to: { name: 'accounting-journal', query: { source_type: 'purchase_invoice', source_id: String(inv.id) } } })
+
+  items.push({ key: 'stock-receipt', label: t('stock.receipt.action'), icon: 'box', tier: 'secondary', variant: 'success',
+    show: stockEnabled.value && hasStockReceiptLines.value
+      && w && inv.status !== 'draft' && inv.status !== 'cancelled',
+    run: () => { stockReceiptOpen.value = true } })
 
   items.push({ key: 'orig', label: t('purchase_invoice.pdf.download_original'), icon: 'doc', tier: 'overflow', variant: 'neutral',
     show: !!inv.pdf_path, href: purchaseInvoicesApi.pdfUrl(inv.id) })
@@ -481,7 +581,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     href: purchaseInvoicesApi.pohodaUrl(inv.id) })
 
   items.push({ key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-    show: canDelete.value && w, disabled: acting.value, run: remove })
+    show: canDelete.value && canDeletePermission && !lockedForMe.value, disabled: acting.value, run: remove })
 
   // odkaz na dodavatele + admin „force" akce (pod „Pokročilé")
   items.push({ key: 'vendor', label: t('purchase_invoice.vendor_detail'), icon: 'user', tier: 'overflow', variant: 'neutral',
@@ -536,6 +636,28 @@ const purchaseActions = computed<ActionItem[]>(() => {
         <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
           {{ t(`purchase_invoice.document_kind.${invoice.document_kind}`) }}
         </span>
+        <PostingBadge v-if="invoice.locked?.journal_entry_id"
+          :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" with-label />
+        <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
+        <WhyChip v-if="!invoice.locked?.journal_entry_id && invoice.ai_posting_suggestion" :provenance="{
+          source: 'ai',
+          mode: 'approved',
+          confidence: invoice.ai_posting_suggestion.confidence,
+          detector: null,
+          rule_id: null,
+          rule_name: null,
+          suggestion_id: invoice.ai_posting_suggestion.id,
+          decided_at: '',
+          decided_by: null,
+        }" />
+        <span v-if="stockProposal && stockRequestedTotal > 0" class="text-xs px-2 py-0.5 rounded font-normal"
+          :class="stockFullyReceived ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">
+          {{ t('stock.receipt.received_badge', { received: stockReceivedTotal, total: stockRequestedTotal }) }}
+        </span>
+        <span v-if="stockProposal?.pf_changed_after_receipt" class="text-xs px-2 py-0.5 rounded font-normal bg-warning-50 text-warning-600"
+          :title="t('stock.receipt.pf_changed_warning')">
+          ⚠ {{ t('stock.receipt.pf_changed_warning') }}
+        </span>
         <a
           v-if="invoice.source_format"
           :href="purchaseInvoicesApi.sourceUrl(invoice.id)"
@@ -544,6 +666,11 @@ const purchaseActions = computed<ActionItem[]>(() => {
         >{{ invoice.source_format.toUpperCase() }}</a>
       </h1>
       <ActionBar :actions="purchaseActions" />
+    </div>
+
+    <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
+      class="mt-3 rounded-md border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm text-primary-700">
+      {{ t('purchase_invoice.advance_posting_hint') }}
     </div>
 
     <!-- ═══ Vendor + číslo dokladu (řádek pod headerem, paralel s vystavenou InvoiceDetail) ═══ -->
@@ -578,7 +705,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           {{ invoice.settled_by.varsymbol || invoice.settled_by.vendor_invoice_number || ('#' + invoice.settled_by.id) }}
         </RouterLink>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
+      <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('purchase_invoice.advance_link.unlink') }}
       </button>
@@ -593,10 +720,152 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </RouterLink>
         <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
       </span>
-      <button v-if="auth.canWrite" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
+      <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
         class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
         {{ t('purchase_invoice.advance_link.unlink') }}
       </button>
+    </div>
+
+    <!-- ═══ Vazba dobropisu ↔ opravovaná faktura (migrace 1096) — čti-only banner ═══ -->
+    <!-- Tento doklad JE dobropis → odkaz na opravovanou fakturu -->
+    <div v-if="invoice.document_kind === 'credit_note' && invoice.linked_parent"
+      class="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
+      <span class="text-amber-800 min-w-0">
+        {{ t('purchase_invoice.credit_note_link.corrects') }}
+        <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
+          {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
+        </RouterLink>
+        <span class="text-amber-800/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
+      </span>
+      <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
+        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
+        {{ t('common.edit') }}
+      </RouterLink>
+    </div>
+    <!-- Tento doklad je opravovaná faktura → odkaz na dobropis(y) -->
+    <div v-if="(invoice.corrected_by?.length ?? 0) > 0"
+      class="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
+      <span class="text-amber-800 min-w-0">
+        {{ t('purchase_invoice.credit_note_link.corrected_by') }}
+        <template v-for="(cn, i) in invoice.corrected_by" :key="cn.id">
+          <span v-if="i > 0">, </span>
+          <RouterLink :to="`/purchase-invoices/${cn.id}`" class="font-mono font-medium hover:underline">
+            {{ cn.varsymbol || cn.vendor_invoice_number || ('#' + cn.id) }}
+          </RouterLink>
+          <span class="text-amber-800/70 font-mono">({{ formatMoney(cn.total_with_vat, cn.currency) }})</span>
+        </template>
+      </span>
+    </div>
+
+    <!-- ═══ DDKP (daňový doklad k platbě §28 ZDPH) → vazba na uhrazenou zálohu ═══ -->
+    <div v-if="invoice.document_kind === 'tax_document' && invoice.linked_parent"
+      class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
+      <span class="text-primary-700 min-w-0">
+        {{ t('purchase_invoice.tax_document_link.for_advance') }}
+        <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
+          {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
+        </RouterLink>
+        <span class="text-primary-700/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
+      </span>
+      <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
+        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
+        {{ t('common.edit') }}
+      </RouterLink>
+    </div>
+    <!-- DDKP zvolený druh, ale bez navázané zálohy → upozorni, že vazba chybí -->
+    <div v-else-if="invoice.document_kind === 'tax_document'"
+      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+      {{ t('purchase_invoice.tax_document_link.missing') }}
+    </div>
+
+    <!-- ═══ Varování: vyúčtovací faktura na zálohu s DDKP → hrozí dvojí odpočet DPH ═══ -->
+    <div v-if="invoice._warnings?.includes('advance_has_tax_document')"
+      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+      ⚠ {{ t('purchase_invoice.warning.advance_has_tax_document') }}
+    </div>
+
+    <!-- ═══ Varování: účtenka vypadá jako doklad k přijaté záloze → nejspíš má být DDKP ═══ -->
+    <div v-if="invoice._warnings?.includes('receipt_looks_like_prepayment')"
+      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+      ⚠ {{ t('purchase_invoice.warning.receipt_looks_like_prepayment') }}
+    </div>
+
+    <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
+    <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
+      class="bg-success-50 dark:bg-success-500/[0.06] border border-success-200 dark:border-success-500/20 rounded-lg px-4 py-2.5 text-sm">
+      <div class="text-success-700 dark:text-success-400/90 font-medium mb-1.5">{{ t('purchase_invoice.payment_provenance.title') }}</div>
+      <ul class="space-y-1.5">
+        <!-- Bankovní úhrady → proklik na výpis + na zaúčtování úhrady (deník) -->
+        <li v-for="pay in (invoice.bank_payments || [])" :key="`b-${pay.bank_transaction_id}`"
+          class="flex items-center justify-between gap-3">
+          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_bank') }}</span>
+            <span class="font-mono">{{ formatDate(pay.posted_at) }}</span>
+            <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
+            <span v-if="pay.counterparty" class="text-success-700/70 ml-2">{{ pay.counterparty }}</span>
+          </span>
+          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+              class="text-primary-600 hover:underline">
+              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+            </RouterLink>
+            <RouterLink :to="{ name: 'bank-detail', params: { id: pay.statement_id } }"
+              class="text-primary-600 hover:underline">
+              {{ t('purchase_invoice.bank_payment.open_statement') }} →
+            </RouterLink>
+          </span>
+        </li>
+        <!-- Hotovostní úhrady → proklik na pokladnu + na zaúčtování úhrady (deník) -->
+        <li v-for="pay in (invoice.cash_payments || [])" :key="`c-${pay.cash_document_id}`"
+          class="flex items-center justify-between gap-3">
+          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_cash') }}</span>
+            <span class="font-mono">{{ formatDate(pay.date) }}</span>
+            <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
+            <span v-if="pay.doc_number" class="text-success-700/70 ml-2 font-mono">{{ pay.doc_number }}</span>
+            <span v-if="pay.register_name" class="text-success-700/70 ml-2">{{ pay.register_name }}</span>
+          </span>
+          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+              class="text-primary-600 hover:underline">
+              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+            </RouterLink>
+            <RouterLink :to="{ name: 'accounting-cash', query: { register_id: String(pay.register_id), q: pay.doc_number || '' } }"
+              class="text-primary-600 hover:underline">
+              {{ t('purchase_invoice.payment_provenance.open_cash') }} →
+            </RouterLink>
+          </span>
+        </li>
+        <!-- Úhrady zápočtem → proklik na zaúčtování zápočtu (deník) -->
+        <li v-for="pay in (invoice.settlement_payments || [])" :key="`s-${pay.settlement_id}`"
+          class="flex items-center justify-between gap-3">
+          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_settlement') }}</span>
+            <span class="font-mono">{{ formatDate(pay.date) }}</span>
+            <span class="font-mono ml-2">{{ formatMoney(pay.amount) }}</span>
+            <span class="text-success-700/70 ml-2 font-mono">{{ pay.account_code }}</span>
+            <span class="text-success-700/70 ml-1">{{ pay.account_name }}</span>
+            <span v-if="pay.note" class="text-success-700/70 ml-2">{{ pay.note }}</span>
+          </span>
+          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+              class="text-primary-600 hover:underline">
+              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+            </RouterLink>
+          </span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- ═══ Ručně/legacy uhrazeno BEZ zaúčtované úhrady → 321 zůstává otevřený ═══ -->
+    <div v-if="invoice.mark_paid_unposted"
+      class="bg-danger-50 border border-danger-500/40 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
+      <svg class="w-5 h-5 shrink-0 text-danger-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      </svg>
+      <div class="text-danger-600 min-w-0">
+        {{ t('purchase_invoice.payment_provenance.mark_paid_unposted', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
+      </div>
     </div>
 
     <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
@@ -647,14 +916,29 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </div>
 
       <!-- Platební účet dodavatele (pokud známý) — vyplní prázdné místo vedle Měny -->
-      <div v-if="hasStoredAccount" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div v-if="hasStoredAccount || isNonTransferPayment" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.qr.account_section') }}</h3>
         <dl class="space-y-2 text-sm">
-          <div v-if="invoice.payment_iban" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono">{{ invoice.payment_iban }}</dd></div>
-          <div v-else class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
-          <div v-if="invoice.payment_bic" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
-          <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
-          <div v-if="invoice.payment_account_source" class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
+          <template v-if="hasStoredAccount">
+            <div v-if="invoice.payment_iban" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono">{{ invoice.payment_iban }}</dd></div>
+            <div v-else class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
+            <div v-if="invoice.payment_bic" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
+            <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
+            <div v-if="invoice.payment_account_source" class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
+          </template>
+          <!-- Způsob úhrady. U jiného než převodu zvýrazněný — je to důvod, proč se
+               faktura neobjeví v platebních příkazech, a to musí být na první pohled vidět. -->
+          <div class="flex justify-between gap-2" :class="hasStoredAccount ? 'pt-2 border-t border-neutral-100' : ''">
+            <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
+            <dd>
+              <span v-if="isNonTransferPayment"
+                class="inline-block text-xs font-medium px-2 py-0.5 rounded bg-warning-50 text-warning-600">
+                {{ t('payment_method.' + (invoice.payment_method || 'bank_transfer')) }}
+              </span>
+              <span v-else>{{ t('payment_method.bank_transfer') }}</span>
+            </dd>
+          </div>
+          <p v-if="isNonTransferPayment" class="text-xs text-neutral-500">{{ t('payment_method.non_transfer_tooltip') }}</p>
         </dl>
         <button v-if="canPayWithQr" type="button" @click="openQr"
           class="mt-3 cursor-pointer text-sm text-primary-700 hover:underline inline-flex items-center gap-1.5">
@@ -731,6 +1015,23 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </tr>
           </tbody>
         </table>
+        <div v-if="invoice.vat_allocations?.length" class="mt-4 pt-3 border-t border-neutral-200">
+          <h4 class="text-xs font-medium text-neutral-600 mb-2">{{ t('purchase_invoice.vat_allocation.enable') }}</h4>
+          <div class="space-y-2">
+            <div v-for="a in invoice.vat_allocations" :key="a.id"
+              class="flex flex-wrap items-center justify-between gap-2 text-xs rounded bg-neutral-50 px-3 py-2">
+              <div>
+                <span class="font-medium">{{ a.description }}</span>
+                <span class="text-neutral-500 ml-2">{{ t('purchase_invoice.vat_allocation.usage_' + a.usage_type) }}</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 whitespace-nowrap">
+                <span class="font-mono">{{ formatMoney(a.total_amount, invoice.currency) }}</span>
+                <span>{{ t('purchase_invoice.vat_deduction.' + a.vat_deduction) }}</span>
+                <span class="font-mono">MD {{ a.account_code }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.totals.with_vat') }}</h3>
@@ -776,7 +1077,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- Záloha zatím nevyúčtovaná → nabídka spárovat s fakturou (opačný směr) -->
       <div v-if="invoice.document_kind === 'advance'" class="flex items-center justify-between gap-3">
         <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.not_settled') }}</p>
-        <button v-if="auth.canWrite && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
+        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
           class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
           {{ t('purchase_invoice.advance_link.pair_settlement') }}
         </button>
@@ -793,7 +1094,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span class="text-neutral-500 font-mono">({{ formatMoney(invoice.advance_link_suggestion.total_with_vat, invoice.advance_link_suggestion.currency) }})</span>
             </div>
           </div>
-          <div v-if="auth.canWrite" class="flex gap-2 shrink-0">
+          <div v-if="auth.canWrite('purchase_invoices') && !lockedForMe" class="flex gap-2 shrink-0">
             <button type="button" @click="linkAdvance(invoice.advance_link_suggestion.id)" :disabled="linkingAdvance"
               class="cursor-pointer text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50">
               {{ t('purchase_invoice.advance_link.confirm') }}
@@ -807,7 +1108,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
         <div v-else class="flex items-center justify-between gap-3">
           <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.none') }}</p>
-          <button v-if="auth.canWrite && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
+          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
             class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
             {{ t('purchase_invoice.advance_link.pair') }}
           </button>
@@ -911,14 +1212,14 @@ const purchaseActions = computed<ActionItem[]>(() => {
               </div>
             </dl>
             <p v-if="qrData.source === 'qr_image'" class="text-xs text-warning-600">{{ t('purchase_invoice.qr.image_fallback_note') }}</p>
-            <button v-if="auth.canWrite" type="button" @click="qrEditing = true"
+            <button v-if="auth.canWrite('purchase_invoices')" type="button" @click="qrEditing = true"
               class="cursor-pointer w-full px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.edit') }}</button>
           </template>
 
           <!-- Účet chybí -->
           <template v-else>
             <p class="text-sm text-neutral-600">{{ t('purchase_invoice.qr.no_account') }}</p>
-            <div v-if="auth.canWrite" class="flex flex-col gap-2">
+            <div v-if="auth.canWrite('purchase_invoices')" class="flex flex-col gap-2">
               <button v-if="qrData && qrData.can_extract" type="button" @click="runExtract"
                 class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md inline-flex items-center justify-center gap-1.5">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -960,7 +1261,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
             <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             {{ t('purchase_invoice.pdf.download') }}
           </a>
-          <button v-if="auth.canWrite" type="button" @click="deletePdf"
+          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
             class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
             {{ t('purchase_invoice.pdf.delete') }}
@@ -979,7 +1280,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     </div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
       <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-      <PdfDropzone v-if="auth.canWrite" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+      <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
       <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
     </div>
 
@@ -1041,23 +1342,29 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <!-- Modal: Označit jako uhrazené (datum úhrady) -->
-    <div v-if="markPaidOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-sm w-full p-5">
-        <h3 class="text-lg font-semibold mb-3">{{ t('purchase_invoice.modals.mark_paid_title') }}</h3>
-        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('purchase_invoice.modals.mark_paid_date') }}</label>
-        <input v-model="paidAtInput" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-4" />
-        <div class="flex justify-end gap-2">
-          <button type="button" @click="markPaidOpen = false"
-            class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-          <button type="button" @click="transition('paid', paidAtInput)" :disabled="acting"
-            class="cursor-pointer px-4 h-9 text-sm bg-success-500 hover:bg-success-600 disabled:bg-neutral-300 text-white font-medium rounded-md">
-            {{ acting ? '…' : t('common.confirm') }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
+    <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="purchase_invoice"
+      :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
+      :amount="Number(invoice.total_with_vat ?? 0)" :partner-name="invoice.vendor_snapshot?.company_name"
+      :busy="acting"
+      @close="markPaidOpen = false" @done="onAltPayDone"
+      @mark-paid="p => transition('paid', p.date)" />
 
     <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
+
+    <!-- Přílohy: link/unlink DMS dokumentů (Epic F7) -->
+    <PurchaseDmsDocumentsPanel v-if="invoice" class="mt-4 block" :invoice-id="invoice.id" />
+
+    <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
+      @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
   </div>
+    <PostingPreviewModal
+      v-if="invoice"
+      :open="postingPreviewOpen"
+      source="purchase-invoices"
+      :doc-id="invoice.id"
+      :doc-label="invoice.vendor_invoice_number || invoice.varsymbol"
+      @close="postingPreviewOpen = false"
+      @posted="onPosted" />
+
 </template>

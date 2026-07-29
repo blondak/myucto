@@ -9,6 +9,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\SigningProfileRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
@@ -215,19 +217,12 @@ final class SignatureDocumentSelectionAction
 
     private function canWrite(Request $request): bool
     {
-        $role = $this->role($request);
-        return $role === 'admin' || $role === 'accountant';
+        return RequestAuthorization::allows($request, 'settings.signing', AccessLevel::WRITE);
     }
 
     private function isAdmin(Request $request): bool
     {
-        return $this->role($request) === 'admin';
-    }
-
-    private function role(Request $request): string
-    {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return (string) ($user['role'] ?? '');
+        return RequestAuthorization::isSuperadmin($request);
     }
 
     private function userId(Request $request): int

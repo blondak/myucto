@@ -48,7 +48,7 @@ final class EmailNoticeReconciler
             'SELECT bt.amount, bt.posted_at, bt.variable_symbol, bt.currency,
                     bt.counterparty_account, bt.source,
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
-                    bs.currency AS stmt_currency
+                    bs.currency AS stmt_currency, bs.supplier_id AS stmt_supplier_id
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
               WHERE bt.id = ?'
@@ -68,7 +68,10 @@ final class EmailNoticeReconciler
         // Bez jednoznačného supplierа NEpřebíráme nic — převzetí smí hýbat jen platbami
         // patřícími témuž tenantovi (currencies.account_number nemá UNIQUE → účet teoreticky
         // může sdílet víc supplierů; bez scope by šlo přetáhnout párování cizího tenanta).
-        $supplierId = $this->resolveSupplierId($pdo, $gpcAccount, (string) ($gpc['stmt_bank'] ?? ''));
+        $supplierId = (int) ($gpc['stmt_supplier_id'] ?? 0);
+        if ($supplierId === 0) {
+            $supplierId = $this->resolveSupplierId($pdo, $gpcAccount, (string) ($gpc['stmt_bank'] ?? ''));
+        }
         if ($supplierId === 0) {
             return null;
         }
@@ -89,6 +92,7 @@ final class EmailNoticeReconciler
                 AND bt.id <> ?
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
+                AND bs.supplier_id = ?
                 AND bt.match_status IN ('auto_exact','auto_partial','manual')
                 AND (
                       EXISTS (SELECT 1 FROM invoice_payments ip
@@ -107,6 +111,7 @@ final class EmailNoticeReconciler
             self::AMOUNT_TOLERANCE,
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
+            $supplierId,
             $supplierId, $supplierId, $supplierId,
         ]);
         $rows = $cand->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -162,25 +167,31 @@ final class EmailNoticeReconciler
             "SELECT bt.amount, bt.posted_at, bt.variable_symbol, bt.currency,
                     bt.counterparty_account, bt.source,
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
-                    bs.currency AS stmt_currency
+                    bs.currency AS stmt_currency, bs.supplier_id AS stmt_supplier_id
                FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ?"
         );
         $stmt->execute([$secondaryTxId]);
         $secondary = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($secondary === false || (string) $secondary['source'] !== 'idoklad') return null;
-        if ($this->resolveSupplierId($pdo, (string) $secondary['stmt_account'], (string) ($secondary['stmt_bank'] ?? '')) === 0) return null;
+        $supplierId = (int) ($secondary['stmt_supplier_id'] ?? 0);
+        if ($supplierId === 0) {
+            $supplierId = $this->resolveSupplierId($pdo, (string) $secondary['stmt_account'], (string) ($secondary['stmt_bank'] ?? ''));
+        }
+        if ($supplierId === 0) return null;
 
         $candidates = $pdo->prepare(
             "SELECT bt.id, bt.variable_symbol, bt.currency, bt.counterparty_account,
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
                     bs.currency AS stmt_currency
-               FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+              FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.source = 'statement' AND bs.source IN ('gpc','pdf')
+                AND bs.supplier_id = ?
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)"
         );
         $candidates->execute([
+            $supplierId,
             $secondary['amount'], self::AMOUNT_TOLERANCE,
             $secondary['posted_at'], self::DATE_WINDOW_DAYS,
             $secondary['posted_at'], self::DATE_WINDOW_DAYS,
@@ -214,7 +225,7 @@ final class EmailNoticeReconciler
     /**
      * Supplier (tenant) z čísla účtu výpisu — kopíruje logiku StatementMatcher::match():
      * porovnání přes AccountNumberNormalizer (zero-padding/prefix + domácí část IBANu),
-     * volitelný filtr na bank_code. Vrací 0, když účet nepatří žádnému supplierovi.
+     * volitelný filtr na bank_code. Vrací 0, když účet nemá právě jednoho vlastníka.
      */
     private function resolveSupplierId(PDO $pdo, string $account, string $bankCode): int
     {
@@ -222,12 +233,18 @@ final class EmailNoticeReconciler
             return 0;
         }
         $stmt = $pdo->query(
-            'SELECT supplier_id, account_number, iban, bank_code FROM currencies
-              WHERE account_number IS NOT NULL OR iban IS NOT NULL'
+            'SELECT supplier_id, account_number, iban, bank_code
+               FROM currencies
+              WHERE account_number IS NOT NULL OR iban IS NOT NULL
+              UNION ALL
+             SELECT supplier_id, account_number, iban, bank_code
+               FROM supplier_bank_accounts
+              WHERE is_active = 1 AND (account_number IS NOT NULL OR iban IS NOT NULL)'
         );
         if ($stmt === false) {
             return 0;
         }
+        $owners = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $cand) {
             $iban = isset($cand['iban']) && is_string($cand['iban']) ? $cand['iban'] : null;
             if ($bankCode !== '') {
@@ -240,10 +257,13 @@ final class EmailNoticeReconciler
                 }
             }
             if (AccountNumberNormalizer::matchesAny($account, $cand['account_number'] ?? null, $iban)) {
-                return (int) $cand['supplier_id'];
+                $owner = (int) $cand['supplier_id'];
+                if ($owner > 0) {
+                    $owners[$owner] = true;
+                }
             }
         }
-        return 0;
+        return count($owners) === 1 ? (int) array_key_first($owners) : 0;
     }
 
     /**

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 // RouterLink se používá i v Add Currency modalu — import už pokrývá
 import { useI18n } from 'vue-i18n'
@@ -8,30 +8,107 @@ import {
   type PurchaseInvoice,
   type PurchaseInvoicePayload,
   type PurchaseInvoiceItem,
+  type PurchaseInvoiceListItem,
   type PurchaseDocumentKind,
+  type ExpenseKind,
+  type ExpenseKindSuggestion,
   type ExchangeRateSource,
   type VatDeduction,
+  type PurchaseVatAllocation,
+  type AiPostingSuggestion,
 } from '@/api/purchaseInvoices'
+import { PAYMENT_METHODS, type PaymentMethod } from '@/api/invoices'
+import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
+import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { settingsApi } from '@/api/settings'
+import AutomationBadge from '@/components/automation/AutomationBadge.vue'
+import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import { formatMoney } from '@/composables/useFormat'
 import { evalMath } from '@/directives/vMath'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
+import { useDemoMode } from '@/composables/useDemoMode'
 import { apiErrorMessage } from '@/api/errors'
+import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
+import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
+const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+
+/** Volby formy úhrady — pořadí a doména ze sdíleného API typu (migrace 1128). */
+const paymentMethodOptions = PAYMENT_METHODS
+
+// Sklad (Epic SKLAD) — na řádku přijaté faktury jen volitelná vazba na skladovou kartu.
+// Na rozdíl od vydané faktury BEZ skladu (warehouse) a bez náhledu dostupnosti.
+const stockEnabled = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true)
+// Per-řádek stav dropdownu (remote hledání) — klíčováno indexem; efemérní.
+// Vybraný LABEL držíme podle stock_item_id (stabilní přes removeItem), ne podle indexu.
+const stockRowOptions = reactive<Record<number, { value: number; label: string; secondary?: string }[]>>({})
+const stockRowLoading = reactive<Record<number, boolean>>({})
+const stockOptionById = reactive<Record<number, { value: number; label: string; secondary?: string }>>({})
+const stockItemsCache = new Map<number, StockItemSearchResult>()
+
+/** Vybraná option pro daný řádek — dle stock_item_id (stabilní přes reorder/smazání). */
+function stockSelectedFor(it: PurchaseInvoiceItem): { value: number; label: string; secondary?: string } | null {
+  return it.stock_item_id != null ? (stockOptionById[it.stock_item_id] ?? null) : null
+}
+
+async function onStockSearch(rowIndex: number, q: string) {
+  stockRowLoading[rowIndex] = true
+  try {
+    const res = await stockApi.searchItems(q, 30)
+    for (const r of res) stockItemsCache.set(r.id, r)
+    stockRowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+  } catch {
+    stockRowOptions[rowIndex] = []
+  } finally {
+    stockRowLoading[rowIndex] = false
+  }
+}
+
+function onStockSelect(rowIndex: number, itemId: number | null) {
+  const it = form.value.items[rowIndex]
+  if (!it) return
+  it.stock_item_id = itemId
+  if (itemId === null) return
+  const si = stockItemsCache.get(itemId)
+  if (si) {
+    stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
+    // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
+    it.description = si.name
+    if (si.unit) it.unit = si.unit
+  }
+}
+
+/** Edit mode: naplní label (SKU — název) z joined polí načtené faktury (stock_sku/stock_name). */
+function hydrateStockSelections() {
+  if (!stockEnabled.value) return
+  for (const it of form.value.items) {
+    if (it.stock_item_id != null && it.stock_sku) {
+      stockOptionById[it.stock_item_id] = {
+        value: it.stock_item_id,
+        label: `${it.stock_sku} — ${it.stock_name ?? ''}`.trim(),
+      }
+    }
+  }
+}
 
 const isEdit = computed(() => route.params.id !== undefined && route.params.id !== 'new')
 const invoiceId = computed(() => (isEdit.value ? Number(route.params.id) : null))
@@ -45,7 +122,17 @@ const vatRates = ref<VatRate[]>([])
 const currencies = ref<Currency[]>([])
 const units = ref<Unit[]>([])
 const expenseCategories = ref<ExpenseCategory[]>([])
+const aiPostingSuggestion = ref<AiPostingSuggestion | null>(null)
+const aiSuggestionSaving = ref(false)
+
+// §DM — návrhy druhu nákladu, klíčované id ULOŽENÉ položky (nové řádky návrh nemají,
+// dokud se doklad neuloží; BE je počítá nad DB). Read-only: `expense_kind` zapisuje
+// výhradně uživatel kliknutím na „Použít", nikdy se neaplikují samy.
+const expenseSuggestions = ref<Record<number, ExpenseKindSuggestion>>({})
+/** Ručně zavřené návrhy — jen pro tuhle relaci editoru, nic se neukládá. */
+const dismissedSuggestions = ref<Set<number>>(new Set())
 const vatClassifications = ref<VatClassification[]>([])
+const accountingAccounts = ref<ChartAccount[]>([])
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -77,6 +164,7 @@ const form = ref<{
   payment_iban: string
   payment_bic: string
   payment_variable_symbol: string
+  payment_method: PaymentMethod
   advance_paid_amount: number
   rounding: number
   payment_currency_id: number | null
@@ -86,6 +174,7 @@ const form = ref<{
   exchange_diff_base: number | null
   expense_category_id: number | null
   vat_classification_code: string | null
+  parent_purchase_invoice_id: number | null
   items: PurchaseInvoiceItem[]
 }>({
   vendor_id: null,
@@ -115,6 +204,7 @@ const form = ref<{
   payment_iban: '',
   payment_bic: '',
   payment_variable_symbol: '',
+  payment_method: 'bank_transfer',
   advance_paid_amount: 0,
   rounding: 0,
   payment_currency_id: null,
@@ -124,8 +214,63 @@ const form = ref<{
   exchange_diff_base: null,
   expense_category_id: null,
   vat_classification_code: null,
+  parent_purchase_invoice_id: null,
   items: [],
 })
+
+// Vazba na jiný přijatý doklad přes parent_purchase_invoice_id:
+//  • dobropis (credit_note) → opravovaná běžná faktura téhož dodavatele (migrace 1096),
+//  • DDKP (tax_document, daňový doklad k platbě §28 ZDPH) → uhrazená záloha téhož dodavatele.
+// Vrací druh dokladu, mezi jehož kandidáty se vybírá (null = doklad se neváže).
+const parentLinkKind = computed<'invoice' | 'advance' | null>(() => {
+  if (form.value.document_kind === 'credit_note') return 'invoice'
+  if (form.value.document_kind === 'tax_document') return 'advance'
+  return null
+})
+
+const parentCandidates = ref<PurchaseInvoiceListItem[]>([])
+const parentCandidatesLoading = ref(false)
+
+async function loadParentCandidates() {
+  const targetKind = parentLinkKind.value
+  if (!targetKind || !form.value.vendor_id) {
+    parentCandidates.value = []
+    return
+  }
+  parentCandidatesLoading.value = true
+  try {
+    const res = await purchaseInvoicesApi.listGrouped({
+      vendor_id: form.value.vendor_id,
+      document_kind: targetKind,
+      per_page: 200,
+    })
+    // Vlastní doklad (kdyby náhodou prošel filtrem) i storna vynech.
+    parentCandidates.value = res.data
+      .flatMap(g => g.invoices)
+      .filter(inv => inv.id !== invoiceId.value && inv.status !== 'cancelled')
+  } catch {
+    parentCandidates.value = []
+  } finally {
+    parentCandidatesLoading.value = false
+  }
+}
+
+// Přenačti kandidáty při změně druhu dokladu / dodavatele; při přepnutí na druh bez
+// vazby ji vyčisti, a při přepnutí mezi dobropisem ⇄ DDKP taky (faktura vs. záloha nesedí).
+watch(
+  () => [form.value.document_kind, form.value.vendor_id] as const,
+  ([kind], [prevKind]) => {
+    if (kind !== 'credit_note' && kind !== 'tax_document') {
+      form.value.parent_purchase_invoice_id = null
+      parentCandidates.value = []
+      return
+    }
+    if (prevKind !== kind && (prevKind === 'credit_note' || prevKind === 'tax_document')) {
+      form.value.parent_purchase_invoice_id = null
+    }
+    void loadParentCandidates()
+  },
+)
 
 // PDF state
 const existingPdf = ref<{ path: string; hash: string; size: number; name: string; uploadedAt: string } | null>(null)
@@ -350,6 +495,13 @@ async function loadCodebooks() {
     units.value = u
     expenseCategories.value = ec
     vatClassifications.value = vc
+    if (!auth.isClientRole) {
+      try {
+        accountingAccounts.value = await accountingApi.listAccounts()
+      } catch {
+        accountingAccounts.value = []
+      }
+    }
   } catch (e) {
     error.value = apiErrorMessage(e)
   }
@@ -358,9 +510,89 @@ async function loadCodebooks() {
 async function loadInvoice(id: number) {
   try {
     const inv = await purchaseInvoicesApi.get(id)
+    // Zamčený doklad (F6): klient editor vůbec neotevře — UX vrstva, BE by PUT stejně 403nul.
+    if (auth.isClientRole && inv.locked?.is_locked) {
+      toast.info(t('lock.client_hint'))
+      router.replace(`/purchase-invoices/${inv.id}`)
+      return
+    }
+    aiPostingSuggestion.value = inv.ai_posting_suggestion ?? null
     populate(inv)
+    void loadExpenseSuggestions(id)
   } catch (e) {
     error.value = apiErrorMessage(e)
+  }
+}
+
+/**
+ * §DM — dotáhne návrhy druhu nákladu. Záměrně MIMO try/catch nad `loadInvoice`: doklad se
+ * musí otevřít i bez nich. Endpoint je jen pro podvojné účetnictví, takže u daňové evidence
+ * vrací 4xx — to není chyba uživatele a nemá o ní vědět (návrh je bonus, ne funkce editoru).
+ */
+async function loadExpenseSuggestions(id: number) {
+  try {
+    const res = await purchaseInvoicesApi.expenseSuggestions(id)
+    const next: Record<number, ExpenseKindSuggestion> = {}
+    for (const [itemId, suggestion] of Object.entries(res.items ?? {})) {
+      next[Number(itemId)] = suggestion
+    }
+    expenseSuggestions.value = next
+    dismissedSuggestions.value = new Set()
+  } catch {
+    expenseSuggestions.value = {}
+  }
+}
+
+/**
+ * Návrh k zobrazení u řádku, nebo null. Skryjeme ho, jakmile na řádku už je to, co navrhuje —
+ * jinak by u potvrzené položky svítil „Použít", který nic neudělá.
+ */
+function suggestionFor(it: PurchaseInvoiceItem): ExpenseKindSuggestion | null {
+  if (it.id == null || dismissedSuggestions.value.has(it.id)) return null
+  const s = expenseSuggestions.value[it.id]
+  if (!s || s.expense_kind === it.expense_kind) return null
+  return s
+}
+
+/** Zápis návrhu na řádek. JEDINÁ cesta, jak se návrh promítne do dat — vždy na klik uživatele. */
+function applySuggestion(it: PurchaseInvoiceItem) {
+  const s = suggestionFor(it)
+  if (!s) return
+  it.expense_kind = s.expense_kind
+}
+
+function dismissSuggestion(it: PurchaseInvoiceItem) {
+  if (it.id != null) dismissedSuggestions.value = new Set(dismissedSuggestions.value).add(it.id)
+}
+
+async function acceptAiPostingSuggestion() {
+  if (!aiPostingSuggestion.value || aiSuggestionSaving.value) return
+  aiSuggestionSaving.value = true
+  try {
+    const result = await purchaseInvoicesApi.acceptAiPostingSuggestion(aiPostingSuggestion.value.id)
+    if (result.applied.expense_category_id != null) {
+      form.value.expense_category_id = result.applied.expense_category_id
+    }
+    aiPostingSuggestion.value = null
+    toast.success(t('common.saved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    aiSuggestionSaving.value = false
+  }
+}
+
+async function rejectAiPostingSuggestion() {
+  if (!aiPostingSuggestion.value || aiSuggestionSaving.value) return
+  aiSuggestionSaving.value = true
+  try {
+    await purchaseInvoicesApi.rejectAiPostingSuggestion(aiPostingSuggestion.value.id)
+    aiPostingSuggestion.value = null
+    toast.success(t('common.saved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    aiSuggestionSaving.value = false
   }
 }
 
@@ -391,6 +623,7 @@ function populate(inv: PurchaseInvoice) {
   form.value.payment_iban = inv.payment_iban || ''
   form.value.payment_bic = inv.payment_bic || ''
   form.value.payment_variable_symbol = inv.payment_variable_symbol || ''
+  form.value.payment_method = inv.payment_method || 'bank_transfer'
   form.value.advance_paid_amount = inv.advance_paid_amount
   form.value.rounding = Number(inv.rounding) || 0
   form.value.payment_currency_id = inv.payment_currency_id
@@ -400,13 +633,25 @@ function populate(inv: PurchaseInvoice) {
   form.value.exchange_diff_base = inv.exchange_diff_base
   form.value.expense_category_id = inv.expense_category_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
+  form.value.parent_purchase_invoice_id = inv.parent_purchase_invoice_id ?? null
   form.value.items = inv.items.length > 0 ? inv.items : []
+  // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
+  showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
+  // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
+  // klasifikací. Bez přepisu do položek by ho odvozený příznak při uložení tiše shodil
+  // na 0 — starý příznak platil pro celý doklad, tak ho tak i přeneseme (uživatel může
+  // po řádcích upřesnit). Klasifikované položky nepřepisujeme.
+  if (form.value.is_fixed_asset && !form.value.items.some(it => it.expense_kind)) {
+    form.value.items.forEach(it => { it.expense_kind = 'fixed_asset' })
+  }
+  hydrateStockSelections()
   extractionWarning.value = inv.extraction_warning ?? null
   // Ruční rekapitulace DPH dle dokladu (§ 73) → naplň override mapu.
   vatOverrides.value = {}
   for (const o of inv.vat_overrides ?? []) {
     vatOverrides.value[String(o.rate)] = { base: o.base, vat: o.vat }
   }
+  vatAllocations.value = (inv.vat_allocations ?? []).map(a => ({ ...a }))
   // Existující faktura: plátcovství čteme ze SNAPSHOTU dokladu (migrace 0133), který si
   // fakturu drží k datu plnění. ZÁMĚRNĚ NEvoláme online ARES/VIES lookup — ten se ptá na
   // dnešní stav a persistoval by ho na klienta, čímž by u historické faktury příznak
@@ -426,6 +671,33 @@ function populate(inv: PurchaseInvoice) {
   }
 }
 
+const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'fixed_asset']
+
+// §DM: klasifikace je na položce (faktura běžně míchá majetek + službu), hlavičkový
+// `is_fixed_asset` z ní jen odvozujeme — dva ručně editovatelné zdroje pravdy by se
+// rozešly hned prvním uložením. Stejné pravidlo drží BE (PurchaseInvoiceRepository).
+const derivedIsFixedAsset = computed(() =>
+  form.value.items.some(it => it.expense_kind === 'fixed_asset'),
+)
+
+// §DČR — časové rozlišení nákladu (381). 99 % faktur ho nepoužije, proto je celý blok
+// SKRYTÝ za jedním master přepínačem u rekapitulace DPH; teprve po jeho zapnutí se u
+// položek ukáže per-řádek „časově rozlišit". Faktura s už zadaným rozlišením ho odkryje sama.
+const showAccrual = ref(false)
+const accrualOpen = reactive(new Set<number>())
+function accrualVisible(it: PurchaseInvoiceItem, i: number): boolean {
+  return accrualOpen.has(i) || !!it.accrual_from || !!it.accrual_to
+}
+function toggleAccrual(it: PurchaseInvoiceItem, i: number) {
+  if (accrualVisible(it, i)) {
+    accrualOpen.delete(i)
+    it.accrual_from = null
+    it.accrual_to = null
+  } else {
+    accrualOpen.add(i)
+  }
+}
+
 function addItem(hideDropzone = true) {
   form.value.items.push({
     description: '',
@@ -434,6 +706,10 @@ function addItem(hideDropzone = true) {
     unit_price_without_vat: 0,
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
     order_index: form.value.items.length,
+    expense_kind: null,
+    accrual_from: null,
+    accrual_to: null,
+    stock_item_id: null,
   })
   // user začal editovat (klik na „přidat položku") → schovej dropzone, ať se nepřeplňuje.
   // Automatický seed první položky při mountu posílá hideDropzone=false (viz onMounted).
@@ -511,6 +787,104 @@ const computedRecap = computed(() => {
 
 // Ruční overridy per sazba (klíč = sazba jako string). Prázdné = počítat standardně.
 const vatOverrides = ref<Record<string, { base: number; vat: number }>>({})
+const vatAllocations = ref<PurchaseVatAllocation[]>([])
+const hasVatAllocations = computed(() => vatAllocations.value.length > 0)
+
+function accountExists(code: string): boolean {
+  return accountingAccounts.value.some(a => a.is_active && a.account_code === code)
+}
+
+function defaultAllocationAccount(usage: PurchaseVatAllocation['usage_type']): string {
+  const candidates = usage === 'personal' ? ['355', '335'] : usage === 'non_deductible' ? ['513', '518'] : ['518']
+  return candidates.find(accountExists) ?? candidates[0]
+}
+
+function startVatAllocations(): void {
+  vatAllocations.value = recapRows.value.map((row, index) => ({
+    description: t('purchase_invoice.vat_allocation.business'),
+    usage_type: 'business',
+    vat_rate: row.rate,
+    base_amount: row.base,
+    vat_amount: row.vat,
+    total_amount: round2(row.base + row.vat),
+    vat_deduction: 'full',
+    vat_deduction_percent: 100,
+    tax_treatment: 'deductible',
+    account_code: defaultAllocationAccount('business'),
+    vat_classification_code: form.value.vat_classification_code,
+    order_index: index,
+  }))
+}
+
+function addVatAllocation(rate: number): void {
+  vatAllocations.value.push({
+    description: t('purchase_invoice.vat_allocation.personal'),
+    usage_type: 'personal', vat_rate: rate,
+    base_amount: 0, vat_amount: 0, total_amount: 0,
+    vat_deduction: 'none', vat_deduction_percent: 0,
+    tax_treatment: 'not_expense', account_code: defaultAllocationAccount('personal'),
+    vat_classification_code: form.value.vat_classification_code,
+    order_index: vatAllocations.value.length,
+  })
+}
+
+function allocationsForRate(rate: number): PurchaseVatAllocation[] {
+  return vatAllocations.value.filter(a => Number(a.vat_rate) === Number(rate))
+}
+
+function applyAllocationPreset(allocation: PurchaseVatAllocation): void {
+  if (allocation.usage_type === 'personal') {
+    allocation.vat_deduction = 'none'; allocation.vat_deduction_percent = 0
+    allocation.tax_treatment = 'not_expense'; allocation.account_code = defaultAllocationAccount('personal')
+  } else if (allocation.usage_type === 'non_deductible') {
+    allocation.vat_deduction = 'none'; allocation.vat_deduction_percent = 0
+    allocation.tax_treatment = 'non_deductible'; allocation.account_code = defaultAllocationAccount('non_deductible')
+  } else if (allocation.usage_type === 'mixed') {
+    allocation.vat_deduction = 'proportional'; allocation.vat_deduction_percent = 70
+    allocation.tax_treatment = 'deductible'; allocation.account_code = defaultAllocationAccount('business')
+  } else {
+    allocation.vat_deduction = 'full'; allocation.vat_deduction_percent = 100
+    allocation.tax_treatment = 'deductible'; allocation.account_code = defaultAllocationAccount('business')
+  }
+}
+
+function syncAllocationResidual(rate: number): void {
+  const recap = recapRows.value.find(r => Number(r.rate) === Number(rate))
+  const rows = allocationsForRate(rate)
+  const residual = rows.find(a => a.usage_type === 'business')
+  if (!recap || !residual) return
+  const others = rows.filter(a => a !== residual)
+  residual.base_amount = round2(recap.base - others.reduce((s, a) => s + Number(a.base_amount || 0), 0))
+  residual.vat_amount = round2(recap.vat - others.reduce((s, a) => s + Number(a.vat_amount || 0), 0))
+  residual.total_amount = round2(residual.base_amount + residual.vat_amount)
+}
+
+function syncAllAllocationResiduals(): void {
+  for (const row of recapRows.value) syncAllocationResidual(row.rate)
+}
+
+function setAllocationGross(allocation: PurchaseVatAllocation, raw: string): void {
+  const total = evalMath(raw)
+  if (total === null) return
+  const recap = recapRows.value.find(r => Number(r.rate) === Number(allocation.vat_rate))
+  const recapTotal = recap ? recap.base + recap.vat : 0
+  const baseRatio = recapTotal !== 0 ? recap!.base / recapTotal : 1
+  allocation.total_amount = round2(total)
+  allocation.base_amount = round2(total * baseRatio)
+  allocation.vat_amount = round2(allocation.total_amount - allocation.base_amount)
+  syncAllocationResidual(allocation.vat_rate)
+}
+
+function removeVatAllocation(allocation: PurchaseVatAllocation): void {
+  if (allocation.usage_type === 'business') return
+  const rate = allocation.vat_rate
+  vatAllocations.value = vatAllocations.value.filter(a => a !== allocation)
+  syncAllocationResidual(rate)
+}
+
+const allocationInvalid = computed(() => hasVatAllocations.value && vatAllocations.value.some(a =>
+  !a.description.trim() || !a.account_code.trim() || a.base_amount < -0.01 || a.vat_amount < -0.01 || a.total_amount < -0.01,
+))
 
 // Řádky pro UI: merge vypočtené rekapitulace s overridy (+ příznak „ručně upraveno").
 const recapRows = computed(() => computedRecap.value.map(r => {
@@ -532,6 +906,7 @@ function setRecapBase(rate: number, raw: string): void {
   const row = computedRecap.value.find(r => r.rate === rate)
   const cur = vatOverrides.value[key] ?? { base: row?.base ?? 0, vat: row?.vat ?? 0 }
   vatOverrides.value = { ...vatOverrides.value, [key]: { ...cur, base: round2(v) } }
+  nextTick(syncAllAllocationResiduals)
 }
 function setRecapVat(rate: number, raw: string): void {
   const v = evalMath(raw)
@@ -540,11 +915,13 @@ function setRecapVat(rate: number, raw: string): void {
   const row = computedRecap.value.find(r => r.rate === rate)
   const cur = vatOverrides.value[key] ?? { base: row?.base ?? 0, vat: row?.vat ?? 0 }
   vatOverrides.value = { ...vatOverrides.value, [key]: { ...cur, vat: round2(v) } }
+  nextTick(syncAllAllocationResiduals)
 }
 function resetRecapRate(rate: number): void {
   const next = { ...vatOverrides.value }
   delete next[String(rate)]
   vatOverrides.value = next
+  nextTick(syncAllAllocationResiduals)
 }
 const hasVatOverride = computed(() => Object.keys(vatOverrides.value).length > 0)
 
@@ -635,10 +1012,17 @@ async function onReplacePdf() {
 }
 
 async function submit() {
+  if (blockDemoMutation()) return
   if (submitting.value) return
   submitting.value = true
   error.value = ''
   fieldErrors.value = {}
+  syncAllAllocationResiduals()
+  if (allocationInvalid.value) {
+    error.value = t('purchase_invoice.vat_allocation.invalid')
+    submitting.value = false
+    return
+  }
   try {
     const payload: PurchaseInvoicePayload = {
       vendor_id: form.value.vendor_id!,
@@ -655,7 +1039,7 @@ async function submit() {
       exchange_rate_source: form.value.exchange_rate_source,
       reverse_charge: form.value.reverse_charge,
       prices_include_vat: form.value.prices_include_vat,
-      is_fixed_asset: form.value.is_fixed_asset,
+      is_fixed_asset: derivedIsFixedAsset.value,
       // Snapshot plátcovství dodavatele k datu plnění (migrace 0133) — zmrazí se na doklad,
       // aby historickou fakturu šlo označit za plátce i když dodavatel dnes plátce není.
       vendor_is_vat_payer: form.value.vendor_is_vat_payer,
@@ -675,6 +1059,9 @@ async function submit() {
         variable_symbol: form.value.payment_variable_symbol.trim() || null,
         source: 'manual',
       },
+      // Forma úhrady — volba v editoru je vědomý úkon účetní, backend jí proto vždy
+      // přiřadí source 'manual' a už ji nepřepíše AI ani předvolba dodavatele.
+      payment_method: form.value.payment_method,
       advance_paid_amount: form.value.advance_paid_amount,
       rounding: form.value.rounding,
       payment_currency_id: form.value.payment_currency_id,
@@ -684,8 +1071,16 @@ async function submit() {
       exchange_diff_base: form.value.exchange_diff_base,
       expense_category_id: form.value.expense_category_id,
       vat_classification_code: form.value.vat_classification_code,
+      // Vazba přes parent_purchase_invoice_id — dobropis → opravovaná faktura (migrace 1096),
+      // DDKP (tax_document) → uhrazená záloha. BE ji stejně provaliduje (tenant/druh/self)
+      // a u jiného druhu vynuluje.
+      parent_purchase_invoice_id:
+        form.value.document_kind === 'credit_note' || form.value.document_kind === 'tax_document'
+          ? form.value.parent_purchase_invoice_id
+          : null,
       // Ruční rekapitulace DPH dle dokladu (§ 73) — [] vyčistí případný starý override.
       vat_overrides: buildVatOverridesPayload(),
+      vat_allocations: vatAllocations.value.map((a, i) => ({ ...a, order_index: i })),
       items: form.value.items.map((it, i) => ({
         description: it.description,
         quantity: Number(it.quantity || 0),
@@ -694,6 +1089,10 @@ async function submit() {
         vat_rate_id: it.vat_rate_id,
         order_index: i,
         vat_classification_code: it.vat_classification_code,
+        expense_kind: it.expense_kind ?? null,
+        accrual_from: it.accrual_from ?? null,
+        accrual_to: it.accrual_to ?? null,
+        stock_item_id: it.stock_item_id ?? null,
       })),
     }
     let inv: PurchaseInvoice
@@ -713,7 +1112,16 @@ async function submit() {
     toast.success(isEdit.value ? t('common.saved') : t('common.created'))
     // Non-blocking varování ze serveru (např. dobropis s kladným součtem — issue #35).
     for (const code of inv._warnings ?? []) {
-      toast.warning(t(`purchase_invoice.warning.${code}`))
+      if (code === 'exchange_rate_cnb_deviation') {
+        const m = inv._warning_meta?.exchange_rate_cnb_deviation
+        toast.warning(t('purchase_invoice.warning.exchange_rate_cnb_deviation', {
+          used: m ? m.used_rate.toFixed(3) : '',
+          cnb: m ? m.cnb_rate.toFixed(3) : '',
+          diff: m ? m.diff_percent.toFixed(2) : '',
+        }))
+      } else {
+        toast.warning(t(`purchase_invoice.warning.${code}`))
+      }
     }
     router.push(`/purchase-invoices/${inv.id}`)
   } catch (e: any) {
@@ -951,8 +1359,53 @@ function fieldErr(key: string): string | null {
               <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
               <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
               <option value="advance">{{ t('purchase_invoice.document_kind.advance') }}</option>
+              <option value="tax_document">{{ t('purchase_invoice.document_kind.tax_document') }}</option>
             </select>
           </div>
+        </div>
+
+        <!-- Dobropis: vazba na opravovanou přijatou fakturu (migrace 1096) -->
+        <div v-if="form.document_kind === 'credit_note'"
+             class="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+          <label class="block text-sm font-medium text-neutral-700 mb-1">
+            {{ t('purchase_invoice.credit_note_link.label') }}
+          </label>
+          <select v-model="form.parent_purchase_invoice_id"
+                  :disabled="!form.vendor_id || parentCandidatesLoading"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-60">
+            <option :value="null">{{ t('purchase_invoice.credit_note_link.none') }}</option>
+            <option v-for="c in parentCandidates" :key="c.id" :value="c.id">
+              {{ c.vendor_invoice_number }} · {{ c.issue_date }} · {{ formatMoney(c.total_with_vat, c.currency) }}
+            </option>
+          </select>
+          <p class="text-xs text-neutral-500 mt-1">
+            <span v-if="parentCandidatesLoading">{{ t('common.loading') }}</span>
+            <span v-else-if="!form.vendor_id">{{ t('purchase_invoice.credit_note_link.pick_vendor') }}</span>
+            <span v-else-if="parentCandidates.length === 0">{{ t('purchase_invoice.credit_note_link.no_candidates') }}</span>
+            <span v-else>{{ t('purchase_invoice.credit_note_link.hint') }}</span>
+          </p>
+        </div>
+
+        <!-- DDKP (daňový doklad k platbě §28 ZDPH): vazba na uhrazenou zálohu -->
+        <div v-if="form.document_kind === 'tax_document'"
+             class="rounded-md border border-primary-200 bg-primary-50/60 px-3 py-2.5">
+          <label class="block text-sm font-medium text-neutral-700 mb-1">
+            {{ t('purchase_invoice.tax_document_link.label') }}
+          </label>
+          <select v-model="form.parent_purchase_invoice_id"
+                  :disabled="!form.vendor_id || parentCandidatesLoading"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-60">
+            <option :value="null">{{ t('purchase_invoice.tax_document_link.none') }}</option>
+            <option v-for="c in parentCandidates" :key="c.id" :value="c.id">
+              {{ c.vendor_invoice_number }} · {{ c.issue_date }} · {{ formatMoney(c.total_with_vat, c.currency) }}
+            </option>
+          </select>
+          <p class="text-xs text-neutral-500 mt-1">
+            <span v-if="parentCandidatesLoading">{{ t('common.loading') }}</span>
+            <span v-else-if="!form.vendor_id">{{ t('purchase_invoice.tax_document_link.pick_vendor') }}</span>
+            <span v-else-if="parentCandidates.length === 0">{{ t('purchase_invoice.tax_document_link.no_candidates') }}</span>
+            <span v-else>{{ t('purchase_invoice.tax_document_link.hint') }}</span>
+          </p>
         </div>
 
         <!-- Vendor invoice number + our varsymbol -->
@@ -1042,10 +1495,14 @@ function fieldErr(key: string): string | null {
             <span :class="!form.vendor_is_vat_payer ? 'text-warning-700' : ''">{{ t('purchase_invoice.fields.vendor_is_vat_payer') }}</span>
             <span v-if="vendorVatStatusLoading" class="text-xs text-neutral-400">…</span>
           </label>
-          <label class="inline-flex items-center gap-2 text-sm" :title="t('purchase_invoice.fields.is_fixed_asset_hint')">
-            <input type="checkbox" v-model="form.is_fixed_asset" class="rounded" />
+          <!-- Odvozeno z položek (§DM) — read-only, aby nevznikl druhý zdroj pravdy. -->
+          <span
+            class="inline-flex items-center gap-2 text-sm text-neutral-500"
+            :title="t('purchase_invoice.fields.is_fixed_asset_derived_hint')"
+          >
+            <input type="checkbox" :checked="derivedIsFixedAsset" disabled class="rounded opacity-60" />
             {{ t('purchase_invoice.fields.is_fixed_asset') }}
-          </label>
+          </span>
           <label class="inline-flex items-center gap-2 text-sm" :title="t('purchase_invoice.fields.prices_include_vat_hint')">
             <input type="checkbox" v-model="form.prices_include_vat" class="rounded" />
             {{ t('purchase_invoice.fields.prices_include_vat') }}
@@ -1081,6 +1538,7 @@ function fieldErr(key: string): string | null {
               <th class="text-left py-2 px-1 font-normal w-20">{{ t('purchase_invoice.items.unit') }}</th>
               <th class="text-right py-2 px-1 font-normal w-28">{{ unitPriceHeaderLabel }}</th>
               <th class="text-left py-2 px-1 font-normal w-24">{{ t('purchase_invoice.items.vat_rate') }}</th>
+              <th class="text-left py-2 px-1 font-normal w-36">{{ t('purchase_invoice.items.expense_kind') }}</th>
               <th class="text-right py-2 px-1 font-normal w-28">{{ t('purchase_invoice.items.total_with_vat') }}</th>
               <th class="w-10 pr-3"></th>
             </tr>
@@ -1088,8 +1546,22 @@ function fieldErr(key: string): string | null {
           <tbody>
             <tr v-for="(it, i) in form.items" :key="i" class="border-t border-neutral-200">
               <td class="py-2 pl-5 pr-2">
-                <input v-model="it.description" type="text" data-row-input="pur-item" class="w-full h-9 px-2 border rounded text-sm"
-                       :class="fieldErr(`items.${i}.description`) ? 'border-danger-500/60' : 'border-neutral-300'" />
+                <StockDescriptionField
+                  v-model:description="it.description"
+                  :stock-item-id="it.stock_item_id ?? null"
+                  :stock-enabled="stockEnabled"
+                  :options="stockRowOptions[i] ?? []"
+                  :loading="stockRowLoading[i]"
+                  :selected-option="stockSelectedFor(it)"
+                  :placeholder="t('purchase_invoice.items.description')"
+                  :invalid="!!fieldErr(`items.${i}.description`)"
+                  row-input-marker="pur-item"
+                  :no-results-label="t('common.no_results')"
+                  :keep-free-text-label="t('common.keep_free_text')"
+                  :unlink-label="t('common.unlink_stock')"
+                  @search="(q: string) => onStockSearch(i, q)"
+                  @select="(v: number | null) => onStockSelect(i, v)"
+                />
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
               </td>
               <td class="py-2 px-1">
@@ -1107,6 +1579,38 @@ function fieldErr(key: string): string | null {
                 <select v-model.number="it.vat_rate_id" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
                   <option v-for="v in vatRates" :key="v.id" :value="v.id">{{ vatRateLabel(v) }}</option>
                 </select>
+              </td>
+              <td class="py-2 px-1 align-top">
+                <select
+                  v-model="it.expense_kind"
+                  :title="t('purchase_invoice.items.expense_kind_hint')"
+                  class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm"
+                >
+                  <option :value="null">{{ t('purchase_invoice.items.expense_kind_unset') }}</option>
+                  <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ t(`purchase_invoice.expense_kind.${k}`) }}</option>
+                </select>
+                <ExpenseKindSuggestionHint
+                  v-if="suggestionFor(it)"
+                  :suggestion="suggestionFor(it)!"
+                  @apply="applySuggestion(it)"
+                  @dismiss="dismissSuggestion(it)"
+                />
+                <template v-if="showAccrual">
+                  <button
+                    type="button"
+                    @click="toggleAccrual(it, i)"
+                    :title="t('purchase_invoice.items.accrual_hint')"
+                    class="mt-1 text-xs text-primary-600 hover:underline"
+                  >
+                    {{ accrualVisible(it, i) ? t('purchase_invoice.items.accrual_remove') : t('purchase_invoice.items.accrual_add') }}
+                  </button>
+                  <div v-if="accrualVisible(it, i)" class="mt-1 space-y-1">
+                    <input v-model="it.accrual_from" type="date" :title="t('purchase_invoice.items.accrual_from')"
+                      class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-xs" />
+                    <input v-model="it.accrual_to" type="date" :title="t('purchase_invoice.items.accrual_to')"
+                      class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-xs" />
+                  </div>
+                </template>
               </td>
               <td class="py-2 px-1">
                 <input :value="itemTotal(it).with" @change="setItemGross(it, ($event.target as HTMLInputElement).value)"
@@ -1130,8 +1634,22 @@ function fieldErr(key: string): string | null {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.description') }}</label>
-              <input v-model="it.description" type="text" data-row-input="pur-item" class="w-full h-10 px-3 border rounded text-sm"
-                     :class="fieldErr(`items.${i}.description`) ? 'border-danger-500/60' : 'border-neutral-300'" />
+              <StockDescriptionField
+                v-model:description="it.description"
+                :stock-item-id="it.stock_item_id ?? null"
+                :stock-enabled="stockEnabled"
+                :options="stockRowOptions[i] ?? []"
+                :loading="stockRowLoading[i]"
+                :selected-option="stockSelectedFor(it)"
+                :placeholder="t('purchase_invoice.items.description')"
+                :invalid="!!fieldErr(`items.${i}.description`)"
+                row-input-marker="pur-item"
+                :no-results-label="t('common.no_results')"
+                :keep-free-text-label="t('common.keep_free_text')"
+                :unlink-label="t('common.unlink_stock')"
+                @search="(q: string) => onStockSearch(i, q)"
+                @select="(v: number | null) => onStockSelect(i, v)"
+              />
               <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
             </div>
             <div class="grid grid-cols-2 gap-2">
@@ -1157,6 +1675,42 @@ function fieldErr(key: string): string | null {
                   <option v-for="v in vatRates" :key="v.id" :value="v.id">{{ vatRateLabel(v) }}</option>
                 </select>
               </div>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.expense_kind') }}</label>
+              <select
+                v-model="it.expense_kind"
+                :title="t('purchase_invoice.items.expense_kind_hint')"
+                class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm"
+              >
+                <option :value="null">{{ t('purchase_invoice.items.expense_kind_unset') }}</option>
+                <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ t(`purchase_invoice.expense_kind.${k}`) }}</option>
+              </select>
+              <ExpenseKindSuggestionHint
+                v-if="suggestionFor(it)"
+                :suggestion="suggestionFor(it)!"
+                @apply="applySuggestion(it)"
+                @dismiss="dismissSuggestion(it)"
+              />
+              <template v-if="showAccrual">
+                <button
+                  type="button"
+                  @click="toggleAccrual(it, i)"
+                  class="mt-1 text-xs text-primary-600 hover:underline"
+                >
+                  {{ accrualVisible(it, i) ? t('purchase_invoice.items.accrual_remove') : t('purchase_invoice.items.accrual_add') }}
+                </button>
+                <div v-if="accrualVisible(it, i)" class="mt-1 grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs text-neutral-600 mb-1">{{ t('purchase_invoice.items.accrual_from') }}</label>
+                    <input v-model="it.accrual_from" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-neutral-600 mb-1">{{ t('purchase_invoice.items.accrual_to') }}</label>
+                    <input v-model="it.accrual_to" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
+                  </div>
+                </div>
+              </template>
             </div>
             <div class="flex items-baseline justify-between pt-1 border-t border-neutral-200">
               <span class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('purchase_invoice.items.total_with_vat') }}</span>
@@ -1207,10 +1761,26 @@ function fieldErr(key: string): string | null {
       <div v-if="form.items.length > 0 && !form.reverse_charge" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3">
           <h2 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.vat_recap.title') }}</h2>
-          <button v-if="hasVatOverride" type="button" @click="vatOverrides = {}"
-            class="cursor-pointer text-xs text-primary-700 hover:underline">
-            {{ t('purchase_invoice.vat_recap.reset_all') }}
-          </button>
+          <div class="flex flex-wrap items-center justify-end gap-3">
+            <button type="button" @click="showAccrual = !showAccrual"
+              :title="t('purchase_invoice.items.accrual_hint')"
+              class="cursor-pointer text-xs hover:underline whitespace-nowrap"
+              :class="showAccrual ? 'text-danger-600' : 'text-primary-700'">
+              {{ showAccrual ? t('purchase_invoice.items.accrual_hide') : t('purchase_invoice.items.accrual_show') }}
+            </button>
+            <button v-if="!hasVatAllocations" type="button" @click="startVatAllocations"
+              class="cursor-pointer text-xs text-primary-700 hover:underline whitespace-nowrap">
+              {{ t('purchase_invoice.vat_allocation.enable') }}
+            </button>
+            <button v-else type="button" @click="vatAllocations = []"
+              class="cursor-pointer text-xs text-danger-600 hover:underline whitespace-nowrap">
+              {{ t('purchase_invoice.vat_allocation.disable') }}
+            </button>
+            <button v-if="hasVatOverride" type="button" @click="vatOverrides = {}"
+              class="cursor-pointer text-xs text-primary-700 hover:underline whitespace-nowrap">
+              {{ t('purchase_invoice.vat_recap.reset_all') }}
+            </button>
+          </div>
         </div>
         <div class="px-5 py-3">
           <p class="text-xs text-neutral-500 mb-3">{{ t('purchase_invoice.vat_recap.hint') }}</p>
@@ -1250,6 +1820,73 @@ function fieldErr(key: string): string | null {
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
             {{ t('purchase_invoice.vat_recap.overridden_note') }}
           </p>
+          <div v-if="hasVatAllocations" class="mt-4 pt-4 border-t border-neutral-200 space-y-4">
+            <p class="text-xs text-neutral-500">{{ t('purchase_invoice.vat_allocation.hint') }}</p>
+            <section v-for="r in recapRows" :key="'alloc-' + r.rate" class="rounded-md border border-neutral-200 p-3">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h3 class="text-sm font-medium text-neutral-700">{{ r.rate }} %</h3>
+                <button type="button" @click="addVatAllocation(r.rate)"
+                  class="cursor-pointer text-xs text-primary-700 hover:underline whitespace-nowrap">
+                  + {{ t('purchase_invoice.vat_allocation.add') }}
+                </button>
+              </div>
+              <div class="space-y-2">
+                <div v-for="(a, ai) in allocationsForRate(r.rate)" :key="a.id ?? ai"
+                  class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end rounded-md bg-neutral-50 p-3">
+                  <div class="sm:col-span-3">
+                    <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.description') }}</label>
+                    <input v-model="a.description" type="text" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.usage') }}</label>
+                    <select v-model="a.usage_type" :disabled="ai === 0" @change="applyAllocationPreset(a); syncAllocationResidual(r.rate)"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface disabled:bg-neutral-100">
+                      <option value="business">{{ t('purchase_invoice.vat_allocation.usage_business') }}</option>
+                      <option value="personal">{{ t('purchase_invoice.vat_allocation.usage_personal') }}</option>
+                      <option value="mixed">{{ t('purchase_invoice.vat_allocation.usage_mixed') }}</option>
+                      <option value="non_deductible">{{ t('purchase_invoice.vat_allocation.usage_non_deductible') }}</option>
+                    </select>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.total') }}</label>
+                    <input :value="a.total_amount" :disabled="ai === 0"
+                      @change="setAllocationGross(a, ($event.target as HTMLInputElement).value)"
+                      type="text" inputmode="decimal"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono disabled:bg-neutral-100" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.deduction') }}</label>
+                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface disabled:bg-neutral-100">
+                      <option value="full">{{ t('purchase_invoice.vat_deduction.full') }}</option>
+                      <option value="none">{{ t('purchase_invoice.vat_deduction.none') }}</option>
+                      <option value="proportional">{{ t('purchase_invoice.vat_deduction.proportional') }}</option>
+                      <option value="reduced">{{ t('purchase_invoice.vat_deduction.reduced') }}</option>
+                    </select>
+                    <input v-if="a.vat_deduction === 'proportional'" v-model.number="a.vat_deduction_percent"
+                      type="number" min="0" max="100" step="0.01" class="w-full h-8 mt-1 px-2 border border-neutral-300 rounded text-xs text-right" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.account') }}</label>
+                    <input v-model="a.account_code" list="purchase-allocation-accounts" type="text"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded text-sm font-mono" />
+                  </div>
+                  <div class="sm:col-span-1 text-right">
+                    <button v-if="ai > 0" type="button" @click="removeVatAllocation(a)"
+                      class="cursor-pointer h-9 px-2 text-danger-600 hover:text-danger-700" :title="t('common.delete')">×</button>
+                  </div>
+                  <div class="sm:col-span-12 flex flex-wrap justify-end gap-x-4 gap-y-1 text-[11px] text-neutral-500 border-t border-neutral-200 pt-2">
+                    <span>{{ t('purchase_invoice.vat_recap.base') }} <strong class="font-mono font-normal text-neutral-600">{{ formatMoney(a.base_amount, currencyCode) }}</strong></span>
+                    <span>{{ t('purchase_invoice.vat_recap.vat') }} <strong class="font-mono font-normal text-neutral-600">{{ formatMoney(a.vat_amount, currencyCode) }}</strong></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <datalist id="purchase-allocation-accounts">
+              <option v-for="a in accountingAccounts.filter(a => a.is_active)" :key="a.id" :value="a.account_code">{{ a.name }}</option>
+            </datalist>
+            <p v-if="allocationInvalid" class="text-xs text-danger-600">{{ t('purchase_invoice.vat_allocation.invalid') }}</p>
+          </div>
         </div>
       </div>
 
@@ -1280,6 +1917,24 @@ function fieldErr(key: string): string | null {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.expense_category') }}</label>
+            <div v-if="aiPostingSuggestion" class="mb-3 rounded-md border border-warning-200 bg-warning-50 p-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <AutomationBadge variant="ai" />
+                <ConfidenceLabel :confidence="aiPostingSuggestion.confidence" />
+              </div>
+              <p class="mt-2 text-sm text-neutral-700">{{ t('automation.ai.pf_suggestion', { md: aiPostingSuggestion.payload.debit_account_code }) }}</p>
+              <p v-if="aiPostingSuggestion.reasoning" class="mt-1 text-xs text-neutral-600">{{ aiPostingSuggestion.reasoning }}</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button type="button" :disabled="aiSuggestionSaving" class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-success-600 px-3 text-sm font-medium text-white hover:bg-success-700 disabled:opacity-50" @click="acceptAiPostingSuggestion">
+                  <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.25 7.31a1 1 0 0 1-1.42.002l-3.75-3.75a1 1 0 1 1 1.414-1.414l3.04 3.04 6.542-6.596a1 1 0 0 1 1.418-.006Z" clip-rule="evenodd" /></svg>
+                  {{ t('automation.ai.apply') }}
+                </button>
+                <button type="button" :disabled="aiSuggestionSaving" class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-danger-500 px-3 text-sm font-medium text-danger-600 hover:bg-danger-50 disabled:opacity-50" @click="rejectAiPostingSuggestion">
+                  <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414Z" /></svg>
+                  {{ t('automation.ai.reject') }}
+                </button>
+              </div>
+            </div>
             <select v-model="form.expense_category_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
               <option :value="null">— {{ t('purchase_invoice.classification.no_category') }} —</option>
               <option v-for="c in expenseCategories" :key="c.id" :value="c.id">
@@ -1287,7 +1942,7 @@ function fieldErr(key: string): string | null {
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">
-              <RouterLink to="/admin/codebooks" class="text-primary-600 hover:underline">
+              <RouterLink to="/admin/codebooks?scope=company&tab=expense_categories" class="text-primary-600 hover:underline">
                 {{ t('purchase_invoice.classification.manage_categories') }}
               </RouterLink>
             </p>
@@ -1308,6 +1963,7 @@ function fieldErr(key: string): string | null {
               <option value="full">{{ t('purchase_invoice.vat_deduction.full') }}</option>
               <option value="none">{{ t('purchase_invoice.vat_deduction.none') }}</option>
               <option value="proportional">{{ t('purchase_invoice.vat_deduction.proportional') }}</option>
+              <option value="reduced">{{ t('purchase_invoice.vat_deduction.reduced') }}</option>
             </select>
             <template v-if="form.vat_deduction === 'proportional'">
               <div class="mt-2 flex items-center gap-2">
@@ -1317,6 +1973,9 @@ function fieldErr(key: string): string | null {
               </div>
               <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.vat_deduction_percent_hint') }}</p>
             </template>
+            <p v-else-if="form.vat_deduction === 'reduced'" class="text-xs text-neutral-500 mt-1">
+              {{ t('purchase_invoice.vat_deduction_reduced_hint') }}
+            </p>
             <p v-else class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.classification.vat_deduction_hint') }}</p>
           </div>
           <div>
@@ -1374,6 +2033,16 @@ function fieldErr(key: string): string | null {
             <input v-model="form.payment_variable_symbol" type="text"
               class="w-full px-3 h-9 border border-neutral-300 rounded-md text-sm font-mono" />
           </div>
+          <div>
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('payment_method.label') }}</label>
+            <select v-model="form.payment_method"
+              class="w-full px-3 h-9 border border-neutral-300 rounded-md text-sm bg-surface">
+              <option v-for="m in paymentMethodOptions" :key="m" :value="m">{{ t(`payment_method.${m}`) }}</option>
+            </select>
+            <p v-if="form.payment_method !== 'bank_transfer'" class="text-xs text-warning-600 mt-1">
+              {{ t('payment_method.purchase_hint') }}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -1413,7 +2082,7 @@ function fieldErr(key: string): string | null {
         </div>
         <p class="text-xs text-neutral-500 pt-1 border-t border-neutral-100">
           {{ t('purchase_invoice.fields.currency_add_advanced_hint') }}
-          <RouterLink to="/admin/codebooks" class="text-primary-700 hover:underline">{{ t('nav.codebooks') }}</RouterLink>.
+          <RouterLink to="/admin/codebooks?scope=global" class="text-primary-700 hover:underline">{{ t('nav.codebooks_global') }}</RouterLink>.
         </p>
       </div>
     </div>

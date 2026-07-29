@@ -9,8 +9,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 /**
  * Loguje akce do tabulky activity_log. Citlivá pole se redaktují
  * (LoggerSanitizer). Pro auth/security události samostatný kanál.
+ *
+ * Není `final` (EP-4): účetní služby zapisují audit ve STEJNÉ transakci jako
+ * účetní mutaci, takže integrační testy potřebují injektovat testovacího dvojníka
+ * loggeru, který zápis auditu záměrně shodí (ověření rollbacku mutace). log() je
+ * proto přepsatelný; produkční chování zůstává beze změny.
  */
-final class ActivityLogger
+class ActivityLogger
 {
     private const REDACT_KEYS = [
         'password', 'password_confirm', 'current_password', 'new_password',
@@ -21,7 +26,12 @@ final class ActivityLogger
         'attestation_object', 'public_key',
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        // § 33a — zřetězení auditní stopy hashem. Volitelná, aby testovací dvojníci
+        // loggeru (viz docblock třídy) nemuseli řetěz řešit.
+        private readonly ?ActivityLogHashChain $hashChain = null,
+    ) {}
 
     /** @param array<array-key,mixed>|null $payload */
     public function log(
@@ -53,6 +63,10 @@ final class ActivityLogger
             $ip !== null ? (@inet_pton($ip) ?: null) : null,
             $userAgent !== null ? substr($userAgent, 0, 255) : null,
         ]);
+
+        // Zapečetění hned po vložení, uvnitř TÉŽE transakce jako zapisovaná mutace —
+        // jinak by při rollbacku zůstal v řetězu článek bez odpovídající změny.
+        $this->hashChain?->seal((int) $this->db->pdo()->lastInsertId());
     }
 
     /** Auto-resolve supplier_id z entity podle entity_type. NULL pro cross-cutting akce. */

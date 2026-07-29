@@ -1,0 +1,340 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Accounting\Bank;
+
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\Bank\TransferAutoPolicyInterface;
+use MyInvoice\Service\Accounting\Bank\TransferPairService;
+use PHPUnit\Framework\Attributes\Group;
+
+#[Group('integration')]
+final class OwnTransferDetectionTest extends BankPostingTestCase
+{
+    private const SECOND_ACCOUNT = '1000000005';
+    private const SECOND_BANK = '0100';
+    private int $initialTransferMatchCount = 0;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $stmt = $this->db->pdo()->prepare(
+            "INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, ?, 'suggest', ?)
+             ON DUPLICATE KEY UPDATE level='suggest', updated_by=VALUES(updated_by)"
+        );
+        foreach (['bank.transfer.own', 'detector.own_transfer'] as $operationType) {
+            $stmt->execute([$this->supplierId, $operationType, $this->userId]);
+        }
+        $this->initialTransferMatchCount = $this->transferMatchCount();
+    }
+
+    public function testBothLegsAreSuggestedPairedAndPostedThrough261(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $outStatement = $this->statement();
+        $inStatement = $this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK);
+        $amount = 98765.43;
+
+        $outTx = $this->transaction($outStatement, -$amount, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($inStatement, $amount, [
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+            'posted_at' => self::YEAR . '-06-16',
+        ]);
+
+        $out = $this->service->handleTransaction($outTx, $this->userId);
+        $in = $this->service->handleTransaction($inTx, $this->userId);
+
+        self::assertSame(['suggested', 'own_transfer'], [$out['action'], $out['reason']]);
+        self::assertSame(['suggested', 'own_transfer'], [$in['action'], $in['reason']]);
+        self::assertSame('transfer', $this->suggestionRow((int) $out['suggestion_id'])['source']);
+        self::assertSame('transfer', $this->suggestionRow((int) $in['suggestion_id'])['source']);
+
+        $pair = $this->db->pdo()->prepare(
+            'SELECT out_transaction_id, in_transaction_id FROM bank_transfer_matches
+              WHERE supplier_id = ? AND out_transaction_id = ? AND in_transaction_id = ?'
+        );
+        $pair->execute([$this->supplierId, $outTx, $inTx]);
+        self::assertSame(
+            ['out_transaction_id' => $outTx, 'in_transaction_id' => $inTx],
+            array_map('intval', $pair->fetch(\PDO::FETCH_ASSOC)),
+        );
+
+        $outEntry = $this->service->approveSuggestion($this->supplierId, (int) $out['suggestion_id'], $this->meta());
+        $inEntry = $this->service->approveSuggestion($this->supplierId, (int) $in['suggestion_id'], $this->meta());
+        self::assertEqualsWithDelta($amount, $this->linesByAccountCode($outEntry)['261']['debit'], 0.001);
+        self::assertEqualsWithDelta($amount, $this->linesByAccountCode($inEntry)['261']['credit'], 0.001);
+    }
+
+    /**
+     * #9 — okno párování nohou převodu rozšířeno z ±3 na ±7 dní (PAIR_WINDOW_DAYS). Mezi
+     * odepsáním z jednoho účtu a připsáním na druhý bývá i víc než 3 dny (mezibankovní, víkend).
+     */
+    public function testTransfersSixDaysApartArePairedWithinSevenDayWindow(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $outStatement = $this->statement();
+        $inStatement = $this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK);
+        $amount = 45678.90;
+
+        // 6 dní mezi nohama — nad starým oknem ±3, uvnitř nového ±7.
+        $outTx = $this->transaction($outStatement, -$amount, [
+            'posted_at' => self::YEAR . '-06-15',
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($inStatement, $amount, [
+            'posted_at' => self::YEAR . '-06-21',
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+        ]);
+
+        $this->service->handleTransaction($outTx, $this->userId);
+        $this->service->handleTransaction($inTx, $this->userId);
+
+        $pair = $this->db->pdo()->prepare(
+            'SELECT out_transaction_id, in_transaction_id FROM bank_transfer_matches
+              WHERE supplier_id = ? AND out_transaction_id = ? AND in_transaction_id = ?'
+        );
+        $pair->execute([$this->supplierId, $outTx, $inTx]);
+        self::assertSame(
+            ['out_transaction_id' => $outTx, 'in_transaction_id' => $inTx],
+            array_map('intval', $pair->fetch(\PDO::FETCH_ASSOC) ?: []),
+            'Nohy 6 dní od sebe se musí ve fixtuře ±7 dní spárovat.',
+        );
+    }
+
+    public function testCrossCurrencyTransferCannotBeApproved(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'EUR');
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, -12345.67, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $result['action']);
+        self::assertSame('cross_currency', $result['reason']);
+        self::assertSame('cross_currency', $this->suggestionRow((int) $result['suggestion_id'])['note']);
+
+        try {
+            $this->service->approveSuggestion($this->supplierId, (int) $result['suggestion_id'], $this->meta());
+            self::fail('Převod mezi měnami se nesmí schválit automatickou kontací.');
+        } catch (PostingException $e) {
+            self::assertSame('cross_currency_manual_only', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+    }
+
+    public function testMissingRegisteredAccountCurrencyFailsClosedAsCrossCurrency(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, null);
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, -12345.67, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $result['action']);
+        self::assertSame('cross_currency', $result['reason']);
+    }
+
+    public function testExistingManual261EntryCreatesDuplicateWarning(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $amount = 54321.09;
+        $manualEntry = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '261', 'side' => 'debit', 'amount' => $amount],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => $amount],
+        ], [
+            'entry_date' => self::YEAR . '-06-08',
+            'posted' => true,
+            'posted_by' => $this->userId,
+        ]);
+        $statement = $this->statement();
+        $tx = $this->transaction($statement, -$amount, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $result['action']);
+        self::assertSame('duplicate_suspect:#' . $manualEntry, $result['reason']);
+        self::assertSame('duplicate_suspect:#' . $manualEntry, $this->suggestionRow((int) $result['suggestion_id'])['note']);
+    }
+
+    public function testPeriodBoundaryTreatsPairedTransitBalanceAsDocumented(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $nextPeriodId = $this->periods->create(
+            $this->supplierId,
+            self::YEAR + 1,
+            (self::YEAR + 1) . '-01-01',
+            (self::YEAR + 1) . '-12-31',
+        );
+        self::assertGreaterThan(0, $nextPeriodId);
+        $outStatement = $this->statement();
+        $inStatement = $this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK);
+        $amount = 87654.32;
+        $outTx = $this->transaction($outStatement, -$amount, [
+            'posted_at' => self::YEAR . '-12-31',
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($inStatement, $amount, [
+            'posted_at' => (self::YEAR + 1) . '-01-02',
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+        ]);
+
+        $out = $this->service->handleTransaction($outTx, $this->userId);
+        $in = $this->service->handleTransaction($inTx, $this->userId);
+        $this->service->approveSuggestion($this->supplierId, (int) $out['suggestion_id'], $this->meta());
+        $this->service->approveSuggestion($this->supplierId, (int) $in['suggestion_id'], $this->meta());
+
+        $period = $this->periods->findById($this->supplierId, $this->periodId);
+        $precheck = $this->container->get(ClosingService::class)->runPrecheck(
+            $this->supplierId,
+            $this->periodId,
+            (int) $period['row_version'],
+            ['user_id' => $this->userId],
+        );
+        $transit = null;
+        foreach ($precheck['checks'] as $check) {
+            if ($check['key'] === 'transit_261_open') $transit = $check;
+        }
+        self::assertNotNull($transit);
+        self::assertContains($outTx, array_map(
+            static fn (array $row): int => (int) $row['tx_id'],
+            $transit['value']['documented'],
+        ));
+    }
+
+    public function testSameCurrencyFxPairUsesFirstLegRateOnBothLegs(): void
+    {
+        $this->registerAccount(self::ACCOUNT, self::BANK_CODE, 'EUR');
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'EUR');
+        $outStatement = $this->statement();
+        $inStatement = $this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK);
+        $this->db->pdo()->prepare('UPDATE bank_statements SET currency = "EUR" WHERE id IN (?, ?)')
+            ->execute([$outStatement, $inStatement]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, "EUR", 25.00), (?, "EUR", 27.00)
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
+        )->execute([self::YEAR . '-06-15', self::YEAR . '-06-16']);
+        $foreignAmount = 432.10;
+        $outTx = $this->transaction($outStatement, -$foreignAmount, [
+            'currency' => 'EUR',
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($inStatement, $foreignAmount, [
+            'currency' => 'EUR',
+            'posted_at' => self::YEAR . '-06-16',
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+        ]);
+
+        $out = $this->service->handleTransaction($outTx, $this->userId);
+        $in = $this->service->handleTransaction($inTx, $this->userId);
+        $outEntry = $this->service->approveSuggestion($this->supplierId, (int) $out['suggestion_id'], $this->meta());
+        $inEntry = $this->service->approveSuggestion($this->supplierId, (int) $in['suggestion_id'], $this->meta());
+        $expectedCzk = round($foreignAmount * 25.00, 2);
+        self::assertEqualsWithDelta($expectedCzk, $this->linesByAccountCode($outEntry)['261']['debit'], 0.001);
+        self::assertEqualsWithDelta($expectedCzk, $this->linesByAccountCode($inEntry)['261']['credit'], 0.001);
+
+        $rates = $this->db->pdo()->prepare(
+            'SELECT DISTINCT fx_rate FROM journal_entry_lines WHERE supplier_id = ? AND entry_id IN (?, ?) ORDER BY fx_rate'
+        );
+        $rates->execute([$this->supplierId, $outEntry, $inEntry]);
+        self::assertSame([25.0], array_map('floatval', $rates->fetchAll(\PDO::FETCH_COLUMN)));
+    }
+
+    public function testAutoPolicyPostsWhileOffPolicyDefersToFollowingDetectors(): void
+    {
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $outStatement = $this->statement();
+        $inStatement = $this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK);
+        $amount = 76543.21;
+        $outTx = $this->transaction($outStatement, -$amount, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($inStatement, $amount, [
+            'posted_at' => self::YEAR . '-06-16',
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+        ]);
+
+        $off = $this->transferService('off')->handle($this->supplierId, $this->loadTransferTx($outTx), $this->userId, false);
+        self::assertNull($off);
+        self::assertSame($this->initialTransferMatchCount, $this->transferMatchCount());
+
+        $auto = $this->transferService('auto');
+        $out = $auto->handle($this->supplierId, $this->loadTransferTx($outTx), $this->userId, false);
+        $in = $auto->handle($this->supplierId, $this->loadTransferTx($inTx), $this->userId, false);
+        self::assertSame(['posted', 'own_transfer'], [$out['action'], $out['reason']]);
+        self::assertSame(['posted', 'own_transfer'], [$in['action'], $in['reason']]);
+        self::assertSame($this->initialTransferMatchCount + 1, $this->transferMatchCount());
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'bank', $outTx));
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'bank', $inTx));
+    }
+
+    private function registerAccount(string $number, string $bank, ?string $currency): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, currency,
+                 account_canonical, kind, source, is_active)
+             VALUES (?, "Druhý testovací účet", ?, ?, ?, ?, ?, "savings", "manual", 1)'
+            . ' ON DUPLICATE KEY UPDATE currency = VALUES(currency), is_active = 1'
+        )->execute([$this->supplierId, $number, $bank, $bank, $currency, $number]);
+    }
+
+    private function transferService(string $level): TransferPairService
+    {
+        $policy = new class($level) implements TransferAutoPolicyInterface {
+            public function __construct(private readonly string $level) {}
+            public function level(int $supplierId): string { return $this->level; }
+        };
+        return new TransferPairService(
+            $this->db,
+            $this->posting,
+            $this->container->get(\MyInvoice\Repository\PostingRuleRepository::class),
+            $this->journal,
+            $this->suggestionRepo,
+            $this->container->get(\MyInvoice\Service\Accounting\Bank\OwnTransferDetector::class),
+            $policy,
+            $this->container->get(\MyInvoice\Service\ActivityLogger::class),
+            $this->container->get(\MyInvoice\Service\Currency\CnbExchangeRateClient::class),
+        );
+    }
+
+    private function transferMatchCount(): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_transfer_matches WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** @return array<string,mixed> */
+    private function loadTransferTx(int $txId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bt.*, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
+                    bs.currency AS statement_currency
+               FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ?'
+        );
+        $stmt->execute([$txId]);
+        return $stmt->fetch(\PDO::FETCH_ASSOC);
+    }
+}

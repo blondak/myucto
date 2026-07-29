@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -22,11 +24,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class CloneInvoiceAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly BulkReissueAction $bulk,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -44,6 +49,17 @@ final class CloneInvoiceAction
         $body = (array) ($request->getParsedBody() ?? []);
         $incrementMonth = (bool) ($body['increment_month_in_descriptions'] ?? false);
         $issueDate = !empty($body['issue_date']) ? (string) $body['issue_date'] : date('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $issueDate)) {
+            return Json::error($response, 'invalid_date', 'Neplatné datum.', 400);
+        }
+
+        // H1 (Epic F6): klon vzniká s issue_date (u ne-proformy i tax_date) z body — datum
+        // v uzavřeném období by založilo „mrtvý" draft, který klient nemůže editovat ani
+        // smazat. Client 403 document_locked, účetní 409 period_closed, admin ?force=1.
+        $lock = $this->locks->forDate(SupplierGuard::currentId($request), $issueDate);
+        if ($deny = $this->denyIfLocked($request, $response, $lock, 'invoice', $id)) {
+            return $deny;
+        }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);

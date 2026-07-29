@@ -16,9 +16,11 @@ import { clientsApi, type CrpDphAccount } from '@/api/clients'
 import { bankApi, type AccountBalancesResponse } from '@/api/bank'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatDate, formatDateTime } from '@/composables/useFormat'
 import { useChartColors } from '@/composables/useTheme'
 import BalanceTrendChart from '@/components/charts/BalanceTrendChart.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { useDemoMode } from '@/composables/useDemoMode'
 
 // embedded = vykresleno jako záložky uvnitř BankPage.vue (Finance → Bankovní účty);
 // hlavičku a lištu záložek pak dodává obálka, aktivní tab řídí přes ?tab=.
@@ -26,6 +28,7 @@ defineProps<{ embedded?: boolean }>()
 
 const { t } = useI18n()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
 const route = useRoute()
 const router = useRouter()
 
@@ -292,6 +295,9 @@ function startEditCurrency(c: CurrencyAccount) {
 }
 
 async function saveCurrency() {
+  // V demu se formulář vyplní i odešle, jen se neuloží — uživatel si tak projde
+  // celý průchod a dostane hlášku místo 403 z DemoReadOnlyMiddleware.
+  if (blockDemoMutation()) return
   const payload: Partial<CurrencyAccount> = {
     label: currencyDraft.label,
     symbol: currencyDraft.symbol,
@@ -398,6 +404,8 @@ async function loadBankToDraft() {
 }
 
 async function removeCurrency(c: CurrencyAccount) {
+  // Před confirmem, ať se v ukázce ani neptáme na něco, co stejně neproběhne.
+  if (blockDemoMutation()) return
   if (!window.confirm(t('bank_accounts.delete_account_confirm', { label: c.label }))) return
   try {
     await settingsApi.deleteCurrency(c.id)
@@ -749,8 +757,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.currencies_subtitle') }}</p>
           </div>
           <button type="button" @click="startNewCurrencyAccount()"
-            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap inline-flex items-center gap-1.5 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
-            + {{ t('bank_accounts.new_account') }}
+            :class="[btnFilled('primary'), 'shrink-0 self-start sm:self-auto']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('bank_accounts.new_account') }}
           </button>
         </header>
 
@@ -822,9 +831,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <span v-if="c.is_active" class="text-success-600">✓ {{ t('bank_accounts.th_active') }}</span>
               </span>
               <div class="flex gap-2">
-                <button type="button" @click="startEditCurrency(c)" class="cursor-pointer h-8 px-3 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded">{{ t('common.edit') }}</button>
+                <button type="button" @click="startEditCurrency(c)" :class="btnOutline('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  {{ t('common.edit') }}</button>
                 <button v-if="(c.invoices_count ?? 0) === 0" type="button" @click="removeCurrency(c)"
-                  class="cursor-pointer h-8 px-3 text-xs border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded">{{ t('common.delete') }}</button>
+                  :class="btnOutline('danger')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                  {{ t('common.delete') }}</button>
               </div>
             </div>
           </div>
@@ -990,7 +1003,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.mappings_subtitle') }}</p>
           </div>
           <button type="button" @click="saveMappings"
-            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap h-9 px-4 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
+            :class="[btnFilled('primary'), 'shrink-0 self-start sm:self-auto']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('bank_accounts.save_mappings') }}
           </button>
         </header>
@@ -1063,7 +1077,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.imap_subtitle') }}</p>
           </div>
           <button type="button" @click="startNewImapAccount"
-            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap h-9 px-3 bg-surface border border-neutral-300 rounded-md text-sm hover:bg-neutral-50">
+            :class="[btnOutline('primary'), 'shrink-0 self-start sm:self-auto']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('bank_accounts.new_imap') }}
           </button>
         </header>
@@ -1154,7 +1169,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <div class="flex gap-2">
                 <input v-model="imapDraft.folder" type="text" class="min-w-0 flex-1 h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
                 <button type="button" @click="browseImapFolders" :disabled="browsingFolders"
-                  class="cursor-pointer h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm hover:bg-neutral-50 disabled:opacity-50">
+                  :class="[btnOutline('neutral'), 'shrink-0']">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" /></svg>
                   {{ browsingFolders ? t('bank_accounts.browsing') : t('bank_accounts.browse') }}
                 </button>
               </div>
@@ -1225,11 +1241,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button type="button" @click="closeImapForm"
-              class="cursor-pointer h-9 px-3 bg-surface border border-neutral-300 rounded-md text-sm hover:bg-neutral-50">
+              :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
             <button type="button" @click="saveImapAccount" :disabled="saving"
-              class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md disabled:opacity-50">
+              :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ saving ? t('bank_accounts.saving') : t('bank_accounts.save_imap') }}
             </button>
           </div>
@@ -1243,7 +1261,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.providers_subtitle') }}</p>
           </div>
           <button type="button" @click="startNewRegexProvider"
-            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap h-9 px-3 bg-surface border border-neutral-300 rounded-md text-sm hover:bg-neutral-50">
+            :class="[btnOutline('primary'), 'shrink-0 self-start sm:self-auto']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('bank_accounts.new_regex_provider') }}
           </button>
         </header>
@@ -1324,7 +1343,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <textarea v-model="parserText" rows="8" class="w-full p-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono"
               :placeholder="t('bank_accounts.email_text_placeholder')"></textarea>
             <button type="button" @click="testParser"
-              class="cursor-pointer mt-2 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
+              :class="[btnOutline('neutral'), 'mt-2']">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
               {{ t('bank_accounts.run_parser_test') }}
             </button>
             <pre v-if="parserResult" class="mt-3 text-xs bg-neutral-50 border border-neutral-200 rounded-md p-3 overflow-auto">{{ parserResult }}</pre>
@@ -1338,7 +1358,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.messages_subtitle') }}</p>
           </div>
           <button type="button" @click="runScan" :disabled="scanning"
-            class="cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md disabled:opacity-50">
+            :class="[btnOutline('neutral'), 'shrink-0 self-start sm:self-auto']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
             {{ scanning ? '…' : t('bank_accounts.run_scan') }}
           </button>
         </header>
@@ -1358,6 +1379,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <tr>
                 <th class="px-3 py-2 text-left font-medium">ID</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_imap_account') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_processed_at') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_message_id') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_status') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_parser') }}</th>
@@ -1370,13 +1392,19 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <tr v-for="m in messages" :key="m.id">
                 <td class="px-3 py-2 font-mono text-xs">#{{ m.id }}<div v-if="m.imap_uid" class="text-neutral-500">UID {{ m.imap_uid }}</div></td>
                 <td class="px-3 py-2 text-xs">{{ m.imap_account_name || (m.imap_account_id ? `#${m.imap_account_id}` : '—') }}</td>
+                <td class="px-3 py-2 text-xs whitespace-nowrap">
+                  <time :datetime="m.processed_at">{{ formatDateTime(m.processed_at) }}</time>
+                </td>
                 <td class="px-3 py-2 max-w-sm">
                   <div class="font-mono text-xs truncate">{{ m.message_id || m.fallback_hash }}</div>
                   <div class="text-xs text-neutral-500 truncate">{{ m.sender }} · {{ m.subject }}</div>
                 </td>
                 <td class="px-3 py-2">
                   <span :class="m.matched ? 'text-success-600' : (['match_failed','parse_failed','security_rejected','postprocess_failed'].includes(m.effective_status || m.status) ? 'text-danger-500' : '')">{{ m.effective_status || m.status }}</span>
-                  <div v-if="m.error_message" class="text-xs text-danger-500">{{ m.error_message }}</div>
+                  <div v-if="m.error_message"
+                    :class="m.matched && m.status === 'postprocess_failed' ? 'text-xs text-warning-600' : 'text-xs text-danger-500'">
+                    {{ m.error_message }}
+                  </div>
                 </td>
                 <td class="px-3 py-2">{{ m.provider_code || '—' }}</td>
                 <td class="px-3 py-2 font-mono text-xs">
@@ -1435,8 +1463,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </div>
           <div v-if="supplierHasDic" class="flex items-center justify-end">
             <button type="button" @click="loadBankToDraft" :disabled="bankDraftLoading"
-              class="cursor-pointer h-8 px-3 text-xs bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-50 disabled:opacity-50 inline-flex items-center gap-1.5">
-              <span v-if="bankDraftLoading">…</span>
+              :class="btnOutline('primary')">
+              <svg v-if="!bankDraftLoading" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              <span v-else>…</span>
               {{ bankDraftLoading ? t('common.loading') : t('supplier.bank_lookup') }}
             </button>
           </div>
@@ -1497,9 +1526,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </label>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" @click="closeCurrencyForm"
-              class="cursor-pointer px-3 h-9 text-sm bg-surface border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+              :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}</button>
             <button type="button" @click="saveCurrency"
-              class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">{{ t('common.save') }}</button>
+              :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ t('common.save') }}</button>
           </div>
         </div>
       </div>
@@ -1590,9 +1623,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
 
           <div class="flex justify-end gap-2 pt-1">
             <button type="button" @click="closeProviderForm"
-              class="cursor-pointer px-3 h-9 text-sm bg-surface border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+              :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}</button>
             <button type="button" @click="saveProvider"
-              class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md">{{ t('bank_accounts.save_provider') }}</button>
+              :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ t('bank_accounts.save_provider') }}</button>
           </div>
         </div>
       </div>

@@ -11,7 +11,7 @@
 #    4. Jinak skip
 #
 #  crontab:
-#    */10 * * * *  /var/www/myinvoice.cz/cmd/cron-scan-purchase-inbox.sh
+#    */10 * * * *  /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

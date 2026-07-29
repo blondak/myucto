@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Admin\Import;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\ImportJobRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,7 +27,7 @@ final class ImportJobStatusAction
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!in_array(($user['role'] ?? ''), ['admin', 'accountant'], true)) {
+        if (!RequestAuthorization::allows($request, 'utilities.import', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
 

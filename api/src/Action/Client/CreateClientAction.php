@@ -8,7 +8,9 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientEmailContactRepository;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Service\Ares\ClientBankAccountRegistrySynchronizer;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation;
@@ -22,6 +24,8 @@ final class CreateClientAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly ClientEmailContactRepository $emailContacts,
+        private readonly ClientBankAccountRepository $bankAccounts,
+        private readonly ClientBankAccountRegistrySynchronizer $bankAccountRegistry,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -58,8 +62,15 @@ final class CreateClientAction
                 return Json::error($response, 'invalid_email_contacts', $e->getMessage(), 422);
             }
         }
+        if (!empty($body['is_vendor']) && !empty($body['dic'])) {
+            try {
+                $this->bankAccountRegistry->sync($id, $supplierId, (string) $body['dic']);
+            } catch (\Throwable) {
+            }
+        }
         $client = $this->repo->find($id);
         $client['email_contacts'] = $this->emailContacts->listForClient($id, $supplierId);
+        $client['bank_accounts'] = $this->bankAccounts->listForClient($id, $supplierId);
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -67,6 +78,12 @@ final class CreateClientAction
             'company_name' => $body['company_name'],
             'ic' => $body['ic'] ?? null,
         ], $ip, $request->getHeaderLine('User-Agent'));
+
+        // Non-blocking varování (IČO mod 11 / DIČ formát — audit 2026-07).
+        $warnings = Validation::clientWarnings($body);
+        if (!empty($warnings)) {
+            $client['_warnings'] = $warnings;
+        }
 
         return Json::ok($response, $client, 201);
     }

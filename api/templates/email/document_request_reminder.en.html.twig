@@ -1,0 +1,56 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  Missing document — waiting on you
+</h1>
+
+<p style="margin:0 0 12px;">Hello,</p>
+
+<p style="margin:0 0 16px;">
+  for <strong>{{ supplier_name }}</strong> we're still waiting for a document we asked
+  about {{ requested_days_ago }} day{{ requested_days_ago == 1 ? '' : 's' }} ago:
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#F4F2FA;border:1px solid #D9D3EC;border-radius:8px;margin:16px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#403B52;">
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;width:40%;">Missing</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ description }}</td>
+        </tr>
+        {% if amount %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Amount</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;font-family:monospace;">{{ amount|number_format(2, '.', ' ') }} CZK</td>
+        </tr>
+        {% endif %}
+        {% if deadline %}
+        <tr>
+          <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #D9D3EC;">Due</td>
+          <td style="padding:8px 0 0;border-top:1px solid #D9D3EC;font-weight:600;color:{{ accent }};">{{ deadline|date('Y-m-d') }}</td>
+        </tr>
+        {% endif %}
+      </table>
+    </td>
+  </tr>
+</table>
+
+{% if portal_link %}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px;">
+  <tr>
+    <td style="border-radius:8px;background:{{ accent }};">
+      <a href="{{ portal_link }}" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">
+        Upload document
+      </a>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  Just take a photo or scan the document and upload it via the client portal — we'll
+  take it from there.
+</p>
+{% endblock %}

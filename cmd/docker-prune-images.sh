@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Detekuje a maže OBSOLETE Docker images po MyInvoice.cz (uvolní disk).
+# Detekuje a maže OBSOLETE Docker images po MyUcto.cz (uvolní disk).
 #
 # Co se maže:
-#   1. staré myinvoice / ghcr myinvoice image, které NEpoužívá žádný kontejner
+#   1. staré myucto / ghcr myucto image, které NEpoužívá žádný kontejner
 #      (running i exited) ANI je nereferencuje compose soubor → typicky osiřelý
 #      build nebo předchozí verze po updatu,
 #   2. dangling (<none>) vrstvy.
@@ -22,8 +22,8 @@ command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found in PATH" >&
 
 ref_to_id() { docker image inspect "$1" --format '{{.Id}}' 2>/dev/null || true; }
 
-echo "==> MyInvoice image teď:"
-docker images --format '  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}' | grep -Ei 'myinvoice' || echo "  (žádné)"
+echo "==> MyUcto image teď:"
+docker images --format '  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}' | grep -Ei 'myucto' || echo "  (žádné)"
 echo ""
 
 # --- chráněné image ID (kontejnery + compose reference) --------------------
@@ -39,21 +39,21 @@ while read -r ref; do
   id="$(ref_to_id "$ref")"
   [[ -n "$id" ]] && protected="$protected"$'\n'"$id"
 done < <(grep -hE '^[[:space:]]*image:[[:space:]]' docker-compose*.yml 2>/dev/null \
-          | sed -E 's/^[[:space:]]*image:[[:space:]]*//' | sed -E 's/\$\{[^}]*\}//g' | grep -i myinvoice || true)
+          | sed -E 's/^[[:space:]]*image:[[:space:]]*//' | sed -E 's/\$\{[^}]*\}//g' | grep -i myucto || true)
 protected="$(echo "$protected" | sort -u | grep -v '^$' || true)"
 
-# --- kandidáti = myinvoice image NEchráněné --------------------------------
+# --- kandidáti = myucto image NEchráněné --------------------------------
 remove_refs=()
 while IFS='|' read -r id ref; do
   [[ -z "$id" || "$ref" == *"<none>"* ]] && continue
   if [[ -n "$protected" ]] && grep -qF "$id" <<<"$protected"; then continue; fi
   remove_refs+=("$ref")
-done < <(docker images --no-trunc --format '{{.ID}}|{{.Repository}}:{{.Tag}}' | grep -Ei 'myinvoice')
+done < <(docker images --no-trunc --format '{{.ID}}|{{.Repository}}:{{.Tag}}' | grep -Ei 'myucto')
 
 if [[ ${#remove_refs[@]} -eq 0 ]]; then
-  echo "==> Žádné obsolete myinvoice image (vše se používá nebo je v compose)."
+  echo "==> Žádné obsolete myucto image (vše se používá nebo je v compose)."
 else
-  echo "==> Obsolete myinvoice image k odstranění:"
+  echo "==> Obsolete myucto image k odstranění:"
   printf '    %s\n' "${remove_refs[@]}"
   if [[ "$DRY" == "1" ]]; then
     echo "    (--dry-run: nemažu)"

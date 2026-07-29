@@ -14,26 +14,42 @@ use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaProtectedOperationService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
+use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\StepUpOperationException;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * POST /api/auth/tokens — vytvoří nový API token.
  *
- * Body: { name, supplier_id?, scope: 'read'|'read_write', expires_at?, totp_code? }
+ * Body: { name, password, supplier_id?, scope: 'read'|'read_write',
+ *         expires_at?, never_expires?, totp_code? }
  *
  * Vyžaduje:
  *   - aktivní session (NE bearer — token by si nemohl vytvořit další token)
- *   - pokud user má `totp_enabled=1`, vyžaduje `totp_code` (step-up auth)
+ *   - re-auth SOUČASNÝM HESLEM — samotná session nestačí. Bez toho šla ukradená
+ *     session (XSS, nezamčený počítač) vyměnit za dlouhodobý bearer token, který
+ *     přežije i odhlášení a změnu hesla.
+ *   - navíc `totp_code`, pokud má user `totp_enabled=1` (step-up auth)
+ *
+ * Chybné heslo i chybný TOTP se počítají do BruteForceGuard (sdílený lockout
+ * s /login), takže se tenhle endpoint nedá použít jako orákulum na hádání hesla.
  *
  * Response: plaintext token JEN v této response, nikdy už znovu.
  */
 final class CreateTokenAction
 {
+    /** Výchozí životnost tokenu, když volající expiraci neuvede. */
+    private const DEFAULT_EXPIRY_DAYS = 90;
+
+    /** Horní strop explicitní expirace — delší = fakticky věčný token. */
+    private const MAX_EXPIRY_DAYS = 730;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ApiTokenService $tokens,
@@ -41,6 +57,8 @@ final class CreateTokenAction
         private readonly SecretEncryption $crypto,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
+        private readonly UserSupplierRepository $memberships,
+        private readonly PasswordHasher $hasher,
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly BruteForceGuard $bruteForce,
@@ -60,14 +78,23 @@ final class CreateTokenAction
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
 
+        // Epic F6: klient nesmí razit API tokeny (PermissionMiddleware to už blokuje —
+        // defense-in-depth pro případ změny pravidel; fail-open BC větev membershipu
+        // níže by jinak pro klienta bez řádků byla eskalace).
+        if (RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+
         $body = (array) ($request->getParsedBody() ?? []);
         $name = trim((string) ($body['name'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
         $supplierId = isset($body['supplier_id']) && $body['supplier_id'] !== ''
             ? (int) $body['supplier_id']
             : null;
         // Default least-privilege: bez explicitního scope je token jen pro čtení.
         $scope = (string) ($body['scope'] ?? 'read');
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
+        $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
         $stepUpToken = trim((string) ($body['step_up_token'] ?? ''));
 
@@ -78,6 +105,9 @@ final class CreateTokenAction
             return Json::error($response, 'validation_failed', 'Neplatný scope.', 400);
         }
 
+        $ip = $this->ipMatcher->clientIp($request->getServerParams(), [], 'X-Forwarded-For');
+        $userAgent = $request->getHeaderLine('User-Agent');
+
         // Validace supplier_id musí předcházet spotřebě jednorázového proofu.
         if ($supplierId !== null) {
             $check = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id = ?');
@@ -85,24 +115,59 @@ final class CreateTokenAction
             if ($check->fetchColumn() === false) {
                 return Json::error($response, 'validation_failed', 'Supplier nenalezen.', 400);
             }
+
+            // Epic F0 bezpečnost: uživatel s membershipem nesmí vytvořit token bound
+            // na firmu mimo své přiřazení — jinak by tím obešel supplier scope
+            // (bound PAT jinak firmu forcuje). Bez membershipu = BC (bez omezení).
+            $allowed = $this->memberships->allowedSupplierIds($userId);
+            if (($user['is_superadmin'] ?? false) !== true && !in_array($supplierId, $allowed, true)) {
+                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+            }
         }
 
-        // Parse expires_at — akceptuj ISO-8601 nebo YYYY-MM-DD.
-        $expiresAt = null;
+        // Expirace. Default je konečná — dřív token bez `expires_at` platil věčně,
+        // takže typický "klikni a vytvoř" scénář razil nesmrtelné read_write klíče.
+        // Věčný token je teď vědomá volba (`never_expires`) a pro read_write ho
+        // smí zvolit jen superadmin. Formát: ISO-8601 nebo YYYY-MM-DD.
+        $now = new \DateTimeImmutable();
+        $expiresAt = $now->modify('+' . self::DEFAULT_EXPIRY_DAYS . ' days');
+
         if ($expiresRaw !== '') {
             try {
                 $expiresAt = new \DateTimeImmutable($expiresRaw);
             } catch (\Exception) {
                 return Json::error($response, 'validation_failed', 'Neplatný formát expires_at.', 400);
             }
-            if ($expiresAt <= new \DateTimeImmutable()) {
+            if ($expiresAt <= $now) {
                 return Json::error($response, 'validation_failed', 'expires_at musí být v budoucnu.', 400);
             }
+            if ($expiresAt > $now->modify('+' . self::MAX_EXPIRY_DAYS . ' days')) {
+                return Json::error($response, 'validation_failed', sprintf(
+                    'Expirace tokenu smí být nejvýš %d dní v budoucnu.', self::MAX_EXPIRY_DAYS
+                ), 400);
+            }
+        } elseif ($neverExpires) {
+            // Věčný token smí razit JEN superadmin — a to bez ohledu na scope.
+            // Dřív se omezení vztahovalo jen na `read_write`, takže si běžný
+            // uživatel pořád vyrobil nesmrtelný `read` token: kompletní čtecí
+            // přístup k účetnictví firmy, který přežije odhlášení i změnu hesla
+            // a nedá se odvolat ničím jiným než ruční revokací.
+            if (($user['is_superadmin'] ?? false) !== true) {
+                return Json::error(
+                    $response,
+                    'expiry_required',
+                    'Token bez expirace smí vytvořit jen superadmin. Zadej expires_at.',
+                    403,
+                );
+            }
+            $expiresAt = null;
         }
 
         // Účelový step-up: jednorázový passkey/TOTP proof, nebo kompatibilní
         // přímé TOTP ověření v tomto requestu.
-        $stmt = $this->db->pdo()->prepare('SELECT totp_secret, totp_enabled FROM users WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT email, password_hash, totp_secret, totp_enabled FROM users WHERE id = ?'
+        );
         $stmt->execute([$userId]);
         $u = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         // Zaregistrovaný TOTP je step-up požadavek bez ohledu na allowed_mfa_methods.
@@ -171,23 +236,42 @@ final class CreateTokenAction
                 401,
                 ['methods' => ['passkey']],
             );
+        } else {
+            // Účet bez jakéhokoli silného faktoru: upstream by token vydal ze
+            // samotné session. MyÚčto tuhle mezeru zavřelo re-authem heslem —
+            // jinak stačí unesená session na vyražení trvalého read_write klíče.
+            $email = (string) ($u['email'] ?? '');
+            $bfState = $this->bruteForce->check($email, $ip);
+            if (in_array($bfState, [BruteForceGuard::STATE_LOCKED_15M, BruteForceGuard::STATE_LOCKED_24H], true)) {
+                return Json::error($response, 'too_many_attempts', 'Příliš mnoho pokusů. Zkus to později.', 429);
+            }
+            if ($password === '' || !$this->hasher->verify($password, (string) ($u['password_hash'] ?? ''))) {
+                $this->hasher->dummyVerify();
+                $this->bruteForce->recordFailure($email, $ip);
+                $this->activity->log('api_token.reauth_failed', $userId, 'user', $userId, [
+                    'reason' => 'password',
+                ], $ip, $userAgent);
+                return Json::error($response, 'invalid_password', 'Neplatné heslo.', 401);
+            }
         }
 
         $out ??= $this->tokens->generate($userId, $supplierId, $name, $scope, $expiresAt);
 
-        $ip = $this->ipMatcher->clientIp(
-            $request->getServerParams(),
-            [],
-            'X-Forwarded-For',
-        );
         $this->activity->log(
             'api_token.created',
             $userId,
             'api_token',
             $out['id'],
-            ['name' => $name, 'scope' => $scope, 'supplier_id' => $supplierId, 'prefix' => $out['prefix']],
+            [
+                'name' => $name,
+                'scope' => $scope,
+                'supplier_id' => $supplierId,
+                'prefix' => $out['prefix'],
+                'expires_at' => $expiresAt?->format('Y-m-d H:i:s'),
+                'never_expires' => $expiresAt === null,
+            ],
             $ip,
-            $request->getHeaderLine('User-Agent'),
+            $userAgent,
         );
 
         return Json::ok($response, [

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { RoleSummary } from './auth'
 
 export interface ActivityLogEntry {
   id: number
@@ -125,11 +126,69 @@ export interface AdminUser {
   id: number
   email: string
   name: string
-  role: 'admin' | 'accountant' | 'readonly'
+  role_id: number
+  role: RoleSummary
+  is_superadmin?: boolean
   locale: 'cs' | 'en'
   is_active: boolean
   created_at: string
   last_login_at: string | null
+}
+
+/** Epic F0 — membership uživatel ↔ firma (user_suppliers). role null = zdědit globální users.role. */
+export interface UserSupplierAssignment {
+  supplier_id: number
+  name: string
+  ic: string | null
+  role_id: number | null
+  effective_role: RoleSummary
+}
+
+export interface AdminSupplierSearchItem {
+  id: number
+  name: string
+  ic: string | null
+}
+
+export interface AdminSupplierSearchResponse {
+  data: AdminSupplierSearchItem[]
+  next_cursor: string | null
+}
+
+export interface AdminBankRuleTemplate {
+  id: number
+  template_key: string
+  name_cs: string
+  name_en: string
+  direction: 'incoming' | 'outgoing'
+  operation_type: string
+  counterparty_bank: string | null
+  counterparty_prefix: string | null
+  vs_placeholder: string | null
+  message_contains: string | null
+  rule_key: string
+  debit_account_code: string | null
+  credit_account_code: string | null
+  default_priority: number
+  sort_order: number
+  is_active: boolean
+  usage_count: number
+}
+
+export type AdminBankRuleTemplatePayload = Omit<
+  AdminBankRuleTemplate,
+  'id' | 'debit_account_code' | 'credit_account_code' | 'usage_count'
+>
+
+export interface AdminBankRuleTemplateCatalog {
+  templates: AdminBankRuleTemplate[]
+  operation_types: string[]
+  posting_rules: Array<{
+    rule_key: string
+    description: string
+    debit_account_code: string | null
+    credit_account_code: string | null
+  }>
 }
 
 export const adminApi = {
@@ -150,11 +209,18 @@ export const adminApi = {
 
   // Users
   listUsers: () => api.get<AdminUser[]>('/admin/users').then(r => r.data),
-  createUser: (payload: { email: string; name: string; role: AdminUser['role']; locale?: 'cs' | 'en'; password: string }) =>
+  createUser: (payload: { email: string; name: string; role_id: number; locale?: 'cs' | 'en'; password: string }) =>
     api.post<AdminUser>('/admin/users', payload).then(r => r.data),
-  updateUser: (id: number, payload: Partial<{ name: string; role: AdminUser['role']; locale: 'cs' | 'en'; is_active: boolean; password: string }>) =>
+  updateUser: (id: number, payload: Partial<{ name: string; role_id: number; locale: 'cs' | 'en'; is_active: boolean; password: string }>) =>
     api.put<AdminUser>(`/admin/users/${id}`, payload).then(r => r.data),
   deleteUser: (id: number) => api.delete(`/admin/users/${id}`),
+  // Epic F0 — přiřazení firem uživateli (prázdné = bez omezení, vidí všechny firmy)
+  listUserSuppliers: (id: number) =>
+    api.get<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`).then(r => r.data),
+  setUserSuppliers: (id: number, assignments: Array<{ supplier_id: number; role_id: number | null }>) =>
+    api.put<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`, { assignments }).then(r => r.data),
+  searchSuppliers: (params: { q?: string; limit?: number; cursor?: string } = {}) =>
+    api.get<AdminSupplierSearchResponse>('/admin/suppliers/search', { params }).then(r => r.data),
 
   // Approvals inbox
   listApprovals: (params: { status?: 'requested' | 'approved' | 'rejected' | 'all'; overdue_days?: number; page?: number; per_page?: number } = {}) =>
@@ -169,6 +235,16 @@ export const adminApi = {
     api.put(`/admin/email-templates/${code}/${locale}`, payload),
   resetEmailTemplate: (code: string, locale: string) =>
     api.delete(`/admin/email-templates/${code}/${locale}`),
+
+  // Globální šablony bankovních pravidel (superadmin only)
+  listBankRuleTemplates: () =>
+    api.get<AdminBankRuleTemplateCatalog>('/admin/bank-rule-templates').then(r => r.data),
+  createBankRuleTemplate: (payload: AdminBankRuleTemplatePayload) =>
+    api.post<AdminBankRuleTemplate>('/admin/bank-rule-templates', payload).then(r => r.data),
+  updateBankRuleTemplate: (id: number, payload: AdminBankRuleTemplatePayload) =>
+    api.put<AdminBankRuleTemplate>(`/admin/bank-rule-templates/${id}`, payload).then(r => r.data),
+  deleteBankRuleTemplate: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/admin/bank-rule-templates/${id}`).then(r => r.data),
 
   // Cron jobs (Systém → Plánované úlohy)
   cronJobs: (signal?: AbortSignal) =>
@@ -186,7 +262,13 @@ export const adminApi = {
 export interface SampleDataStatus {
   has: boolean
   total: number
-  counts: Partial<Record<'client' | 'vendor' | 'project' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'recurring_template' | 'car', number>>
+  counts: Partial<Record<
+    | 'client' | 'vendor' | 'project' | 'invoice' | 'credit_note' | 'purchase_invoice'
+    | 'recurring_template' | 'car' | 'journal_entry' | 'bank_statement'
+    | 'supplier_bank_account' | 'asset' | 'stock_document' | 'stock_item' | 'warehouse'
+    | 'cash_document' | 'cash_register' | 'manufacturer' | 'stock_category',
+    number
+  >>
 }
 
 export type CronJobHealth = 'ok' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
