@@ -175,6 +175,33 @@ elif [[ "$holder" == OURS* ]]; then
   echo "    Port ${APP_PORT} drží vlastní myucto kontejner (${holder#OURS }) — OK."
 fi
 
+# Port databáze: mapuje se na loopback jen kvůli klientovi zvenčí. Souběh
+# MyInvoice a MyÚčta na jednom stroji je běžný scénář (převod dat), takže kolize
+# je očekávatelná a nemá kvůli ní instalace padat — port posuneme a zapíšeme do
+# .env. Aplikace na něm nezávisí, uvnitř sítě sahá na 'db:3306'.
+echo "==> Pre-flight: kontrola hostového portu databáze ${DB_PORT}…"
+if [[ "$(port_holder_status "${DB_PORT}")" == FOREIGN* ]]; then
+  free=""
+  for ((p = DB_PORT + 1; p < DB_PORT + 41; p++)); do
+    if [[ "$(port_holder_status "$p")" != FOREIGN* ]] && ! (command -v ss >/dev/null && ss -ltn "( sport = :$p )" 2>/dev/null | grep -q LISTEN); then
+      free="$p"; break
+    fi
+  done
+  if [[ -z "$free" ]]; then
+    echo "ERROR: Host port ${DB_PORT} je obsazený a v rozsahu $((DB_PORT+1))..$((DB_PORT+40)) není volný." >&2
+    echo "       Uvolni port nebo změň DB_PORT v .env ručně." >&2
+    exit 1
+  fi
+  echo "    Port ${DB_PORT} drží cizí kontejner — přepínám DB_PORT na ${free} a zapisuji do .env."
+  if grep -q '^DB_PORT=' .env; then
+    sed -i.bak "s|^DB_PORT=.*|DB_PORT=${free}|" .env && rm -f .env.bak
+  else
+    echo "DB_PORT=${free}" >> .env
+  fi
+  DB_PORT="${free}"
+  export DB_PORT
+fi
+
 # Fallback (GHCR pull selhal) i čistý build → vynuť čistou rekreaci app, ať
 # nezůstane půl-vytvořený kontejner držící port bez sítě. DB data ve volume zůstávají.
 FORCE_RECREATE=0

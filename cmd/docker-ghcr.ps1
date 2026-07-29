@@ -50,7 +50,8 @@ function Get-ComposeProjectName([string]$root) {
 }
 
 # Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner/proces.
-function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
+# $EnvVar jen upresni hlasku, aby radila spravnou promennou v .env.
+function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar = 'APP_PORT') {
     $lines = & docker ps --format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>$null
     foreach ($ln in $lines) {
         $parts = $ln -split '\|', 4
@@ -62,7 +63,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
             return $false
         }
         Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
-        Write-Host    "    Reseni: 'docker stop $name' nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        Write-Host    "    Reseni: 'docker stop $name' nebo zmen $EnvVar v .env a spust znovu." -ForegroundColor Yellow
         return $true
     }
     $conn = $null
@@ -75,10 +76,36 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
             return $false
         }
         Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
-        Write-Host    "    Reseni: ukonci proces nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        Write-Host    "    Reseni: ukonci proces nebo zmen $EnvVar v .env a spust znovu." -ForegroundColor Yellow
         return $true
     }
     return $false
+}
+
+# Najde prvni volny hostovy port od $Start vys (max 40 pokusu).
+function Find-FreePort([int]$Start, [string]$OurProject, [string]$EnvVar) {
+    for ($p = $Start; $p -lt ($Start + 40); $p++) {
+        $busy = $false
+        $lines = & docker ps --format '{{.Ports}}' 2>$null
+        foreach ($ln in $lines) { if ($ln -match ":$p->") { $busy = $true; break } }
+        if (-not $busy) {
+            try { if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction Stop) { $busy = $true } } catch {}
+        }
+        if (-not $busy) { return $p }
+    }
+    return 0
+}
+
+# Prepise jeden klic v .env (a v $envVars), aby zmena prezila dalsi spusteni.
+function Set-EnvValue([string]$Key, [string]$Value) {
+    $lines = Get-Content .env
+    $hit = $false
+    $out = $lines | ForEach-Object {
+        if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ }
+    }
+    if (-not $hit) { $out += "$Key=$Value" }
+    Set-Content .env -Value $out -Encoding UTF8
+    $script:envVars[$Key] = $Value
 }
 
 function Get-AppLogTail([int]$Lines = 40) {
@@ -166,8 +193,27 @@ $ourProject = Get-ComposeProjectName $ProjectRoot
 $appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
 if ($appPort -le 0) { $appPort = 8080 }
 Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort..."
-if (Test-ForeignPortHolder $appPort $ourProject) {
+if (Test-ForeignPortHolder $appPort $ourProject 'APP_PORT') {
     Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+}
+
+# --- 3c. pre-flight: hostovy port databaze -------------------------------
+# Db se mapuje na loopback jen kvuli pripojeni klientem zvenci. Souzeni MyInvoice
+# a MyUcta na jednom stroji je bezny scenar (prevod dat), takze kolize na 3307 je
+# ocekavatelna a nema kvuli ni instalace padat: port jen posuneme a zapiseme do
+# .env, aby volba prezila dalsi spusteni. Aplikace na nem nezavisi — uvnitr site
+# si sahá na 'db:3306'.
+$dbPort = 0; [void][int]::TryParse(("" + $envVars.DB_PORT), [ref]$dbPort)
+if ($dbPort -le 0) { $dbPort = 3307 }
+Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort..."
+if (Test-ForeignPortHolder $dbPort $ourProject 'DB_PORT') {
+    $free = Find-FreePort ($dbPort + 1) $ourProject 'DB_PORT'
+    if ($free -le 0) {
+        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny — uvolni port nebo zmen DB_PORT v .env rucne."
+    }
+    Write-Host "    Prepinam DB_PORT $dbPort -> $free a zapisuji do .env." -ForegroundColor Yellow
+    Set-EnvValue 'DB_PORT' "$free"
+    $dbPort = $free
 }
 
 # --- 4. up databaze ------------------------------------------------------

@@ -38,9 +38,29 @@ function Get-ComposeProjectName([string]$root) {
     return ((Split-Path -Leaf $root).ToLower() -replace '[^a-z0-9_-]', '')
 }
 
+# Najde prvni volny hostovy port od $Start vys (max 40 pokusu).
+function Find-FreePort([int]$Start) {
+    for ($p = $Start; $p -lt ($Start + 40); $p++) {
+        $busy = $false
+        foreach ($ln in (& docker ps --format '{{.Ports}}' 2>$null)) { if ($ln -match ":$p->") { $busy = $true; break } }
+        if (-not $busy) { try { if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction Stop) { $busy = $true } } catch {} }
+        if (-not $busy) { return $p }
+    }
+    return 0
+}
+
+# Prepise jeden klic v .env (a v $envVars), aby zmena prezila dalsi spusteni.
+function Set-EnvValue([string]$Key, [string]$Value) {
+    $lines = Get-Content .env
+    $hit = $false
+    $out = $lines | ForEach-Object { if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ } }
+    if (-not $hit) { $out += "$Key=$Value" }
+    Set-Content .env -Value $out -Encoding UTF8
+    $script:envVars[$Key] = $Value
+}
 # Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner nebo proces.
 # Vlastni myucto kontejner na tomtez portu je OK (up ho prevezme).
-function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
+function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar = 'APP_PORT') {
     $lines = & docker ps --format '{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>$null
     foreach ($ln in $lines) {
         $parts = $ln -split '\|', 4
@@ -52,7 +72,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
             return $false
         }
         Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
-        Write-Host    "    Reseni: 'docker stop $name' nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        Write-Host    "    Reseni: 'docker stop $name' nebo zmen $EnvVar v .env a spust znovu." -ForegroundColor Yellow
         return $true
     }
     $conn = $null
@@ -65,7 +85,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject) {
             return $false
         }
         Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
-        Write-Host    "    Reseni: ukonci proces nebo zmen APP_PORT v .env a spust znovu." -ForegroundColor Yellow
+        Write-Host    "    Reseni: ukonci proces nebo zmen $EnvVar v .env a spust znovu." -ForegroundColor Yellow
         return $true
     }
     return $false
@@ -191,8 +211,24 @@ $ourProject = Get-ComposeProjectName $ProjectRoot
 $appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
 if ($appPort -le 0) { $appPort = 8080 }
 Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort…"
-if (Test-ForeignPortHolder $appPort $ourProject) {
+if (Test-ForeignPortHolder $appPort $ourProject 'APP_PORT') {
     Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+}
+
+# Port databaze: kdyz ho behem odstavky sebral cizi kontejner, `up` by spadl na
+# 'port already allocated'. Mapovani je jen loopback konvence pro DB klienta,
+# aplikace uvnitr site sahá na 'db:3306' — port proto radeji posuneme, nez aby
+# update selhal. Zmena jde do .env, takze prezije dalsi spusteni.
+$dbPort = 0; [void][int]::TryParse(("" + $envVars.DB_PORT), [ref]$dbPort)
+if ($dbPort -le 0) { $dbPort = 3307 }
+Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort…"
+if (Test-ForeignPortHolder $dbPort $ourProject 'DB_PORT') {
+    $free = Find-FreePort ($dbPort + 1)
+    if ($free -le 0) {
+        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny — uvolni port nebo zmen DB_PORT v .env rucne."
+    }
+    Write-Host "    Prepinam DB_PORT $dbPort -> $free a zapisuji do .env." -ForegroundColor Yellow
+    Set-EnvValue 'DB_PORT' "$free"
 }
 
 # --- 2. restart ----------------------------------------------------------
