@@ -13,6 +13,7 @@ import {
   Filler,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler)
 
@@ -65,13 +66,11 @@ const seriesData = computed(() => {
 })
 
 function formatVal(n: number): string {
-  return new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 }).format(n)
+  return formatNumber(n, { maximumFractionDigits: 0 })
 }
 
 function formatTick(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k'
-  return n.toString()
+  return formatCompactNumber(n)
 }
 
 function build() {

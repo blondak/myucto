@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseStatsApi, type PurchaseSummary } from '@/api/purchaseStats'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
 import type { TopClient } from '@/api/dashboard'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
@@ -223,7 +223,7 @@ const hasAnyData = computed(() =>
             {{ t('costs.vs_prev_year_full', { year: summary.prev_year }) }}
           </div>
           <div class="text-[11px] text-neutral-500 mt-2">
-            {{ t('costs.forecast_growth_hint', { growth: ((f.growth_ratio - 1) * 100).toFixed(1) }) }}
+            {{ t('costs.forecast_growth_hint', { growth: formatNumber((f.growth_ratio - 1) * 100, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) }}
           </div>
         </div>
 
@@ -260,7 +260,7 @@ const hasAnyData = computed(() =>
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('costs.avg_payment') }}</div>
           <div class="text-2xl font-semibold text-neutral-900">
-            {{ summary.kpi.avg_payment_days !== null ? summary.kpi.avg_payment_days + ' ' + t('common.days') : '—' }}
+            {{ formatNumber(summary.kpi.avg_payment_days, { maximumFractionDigits: 1 }) }} {{ summary.kpi.avg_payment_days !== null ? t('common.days') : '' }}
           </div>
           <div class="text-xs text-neutral-400 mt-1">{{ t('costs.avg_payment_hint') }}</div>
         </div>
@@ -471,7 +471,7 @@ const hasAnyData = computed(() =>
                     </div>
                   </td>
                   <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(e.total_czk, 'CZK') }}</td>
-                  <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ e.percent.toFixed(1) }}%</td>
+                  <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(e.percent, 1) }}</td>
                 </tr>
               </tbody>
             </table>

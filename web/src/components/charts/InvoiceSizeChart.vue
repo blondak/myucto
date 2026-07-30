@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { useChartColors, useTheme } from '@/composables/useTheme'
+import { formatCompactNumber } from '@/composables/useFormat'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -13,6 +15,7 @@ const props = defineProps<{
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
+const { locale } = useI18n()
 const colors = useChartColors()
 const { isDark } = useTheme()
 
@@ -22,9 +25,7 @@ const palette = computed(() => isDark.value
   : ['#A99CD8', '#6753AE', '#3B2D83', '#15131D'])
 
 function formatCzk(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M Kč'
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k Kč'
-  return n.toFixed(0) + ' Kč'
+  return `${formatCompactNumber(n)} Kč`
 }
 
 function build() {
@@ -66,7 +67,7 @@ function build() {
 
 onMounted(build)
 onBeforeUnmount(() => chart?.destroy())
-watch(() => props.buckets, build, { deep: true })
+watch(() => [props.buckets, locale.value], build, { deep: true })
 watch(colors, build)
 </script>
 

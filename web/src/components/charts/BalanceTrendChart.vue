@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Chart,
   LineController,
@@ -11,7 +12,7 @@ import {
   Filler,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
-import { formatMoney, formatMonth } from '@/composables/useFormat'
+import { formatCompactNumber, formatMoney, formatMonth } from '@/composables/useFormat'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler)
 
@@ -45,16 +46,14 @@ const props = defineProps<{
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
+const { locale } = useI18n()
 const colors = useChartColors()
 const resolvedDatasets = computed<BalanceTrendDataset[]>(() => props.datasets?.length
   ? props.datasets
   : [{ label: '', values: props.values ?? [], color: props.color ?? colors.value.primary, fill: props.fill }])
 
 function formatTick(n: number): string {
-  const abs = Math.abs(n)
-  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (abs >= 1_000) return (n / 1_000).toFixed(0) + 'k'
-  return String(Math.round(n))
+  return formatCompactNumber(n)
 }
 
 function build() {
@@ -124,7 +123,7 @@ function build() {
 
 onMounted(build)
 onBeforeUnmount(() => chart?.destroy())
-watch(() => [props.labels, props.values, props.datasets, props.currency, props.color, props.fill], build, { deep: true })
+watch(() => [props.labels, props.values, props.datasets, props.currency, props.color, props.fill, locale.value], build, { deep: true })
 watch(colors, build)
 </script>
 

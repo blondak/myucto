@@ -31,6 +31,25 @@ export function formatMoney(value: number | null | undefined, currency: string =
   return `${formatter.format(value)} ${symbol}`
 }
 
+export function formatNumber(
+  value: number | null | undefined,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return new Intl.NumberFormat(activeLocale(), options).format(value)
+}
+
+export function formatCompactNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  const fractionDigits = Math.abs(value) >= 1_000_000 ? 1 : 0
+  return formatNumber(value, {
+    notation: 'compact',
+    compactDisplay: 'short',
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })
+}
+
 export function formatDate(date: string | null | undefined): string {
   if (!date) return '—'
   const d = new Date(date)
@@ -63,8 +82,13 @@ export function formatMonth(yyyymm: string): string {
   return `${months[m - 1]} ${y}`
 }
 
-export function formatPercent(value: number): string {
-  return `${value.toFixed(value % 1 === 0 ? 0 : 2)} %`
+export function formatPercent(value: number | null | undefined, decimals?: number): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  const fractionDigits = decimals ?? (value % 1 === 0 ? 0 : 2)
+  return `${formatNumber(value, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })} %`
 }
 
 export function statusLabel(status: string): string {

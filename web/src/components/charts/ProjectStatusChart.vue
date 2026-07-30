@@ -3,10 +3,11 @@ import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import { useI18n } from 'vue-i18n'
 import { useChartColors } from '@/composables/useTheme'
+import { formatPercent } from '@/composables/useFormat'
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const props = defineProps<{ counts: Record<string, number> }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
@@ -53,8 +54,8 @@ function build() {
           callbacks: {
             label: (ctx) => {
               const v = ctx.parsed as number
-              const pct = total > 0 ? ((v / total) * 100).toFixed(0) : '0'
-              return ` ${ctx.label}: ${v} (${pct} %)`
+              const pct = total > 0 ? (v / total) * 100 : 0
+              return ` ${ctx.label}: ${v} (${formatPercent(pct, 0)})`
             },
           },
         },
@@ -67,6 +68,7 @@ function build() {
 onMounted(build)
 onBeforeUnmount(() => chart?.destroy())
 watch(() => props.counts, build, { deep: true })
+watch(() => locale.value, build)
 watch(colors, build)
 </script>
 

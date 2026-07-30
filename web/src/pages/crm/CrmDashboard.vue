@@ -10,7 +10,7 @@ import { crmApi, type CrmKpi, type CrmOverview, type CrmMonthlyRow, type TopClie
   type ExpenseCategoryRow, type RevenueCategoryRow, type ChurnRiskClient,
   type CashFlowResult, type LateRiskClient,
   type ReminderEffectiveness, type PaymentTimeHistogram, type CrmYearlyRow } from '@/api/crm'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
@@ -478,7 +478,7 @@ onMounted(loadAll)
             <span v-if="lastMonthKpi" class="ml-2"
               :class="trendPct(expectedThisMonth, lastMonthKpi.revenue) >= 0 ? 'text-success-600' : 'text-danger-500'">
               {{ trendPct(expectedThisMonth, lastMonthKpi.revenue) >= 0 ? '▲' : '▼' }}
-              {{ Math.abs(trendPct(expectedThisMonth, lastMonthKpi.revenue)) }}%
+              {{ formatPercent(Math.abs(trendPct(expectedThisMonth, lastMonthKpi.revenue)), 0) }}
             </span>
           </div>
           <!-- Rozpad očekávaných tržeb: vystaveno + koncepty + nespárované proformy (jen když jsou dopředné složky) -->
@@ -501,14 +501,14 @@ onMounted(loadAll)
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(last12mKpi?.revenue || 0, displayCurrency) }}
-                <span v-if="rev12Yoy.show" class="ml-1" :class="rev12Yoy.cls">{{ rev12Yoy.arrow }}{{ rev12Yoy.abs }}%</span>
+                <span v-if="rev12Yoy.show" class="ml-1" :class="rev12Yoy.cls">{{ rev12Yoy.arrow }}{{ formatPercent(rev12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(ytdKpi?.revenue || 0, displayCurrency) }}
-                <span v-if="revYtdYoy.show" class="ml-1" :class="revYtdYoy.cls">{{ revYtdYoy.arrow }}{{ revYtdYoy.abs }}%</span>
+                <span v-if="revYtdYoy.show" class="ml-1" :class="revYtdYoy.cls">{{ revYtdYoy.arrow }}{{ formatPercent(revYtdYoy.abs, 0) }}</span>
               </span>
             </div>
             <div v-if="!hasPipeline">{{ currentMonthKpi?.invoice_count || 0 }} {{ t('crm.kpi.invoices') }}</div>
@@ -532,7 +532,7 @@ onMounted(loadAll)
             <span v-if="lastMonthKpi" class="ml-2"
               :class="trendPct(currentMonthKpi?.costs || 0, lastMonthKpi.costs) >= 0 ? 'text-danger-500' : 'text-success-600'">
               {{ trendPct(currentMonthKpi?.costs || 0, lastMonthKpi.costs) >= 0 ? '▲' : '▼' }}
-              {{ Math.abs(trendPct(currentMonthKpi?.costs || 0, lastMonthKpi.costs)) }}%
+              {{ formatPercent(Math.abs(trendPct(currentMonthKpi?.costs || 0, lastMonthKpi.costs)), 0) }}
             </span>
           </div>
           <div class="text-xs text-neutral-400 mt-3 pt-2 border-t border-neutral-100 space-y-0.5">
@@ -540,14 +540,14 @@ onMounted(loadAll)
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(last12mKpi?.costs || 0, displayCurrency) }}
-                <span v-if="cost12Yoy.show" class="ml-1" :class="cost12Yoy.cls">{{ cost12Yoy.arrow }}{{ cost12Yoy.abs }}%</span>
+                <span v-if="cost12Yoy.show" class="ml-1" :class="cost12Yoy.cls">{{ cost12Yoy.arrow }}{{ formatPercent(cost12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(ytdKpi?.costs || 0, displayCurrency) }}
-                <span v-if="costYtdYoy.show" class="ml-1" :class="costYtdYoy.cls">{{ costYtdYoy.arrow }}{{ costYtdYoy.abs }}%</span>
+                <span v-if="costYtdYoy.show" class="ml-1" :class="costYtdYoy.cls">{{ costYtdYoy.arrow }}{{ formatPercent(costYtdYoy.abs, 0) }}</span>
               </span>
             </div>
             <div>{{ currentMonthKpi?.purchase_count || 0 }} {{ t('crm.kpi.purchases') }}</div>
@@ -569,7 +569,7 @@ onMounted(loadAll)
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('crm.kpi.this_month') }}<span v-if="hasPipeline" class="text-neutral-400"> · {{ t('crm.kpi.expected') }}</span>
             <span v-if="expectedThisMonth > 0" class="ml-2">
-              · {{ Math.round((expectedProfitThisMonth / expectedThisMonth) * 100) }}% {{ t('crm.kpi.margin') }}
+              · {{ formatPercent((expectedProfitThisMonth / expectedThisMonth) * 100, 0) }} {{ t('crm.kpi.margin') }}
             </span>
           </div>
           <!-- Rozpad očekávaného zisku: vystavený zisk + koncepty + nespárované proformy (jen když jsou dopředné složky) -->
@@ -592,18 +592,18 @@ onMounted(loadAll)
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(last12mKpi?.profit || 0, displayCurrency) }}
-                <span v-if="profit12Yoy.show" class="ml-1" :class="profit12Yoy.cls">{{ profit12Yoy.arrow }}{{ profit12Yoy.abs }}%</span>
+                <span v-if="profit12Yoy.show" class="ml-1" :class="profit12Yoy.cls">{{ profit12Yoy.arrow }}{{ formatPercent(profit12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
                 {{ formatMoney(ytdKpi?.profit || 0, displayCurrency) }}
-                <span v-if="profitYtdYoy.show" class="ml-1" :class="profitYtdYoy.cls">{{ profitYtdYoy.arrow }}{{ profitYtdYoy.abs }}%</span>
+                <span v-if="profitYtdYoy.show" class="ml-1" :class="profitYtdYoy.cls">{{ profitYtdYoy.arrow }}{{ formatPercent(profitYtdYoy.abs, 0) }}</span>
               </span>
             </div>
             <div v-if="marginPct(ytdKpi?.profit, ytdKpi?.revenue) !== null">
-              {{ t('crm.kpi.ytd_margin', { pct: Math.round(marginPct(ytdKpi?.profit, ytdKpi?.revenue)!) }) }}
+              {{ t('crm.kpi.ytd_margin', { pct: formatNumber(marginPct(ytdKpi?.profit, ytdKpi?.revenue), { maximumFractionDigits: 0 }) }) }}
             </div>
           </div>
         </div>
@@ -645,7 +645,7 @@ onMounted(loadAll)
                   {{ row.profit >= 0 ? '+' : '' }}{{ formatMoney(row.profit, displayCurrency) }}
                 </td>
                 <td class="px-5 py-2 text-right font-mono text-neutral-600">
-                  {{ row.margin === null ? '—' : row.margin.toFixed(1) + '%' }}
+                  {{ formatPercent(row.margin, 1) }}
                 </td>
               </tr>
             </tbody>
@@ -756,7 +756,7 @@ onMounted(loadAll)
                   {{ formatMoney(c.revenue, 'CZK') }}
                 </td>
                 <td class="px-5 py-2.5 text-right text-xs text-neutral-500 font-mono">
-                  {{ c.percent_share.toFixed(1) }}%
+                  {{ formatPercent(c.percent_share, 1) }}
                 </td>
               </tr>
             </tbody>
@@ -787,7 +787,7 @@ onMounted(loadAll)
                   {{ formatMoney(v.costs, 'CZK') }}
                 </td>
                 <td class="px-5 py-2.5 text-right text-xs text-neutral-500 font-mono">
-                  {{ v.percent_share.toFixed(1) }}%
+                  {{ formatPercent(v.percent_share, 1) }}
                 </td>
               </tr>
             </tbody>
@@ -822,7 +822,7 @@ onMounted(loadAll)
               <div class="flex items-center gap-2">
                 <div :class="['h-3 rounded-sm', agingBucketColor(b.bucket)]"
                   :style="{ width: agingPct(b, agingTotal) + '%' }"></div>
-                <span class="text-neutral-500">{{ b.count }} faktur</span>
+                <span class="text-neutral-500">{{ b.count }} {{ t('crm.kpi.invoices') }}</span>
               </div>
               <div class="text-right font-mono text-neutral-700">
                 {{ formatMoney(b.total, b.currency) }}
@@ -856,7 +856,7 @@ onMounted(loadAll)
               <div class="flex items-center gap-2">
                 <div :class="['h-3 rounded-sm', agingBucketColor(b.bucket)]"
                   :style="{ width: agingPct(b, agingPayTotal) + '%' }"></div>
-                <span class="text-neutral-500">{{ b.count }} faktur</span>
+                <span class="text-neutral-500">{{ b.count }} {{ t('crm.kpi.invoices') }}</span>
               </div>
               <div class="text-right font-mono text-neutral-700">
                 {{ formatMoney(b.total, b.currency) }}
@@ -874,7 +874,7 @@ onMounted(loadAll)
             {{ t('crm.dso.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>
           <div class="text-2xl font-bold font-mono text-neutral-900">
-            {{ dso?.avg_days ?? '—' }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span>
+            {{ formatNumber(dso?.avg_days, { maximumFractionDigits: 1 }) }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span>
           </div>
           <div class="text-xs text-neutral-500 mt-1">{{ t('crm.dso.hint', { n: dso?.sample_size || 0 }) }}</div>
         </div>
@@ -886,7 +886,7 @@ onMounted(loadAll)
           </div>
           <div class="text-2xl font-bold font-mono"
             :class="(punctuality?.on_time_pct ?? 0) >= 80 ? 'text-success-600' : (punctuality?.on_time_pct ?? 0) >= 50 ? 'text-warning-600' : 'text-danger-500'">
-            {{ punctuality?.on_time_pct ?? 0 }}%
+            {{ formatPercent(punctuality?.on_time_pct ?? 0, 1) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('crm.punctuality.detail', { on_time: punctuality?.on_time || 0, late: punctuality?.late || 0 }) }}
@@ -899,10 +899,10 @@ onMounted(loadAll)
             {{ t('crm.concentration.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>
           <div class="text-2xl font-bold font-mono" :class="riskColor(concentration?.risk_level || 'low')">
-            {{ concentration?.top1_share ?? 0 }}%
+            {{ formatPercent(concentration?.top1_share ?? 0, 1) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
-            {{ t('crm.concentration.top1', { pct: concentration?.top1_share ?? 0 }) }}
+            {{ t('crm.concentration.top1', { pct: formatNumber(concentration?.top1_share ?? 0, { maximumFractionDigits: 1 }) }) }}
             <span class="ml-2">· {{ t('crm.concentration.pareto', { n: concentration?.pareto_80_count ?? 0 }) }}</span>
           </div>
           <div class="text-xs mt-2 pt-2 border-t border-neutral-100" :class="riskColor(concentration?.risk_level || 'low')">
@@ -919,7 +919,7 @@ onMounted(loadAll)
             {{ t('crm.dpo.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>
           <div class="text-2xl font-bold font-mono text-neutral-900">
-            {{ dpo?.avg_days ?? '—' }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span>
+            {{ formatNumber(dpo?.avg_days, { maximumFractionDigits: 1 }) }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span>
           </div>
           <div class="text-xs text-neutral-500 mt-1">{{ t('crm.dpo.hint', { n: dpo?.sample_size || 0 }) }}</div>
         </div>
@@ -930,10 +930,10 @@ onMounted(loadAll)
             {{ t('crm.vendor_concentration.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>
           <div class="text-2xl font-bold font-mono" :class="riskColor(vendorConcentration?.risk_level || 'low')">
-            {{ vendorConcentration?.top1_share ?? 0 }}%
+            {{ formatPercent(vendorConcentration?.top1_share ?? 0, 1) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
-            {{ t('crm.vendor_concentration.top1', { pct: vendorConcentration?.top1_share ?? 0 }) }}
+            {{ t('crm.vendor_concentration.top1', { pct: formatNumber(vendorConcentration?.top1_share ?? 0, { maximumFractionDigits: 1 }) }) }}
             <span class="ml-2">· {{ t('crm.vendor_concentration.pareto', { n: vendorConcentration?.pareto_80_count ?? 0 }) }}</span>
           </div>
           <div class="text-xs mt-2 pt-2 border-t border-neutral-100" :class="riskColor(vendorConcentration?.risk_level || 'low')">
@@ -948,7 +948,7 @@ onMounted(loadAll)
           </div>
           <div class="text-2xl font-bold font-mono"
             :class="wcCycle === null ? 'text-neutral-400' : wcCycle > 0 ? 'text-warning-600' : 'text-success-600'">
-            <template v-if="wcCycle !== null">{{ wcCycle > 0 ? '+' : '' }}{{ wcCycle }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span></template>
+            <template v-if="wcCycle !== null">{{ wcCycle > 0 ? '+' : '' }}{{ formatNumber(wcCycle, { maximumFractionDigits: 1 }) }}<span class="text-base text-neutral-500 ml-1">{{ t('crm.dso.days') }}</span></template>
             <template v-else>—</template>
           </div>
           <div class="text-xs text-neutral-500 mt-1">{{ t('crm.wc_cycle.formula') }}</div>
@@ -982,7 +982,7 @@ onMounted(loadAll)
               </td>
               <!-- revenue breakdown je VŽDY CZK-normalizovaný (server přepočítá ×exchange_rate) → label CZK -->
               <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(r.total, 'CZK') }}</td>
-              <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ r.percent.toFixed(1) }}%</td>
+              <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(r.percent, 1) }}</td>
             </tr>
           </tbody>
         </table>
@@ -1020,7 +1020,7 @@ onMounted(loadAll)
                 </td>
                 <!-- expense breakdown je VŽDY CZK-normalizovaný (server přepočítá ×exchange_rate) → label CZK -->
                 <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(e.total, 'CZK') }}</td>
-                <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ e.percent.toFixed(1) }}%</td>
+                <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(e.percent, 1) }}</td>
               </tr>
             </tbody>
           </table>
@@ -1047,12 +1047,12 @@ onMounted(loadAll)
                   <RouterLink :to="`/clients/${c.client_id}`" class="font-medium text-primary-700 hover:underline">
                     {{ c.company_name }}
                   </RouterLink>
-                  <div class="text-xs text-neutral-500">{{ t('crm.churn.last', { date: c.last_invoice_date }) }}</div>
+                  <div class="text-xs text-neutral-500">{{ t('crm.churn.last', { date: formatDate(c.last_invoice_date) }) }}</div>
                 </td>
                 <td class="px-3 py-2 text-right">
                   <span class="text-sm font-mono"
                     :class="c.days_since > 180 ? 'text-danger-500' : c.days_since > 90 ? 'text-warning-600' : 'text-neutral-700'">
-                    {{ c.days_since }}d
+                    {{ formatNumber(c.days_since) }} {{ t('crm.payment_time.days') }}
                   </span>
                 </td>
                 <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono">
@@ -1157,7 +1157,7 @@ onMounted(loadAll)
                     {{ r.profit >= 0 ? '+' : '' }}{{ formatMoney(r.profit, r.currency) }}
                   </td>
                   <td class="px-4 py-2 text-right font-mono text-xs text-neutral-500">
-                    {{ marginPct(r.profit, r.revenue) === null ? '—' : marginPct(r.profit, r.revenue)!.toFixed(1) + '%' }}
+                    {{ formatPercent(marginPct(r.profit, r.revenue), 1) }}
                   </td>
                 </tr>
               </tbody>
@@ -1195,7 +1195,7 @@ onMounted(loadAll)
                     {{ row.profit >= 0 ? '+' : '' }}{{ formatMoney(row.profit, row.currency) }}
                   </td>
                   <td class="px-4 py-2 text-right font-mono text-xs text-neutral-500">
-                    {{ marginPct(row.profit, row.revenue) === null ? '—' : marginPct(row.profit, row.revenue)!.toFixed(1) + '%' }}
+                    {{ formatPercent(marginPct(row.profit, row.revenue), 1) }}
                   </td>
                 </tr>
               </tbody>
@@ -1226,8 +1226,8 @@ onMounted(loadAll)
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="(w, i) in cashFlow.weeks" :key="i" class="hover:bg-neutral-50">
               <td class="px-5 py-2 text-xs">
-                <span class="font-medium">{{ new Date(w.week_start).toLocaleDateString() }}</span>
-                <span class="text-neutral-400"> – {{ new Date(w.week_end).toLocaleDateString() }}</span>
+                <span class="font-medium">{{ formatDate(w.week_start) }}</span>
+                <span class="text-neutral-400"> – {{ formatDate(w.week_end) }}</span>
               </td>
               <td class="px-3 py-2 text-right font-mono text-success-600">{{ formatMoney(w.in, cashFlow.currency) }}</td>
               <td class="px-3 py-2 text-right font-mono text-danger-500">−{{ formatMoney(w.out, cashFlow.currency) }}</td>
@@ -1282,8 +1282,8 @@ onMounted(loadAll)
                   </RouterLink>
                   <div class="text-xs text-neutral-500">{{ c.late_count }}/{{ c.total_paid }} {{ t('crm.late_risk.late_paid') }}</div>
                 </td>
-                <td class="px-3 py-2 text-right font-mono text-xs">{{ Math.round(c.late_rate * 100) }}%</td>
-                <td class="px-3 py-2 text-right font-mono text-xs">{{ c.avg_days_late.toFixed(1) }} d</td>
+                <td class="px-3 py-2 text-right font-mono text-xs">{{ formatPercent(c.late_rate * 100, 0) }}</td>
+                <td class="px-3 py-2 text-right font-mono text-xs">{{ formatNumber(c.avg_days_late, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }} {{ t('crm.payment_time.days') }}</td>
                 <td class="px-5 py-2 text-center">
                   <span :class="['inline-block px-2 py-0.5 rounded text-xs font-bold',
                     c.risk_level === 'high' ? 'bg-danger-50 text-danger-500' :
@@ -1303,7 +1303,7 @@ onMounted(loadAll)
               ⏱️ {{ t('crm.payment_time.title') }} <span class="normal-case font-normal text-[10px] text-neutral-400">({{ periodChip }})</span>
             </h3>
             <div v-if="paymentHist && paymentHist.median_days !== null" class="text-xs text-neutral-500">
-              {{ t('crm.payment_time.median') }}: <span class="font-mono font-medium">{{ paymentHist.median_days }} {{ t('crm.payment_time.days') }}</span>
+              {{ t('crm.payment_time.median') }}: <span class="font-mono font-medium">{{ formatNumber(paymentHist.median_days, { maximumFractionDigits: 1 }) }} {{ t('crm.payment_time.days') }}</span>
             </div>
           </header>
           <div v-if="!paymentHist || paymentHist.total_invoices === 0" class="p-6 text-center text-sm text-neutral-400">
@@ -1313,7 +1313,7 @@ onMounted(loadAll)
             <div v-for="b in paymentHist.buckets" :key="b.label" class="text-xs">
               <div class="flex justify-between mb-1">
                 <span class="text-neutral-700 font-medium">{{ b.label }}</span>
-                <span class="font-mono text-neutral-600">{{ b.count }} ({{ b.percent }}%)</span>
+                <span class="font-mono text-neutral-600">{{ b.count }} ({{ formatPercent(b.percent, 1) }})</span>
               </div>
               <div class="w-full bg-neutral-100 rounded h-2 overflow-hidden">
                 <div class="h-full rounded transition-all" :style="{ width: b.percent + '%' }"
@@ -1322,7 +1322,7 @@ onMounted(loadAll)
             </div>
             <div class="text-xs text-neutral-500 mt-3 pt-3 border-t border-neutral-100">
               {{ t('crm.payment_time.total') }}: {{ paymentHist.total_invoices }} •
-              {{ t('crm.payment_time.p90') }}: {{ paymentHist.p90_days ?? '—' }} {{ t('crm.payment_time.days') }}
+              {{ t('crm.payment_time.p90') }}: {{ formatNumber(paymentHist.p90_days, { maximumFractionDigits: 1 }) }} {{ t('crm.payment_time.days') }}
             </div>
           </div>
         </div>
@@ -1358,7 +1358,7 @@ onMounted(loadAll)
           </div>
         </div>
         <div class="px-4 pb-3 text-xs text-neutral-500 text-center">
-          {{ t('crm.reminder.avg_reminders') }}: <span class="font-mono font-medium">{{ reminderEff.avg_reminders_to_paid }}</span>
+          {{ t('crm.reminder.avg_reminders') }}: <span class="font-mono font-medium">{{ formatNumber(reminderEff.avg_reminders_to_paid, { maximumFractionDigits: 1 }) }}</span>
         </div>
       </div>
     </div>

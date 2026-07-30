@@ -3,7 +3,7 @@ import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import type { RevenueCategoryBreakdownItem } from '@/api/dashboard'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatPercent } from '@/composables/useFormat'
 import { useChartColors } from '@/composables/useTheme'
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
@@ -61,8 +61,8 @@ function build() {
           callbacks: {
             label: (ctx) => {
               const v = ctx.parsed as number
-              const pct = total > 0 ? ((v / total) * 100).toFixed(1) : '0'
-              return ` ${ctx.label}: ${formatMoney(v, 'CZK')} (${pct} %)`
+              const pct = total > 0 ? (v / total) * 100 : 0
+              return ` ${ctx.label}: ${formatMoney(v, 'CZK')} (${formatPercent(pct, 1)})`
             },
           },
         },

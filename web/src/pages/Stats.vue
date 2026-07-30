@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
 import { projectsApi, type ProjectStats } from '@/api/projects'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatNumber } from '@/composables/useFormat'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
 import TopClientsPieChart from '@/components/charts/TopClientsPieChart.vue'
@@ -379,7 +379,7 @@ const hasAnyData = computed(() =>
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('dashboard.avg_payment') }}</div>
           <div class="text-2xl font-semibold text-neutral-900">
-            {{ summary.kpi.avg_payment_days !== null ? summary.kpi.avg_payment_days + ' ' + t('dashboard.days') : '—' }}
+            {{ formatNumber(summary.kpi.avg_payment_days, { maximumFractionDigits: 1 }) }} {{ summary.kpi.avg_payment_days !== null ? t('dashboard.days') : '' }}
           </div>
           <div class="text-xs text-neutral-400 mt-1">{{ t('dashboard.this_year_paid') }}</div>
         </div>

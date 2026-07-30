@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Chart,
   BarController,
@@ -9,6 +10,7 @@ import {
   Tooltip,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -20,6 +22,7 @@ const props = defineProps<{
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
+const { locale } = useI18n()
 const colors = useChartColors()
 
 function build() {
@@ -66,18 +69,16 @@ function build() {
 }
 
 function formatVal(n: number): string {
-  return new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 }).format(n)
+  return formatNumber(n, { maximumFractionDigits: 0 })
 }
 
 function formatTick(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k'
-  return n.toString()
+  return formatCompactNumber(n)
 }
 
 onMounted(build)
 onBeforeUnmount(() => chart?.destroy())
-watch(() => [props.labels, props.values, props.currency], build, { deep: true })
+watch(() => [props.labels, props.values, props.currency, locale.value], build, { deep: true })
 watch(colors, build)
 </script>
 

@@ -7,7 +7,7 @@ import { useSupplierStore } from '@/stores/supplier'
 
 const { t } = useI18n()
 import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatDate, formatNumber } from '@/composables/useFormat'
 import SparklineChart from '@/components/charts/SparklineChart.vue'
 import TopClientsPieChart from '@/components/charts/TopClientsPieChart.vue'
 import TaxNetWidget from '@/components/dashboard/TaxNetWidget.vue'
@@ -283,7 +283,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm cursor-pointer hover:border-primary-300 transition">
             <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('dashboard.avg_payment') }}</div>
             <div class="text-2xl font-semibold text-neutral-900">
-              {{ summary.kpi.avg_payment_days !== null ? summary.kpi.avg_payment_days + ' ' + t('dashboard.days') : '—' }}
+              {{ formatNumber(summary.kpi.avg_payment_days, { maximumFractionDigits: 1 }) }} {{ summary.kpi.avg_payment_days !== null ? t('dashboard.days') : '' }}
             </div>
             <div class="text-xs text-neutral-400 mt-1">{{ t('dashboard.this_year_paid') }}</div>
           </div>

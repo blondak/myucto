@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import { formatNumber, formatPercent } from '@/composables/useFormat'
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
 
@@ -16,6 +18,7 @@ const props = defineProps<{
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
+const { locale } = useI18n()
 const colors = useChartColors()
 
 // Barevné mapování podle obvyklých CZ sazeb (21 % red, 12 % blue, 0 % grey, RC purple).
@@ -31,7 +34,7 @@ const palette: Record<string, string> = {
 const filtered = computed(() => props.items.filter(i => i.currency === props.currency && i.base !== 0))
 
 function formatVal(n: number): string {
-  return new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 }).format(n)
+  return formatNumber(n, { maximumFractionDigits: 0 })
 }
 
 function build() {
@@ -58,8 +61,8 @@ function build() {
           callbacks: {
             label: (ctx) => {
               const v = ctx.parsed as number
-              const pct = total > 0 ? ((v / total) * 100).toFixed(1) : '0'
-              return ` ${ctx.label}: ${formatVal(v)} ${props.currency} (${pct} %)`
+              const pct = total > 0 ? (v / total) * 100 : 0
+              return ` ${ctx.label}: ${formatVal(v)} ${props.currency} (${formatPercent(pct, 1)})`
             },
           },
         },
@@ -71,7 +74,7 @@ function build() {
 
 onMounted(build)
 onBeforeUnmount(() => chart?.destroy())
-watch(() => [props.items, props.currency], build, { deep: true })
+watch(() => [props.items, props.currency, locale.value], build, { deep: true })
 watch(colors, build)
 </script>
 
