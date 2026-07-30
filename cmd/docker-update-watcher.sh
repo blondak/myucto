@@ -40,9 +40,14 @@ cd "$PROJECT_ROOT"
 INTERVAL_S="${MYINVOICE_WATCHER_INTERVAL:-30}"
 
 # Detect compose file — preferuj production.yml pokud existuje a má běžící stack.
+#
+# Ask compose for the container id instead of grepping the human-readable table:
+# older Compose v2 printed "running" in the STATUS column, newer releases print
+# the docker-style "Up 2 weeks", so the grep silently stopped matching and the
+# watcher always fell back to the default compose file.
 COMPOSE_ARGS=()
 if [[ -f docker-compose.production.yml ]] \
-   && docker compose -f docker-compose.production.yml ps app 2>/dev/null | grep -q "running"; then
+   && [[ -n "$(docker compose -f docker-compose.production.yml ps --status running -q app 2>/dev/null)" ]]; then
     COMPOSE_ARGS=("-f" "docker-compose.production.yml")
 fi
 
