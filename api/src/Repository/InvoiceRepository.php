@@ -822,6 +822,18 @@ final class InvoiceRepository
             throw new \InvalidArgumentException("Client #$clientId nenalezen.");
         }
         $supplierId = (int) $client['supplier_id'];
+        $parentInvoiceId = !empty($data['parent_invoice_id']) ? (int) $data['parent_invoice_id'] : null;
+        if ($parentInvoiceId !== null) {
+            $parent = $pdo->prepare(
+                'SELECT 1 FROM invoices WHERE id = ? AND supplier_id = ? LIMIT 1'
+            );
+            $parent->execute([$parentInvoiceId, $supplierId]);
+            if ($parent->fetchColumn() === false) {
+                throw new \InvalidArgumentException(
+                    "Rodičovský doklad #$parentInvoiceId neexistuje nebo patří jiné firmě."
+                );
+            }
+        }
         $brandingProfileId = empty($client['branding_profiles_enabled']) ? null : (array_key_exists('branding_profile_id', $data)
             ? $this->resolveBrandingProfileId($data['branding_profile_id'], $supplierId)
             : ($client['default_branding_profile_id'] !== null
@@ -867,7 +879,7 @@ final class InvoiceRepository
 
         $params = [
             (string) ($data['invoice_type'] ?? 'invoice'),
-            isset($data['parent_invoice_id']) ? (int) $data['parent_invoice_id'] : null,
+            $parentInvoiceId,
             $clientId,
             isset($data['project_id']) && $data['project_id'] ? (int) $data['project_id'] : null,
             $supplierId,
