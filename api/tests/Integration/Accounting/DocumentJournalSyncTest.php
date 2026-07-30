@@ -208,21 +208,36 @@ final class DocumentJournalSyncTest extends TestCase
 
     // ── (b3) retenční lhůta § 31 ZoÚ ───────────────────────────────────────
 
-    /**
-     * Vystavený doklad z běžícího období nejde fyzicky smazat ani adminem — je to účetní
-     * záznam v retenční lhůtě (§ 31 ZoÚ, § 35a ZDPH). Do doplnění brány to šlo bez ohledu
-     * na stáří a bez jediné zmínky o lhůtě.
-     */
-    public function testDeleteWithinRetentionPeriodIsRejected(): void
+    /** Zaúčtovaný doklad v běžící retenční lhůtě nejde fyzicky smazat bez ack_retention. */
+    public function testDeletePostedInvoiceWithinRetentionPeriodIsRejected(): void
     {
         $client    = $this->client('Odběratel s.r.o.', true, false);
         $invoiceId = $this->sale('FV-2099-R1', $client, '1', 1000.00, 210.00, 21.00);
+        $this->postInvoiceEntry($invoiceId);
 
         $res = $this->invoke($this->deleteInvoice, 'admin', ['id' => (string) $invoiceId], [], ['force' => '1']);
 
         self::assertSame(422, $res['status']);
         self::assertSame('retention_period', $res['body']['error']['code'] ?? null);
         self::assertSame(1, $this->invoiceCount($invoiceId), 'Doklad musí zůstat.');
+    }
+
+    public function testForceDeleteUnpostedParentWithPostedChildStillRequiresRetentionAck(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.', true, false);
+        $parentId = $this->sale('FV-2099-R2', $client, '1', 1000.00, 210.00, 21.00);
+        $childId  = $this->sale('DOB-2099-R2', $client, '1', 100.00, 21.00, 21.00);
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET parent_invoice_id = ?, invoice_type = 'credit_note' WHERE id = ?"
+        )->execute([$parentId, $childId]);
+        $this->postInvoiceEntry($childId);
+
+        $res = $this->invoke($this->deleteInvoice, 'admin', ['id' => (string) $parentId], [], ['force' => '1']);
+
+        self::assertSame(422, $res['status'], 'Zaúčtovaný CASCADE child musí udržet retenční bránu.');
+        self::assertSame('retention_period', $res['body']['error']['code'] ?? null);
+        self::assertSame(1, $this->invoiceCount($parentId), 'Parent musí zůstat.');
+        self::assertSame(1, $this->invoiceCount($childId), 'Zaúčtovaný child musí zůstat.');
     }
 
     // Úspěšné smazání s `ack_retention=1` (a jeho auditní stopu) ověřuje

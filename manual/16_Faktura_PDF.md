@@ -407,6 +407,11 @@ Třetí možnost **nenávratně odstraní účetní doklad** z databáze:
 - Activity log: `invoice.force_deleted` s detaily (status, total, currency,
   cascade_deleted_ids, počet smazaných souborů).
 
+Pokud faktura ani žádný navázaný doklad nebyly zaúčtovány, admin force-delete
+provede smazání přímo. U zaúčtovaného dokladu zůstává aktivní retenční ochrana
+účetních a daňových záznamů; v běžící retenční lhůtě proto použij storno nebo
+dobropis.
+
 Před skutečným smazáním systém ukáže **detailní per-status varování**
 (jiné pro vystavenou / odeslanou / zaplacenou / stornovanou) s doporučenou
 alternativou (storno / dobropis / Nezaplacené).

@@ -88,7 +88,8 @@ final class DeleteInvoiceAction
         // Zámek dokladu (Epic F6) — PŘED status guardem: zaúčtovaný/uzavřený doklad
         // klient nesmaže (403 document_locked), účetní v zavřeném období 409, admin
         // jen s ?force=1 (client nikdy admin větev — M6).
-        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($existing), 'invoice', $id)) {
+        $documentLock = $this->locks->forInvoice($existing);
+        if ($deny = $this->denyIfLocked($request, $response, $documentLock, 'invoice', $id)) {
             return $deny;
         }
 
@@ -101,10 +102,35 @@ final class DeleteInvoiceAction
             );
         }
 
-        // Retenční brána (§ 31/§ 32 ZoÚ, § 35a ZDPH). Vystavený doklad je účetní záznam
-        // a v běžící lhůtě se uchovávat MUSÍ — doteď ho šlo fyzicky smazat bez ohledu na
-        // stáří a bez jediné zmínky o lhůtě. Draft účetním záznamem není (nikdy nebyl
-        // vystaven), takže se brány netýká.
+        $supplierId = (int) ($existing['supplier_id'] ?? 0);
+
+        // Najdi všechny child doklady (storno, dobropis) — díky CASCADE se smažou
+        // s parentem, ale chceme je zalogovat, invalidovat jejich PDF cache a zahrnout
+        // do posouzení, zda force-delete maže výhradně nezaúčtované doklady.
+        $children = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, invoice_type, varsymbol, status, issue_date, tax_date,
+                    effective_tax_date, booked_at
+               FROM invoices
+              WHERE parent_invoice_id = ?'
+        );
+        $children->execute([$id]);
+        $childRows = $children->fetchAll(\PDO::FETCH_ASSOC);
+
+        $forceDelete = ($request->getQueryParams()['force'] ?? '') === '1'
+            && RequestAuthorization::isSuperadmin($request);
+        $allUnposted = !$documentLock->booked && !$documentLock->posted;
+        foreach ($childRows as $child) {
+            $childLock = $this->locks->forInvoice($child);
+            if ($childLock->booked || $childLock->posted) {
+                $allUnposted = false;
+                break;
+            }
+        }
+
+        // Retenční brána (§ 31/§ 32 ZoÚ, § 35a ZDPH). Explicitní admin force-delete
+        // smí bez dalšího potvrzení odstranit vydaný doklad jen tehdy, když target ani
+        // žádný CASCADE child nikdy nebyl zaúčtován (booked_at ani aktivní posted zápis).
+        // Zaúčtované doklady zůstávají chráněné retenční lhůtou; draft se jí netýká.
         //
         // Přehlasování `?ack_retention=1` existuje vědomě. Povinnost uchovávat váže účetní
         // jednotku, ne software, a tvrdý zákaz by uživatele s vadným dokladem (omylem
@@ -112,8 +138,7 @@ final class DeleteInvoiceAction
         // řešení, po kterém nezůstane žádná stopa. Takhle je smazání vědomý úkon, který
         // se i s prošlapanou lhůtou zapíše do auditní stopy.
         $retentionOverride = null;
-        if ($status !== 'draft') {
-            $supplierId = (int) ($existing['supplier_id'] ?? 0);
+        if ($status !== 'draft' && !($forceDelete && $allUnposted)) {
             $periodYear = (int) (new \DateTimeImmutable(
                 (string) ($existing['tax_date'] ?: $existing['issue_date'])
             ))->format('Y');
@@ -135,16 +160,6 @@ final class DeleteInvoiceAction
                 ];
             }
         }
-
-        // Najdi všechny child doklady (storno, dobropis) — díky CASCADE se smažou
-        // s parentem, ale chceme je zalogovat a invalidovat jejich PDF cache (DB to neudělá).
-        $children = $this->db->pdo()->prepare(
-            'SELECT id, invoice_type, varsymbol, status, issue_date FROM invoices WHERE parent_invoice_id = ?'
-        );
-        $children->execute([$id]);
-        $childRows = $children->fetchAll(\PDO::FETCH_ASSOC);
-
-        $supplierId = (int) ($existing['supplier_id'] ?? 0);
 
         // Zachyt stats závislosti PŘED delete (po delete už client_id/project_id nepřečteme)
         $clientId  = isset($existing['client_id'])  ? (int) $existing['client_id']  : null;

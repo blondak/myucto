@@ -604,7 +604,7 @@ async function deleteInvoice() {
   if (!confirm(t(confirmKey, { varsymbol: vs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(invoice.value.id)
+    const res = await invoicesApi.delete(invoice.value.id, status !== 'draft')
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }
@@ -628,7 +628,7 @@ async function deleteCancellationParent() {
   if (!confirm(t('invoice.delete_cancelled_confirm', { varsymbol: parentVs }))) return
   busy.value = 'delete'
   try {
-    const res = await invoicesApi.delete(parentId)
+    const res = await invoicesApi.delete(parentId, true)
     if (res?.cascade_deleted && res.cascade_deleted > 0) {
       toast.success(t('invoice.deleted_with_cascade', { n: res.cascade_deleted }))
     }

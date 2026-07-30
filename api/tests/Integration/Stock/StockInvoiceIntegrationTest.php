@@ -319,9 +319,7 @@ final class StockInvoiceIntegrationTest extends StockTestCase
         $action = $this->container->get(DeleteInvoiceAction::class);
         $request = (new ServerRequestFactory())
             ->createServerRequest('DELETE', '/api/invoices/' . $invoiceId)
-            // `ack_retention=1` = vědomé přehlasování retenční lhůty § 31 (doklad je
-            // z běžícího období); test měří reverzi skladového dokladu, ne bránu.
-            ->withQueryParams(['force' => '1', 'ack_retention' => '1'])
+            ->withQueryParams(['force' => '1'])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
         $response = $action($request, new Psr7Response(), ['id' => (string) $invoiceId]);
@@ -329,8 +327,6 @@ final class StockInvoiceIntegrationTest extends StockTestCase
         self::assertSame(200, $response->getStatusCode());
         self::assertSame(5000, $this->level($supplierId, $whId, $itemId)['qtyT']);
 
-        // Přehlasování retenční lhůty (§ 31) je vědomý úkon a MUSÍ po sobě nechat stopu —
-        // bez záznamu v auditu by z něj bylo obyčejné smazání.
         $stmt = $this->db->pdo()->prepare(
             "SELECT payload FROM activity_log
               WHERE action = 'invoice.force_deleted' AND entity_id = ?
@@ -338,12 +334,43 @@ final class StockInvoiceIntegrationTest extends StockTestCase
         );
         $stmt->execute([$invoiceId]);
         $payload = json_decode((string) $stmt->fetchColumn(), true);
-        self::assertIsArray($payload['retention_override'] ?? null);
-        self::assertArrayHasKey('retain_until', $payload['retention_override']);
+        self::assertNull(
+            $payload['retention_override'] ?? null,
+            'Nezaúčtovaná faktura nepotřebuje retenční override ani při reverzi skladové výdejky.',
+        );
 
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM stock_documents WHERE supplier_id = ? AND status = "reversed"');
         $stmt->execute([$supplierId]);
         self::assertSame(1, (int) $stmt->fetchColumn());
+    }
+
+    public function testAdminForceDeleteUnpostedInvoiceSkipsRetentionPeriod(): void
+    {
+        $supplierId = $this->createSupplier();
+        $invoiceId = $this->invoiceDraft($supplierId, $this->client($supplierId), 'invoice', [
+            'varsymbol' => 'FV-2099-UNPOSTED',
+        ]);
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET status = 'issued', booked_at = NULL WHERE id = ? AND supplier_id = ?"
+        )->execute([$invoiceId, $supplierId]);
+
+        /** @var DeleteInvoiceAction $action */
+        $action = $this->container->get(DeleteInvoiceAction::class);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('DELETE', '/api/invoices/' . $invoiceId)
+            ->withQueryParams(['force' => '1'])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $response = $action($request, new Psr7Response(), ['id' => (string) $invoiceId]);
+
+        self::assertSame(
+            200,
+            $response->getStatusCode(),
+            'Admin force-delete musí smazat nezaúčtovanou fakturu bez ack_retention.',
+        );
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$invoiceId, $supplierId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
     }
 
     // ── pomocníci ────────────────────────────────────────────────────────────
