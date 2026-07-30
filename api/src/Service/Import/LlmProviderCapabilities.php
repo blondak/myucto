@@ -15,6 +15,16 @@ namespace MyInvoice\Service\Import;
  */
 final readonly class LlmProviderCapabilities
 {
+    public const GEMINI_DEFAULT_MODEL = 'gemini-3.6-flash';
+    public const GEMINI_MODELS = [
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-pro-preview',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash',
+    ];
+
     public function __construct(
         public string $id,               // 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
         public string $label,            // human-readable
@@ -100,11 +110,14 @@ final readonly class LlmProviderCapabilities
      */
     public static function gemini(?string $defaultModel): self
     {
+        $resolvedDefault = in_array($defaultModel, self::GEMINI_MODELS, true)
+            ? $defaultModel
+            : self::GEMINI_DEFAULT_MODEL;
         return new self(
             id: 'gemini',
             label: 'Google Gemini',
-            models: ['gemini-3-pro', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
-            defaultModel: ($defaultModel !== null && $defaultModel !== '') ? $defaultModel : 'gemini-2.0-flash',
+            models: self::GEMINI_MODELS,
+            defaultModel: $resolvedDefault,
             maxPdfBytes: 20 * 1024 * 1024,
             dataRegion: 'us',
             residencyLabel: 'US (Gemini)',
@@ -145,8 +158,8 @@ final readonly class LlmProviderCapabilities
             'openai' => (!str_starts_with($key, 'sk-') || strlen($key) < 20 || strlen($key) > 256)
                 ? 'api_key má neplatný formát (musí začínat "sk-").'
                 : null,
-            'gemini' => (!str_starts_with($key, 'AIza') || strlen($key) < 30 || strlen($key) > 256)
-                ? 'api_key má neplatný formát (Gemini klíč začíná "AIza").'
+            'gemini' => (strlen($key) < 20 || strlen($key) > 512 || preg_match('/\s/', $key) === 1)
+                ? 'api_key má neplatný formát.'
                 : null,
             'azure_openai' => ($key === '' || strlen($key) > 256)
                 ? 'api_key je povinné.'

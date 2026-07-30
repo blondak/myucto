@@ -59,7 +59,9 @@ final class GeminiClient implements LlmGatewayInterface
         }
         return [
             'api_key'       => $key,
-            'default_model' => (string) ($row['gemini_default_model'] ?? 'gemini-2.0-flash') ?: 'gemini-2.0-flash',
+            'default_model' => LlmProviderCapabilities::gemini(
+                isset($row['gemini_default_model']) ? (string) $row['gemini_default_model'] : null,
+            )->defaultModel,
         ];
     }
 
@@ -70,7 +72,7 @@ final class GeminiClient implements LlmGatewayInterface
             'UPDATE supplier SET gemini_api_key_enc = ?, gemini_default_model = ? WHERE id = ?'
         )->execute([
             $enc,
-            $defaultModel !== null && $defaultModel !== '' ? $defaultModel : 'gemini-2.0-flash',
+            $defaultModel !== null && $defaultModel !== '' ? $defaultModel : LlmProviderCapabilities::GEMINI_DEFAULT_MODEL,
             $supplierId,
         ]);
     }
@@ -106,6 +108,12 @@ final class GeminiClient implements LlmGatewayInterface
             ]);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
+                $this->logger->warning('Gemini connection test failed', [
+                    'supplier_id' => $supplierId,
+                    'model'       => $creds['default_model'],
+                    'http_status' => $code,
+                    'api_error'   => substr((string) $msg, 0, 500),
+                ]);
                 return ['ok' => false, 'error' => $msg];
             }
             return ['ok' => true, 'model' => $creds['default_model'], 'usage' => self::mapUsage($body['usageMetadata'] ?? null)];
@@ -119,11 +127,24 @@ final class GeminiClient implements LlmGatewayInterface
         $r = $this->generate($supplierId, $pdfBytes, $modelOverride,
             InvoiceExtractionPrompt::tenantContext($this->db, $supplierId) . InvoiceExtractionPrompt::invoiceSystem(),
             'Vytáhni strukturovaná data z této faktury podle JSON schema. Odpověz JEN samotným JSON.',
-            4096, self::geminiInvoiceSchema());
+            16384, self::geminiInvoiceSchema());
         if (!$r['ok']) return $r;
         $data = InvoiceExtractionPrompt::decodeJsonText($r['text']);
         if ($data === null) {
-            return ['ok' => false, 'error' => 'Gemini vrátil invalid JSON: ' . substr($r['text'], 0, 200)];
+            $this->logger->warning('Gemini invoice extraction returned invalid JSON', [
+                'supplier_id'    => $supplierId,
+                'model'          => $r['model'] ?? $modelOverride,
+                'response_bytes' => strlen($r['text']),
+                'finish_reason'   => $r['finish_reason'] ?? null,
+                'output_tokens'   => $r['usage']['output_tokens'] ?? null,
+                'thought_tokens'  => $r['thought_tokens'] ?? null,
+                'json_error'      => json_last_error_msg(),
+            ]);
+            return [
+                'ok'    => false,
+                'error' => 'Gemini vrátil neplatný nebo neúplný JSON'
+                    . (isset($r['finish_reason']) ? ' (finishReason: ' . $r['finish_reason'] . ')' : ''),
+            ];
         }
         $this->incrementCounter($supplierId);
         return ['ok' => true, 'data' => $data, 'model' => $r['model'], 'usage' => $r['usage']];
@@ -195,6 +216,11 @@ final class GeminiClient implements LlmGatewayInterface
 
         $model = $modelOverride ?: $creds['default_model'];
         $generationConfig = ['responseMimeType' => 'application/json', 'maxOutputTokens' => $maxTokens];
+        if (preg_match('/^gemini-3(?:[.-]|$)/', $model) === 1) {
+            $generationConfig['thinkingConfig'] = ['thinkingLevel' => 'low'];
+        } elseif (str_starts_with($model, 'gemini-2.5-')) {
+            $generationConfig['thinkingConfig'] = ['thinkingBudget' => 1024];
+        }
         if ($responseSchema !== null) {
             $generationConfig['responseSchema'] = $responseSchema;
         }
@@ -217,13 +243,32 @@ final class GeminiClient implements LlmGatewayInterface
         }
         if ($code !== 200) {
             $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
+            $this->logger->warning('Gemini extraction request failed', [
+                'supplier_id' => $supplierId,
+                'model'       => $model,
+                'http_status' => $code,
+                'api_error'   => substr((string) $msg, 0, 500),
+            ]);
             return ['ok' => false, 'error' => $msg];
         }
         $text = self::extractText($body);
         if ($text === null || $text === '') {
+            $this->logger->warning('Gemini extraction returned no text', [
+                'supplier_id'  => $supplierId,
+                'model'        => $model,
+                'finish_reason' => $body['candidates'][0]['finishReason'] ?? null,
+                'block_reason'  => $body['promptFeedback']['blockReason'] ?? null,
+            ]);
             return ['ok' => false, 'error' => 'Prázdná odpověď od Gemini'];
         }
-        return ['ok' => true, 'text' => $text, 'model' => $model, 'usage' => self::mapUsage($body['usageMetadata'] ?? null)];
+        return [
+            'ok'            => true,
+            'text'          => $text,
+            'model'         => $model,
+            'usage'         => self::mapUsage($body['usageMetadata'] ?? null),
+            'thought_tokens' => (int) ($body['usageMetadata']['thoughtsTokenCount'] ?? 0),
+            'finish_reason' => $body['candidates'][0]['finishReason'] ?? null,
+        ];
     }
 
     /**
@@ -267,97 +312,48 @@ final class GeminiClient implements LlmGatewayInterface
         ];
     }
 
-    /**
-     * Kompaktní Gemini-format responseSchema (OpenAPI subset, typy velkými písmeny)
-     * pro extrakci faktury. Zrcadlí {@see InvoiceExtractionPrompt::invoiceJsonSchema()}.
-     *
-     * @return array<string,mixed>
-     */
+    /** @return array<string,mixed> */
     private static function geminiInvoiceSchema(): array
     {
-        $party = [
-            'type'       => 'OBJECT',
-            'properties' => [
-                'company_name' => ['type' => 'STRING', 'nullable' => true],
-                'ic'           => ['type' => 'STRING', 'nullable' => true],
-                'dic'          => ['type' => 'STRING', 'nullable' => true],
-                'street'       => ['type' => 'STRING', 'nullable' => true],
-                'city'         => ['type' => 'STRING', 'nullable' => true],
-                'zip'          => ['type' => 'STRING', 'nullable' => true],
-                'country_iso2' => ['type' => 'STRING', 'nullable' => true],
-                'email'        => ['type' => 'STRING', 'nullable' => true],
-                'phone'        => ['type' => 'STRING', 'nullable' => true],
-                'web'          => ['type' => 'STRING', 'nullable' => true],
-                'is_vat_payer' => ['type' => 'BOOLEAN', 'nullable' => true],
-            ],
-        ];
-        return [
-            'type'       => 'OBJECT',
-            'properties' => [
-                'vendor'   => $party,
-                'customer' => [
-                    'type'       => 'OBJECT',
-                    'properties' => [
-                        'company_name' => ['type' => 'STRING', 'nullable' => true],
-                        'ic'           => ['type' => 'STRING', 'nullable' => true],
-                        'dic'          => ['type' => 'STRING', 'nullable' => true],
-                    ],
-                ],
-                'payment' => [
-                    'type'       => 'OBJECT',
-                    'properties' => [
-                        'bank_account'    => ['type' => 'STRING', 'nullable' => true],
-                        'iban'            => ['type' => 'STRING', 'nullable' => true],
-                        'variable_symbol' => ['type' => 'STRING', 'nullable' => true],
-                        // Migrace 1128 — forma úhrady. `nullable` je zásadní: null je
-                        // SPRÁVNÁ odpověď, když doklad formu neuvádí (Gemini enum nesmí
-                        // obsahovat null, řeší se právě přes nullable). Význam nese prompt,
-                        // znovu se validuje v AiPdfExtractor.
-                        'method'            => ['type' => 'STRING', 'nullable' => true, 'enum' => ['bank_transfer', 'direct_debit', 'card', 'cash', 'cash_on_delivery', 'offset', 'other']],
-                        'method_confidence' => ['type' => 'NUMBER', 'nullable' => true],
-                    ],
-                ],
-                'vendor_invoice_number' => ['type' => 'STRING', 'nullable' => true],
-                'varsymbol'             => ['type' => 'STRING', 'nullable' => true],
-                'document_kind'         => ['type' => 'STRING', 'enum' => ['invoice', 'credit_note', 'advance', 'receipt', 'tax_document']],
-                'issue_date'            => ['type' => 'STRING'],
-                'tax_date'              => ['type' => 'STRING', 'nullable' => true],
-                'due_date'              => ['type' => 'STRING', 'nullable' => true],
-                'currency'              => ['type' => 'STRING'],
-                'items'                 => [
-                    'type'  => 'ARRAY',
-                    'items' => [
-                        'type'       => 'OBJECT',
-                        'properties' => [
-                            'description'            => ['type' => 'STRING'],
-                            'quantity'               => ['type' => 'NUMBER'],
-                            'unit'                   => ['type' => 'STRING', 'nullable' => true],
-                            'unit_price_without_vat' => ['type' => 'NUMBER'],
-                            'line_total_without_vat' => ['type' => 'NUMBER', 'nullable' => true],
-                            'vat_rate'               => ['type' => 'NUMBER'],
-                        ],
-                    ],
-                ],
-                'unit_prices_include_vat' => ['type' => 'BOOLEAN'],
-                'total_without_vat'       => ['type' => 'NUMBER', 'nullable' => true],
-                'total_with_vat'          => ['type' => 'NUMBER', 'nullable' => true],
-                'total_with_vat_rounded'  => ['type' => 'NUMBER', 'nullable' => true],
-                'vat_recap'               => [
-                    'type'  => 'ARRAY',
-                    'items' => [
-                        'type'       => 'OBJECT',
-                        'properties' => [
-                            'rate' => ['type' => 'NUMBER'],
-                            'base' => ['type' => 'NUMBER'],
-                            'vat'  => ['type' => 'NUMBER'],
-                        ],
-                    ],
-                ],
-                'already_paid'      => ['type' => 'BOOLEAN'],
-                'advance_reference' => ['type' => 'STRING', 'nullable' => true],
-                'supply_nature'     => ['type' => 'STRING', 'nullable' => true],
-            ],
-        ];
+        return self::toGeminiSchema(InvoiceExtractionPrompt::invoiceJsonSchema());
+    }
+
+    /** @param array<string,mixed> $schema @return array<string,mixed> */
+    private static function toGeminiSchema(array $schema): array
+    {
+        $converted = [];
+        $type = $schema['type'] ?? null;
+        if (is_array($type)) {
+            $converted['nullable'] = in_array('null', $type, true);
+            $nonNullTypes = array_values(array_filter($type, static fn ($value) => $value !== 'null'));
+            $type = $nonNullTypes[0] ?? null;
+        }
+        if (is_string($type)) {
+            $converted['type'] = strtoupper($type);
+        }
+        if (isset($schema['properties']) && is_array($schema['properties'])) {
+            $converted['properties'] = [];
+            foreach ($schema['properties'] as $name => $property) {
+                if (is_array($property)) {
+                    $converted['properties'][$name] = self::toGeminiSchema($property);
+                }
+            }
+        }
+        if (isset($schema['items']) && is_array($schema['items'])) {
+            $converted['items'] = self::toGeminiSchema($schema['items']);
+        }
+        foreach (['required', 'minimum', 'maximum', 'minItems', 'maxItems', 'format', 'title', 'description'] as $key) {
+            if (array_key_exists($key, $schema)) {
+                $converted[$key] = $schema[$key];
+            }
+        }
+        if (isset($schema['enum']) && is_array($schema['enum'])) {
+            $enum = array_values(array_filter($schema['enum'], static fn ($value) => $value !== null));
+            if ($enum !== []) {
+                $converted['enum'] = $enum;
+            }
+        }
+        return $converted;
     }
 
     private function incrementCounter(int $supplierId): void

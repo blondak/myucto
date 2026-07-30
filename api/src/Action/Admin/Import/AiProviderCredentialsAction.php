@@ -348,7 +348,7 @@ final class AiProviderCredentialsAction
             case 'gemini':
                 if (array_key_exists('default_model', $body)) {
                     $pdo->prepare('UPDATE supplier SET gemini_default_model = ? WHERE id = ?')->execute([
-                        trim((string) $body['default_model']) ?: 'gemini-2.0-flash',
+                        trim((string) $body['default_model']) ?: LlmProviderCapabilities::GEMINI_DEFAULT_MODEL,
                         $supplierId,
                     ]);
                 }

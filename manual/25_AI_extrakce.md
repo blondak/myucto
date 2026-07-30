@@ -106,8 +106,10 @@ co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci 
   potřebuje EU rezidenci dat se smluvním zajištěním od Microsoftu.
 - **OpenAI** (přímé API) — BYOK klíč z platformy OpenAI, modely řady GPT
   (`gpt-5`, `gpt-4.1`, `gpt-4o` a jejich `mini` varianty).
-- **Google Gemini** — BYOK klíč z Google AI Studio, modely `gemini-3-pro` /
-  `gemini-3-flash` / `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.0-flash`.
+- **Google Gemini** — BYOK klíč z Google AI Studio, výchozí model
+  `gemini-3.6-flash`; dostupné jsou také `gemini-3.5-flash`,
+  `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` a
+  `gemini-2.5-flash`.
 
 Nastavení je **per dodavatel** (celá firma/tenant sdílí jednoho aktivního
 poskytovatele a jeho přihlašovací údaje, ne po jednotlivých uživatelích).
@@ -141,9 +143,10 @@ Pod tím je formulář **Přihlašovací údaje — {poskytovatel}**:
 - **Azure OpenAI** — navíc **Azure endpoint**, **Deployment** (název nasazeného
   modelu v Azure resource) a **API verze**.
 - Tlačítko **Test připojení** ověří klíč/endpoint reálným voláním a nahlásí,
-  jaký model odpověděl (nebo chybu). Klíč se validuje i po formátu už na
-  frontendu (Anthropic musí začínat `sk-ant-`, OpenAI `sk-`, Gemini `AIza`) —
-  ušetří to zbytečný test s očividně špatně vloženým klíčem.
+  jaký model odpověděl (nebo chybu). Před uložením se kontroluje i základní
+  formát klíče (Anthropic musí začínat `sk-ant-`, OpenAI `sk-`; Gemini přijímá
+  starší standardní i nové autorizační klíče z AI Studio) — ušetří to zbytečný
+  test s očividně špatně vloženým klíčem.
 - Tlačítko **koš** u nastaveného poskytovatele smaže jeho uložené přihlašovací
   údaje (po potvrzení) — pokud byl zrovna aktivní, extrakce přestane fungovat,
   dokud nenastavíš jiného poskytovatele nebo klíč nevložíš znovu.

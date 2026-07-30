@@ -104,9 +104,9 @@ final class OpenAiClient implements LlmGatewayInterface
         }
         try {
             ['code' => $code, 'body' => $body] = $this->post($creds, [
-                'model'      => $creds['default_model'],
-                'messages'   => [['role' => 'user', 'content' => 'Reply OK']],
-                'max_tokens' => 10,
+                'model'                 => $creds['default_model'],
+                'messages'              => [['role' => 'user', 'content' => 'Reply OK']],
+                'max_completion_tokens' => 10,
             ]);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
@@ -123,7 +123,7 @@ final class OpenAiClient implements LlmGatewayInterface
         $r = $this->chat($supplierId, $pdfBytes, $modelOverride,
             InvoiceExtractionPrompt::tenantContext($this->db, $supplierId) . InvoiceExtractionPrompt::invoiceSystem(),
             'Vytáhni strukturovaná data z této faktury podle JSON schema. Odpověz JEN samotným JSON.',
-            4096, InvoiceExtractionPrompt::invoiceJsonSchema());
+            16384, InvoiceExtractionPrompt::invoiceJsonSchema());
         if (!$r['ok']) return $r;
         $data = InvoiceExtractionPrompt::decodeJsonText($r['text']);
         if ($data === null) {
@@ -198,7 +198,7 @@ final class OpenAiClient implements LlmGatewayInterface
         }
 
         $responseFormat = $jsonSchema !== null
-            ? ['type' => 'json_schema', 'json_schema' => ['name' => 'invoice_extraction', 'schema' => $jsonSchema]]
+            ? ['type' => 'json_schema', 'json_schema' => ['name' => 'invoice_extraction', 'strict' => true, 'schema' => $jsonSchema]]
             : ['type' => 'json_object'];
 
         $payload = [
@@ -210,8 +210,8 @@ final class OpenAiClient implements LlmGatewayInterface
                     ['type' => 'file', 'file' => ['filename' => 'invoice.pdf', 'file_data' => 'data:application/pdf;base64,' . base64_encode($pdfBytes)]],
                 ]],
             ],
-            'max_tokens'      => $maxTokens,
-            'response_format' => $responseFormat,
+            'max_completion_tokens' => $maxTokens,
+            'response_format'       => $responseFormat,
         ];
 
         try {

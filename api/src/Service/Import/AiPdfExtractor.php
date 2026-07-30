@@ -212,6 +212,13 @@ final class AiPdfExtractor
 
         $validationError = $this->validateAiData($data);
         if ($validationError !== null) {
+            $this->logger->warning('AI extractor: výstup neprošel validací', [
+                'supplier_id' => $supplierId,
+                'provider'    => $extracted['provider'] ?? null,
+                'model'       => $extracted['model'] ?? null,
+                'reason'      => $validationError,
+                'fields'      => array_keys($data),
+            ]);
             return [
                 'ok'      => false,
                 'error'   => 'AI extrakce neprošla validací: ' . $validationError,

@@ -329,7 +329,7 @@ EOT;
             ],
         ];
 
-        return [
+        return self::requireAllObjectProperties([
             'type'       => 'object',
             'properties' => [
                 'vendor'   => $party,
@@ -363,7 +363,8 @@ EOT;
                 'due_date'               => ['type' => ['string', 'null']],
                 'currency'               => ['type' => 'string'],
                 'items'                  => [
-                    'type'  => 'array',
+                    'type'     => 'array',
+                    'minItems' => 1,
                     'items' => [
                         'type'       => 'object',
                         'properties' => [
@@ -401,7 +402,25 @@ EOT;
                 'advance_reference' => ['type' => ['string', 'null']],
                 'supply_nature'     => ['type' => ['string', 'null']],
             ],
-        ];
+        ]);
+    }
+
+    /** @param array<string,mixed> $schema @return array<string,mixed> */
+    private static function requireAllObjectProperties(array $schema): array
+    {
+        if (($schema['type'] ?? null) === 'object' && isset($schema['properties']) && is_array($schema['properties'])) {
+            $schema['required'] = array_keys($schema['properties']);
+            $schema['additionalProperties'] = false;
+            foreach ($schema['properties'] as $name => $property) {
+                if (is_array($property)) {
+                    $schema['properties'][$name] = self::requireAllObjectProperties($property);
+                }
+            }
+        }
+        if (($schema['type'] ?? null) === 'array' && isset($schema['items']) && is_array($schema['items'])) {
+            $schema['items'] = self::requireAllObjectProperties($schema['items']);
+        }
+        return $schema;
     }
 
     /**

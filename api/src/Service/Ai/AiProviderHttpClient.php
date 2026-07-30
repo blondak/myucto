@@ -209,7 +209,7 @@ final class AiProviderHttpClient
             $model = (string) ($body['model'] ?? $ctx['model']);
         } elseif (in_array($provider, ['openai', 'azure_openai'], true)) {
             $payload = [
-                'model' => $ctx['model'], 'temperature' => 0, 'max_tokens' => 500,
+                'model' => $ctx['model'], 'max_completion_tokens' => 500,
                 'messages' => [['role' => 'system', 'content' => $system], ['role' => 'user', 'content' => $user]],
                 'response_format' => ['type' => 'json_schema', 'json_schema' => [
                     'name' => 'posting_suggestion', 'strict' => true, 'schema' => $schema,

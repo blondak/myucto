@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Import;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -171,10 +172,83 @@ final class AiProviderContractTest extends TestCase
         self::assertNotNull(LlmProviderCapabilities::openai(null, null)->validateKey('AIza' . str_repeat('a', 40)));
 
         self::assertNull(LlmProviderCapabilities::gemini(null)->validateKey('AIza' . str_repeat('a', 35)));
+        self::assertNull(LlmProviderCapabilities::gemini(null)->validateKey('AQ.' . str_repeat('a', 40)));
         self::assertNotNull(LlmProviderCapabilities::gemini(null)->validateKey('sk-short'));
+        self::assertNotNull(LlmProviderCapabilities::gemini(null)->validateKey('AQ.' . str_repeat('a', 20) . ' '));
 
         self::assertNull(LlmProviderCapabilities::azureOpenai('https://x.openai.azure.com', 'dep', 'eu')->validateKey('some-azure-key'));
         self::assertNotNull(LlmProviderCapabilities::azureOpenai('https://x', 'dep', 'eu')->validateKey(''));
+    }
+
+    public function testGeminiInvoiceRequest_requiresCompleteSharedSchema(): void
+    {
+        $golden = $this->goldenData();
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], (string) json_encode([
+                'candidates' => [['content' => ['parts' => [[
+                    'text' => (string) json_encode($golden, JSON_UNESCAPED_UNICODE),
+                ]]]]],
+                'usageMetadata' => ['promptTokenCount' => 10, 'candidatesTokenCount' => 5],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+        $http = new Client(['handler' => $stack, 'http_errors' => false]);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) {
+            $stmt = $this->createMock(PDOStatement::class);
+            $stmt->method('execute')->willReturn(true);
+            if (str_contains($sql, 'gemini_api_key_enc')) {
+                $stmt->method('fetch')->willReturn([
+                    'gemini_api_key_enc' => 'ENC',
+                    'gemini_default_model' => 'gemini-3-flash',
+                ]);
+            } elseif (str_contains($sql, 'company_name')) {
+                $stmt->method('fetch')->willReturn(false);
+            } else {
+                $stmt->method('fetch')->willReturn([]);
+            }
+            return $stmt;
+        });
+        $conn = $this->createMock(Connection::class);
+        $conn->method('pdo')->willReturn($pdo);
+
+        $crypto = $this->createMock(SecretEncryption::class);
+        $crypto->method('decrypt')->willReturn('AQ.' . str_repeat('a', 40));
+
+        $result = (new GeminiClient($conn, $crypto, new NullLogger(), $http))
+            ->extractInvoice(1, "%PDF-1.4\nfake");
+
+        self::assertTrue($result['ok']);
+        self::assertCount(1, $history);
+        $payload = json_decode((string) $history[0]['request']->getBody(), true);
+        self::assertIsArray($payload);
+        $schema = $payload['generationConfig']['responseSchema'];
+        self::assertSame(array_keys($schema['properties']), $schema['required']);
+        self::assertSame(
+            array_keys($schema['properties']['items']['items']['properties']),
+            $schema['properties']['items']['items']['required'],
+        );
+        self::assertArrayHasKey('corrected_invoice_number', $schema['properties']);
+        self::assertArrayHasKey('expense_kind', $schema['properties']['items']['items']['properties']);
+        self::assertSame(16384, $payload['generationConfig']['maxOutputTokens']);
+        self::assertSame('low', $payload['generationConfig']['thinkingConfig']['thinkingLevel']);
+        self::assertStringContainsString('/models/gemini-3.6-flash:generateContent', (string) $history[0]['request']->getUri());
+    }
+
+    public function testGeminiCapabilities_useCurrentStableDefault(): void
+    {
+        $caps = LlmProviderCapabilities::gemini(null);
+
+        self::assertSame('gemini-3.6-flash', $caps->defaultModel);
+        self::assertContains('gemini-3.6-flash', $caps->models);
+        self::assertNotContains('gemini-2.0-flash', $caps->models);
+        self::assertSame(
+            'gemini-3.6-flash',
+            LlmProviderCapabilities::gemini('gemini-3-flash')->defaultModel,
+        );
     }
 
     // ── Inkrement čítače přesně 1× (per-client counter model, žádné dvojí) ────
@@ -184,6 +258,7 @@ final class AiProviderContractTest extends TestCase
         $golden = $this->goldenData();
         $text   = (string) json_encode($golden, JSON_UNESCAPED_UNICODE);
 
+        $history = [];
         $mock = new MockHandler([
             new Response(200, [], (string) json_encode([
                 'choices' => [['message' => ['content' => $text]]],
@@ -191,7 +266,9 @@ final class AiProviderContractTest extends TestCase
                 'usage'   => ['prompt_tokens' => 10, 'completion_tokens' => 5],
             ])),
         ]);
-        $http = new Client(['handler' => HandlerStack::create($mock), 'http_errors' => false]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+        $http = new Client(['handler' => $stack, 'http_errors' => false]);
 
         $updateCount = 0;
         $pdo = $this->createMock(PDO::class);
@@ -223,6 +300,59 @@ final class AiProviderContractTest extends TestCase
         self::assertTrue($result['ok'], 'extrakce má uspět');
         self::assertSame($golden, $result['data'], 'data normalizovaná dle golden schema');
         self::assertSame(1, $updateCount, 'čítač se smí inkrementovat právě jednou (žádné dvojí počítání)');
+        $payload = json_decode((string) $history[0]['request']->getBody(), true);
+        self::assertSame(16384, $payload['max_completion_tokens']);
+        self::assertArrayNotHasKey('max_tokens', $payload);
+        self::assertTrue($payload['response_format']['json_schema']['strict']);
+    }
+
+    public function testAzureInvoiceRequest_usesCurrentCompletionTokenParameter(): void
+    {
+        $history = [];
+        $mock = new MockHandler([
+            new Response(200, [], (string) json_encode([
+                'choices' => [['message' => ['content' => (string) json_encode($this->goldenData())]]],
+                'model'   => 'gpt-5',
+                'usage'   => ['prompt_tokens' => 10, 'completion_tokens' => 5],
+            ])),
+        ]);
+        $stack = HandlerStack::create($mock);
+        $stack->push(Middleware::history($history));
+        $http = new Client(['handler' => $stack, 'http_errors' => false]);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) {
+            $stmt = $this->createMock(PDOStatement::class);
+            $stmt->method('execute')->willReturn(true);
+            if (str_contains($sql, 'azure_openai_api_key_enc')) {
+                $stmt->method('fetch')->willReturn([
+                    'azure_openai_api_key_enc' => 'ENC',
+                    'azure_openai_endpoint' => 'https://example.openai.azure.com',
+                    'azure_openai_deployment' => 'gpt-5',
+                    'azure_openai_api_version' => '2024-10-21',
+                ]);
+            } elseif (str_contains($sql, 'company_name')) {
+                $stmt->method('fetch')->willReturn(false);
+            } else {
+                $stmt->method('fetch')->willReturn([]);
+            }
+            return $stmt;
+        });
+        $conn = $this->createMock(Connection::class);
+        $conn->method('pdo')->willReturn($pdo);
+
+        $crypto = $this->createMock(SecretEncryption::class);
+        $crypto->method('decrypt')->willReturn('synthetic-azure-key');
+
+        $result = (new AzureOpenAiClient($conn, $crypto, new NullLogger(), $http))
+            ->extractInvoice(1, "%PDF-1.4\nfake");
+
+        self::assertTrue($result['ok']);
+        self::assertCount(1, $history);
+        $payload = json_decode((string) $history[0]['request']->getBody(), true);
+        self::assertSame(16384, $payload['max_completion_tokens']);
+        self::assertArrayNotHasKey('max_tokens', $payload);
+        self::assertTrue($payload['response_format']['json_schema']['strict']);
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────
