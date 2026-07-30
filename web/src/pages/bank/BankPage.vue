@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import StatementList from './StatementList.vue'
 import BankAccounts from '@/pages/admin/BankAccounts.vue'
+import BankAccountAnalytics from './BankAccountAnalytics.vue'
 import PostingSuggestions from './PostingSuggestions.vue'
 import UnpostedTransactions from './UnpostedTransactions.vue'
 import { bankPostingApi } from '@/api/bankPosting'
@@ -21,9 +22,10 @@ const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore
 // Sjednocená stránka „Bankovní účty" (Finance): výpisy + účetní automatika + admin záložky.
 // Pravidla účtování (dřívější tab „rules") žijí pod Šablony (/templates?section=posting) —
 // z tabu K zaúčtování je na ně jen odkaz, ať se neztratí flow „založ pravidlo za chodu".
-type Tab = 'statements' | 'all_movements' | 'posting' | 'accounts' | 'balances' | 'email'
+type Tab = 'statements' | 'all_movements' | 'posting' | 'analytics' | 'accounts' | 'balances' | 'email'
 // „Všechny pohyby" = samostatný top-level tab hned za Výpisy (ne pod K zaúčtování).
-const ACCOUNTING_TABS: Tab[] = ['all_movements', 'posting']
+// „Kontace účtů" = metadata vlastních účtů pro analytiku 221.xxx (audit UI mezer 2026-07).
+const ACCOUNTING_TABS: Tab[] = ['all_movements', 'posting', 'analytics']
 const ADMIN_TABS: Tab[] = ['accounts', 'balances', 'email']
 // V ukázce jsou vidět i účty a stavy (jinak by nešlo předvést zakládání účtu),
 // ale ne „E-mailová hlášení" — ta konfigurují doručování, což demo nepředvádí.
@@ -63,6 +65,7 @@ function tabLabel(v: Tab): string {
   return v === 'statements' ? t('bank.title')
     : v === 'all_movements' ? t('bank.posting.tab_all')
     : v === 'posting' ? t('bank.posting.tab_suggestions')
+    : v === 'analytics' ? t('bank.analytics.tab')
     : v === 'accounts' ? t('bank_accounts.tab_accounts')
     : v === 'balances' ? t('bank_accounts.tab_balances')
     : t('bank_accounts.tab_email_notices')
@@ -115,6 +118,7 @@ function tabLabel(v: Tab): string {
         @counts-changed="loadPendingCount" />
       <PostingSuggestions v-else @counts-changed="loadPendingCount" />
     </div>
+    <BankAccountAnalytics v-else-if="tab === 'analytics'" />
     <BankAccounts v-else embedded />
   </div>
 </template>

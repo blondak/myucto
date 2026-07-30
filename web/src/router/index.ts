@@ -147,6 +147,12 @@ const routes: RouteRecordRaw[] = [
       // Příloha k účetní závěrce (§ 18/1/c) — editor sekcí; ukládá se per fiskální rok,
       // takže funguje i nad uzavřeným obdobím.
       { path: 'accounting/periods/:id(\\d+)/statement-notes', name: 'accounting-statement-notes', component: () => import('@/pages/accounting/StatementNotes.vue'), meta: { requiresDoubleEntry: true } },
+      // Retenční lhůty § 31/32 ZoÚ + zadržení skartace (audit UI mezer 2026-07).
+      { path: 'accounting/retention', name: 'accounting-retention', component: () => import('@/pages/accounting/Retention.vue'), meta: { requiresDoubleEntry: true } },
+      // Přechodový můstek § 7b ↔ § 24 ZDP (přílohy č. 2 a 3) — read-only sestava.
+      // Bez mode-guardu: v menu je jen u firem na daňové evidenci (chystaný přechod),
+      // ale po přechodu na podvojné musí zůstat dostupná přes URL — BE si směr ohlídá.
+      { path: 'accounting/transition-report', name: 'accounting-transition-report', component: () => import('@/pages/accounting/TransitionReport.vue') },
       { path: 'accounting/archive',                   name: 'accounting-archive',        redirect: '/utilities?section=archive' },
       // Pokladna (mini-epic POKLADNA #14) — dostupná v OBOU účetních režimech: podvojné
       // účetnictví i daňová evidence (Epic DE §6, no-journal cash path). requiresCashMode
@@ -286,6 +292,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/dph-book',       name: 'reports-dph-book',   component: () => import('@/pages/reports/DphBookReport.vue') },
       { path: 'reports/s74b',           name: 'reports-s74b',       component: () => import('@/pages/reports/Section74b.vue') },
       { path: 'reports/related-parties', name: 'reports-related-parties', component: () => import('@/pages/reports/RelatedParties.vue') },
+      // § 76 ZDPH — koeficient krácení nároku na odpočet (zálohový + roční vypořádání).
+      { path: 'reports/vat-coefficient', name: 'reports-vat-coefficient', component: () => import('@/pages/reports/VatCoefficient.vue') },
+      // § 46 ZDPH — věřitelská oprava základu daně u nedobytné pohledávky + obnovy § 46e.
+      { path: 'reports/s46', name: 'reports-s46', component: () => import('@/pages/reports/Section46.vue') },
       { path: 'reports/vat-corrections', name: 'reports-vat-corrections', component: () => import('@/pages/reports/VatCorrections.vue') },
       { path: 'reports/shv',            name: 'reports-shv',        component: () => import('@/pages/reports/SouhrnneHlaseniReport.vue') },
       { path: 'reports/income-tax',     name: 'reports-income-tax', component: () => import('@/pages/reports/IncomeTaxReport.vue') },
@@ -377,7 +387,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // lookahead vylučuje jen `assets`, ne `small-assets`). Jiný klíč tady = menu svítí,
   // ale API vrátí 403.
   'accounting-small-assets': ['accounting'],
-  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
+  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
@@ -388,7 +398,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'],
   'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
-  'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
+  'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
   'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
 }

@@ -422,6 +422,53 @@ export interface S74bRecordResult extends S74bPreview {
   recorded: number
 }
 
+// ── § 76 ZDPH — koeficient krácení nároku na odpočet ────────────────────────
+export interface VatCoefficientStatus {
+  year: number
+  /** Explicitně nastavený zálohový koeficient (§ 76/6), null = nenastaven. */
+  provisional_percent: number | null
+  /** Koeficient skutečně uplatňovaný na ř. 52 (fallback = vypořádací z minulého roku). */
+  resolved_provisional_percent: number | null
+  /** true = zálohový se přenáší z vypořádání minulého roku, ne z ručního nastavení. */
+  carried_forward: boolean
+  /** Vypořádací koeficient (§ 76/7) — null, dokud neproběhne roční vypořádání. */
+  final_percent: number | null
+  numerator_czk: number | null
+  denominator_czk: number | null
+  settled_at: string | null
+}
+
+// ── § 46–46g ZDPH — oprava základu daně u nedobytné pohledávky (věřitel) ────
+export type S46LegalGround = 'insolvency' | 'execution' | 'death' | 'liquidation' | 'small_receivable'
+
+/**
+ * Netting shodný s § 74b: target = output_vat × unpaid_ratio, delta = target −
+ * net_corrected. delta > 0 → oprava (correction), delta < 0 → obnova (restoration).
+ */
+export interface S46Row {
+  invoice_id: number
+  varsymbol: string
+  client_name: string
+  client_dic: string | null
+  tax_date: string | null
+  due_date: string
+  total_with_vat: number
+  output_vat: number
+  unpaid_ratio: number
+  net_corrected: number
+  target: number
+  delta: number
+  movement: 'correction' | 'restoration' | null
+  legal_ground: S46LegalGround | null
+}
+
+export interface S46RestorationsPreview {
+  period: { year: number; month: number; period_end: string }
+  rows: S46Row[]
+  total: number
+  recorded?: number
+}
+
 // ── § 36a ZDPH / § 23 odst. 7 ZDP — spojené osoby a ceny obvyklé ────────────
 export type RelatedPartyType = 'capital' | 'otherwise' | 'close_person' | 'employment'
 
@@ -536,11 +583,8 @@ export const reportsApi = {
       },
     }).then(r => r.data),
 
-  /** Fronta „doklady změněné po podání" (C7') — kandidáti na dodatečné přiznání. */
-  dphPostFilingChanges: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
-    api.get<PostFilingChanges>('/reports/dphdp3/post-filing-changes', {
-      params: { year, month, ...(period ? { period } : {}) },
-    }).then(r => r.data),
+  // Pozn.: fronta „doklady změněné po podání" (C7') se čte vloženě z dphPreview —
+  // samostatný klient post-filing-changes byl mrtvý kód (audit UI mezer 2026-07).
 
   dphTrend: (months = 12) =>
     api.get<DphTrendRow[]>('/reports/dphdp3/trend', { params: { months } }).then(r => r.data),
@@ -648,6 +692,44 @@ export const reportsApi = {
 
   s74bRecord: (year: number, month: number) =>
     api.post<S74bRecordResult>('/reports/s74b/record', { year, month }).then(r => r.data),
+
+  // § 76 — koeficient krácení nároku na odpočet: zálohový (PUT) se uplatňuje na ř. 52
+  // každé období roku; vypořádací vzniká JEN explicitním settle (nikdy jako vedlejší
+  // efekt náhledu přiznání).
+  vatCoefficient: (year: number) =>
+    api.get<VatCoefficientStatus>('/reports/vat-coefficient', { params: { year } }).then(r => r.data),
+
+  vatCoefficientSet: (year: number, provisionalPercent: number) =>
+    api.put<{ year: number; provisional_percent: number }>('/reports/vat-coefficient', {
+      year, provisional_percent: provisionalPercent,
+    }).then(r => r.data),
+
+  vatCoefficientSettle: (year: number) =>
+    api.post<{ year: number; final_percent: number; numerator_czk: number; denominator_czk: number }>(
+      '/reports/vat-coefficient/settle', { year },
+    ).then(r => r.data),
+
+  // § 46 — věřitelská oprava u nedobytné pohledávky. Kandidáti = pracovní seznam
+  // (právní důvod dokládá účetní); correction ji vědomě zaeviduje; obnovy § 46e
+  // po úhradě jsou dry-run (GET) + vědomý zápis (POST).
+  s46Candidates: (asOf: string) =>
+    api.get<{ as_of: string; rows: S46Row[] }>('/reports/s46/candidates', { params: { as_of: asOf } }).then(r => r.data),
+
+  s46Correction: (payload: {
+    invoice_id: number
+    legal_ground: S46LegalGround
+    delivered_on: string
+    corrective_doc_number?: string | null
+    note?: string | null
+  }) => api.post<{ movement_id: number; vat_amount: number; period: { year: number; month: number }; row: S46Row }>(
+    '/reports/s46/correction', payload,
+  ).then(r => r.data),
+
+  s46Restorations: (year: number, month: number) =>
+    api.get<S46RestorationsPreview>('/reports/s46/restorations', { params: { year, month } }).then(r => r.data),
+
+  s46RestorationsRecord: (year: number, month: number) =>
+    api.post<S46RestorationsPreview>('/reports/s46/restorations', { year, month }).then(r => r.data),
 
   // § 36a / § 23 odst. 7 — transakce se spojenými osobami, měřitelné cenové odchylky
   // a evidence úprav základu daně. Read-only přehled + CRUD úprav.

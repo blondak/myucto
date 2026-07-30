@@ -195,6 +195,29 @@ export const bankPostingApi = {
     api.post<{ backfilled: number }>(`/accounting/bank-posting-rules/${id}/backfill`, {}).then(r => r.data),
   ruleHistory: (id: number, page = 1, perPage = 25) =>
     api.get<RuleHistory>(`/accounting/bank-posting-rules/${id}/history`, { params: { page, per_page: perPage } }).then(r => r.data),
+
+  // Vlastní bankovní účty firmy — metadata pro kontaci (druh, label, analytika 221.xxx).
+  listAccounts: () =>
+    api.get<{ accounts: SupplierBankAccount[] }>('/accounting/bank-accounts').then(r => r.data.accounts),
+  updateAccount: (id: number, patch: Partial<Pick<SupplierBankAccount, 'kind' | 'label' | 'analytic_suffix' | 'is_active'>>) =>
+    api.patch<SupplierBankAccount>(`/accounting/bank-accounts/${id}`, patch).then(r => r.data),
+}
+
+// ── Vlastní bankovní účty (kontace 221.xxx) ─────────────────────────────────
+export type BankAccountKind = 'current' | 'savings' | 'term_deposit'
+
+export interface SupplierBankAccount {
+  id: number
+  label: string | null
+  account_number: string | null
+  bank_code: string | null
+  iban: string | null
+  currency: string | null
+  kind: BankAccountKind
+  analytic_suffix: string | null
+  is_active: boolean | number
+  source: string | null
+  currency_id: number | null
 }
 
 const ERROR_KEYS: Record<string, string> = {

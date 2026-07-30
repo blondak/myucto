@@ -413,13 +413,17 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports },
         { to: '/accounting/section18-statements', label: t('nav.accounting_section18'), icon: ICONS.reports },
         { to: '/reports/related-parties', label: t('nav.reports_related_parties'), icon: ICONS.clients },
-        // Uzávěrka — účetní období vytažená ze záložky Nástrojů do vlastní top-level
-        // položky menu, hned před Nástroje (jen podvojné účetnictví).
-        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals },
+        // Audit UI mezer 2026-07: dříve backend-only funkce zpřístupněné v menu.
+        { to: '/reports/vat-coefficient', label: t('nav.reports_vat_coefficient'), icon: ICONS.tax_income },
+        { to: '/reports/s46', label: t('nav.reports_s46'), icon: ICONS.coin },
+        { to: '/accounting/retention', label: t('nav.accounting_retention'), icon: ICONS.tax_archive },
         // Nástroje — jedna položka, uvnitř záložky pro méně používané/setup funkce
         // (archivy, kurzový režim, repo sazba, předkontace). Hromadný export je
         // samostatná stránka v sekci Daně.
         { to: '/utilities', label: t('nav.accounting_settings'), icon: ICONS.exports },
+        // Uzávěrka — účetní období vytažená ze záložky Nástrojů do vlastní top-level
+        // položky menu (jen podvojné účetnictví).
+        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals },
         { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
       ],
     })
@@ -435,6 +439,9 @@ const navSections = computed<NavSection[]>(() => {
         ...(supplierStore.hasMultiple ? [{ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses }] : []),
         { to: '/tax-evidence/cash-journal',         label: t('nav.de_cash_journal'),         icon: ICONS.tax_book },
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
+        // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
+        // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
+        { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports },
         // Pokladna (PPD/VPD) je v sekci Peníze hned za Bankovní účty (jako u podvojného).
         // Export/Import vydaných/přijaté faktury jsou nezávisle na účetním režimu pod Prodej/Nákup.
         ...(auth.hasCommercialFeatures && isAdmin ? [{ to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' as PermissionKey }] : []),

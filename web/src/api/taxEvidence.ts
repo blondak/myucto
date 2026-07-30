@@ -176,4 +176,42 @@ export const taxEvidenceApi = {
     api.post<MovementClassification>('/tax-evidence/classification', payload).then(r => r.data),
   deleteClassification: (sourceType: string, sourceId: number) =>
     api.delete<{ deleted: boolean }>(`/tax-evidence/classification/${sourceType}/${sourceId}`).then(r => r.data),
+  // Přechodový můstek § 7b ↔ § 24 ZDP (přílohy č. 2 a 3) — read-only podklad
+  // pro úpravu základu daně při změně účetního režimu.
+  transitionReport: (asOf: string, direction: TransitionDirection) =>
+    api.get<TransitionReport>('/tax-evidence/transition-report', {
+      params: { as_of: asOf, direction },
+    }).then(r => r.data),
+}
+
+// ── Přechodový můstek § 7b ↔ § 24 ZDP ───────────────────────────────────────
+export type TransitionDirection = 'tax_to_accounting' | 'accounting_to_tax'
+
+export interface TransitionDocRow {
+  id: number
+  doc_no: string
+  partner: string
+  currency: string
+  amount: number
+  amount_czk: number
+  issue_date: string
+  due_date: string
+}
+
+export interface TransitionReport {
+  as_of: string
+  direction?: TransitionDirection
+  receivables: TransitionDocRow[]
+  payables: TransitionDocRow[]
+  totals: {
+    receivables_czk: number
+    payables_czk: number
+    advances_paid_czk?: number
+    advances_received_czk?: number
+    inventory_czk?: number
+    net_adjustment_czk: number
+  }
+  inventory: { enabled: boolean; value_czk: number | null; note: string }
+  valuables?: { value_czk: number | null; note: string }
+  receivables_spread?: { max_years: number; annual_czk: number; note: string }
 }
