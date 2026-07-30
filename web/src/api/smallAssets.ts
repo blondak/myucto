@@ -73,13 +73,6 @@ export interface SmallAssetPayload {
   cash_document_id?: number | null
 }
 
-export interface SmallAssetGenerateResult {
-  purchase_invoice_id: number
-  created: number
-  skipped: number
-  cards: SmallAsset[]
-}
-
 // ── sestavy ─────────────────────────────────────────────────────────────────
 
 export interface ReportEntity {
@@ -158,7 +151,6 @@ export const smallAssetsApi = {
     if (filters?.per_page) params.per_page = filters.per_page
     return api.get<SmallAssetListResponse>('/accounting/small-assets', { params }).then(r => r.data)
   },
-  get: (id: number) => api.get<{ card: SmallAsset }>(`/accounting/small-assets/${id}`).then(r => r.data.card),
   create: (payload: SmallAssetPayload) =>
     api.post<{ card: SmallAsset }>('/accounting/small-assets', payload).then(r => r.data.card),
   update: (id: number, payload: Partial<SmallAssetPayload>) =>
@@ -171,9 +163,9 @@ export const smallAssetsApi = {
     api.post<{ card: SmallAsset }>(`/accounting/small-assets/${id}/sell`, payload).then(r => r.data.card),
   restore: (id: number) =>
     api.post<{ card: SmallAsset }>(`/accounting/small-assets/${id}/restore`, {}).then(r => r.data.card),
-  /** Idempotentní — opakované volání nezaloží duplicity. */
-  generateFromPurchaseInvoice: (purchaseInvoiceId: number) =>
-    api.post<SmallAssetGenerateResult>(`/accounting/purchase-invoices/${purchaseInvoiceId}/small-assets`, {}).then(r => r.data),
+  // Pozn.: karty z přijaté faktury vznikají automaticky při uložení dokladu
+  // (UpdatePurchaseInvoiceAction → syncFromPurchaseInvoice) — FE klient pro ruční
+  // generate byl mrtvý kód a je odstraněn (audit UI mezer 2026-07).
 
   inventory: (asOf: string) =>
     api.get<SmallAssetInventoryReport>('/accounting/reports/small-assets/inventory', { params: { as_of: asOf } }).then(r => r.data),

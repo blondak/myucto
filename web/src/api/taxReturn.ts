@@ -285,9 +285,6 @@ export const taxReturnApi = {
   get: (type: TaxpayerType, year: number, variant?: TaxReturnVariant, seq?: number) =>
     api.get<TaxReturnState>(`/tax-return/${type}/${year}${vsQuery(variant, seq)}`).then(r => r.data),
 
-  prefinalizeCheck: (type: TaxpayerType, year: number, variant?: TaxReturnVariant, seq?: number) =>
-    api.get<PreFinalizeCheckResult>(`/tax-return/${type}/${year}/prefinalize-check${vsQuery(variant, seq)}`).then(r => r.data),
-
   saveInputs: (type: TaxpayerType, year: number, inputs: Record<string, unknown>, rowVersion: number, variant?: TaxReturnVariant, seq?: number) =>
     api.put<TaxReturnState>(`/tax-return/${type}/${year}/inputs${vsQuery(variant, seq)}`, { inputs, row_version: rowVersion }).then(r => r.data),
 
@@ -348,18 +345,8 @@ export const taxReturnApi = {
   generateAdvancesForPeriod: (type: TaxpayerType, year: number) =>
     api.post<Record<string, number>>(`/tax-return/${type}/${year}/advances/generate-period`, {}).then(r => r.data),
 
-  // #43 — override výše záloh dle rozhodnutí FÚ (§174).
-  getAdvanceOverride: (type: TaxpayerType, year: number) =>
-    api.get<{ override: AdvanceOverride | null }>(`/tax-return/${type}/${year}/advances/override`).then(r => r.data),
-
-  saveAdvanceOverride: (type: TaxpayerType, year: number, body: AdvanceOverrideInput) =>
-    api.put<{ override: AdvanceOverride; generated: Record<string, number>; schedules: AdvanceSchedule[] }>(
-      `/tax-return/${type}/${year}/advances/override`, body).then(r => r.data),
-
-  deleteAdvanceOverride: (type: TaxpayerType, year: number) =>
-    api.delete<{ deleted: number; schedules: AdvanceSchedule[] }>(`/tax-return/${type}/${year}/advances/override`).then(r => r.data),
-
   // #46 — rozhodnutí FÚ s rozsahem OD-DO: id-based CRUD napříč roky (globální tabulka).
+  // (Starší per-rok varianta `advances/override` byla odstraněna — nahrazena id-based CRUD.)
   // {year} v URL je pro globální operace ignorováno (rozsah je napříč roky) — posílá se aktuální rok stránky.
   advanceOverrides: (type: TaxpayerType, year: number) =>
     api.get<AdvanceOverridesOverview>(`/tax-return/${type}/${year}/advances/overrides`).then(r => r.data),

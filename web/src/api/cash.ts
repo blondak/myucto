@@ -105,9 +105,6 @@ export const cashApi = {
   listRegisters: (includeInactive = false) =>
     api.get<CashRegister[]>('/accounting/cash-registers',
       { params: includeInactive ? { include_inactive: 1 } : undefined }).then(r => r.data),
-  getRegister: (id: number, date?: string) =>
-    api.get<CashRegister & { documents_total: number }>(
-      `/accounting/cash-registers/${id}`, { params: { date } }).then(r => r.data),
   createRegister: (p: CashRegisterPayload) =>
     api.post<CashRegister>('/accounting/cash-registers', p).then(r => r.data),
   updateRegister: (id: number, p: Partial<CashRegisterPayload> & { is_active?: boolean }) =>
@@ -117,8 +114,6 @@ export const cashApi = {
 
   listDocuments: (f: CashDocumentFilters) =>
     api.get<CashDocumentListResponse>('/accounting/cash-documents', { params: f }).then(r => r.data),
-  getDocument: (id: number) =>
-    api.get<CashDocument>(`/accounting/cash-documents/${id}`).then(r => r.data),
   createDocument: (p: CreateCashDocumentPayload) =>
     api.post<CashDocumentCreateResult>('/accounting/cash-documents', p).then(r => r.data),
   reverseDocument: (id: number, reason: string, entryDate?: string) =>

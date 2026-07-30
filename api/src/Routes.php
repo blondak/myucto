@@ -1496,9 +1496,8 @@ final class Routes
             // #42 — vygenerovat předpisy PRO tento rok (z draftu min. roku / z rozhodnutí FÚ).
             $g->post('/{type}/{year:[0-9]+}/advances/generate-period', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'generateAdvancesForPeriod']);
             // #43 — rozhodnutí FÚ o výši záloh §174 (override) + ruční potvrzení úhrad.
-            $g->get('/{type}/{year:[0-9]+}/advances/override',    [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'getAdvanceOverride']);
-            $g->put('/{type}/{year:[0-9]+}/advances/override',    [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'saveAdvanceOverride']);
-            $g->delete('/{type}/{year:[0-9]+}/advances/override', [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'deleteAdvanceOverride']);
+            // Per-rok override (#43, /advances/override) odstraněn — nahrazen id-based
+            // CRUD s rozsahem OD-DO (#46, /advances/overrides níže).
             // #46 — rozhodnutí FÚ s rozsahem OD-DO: id-based CRUD napříč roky (globální tabulka).
             $g->get('/{type}/{year:[0-9]+}/advances/overrides',                    [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'advanceOverrides']);
             $g->post('/{type}/{year:[0-9]+}/advances/overrides',                   [\MyInvoice\Action\Tax\Return\TaxReturnAction::class, 'createAdvanceOverride']);

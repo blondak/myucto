@@ -314,51 +314,8 @@ final class TaxReturnAction
         ));
     }
 
-    /** E9/#43 — účinný override výše záloh na daň §38a pro rok. */
-    public function getAdvanceOverride(Request $request, Response $response, array $args): Response
-    {
-        if (($err = $this->requireAccess($request, $response, AccessLevel::READ)) !== null) {
-            return $err;
-        }
-        [$type, $year, $bad] = $this->params($args);
-        if ($bad !== null) {
-            return $bad($response);
-        }
-        return $this->run($response, fn () => $this->service->getAdvanceOverride(
-            SupplierGuard::currentId($request), $year, $type
-        ));
-    }
-
-    /** E9/#43 — uloží override (rozhodnutí FÚ §174) a přepočítá předpisy roku. */
-    public function saveAdvanceOverride(Request $request, Response $response, array $args): Response
-    {
-        if (($err = $this->requireAccess($request, $response, AccessLevel::WRITE)) !== null) {
-            return $err;
-        }
-        [$type, $year, $bad] = $this->params($args);
-        if ($bad !== null) {
-            return $bad($response);
-        }
-        $body = (array) ($request->getParsedBody() ?? []);
-        return $this->run($response, fn () => $this->service->saveAdvanceOverride(
-            SupplierGuard::currentId($request), $year, $type, $body
-        ));
-    }
-
-    /** E9/#43 — smaže override a přepočítá předpisy zpět na predikci. */
-    public function deleteAdvanceOverride(Request $request, Response $response, array $args): Response
-    {
-        if (($err = $this->requireAccess($request, $response, AccessLevel::WRITE)) !== null) {
-            return $err;
-        }
-        [$type, $year, $bad] = $this->params($args);
-        if ($bad !== null) {
-            return $bad($response);
-        }
-        return $this->run($response, fn () => $this->service->deleteAdvanceOverride(
-            SupplierGuard::currentId($request), $year, $type
-        ));
-    }
+    // Pozn.: per-rok varianta override (#43, advances/override singulár) byla odstraněna —
+    // plně ji nahradil id-based CRUD s rozsahem OD-DO (#46, advances/overrides).
 
     /** E9/#43 — ruční úprava předepsané výše NEzaplaceného předpisu. */
     public function updateAdvanceAmount(Request $request, Response $response, array $args): Response

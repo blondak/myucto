@@ -435,68 +435,8 @@ final class TaxReturnService
         return ['items' => $this->advanceSchedules->upcoming($supplierId, $limit)];
     }
 
-    // ── #43 — rozhodnutí FÚ o výši záloh (§174) + ruční potvrzení úhrad ─────────
-
-    /** E9/#43 — účinný override výše záloh na daň §38a pro rok. @return array<string,mixed> */
-    public function getAdvanceOverride(int $supplierId, int $periodYear, string $type): array
-    {
-        $this->assertType($type);
-        return ['override' => $this->advanceSchedules->activeTaxOverride($supplierId, $type, $periodYear)];
-    }
-
-    /**
-     * E9/#43 — uloží override výše záloh (rozhodnutí FÚ §174) a přepočítá předpisy roku
-     * na tuto výši MÍSTO predikce. Regenerace je best-effort — nesmí shodit uložení override.
-     *
-     * @param array<string,mixed> $body
-     * @return array<string,mixed>
-     */
-    public function saveAdvanceOverride(int $supplierId, int $periodYear, string $type, array $body): array
-    {
-        $this->assertType($type);
-        $amount = $this->money($body['amount'] ?? 0);
-        $periodicity = (string) ($body['periodicity'] ?? 'quarterly');
-        $effectiveFrom = $this->date($body['effective_from'] ?? '');
-        if ($effectiveFrom === '') {
-            $effectiveFrom = sprintf('%04d-01-01', $periodYear);
-        }
-        $note = $this->text($body['note'] ?? '', 255);
-        $source = ((string) ($body['source'] ?? 'fu_decision')) === 'manual' ? 'manual' : 'fu_decision';
-
-        $saved = $this->advanceSchedules->saveTaxOverride(
-            $supplierId, $type, $periodYear, $effectiveFrom, $amount, $periodicity, $note !== '' ? $note : null, $source
-        );
-        $generated = ['tax' => 0, 'social' => 0, 'health' => 0];
-        try {
-            $generated = $this->rebuildAdvancesForPeriod($supplierId, $periodYear, $type, false);
-        } catch (\Throwable) {
-            // regenerace je pomůcka; override zůstává uložený
-        }
-        return [
-            'override' => $saved,
-            'generated' => $generated,
-            'schedules' => $this->advanceSchedules->listForYear($supplierId, $periodYear, $type),
-        ];
-    }
-
-    /**
-     * E9/#43 — smaže override výše záloh a přepočítá předpisy zpět na predikci (nebo je
-     * vyprázdní, když predikce chybí). @return array<string,mixed>
-     */
-    public function deleteAdvanceOverride(int $supplierId, int $periodYear, string $type): array
-    {
-        $this->assertType($type);
-        $deleted = $this->advanceSchedules->deleteTaxOverride($supplierId, $type, $periodYear);
-        try {
-            $this->rebuildAdvancesForPeriod($supplierId, $periodYear, $type, false);
-        } catch (\Throwable) {
-            // nechceme shodit smazání override kvůli přepočtu
-        }
-        return [
-            'deleted' => $deleted,
-            'schedules' => $this->advanceSchedules->listForYear($supplierId, $periodYear, $type),
-        ];
-    }
+    // Pozn.: per-rok override metody (#43, advances/override singulár) byly odstraněny —
+    // plně je nahradil id-based CRUD s rozsahem OD-DO (#46 níže).
 
     // ── #46 — rozhodnutí FÚ s rozsahem OD-DO: id-based CRUD napříč roky ─────────
 

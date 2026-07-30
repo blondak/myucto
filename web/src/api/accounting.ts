@@ -1409,10 +1409,8 @@ export const accountingApi = {
     api.get<SaldoReport>('/accounting/reports/saldo', { params }).then(r => r.data),
   getEntityCategory: (periodId: number) =>
     api.get<EntityCategory>('/accounting/reports/entity-category', { params: { period_id: periodId } }).then(r => r.data),
-  getReportingSettings: () =>
-    api.get<ReportingSettings>('/accounting/reporting-settings').then(r => r.data),
-  updateReportingSettings: (payload: ReportingSettings) =>
-    api.put<ReportingSettings>('/accounting/reporting-settings', payload).then(r => r.data),
+  // Pozn.: reporting-settings klient žije v closing.ts (closingSettingsApi) —
+  // duplicitní varianta odsud byla odstraněna (audit UI mezer 2026-07).
   // Vrací celou odpověď (blob) — komponenta si sestaví název souboru dle konvence.
   exportReport: (path: string, params: Record<string, unknown>) =>
     api.get<Blob>(path, { params, responseType: 'blob' }),
