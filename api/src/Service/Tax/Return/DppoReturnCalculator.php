@@ -116,19 +116,17 @@ final class DppoReturnCalculator
         // ── Rozpad výpisu ř.40/62/112/162/170 — §24/2/zt paušál na dopravu ────
         // Přesouvá add-back PHM (increase) z obecného ř.62 na ř.40 a paušální výdaj
         // (decrease) z obecného ř.162 na ř.112/170, PŘESNĚ dle toho, jak to podává
-        // účetní (ověřeno proti podanému přiznání za rok 2024) — jinak
-        // stejné částky, jen jiné řádky (kosmetika, součty výše beze změny).
+        // účetní — věcně ověřeno proti podanému přiznání za rok 2024 (DPPDP9:
+        // kc_ii_112=45000 + VetaR příloha k ř. 112, add-back PHM v kc_ii50_40 přes
+        // tabulku A). Add-back zaúčtovaných PHM je nedaňový náklad §25/1/x → ř. 40;
+        // paušál sám podle pokynů GFŘ patří na ř. 162, podání na ř. 112 s textovou
+        // přílohou je ale přijímaná praxe a základ daně (ř. 170/200) je identický.
+        // Jinak stejné částky, jen jiné řádky (kosmetika, součty výše beze změny).
         $line40Reported = round($line40 + $flatRateTravelAddback, 2);
         $line62Reported = round(($manualIncrease - $flatRateTravelAddback) + $disposalIncrease, 2);
         $line162Reported = round(($manualDecrease - $flatRateTravelDeduction) + $disposalDecrease, 2);
         $line112Reported = $flatRateTravelDeduction;
         $line170Reported = round($depDecrease + $manualDecrease + $disposalDecrease, 2);
-        if ($flatRateTravelAddback > 0 || $flatRateTravelDeduction > 0) {
-            $warnings[] = 'Paušální výdaj na dopravu (§24 odst. 2 písm. zt zákona) — '
-                . number_format($flatRateTravelDeduction, 0, ',', ' ') . ' Kč namapováno '
-                . 'na ř. 112/170 (místo obecného ř. 162) a ' . number_format($flatRateTravelAddback, 0, ',', ' ')
-                . ' Kč (add-back PHM) na ř. 40 (místo ř. 62). Ověřte věcnou správnost.';
-        }
 
         // Položky, které o dopravě mluví, ale za paušál označené nejsou. Systém je zařadit
         // neumí; tiše je vykázat na obecném ř. 62/162 by znamenalo špatně vyplněné přiznání,

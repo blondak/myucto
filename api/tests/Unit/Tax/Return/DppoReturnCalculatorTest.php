@@ -306,7 +306,7 @@ final class DppoReturnCalculatorTest extends TestCase
         self::assertSame(2991500.0, self::lineValue($L, 200), 'Základ daně beze změny.');
         self::assertSame(628110.0, $r['tax'], 'Daň beze změny.');
         $joined = implode("\n", $r['warnings']);
-        self::assertStringContainsString('Paušální výdaj na dopravu', $joined);
+        self::assertStringNotContainsString('Paušální výdaj na dopravu', $joined, 'Mapování je věcně ověřené proti podanému přiznání 2024 — bez varování.');
     }
 
     /** Beze změny textu (obecná §23 položka) zůstává mapování na ř.62/162, jako dřív. */
