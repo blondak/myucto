@@ -300,8 +300,18 @@ final class VersionService
         }
         @unlink($this->upgradeResultPath());
 
+        // Bez workera by se spawn „povedl" a UI by pak čekalo na heartbeat,
+        // který nikdy nepřijde — radši rovnou ruční návod.
+        $worker = $this->rootDir . '/api/bin/native-update.php';
+        if (!is_file($worker)) {
+            @unlink($flag);
+            return $this->nativeManualFallback((string) $target, [
+                'Chybí ' . $worker . ' — instalaci schází update worker, nasaď bundle ručně podle návodu níž.',
+            ]);
+        }
+
         $spawned = BackgroundProcess::spawnPhp(
-            $this->rootDir . '/api/bin/native-update.php',
+            $worker,
             ['--target=' . $target, '--requested-by=' . $requestedByEmail],
             null,
             $this->rootDir,

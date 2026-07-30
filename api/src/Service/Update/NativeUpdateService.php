@@ -91,6 +91,9 @@ final class NativeUpdateService
     /** Relativní cesty už přepsané v aktuálním swapu — podklad pro rollback. */
     private array $swapped = [];
 
+    /** Odložené `.myucto-old` soubory, které zatím nešlo smazat (zamčené). */
+    private array $parked = [];
+
     public function __construct(?string $rootDir = null, ?string $stateDir = null)
     {
         $this->rootDir = rtrim($rootDir ?? Bootstrap::rootDir(), '/\\');
@@ -218,12 +221,14 @@ final class NativeUpdateService
             $this->writeVersionFile($target, $stage, $log);
             $this->cleanupWork($work, $log);
             $this->pruneOldBackups($target, $log);
+            $this->cleanupParked($log);
 
             $this->appendLog($log, 'HOTOVO: nasazena verze ' . $target . ' (' . $swapped . ' souborů, záloha: ' . $backup . ')');
 
             return $this->finishApplied($target, $swapped, $backup, $log, $pf['warnings']);
         } catch (Throwable $e) {
             $this->appendLog($log, 'CHYBA: ' . $e->getMessage());
+            $this->cleanupParked($log);
             return $this->finishFailed($target, $e->getMessage(), $log);
         }
     }
@@ -397,8 +402,11 @@ final class NativeUpdateService
                 if (is_file($dest)) {
                     $this->backupFile($rel, $dest, $backup);
                 }
-                $this->replaceFile($item->getPathname(), $dest);
+                // Do rollback listu se cesta zapisuje ještě PŘED přepisem:
+                // když replaceFile selže napůl (cíl už smazaný, nová verze
+                // nezapsaná), musí ho rollback vrátit ze zálohy taky.
                 $this->swapped[] = $rel;
+                $this->replaceFile($item->getPathname(), $dest);
                 $files++;
 
                 if ($files % 500 === 0) {
@@ -428,8 +436,18 @@ final class NativeUpdateService
 
     /**
      * Přepis souboru s co nejkratším okamžikem nekonzistence: zapiš vedle,
-     * pak přejmenuj. Na Windows rename přes existující soubor selže, proto
-     * fallback unlink+rename a až nakonec přímé copy.
+     * pak přejmenuj. Na Windows rename přes existující soubor selže vždy,
+     * proto fallbacky.
+     *
+     * Zamčený cíl (na Windows typicky `api/bin/native-update.php` — vlastní
+     * běžící worker: PHP drží handle na spouštěný skript) nejde přepsat ani
+     * copy, ani unlink+rename: `unlink()` sice uspěje, ale jméno zůstane
+     * v delete-pending stavu až do konce procesu, takže se na něj nedá nic
+     * zapsat — a soubor po doběhnutí zmizí. Otevřený soubor ale Windows
+     * dovolí *přejmenovat*, proto cíl nejdřív uhneme stranou (`.myucto-old`)
+     * a novou verzi přesuneme na uvolněné jméno. Když ani to nevyjde, vrátíme
+     * původní soubor zpátky — instalace po neúspěšném přepisu nikdy nesmí
+     * zůstat bez souboru.
      */
     private function replaceFile(string $src, string $dest): void
     {
@@ -441,15 +459,61 @@ final class NativeUpdateService
         if (@rename($tmp, $dest)) {
             return;
         }
-        if (is_file($dest) && @unlink($dest) && @rename($tmp, $dest)) {
+
+        $parked = null;
+        if (is_file($dest)) {
+            $candidate = $dest . '.myucto-old';
+            @unlink($candidate);
+            if (@rename($dest, $candidate)) {
+                $parked = $candidate;
+            }
+        }
+        if (@rename($tmp, $dest) || @copy($tmp, $dest)) {
+            @unlink($tmp);
+            if ($parked !== null) {
+                $this->discardParked($parked);
+            }
             return;
         }
-        if (@copy($tmp, $dest)) {
+        // Uhnout stranou nešlo — zbývá destruktivní varianta (cíl je pak už
+        // stejně jen v záloze, ze které umí rollback).
+        if ($parked === null && is_file($dest) && @unlink($dest)
+            && (@rename($tmp, $dest) || @copy($tmp, $dest))) {
             @unlink($tmp);
             return;
         }
+        if ($parked !== null) {
+            @rename($parked, $dest);
+        }
         @unlink($tmp);
         throw new RuntimeException('Nelze přepsat ' . $dest . ' (soubor je zamčený nebo chybí práva).');
+    }
+
+    /**
+     * Zahodí odloženou původní verzi souboru. Na Windows je zámek držený jen
+     * do konce procesu, takže co teď nejde smazat, zkusíme na konci pipeline
+     * ještě jednou {@see self::cleanupParked()}.
+     */
+    private function discardParked(string $path): void
+    {
+        if (@unlink($path)) {
+            return;
+        }
+        $this->parked[] = $path;
+    }
+
+    private function cleanupParked(string $log): void
+    {
+        $left = [];
+        foreach ($this->parked as $path) {
+            if (is_file($path) && !@unlink($path)) {
+                $left[] = $path;
+            }
+        }
+        $this->parked = [];
+        if ($left !== []) {
+            $this->appendLog($log, 'Zbyly odložené soubory (smaž ručně po restartu): ' . implode(', ', $left));
+        }
     }
 
     /** Vrátí zazálohované soubory zpět na místo. @return int počet obnovených */
@@ -857,8 +921,10 @@ final class NativeUpdateService
         } catch (Throwable) {
             return false;
         } finally {
+            $this->parked = [];
             @unlink($probe);
             @unlink($probe . '.myucto-upd');
+            @unlink($probe . '.myucto-old');
         }
     }
 

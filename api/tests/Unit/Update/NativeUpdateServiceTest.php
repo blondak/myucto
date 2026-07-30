@@ -116,6 +116,51 @@ final class NativeUpdateServiceTest extends TestCase
         self::assertSame(2, $files, 'nasadit se měly právě dva soubory kódu');
     }
 
+    /**
+     * Regrese: swap přepisuje i `api/bin/native-update.php`, tedy skript, který
+     * v tu chvíli sám běží. Na Windows drží PHP na spouštěném skriptu handle —
+     * rename i copy přes něj selžou a `unlink()` sice projde, ale jméno zůstane
+     * v delete-pending stavu, takže se starý updater po doběhnutí procesu
+     * smazal a nic ho nevrátilo (v5.0.7 přesně takhle spadl).
+     *
+     * Test proto pouští opravdový PHP proces, který přepíše sám sebe, a po jeho
+     * skončení kontroluje, že soubor existuje a má nový obsah.
+     */
+    public function testReplaceFileCanOverwriteTheCurrentlyRunningScript(): void
+    {
+        $autoload = dirname(__DIR__, 3) . '/vendor/autoload.php';
+        if (!is_file($autoload)) {
+            self::markTestSkipped('vendor/autoload.php není k dispozici');
+        }
+
+        $root   = $this->tmp . '/root';
+        $runner = $root . '/bin/runner.php';
+        $new    = $this->tmp . '/new-version.php';
+        $this->write($new, "<?php // NOVA VERZE\n");
+        $this->write($runner, '<?php' . "\n" . <<<PHP
+            require {$this->export($autoload)};
+            \$svc = new \\MyInvoice\\Service\\Update\\NativeUpdateService({$this->export($root)}, {$this->export($this->tmp)});
+            \$m = new \\ReflectionMethod(\$svc, 'replaceFile');
+            try {
+                \$m->invoke(\$svc, {$this->export($new)}, __FILE__);
+                echo 'OK';
+            } catch (\\Throwable \$e) {
+                echo 'FAIL: ' . \$e->getMessage();
+            }
+            PHP);
+
+        $out = [];
+        $rc  = 0;
+        exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($runner) . ' 2>&1', $out, $rc);
+
+        self::assertSame('OK', trim(implode("\n", $out)), 'přepis běžícího skriptu musí projít');
+        self::assertFileExists($runner, 'běžící skript nesmí po přepisu zmizet');
+        self::assertSame(file_get_contents($new), file_get_contents($runner), 'na místě musí být nová verze');
+        // Odložená stará verze ani mezisoubor po sobě nesmí nic nechat.
+        self::assertSame([], $this->findByExtension($root, 'myucto-old'));
+        self::assertSame([], $this->findByExtension($root, 'myucto-upd'));
+    }
+
     public function testSwapDeploysNothingOutsideRoot(): void
     {
         $root  = $this->tmp . '/root';
@@ -429,6 +474,12 @@ final class NativeUpdateServiceTest extends TestCase
         $ref = new ReflectionMethod($svc, $method);
 
         return $ref->invokeArgs($svc, $args);
+    }
+
+    /** Cesta jako PHP literál do generovaného skriptu. */
+    private function export(string $value): string
+    {
+        return var_export($value, true);
     }
 
     private function write(string $path, string $content): void
