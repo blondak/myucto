@@ -161,6 +161,9 @@ final class Bootstrap
             // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
             // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.
             \MyInvoice\Infrastructure\Database\ConnectionResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Infrastructure\Database\ConnectionResolver($c->get(Connection::class)),
+            // Nativní updater si cesty (root / data dir) rozřeší sám; explicitní bind,
+            // ať PHP-DI nemusí hádat volitelné string parametry konstruktoru.
+            \MyInvoice\Service\Update\NativeUpdateService::class => fn () => new \MyInvoice\Service\Update\NativeUpdateService(),
             RedisProbe::class      => fn (ContainerInterface $c) => new RedisProbe($c->get(Config::class)),
             RedisFactory::class    => fn (ContainerInterface $c) => new RedisFactory($c->get(Config::class)),
             PasskeyService::class  => fn (ContainerInterface $c) => new PasskeyService(

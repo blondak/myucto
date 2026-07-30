@@ -9,8 +9,9 @@ shell — záleží na typu instalace.
 
 Aktualizace zahrnuje všechny tři vrstvy aplikace:
 
-- **Backend (PHP)** — `api/vendor/` se přebuilduje, schéma DB se případně
-  migruje (`php api/bin/migrate.php`).
+- **Backend (PHP)** — `api/vendor/` se přebuilduje (nebo přijde
+  představěné v production bundlu), schéma DB se případně migruje
+  (`php api/bin/migrate.php`).
 - **Frontend (Vue)** — `web/dist/` (Vite produkční build).
 - **Manuál** — `manual/generated/*.html` + `manual/manual.pdf`.
 
@@ -250,39 +251,88 @@ docker run --rm -v myinvoice_app-storage:/old:ro -v myinvoice_app-data:/new alpi
 
 ## 75.6 Aktualizace v UI — nativní instalace
 
-Pro nativní deployment (sdílený hosting / VPS bez Dockeru) UI
-zatím **neimplementuje** automatický download release
-tarballu — pouze ti ukáže copy-paste příkazy:
+Nativní deployment (sdílený hosting / VPS bez Dockeru) se aktualizuje
+z UI stejně jako Docker — jedním tlačítkem. V **Systém → Aktualizace**
+klikni na **„Aktualizovat na vX.Y.Z"**.
+
+Aplikace stáhne **production bundle** z GitHub release
+(`myucto-X.Y.Z.tar.gz`), ověří jeho SHA-256, nasadí ho přes instalaci
+a spustí migrace. **Composer, Node ani pnpm na hostu potřeba nejsou** —
+bundle má `api/vendor/`, `web/dist/`, `manual/generated/` i
+`manual/manual.pdf` už představěné.
+
+### Co se děje na pozadí
+
+Vlastní práci dělá detached CLI worker `api/bin/native-update.php`
+(z UI se spouští automaticky, ručně jde zavolat taky):
 
 ```bash
-git fetch --tags
-git checkout vX.Y.Z
-cd api && composer install --no-dev && cd ..
-cd web && pnpm install && pnpm build && cd ..
-php tools/generateManualHtml.php
-php tools/exportManualToPdf.php
+php api/bin/native-update.php --target=X.Y.Z
+php api/bin/native-update.php --target=X.Y.Z --preflight   # jen kontrola
+```
+
+| Krok | Co dělá |
+|------|---------|
+| `preflight` | Práva na zápis, volné místo (min. 512 MB), PHP CLI, `phar` + `zlib`, možnost přepsat existující soubor |
+| `download` | Stažení assetu z release (jen HTTPS, jen hosty GitHubu) |
+| `verify` | SHA-256 proti assetu `.sha256`; při neshodě se bundle smaže a končí se |
+| `extract` | Rozbalení do `storage/updates/<verze>/stage/` + validace všech cest v archivu |
+| `backup` | Kopie souborů, které se budou přepisovat, do `storage/updates/<verze>/backup/` |
+| `swap` | Nakopírování bundlu přes instalaci (nic se nemaže) |
+| `migrate` | `php api/bin/migrate.php` už novým kódem |
+| `finish` | Až teď se přepíše `VERSION`, uklidí se staging a starší zálohy |
+
+Průběh se zapisuje do `storage/upgrade-requested.json` (krok +
+heartbeat), výsledek do `storage/upgrade-result.json` a plný log do
+`storage/upgrade-<timestamp>.log`. UI všechny tři čte a ukazuje krok
+za krokem.
+
+### Co zůstane nedotčené
+
+`cfg.php`, `cfg.local.php`, `cfg.docker.php`, `.env`, `storage/`,
+`private/`, `log/`, `tmp/` a `.git/` se nikdy nepřepisují — bundle je
+ani neobsahuje a swap je navíc přeskakuje. Soubory, které v novém
+bundlu nejsou, se **nemažou** (stejné chování jako ruční `tar -xzf`).
+
+`VERSION` se úmyslně přepisuje jako poslední krok: dokud migrace
+neproběhnou, instalace se hlásí starou verzí, takže přerušená
+aktualizace nevypadá jako dokončená.
+
+> ⚠️ Aktualizace přepisuje soubory běžící aplikace — requesty
+> odbavované přesně v ten moment mohou selhat. Na produkci ji spouštěj
+> v klidném okně a **měj aktuální zálohu databáze**; migrace samotné
+> se vracet nedají.
+
+> 🛈 Pokud máš `opcache.validate_timestamps=0`, restartuj po aktualizaci
+> php-fpm / IIS application pool — jinak poběží stará bytecode cache.
+> Preflight na to upozorní sám.
+
+### Bezpečnostní model
+
+Bundle se stahuje po HTTPS jen z hostů GitHubu a kontroluje se jeho
+SHA-256. Checksum ale leží ve stejném releasu jako tarball, takže
+chrání proti **poškozenému přenosu, ne proti kompromitovanému
+repozitáři** — trust root je GitHub účet projektu. Aktualizaci smí
+spustit jen superadmin.
+
+### Když automatická cesta nejde
+
+Sdílený hosting často zakazuje spouštění procesů nebo nemá práva na
+zápis do rootu. Preflight to pozná dopředu, vypíše konkrétní důvody
+a UI nabídne ruční postup se stejným bundlem:
+
+```bash
+curl -LO https://github.com/radekhulan/myucto/releases/download/vX.Y.Z/myucto-X.Y.Z.tar.gz
+curl -LO https://github.com/radekhulan/myucto/releases/download/vX.Y.Z/myucto-X.Y.Z.tar.gz.sha256
+sha256sum -c myucto-X.Y.Z.tar.gz.sha256
+tar -xzf myucto-X.Y.Z.tar.gz --strip-components=1 \
+  --exclude='cfg.php' --exclude='cfg.local.php' --exclude='cfg.docker.php' \
+  --exclude='storage' --exclude='private' --exclude='log'
 php api/bin/migrate.php
 ```
 
-Vyžaduje na hostu **PHP CLI + Composer + Node + pnpm**. Pokud Composer/
-Node nemáš (typicky sdílený hosting), je nejjednodušší cesta:
-
-1. Stáhni **production bundle** z release page:
-   `https://github.com/radekhulan/myucto/releases/tag/vX.Y.Z` →
-   asset `myucto-X.Y.Z.tar.gz`. Tarball má všechno potřebné už
-   vyrobené (vendor, web/dist, manual). SHA-256 checksum je v
-   `myucto-X.Y.Z.tar.gz.sha256`.
-2. Rozbal přes web rozhraní hostingu nebo SSH:
-   ```bash
-   tar -xzf myucto-X.Y.Z.tar.gz --strip-components=1 \
-     --exclude='cfg.php' --exclude='cfg.local.php' \
-     --exclude='storage' --exclude='private' --exclude='log'
-   ```
-3. Spusť migraci přes hosting cron / SSH:
-   `php api/bin/migrate.php`
-
-> 🛈 Phase 2 (plánováno na příští minor release) doplní automatický
-> download bundle + extrakci přímo z UI tlačítka, takže krok 1+2 odpadne.
+Ve vývoji (instalace je git checkout) preferuj `git checkout vX.Y.Z` —
+bundle by ti jinak zašpinil pracovní kopii. Preflight na to upozorní.
 
 ## 75.7 Co když upgrade selže
 
@@ -305,17 +355,30 @@ nedotčena.
 
 ### Nativní
 
-Když selže `composer install` nebo `pnpm build`, soubory v `api/vendor/`
-nebo `web/dist/` mohou být v inkonzistentním stavu. Recovery:
+Worker zapíše `storage/upgrade-result.json` se `status: "failed"`,
+důvodem a cestou k logu `storage/upgrade-<timestamp>.log`. UI to
+zobrazí včetně cesty k záloze. Podle kroku, na kterém to spadlo:
 
-```bash
-git checkout vPREDCHOZI-VERZE
-cd api && composer install --no-dev && cd ..
-cd web && pnpm install && pnpm build && cd ..
-```
+- **`download` / `verify` / `extract`** — instalace se vůbec nezměnila,
+  nic řešit netřeba. Neshoda SHA-256 znamená poškozené stažení; zkus to
+  znovu, případně stáhni bundle ručně.
+- **`swap`** — worker sám spustí **rollback** ze zálohy
+  `storage/updates/<verze>/backup/` a do logu napíše, kolik souborů
+  vrátil. Když rollback část souborů nevrátil (zamčené soubory), obnov
+  je odtud ručně:
+  ```bash
+  cp -r storage/updates/X.Y.Z/backup/. .
+  ```
+- **`migrate`** — kód je už nasazený, schéma ne. Rollback se
+  **záměrně nespouští** (vracet kód pod rozjeté schéma škodí víc).
+  Projdi log a dokonči `php api/bin/migrate.php` ručně.
 
-Pokud `migrate.php` selhal, vrátit se nejde — musíš debugovat konkrétní
-migraci. Záloha DB je tvoje odpovědnost (kapitola **§ 16 Exporty**).
+Pokud `migrate.php` selhal, vrátit migraci samotnou nejde — musíš
+debugovat konkrétní migraci. Záloha DB je tvoje odpovědnost (kapitola
+**§ 16 Exporty**).
+
+Když se worker přestane hlásit (spadl proces), UI po 15 minutách bez
+heartbeatu příznak „probíhá" samo zruší a napíše, kde hledat log.
 
 ## 75.8 Dohled na nové verze bez UI
 

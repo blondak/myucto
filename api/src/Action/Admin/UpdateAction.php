@@ -15,9 +15,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Admin endpointy pro správu upgradu:
  *   GET  /api/admin/update/status     — plný stav (s release notes)
+ *   GET  /api/admin/update/preflight  — může nativní instalace updatovat sama?
  *   POST /api/admin/update/refresh    — fresh fetch z GitHub Releases API
  *   POST /api/admin/update/trigger    — zařadit upgrade do fronty (Docker)
- *                                       nebo vrátit copy-paste návod (nativní)
+ *                                       nebo spustit nativní worker
  */
 final class UpdateAction
 {
@@ -30,6 +31,20 @@ final class UpdateAction
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
         return Json::ok($response, $this->version->getStatus());
+    }
+
+    /**
+     * Preflight nativního upgradu. Samostatný endpoint (ne součást `status`),
+     * protože zapisuje probe soubory pro kontrolu práv — nemá běžet při
+     * každém 5s pollu.
+     */
+    public function preflight(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request, $response, $err)) return $err;
+        $target = $request->getQueryParams()['target_version'] ?? null;
+        return Json::ok($response, $this->version->nativePreflight(
+            is_string($target) && $target !== '' ? $target : null
+        ));
     }
 
     public function refresh(Request $request, Response $response): Response

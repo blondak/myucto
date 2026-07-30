@@ -7,11 +7,15 @@ namespace MyInvoice\Service\Update;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\BackgroundProcess;
 use PDO;
 
 /**
  * Version service — kontrola nové verze, cache release notes, detekce
  * runtime prostředí (Docker / nativní), spouštění upgradu.
+ *
+ * Upgrade sám neprovádí: Docker deleguje na host-side watcher, nativní
+ * instalace na {@see NativeUpdateService} (production bundle z release).
  *
  * Aktuální verze se čte z `VERSION` souboru v rootu repa (jeden řádek
  * semver). Poslední dostupná verze + release notes se cachují v tabulce
@@ -40,8 +44,10 @@ final class VersionService
     private readonly PDO $db;
     private readonly string $rootDir;
 
-    public function __construct(Connection $connection)
-    {
+    public function __construct(
+        Connection $connection,
+        private readonly NativeUpdateService $native,
+    ) {
         $this->db      = $connection->pdo();
         $this->rootDir = Bootstrap::rootDir();
     }
@@ -115,8 +121,65 @@ final class VersionService
             'cache_stale'          => $cacheStale,
             'environment'          => $this->detectEnvironment(),
             'upgrade_in_progress'  => $this->isUpgradeInProgress(),
+            'upgrade_progress'     => $this->loadUpgradeProgress(),
             'last_upgrade_result'  => $this->loadUpgradeResult(),
         ];
+    }
+
+    /**
+     * Krok právě běžícího nativního upgradu (worker ho píše do flag souboru).
+     * Docker flow tohle neplní — vrátí null. Záměrně bez preflight kontrol,
+     * aby polling statusu nesahal na disk víc, než musí.
+     *
+     * @return array{mode:string, step:string, step_index:int, step_count:int, step_message:string}|null
+     */
+    public function loadUpgradeProgress(): ?array
+    {
+        $flag = $this->upgradeFlagPath();
+        if (!is_file($flag)) {
+            return null;
+        }
+        $payload = json_decode((string) @file_get_contents($flag), true);
+        if (!is_array($payload) || !isset($payload['step'])) {
+            return null;
+        }
+
+        return [
+            'mode'         => (string) ($payload['mode'] ?? 'native'),
+            'step'         => (string) $payload['step'],
+            'step_index'   => (int) ($payload['step_index'] ?? 0),
+            'step_count'   => (int) ($payload['step_count'] ?? count(NativeUpdateService::STEPS)),
+            'step_message' => (string) ($payload['step_message'] ?? ''),
+        ];
+    }
+
+    /**
+     * Preflight nativního upgradu — samostatný endpoint, protože zapisuje
+     * probe soubory (kontrola práv) a nemá běžet při každém pollu statusu.
+     *
+     * @return array{ok:bool, supported:bool, blockers:list<string>, warnings:list<string>}
+     */
+    public function nativePreflight(?string $targetVersion = null): array
+    {
+        if ($this->detectEnvironment() !== 'native') {
+            return [
+                'ok'        => false,
+                'supported' => false,
+                'blockers'  => ['Nativní updater se v Docker instalaci nepoužívá — upgrade řeší host-side watcher.'],
+                'warnings'  => [],
+            ];
+        }
+        $target = $targetVersion ?: ($this->loadCache()['latest_version'] ?? null);
+        if (!$target) {
+            return [
+                'ok'        => false,
+                'supported' => true,
+                'blockers'  => ['Není známá žádná novější verze — spusť nejdřív kontrolu.'],
+                'warnings'  => [],
+            ];
+        }
+
+        return $this->native->preflight((string) $target);
     }
 
     /**
@@ -151,7 +214,10 @@ final class VersionService
     /**
      * Trigger upgrade. Pro Docker zapíše flag soubor — host-side watcher
      * (`cmd/docker-update-watcher.{sh,ps1}`) ho zachytí a spustí
-     * `docker-update.{sh,ps1}`. Pro nativní zatím vrací instrukci.
+     * `docker-update.{sh,ps1}`. Pro nativní instalaci spustí detached worker
+     * `api/bin/native-update.php`, který nasadí production bundle z release
+     * (viz {@see NativeUpdateService}); když to prostředí neumožní, vrátí
+     * copy-paste návod se stejným bundlem.
      *
      * @return array<string,mixed>  result se status / message / instruction
      */
@@ -197,20 +263,93 @@ final class VersionService
             ];
         }
 
-        // Nativní auto-update zatím přes copy-paste instrukci. Phase 2
-        // doplní download production bundle z GitHub release a extrakci.
+        // Nativní instalace — stáhneme production bundle z release a nasadíme ho
+        // detached CLI workerem. Když to prostředí neumožní (chybí PHP CLI, práva,
+        // místo…), vrátíme copy-paste návod se stejným bundlem.
+        if (!NativeUpdateService::isValidVersion((string) $target)) {
+            return [
+                'status'  => 'error',
+                'message' => 'Cílová verze „' . $target . '" není platný semver.',
+            ];
+        }
+
+        $preflight = $this->native->preflight((string) $target);
+        if (!$preflight['ok']) {
+            return $this->nativeManualFallback((string) $target, $preflight['blockers']);
+        }
+
+        $flag = $this->upgradeFlagPath();
+        if (!is_dir(dirname($flag))) {
+            @mkdir(dirname($flag), 0775, true);
+        }
+        $written = @file_put_contents($flag, json_encode([
+            'mode'               => 'native',
+            'target_version'     => $target,
+            'requested_by_email' => $requestedByEmail,
+            'requested_at'       => date(\DateTimeInterface::ATOM),
+            'heartbeat_at'       => date(\DateTimeInterface::ATOM),
+            'step'               => 'preflight',
+            'step_index'         => 1,
+            'step_count'         => count(NativeUpdateService::STEPS),
+            'step_message'       => 'Startuji aktualizaci…',
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        if ($written === false) {
+            return $this->nativeManualFallback((string) $target, [
+                'Nelze zapsat ' . $flag . ' — zkontroluj práva na storage/.',
+            ]);
+        }
+        @unlink($this->upgradeResultPath());
+
+        $spawned = BackgroundProcess::spawnPhp(
+            $this->rootDir . '/api/bin/native-update.php',
+            ['--target=' . $target, '--requested-by=' . $requestedByEmail],
+            null,
+            $this->rootDir,
+            $diag,
+        );
+        if (!$spawned) {
+            @unlink($flag);
+            return $this->nativeManualFallback((string) $target, [
+                'Nepodařilo se spustit worker na pozadí (' . (string) $diag . ').',
+            ]);
+        }
+
         return [
-            'status'      => 'manual_required',
-            'environment' => 'native',
+            'status'         => 'queued',
+            'environment'    => 'native',
             'target_version' => $target,
-            'message'     => 'Pro nativní instalaci spusť na hostu:',
-            'instructions' => [
-                'git fetch --tags',
-                'git checkout v' . $target,
-                'cd api && composer install --no-dev && cd ..',
-                'cd web && pnpm install && pnpm build && cd ..',
-                'php tools/generateManualHtml.php',
-                'php tools/exportManualToPdf.php',
+            'message'        => 'Aktualizace na v' . $target . ' běží na pozadí — stahuje se production bundle, '
+                . 'nasadí se přes instalaci a doběhnou migrace. Průběh se ukazuje níž.',
+            'warnings'       => $preflight['warnings'],
+        ];
+    }
+
+    /**
+     * Fallback, když automatická cesta nejde — přesné příkazy pro ruční
+     * nasazení téhož production bundlu.
+     *
+     * @param  list<string> $blockers
+     * @return array<string,mixed>
+     */
+    private function nativeManualFallback(string $target, array $blockers): array
+    {
+        $bundle = 'myucto-' . $target . '.tar.gz';
+        $base   = 'https://github.com/radekhulan/myucto/releases/download/v' . $target . '/';
+
+        return [
+            'status'         => 'manual_required',
+            'environment'    => 'native',
+            'target_version' => $target,
+            'message'        => 'Automatickou aktualizaci nelze spustit, proveď ji na hostu ručně:',
+            'blockers'       => $blockers,
+            'instructions'   => [
+                '# Production bundle — nepotřebuje Composer ani Node',
+                'curl -LO ' . $base . $bundle,
+                'curl -LO ' . $base . $bundle . '.sha256',
+                'sha256sum -c ' . $bundle . '.sha256',
+                'tar -xzf ' . $bundle . ' --strip-components=1 \\',
+                "  --exclude='cfg.php' --exclude='cfg.local.php' --exclude='cfg.docker.php' \\",
+                "  --exclude='storage' --exclude='private' --exclude='log'",
                 'php api/bin/migrate.php',
             ],
         ];
@@ -256,22 +395,33 @@ final class VersionService
             return false;
         }
 
-        // b) prošlý flag (requested_at nebo mtime starší než TTL) → watcher to nezpracoval.
-        $requestedTs = isset($payload['requested_at']) ? strtotime((string) $payload['requested_at']) : false;
-        if ($requestedTs === false) {
-            $requestedTs = @filemtime($flag) ?: time();
+        // b) prošlý flag → zpracovatel (docker watcher / nativní worker) neběží.
+        // Nativní worker píše `heartbeat_at` na každém kroku, takže dlouhý běh
+        // (stahování bundlu, kopírování 10k souborů, migrace) TTL nepodtrhne;
+        // rozhoduje poslední známá aktivita, ne čas zařazení.
+        $isNative    = ($payload['mode'] ?? null) === 'native';
+        $activityTs  = isset($payload['heartbeat_at']) ? strtotime((string) $payload['heartbeat_at']) : false;
+        if ($activityTs === false) {
+            $activityTs = isset($payload['requested_at']) ? strtotime((string) $payload['requested_at']) : false;
         }
-        if (time() - $requestedTs > self::UPGRADE_FLAG_TTL) {
+        if ($activityTs === false) {
+            $activityTs = @filemtime($flag) ?: time();
+        }
+        if (time() - $activityTs > self::UPGRADE_FLAG_TTL) {
             @unlink($flag);
-            // Informativní result, ať uživatel ví, proč to skončilo (a že watcher možná neběží).
+            // Informativní result, ať uživatel ví, proč to skončilo.
             if (!is_file($this->upgradeResultPath())) {
                 @file_put_contents($this->upgradeResultPath(), json_encode([
                     'status'         => 'unknown',
                     'target_version' => $target,
                     'applied_at'     => date(\DateTimeInterface::ATOM),
-                    'message'        => 'Požadavek na upgrade vypršel — dokončení se nepodařilo potvrdit. '
-                        . 'Pokud aktualizuješ ručně přes terminál, je to v pořádku; jinak zkontroluj, '
-                        . 'že na hostu běží watcher (cmd/docker-update-watcher.{sh,ps1}).',
+                    'message'        => $isNative
+                        ? 'Aktualizace se přestala hlásit — worker (api/bin/native-update.php) zřejmě spadl. '
+                            . 'Projdi log storage/upgrade-*.log; nasazené soubory jde vrátit ze zálohy '
+                            . 'storage/updates/<verze>/backup/.'
+                        : 'Požadavek na upgrade vypršel — dokončení se nepodařilo potvrdit. '
+                            . 'Pokud aktualizuješ ručně přes terminál, je to v pořádku; jinak zkontroluj, '
+                            . 'že na hostu běží watcher (cmd/docker-update-watcher.{sh,ps1}).',
                 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             }
             return false;
