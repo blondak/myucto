@@ -45,10 +45,15 @@ if (-not $PwshExe) {
 $intervalS = if ($env:MYINVOICE_WATCHER_INTERVAL) { [int]$env:MYINVOICE_WATCHER_INTERVAL } else { 30 }
 
 # Auto-detect compose file — preferuj production.yml pokud běží.
+#
+# Ptáme se rovnou na container id místo matchování člověkem čitelné tabulky:
+# starší Compose v2 tiskl ve sloupci STATUS "running", novější tisknou
+# docker-style "Up 2 weeks", takže match tiše přestal fungovat a watcher vždy
+# spadl na výchozí compose soubor.
 $composeArgs = @()
 if ((Test-Path 'docker-compose.production.yml')) {
-    $prodPs = & docker compose -f docker-compose.production.yml ps app 2>$null
-    if ($LASTEXITCODE -eq 0 -and $prodPs -match 'running') {
+    $prodCid = (& docker compose -f docker-compose.production.yml ps --status running -q app 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and $prodCid) {
         $composeArgs = @('-f', 'docker-compose.production.yml')
     }
 }
