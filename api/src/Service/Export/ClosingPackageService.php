@@ -59,6 +59,7 @@ use ZipArchive;
  *   Inventarizace-majetku/karty/karta-<N>.pdf (inventární karta na majetek, §29–30 ZoÚ)
  *   Saldokonta-nad-1-rok/saldo-nad-1-rok-<rok>.pdf(.xlsx)
  *   Casova-rozliseni/casove-rozliseni-<rok>.pdf(.xlsx)
+ *   Priloha-k-zaverce/priloha-<rok>.pdf + .txt (§ 18/1/c ZoÚ)
  *   README.txt
  *
  * Dostupné jen pro firmy vedené v podvojném účetnictví (guard v Action) — sestavy
@@ -129,6 +130,7 @@ final class ClosingPackageService
         private readonly SaldoPdfRenderer $saldoPdf,
         private readonly AccrualsReportService $accrualsReport,
         private readonly \MyInvoice\Service\Accounting\Reports\StatementNotesService $statementNotes,
+        private readonly \MyInvoice\Service\Pdf\StatementNotesPdfRenderer $statementNotesPdf,
         private readonly BalanceInventoryPdfRenderer $balanceInventoryPdf,
         private readonly BalanceInventoryService $balanceInventoryReport,
         private readonly \MyInvoice\Service\Accounting\Reports\CashFlowStatementService $cashFlowService,
@@ -559,13 +561,18 @@ final class ClosingPackageService
 
             // 11) Příloha k účetní závěrce (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002).
             // Chyběla, přestože komentář u REQUIRED_PARTS § 18 sám cituje — a bez přílohy
-            // závěrka není úplná. Text se generuje jako prostý soubor, ne PDF sestava:
-            // je to souvislý text, ne tabulka, a předstírat u něj tabulkový renderer by
-            // znamenalo formátovat cizí formulace do sloupců.
+            // závěrka není úplná. Primárně PDF (oficiální dokument závěrky, stejně jako
+            // ostatní části balíčku); TXT zůstává vedle jako strojově/copy-paste čitelná
+            // verze téhož obsahu.
             if (in_array('statement_notes', $parts, true)) {
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 try {
                     $notes = $this->statementNotes->build($supplierId, $periodId);
+                    $put(sprintf('Priloha-k-zaverce/priloha-%d.pdf', $fiscalYear), $this->statementNotesPdf->render([
+                        'notes'  => $notes,
+                        'entity' => $this->statements->entityHeader($supplierId),
+                        'period' => ['starts_on' => $startsOn, 'ends_on' => $endsOn],
+                    ]));
                     $put(sprintf('Priloha-k-zaverce/priloha-%d.txt', $fiscalYear), self::renderNotes($notes));
                     $added++; $summary['statement_notes'] = 1;
                     if ($notes['missing'] !== []) {
@@ -940,7 +947,7 @@ final class ClosingPackageService
             'asset_inventory' => 'Inventarizace majetku (PDF, dlouhodobý + drobný majetek + inventární karty)',
             'saldo_over_1y' => 'Saldokonta pohledávek a závazků starší 1 roku (PDF)',
             'accruals' => 'Časové rozlišení 381–385 (PDF)',
-            'statement_notes' => 'Příloha k účetní závěrce §18/1/c (TXT)',
+            'statement_notes' => 'Příloha k účetní závěrce §18/1/c (PDF + TXT)',
             'cash_flow' => 'Přehled o peněžních tocích (PDF, §18/2 ZoÚ)',
             'equity_changes' => 'Přehled o změnách vlastního kapitálu (PDF, §18/2 ZoÚ)',
         ];
