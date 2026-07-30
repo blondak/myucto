@@ -135,7 +135,14 @@ async function cancelStuckUpgrade() {
 
 async function pollUpdate(signal: AbortSignal) {
   await load(signal)
-  pollingEnabled.value = status.value?.upgrade_in_progress === true
+  const running = status.value?.upgrade_in_progress === true
+  pollingEnabled.value = running
+  // „Zařazeno do fronty" je jen překlenutí, než worker začne hlásit průběh.
+  // Jakmile doběhne, platný stav ukazuje panel s výsledkem — bez tohohle by
+  // hláška o zařazení visela vedle něj až do reloadu stránky.
+  if (!running && triggerResult.value?.status === 'queued' && status.value?.last_upgrade_result) {
+    triggerResult.value = null
+  }
 }
 
 useSessionAwarePolling(pollUpdate, 5000, pollingEnabled)
@@ -152,6 +159,7 @@ function renderMarkdown(md: string): string {
   const out: string[] = []
   let listType: 'ul' | 'ol' | null = null
   let para: string[] = []
+  let li: string[] | null = null
   let inFence = false
   let fenceBuf: string[] = []
 
@@ -161,7 +169,16 @@ function renderMarkdown(md: string): string {
       para = []
     }
   }
+  // Odrážka se sbírá po řádcích: pokračovací řádky (zalomený text odstavce
+  // pod `- `) patří pořád do téže položky, ne do samostatného odstavce.
+  const flushLi = () => {
+    if (li) {
+      out.push('<li>' + inline(li.join(' ')) + '</li>')
+      li = null
+    }
+  }
   const closeList = () => {
+    flushLi()
     if (listType) {
       out.push(`</${listType}>`)
       listType = null
@@ -224,14 +241,20 @@ function renderMarkdown(md: string): string {
     }
     if (/^[-*]\s+/.test(trim)) {
       flushPara()
+      flushLi()
       ensureList('ul')
-      out.push('<li>' + inline(trim.replace(/^[-*]\s+/, '')) + '</li>')
+      li = [trim.replace(/^[-*]\s+/, '')]
       continue
     }
     if (/^\d+\.\s+/.test(trim)) {
       flushPara()
+      flushLi()
       ensureList('ol')
-      out.push('<li>' + inline(trim.replace(/^\d+\.\s+/, '')) + '</li>')
+      li = [trim.replace(/^\d+\.\s+/, '')]
+      continue
+    }
+    if (li) {
+      li.push(trim)
       continue
     }
     closeList()
