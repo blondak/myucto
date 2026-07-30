@@ -2645,7 +2645,26 @@
         "statement_notes": "Notes to the financial statements (§ 18/1/c)",
         "cash_flow": "Cash flow statement (§ 18/2)",
         "equity_changes": "Statement of changes in equity (§ 18/2)"
-      }
+      },
+      "edit_notes": "Fill in the notes",
+      "notes_incomplete_hint": "The notes to the financial statements can be completed in the editor — filled-in sections are included the next time the package is generated."
+    },
+    "statement_notes": {
+      "title": "Notes to the financial statements",
+      "subtitle": "§ 18(1)(c) of the Accounting Act, § 39/39a/39b of Decree 500/2002 Coll. The set of sections depends on the entity category and statutory audit. Sections are stored per fiscal year — they can be completed even for a closed period.",
+      "back_to_package": "Back to the closing package",
+      "complete": "The notes are complete — all mandatory sections are filled in.",
+      "incomplete": "The notes are incomplete — {filled} of {total} mandatory sections filled in.",
+      "filled": "Filled in",
+      "missing": "Missing",
+      "saved": "Notes section saved.",
+      "auto_badge": "prefilled",
+      "scope_audited": "§ 39a — statutory audit",
+      "scope_large": "§ 39b — large entities",
+      "auto_hint": "The system prefills this section from its own data; your own text takes precedence and is never overwritten.",
+      "auto_placeholder": "The system prefills this section automatically; you can refine it with your own text.",
+      "placeholder": "Free-form text of the section — the system cannot derive it from the books.",
+      "readonly_hint": "You do not have write permission — sections are read-only."
     },
     "closing": {
       "title": "Period closing",

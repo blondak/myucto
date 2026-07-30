@@ -2645,7 +2645,26 @@
         "statement_notes": "Příloha k účetní závěrce (§ 18/1/c)",
         "cash_flow": "Přehled o peněžních tocích (§ 18/2)",
         "equity_changes": "Přehled o změnách vlastního kapitálu (§ 18/2)"
-      }
+      },
+      "edit_notes": "Vyplnit přílohu",
+      "notes_incomplete_hint": "Přílohu k závěrce lze doplnit v editoru — vyplněné sekce se do balíčku promítnou při dalším vygenerování."
+    },
+    "statement_notes": {
+      "title": "Příloha k účetní závěrce",
+      "subtitle": "§ 18 odst. 1 písm. c) ZoÚ, § 39/39a/39b vyhlášky 500/2002 Sb. Rozsah sekcí se odvíjí od kategorie účetní jednotky a povinného auditu. Sekce se ukládají k fiskálnímu roku — doplnit je lze i u uzavřeného období.",
+      "back_to_package": "Zpět na uzávěrkový balíček",
+      "complete": "Příloha je úplná — všechny povinné sekce jsou vyplněné.",
+      "incomplete": "Příloha není úplná — vyplněno {filled} z {total} povinných sekcí.",
+      "filled": "Vyplněno",
+      "missing": "Chybí",
+      "saved": "Sekce přílohy byla uložena.",
+      "auto_badge": "předvyplněno",
+      "scope_audited": "§ 39a — s povinným auditem",
+      "scope_large": "§ 39b — velké ÚJ",
+      "auto_hint": "Sekci systém předvyplňuje z vlastních dat; vlastní text má přednost a automatika ho nepřepíše.",
+      "auto_placeholder": "Systém sekci předvyplní automaticky; vlastním textem ji lze upřesnit.",
+      "placeholder": "Souvislý text sekce — systém ho z účetnictví odvodit nemůže.",
+      "readonly_hint": "Nemáš oprávnění pro zápis — sekce jsou jen ke čtení."
     },
     "closing": {
       "title": "Uzávěrka období",

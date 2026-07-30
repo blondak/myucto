@@ -225,7 +225,17 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
               :disabled="countFor(part) === 0 || anyActive"
               @change="toggle(part)"
             />
-            <span class="text-sm font-medium text-neutral-800 flex-1">{{ t('accounting.closing_package.parts.' + part) }}</span>
+            <span class="text-sm font-medium text-neutral-800 flex-1">
+              {{ t('accounting.closing_package.parts.' + part) }}
+              <!-- Příloha závěrky má vlastní editor sekcí — bez odkazu odsud se k němu
+                   uživatel nedostal a neúplná příloha nešla doplnit (ani u uzavřeného roku). -->
+              <RouterLink v-if="part === 'statement_notes'"
+                :to="{ name: 'accounting-statement-notes', params: { id: periodId } }"
+                class="ml-2 text-xs font-normal text-primary-600 hover:text-primary-700"
+                @click.stop>
+                {{ t('accounting.closing_package.edit_notes') }} →
+              </RouterLink>
+            </span>
             <span v-if="!loading"
               class="text-xs font-mono px-2 py-0.5 rounded"
               :class="countFor(part) > 0 ? 'bg-neutral-100 text-neutral-600' : 'bg-neutral-50 text-neutral-400'">
@@ -307,6 +317,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
           <div v-else-if="j.status === 'completed_with_warnings'"
             class="mt-1.5 text-xs text-warning-700 bg-warning-50 border border-warning-500/30 rounded-md px-2 py-1.5">
             {{ t('accounting.closing_package.job.warnings_notice', { count: j.failed_count }) }}
+            <RouterLink :to="{ name: 'accounting-statement-notes', params: { id: periodId } }"
+              class="block mt-1 text-primary-600 hover:text-primary-700">
+              {{ t('accounting.closing_package.notes_incomplete_hint') }} →
+            </RouterLink>
           </div>
           <div v-else-if="j.status === 'failed' && j.last_error" class="mt-1.5 text-xs text-danger-600">{{ j.last_error }}</div>
         </li>

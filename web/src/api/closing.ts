@@ -595,6 +595,33 @@ export const closingApi = {
     api.get<MonthlyCheckResult>(`/accounting/periods/${periodId}/monthly-check`, {
       params: { date_from: dateFrom, date_to: dateTo },
     }).then(r => r.data),
+  // Příloha k účetní závěrce (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002) — sekce se
+  // ukládají per fiskální rok, takže doplnit jde i u uzavřeného období (příloha se
+  // typicky dopisuje v průběhu uzávěrky i po ní).
+  statementNotes: (periodId: number) =>
+    api.get<StatementNotes>(`/accounting/periods/${periodId}/statement-notes`).then(r => r.data),
+  saveStatementNote: (periodId: number, section: string, content: string | null) =>
+    api.put<StatementNotes>(`/accounting/periods/${periodId}/statement-notes/${section}`, { content }).then(r => r.data),
+}
+
+// ── Příloha k účetní závěrce (§ 18/1/c) ─────────────────────────────────────
+export interface StatementNotesSection {
+  key: string
+  label: string
+  legal: string
+  scope: 'all' | 'audited' | 'large'
+  auto: boolean
+  content: string | null
+  filled: boolean
+}
+
+export interface StatementNotes {
+  fiscal_year: number
+  category: string
+  scopes: string[]
+  sections: StatementNotesSection[]
+  missing: string[]
+  complete: boolean
 }
 
 // ── Měkký zámek účtování k datu (B8) ────────────────────────────────────────

@@ -9229,6 +9229,40 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/periods/{id}/statement-notes:
+    get:
+      tags: [Accounting]
+      summary: Příloha k účetní závěrce (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002)
+      description: Povinné sekce dle kategorie účetní jednotky a povinného auditu, jejich obsah a co chybí. Sekce se ukládají per fiskální rok — čtení i zápis fungují i nad uzavřeným obdobím.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK {fiscal_year, category, scopes[], sections[], missing[], complete}", content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/periods/{id}/statement-notes/{section}:
+    put:
+      tags: [Accounting]
+      summary: Uložení textu sekce přílohy k závěrce
+      description: Prázdný/nullový `content` sekci smaže (vrátí se k případnému automatickému předvyplnění). Vrací čerstvý stav přílohy jako GET.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: section, required: true, schema: { type: string, pattern: '^[a-z0-9_]+$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string, nullable: true }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/periods/{id}/closing/start:
     post:
       tags: [Accounting]
@@ -13753,6 +13787,7 @@ paths:
     get:
       tags: [Reports]
       summary: Stáhne hotový ZIP uzávěrkového balíčku
+      description: Ke stažení jsou joby ve stavu `completed` i `completed_with_warnings` (povinné jádro kompletní, doplňkové části selhaly).
       responses:
         '200':
           description: ZIP archiv

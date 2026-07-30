@@ -144,6 +144,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'accounting/periods/:id(\\d+)/closing', name: 'accounting-period-closing', component: () => import('@/pages/accounting/PeriodClosing.vue'),     meta: { requiresDoubleEntry: true } },
       // Uzávěrkový balíček — ZIP se všemi sestavami uzávěrky daného účetního období.
       { path: 'accounting/periods/:id(\\d+)/closing-package', name: 'accounting-closing-package', component: () => import('@/pages/accounting/ClosingPackage.vue'), meta: { requiresDoubleEntry: true } },
+      // Příloha k účetní závěrce (§ 18/1/c) — editor sekcí; ukládá se per fiskální rok,
+      // takže funguje i nad uzavřeným obdobím.
+      { path: 'accounting/periods/:id(\\d+)/statement-notes', name: 'accounting-statement-notes', component: () => import('@/pages/accounting/StatementNotes.vue'), meta: { requiresDoubleEntry: true } },
       { path: 'accounting/archive',                   name: 'accounting-archive',        redirect: '/utilities?section=archive' },
       // Pokladna (mini-epic POKLADNA #14) — dostupná v OBOU účetních režimech: podvojné
       // účetnictví i daňová evidence (Epic DE §6, no-journal cash path). requiresCashMode
@@ -374,7 +377,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // lookahead vylučuje jen `assets`, ne `small-assets`). Jiný klíč tady = menu svítí,
   // ale API vrátí 403.
   'accounting-small-assets': ['accounting'],
-  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
+  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
