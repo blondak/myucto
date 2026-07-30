@@ -357,8 +357,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/reports/dph-book',    label: t('nav.reports_dph_book'),    icon: ICONS.tax_book },
         { to: '/reports/shv',         label: t('nav.reports_shv'),         icon: ICONS.tax_shv },
         { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+        // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
+        // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/s74b',        label: t('nav.reports_s74b'),        icon: ICONS.recurring },
           { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
         ] : []),
         { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin },
@@ -413,6 +414,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports },
         { to: '/accounting/section18-statements', label: t('nav.accounting_section18'), icon: ICONS.reports },
         { to: '/reports/related-parties', label: t('nav.reports_related_parties'), icon: ICONS.clients },
+        { to: '/reports/s74b', label: t('nav.reports_s74b'), icon: ICONS.recurring },
         // Audit UI mezer 2026-07: dříve backend-only funkce zpřístupněné v menu.
         { to: '/reports/vat-coefficient', label: t('nav.reports_vat_coefficient'), icon: ICONS.tax_income },
         { to: '/reports/s46', label: t('nav.reports_s46'), icon: ICONS.coin },
