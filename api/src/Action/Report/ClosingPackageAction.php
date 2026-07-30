@@ -165,7 +165,10 @@ final class ClosingPackageAction
         if ($job === null) {
             return Json::error($response, 'not_found', 'Job nenalezen.', 404);
         }
-        if (($job['status'] ?? '') !== 'completed' || empty($job['result_path'])) {
+        // `completed_with_warnings` (EP-6) je ke stažení stejně jako `completed` — povinné
+        // jádro je kompletní, jen doplňkové části selhaly. Bez toho FE tlačítko stahování
+        // nabízel, ale API vracelo not_ready.
+        if (!in_array($job['status'] ?? '', ['completed', 'completed_with_warnings'], true) || empty($job['result_path'])) {
             return Json::error($response, 'not_ready', 'Balíček ještě není připravený ke stažení.', 409);
         }
 
