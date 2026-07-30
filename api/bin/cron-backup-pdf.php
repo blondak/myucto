@@ -122,6 +122,13 @@ foreach ($pdfs as $abs => $rel) {
     if (defined('ZipArchive::CM_STORE')) {
         $zip->setCompressionName($rel, ZipArchive::CM_STORE);
     }
+    if (!\MyInvoice\Service\Backup\BackupZipPermissions::neutralize($zip, $rel)) {
+        fwrite(STDERR, "Cannot normalize ZIP entry permissions: $rel\n");
+        $zip->close();
+        @unlink($file);
+        $run->finish('error', null, 'zip permission normalization failed', 1);
+        exit(1);
+    }
     if (!BackupEncryption::encryptEntry($zip, $rel, $zipPassword)) {
         fwrite(STDERR, "Cannot encrypt ZIP entry: $rel\n");
         $zip->close();

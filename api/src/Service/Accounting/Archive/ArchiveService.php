@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Archive;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Backup\BackupZipPermissions;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
 use PDO;
 use Psr\Log\LoggerInterface;
@@ -220,6 +221,9 @@ final class ArchiveService
             foreach (array_merge(['manifest.json'], array_map(static fn ($t) => $t . '.jsonl', array_keys($tables))) as $name) {
                 $zip->addFile($tmpDir . '/' . $name, $name);
                 $zip->setCompressionName($name, \ZipArchive::CM_DEFLATE);
+                if (!BackupZipPermissions::neutralize($zip, $name)) {
+                    throw new \RuntimeException('Nelze sjednotit práva položky archivu: ' . $name);
+                }
             }
             foreach ($files as $zipName => $meta) {
                 if (($meta['missing'] ?? false) === true || !isset($meta['disk_path'])) {
@@ -227,6 +231,9 @@ final class ArchiveService
                 }
                 $zip->addFile($meta['disk_path'], $zipName);
                 $zip->setCompressionName($zipName, \ZipArchive::CM_DEFLATE);
+                if (!BackupZipPermissions::neutralize($zip, $zipName)) {
+                    throw new \RuntimeException('Nelze sjednotit práva položky archivu: ' . $zipName);
+                }
             }
             if (!$zip->close()) {
                 throw new \RuntimeException('ZIP se nepodařilo zapsat: ' . $zipPath);

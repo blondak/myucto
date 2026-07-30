@@ -200,6 +200,14 @@ $zip->addFile($sqlTmp, $sqlName);
 if (defined('ZipArchive::CM_DEFLATE')) {
     $zip->setCompressionName($sqlName, ZipArchive::CM_DEFLATE, 9);
 }
+if (!\MyInvoice\Service\Backup\BackupZipPermissions::neutralize($zip, $sqlName)) {
+    $zip->close();
+    @unlink($sqlTmp); @unlink($file);
+    $msg = 'ZIP permission normalization failed.';
+    fwrite(STDERR, "$msg\n");
+    $run->finish('error', null, $msg, 1);
+    exit(1);
+}
 if (!BackupEncryption::encryptEntry($zip, $sqlName, $zipPassword)) {
     $zip->close();
     @unlink($sqlTmp); @unlink($file);
