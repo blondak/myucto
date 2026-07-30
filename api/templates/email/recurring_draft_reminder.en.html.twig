@@ -8,7 +8,8 @@
 <p style="margin:0 0 12px;">Hello,</p>
 
 <p style="margin:0 0 16px;">
-  the recurring invoice draft <strong>{{ template_name }}</strong>{% if client_name %} for <strong>{{ client_name }}</strong>{% endif %}
+  {# Templates are often named after the client — "X for X" would duplicate the name. #}
+  the recurring invoice draft <strong>{{ template_name }}</strong>{% if client_name and client_name|trim != template_name|trim %} for <strong>{{ client_name }}</strong>{% endif %}
   will be issued automatically on <strong style="color:#C2410C;">{{ issue_date|date('j M Y') }}</strong>.
   If you want to add extra work to the work report, please do so before then.
 </p>

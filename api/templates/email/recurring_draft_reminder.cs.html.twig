@@ -8,7 +8,8 @@
 <p style="margin:0 0 12px;">Dobrý den,</p>
 
 <p style="margin:0 0 16px;">
-  koncept pravidelné faktury <strong>{{ template_name }}</strong>{% if client_name %} pro <strong>{{ client_name }}</strong>{% endif %}
+  {# Šablona bývá pojmenovaná po klientovi — „X pro X" by jméno zbytečně zdvojilo. #}
+  koncept pravidelné faktury <strong>{{ template_name }}</strong>{% if client_name and client_name|trim != template_name|trim %} pro <strong>{{ client_name }}</strong>{% endif %}
   se automaticky vystaví <strong style="color:#C2410C;">{{ issue_date|date('j.n.Y') }}</strong>.
   Pokud chcete doplnit vícepráce do výkazu práce, udělejte to prosím do té doby.
 </p>

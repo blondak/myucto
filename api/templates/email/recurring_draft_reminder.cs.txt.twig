@@ -6,7 +6,8 @@ KONCEPT PRAVIDELNÉ FAKTURY SE BRZY VYSTAVÍ
 
 Dobrý den,
 
-koncept pravidelné faktury "{{ template_name }}"{% if client_name %} pro {{ client_name }}{% endif %}
+{# Šablona bývá pojmenovaná po klientovi — „X pro X" by jméno zbytečně zdvojilo. #}
+koncept pravidelné faktury "{{ template_name }}"{% if client_name and client_name|trim != template_name|trim %} pro {{ client_name }}{% endif %}
 se automaticky vystaví {{ issue_date|date('j.n.Y') }}.
 Pokud chcete doplnit vícepráce do výkazu práce, udělejte to prosím do té doby.
 

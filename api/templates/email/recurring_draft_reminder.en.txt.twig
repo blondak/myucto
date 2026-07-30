@@ -6,7 +6,8 @@ RECURRING INVOICE DRAFT WILL BE ISSUED SOON
 
 Hello,
 
-the recurring invoice draft "{{ template_name }}"{% if client_name %} for {{ client_name }}{% endif %}
+{# Templates are often named after the client — "X for X" would duplicate the name. #}
+the recurring invoice draft "{{ template_name }}"{% if client_name and client_name|trim != template_name|trim %} for {{ client_name }}{% endif %}
 will be issued automatically on {{ issue_date|date('j M Y') }}.
 If you want to add extra work to the work report, please do so before then.
 
