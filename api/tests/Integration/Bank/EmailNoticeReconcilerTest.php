@@ -493,4 +493,83 @@ final class EmailNoticeReconcilerTest extends TestCase
         self::assertNull($result, 'Rozdílný VS nesmí převzít cizí párování.');
         self::assertSame(1, $this->paymentCountForTx($emailTx));
     }
+
+    // ── Karetní platby: avízo bez VS i bez protiúčtu ─────────────────────────
+
+    private function setCounterpartyAccount(int $txId, string $account): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE bank_transactions SET counterparty_account = ? WHERE id = ?'
+        )->execute([$account, $txId]);
+    }
+
+    /**
+     * Karetní avízo („Blokace") nenese VS ani protiúčet a GPC řádek karty taky ne.
+     * Dřív takové párování zůstalo viset na avízu — a avízo se nikdy neúčtuje, takže
+     * se platební noha (u cizoměnové faktury včetně kurzového rozdílu) nikdy nedostala
+     * do deníku. Při jednoznačném kandidátovi se převzít musí.
+     */
+    public function testTakeOverCardNoticeWithoutVsOrCounterparty(): void
+    {
+        $invA = $this->insertInvoice(self::VS_A, 212.88);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', 212.88, '', 'card-email');
+        $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx, 'created_by' => $this->userId,
+        ]);
+        $this->markTxMatched($emailTx, $invA, 'manual');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', 212.88, '', 'card-gpc');
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNotNull($result, 'Karetní platba bez VS i protiúčtu se má převzít.');
+        self::assertSame($emailTx, $result['email_tx_id']);
+        self::assertSame(1, $this->paymentCountForTx($gpcTx), 'Platba patří na GPC transakci.');
+        self::assertSame(0, $this->paymentCountForTx($emailTx), 'Avízo zůstane bez plateb.');
+        self::assertSame('paid', $this->invoiceStatus($invA), 'Žádné dvojí započtení.');
+    }
+
+    /**
+     * Asymetrie = slabá shoda: avízo je bez identity, ale GPC protistranu zná, takže
+     * jde nejspíš o běžný převod, ne o tentýž karetní pohyb. Nepřebírat — jinak by
+     * shodná částka ve stejný den přetáhla platbu na cizí doklad.
+     */
+    public function testCardNoticeNotTakenOverWhenGpcKnowsCounterparty(): void
+    {
+        $invA = $this->insertInvoice(self::VS_A, 212.88);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', 212.88, '', 'card-email2');
+        $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx, 'created_by' => $this->userId,
+        ]);
+        $this->markTxMatched($emailTx, $invA, 'manual');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', 212.88, '', 'card-gpc2');
+        $this->setCounterpartyAccount($gpcTx, '2601234567');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNull($result, 'GPC se známou protistranou se s bezidentitním avízem nepáruje.');
+        self::assertSame(1, $this->paymentCountForTx($emailTx), 'Platba zůstává na avízu.');
+    }
+
+    /** Dvě stejné karetní blokace v okně → nejednoznačné, nechat na uživateli. */
+    public function testAmbiguousCardNoticesSkipped(): void
+    {
+        $invA = $this->insertInvoice(self::VS_A, 212.88);
+        [, $emailTx1] = $this->insertStatementWithTx('email_notice', 212.88, '', 'card-e1');
+        [, $emailTx2] = $this->insertStatementWithTx('email_notice', 212.88, '', 'card-e2');
+        $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx1, 'created_by' => $this->userId,
+        ]);
+        $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx2, 'created_by' => $this->userId,
+        ]);
+        $this->markTxMatched($emailTx1, $invA, 'manual');
+        $this->markTxMatched($emailTx2, $invA, 'manual');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', 212.88, '', 'card-g');
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNull($result, 'Dvě stejné blokace = nejednoznačné, nepřebírat.');
+        self::assertSame(0, $this->paymentCountForTx($gpcTx));
+    }
 }

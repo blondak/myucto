@@ -236,6 +236,33 @@ Smazání záznamu zde nemaže transakci ani fakturu. Maže jen deduplikační z
 takže je možné stejný e-mail znovu zpracovat při dalším scanu. Používej to jen
 jako emergency/debug akci.
 
+### Když k avízu dorazí GPC výpis
+
+Zdroj pravdy je GPC. Když se importuje transakce, která už předtím přišla
+avízem a je spárovaná, aplikace **párování převezme z avíza na GPC transakci**
+— platba se přepojí, avízo zůstane rozpárované a nevznikne dvojí započtení.
+Je to důležité i účetně: **avízo se nikdy neúčtuje**, takže dokud platba visí
+na něm, nedostane se platební noha (u cizoměnové faktury včetně kurzového
+rozdílu) do deníku vůbec.
+
+Převzetí je záměrně opatrné — proběhne jen při **právě jednom** kandidátovi se
+shodou účtu, měny, částky na haléř a data v okně ±5 dní. Identita se hledá
+takto:
+
+| Situace | Podmínka převzetí |
+|---------|-------------------|
+| GPC má variabilní symbol | VS musí číselně sedět s VS avíza |
+| GPC nemá VS, ale avízo nese VS nebo protiúčet | musí sedět protiúčet |
+| Ani jedna strana nemá VS ani protiúčet (karetní platba, „Blokace") | stačí výše uvedená shoda účtu, měny, částky a data |
+
+Poslední řádek pokrývá karetní úhrady, které VS ani protiúčet nenesou. Pokud
+by avízo bylo bez identity, ale GPC protistranu znal, jde nejspíš o běžný
+převod a k převzetí nedojde. Dvě stejné blokace ve stejném okně jsou
+nejednoznačné — aplikace nechá párování na tobě.
+
+> 🛈 Karetní **blokace** se může od finálně zúčtované částky lišit. Pak se
+> částky neshodují, převzetí neproběhne a platbu je potřeba přepárovat ručně.
+
 ## 29.7 Cron pro e-mailová avíza
 
 Pro automatické zpracování nastav samostatný cron:

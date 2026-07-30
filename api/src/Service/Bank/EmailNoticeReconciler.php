@@ -24,6 +24,14 @@ use PDO;
  * Bezpečnost: převezmeme JEN když existuje PRÁVĚ JEDEN jednoznačný kandidát (shoda
  * účtu + částky + VS + okno data + měny). 0 = nic neděláme (GPC se spáruje normálně),
  * >1 = nejednoznačné → necháme na uživateli (žádný automatický zásah).
+ *
+ * Identita platby se hledá ve třech úrovních (viz smyčka v takeOverFromEmailNotice):
+ *   1. GPC má VS → musí číselně sedět s VS avíza,
+ *   2. GPC nemá VS, ale avízo nese VS nebo protiúčet → shoda protiúčtu,
+ *   3. ani jedna strana nemá VS ani protiúčet → karetní platba; spoléhá se na účet
+ *      výpisu, měnu, částku na haléř, datové okno a jednoznačnost kandidáta.
+ * Úroveň 3 je nutná pro karetní avíza typu „Blokace", která VS ani protiúčet
+ * nenesou — bez ní platba zůstane viset na avízu, a to se nikdy neúčtuje.
  */
 final class EmailNoticeReconciler
 {
@@ -132,18 +140,37 @@ final class EmailNoticeReconciler
             if ($gpcCcy !== null && $candCcy !== null && strtoupper($gpcCcy) !== strtoupper($candCcy)) {
                 continue;
             }
-            // VS: má-li GPC tx variabilní symbol, vyžaduj číselnou shodu. Bez VS
-            // (karetní platby) padáme na shodu protiúčtu — jinak je shoda příliš slabá.
+            // VS: má-li GPC tx variabilní symbol, vyžaduj číselnou shodu.
             if ($gpcVsDigits !== '') {
                 if (VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? '')) !== $gpcVsDigits) {
                     continue;
                 }
             } else {
-                $a = (string) ($gpc['counterparty_account'] ?? '');
-                $b = (string) ($r['counterparty_account'] ?? '');
-                if ($a === '' || $b === '' || !AccountNumberNormalizer::equals($a, $b)) {
+                // POZOR: `$gpcAccount` je číslo účtu VÝPISU a používá ho kontrola výš
+                // v každé iteraci — protiúčet proto drž v samostatné proměnné.
+                $gpcCounterparty  = (string) ($gpc['counterparty_account'] ?? '');
+                $candCounterparty = (string) ($r['counterparty_account'] ?? '');
+                $candVsDigits     = VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? ''));
+
+                if ($candCounterparty !== '' || $candVsDigits !== '') {
+                    // Avízo něco identifikujícího nese → drž se shody protiúčtu (jako dosud).
+                    if ($gpcCounterparty === '' || $candCounterparty === ''
+                        || !AccountNumberNormalizer::equals($gpcCounterparty, $candCounterparty)
+                    ) {
+                        continue;
+                    }
+                } elseif ($gpcCounterparty !== '') {
+                    // Avízo je bez identity, ale GPC protistranu zná → jde nejspíš o běžný
+                    // převod, ne o tentýž karetní pohyb. Nepřebíráme (asymetrie = slabá shoda).
                     continue;
                 }
+                // Zbývá symetrický případ: ani jedna strana nemá VS ani protiúčet — přesně
+                // takhle vypadá karetní platba (avízo „Blokace" × GPC řádek karty). Identitu
+                // tu nese shoda účtu výpisu, měny, částky na haléř, datového okna, tenantа
+                // a hlavně JEDNOZNAČNOST kandidáta (count($matches) === 1 níž). Bez téhle
+                // větve by karetní úhrady zůstaly na avízu napořád — a avízo se nikdy
+                // neúčtuje, takže platební noha (vč. kurzového rozdílu) nikdy nedoteče
+                // do deníku.
             }
             $matches[] = $r;
         }
