@@ -67,35 +67,59 @@ final class StatementNotesService
             'label' => 'Použité obecné účetní zásady, metody a odchylky',
             'legal' => '§ 39 odst. 1 písm. b)',
         ],
+        // Písm. b) pokrývá i způsoby oceňování; písm. c) oceňovací model při reálné
+        // hodnotě (mikro ÚJ reálnou hodnotu nepoužívají — stačí „nepoužito").
         'valuation_methods' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
             'label' => 'Způsoby oceňování, odpisování a tvorby opravných položek',
-            'legal' => '§ 39 odst. 1 písm. c)',
+            'legal' => '§ 39 odst. 1 písm. b) a c)',
         ],
         'fx_policy' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
             'label' => 'Způsob přepočtu cizích měn na českou měnu',
-            'legal' => '§ 39 odst. 1 písm. c) ve spojení s § 24 odst. 6 ZoÚ',
+            'legal' => '§ 39 odst. 1 písm. b) ve spojení s § 24 odst. 6 ZoÚ',
         ],
-        'average_employees' => [
-            'scope' => self::SCOPE_ALL, 'auto' => true,
-            'label' => 'Průměrný přepočtený počet zaměstnanců',
-            'legal' => '§ 39 odst. 2 písm. a)',
-        ],
-        'subsequent_events' => [
+        // Standardní blok příloh od účetních (rozpis majetku, pohledávek, vlastního
+        // kapitálu, závazků, rezerv a členění výnosů) — bez něj šablona přílohy
+        // neodpovídala praxi a tenhle obsah neměl kam.
+        'balance_pl_details' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
-            'label' => 'Události po rozvahovém dni',
-            'legal' => '§ 39 odst. 1 písm. i); § 19 odst. 6 ZoÚ',
+            'label' => 'Doplňující údaje k rozvaze a výkazu zisku a ztráty',
+            'legal' => '§ 39 odst. 1 — rozpis významných položek výkazů (majetek, pohledávky, vlastní kapitál, závazky, rezervy, členění výnosů)',
         ],
         'receivables_payables_over_5y' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
             'label' => 'Pohledávky a závazky se splatností delší než 5 let a kryté zárukou',
-            'legal' => '§ 39 odst. 1 písm. f)',
+            'legal' => '§ 39 odst. 1 písm. d) a e)',
+        ],
+        // Chyběly dvě povinné sekce § 39 odst. 1: písm. f) — půjčky a zálohy členům
+        // orgánů (účetní je uvádějí i jako „žádné"), a písm. g) — mimořádné položky
+        // výnosů a nákladů. Bez nich příloha hlásila „úplná", ačkoli zákonný výčet
+        // pokrytý nebyl.
+        'board_loans_advances' => [
+            'scope' => self::SCOPE_ALL, 'auto' => false,
+            'label' => 'Zálohy, závdavky, zápůjčky a úvěry členům řídících, kontrolních a správních orgánů',
+            'legal' => '§ 39 odst. 1 písm. f) — včetně úrokové sazby a hlavních podmínek',
+        ],
+        'extraordinary_items' => [
+            'scope' => self::SCOPE_ALL, 'auto' => false,
+            'label' => 'Výnosy a náklady mimořádné svým objemem nebo původem',
+            'legal' => '§ 39 odst. 1 písm. g)',
         ],
         'off_balance_commitments' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
             'label' => 'Závazky nevykázané v rozvaze (podrozvahová evidence)',
-            'legal' => '§ 39 odst. 1 písm. g)',
+            'legal' => '§ 39 odst. 1 písm. h)',
+        ],
+        'average_employees' => [
+            'scope' => self::SCOPE_ALL, 'auto' => true,
+            'label' => 'Průměrný přepočtený počet zaměstnanců',
+            'legal' => '§ 39 odst. 1 písm. i)',
+        ],
+        'subsequent_events' => [
+            'scope' => self::SCOPE_ALL, 'auto' => false,
+            'label' => 'Události po rozvahovém dni',
+            'legal' => '§ 19 odst. 6 ZoÚ',
         ],
         'governing_body_remuneration' => [
             'scope' => self::SCOPE_AUDITED, 'auto' => false,
@@ -135,7 +159,7 @@ final class StatementNotesService
      * Příloha k závěrce období: povinné sekce dle kategorie, jejich obsah a co chybí.
      *
      * @return array{
-     *   fiscal_year:int, category:string, scopes:list<string>,
+     *   fiscal_year:int, category:string, category_label:string, scopes:list<string>,
      *   sections:list<array{key:string, label:string, legal:string, scope:string,
      *                       auto:bool, content:?string, filled:bool}>,
      *   missing:list<string>, complete:bool
@@ -178,12 +202,13 @@ final class StatementNotesService
         }
 
         return [
-            'fiscal_year' => $fiscalYear,
-            'category'    => $category,
-            'scopes'      => $scopes,
-            'sections'    => $sections,
-            'missing'     => $missing,
-            'complete'    => $missing === [],
+            'fiscal_year'    => $fiscalYear,
+            'category'       => $category,
+            'category_label' => self::categoryLabel($category),
+            'scopes'         => $scopes,
+            'sections'       => $sections,
+            'missing'        => $missing,
+            'complete'       => $missing === [],
         ];
     }
 

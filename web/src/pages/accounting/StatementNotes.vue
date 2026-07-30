@@ -25,7 +25,7 @@ const error = ref('')
 // Rozeditované texty per sekce — uložený obsah z API se drží zvlášť, ať jde poznat
 // „změněno, neuloženo" a tlačítko Uložit svítí jen tam, kde má co uložit.
 const drafts = ref<Record<string, string>>({})
-const saving = ref<Record<string, boolean>>({})
+const savingAll = ref(false)
 
 function applyNotes(n: StatementNotes) {
   notes.value = n
@@ -39,6 +39,7 @@ function isDirty(key: string): boolean {
   return (drafts.value[key] ?? '') !== stored
 }
 
+const dirtyKeys = computed(() => notes.value?.sections.filter(s => isDirty(s.key)).map(s => s.key) ?? [])
 const filledCount = computed(() => notes.value?.sections.filter(s => s.filled).length ?? 0)
 
 async function load() {
@@ -55,18 +56,30 @@ async function load() {
   }
 }
 
-async function saveSection(key: string) {
-  if (!canWrite.value || saving.value[key]) return
-  saving.value = { ...saving.value, [key]: true }
+// Jedno společné Uložit — uloží všechny rozeditované sekce najednou (API je per
+// sekce, takže se PUTuje postupně a aplikuje se poslední vrácený stav). Tlačítko
+// u každé sekce bylo zbytečné klikání.
+async function saveAll() {
+  if (!canWrite.value || savingAll.value || dirtyKeys.value.length === 0) return
+  savingAll.value = true
   try {
-    const content = (drafts.value[key] ?? '').trim()
-    const fresh = await closingApi.saveStatementNote(periodId, key, content !== '' ? drafts.value[key] : null)
-    applyNotes(fresh)
+    // Drafty se čtou předem — applyNotes() po posledním PUTu je resetuje.
+    const toSave = dirtyKeys.value.map(key => {
+      const raw = drafts.value[key] ?? ''
+      return { key, content: raw.trim() !== '' ? raw : null }
+    })
+    let fresh: StatementNotes | null = null
+    for (const s of toSave) {
+      fresh = await closingApi.saveStatementNote(periodId, s.key, s.content)
+    }
+    if (fresh) applyNotes(fresh)
     toast.success(t('accounting.statement_notes.saved'))
   } catch (e) {
     toast.error(apiErrorMessage(e))
+    // Částečně uložený stav — načti čerstvý, ať badge/drafty odpovídají serveru.
+    try { applyNotes(await closingApi.statementNotes(periodId)) } catch { /* ponech */ }
   } finally {
-    saving.value = { ...saving.value, [key]: false }
+    savingAll.value = false
   }
 }
 
@@ -147,19 +160,23 @@ onMounted(load)
           class="w-full text-sm border border-neutral-300 rounded-md p-2.5 focus:ring-primary-500 focus:border-primary-500 disabled:bg-neutral-50 disabled:text-neutral-500"
         ></textarea>
 
-        <div class="flex items-center justify-between gap-3">
-          <p v-if="s.auto" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
-          <span v-else></span>
-          <button
-            v-if="canWrite"
-            type="button"
-            @click="saveSection(s.key)"
-            :disabled="!isDirty(s.key) || saving[s.key]"
-            :class="btnFilled('primary')"
-          >
-            {{ saving[s.key] ? t('common.saving') : t('common.save') }}
-          </button>
-        </div>
+        <p v-if="s.auto" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
+      </div>
+
+      <!-- Jedno společné Uložit pro všechny rozeditované sekce — sticky, ať je po
+           editaci kterékoli sekce po ruce bez scrollování. -->
+      <div v-if="canWrite" class="sticky bottom-4 flex items-center justify-end gap-3 bg-surface/95 backdrop-blur border border-neutral-200 rounded-lg px-4 py-3 shadow-md">
+        <span v-if="dirtyKeys.length" class="text-xs text-neutral-500">
+          {{ t('accounting.statement_notes.unsaved', { count: dirtyKeys.length }) }}
+        </span>
+        <button
+          type="button"
+          @click="saveAll"
+          :disabled="dirtyKeys.length === 0 || savingAll"
+          :class="btnFilled('primary')"
+        >
+          {{ savingAll ? t('common.saving') : t('common.save') }}
+        </button>
       </div>
     </template>
   </div>
