@@ -14,9 +14,9 @@ databáze MariaDB 11.8+.
 
 - `api/` — PHP backend (Slim, autowired actions, services, repositories); `api/bin/` = CLI skripty, `api/tests/` = PHPUnit
 - `web/` — Vue 3 + TS frontend; zdrojáky ve `web/src/`, lokalizace ve `web/src/i18n/`
-- `dist/` — produkční build frontendu (commitovaný — uživatelé testují přes něj)
+- `web/dist/` — produkční build frontendu; **gitignorovaný**, staví se lokálně (`pnpm build`) a v CI do release bundlu
 - `db/migrations/` — SQL migrace (číslované, idempotentní)
-- `manual/` — uživatelský manuál (Markdown, česky); `manual/generated/` = vyrenderované HTML
+- `manual/` — uživatelský manuál (Markdown, česky); `manual/generated/` = vyrenderované HTML, taky gitignorované
 - `tools/` — pomocné skripty (generování manuálu, převody obrázků)
 - `cmd/` — cron/deploy wrappery (`.sh` + `.cmd`/`.ps1`)
 
@@ -46,7 +46,7 @@ databáze MariaDB 11.8+.
 ## Příkazy
 
 ```bash
-# Frontend — build (NUTNÉ po každé změně web/src, dist/ se commituje)
+# Frontend — build (NUTNÉ po každé změně web/src; web/dist/ se necommituje, ale bez buildu neuvidíš změnu v aplikaci)
 cd web && pnpm build            # = vue-tsc --noEmit && vite build (npm run build funguje též)
 cd web && pnpm type-check       # jen typová kontrola
 
@@ -99,7 +99,7 @@ php tools/generateManualHtml.php
 - Citlivé údaje (hesla, API klíče, connection stringy) nikdy do kódu, testů ani dokumentace.
 
 ### Frontend
-- Po každé změně ve `web/src` spusť `pnpm build` — `dist/` je to, co se nasazuje a testuje; samotný `vue-tsc` nestačí.
+- Po každé změně ve `web/src` spusť `pnpm build` — aplikace běží z `web/dist/`, takže bez buildu změnu neuvidíš ani neotestuješ; samotný `vue-tsc` nestačí. Do commitu `web/dist/` nepatří (je gitignorovaný), staví ho CI.
 - Drž se existujícího design language (sjednocené boxy, status badges, mobile cards) — před vymýšlením nového vzoru se podívej, jak to dělají sousední stránky.
 - **Akční tlačítka — jednotný koncept** (vzor detail faktury): každá akce má **ikonu + sémantickou barvu** dle smyslu (`primary` = hlavní krok, `success` = potvrzení/úhrada, `warning` = upomínka/admin zásah, `danger` = destrukce, `neutral` = utility). Na detailních stránkách přes sdílený `ActionBar`/`ActionItem` (`web/src/components/ui/ActionBar.vue`: 1 plná primární akce dle stavu, sekundární outline, utility/destrukce v „…"). Samostatná tlačítka mimo ActionBar přebírají stejné FILLED/OUTLINE styly a ikony — žádná ad-hoc tlačítka bez ikony a sémantické barvy. Platí i pro sekci Účetnictví a všechny nové stránky.
 - Toolbary a skupiny tlačítek vždy s `flex-wrap` (+ `whitespace-nowrap` na tlačítkách) — obsah se při zúžení nesmí mačkat ani přetékat.
@@ -150,5 +150,5 @@ Praktické důsledky:
 
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
-- Změny v `CHANGELOG.md` a `VERSION` dělá maintainer při release — v běžném PR na ně nesahej.
-- Necommituj vygenerované artefakty mimo zavedené výjimky (`dist/`, `manual/generated/` jsou commitované záměrně).
+- `VERSION` a poznámky k vydání (`.github/release-notes/vX.Y.Z.md`) mění maintainer při release — v běžném PR na ně nesahej.
+- Necommituj vygenerované artefakty. `web/dist/`, `manual/generated/` a `manual/manual.pdf` jsou gitignorované; do release bundlu je staví CI (`.github/workflows/docker-publish.yml`).
