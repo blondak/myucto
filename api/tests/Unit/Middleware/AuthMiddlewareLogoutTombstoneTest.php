@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Unit\Middleware;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Service\ApiRequestLogger;
+use Psr\Log\NullLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Security\UserRoleProfile;
@@ -65,6 +67,7 @@ final class AuthMiddlewareLogoutTombstoneTest extends TestCase
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
             $this->roleProfileStub(),
+            new ApiRequestLogger($this->createMock(Connection::class), new NullLogger()),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/invoices')
@@ -130,6 +133,7 @@ final class AuthMiddlewareLogoutTombstoneTest extends TestCase
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
             $this->roleProfileStub(),
+            new ApiRequestLogger($this->createMock(Connection::class), new NullLogger()),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/logout')

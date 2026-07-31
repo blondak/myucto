@@ -169,6 +169,7 @@ const ICONS = {
   cron:       'M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   updates:    'M4 4v5h5M4 9a8 8 0 0 1 14.13-4.06M20 20v-5h-5M20 15a8 8 0 0 1-14.13 4.06',
   api_tokens: 'M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9z',
+  mcp:        'M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5',
   help:       'M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827V14m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   ai:         'M13 10V3L4 14h7v7l9-11h-7z',
   documents:  'M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM9 13h6m-6 4h6',
@@ -469,6 +470,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
         { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks },
         { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
+        { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
         { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
       ],
     })
@@ -508,6 +510,7 @@ const navSections = computed<NavSection[]>(() => {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
     }
     nonAdminSystemItems.push({ to: '/profile/api-tokens', label: t('nav.api_tokens'), icon: ICONS.api_tokens })
+    nonAdminSystemItems.push({ to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp })
     sections.push({
       key: 'system_signing',
       title: t('nav.system'),
@@ -563,7 +566,7 @@ function navPermission(item: NavItem): PermissionKey | null {
   if (path === '/admin/electronic-signatures') return 'settings.signing'
   if (path.startsWith('/admin/settings') || path.startsWith('/admin/integrations')) return 'settings.company'
   if (path.startsWith('/admin/branding')) return 'settings.branding'
-  if (path.startsWith('/profile/api-tokens')) return 'profile.tokens'
+  if (path.startsWith('/profile/api-tokens') || path.startsWith('/profile/mcp-server')) return 'profile.tokens'
   if (path.startsWith('/profile')) return 'profile'
   return null
 }
@@ -906,6 +909,7 @@ const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
   [/^\/admin\/tax-constants(?:\/|$)/, '73_Danove_konstanty'],
   [/^\/admin\/(?:users|roles|activity-log|cron-jobs)(?:\/|$)/, '74_Bezpecnost'],
   [/^\/admin\/update(?:\/|$)/, '75_Aktualizace'],
+  [/^\/profile\/mcp-server(?:\/|$)/, '78_MCP_server'],
   [/^\/profile\/api-tokens(?:\/|$)/, '76_API'],
   [/^\/activation(?:\/|$)/, '77_Licence_a_aktivace'],
   [/^\/admin(?:\/|$)/, '71_Nastaveni'],

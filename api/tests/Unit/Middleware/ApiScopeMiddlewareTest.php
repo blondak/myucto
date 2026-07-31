@@ -65,6 +65,85 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame('token_endpoint_forbidden', $this->errorCode($r));
     }
 
+    /**
+     * Účetní a daňová vrstva je pro token jednosměrná. Bez tohohle testu by stačilo
+     * přidat `/api/accounting` do allowlistu (kvůli čtení sestav) a token s právem
+     * zápisu by tiše získal možnost zaúčtovat doklad nebo uzavřít období.
+     */
+    public function testBearerReadWriteCannotWriteToAccountingOrTaxLayer(): void
+    {
+        $writes = [
+            ['POST', '/api/accounting/journal'],
+            ['POST', '/api/accounting/journal/12/reverse'],
+            ['POST', '/api/accounting/periods/3/status'],
+            ['POST', '/api/reports/s74b/record'],
+            ['POST', '/api/reports/s46/correction'],
+            ['PUT',  '/api/tax/profile'],
+            ['PUT',  '/api/tax-evidence/closing/2026'],
+        ];
+
+        foreach ($writes as [$method, $path]) {
+            $r = $this->middleware()->process(
+                $this->bearer($method, $path, 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(403, $r->getStatusCode(), "$method $path musí být odmítnuto");
+            self::assertSame('token_write_forbidden', $this->errorCode($r), "$method $path");
+        }
+    }
+
+    public function testBearerCanReadAccountingAndTaxReports(): void
+    {
+        $reads = [
+            '/api/accounting/periods',
+            '/api/accounting/reports/trial-balance',
+            '/api/accounting/reports/balance-sheet',
+            '/api/accounting/journal',
+            '/api/reports/dphdp3/preview',
+            '/api/tax/analysis',
+            '/api/tax-evidence/cash-journal',
+        ];
+
+        foreach ($reads as $path) {
+            $r = $this->middleware()->process(
+                $this->bearer('GET', $path, 'read'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $r->getStatusCode(), "GET $path musí projít");
+        }
+    }
+
+    public function testBearerCanReachStockAndEshopModules(): void
+    {
+        // MCP server nad nimi staví nástroje pro zboží a zásoby; případné vypnutí
+        // modulu řeší až GuardsStockEnabled, ne scope middleware.
+        foreach (['/api/stock/levels', '/api/eshop/products/1', '/api/price-list-items'] as $path) {
+            $r = $this->middleware()->process(
+                $this->bearer('GET', $path, 'read'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $r->getStatusCode(), "GET $path musí projít");
+        }
+    }
+
+    public function testBearerReadCannotWriteToEshop(): void
+    {
+        // E-shop zápis JE povolený, ale jen se scope read_write — kontrola,
+        // že rozšíření allowlistu neobešlo běžné scope pravidlo.
+        $r = $this->middleware()->process(
+            $this->bearer('PUT', '/api/eshop/products/1/prices', 'read'),
+            $this->okHandler(),
+        );
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('insufficient_scope', $this->errorCode($r));
+
+        $ok = $this->middleware()->process(
+            $this->bearer('PUT', '/api/eshop/products/1/prices', 'read_write'),
+            $this->okHandler(),
+        );
+        self::assertSame(204, $ok->getStatusCode());
+    }
+
     public function testBearerBlockedFromTokenManagementAndSensitiveSettings(): void
     {
         foreach ([

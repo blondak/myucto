@@ -22,6 +22,8 @@ use Slim\Psr7\Factory\ResponseFactory;
  * 2) Scope:
  *      GET / HEAD                 → vyžaduje `read` (každý token splňuje)
  *      POST / PUT / PATCH / DELETE → vyžaduje `read_write`
+ *    Nad rámec toho je účetní a daňová vrstva ({@see self::BEARER_READ_ONLY})
+ *    pro token jednosměrná — zápis odmítne i `read_write`.
  *
  * Session auth (browser SPA) tímto MW není dotčen — uživatel má plná práva své role.
  *
@@ -64,12 +66,20 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/documents(/|$)#',
         '#^/api/document-folders(/|$)#',
         '#^/api/suppliers(/|$)#',
+        // Sklad a e-shop — MCP server nad nimi staví nástroje pro zboží, ceny
+        // a dostupnost. Moduly jsou opt-in (`stock_enabled`) a PermissionMiddleware
+        // nad `^/api/(stock|eshop)` platí dál, takže se tím nic neotevírá plošně.
+        '#^/api/stock(/|$)#',
+        '#^/api/eshop(/|$)#',
+        '#^/api/price-list-items(/|$)#',
         // Dashboard / CRM / reporty (čtení + exporty)
         '#^/api/dashboard(/|$)#',
         '#^/api/crm(/|$)#',
         '#^/api/portfolio(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
+        '#^/api/tax-evidence(/|$)#',
+        '#^/api/accounting(/|$)#',
         '#^/api/search$#',
         '#^/api/branding-profiles$#',
         // Číselníky
@@ -87,6 +97,28 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/settings/units(/|$)#',
         '#^/api/settings/countries(/|$)#',
         '#^/api/settings/nace-codes$#',
+    ];
+
+    /**
+     * Cesty, které jsou přes bearer token dostupné VÝHRADNĚ KE ČTENÍ — i pro token
+     * se scope `read_write`.
+     *
+     * Účetní a daňová vrstva je záměrně jednosměrná: zaúčtování, storno zápisu,
+     * uzavření období, zaevidování opravy podle § 46 / § 74b nebo odeslání podání
+     * na EPO jsou úkony s daňovou odpovědností. Chyba v nich znamená opravné
+     * podání, takže je nesmí spustit integrace ani AI agent — dělá je člověk
+     * v aplikaci, kde vidí kontext a potvrzuje krok.
+     *
+     * Čtení je naopak žádoucí: odhad DPH za období, obratovka, rozvaha, výsledovka
+     * i saldo jsou přesně ta čísla, kvůli kterým se integrace staví.
+     *
+     * @var list<string>
+     */
+    private const BEARER_READ_ONLY = [
+        '#^/api/accounting(/|$)#',
+        '#^/api/reports(/|$)#',
+        '#^/api/tax(/|$)#',
+        '#^/api/tax-evidence(/|$)#',
     ];
 
     public function __construct(
@@ -120,6 +152,20 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        // 2a) Účetní / daňová vrstva — zápis přes token nikdy, ani se `read_write`.
+        //     Kontrola je PŘED scope kontrolou schválně: token s právem zápisu by
+        //     jinak prošel a hláška „nemáte scope" by lhala o důvodu odmítnutí.
+        if ($this->isReadOnlyForBearer($path)) {
+            $response = $this->responseFactory->createResponse(403);
+            return Json::error(
+                $response,
+                'token_write_forbidden',
+                'Účetní a daňová vrstva je přes API token dostupná pouze ke čtení. '
+                . 'Zaúčtování, uzávěrku a daňová podání lze provést jen z webového rozhraní.',
+                403,
+            );
+        }
+
         $apiToken = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
         $scope    = (string) ($apiToken['scope'] ?? '');
 
@@ -139,6 +185,16 @@ final class ApiScopeMiddleware implements MiddlewareInterface
     private function isBearerAllowed(string $path): bool
     {
         foreach (self::BEARER_ALLOWED as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function isReadOnlyForBearer(string $path): bool
+    {
+        foreach (self::BEARER_READ_ONLY as $pattern) {
             if (preg_match($pattern, $path) === 1) {
                 return true;
             }

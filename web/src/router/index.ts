@@ -326,6 +326,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'profile/password',       name: 'profile-password',      component: () => import('@/pages/PasswordChange.vue'), meta: {  } },
       { path: 'profile/shortcuts',      name: 'profile-shortcuts',     redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'shortcuts' } }) },
       { path: 'profile/api-tokens',     name: 'profile-api-tokens',    component: () => import('@/pages/ApiTokens.vue') },
+      { path: 'profile/mcp-server',     name: 'profile-mcp-server',    component: () => import('@/pages/McpServer.vue') },
       { path: 'profile/passkeys',       name: 'profile-passkeys',      redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'passkeys' } }) },
       { path: 'profile/session-lock',   name: 'profile-session-lock',  redirect: (to) => ({ path: '/profile/password', query: { ...to.query, tab: 'session-lock' } }) },
       { path: 'profile/signing-profiles', name: 'profile-signing-profiles', redirect: '/admin/electronic-signatures' },
@@ -400,7 +401,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
-  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
+  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
 }
 
 const superadminRouteNames = new Set([

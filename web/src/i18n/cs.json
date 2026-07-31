@@ -534,7 +534,8 @@
     "quick_stock_issue": "Nová výdejka",
     "quick_stock_item": "Nová skladová karta",
     "reports_oss": "OSS přiznání",
-    "section_finance": "Finance"
+    "section_finance": "Finance",
+    "mcp_server": "MCP server"
   },
   "keyboard_shortcuts": {
     "title": "Klávesové zkratky",
@@ -4168,7 +4169,19 @@
     "created_warning": "Plain-text token se zobrazí pouze jednou. Ulož si ho do password manageru — později už ho nezískáš.",
     "created_confirm": "Token jsem si bezpečně uložil/a a rozumím tomu, že ho znovu neuvidím.",
     "copy": "Kopírovat",
-    "copied": "Zkopírováno"
+    "copied": "Zkopírováno",
+    "col_ip": "IP omezení",
+    "ip_none": "bez omezení",
+    "ip_manage": "Nastavit omezení podle IP adresy",
+    "ip_title": "Omezení podle IP adresy",
+    "ip_intro": "Prázdný seznam znamená bez omezení — token funguje z libovolné adresy. Jakmile přidáš první pravidlo, projdou už jen volání z uvedených adres a rozsahů.",
+    "ip_empty": "Zatím žádné pravidlo — token funguje odkudkoliv.",
+    "ip_address": "IP adresa nebo rozsah",
+    "ip_placeholder": "192.168.1.0/24",
+    "ip_note": "Poznámka",
+    "ip_add": "Přidat",
+    "ip_remove": "Odebrat",
+    "ip_hint": "Podporuje IPv4 i IPv6, samostatnou adresu i CIDR rozsah — např. 203.0.113.7, 192.168.1.0/24, 2001:db8::1, 2001:db8::/32."
   },
   "license": {
     "banner_trial": "Zkušební období končí za {days} dní — aktivujte licenci, aby zůstaly dostupné podvojné účetnictví, sklad a další komerční moduly.",

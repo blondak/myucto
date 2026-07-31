@@ -77,6 +77,12 @@ $report['login_otps'] = (int) $n;
 $n = $pdo->exec("DELETE FROM trusted_devices WHERE expires_at < NOW()");
 $report['trusted_devices'] = (int) $n;
 
+// 3d) api_request_log — log volání veřejného API (MCP server) starší 90 dní.
+// Není to auditní stopa podle § 33a (ta je v activity_log a maže se NIKDY), jen
+// provozní přehled „co token volal", takže retence je krátká a bez pečetění.
+$n = $pdo->exec("DELETE FROM api_request_log WHERE ts < NOW() - INTERVAL 90 DAY");
+$report['api_request_log'] = (int) $n;
+
 // 4) ARES/VIES cache — starší 30 dní
 $n = $pdo->exec("DELETE FROM ares_cache WHERE fetched_at < NOW() - INTERVAL 30 DAY");
 $report['ares_cache'] = (int) $n;

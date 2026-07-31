@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Clock\UtcClock;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\ApiRequestLogMiddleware;
 use MyInvoice\Middleware\ApiScopeMiddleware;
 use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -364,7 +365,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → Auth → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   IpAllowlist → FirstRunLock → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         $app->addBodyParsingMiddleware();                            // innermost
         $app->addRoutingMiddleware();
@@ -378,6 +379,7 @@ final class Bootstrap
         $app->add($container->get(LicenseMiddleware::class));        // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
         $app->add($container->get(RequireMfaMiddleware::class));     // assurance + povinný MFA setup (bearer skip)
         $app->add($container->get(SessionLockMiddleware::class));    // autoritativní idle/manual lock browser session
+        $app->add($container->get(ApiRequestLogMiddleware::class));  // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
         $app->add($container->get(AuthMiddleware::class));           // načte session nebo bearer token
         $app->add($container->get(FirstRunLockMiddleware::class));   // 423 pokud users prázdná
         $app->add($container->get(IpAllowlistMiddleware::class));    // outermost user mw

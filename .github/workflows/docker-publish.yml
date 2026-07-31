@@ -197,6 +197,12 @@ jobs:
           php tools/generateManualHtml.php
           php tools/exportManualToPdf.php
 
+      # MCP server — jednosouborový build. Do bundlu jde `MCP/dist/myucto-mcp.mjs`,
+      # takže uživatel nemusí mít Node toolchain ani spouštět `npm install`; stačí
+      # mu Node runtime. `MCP/node_modules` se do tarballu nedostane (exclude níže).
+      - name: Build MCP server (single file)
+        run: ./cmd/build-mcp.sh
+
       - name: Tag from ref
         id: tag
         run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -229,6 +235,7 @@ jobs:
             --exclude='./.env' \
             --exclude='./web/src' \
             --exclude='./web/node_modules' \
+            --exclude='./MCP/node_modules' \
             --exclude='./web/public' \
             --exclude='./web/index.html' \
             --exclude='./web/package.json' \
@@ -243,6 +250,11 @@ jobs:
           ls -lh "$BUNDLE"
           sha256sum "$BUNDLE" > "$BUNDLE.sha256"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
+      # MCP server i samostatně: kdo chce jen napojit AI asistenta, nemusí kvůli
+      # jednomu souboru stahovat celý deployment bundle.
+      - name: Stage MCP server as standalone asset
+        run: cp MCP/dist/myucto-mcp.mjs "myucto-mcp-${{ steps.tag.outputs.tag }}.mjs"
 
       # `generate_release_notes: true` — GitHub sám vygeneruje changelog
       # (commity + přispěvatelé) proti předchozímu tagu. Když repo obsahuje
@@ -265,3 +277,4 @@ jobs:
           files: |
             ${{ env.BUNDLE }}
             ${{ env.BUNDLE }}.sha256
+            myucto-mcp-${{ steps.tag.outputs.tag }}.mjs

@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Service\ApiRequestLogger;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -78,6 +79,7 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly ApiTokenService $apiTokens,
         private readonly IpMatcher $ipMatcher,
         private readonly UserRoleProfile $roleProfile,
+        private readonly ApiRequestLogger $apiRequestLog,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -91,8 +93,47 @@ final class AuthMiddleware implements MiddlewareInterface
             $plaintext = substr($authHeader, 7);
             $tokenRow = $this->apiTokens->validate($plaintext);
             if ($tokenRow === null) {
+                // Neplatný token se do `api_request_log` schválně NEZAPISUJE: volání je
+                // plně pod kontrolou útočníka, takže by šlo tabulku libovolně nafouknout.
+                // Stopu po takových pokusech nese aplikační log a rate limiter.
                 $response = $this->responseFactory->createResponse(401);
                 return Json::error($response, 'invalid_token', 'Neplatný nebo expirovaný API token.', 401);
+            }
+
+            $ip = $this->ipMatcher->clientIp(
+                $request->getServerParams(),
+                (array) $this->config->get('ip_allowlist.trusted_proxies', []),
+                (string) $this->config->get('ip_allowlist.header', 'X-Forwarded-For'),
+            );
+
+            // Volitelný IP allowlist tokenu. PRÁZDNÝ SEZNAM = bez omezení — jinak by
+            // se zamkly všechny tokeny vydané před zavedením téhle funkce.
+            $ipRules = $this->apiTokens->ipRulesFor((int) $tokenRow['id']);
+            if ($ipRules !== [] && !$this->ipMatcher->matches($ip, $ipRules)) {
+                // Tohle naopak logujeme — token je známý, takže objem je omezený jeho
+                // rate limitem, a majitel potřebuje vidět, že mu někdo volá odjinud.
+                $this->apiRequestLog->log([
+                    'token_id'       => (int) $tokenRow['id'],
+                    'user_id'        => (int) $tokenRow['user_id'],
+                    'supplier_id'    => $tokenRow['supplier_id'],
+                    'ip'             => $ip,
+                    'method'         => $request->getMethod(),
+                    'route'          => $request->getUri()->getPath(),
+                    'query'          => $request->getUri()->getQuery(),
+                    'status'         => 403,
+                    'scope_used'     => (string) ($tokenRow['scope'] ?? ''),
+                    'client'         => $request->getHeaderLine('X-MyUcto-Client'),
+                    'client_version' => $request->getHeaderLine('X-MyUcto-Client-Version'),
+                    'tool'           => $request->getHeaderLine('X-MyUcto-Tool'),
+                    'error_code'     => 'token_ip_forbidden',
+                ]);
+                $response = $this->responseFactory->createResponse(403);
+                return Json::error(
+                    $response,
+                    'token_ip_forbidden',
+                    'API token není povolen z této IP adresy.',
+                    403,
+                );
             }
 
             $user = [
@@ -114,11 +155,6 @@ final class AuthMiddleware implements MiddlewareInterface
             ];
             Locale::set((string) ($user['locale'] ?? 'cs'));
 
-            $ip = $this->ipMatcher->clientIp(
-                $request->getServerParams(),
-                (array) $this->config->get('ip_allowlist.trusted_proxies', []),
-                (string) $this->config->get('ip_allowlist.header', 'X-Forwarded-For'),
-            );
             $this->apiTokens->touch($tokenRow['id'], $ip);
 
             $request = $request

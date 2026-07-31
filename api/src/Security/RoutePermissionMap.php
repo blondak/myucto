@@ -40,6 +40,8 @@ final class RoutePermissionMap
     private const RULES = [
         ['GET', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::READ],
         ['*', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::WRITE],
+        // Log volání API vlastními tokeny — čtení sdílí oprávnění se správou tokenů.
+        ['GET', '#^/api/auth/api-log$#', 'profile.tokens', AccessLevel::READ],
 
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],

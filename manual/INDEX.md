@@ -128,6 +128,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 75. [Aktualizace](75_Aktualizace.md)
 76. [REST API](76_API.md)
 77. [Licence a aktivace](77_Licence_a_aktivace.md)
+78. [MCP server (napojení AI asistenta)](78_MCP_server.md)
 
 ### Reference
 

@@ -117,6 +117,20 @@ final class IpMatcher
      */
     private function normalize(string $ip): ?string
     {
+        return self::canonicalize($ip);
+    }
+
+    /**
+     * Kanonický tvar IP adresy — SSOT pro celou aplikaci.
+     *
+     * Statická a veřejná schválně: stejnou normalizaci potřebuje i validace
+     * pravidel IP allowlistu tokenů ({@see \MyInvoice\Service\Auth\ApiTokenService::normalizeRule}).
+     * Kdyby si ji zapsala po svém, uložilo by se pravidlo v jiném tvaru, než jaký
+     * tady matchování očekává — a allowlist by tiše nefungoval. Vlastní kopii
+     * téhle logiky proto nikde nezakládej.
+     */
+    public static function canonicalize(string $ip): ?string
+    {
         $ip = trim($ip);
         if ($ip === '') {
             return null;
@@ -137,6 +151,16 @@ final class IpMatcher
 
         $back = inet_ntop($packed);
         return $back === false ? null : $back;
+    }
+
+    /**
+     * Počet bitů adresy (32 pro IPv4, 128 pro IPv6), nebo null u neplatné adresy.
+     * Používá validace CIDR prefixu, aby „1.2.3.0/64" neprošlo jako platné pravidlo.
+     */
+    public static function addressBits(string $ip): ?int
+    {
+        $packed = @inet_pton(trim($ip));
+        return $packed === false ? null : strlen($packed) * 8;
     }
 
     /**

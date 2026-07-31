@@ -534,7 +534,8 @@
     "quick_stock_issue": "New goods issue",
     "quick_stock_item": "New stock item",
     "reports_oss": "OSS return",
-    "section_finance": "Finance"
+    "section_finance": "Finance",
+    "mcp_server": "MCP server"
   },
   "keyboard_shortcuts": {
     "title": "Keyboard shortcuts",
@@ -4168,7 +4169,19 @@
     "created_warning": "The plain-text token is shown only once. Save it to a password manager — you won't see it again.",
     "created_confirm": "I've saved the token safely and understand I won't see it again.",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "col_ip": "IP limits",
+    "ip_none": "unrestricted",
+    "ip_manage": "Restrict token to IP addresses",
+    "ip_title": "IP address restrictions",
+    "ip_intro": "An empty list means no restriction — the token works from any address. Once you add the first rule, only calls from the listed addresses and ranges get through.",
+    "ip_empty": "No rules yet — the token works from anywhere.",
+    "ip_address": "IP address or range",
+    "ip_placeholder": "192.168.1.0/24",
+    "ip_note": "Note",
+    "ip_add": "Add",
+    "ip_remove": "Remove",
+    "ip_hint": "Supports IPv4 and IPv6, a single address as well as a CIDR range — e.g. 203.0.113.7, 192.168.1.0/24, 2001:db8::1, 2001:db8::/32."
   },
   "license": {
     "banner_trial": "Trial ends in {days} days — activate a license to keep double-entry accounting, stock and other commercial modules available.",

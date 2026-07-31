@@ -25,6 +25,28 @@ info:
       se odehrávají v jeho kontextu. Pokud je `supplier` `null`, klient může
       přepínat přes hlavičku `X-Supplier-Id: <id>`.
     - volitelnou expiraci.
+    - volitelné **omezení podle IP adresy** — seznam povolených adres a CIDR
+      rozsahů (IPv4 i IPv6). Prázdný seznam znamená bez omezení; jinak volání
+      z jiné adresy skončí `403 token_ip_forbidden`.
+
+    ## Účetnictví a daně jen ke čtení
+
+    Nad rámec scopů platí, že **účetní a daňová vrstva je přes token jednosměrná**.
+    Cesty `/api/v1/accounting/**`, `/api/v1/reports/**`, `/api/v1/tax/**`
+    a `/api/v1/tax-evidence/**` odpovídají na `GET`, ale jakýkoli zápis odmítnou
+    chybou `403 token_write_forbidden` — i tokenu se scope `read_write`.
+
+    Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
+    § 46 / § 74b i odeslání podání na EPO jsou úkony s daňovou odpovědností, kde
+    chyba znamená opravné podání. Provádějí se výhradně z webového rozhraní.
+
+    ## Logování volání
+
+    Každé volání tokenem se zaznamenává (cesta, metoda, návratový kód, doba
+    zpracování, zdrojová IP) a uživatel si ho prohlédne v aplikaci. Klient se
+    může označit hlavičkami `X-MyUcto-Client`, `X-MyUcto-Client-Version`
+    a `X-MyUcto-Tool`; jejich hodnoty se do logu propíšou, takže je ve výpisu
+    poznat, která integrace a která její operace volání vyvolala.
 
     ## Verzování
 

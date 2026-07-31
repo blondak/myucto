@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\IpMatcher;
 use PDO;
 
 /**
@@ -201,7 +202,8 @@ final class ApiTokenService
             'SELECT t.id, t.supplier_id, s.display_name AS supplier_name, s.company_name AS supplier_company,
                     t.name, t.prefix, t.scope,
                     t.last_used_at, t.last_used_ip,
-                    t.expires_at, t.revoked_at, t.created_at
+                    t.expires_at, t.revoked_at, t.created_at,
+                    (SELECT COUNT(*) FROM api_token_ips ip WHERE ip.token_id = t.id) AS ip_rule_count
              FROM api_tokens t
              LEFT JOIN supplier s ON s.id = t.supplier_id
              WHERE t.user_id = ?
@@ -210,8 +212,9 @@ final class ApiTokenService
         $stmt->execute([$userId]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
         foreach ($rows as &$r) {
-            $r['id']          = (int) $r['id'];
-            $r['supplier_id'] = $r['supplier_id'] !== null ? (int) $r['supplier_id'] : null;
+            $r['id']            = (int) $r['id'];
+            $r['supplier_id']   = $r['supplier_id'] !== null ? (int) $r['supplier_id'] : null;
+            $r['ip_rule_count'] = (int) $r['ip_rule_count'];
             if ($r['last_used_ip'] !== null) {
                 $r['last_used_ip'] = @inet_ntop($r['last_used_ip']) ?: null;
             }
@@ -219,6 +222,135 @@ final class ApiTokenService
             $r['is_expired'] = $r['expires_at'] !== null && strtotime((string) $r['expires_at']) < time();
         }
         return $rows;
+    }
+
+    /**
+     * Pravidla IP allowlistu tokenu. PRÁZDNÝ SEZNAM = bez omezení.
+     *
+     * @return list<array{id:int,cidr:string,note:string,created_at:string}>
+     */
+    public function listIpRules(int $tokenId, int $userId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ip.id, ip.cidr, ip.note, ip.created_at
+               FROM api_token_ips ip
+               JOIN api_tokens t ON t.id = ip.token_id
+              WHERE ip.token_id = ? AND t.user_id = ?
+              ORDER BY ip.id'
+        );
+        $stmt->execute([$tokenId, $userId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        foreach ($rows as &$r) {
+            $r['id'] = (int) $r['id'];
+        }
+        return $rows;
+    }
+
+    /**
+     * Jen samotná pravidla (bez kontroly vlastnictví) — pro ověření při autentizaci.
+     *
+     * @return list<string>
+     */
+    public function ipRulesFor(int $tokenId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT cidr FROM api_token_ips WHERE token_id = ?');
+        $stmt->execute([$tokenId]);
+        return array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /**
+     * Přidá pravidlo. Vrací id, nebo null pokud token uživateli nepatří.
+     *
+     * @throws \InvalidArgumentException při neplatném zápisu adresy/rozsahu
+     */
+    public function addIpRule(int $tokenId, int $userId, string $cidr, string $note): ?int
+    {
+        $cidr = self::normalizeRule($cidr);
+        $note = mb_substr(trim($note), 0, 255);
+
+        $pdo  = $this->db->pdo();
+        $own  = $pdo->prepare('SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?');
+        $own->execute([$tokenId, $userId]);
+        if ($own->fetchColumn() === false) {
+            return null;
+        }
+
+        // Opakované přidání téhož pravidla není chyba — jen ho nechceme duplikovat.
+        $stmt = $pdo->prepare(
+            'INSERT INTO api_token_ips (token_id, cidr, note) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE note = VALUES(note)'
+        );
+        $stmt->execute([$tokenId, $cidr, $note]);
+
+        $id = (int) $pdo->lastInsertId();
+        if ($id > 0) {
+            return $id;
+        }
+        $existing = $pdo->prepare('SELECT id FROM api_token_ips WHERE token_id = ? AND cidr = ?');
+        $existing->execute([$tokenId, $cidr]);
+        return (int) $existing->fetchColumn();
+    }
+
+    /**
+     * Odebere pravidlo (jen z tokenu daného usera). Idempotentní.
+     */
+    public function deleteIpRule(int $ruleId, int $userId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE ip FROM api_token_ips ip
+               JOIN api_tokens t ON t.id = ip.token_id
+              WHERE ip.id = ? AND t.user_id = ?'
+        );
+        $stmt->execute([$ruleId, $userId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Ověří a zkanonizuje zápis pravidla IP allowlistu.
+     *
+     * Kanonizaci adresy dělá {@see IpMatcher::canonicalize()} — tedy přesně ta
+     * funkce, kterou pak používá i matchování. Vlastní normalizace by uložila
+     * pravidlo v jiném tvaru (typicky `::ffff:1.2.3.4` místo `1.2.3.4`) a
+     * allowlist by tiše nefungoval.
+     *
+     * Prefix se kontroluje proti rodině adresy (IPv4 max /32, IPv6 max /128) —
+     * jinak by "1.2.3.0/64" prošlo do DB jako pravidlo, které nikdy nic
+     * nenamatchuje, a uživatel by si myslel, že si přístup povolil.
+     */
+    public static function normalizeRule(string $rule): string
+    {
+        $rule = trim($rule);
+        if ($rule === '') {
+            throw new \InvalidArgumentException('Zadejte IP adresu nebo rozsah.');
+        }
+        if (mb_strlen($rule) > 64) {
+            throw new \InvalidArgumentException('Pravidlo je příliš dlouhé.');
+        }
+
+        $addr   = $rule;
+        $prefix = null;
+        if (str_contains($rule, '/')) {
+            [$addr, $prefixStr] = explode('/', $rule, 2);
+            $addr = trim($addr);
+            if (preg_match('/^\d{1,3}$/', trim($prefixStr)) !== 1) {
+                throw new \InvalidArgumentException('Neplatná délka prefixu: ' . $rule);
+            }
+            $prefix = (int) trim($prefixStr);
+        }
+
+        $canonical = IpMatcher::canonicalize($addr);
+        $bits      = IpMatcher::addressBits($canonical ?? '');
+        if ($canonical === null || $bits === null) {
+            throw new \InvalidArgumentException('Neplatná IP adresa: ' . $rule);
+        }
+
+        if ($prefix !== null && $prefix > $bits) {
+            throw new \InvalidArgumentException(
+                'Prefix /' . $prefix . ' je mimo rozsah pro ' . ($bits === 32 ? 'IPv4' : 'IPv6') . ' (max /' . $bits . ').'
+            );
+        }
+
+        return $prefix !== null ? $canonical . '/' . $prefix : $canonical;
     }
 
     /**

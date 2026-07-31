@@ -141,7 +141,67 @@ Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 
 Volání s nedostatečným scopem vrátí `403 insufficient_scope`.
 
-## 76.7 Chybové odpovědi
+### Účetnictví a daně jen ke čtení
+
+Nad rámec scopů platí tvrdé pravidlo: **účetní a daňová vrstva je přes API token
+jednosměrná**. Čtení funguje normálně, zápis odmítne i token se scope
+`read_write` — chybou `403 token_write_forbidden`.
+
+| Cesta | `GET` | zápis |
+|---|---|---|
+| `/api/v1/accounting/**` | ano | **ne** |
+| `/api/v1/reports/**` | ano | **ne** |
+| `/api/v1/tax/**`, `/api/v1/tax-evidence/**` | ano | **ne** |
+
+Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
+§ 46 / § 74b i odeslání podání na EPO jsou úkony s daňovou odpovědností, kde
+chyba znamená opravné podání. Dělají se proto výhradně z webového rozhraní,
+kde je vidět kontext a krok se potvrzuje. Integraci ani AI asistentovi to
+nebrání v tom podstatném — obratovku, rozvahu, výsledovku, saldo i odhad DPH
+si přes API přečtou.
+
+## 76.7 Omezení tokenu podle IP adresy
+
+U každého tokenu lze nastavit **seznam povolených zdrojových adres**. Ve výpisu
+tokenů k tomu slouží sloupec **IP omezení**.
+
+- **Prázdný seznam = bez omezení.** Token funguje odkudkoliv. Tak se chovají
+  všechny existující tokeny, dokud jim první pravidlo nepřidáš.
+- Jakmile přidáš první pravidlo, projdou jen volání z uvedených adres.
+  Ostatní dostanou `403 token_ip_forbidden` — a zamítnutí se zapíše do logu
+  volání (viz níže), takže je poznat, že někdo zkouší token odjinud.
+- Podporované zápisy: **IPv4 i IPv6**, samostatná adresa i CIDR rozsah.
+
+| Zápis | Význam |
+|---|---|
+| `203.0.113.7` | jediná IPv4 adresa |
+| `192.168.1.0/24` | celý rozsah IPv4 |
+| `2001:db8::1` | jediná IPv6 adresa |
+| `2001:db8::/32` | prefix IPv6 |
+
+Neplatný zápis se neuloží. Kontroluje se i smysluplnost prefixu vůči rodině
+adresy, takže `192.168.1.0/64` skončí chybou — jinak by vzniklo pravidlo,
+které nikdy nic nepovolí, a token by tiše přestal fungovat.
+
+> [!TIP]
+> Když jede integrace z jednoho serveru, omez token na jeho adresu. Uniklý
+> token je pak k ničemu komukoli mimo tvou síť.
+
+## 76.8 Log volání API
+
+Každé volání bearer tokenem se zaznamenává — včetně zamítnutých. Výpis najdeš
+v **Nastavení firmy → MCP server → Log volání**; vidíš vždy jen volání svých
+vlastních tokenů.
+
+U každého záznamu je čas, token, HTTP metoda, cesta, návratový kód, doba
+zpracování a zdrojová IP. U volání z MCP serveru navíc **název nástroje**,
+který volání vyvolal, takže je poznat záměr, ne jen holá cesta.
+
+Filtrovat jde podle tokenu, metody, cesty, zdroje (jen MCP) a na samotné chyby.
+Záznamy se drží **90 dní**, pak je uklidí údržbový cron. Nejde o auditní stopu
+podle § 33a — ta žije dál v Aktivitě uživatelů a nemaže se.
+
+## 76.9 Chybové odpovědi
 
 Všechny chyby v unifikovaném formátu:
 
@@ -153,11 +213,14 @@ Všechny chyby v unifikovaném formátu:
 |---|---|
 | `unauthenticated` / `invalid_token` | Chybí nebo neplatný token |
 | `insufficient_scope` | Token nemá `read_write` |
+| `token_endpoint_forbidden` | Endpoint není přes token dostupný (jen z webu) |
+| `token_write_forbidden` | Zápis do účetní / daňové vrstvy — přes token nikdy |
+| `token_ip_forbidden` | Token není povolen z této IP adresy |
 | `validation_failed` | Tělo neprošlo validací |
 | `not_found` | Zdroj neexistuje (nebo nepatří aktuálnímu supplier-ovi) |
 | `rate_limited` | Překročen limit (viz `Retry-After`) |
 
-## 76.8 Nastavení dodavatele a číslování dokladů přes API
+## 76.10 Nastavení dodavatele a číslování dokladů přes API
 
 Veřejný subset nastavení dodavatele jde měnit tokenem se scope `read_write`
 (uživatel tokenu musí být admin):
@@ -200,7 +263,7 @@ curl -X POST https://mojefirma.example/api/v1/settings/supplier/logo \
 # → { "logo_path": "storage/supplier-logos/sup-1.png", "width": 480, "height": 160 }
 ```
 
-## 76.9 Brandingový profil faktury
+## 76.11 Brandingový profil faktury
 
 Po zapnutí modulu brandingových profilů vrací aktivní profily aktuálního
 dodavatele read-only endpoint:
@@ -239,7 +302,7 @@ výchozí profil dodavatele. Není-li žádný nastaven, použije základní ide
 Při vystavení se výsledná identita včetně cesty k verzi loga uloží do snapshotu
 faktury. Pozdější úprava profilu tedy již vystavený doklad nezmění.
 
-## 76.10 Export faktur přes API
+## 76.12 Export faktur přes API
 
 - **`GET /api/v1/invoices/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM`**
   — hromadný export vystavených dokladů za měsíc (nebo
@@ -255,7 +318,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
   "https://mojefirma.example/api/v1/invoices/export?format=isdoc&month=2026-06"
 ```
 
-## 76.11 Bezpečnost tokenů — best practices
+## 76.13 Bezpečnost tokenů — best practices
 
 - **Ukládej token jako secret** (password manager, Make encrypted variable, GitHub Secrets…).
   Nepushuj do gitu.
@@ -266,7 +329,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 - **Sleduj `last_used_at`** v UI — token, který se 3 měsíce nepoužil, asi nepotřebuješ.
 - **Při ztrátě/podezření** — okamžitě **Zrušit** v UI. Revokace je instantní (žádný cache).
 
-## 76.12 Co API nepokrývá
+## 76.14 Co API nepokrývá
 
 - **Admin a settings endpointy** (`/api/admin/*` a `/api/settings/*` mimo
   veřejný subset — supplier, číselníky) nejsou v `openapi.yaml` - jsou určené

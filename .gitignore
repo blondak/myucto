@@ -14,6 +14,8 @@ api/vendor/
 api/vendor.prod/
 api/.phpunit.cache/
 web/node_modules/
+MCP/node_modules/
+MCP/dist/
 web/dist/
 web/dist.bak/
 dist/

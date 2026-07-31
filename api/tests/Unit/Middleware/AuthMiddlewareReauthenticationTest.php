@@ -10,6 +10,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\ApiRequestLogger;
+use Psr\Log\NullLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
@@ -278,6 +280,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             $this->createMock(ApiTokenService::class),
             $this->createMock(IpMatcher::class),
             $this->roleProfileStub(),
+            new ApiRequestLogger($this->createMock(Connection::class), new NullLogger()),
         );
     }
 

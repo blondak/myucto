@@ -15,6 +15,47 @@ export interface ApiToken {
   created_at: string
   is_revoked: boolean
   is_expired: boolean
+  /** Počet pravidel IP allowlistu. 0 = token funguje z libovolné adresy. */
+  ip_rule_count: number
+}
+
+export interface TokenIpRule {
+  id: number
+  /** IPv4/IPv6 adresa nebo CIDR rozsah, např. `192.168.1.0/24`, `2001:db8::/32`. */
+  cidr: string
+  note: string
+  created_at: string
+}
+
+export interface ApiLogEntry {
+  id: number
+  token_id: number | null
+  token_name: string | null
+  supplier_id: number | null
+  ts: string
+  ip: string | null
+  method: string
+  route: string
+  query: string
+  status: number
+  duration_ms: number
+  scope_used: string
+  /** `mcp` u volání z MCP serveru, prázdné u přímé integrace. */
+  client: string
+  client_version: string
+  /** Název MCP nástroje, který volání vyvolal. */
+  tool: string
+  error_code: string
+}
+
+export interface ApiLogFilter {
+  token_id?: number
+  method?: string
+  route?: string
+  client?: string
+  only_errors?: boolean
+  limit?: number
+  offset?: number
 }
 
 export interface CreateTokenPayload {
@@ -44,4 +85,27 @@ export const tokensApi = {
     api.post<CreateTokenResult>('/auth/tokens', payload).then((r) => r.data),
 
   revoke: (id: number) => api.delete(`/auth/tokens/${id}`),
+
+  // ── IP allowlist tokenu — prázdný seznam znamená bez omezení ──────────────
+  listIps: (tokenId: number) =>
+    api.get<{ rules: TokenIpRule[] }>(`/auth/tokens/${tokenId}/ips`).then((r) => r.data.rules),
+
+  addIp: (tokenId: number, cidr: string, note: string) =>
+    api
+      .post<{ rules: TokenIpRule[] }>(`/auth/tokens/${tokenId}/ips`, { cidr, note })
+      .then((r) => r.data.rules),
+
+  deleteIp: (tokenId: number, ruleId: number) =>
+    api
+      .delete<{ rules: TokenIpRule[] }>(`/auth/tokens/${tokenId}/ips/${ruleId}`)
+      .then((r) => r.data.rules),
+
+  // ── Log volání veřejného API vlastními tokeny ─────────────────────────────
+  log: (filter: ApiLogFilter = {}) =>
+    api
+      .get<{ entries: ApiLogEntry[]; total: number; limit: number; offset: number }>(
+        '/auth/api-log',
+        { params: filter },
+      )
+      .then((r) => r.data),
 }

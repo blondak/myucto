@@ -304,6 +304,12 @@ final class Routes
             $g->get   ('/tokens',                  ListTokensAction::class);
             $g->post  ('/tokens',                  CreateTokenAction::class);
             $g->delete('/tokens/{id:[0-9]+}',      RevokeTokenAction::class);
+            // Volitelný IP allowlist tokenu (IPv4/IPv6, adresa i CIDR rozsah)
+            $g->get   ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'list']);
+            $g->post  ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'create']);
+            $g->delete('/tokens/{id:[0-9]+}/ips/{ipId:[0-9]+}',    [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'delete']);
+            // Log volání veřejného API vlastními tokeny (MCP server i přímá integrace)
+            $g->get   ('/api-log',                 \MyInvoice\Action\Auth\Tokens\ApiRequestLogAction::class);
         });
 
         // Licencování a aktivace (E4) — admin only (RoutePermissionMap → superadmin).

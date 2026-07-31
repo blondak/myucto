@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { tokensApi, type ApiToken, type CreateTokenResult } from '@/api/tokens'
+import { tokensApi, type ApiToken, type CreateTokenResult, type TokenIpRule } from '@/api/tokens'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
@@ -35,6 +35,15 @@ const form = ref({
   never_expires: false,
   totp_code: '',
 })
+
+// IP allowlist modal — prázdný seznam pravidel znamená „bez omezení",
+// proto se počet drží i v řádku tabulky (jinak by nebylo poznat, které
+// tokeny jsou zamčené na síť a které ne).
+const ipToken = ref<ApiToken | null>(null)
+const ipRules = ref<TokenIpRule[]>([])
+const ipBusy = ref(false)
+const ipError = ref('')
+const ipForm = ref({ cidr: '', note: '' })
 
 // Created token reveal modal
 const revealed = ref<CreateTokenResult | null>(null)
@@ -192,6 +201,68 @@ async function revoke(id: number, name: string) {
   }
 }
 
+async function openIps(tk: ApiToken) {
+  ipToken.value = tk
+  ipRules.value = []
+  ipError.value = ''
+  ipForm.value = { cidr: '', note: '' }
+  ipBusy.value = true
+  try {
+    ipRules.value = await tokensApi.listIps(tk.id)
+  } catch (e: any) {
+    ipError.value = e?.response?.data?.error?.message || t('common.error')
+  } finally {
+    ipBusy.value = false
+  }
+}
+
+function closeIps() {
+  if (ipBusy.value) return
+  ipToken.value = null
+}
+
+async function addIp() {
+  const tk = ipToken.value
+  if (!tk || ipForm.value.cidr.trim() === '') return
+  ipBusy.value = true
+  ipError.value = ''
+  try {
+    ipRules.value = await tokensApi.addIp(tk.id, ipForm.value.cidr.trim(), ipForm.value.note.trim())
+    ipForm.value = { cidr: '', note: '' }
+    // Počet v tabulce musí odpovídat hned — bez reloadu by řádek tvrdil,
+    // že token pořád nemá žádné omezení.
+    await load()
+    syncIpToken()
+  } catch (e: any) {
+    ipError.value = e?.response?.data?.error?.message || t('common.error')
+  } finally {
+    ipBusy.value = false
+  }
+}
+
+async function removeIp(ruleId: number) {
+  const tk = ipToken.value
+  if (!tk) return
+  ipBusy.value = true
+  ipError.value = ''
+  try {
+    ipRules.value = await tokensApi.deleteIp(tk.id, ruleId)
+    await load()
+    syncIpToken()
+  } catch (e: any) {
+    ipError.value = e?.response?.data?.error?.message || t('common.error')
+  } finally {
+    ipBusy.value = false
+  }
+}
+
+/** Po reloadu seznamu drží modal ukazatel na čerstvý objekt tokenu. */
+function syncIpToken() {
+  if (!ipToken.value) return
+  const fresh = list.value.find((x) => x.id === ipToken.value!.id)
+  if (fresh) ipToken.value = fresh
+}
+
 function badgeClass(tk: ApiToken): string {
   if (tk.is_revoked) return 'bg-neutral-100 text-neutral-500'
   if (tk.is_expired) return 'bg-warning-50 text-warning-600'
@@ -247,6 +318,7 @@ onMounted(load)
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_prefix') }}</th>
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_supplier') }}</th>
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_scope') }}</th>
+            <th class="text-left px-3 py-2">{{ t('api_tokens.col_ip') }}</th>
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_last_used') }}</th>
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_expires') }}</th>
             <th class="text-left px-3 py-2">{{ t('api_tokens.col_status') }}</th>
@@ -255,7 +327,7 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-if="!loading && list.length === 0">
-            <td colspan="8" class="text-center text-neutral-500 py-8">{{ t('api_tokens.empty') }}</td>
+            <td colspan="9" class="text-center text-neutral-500 py-8">{{ t('api_tokens.empty') }}</td>
           </tr>
           <tr v-for="tk in list" :key="tk.id" class="border-t border-neutral-200">
             <td class="px-3 py-2 font-medium">{{ tk.name }}</td>
@@ -268,6 +340,22 @@ onMounted(load)
                 :class="tk.scope === 'read' ? 'bg-neutral-100 text-neutral-600' : 'bg-primary-100 text-primary-700'">
                 {{ tk.scope === 'read' ? t('api_tokens.scope_read') : t('api_tokens.scope_read_write') }}
               </span>
+            </td>
+            <td class="px-3 py-2">
+              <button
+                @click="openIps(tk)"
+                class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap"
+                :class="tk.ip_rule_count > 0
+                  ? 'border-success-500/40 bg-success-50 text-success-600'
+                  : 'border-neutral-300 text-neutral-500 hover:bg-neutral-50'"
+                :title="t('api_tokens.ip_manage')"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z" />
+                </svg>
+                {{ tk.ip_rule_count > 0 ? tk.ip_rule_count : t('api_tokens.ip_none') }}
+              </button>
             </td>
             <td class="px-3 py-2 text-neutral-500">{{ fmtTime(tk.last_used_at) }}</td>
             <td class="px-3 py-2 text-neutral-500">{{ tk.expires_at ? fmtTime(tk.expires_at) : t('api_tokens.expires_never') }}</td>
@@ -286,6 +374,66 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- IP allowlist modal -->
+    <div v-if="ipToken" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full p-6">
+        <h2 class="text-xl font-semibold mb-1">{{ t('api_tokens.ip_title') }}</h2>
+        <p class="text-sm text-neutral-500 mb-3">{{ ipToken.name }}</p>
+
+        <div class="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700 mb-3">
+          {{ t('api_tokens.ip_intro') }}
+        </div>
+
+        <div v-if="ipRules.length === 0" class="text-sm text-neutral-500 py-3">
+          {{ t('api_tokens.ip_empty') }}
+        </div>
+        <ul v-else class="divide-y divide-neutral-200 border border-neutral-200 rounded-md mb-3">
+          <li v-for="r in ipRules" :key="r.id" class="flex items-center justify-between gap-3 px-3 py-2">
+            <div class="min-w-0">
+              <code class="text-sm font-mono">{{ r.cidr }}</code>
+              <span v-if="r.note" class="block text-xs text-neutral-500 truncate">{{ r.note }}</span>
+            </div>
+            <button @click="removeIp(r.id)" :disabled="ipBusy"
+              class="cursor-pointer text-danger-500 hover:text-danger-600 text-sm whitespace-nowrap disabled:text-neutral-400">
+              {{ t('api_tokens.ip_remove') }}
+            </button>
+          </li>
+        </ul>
+
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="block text-sm flex-1 min-w-[12rem]">
+            <span class="text-neutral-700 font-medium">{{ t('api_tokens.ip_address') }}</span>
+            <input v-model="ipForm.cidr" type="text" maxlength="64"
+              :placeholder="t('api_tokens.ip_placeholder')"
+              @keyup.enter="addIp"
+              class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm" />
+          </label>
+          <label class="block text-sm flex-1 min-w-[10rem]">
+            <span class="text-neutral-700 font-medium">{{ t('api_tokens.ip_note') }}</span>
+            <input v-model="ipForm.note" type="text" maxlength="255"
+              class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
+          </label>
+          <button @click="addIp" :disabled="ipBusy || ipForm.cidr.trim() === ''"
+            class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md whitespace-nowrap">
+            {{ t('api_tokens.ip_add') }}
+          </button>
+        </div>
+        <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.ip_hint') }}</p>
+
+        <div v-if="ipError"
+          class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
+          {{ ipError }}
+        </div>
+
+        <div class="mt-5 flex justify-end">
+          <button @click="closeIps" :disabled="ipBusy"
+            class="cursor-pointer h-10 px-4 border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">
+            {{ t('common.close') }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Create modal -->
