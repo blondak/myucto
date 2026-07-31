@@ -399,6 +399,7 @@
     "suppliers": "Dodavatelé",
     "codebooks": "Kategorie",
     "codebooks_global": "Sazby a číselníky",
+    "bank_rule_templates": "Šablony bank. pravidel",
     "users": "Uživatelé",
     "roles": "Role a oprávnění",
     "emails": "E-maily",
@@ -7541,7 +7542,6 @@
   },
   "template_tools": {
     "journal": "Šablony zápisů",
-    "bank": "Šablony banky",
     "expense": "Pravidla nákladů",
     "posting": "Pravidla účtování"
   },
@@ -7565,6 +7565,7 @@
     "active": "Aktivní",
     "inactive": "Neaktivní",
     "template_key": "Klíč šablony",
+    "template_key_hint": "Předvyplní se z českého názvu, můžete ho přepsat.",
     "direction": "Směr",
     "name_cs": "Český název",
     "name_en": "Anglický název",

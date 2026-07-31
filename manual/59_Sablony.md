@@ -2,7 +2,7 @@
 
 **Cesta: `Nástroje → Šablony`**
 
-Stránka soustřeďuje čtyři rozdílné druhy pomůcek. Nejde o jeden univerzální
+Stránka soustřeďuje tři rozdílné druhy pomůcek. Nejde o jeden univerzální
 automat: každá záložka vstupuje do jiné části zpracování.
 
 | Záložka | Co ovlivňuje |
@@ -10,11 +10,11 @@ automat: každá záložka vstupuje do jiné části zpracování.
 | Šablony zápisů | Předvyplnění řádků ručního účetního zápisu |
 | Pravidla nákladů | Návrh druhu a účtu řádku přijaté faktury |
 | Pravidla účtování | Návrh nebo automatizace opakovaných bankovních plateb |
-| Šablony banky | Globální katalog bankovních pravidel, ze kterého administrátor instaluje firemní pravidla |
 
-První tři záložky se zobrazují jen v podvojném účetnictví. Poslední je
-administrátorská. Změna pravidla se použije na nové návrhy; již zaúčtované
-zápisy sama zpětně nepřepočítává.
+Všechny tři záložky jsou firemní a zobrazují se jen v podvojném účetnictví.
+Globální katalog šablon bankovních pravidel je systémová agenda a má vlastní
+stránku **Systém → Šablony bank. pravidel** (viz 59.4). Změna pravidla se
+použije na nové návrhy; již zaúčtované zápisy sama zpětně nepřepočítává.
 
 ## 59.1 Šablony účetních zápisů
 
@@ -119,7 +119,9 @@ stopu. Opakovaně odmítané pravidlo se může deaktivovat. Historický backfil
 vždy degraduje automatický režim na návrh, aby stará data neúčtoval bez
 kontroly.
 
-## 59.4 Šablony banky
+## 59.4 Šablony bankovních pravidel (globální katalog)
+
+**Cesta: `Systém → Šablony bank. pravidel`**
 
 Administrátor instance může spravovat katalog typických pravidel. Šablona má
 stabilní klíč, popis, výchozí kontaci, kritéria, režim a aktivní stav. Firemní

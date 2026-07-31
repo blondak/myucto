@@ -231,7 +231,14 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'admin/tax-constants',    name: 'admin-tax-constants', component: () => import('@/pages/admin/TaxConstants.vue'), meta: {  } },
       { path: 'admin/electronic-signatures', name: 'admin-electronic-signatures', component: () => import('@/pages/admin/ElectronicSignatures.vue'), meta: {  } },
-      { path: 'templates',                  name: 'templates',       component: () => import('@/pages/TemplatesPage.vue') },
+      // Globální katalog šablon bankovních pravidel — systémová (ne per-firma) agenda,
+      // proto vlastní routa pod Systém místo záložky v per-firma /templates.
+      { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: {  } },
+      {
+        path: 'templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'),
+        // Bookmark na bývalou superadmin záložku katalogu šablon → nová systémová routa.
+        beforeEnter: to => (to.query.section === 'bank' ? { path: '/admin/bank-rule-templates' } : true),
+      },
       // Nástroje (reorg menu, audit 2026-07) — archivy, kurzový režim, repo sazba,
       // předkontace a účetní období jako záložky jedné stránky (?section=…). Export/Import
       // se odsud vyčlenilo (reorg UX 2026-07) na /invoices/export|import a
@@ -406,7 +413,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
 
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles', 'admin-suppliers',
-  'admin-codebooks', 'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
+  'admin-codebooks', 'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
   'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
 ])

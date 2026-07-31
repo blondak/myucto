@@ -2,38 +2,29 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import JournalTemplates from '@/pages/accounting/JournalTemplates.vue'
 import ExpenseRules from '@/pages/accounting/ExpenseRules.vue'
 import BankPostingRules from '@/pages/bank/BankPostingRules.vue'
-import BankRuleTemplatesAdmin from '@/components/settings/BankRuleTemplatesAdmin.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const accountingMode = computed(() => supplierStore.currentSupplier?.accounting_mode)
 const journalEnabled = computed(() => accountingMode.value === 'double_entry')
-type Tab = 'journal' | 'expense' | 'posting' | 'bank'
+type Tab = 'journal' | 'expense' | 'posting'
 
-// Dostupné záložky podle režimu účtování a role. Pravidla nákladů (expense), pravidla
-// účtování banky (posting) i šablony zápisů (journal) dávají smysl jen v podvojném
-// účetnictví; banka (katalog šablon) je jen pro superadmina.
-const availableTabs = computed<Tab[]>(() => {
-  const tabs: Tab[] = []
-  if (journalEnabled.value) tabs.push('journal', 'expense', 'posting')
-  if (auth.isSuperadmin) tabs.push('bank')
-  return tabs
-})
+// Dostupné záložky podle režimu účtování. Všechny jsou per-firma a dávají smysl jen
+// v podvojném účetnictví; globální katalog šablon bankovních pravidel je systémová
+// agenda a žije na /admin/bank-rule-templates (Systém).
+const availableTabs = computed<Tab[]>(() => (journalEnabled.value ? ['journal', 'expense', 'posting'] : []))
 
 function tabFromQuery(value: unknown): Tab {
   const v = String(value ?? '')
-  if (v === 'bank' && auth.isSuperadmin) return 'bank'
   if (v === 'expense' && journalEnabled.value) return 'expense'
   if (v === 'posting' && journalEnabled.value) return 'posting'
-  return journalEnabled.value ? 'journal' : (auth.isSuperadmin ? 'bank' : 'journal')
+  return 'journal'
 }
 
 const tab = ref<Tab>(tabFromQuery(route.query.section))
@@ -42,7 +33,7 @@ const effectiveTab = computed<Tab>(() =>
 )
 
 watch(() => route.query.section, value => { tab.value = tabFromQuery(value) })
-watch([accountingMode, () => auth.isSuperadmin], () => { tab.value = tabFromQuery(route.query.section) })
+watch(accountingMode, () => { tab.value = tabFromQuery(route.query.section) })
 
 function switchTab(value: Tab) {
   if (effectiveTab.value === value) return
@@ -73,16 +64,10 @@ const tabClass = (value: Tab) =>
         :class="tabClass('posting')" @click="switchTab('posting')">
         {{ t('template_tools.posting') }}
       </button>
-      <button v-if="auth.isSuperadmin" type="button"
-        class="cursor-pointer px-4 py-2 text-sm border-b-2 -mb-px transition whitespace-nowrap"
-        :class="tabClass('bank')" @click="switchTab('bank')">
-        {{ t('template_tools.bank') }}
-      </button>
     </div>
 
     <ExpenseRules v-if="journalEnabled && effectiveTab === 'expense'" embedded />
     <BankPostingRules v-else-if="journalEnabled && effectiveTab === 'posting'" />
-    <BankRuleTemplatesAdmin v-else-if="auth.isSuperadmin && effectiveTab === 'bank'" />
     <JournalTemplates v-else-if="journalEnabled" embedded />
   </div>
 </template>

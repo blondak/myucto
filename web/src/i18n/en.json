@@ -399,6 +399,7 @@
     "suppliers": "Suppliers",
     "codebooks": "Categories",
     "codebooks_global": "VAT rates & codebooks",
+    "bank_rule_templates": "Bank rule templates",
     "users": "Users",
     "roles": "Roles & permissions",
     "emails": "Emails",
@@ -7541,7 +7542,6 @@
   },
   "template_tools": {
     "journal": "Entry templates",
-    "bank": "Bank templates",
     "expense": "Expense rules",
     "posting": "Posting rules"
   },
@@ -7565,6 +7565,7 @@
     "active": "Active",
     "inactive": "Inactive",
     "template_key": "Template key",
+    "template_key_hint": "Pre-filled from the Czech name; you can override it.",
     "direction": "Direction",
     "name_cs": "Czech name",
     "name_en": "English name",

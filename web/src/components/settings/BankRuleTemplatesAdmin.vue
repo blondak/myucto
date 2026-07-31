@@ -9,6 +9,7 @@ import {
 } from '@/api/admin'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -56,6 +57,11 @@ watch(() => form.direction, () => {
   if (!availablePostingRules.value.some(rule => rule.rule_key === form.rule_key)) form.rule_key = ''
 })
 
+// Klíč se u nové šablony předvyplní slugem českého názvu, dokud do něj uživatel nesáhne.
+const keySlug = useAutoSlug(slug => { form.template_key = slug }, { maxLen: 64 })
+function onNameCsInput(e: Event) { keySlug.fromName((e.target as HTMLInputElement).value) }
+function onTemplateKeyInput(e: Event) { keySlug.markManual((e.target as HTMLInputElement).value) }
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -83,6 +89,7 @@ function startNew() {
     vs_placeholder: null, message_contains: null, rule_key: '', default_priority: 100,
     sort_order: nextSortOrder(), is_active: true,
   })
+  keySlug.init('', false)
   error.value = ''
   formOpen.value = true
 }
@@ -104,6 +111,7 @@ function editTemplate(item: AdminBankRuleTemplate) {
     sort_order: item.sort_order,
     is_active: item.is_active,
   })
+  keySlug.init(item.template_key, true)
   error.value = ''
   formOpen.value = true
 }
@@ -275,8 +283,17 @@ function criteria(item: AdminBankRuleTemplate): string {
       <div class="space-y-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.name_cs') }}</label>
+          <input v-model="form.name_cs" @input="onNameCsInput" type="text" maxlength="120" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.name_en') }}</label>
+          <input v-model="form.name_en" type="text" maxlength="120" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.template_key') }}</label>
-          <input v-model="form.template_key" type="text" maxlength="64" :disabled="editingId !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
+          <input v-model="form.template_key" @input="onTemplateKeyInput" type="text" maxlength="64" :disabled="editingId !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
+          <p v-if="editingId === null" class="mt-1 text-xs text-neutral-500">{{ t('bank_template_admin.template_key_hint') }}</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.direction') }}</label>
@@ -284,14 +301,6 @@ function criteria(item: AdminBankRuleTemplate): string {
             <option value="incoming">{{ t('bank.posting.dir_incoming') }}</option>
             <option value="outgoing">{{ t('bank.posting.dir_outgoing') }}</option>
           </select>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.name_cs') }}</label>
-          <input v-model="form.name_cs" type="text" maxlength="120" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.name_en') }}</label>
-          <input v-model="form.name_en" type="text" maxlength="120" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_template_admin.operation_type') }}</label>

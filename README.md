@@ -151,16 +151,11 @@ jsou dostupné **navždy zdarma a bez omezení zápisu**. Po instalaci je navíc
 Po skončení zkušebního období se aktivuje licenčním klíčem ze zakoupeného
 předplatného (v aplikaci v sekci **Aktivace**).
 
-| Tarif | Cena / měsíc | Rozsah |
-|---|---:|---|
-| **Jedna firma** | 290 Kč | 1 firemní agenda |
-| **Kancelář** | 590 Kč | až 10 firemních agend |
-| **Neomezeně** | 890 Kč | libovolný počet firemních agend |
-| **Enterprise** | individuálně | vlastní smlouva, integrace, white-label |
-
-Ceny jsou včetně DPH, za **aktivního uživatele a měsíc**. Uživatelé s rolí pouze
-pro čtení se nepočítají a jsou **zdarma**. **Roční platba = 12 měsíců za cenu
-10.** Předplatné zakoupíte online na [MyÚčto.cz](https://myucto.cz/).
+Tarify se liší počtem firemních agend (od jedné firmy po neomezeně, plus
+Enterprise s vlastní smlouvou, integracemi a white-label). Účtuje se za
+**aktivního uživatele a měsíc**; uživatelé s rolí pouze pro čtení se nepočítají
+a jsou **zdarma**. **Roční platba = 12 měsíců za cenu 10.**
+Aktuální ceník a nákup předplatného: [myucto.cz/#cenik](https://myucto.cz/#cenik).
 
 **Po skončení licence** zůstává bezplatná část plně funkční včetně pořizování
 a úprav dat. Nedostupná je pouze komerční nadstavba: celý **Sklad**,

@@ -490,7 +490,7 @@ debetní zůstatek závazku.
 Na stránce **Pravidla účtování** lze tlačítkem **Ze šablony** založit připravené
 pravidlo pro odvody, bankovní poplatky, úroky, nájem nebo předplatné. Šablona
 doplní identifikátory z nastavení firmy a vždy vznikne v režimu **Návrh**.
-Superadmin spravuje tento globální katalog v **Šablony → Šablony banky**.
+Superadmin spravuje tento globální katalog v **Systém → Šablony bank. pravidel**.
 Změna šablony ovlivní její budoucí použití ve všech firmách;
 už dříve vytvořená firemní pravidla se zpětně nemění. Použitou šablonu lze
 deaktivovat, ale ne smazat.

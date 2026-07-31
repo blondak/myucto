@@ -489,6 +489,7 @@ const navSections = computed<NavSection[]>(() => {
       ] : [
         { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks },
         { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer },
+        { to: '/admin/bank-rule-templates', label: t('nav.bank_rule_templates'), icon: ICONS.bank },
         { to: '/admin/suppliers',        label: t('nav.suppliers'),       icon: ICONS.suppliers },
         { to: '/admin/users',            label: t('nav.users'),           icon: ICONS.users },
         { to: '/admin/roles',            label: t('nav.roles'),           icon: ICONS.approvals },
