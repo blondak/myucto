@@ -189,4 +189,57 @@ final class CloneInvoiceDueDateTest extends TestCase
             ]);
         }
     }
+
+    public function testClientValueInheritsSupplierCalendarMonthUnit(): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = (int) $pdo->query("SELECT client_id FROM invoices WHERE id = {$this->sourceId}")->fetchColumn();
+
+        $clientStmt = $pdo->prepare('SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?');
+        $clientStmt->execute([$clientId]);
+        $originalClient = $clientStmt->fetch(PDO::FETCH_ASSOC);
+        $supplierStmt = $pdo->prepare(
+            'SELECT default_payment_due_days, default_payment_due_unit FROM supplier WHERE id = ?'
+        );
+        $supplierStmt->execute([$this->supplierId]);
+        $originalSupplier = $supplierStmt->fetch(PDO::FETCH_ASSOC);
+        if ($clientId === 0 || $originalClient === false || $originalSupplier === false) {
+            self::markTestSkipped('Chybí klient nebo dodavatel zdrojové faktury.');
+        }
+
+        try {
+            $pdo->prepare(
+                'UPDATE clients SET payment_due_default = 1, payment_due_unit = NULL WHERE id = ?'
+            )->execute([$clientId]);
+            $pdo->prepare(
+                "UPDATE supplier SET default_payment_due_unit = 'month' WHERE id = ?"
+            )->execute([$this->supplierId]);
+
+            $cloneId = $this->bulk->cloneOne($this->sourceId, '2026-07-31', false, $this->userId);
+            $this->createdClones[] = $cloneId;
+
+            $dueDate = $pdo->query("SELECT due_date FROM invoices WHERE id = $cloneId")->fetchColumn();
+            self::assertSame('2026-08-31', (string) $dueDate);
+
+            $resolved = $this->defaults->resolve([
+                'client_id' => $clientId,
+                'issue_date' => '2026-07-31',
+            ]);
+            self::assertSame('2026-08-31', $resolved['due_date']);
+        } finally {
+            $pdo->prepare(
+                'UPDATE clients SET payment_due_default = ?, payment_due_unit = ? WHERE id = ?'
+            )->execute([
+                $originalClient['payment_due_default'],
+                $originalClient['payment_due_unit'],
+                $clientId,
+            ]);
+            $pdo->prepare(
+                'UPDATE supplier SET default_payment_due_unit = ? WHERE id = ?'
+            )->execute([
+                $originalSupplier['default_payment_due_unit'],
+                $this->supplierId,
+            ]);
+        }
+    }
 }

@@ -110,6 +110,12 @@ final class BulkReissueAction
         // explicitní 0 ctíme — stejně jako u nové faktury.
         $dueValue = null;
         $dueUnit = 'days';
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT default_payment_due_days, default_payment_due_unit FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([(int) $source['supplier_id']]);
+        $supplier = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+
         if (!empty($source['project_id'])) {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT payment_due_days, payment_due_unit FROM projects WHERE id = ?'
@@ -129,19 +135,16 @@ final class BulkReissueAction
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             if ($row !== false && $row['payment_due_default'] !== null) {
                 $dueValue = (int) $row['payment_due_default'];
-                $dueUnit = (string) ($row['payment_due_unit'] ?? 'days');
+                $dueUnit = (string) (
+                    $row['payment_due_unit']
+                    ?? $supplier['default_payment_due_unit']
+                    ?? 'days'
+                );
             }
         }
-        if ($dueValue === null) {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT default_payment_due_days, default_payment_due_unit FROM supplier WHERE id = ?'
-            );
-            $stmt->execute([(int) $source['supplier_id']]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if ($row !== false && $row['default_payment_due_days'] !== null) {
-                $dueValue = (int) $row['default_payment_due_days'];
-                $dueUnit = (string) ($row['default_payment_due_unit'] ?? 'days');
-            }
+        if ($dueValue === null && $supplier !== null && $supplier['default_payment_due_days'] !== null) {
+            $dueValue = (int) $supplier['default_payment_due_days'];
+            $dueUnit = (string) ($supplier['default_payment_due_unit'] ?? 'days');
         }
         $dueValue ??= 7;
         $dueDate = DueDateCalculator::calculate($issueDate, $dueValue, $dueUnit);

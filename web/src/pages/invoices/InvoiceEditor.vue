@@ -506,8 +506,8 @@ watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_i
 
 // Při změně Vystaveno přepočti Splatnost — projekt přebíjí klienta, klient přebíjí supplier.
 // Jen pro draft / nový (po `loaded`), abys nepřepsal uloženou hodnotu při hydrataci nebo
-// u vystavených dokladů. Projekt má jen `payment_due_days` (vždy v dnech), klient a
-// supplier mají i `unit` ('days' nebo 'month').
+// u vystavených dokladů. Projekt má vlastní hodnotu i jednotku, klient může jednotku
+// zdědit od dodavatele.
 watch(() => form.value.issue_date, (newIssue) => {
   if (!loaded.value || editedStatus.value !== 'draft' || !newIssue) return
   // Zakázka přebíjí vše — má vlastní hodnotu i jednotku (NULL unit = dny).
@@ -518,11 +518,12 @@ watch(() => form.value.issue_date, (newIssue) => {
       return
     }
   }
-  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní = dny, ne supplier),
+  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní dědí supplier),
   // jinak plně dědí supplier default (hodnotu i jednotku).
   const c = form.value.client_id ? clients.value.find(x => x.id === form.value.client_id) : null
   if (c && typeof c.payment_due_default === 'number') {
-    form.value.due_date = computeDueDate(newIssue, c.payment_due_default, (c.payment_due_unit ?? 'days') as DueUnit)
+    const unit = c.payment_due_unit ?? supplierStore.currentSupplier?.default_payment_due_unit ?? 'days'
+    form.value.due_date = computeDueDate(newIssue, c.payment_due_default, unit as DueUnit)
   } else {
     form.value.due_date = supplierDueDate(newIssue)
   }
@@ -748,10 +749,11 @@ async function applyClientDefaults(clientId: number) {
   if (form.value.revenue_category_id == null && c.default_revenue_category_id != null) {
     form.value.revenue_category_id = c.default_revenue_category_id
   }
-  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní = dny, ne supplier),
+  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní dědí supplier),
   // jinak plně dědí supplier default (hodnotu i jednotku).
   if (typeof c.payment_due_default === 'number') {
-    form.value.due_date = computeDueDate(form.value.issue_date, c.payment_due_default, (c.payment_due_unit ?? 'days') as DueUnit)
+    const unit = c.payment_due_unit ?? supplierStore.currentSupplier?.default_payment_due_unit ?? 'days'
+    form.value.due_date = computeDueDate(form.value.issue_date, c.payment_due_default, unit as DueUnit)
   } else {
     form.value.due_date = supplierDueDate(form.value.issue_date)
   }
