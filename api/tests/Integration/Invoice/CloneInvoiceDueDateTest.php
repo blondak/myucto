@@ -7,16 +7,14 @@ namespace MyInvoice\Tests\Integration\Invoice;
 use MyInvoice\Action\Invoice\BulkReissueAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\InvoiceDefaults;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Klon faktury BEZ zakázky musí splatnost odvodit z výchozí splatnosti dodavatele
- * (default_payment_due_days), ne ji nechat rovnou datu vystavení (0 dní).
- *
- * Regrese: cloneOne počítal due_date jen z project.payment_due_days; bez zakázky
- * zůstalo due_date = issue_date.
+ * Klon faktury odvozuje splatnost včetně jednotky v prioritě
+ * zakázka → klient → dodavatel → 7 dní.
  *
  * Soft-skip bez cfg.php / DB (CI runner).
  */
@@ -25,6 +23,7 @@ final class CloneInvoiceDueDateTest extends TestCase
 {
     private Connection $db;
     private BulkReissueAction $bulk;
+    private InvoiceDefaults $defaults;
     private int $supplierId = 0;
     private int $userId = 0;
     private int $sourceId = 0;
@@ -43,6 +42,7 @@ final class CloneInvoiceDueDateTest extends TestCase
             $c = Bootstrap::buildApp()->getContainer();
             $this->db = $c->get(Connection::class);
             $this->bulk = $c->get(BulkReissueAction::class);
+            $this->defaults = $c->get(InvoiceDefaults::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -98,5 +98,95 @@ final class CloneInvoiceDueDateTest extends TestCase
         self::assertSame($issueDate, (string) $row['issue_date'], 'issue_date klonu má být zadané datum.');
         self::assertSame($expected, (string) $row['due_date'], 'splatnost klonu má být vystavení + výchozí splatnost (klient → dodavatel → 7).');
         self::assertNotSame($issueDate, (string) $row['due_date'], 'splatnost nesmí být rovna datu vystavení (0 dní).');
+    }
+
+    public function testCloneUsesClientCalendarMonthDueDate(): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = (int) $pdo->query("SELECT client_id FROM invoices WHERE id = {$this->sourceId}")->fetchColumn();
+        $stmt = $pdo->prepare('SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?');
+        $stmt->execute([$clientId]);
+        $original = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($clientId === 0 || $original === false) {
+            self::markTestSkipped('Zdrojová faktura nemá klienta.');
+        }
+
+        try {
+            $pdo->prepare(
+                "UPDATE clients SET payment_due_default = 1, payment_due_unit = 'month' WHERE id = ?"
+            )->execute([$clientId]);
+
+            $cloneId = $this->bulk->cloneOne($this->sourceId, '2026-07-31', false, $this->userId);
+            $this->createdClones[] = $cloneId;
+
+            $dueDate = $pdo->query("SELECT due_date FROM invoices WHERE id = $cloneId")->fetchColumn();
+            self::assertSame('2026-08-31', (string) $dueDate);
+
+            $resolved = $this->defaults->resolve([
+                'client_id' => $clientId,
+                'issue_date' => '2026-07-31',
+            ]);
+            self::assertSame('2026-08-31', $resolved['due_date']);
+        } finally {
+            $pdo->prepare(
+                'UPDATE clients SET payment_due_default = ?, payment_due_unit = ? WHERE id = ?'
+            )->execute([
+                $original['payment_due_default'],
+                $original['payment_due_unit'],
+                $clientId,
+            ]);
+        }
+    }
+
+    public function testCloneUsesSupplierCalendarMonthDueDate(): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = (int) $pdo->query("SELECT client_id FROM invoices WHERE id = {$this->sourceId}")->fetchColumn();
+
+        $clientStmt = $pdo->prepare('SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?');
+        $clientStmt->execute([$clientId]);
+        $originalClient = $clientStmt->fetch(PDO::FETCH_ASSOC);
+        $supplierStmt = $pdo->prepare(
+            'SELECT default_payment_due_days, default_payment_due_unit FROM supplier WHERE id = ?'
+        );
+        $supplierStmt->execute([$this->supplierId]);
+        $originalSupplier = $supplierStmt->fetch(PDO::FETCH_ASSOC);
+        if ($clientId === 0 || $originalClient === false || $originalSupplier === false) {
+            self::markTestSkipped('Chybí klient nebo dodavatel zdrojové faktury.');
+        }
+
+        try {
+            $pdo->prepare(
+                'UPDATE clients SET payment_due_default = NULL, payment_due_unit = NULL WHERE id = ?'
+            )->execute([$clientId]);
+            $pdo->prepare(
+                "UPDATE supplier
+                    SET default_payment_due_days = 1, default_payment_due_unit = 'month'
+                  WHERE id = ?"
+            )->execute([$this->supplierId]);
+
+            $cloneId = $this->bulk->cloneOne($this->sourceId, '2026-07-31', false, $this->userId);
+            $this->createdClones[] = $cloneId;
+
+            $dueDate = $pdo->query("SELECT due_date FROM invoices WHERE id = $cloneId")->fetchColumn();
+            self::assertSame('2026-08-31', (string) $dueDate);
+        } finally {
+            $pdo->prepare(
+                'UPDATE clients SET payment_due_default = ?, payment_due_unit = ? WHERE id = ?'
+            )->execute([
+                $originalClient['payment_due_default'],
+                $originalClient['payment_due_unit'],
+                $clientId,
+            ]);
+            $pdo->prepare(
+                'UPDATE supplier
+                    SET default_payment_due_days = ?, default_payment_due_unit = ?
+                  WHERE id = ?'
+            )->execute([
+                $originalSupplier['default_payment_due_days'],
+                $originalSupplier['default_payment_due_unit'],
+                $this->supplierId,
+            ]);
+        }
     }
 }

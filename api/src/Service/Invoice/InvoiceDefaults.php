@@ -32,14 +32,21 @@ final class InvoiceDefaults
 
         $client = null;
         if ($clientId) {
-            $stmt = $pdo->prepare('SELECT supplier_id, language, currency_default_id, reverse_charge, payment_due_default FROM clients WHERE id = ?');
+            $stmt = $pdo->prepare(
+                'SELECT supplier_id, language, currency_default_id, reverse_charge,
+                        payment_due_default, payment_due_unit
+                   FROM clients WHERE id = ?'
+            );
             $stmt->execute([$clientId]);
             $client = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         }
 
         $project = null;
         if ($projectId) {
-            $stmt = $pdo->prepare('SELECT client_id, currency_id, payment_due_days, hourly_rate FROM projects WHERE id = ?');
+            $stmt = $pdo->prepare(
+                'SELECT client_id, currency_id, payment_due_days, payment_due_unit, hourly_rate
+                   FROM projects WHERE id = ?'
+            );
             $stmt->execute([$projectId]);
             $project = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
             // MS-P1-1: project musí patřit zadanému klientovi
@@ -51,7 +58,10 @@ final class InvoiceDefaults
         // Supplier defaults — bere z clientova supplier_id (invoice je vždy v rámci klientova supplier)
         $supplier = null;
         if ($client !== null && !empty($client['supplier_id'])) {
-            $stmt = $pdo->prepare('SELECT default_currency_id, default_payment_due_days FROM supplier WHERE id = ?');
+            $stmt = $pdo->prepare(
+                'SELECT default_currency_id, default_payment_due_days, default_payment_due_unit
+                   FROM supplier WHERE id = ?'
+            );
             $stmt->execute([(int) $client['supplier_id']]);
             $supplier = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         }
@@ -115,13 +125,24 @@ final class InvoiceDefaults
         }
 
         if (empty($data['due_date'])) {
-            $days = (int) (
-                $project['payment_due_days']
-                ?? $client['payment_due_default']
-                ?? $supplier['default_payment_due_days']
-                ?? 7
+            if ($project !== null && $project['payment_due_days'] !== null) {
+                $dueValue = (int) $project['payment_due_days'];
+                $dueUnit = (string) ($project['payment_due_unit'] ?? 'days');
+            } elseif ($client !== null && $client['payment_due_default'] !== null) {
+                $dueValue = (int) $client['payment_due_default'];
+                $dueUnit = (string) ($client['payment_due_unit'] ?? 'days');
+            } elseif ($supplier !== null && $supplier['default_payment_due_days'] !== null) {
+                $dueValue = (int) $supplier['default_payment_due_days'];
+                $dueUnit = (string) ($supplier['default_payment_due_unit'] ?? 'days');
+            } else {
+                $dueValue = 7;
+                $dueUnit = 'days';
+            }
+            $data['due_date'] = DueDateCalculator::calculate(
+                $data['issue_date'],
+                $dueValue,
+                $dueUnit,
             );
-            $data['due_date'] = date('Y-m-d', strtotime($data['issue_date'] . " +{$days} days"));
         }
 
         return $data;
