@@ -28,6 +28,7 @@ Podstatné vlastnosti:
 | Oblast | Rozsah |
 |---|---|
 | Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
+| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
@@ -155,6 +156,13 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Najdi fakturu pro ACME z června a ukaž, jestli je zaplacená.“
 - „Vystav fakturu firmě ACME na 10 hodin konzultací po 1 500 Kč.“ *(token čtení a zápis)*
 
+**Odběratelé**
+
+- „Založ klienta podle IČO 45274649.“
+- „Najdi v ARES firmu s IČO 12345678 a ukaž mi její adresu.“
+- „Uprav Prazdroji telefon na +420 123 456 789.“
+- „Přenačti údaje ACME z ARES, přestěhovali se.“
+
 **Výkazy práce a materiálu**
 
 - „Přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru.“
@@ -162,7 +170,7 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Přidej do výkazu 5 metrů kabeláže po 120 Kč.“
 - „Smaž poslední řádek z výkazu, zadal jsem ho omylem.“
 
-Podrobnosti v [78.6](#786-výkazy-práce-a-materiálu).
+Podrobnosti v [78.7](#787-výkazy-práce-a-materiálu).
 
 **Daně**
 
@@ -189,7 +197,38 @@ Podrobnosti v [78.6](#786-výkazy-práce-a-materiálu).
 - „Které zboží je pod minimální zásobou a mělo by se doobjednat?“
 - „Kolik máme uloženo ve skladu k dnešnímu dni?“
 
-## 78.6 Výkazy práce a materiálu
+## 78.6 Odběratelé a ARES
+
+Nového odběratele stačí zadat IČEM:
+
+> „Založ klienta podle IČO 45274649.“
+
+Asistent si vytáhne z **ARES** název, adresu, DIČ i registraci k DPH a kartu
+založí. Cokoli řekneš navíc („…a e-mail fakturace@firma.cz“) má přednost před
+tím, co vrátí rejstřík — může jít o změnu, která se do ARES ještě nepropsala.
+
+Bez IČO je potřeba název, ulice, město a PSČ; asistent si o ně řekne.
+
+### Ochrana proti duplicitám
+
+Před založením se kontroluje, jestli odběratel se stejným **IČO nebo DIČ** už
+neexistuje. Pokud ano, **nic se nezaloží** a asistent ukáže stávající kartu.
+Druhou kartu téže firmy lze vytvořit jen vědomě, na výslovné potvrzení.
+
+### Úprava
+
+Stačí říct, co se má změnit — zbytek karty zůstane. Asistent si ji načte,
+změnu do ní vloží a uloží celou zpět, takže se nic nevynuluje.
+
+Když se firma přestěhuje nebo přejmenuje, jde údaje přenačíst z rejstříku:
+
+> „Přenačti údaje ACME z ARES.“
+
+Když je ARES nedostupný, u úpravy se **nic nemění** (raději nic než půlka
+starých a půlka nových údajů). U zakládání se použijí údaje ze zadání, pokud
+stačí — asistent do odpovědi napíše, odkud data vzal.
+
+## 78.7 Výkazy práce a materiálu
 
 Výkaz je navázaný na **koncept faktury** — přesně jako v aplikaci. Stačí tedy říct:
 
@@ -226,7 +265,7 @@ rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
 existujícího výkazu, jinak si o ni řekne — špatná sazba by se propsala do
 přiznání k DPH.
 
-## 78.7 Log volání
+## 78.8 Log volání
 
 Stránka **Firma → MCP server** má dole **Log volání** — každé volání tvých API
 tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název nástroje**,
@@ -235,7 +274,7 @@ takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
 v [kapitole 76.8](76_API.md).
 
-## 78.8 Bezpečnost
+## 78.9 Bezpečnost
 
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omez token na IP** — uniklý token je pak mimo tvou síť k ničemu.
@@ -247,12 +286,12 @@ v [kapitole 76.8](76_API.md).
   `.vscode/mcp.json` a `.cursor/mcp.json` v projektu).
 - Nepoužívaný token **zruš**. Historie volání v logu zůstane.
 
-## 78.9 Řešení problémů
+## 78.10 Řešení problémů
 
 | Projev | Příčina a náprava |
 |---|---|
 | Server nenaběhne, hlásí chybnou konfiguraci | `MYUCTO_API_URL` musí končit `/api/v1` a token začínat `mi_pat_`. |
-| Asistent hlásí, že **server neodpovídá** | Nejčastěji nedůvěryhodný HTTPS certifikát, ne výpadek — viz 78.10. |
+| Asistent hlásí, že **server neodpovídá** | Nejčastěji nedůvěryhodný HTTPS certifikát, ne výpadek — viz 78.11. |
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
@@ -262,7 +301,7 @@ v [kapitole 76.8](76_API.md).
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |
 | V logu nejsou žádná volání | Server se nespustil — zkontroluj cestu k `index.mjs` a že proběhlo `npm install`. |
 
-## 78.10 Vlastní HTTPS certifikát
+## 78.11 Vlastní HTTPS certifikát
 
 Instance s certifikátem od firemní nebo vlastní autority (typicky testovací
 prostředí) je zvláštní případ: **Node má vlastní seznam kořenových autorit

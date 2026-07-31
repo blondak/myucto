@@ -10,8 +10,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { tokensApi, type ApiToken, type ApiLogEntry } from '@/api/tokens'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
+const auth = useAuthStore()
+
+// V demu je stránka dostupná jako ukázka — čte se všechno, ale token vydat nelze
+// (mutace zastaví DemoReadOnlyMiddleware). Bez téhle informace by uživatel
+// zbytečně bloudil na stránce tokenů a narazil na obecnou chybu.
+const isDemo = computed(() => auth.isDemo)
 
 // API má stejný původ jako aplikace — návod tak ukazuje adresu, na kterou se
 // uživatel právě dívá, a ne natvrdo zadanou produkční doménu.
@@ -289,6 +296,15 @@ const EXAMPLE_GROUPS = [
     ],
   },
   {
+    title: 'Odběratelé',
+    items: [
+      { q: 'Založ klienta podle IČO 45274649.', tool: 'create_client (údaje z ARES)' },
+      { q: 'Najdi v ARES firmu s IČO 12345678 a ukaž mi její adresu.', tool: 'lookup_company_in_ares' },
+      { q: 'Uprav Prazdroji telefon na +420 123 456 789.', tool: 'update_client' },
+      { q: 'Přenačti údaje ACME z ARES, přestěhovali se.', tool: 'update_client (refresh_from_ares)' },
+    ],
+  },
+  {
     title: 'Výkazy práce a materiálu',
     items: [
       { q: 'Přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru.', tool: 'add_work_report_entry' },
@@ -376,8 +392,12 @@ const TOOL_GROUPS = [
       + 'list_categories, list_manufacturers, stock_levels, stock_availability, stock_valuation, list_warehouses',
   },
   {
-    title: 'Hledání, odběratelé a číselníky',
-    tools: 'search, search_clients, get_client, list_vat_rates, list_suppliers, whoami',
+    title: 'Odběratelé a ARES',
+    tools: 'search_clients, get_client, create_client, update_client, lookup_company_in_ares',
+  },
+  {
+    title: 'Hledání a číselníky',
+    tools: 'search, list_vat_rates, list_suppliers, whoami',
   },
 ]
 
@@ -405,10 +425,10 @@ onMounted(() => {
         a asistent si sám vybere správné nástroje a zavolá je přes veřejné API.
       </p>
       <p class="mb-2">
-        Server pokrývá <strong>fakturaci včetně vystavování</strong>, <strong>výkazy práce
-        a materiálu</strong>, <strong>přehled zaplacených a nezaplacených dokladů</strong>,
-        <strong>daně</strong>, <strong>účetnictví</strong>, <strong>statistiku</strong>
-        a <strong>e-shop se skladem</strong>.
+        Server pokrývá <strong>fakturaci včetně vystavování</strong>, <strong>správu
+        odběratelů s napojením na ARES</strong>, <strong>výkazy práce a materiálu</strong>,
+        <strong>přehled zaplacených a nezaplacených dokladů</strong>, <strong>daně</strong>,
+        <strong>účetnictví</strong>, <strong>statistiku</strong> a <strong>e-shop se skladem</strong>.
       </p>
       <p class="mb-2">
         Řekneš třeba <em>„přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru“</em> —
@@ -423,6 +443,14 @@ onMounted(() => {
         chyba znamená opravné podání. Zápis do účetnictví dělá člověk v aplikaci. Zákaz vynucuje
         server, ne jen tenhle nástroj: i token s právem zápisu dostane na takovou operaci odmítnutí.
       </p>
+    </div>
+
+    <div v-if="isDemo"
+      class="rounded-lg border border-primary-600/40 bg-primary-50 px-4 py-3 mb-4 text-sm text-primary-700">
+      <strong>Ukázkový režim.</strong> Stránka je tu celá k prohlédnutí — návod, přehled
+      nástrojů i log volání. <strong>API token si v demu vydat nelze</strong>, protože
+      demo nic nezapisuje; MCP server tedy nezprovozníte. Ve vlastní instalaci je postup
+      přesně takový, jaký je popsaný níže.
     </div>
 
     <!-- Adresa API -->
@@ -452,8 +480,14 @@ onMounted(() => {
           <span class="shrink-0 w-7 h-7 rounded-full bg-primary-600 text-white font-bold text-xs flex items-center justify-center">1</span>
           <div class="min-w-0">
             <strong>Vygenerujte API token.</strong>
+            <template v-if="isDemo">
+              Ve vlastní instalaci ho vydáte v <em>Firma → API tokeny</em> tlačítkem
+              <em>Nový token</em>. Token se zobrazí jen jednou — hned si ho zkopírujete.
+              <span class="text-neutral-500">V demu tenhle krok nejde dokončit.</span>
+            </template>
+            <template v-else>
             V <RouterLink to="/profile/api-tokens" class="text-primary-600 hover:underline">API tokenech</RouterLink>
-            klikněte na <em>Nový token</em>. Token se zobrazí jen jednou — hned si ho zkopírujte.
+            klikněte na <em>Nový token</em>. Token se zobrazí jen jednou — hned si ho zkopírujte.</template>
             Pro zkoušení volte rozsah <strong>čtení</strong>; <strong>čtení a zápis</strong>
             až tehdy, když má asistent opravdu vystavovat doklady nebo měnit ceny.
             <div class="mt-1 text-neutral-500">

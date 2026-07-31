@@ -463,6 +463,10 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/settings', label: t('nav.settings'), icon: ICONS.settings },
         { to: '/admin/branding', label: t('nav.branding'), icon: ICONS.branding, permission: 'settings.branding' as PermissionKey },
         { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
+        // MCP server je v demu záměrně vidět: stránka jen čte (návod, přehled nástrojů,
+        // log volání) a je to jedna z věcí, kvůli kterým si zájemce demo pouští.
+        // Vydat token v demu nejde — mutace zastaví DemoReadOnlyMiddleware.
+        { to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp, permission: 'profile.tokens' as PermissionKey },
       ] : [
         { to: '/admin/settings',              label: t('nav.settings'),        icon: ICONS.settings },
         { to: '/admin/integrations',          label: t('nav.integrations'),    icon: ICONS.api_tokens },

@@ -208,6 +208,210 @@ export const TOOLS = [
     write: false,
     run: (c, a, tool) => c.get(`/clients/${a.id}`, null, tool),
   },
+  {
+    name: 'lookup_company_in_ares',
+    title: 'Vyhledat firmu v ARES',
+    description:
+      'Načte údaje firmy z rejstříku ARES podle IČO — název, adresu, DIČ, právní formu '
+      + 'a registraci k DPH. Nic neukládá, jen vrací data.\n\n'
+      + 'Používej k ověření údajů před založením odběratele; `create_client` si ale '
+      + 'ARES zavolá sám, když mu dáš IČO.\n\n'
+      + 'Pozn.: endpoint je v API řešený jako POST, takže i tenhle čtecí dotaz '
+      + 'vyžaduje token s rozsahem „čtení a zápis".',
+    inputSchema: schema({ ic: str('IČO — 8 číslic.') }, ['ic']),
+    write: false,
+    run: (c, a, tool) => c.post('/clients/lookup-ares', { ic: String(a.ic).replace(/\D/g, '') }, tool),
+  },
+  {
+    name: 'create_client',
+    title: 'Založit odběratele',
+    description:
+      'Založí nového odběratele (nebo dodavatele). Typické zadání: '
+      + '„založ klienta podle IČO 12345678".\n\n'
+      + 'KDYŽ ZADÁŠ `ic`, ÚDAJE SE DOTÁHNOU Z ARES — název, adresa, DIČ i registrace '
+      + 'k DPH. Cokoli vyplníš ručně má přednost před tím, co vrátí ARES.\n\n'
+      + 'Bez IČO je nutné vyplnit `company_name`, `street`, `city` a `zip`.\n\n'
+      + 'Před založením se kontroluje, jestli odběratel se stejným IČO nebo DIČ už '
+      + 'neexistuje — pokud ano, nic se nevytvoří a vrátí se odkaz na stávající '
+      + 'kartu. Vědomý duplicitní zápis povolíš přes `allow_duplicate`.',
+    inputSchema: schema({
+      ic: str('IČO (8 číslic). Když je vyplněné, zbytek se dotáhne z ARES.'),
+      company_name: str('Firma nebo jméno. Povinné, pokud se nedotáhne z ARES.'),
+      street: str('Ulice a číslo popisné.'),
+      city: str('Město.'),
+      zip: str('PSČ.'),
+      country_iso2: str('Kód země, dvě písmena. Výchozí CZ.', { minLength: 2, maxLength: 2 }),
+      dic: str('DIČ.'),
+      main_email: str('Hlavní e-mail pro zasílání dokladů.'),
+      phone: str('Telefon.'),
+      language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
+      hourly_rate: num('Hodinová sazba pro výkazy práce.', { minimum: 0 }),
+      is_customer: bool('Je odběratel (výchozí ano).'),
+      is_vendor: bool('Je i dodavatel (výchozí ne).'),
+      note: str('Interní poznámka.'),
+      allow_duplicate: bool('Založit i když už odběratel se stejným IČO/DIČ existuje.'),
+    }),
+    write: true,
+    run: async (c, a, tool) => {
+      const ic = String(a.ic ?? '').replace(/\D/g, '');
+      if (a.ic && ic.length !== 8) {
+        throw new Error(`IČO musí mít 8 číslic, dostal jsem „${a.ic}".`);
+      }
+
+      // ── ARES ────────────────────────────────────────────────────────────
+      let ares = null;
+      let aresNote = 'nepoužit (IČO nezadáno)';
+      if (ic !== '') {
+        try {
+          const res = await c.post('/clients/lookup-ares', { ic }, tool);
+          if (res?.found === false || !res?.data) {
+            aresNote = `IČO ${ic} v ARES nenalezeno — údaje se berou jen ze zadání`;
+          } else {
+            ares = res.data;
+            aresNote = `údaje doplněny z ARES (${ares.company_name ?? ''})`;
+          }
+        } catch (e) {
+          // Výpadek rejstříku nesmí zablokovat založení, když má uživatel údaje sám.
+          aresNote = `ARES nedostupný (${e.message}) — údaje se berou jen ze zadání`;
+        }
+      }
+
+      // Ruční zadání má přednost před rejstříkem: uživatel může vědět
+      // o změně, která se do ARES ještě nepropsala.
+      const pick = (own, fromAres) => {
+        const v = own ?? fromAres ?? '';
+        return typeof v === 'string' ? v.trim() : v;
+      };
+
+      const payload = {
+        company_name: pick(a.company_name, ares?.company_name),
+        street: pick(a.street, ares?.street),
+        city: pick(a.city, ares?.city),
+        zip: pick(a.zip, ares?.zip),
+        country_iso2: pick(a.country_iso2, ares?.country_iso2) || 'CZ',
+        ic: ic || '',
+        dic: pick(a.dic, ares?.dic),
+        main_email: String(a.main_email ?? '').trim(),
+        phone: a.phone ?? null,
+        language: a.language ?? 'cs',
+        is_customer: a.is_customer !== false,
+        is_vendor: a.is_vendor === true,
+        note: a.note ?? '',
+      };
+      if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
+      // ARES je pro CZ autoritativní zdroj registrace k DPH.
+      if (ares && typeof ares.is_vat_payer === 'boolean') payload.is_vat_payer = ares.is_vat_payer;
+
+      const missing = ['company_name', 'street', 'city', 'zip'].filter((f) => payload[f] === '');
+      if (missing.length > 0) {
+        throw new Error(
+          `Chybí povinné údaje: ${missing.join(', ')}. `
+          + (ic === ''
+            ? 'Zadej je, nebo předej `ic` a doplní se z ARES.'
+            : `Z ARES se nedotáhly (${aresNote}), doplň je ručně.`),
+        );
+      }
+
+      // ── Kontrola duplicity ──────────────────────────────────────────────
+      if (!a.allow_duplicate) {
+        for (const [field, value] of [['IČO', payload.ic], ['DIČ', payload.dic]]) {
+          if (!value) continue;
+          const found = rows(await c.get('/clients', { q: value, per_page: 10 }, tool));
+          const hit = found.find((x) => String(x[field === 'IČO' ? 'ic' : 'dic'] ?? '').trim() === value);
+          if (hit) {
+            throw new Error(
+              `Odběratel se stejným ${field} už existuje: „${hit.company_name}" (id ${hit.id}). `
+              + 'Nic jsem nezakládal. Pokud má vzniknout druhá karta, zavolej znovu '
+              + 's `allow_duplicate: true`.',
+            );
+          }
+        }
+      }
+
+      const created = await c.post('/clients', payload, tool);
+      return { ares: aresNote, client: created };
+    },
+  },
+  {
+    name: 'update_client',
+    title: 'Upravit odběratele',
+    description:
+      'Změní údaje existujícího odběratele. Uveď jen to, co se má změnit — zbytek '
+      + 'karty se zachová (nástroj si ji načte a pošle zpět kompletní).\n\n'
+      + '`refresh_from_ares: true` znovu natáhne název, adresu, DIČ a registraci '
+      + 'k DPH z rejstříku podle IČO na kartě. Ručně zadané hodnoty mají i tady '
+      + 'přednost před tím, co vrátí ARES.',
+    inputSchema: schema({
+      id: int('ID odběratele.'),
+      refresh_from_ares: bool('Přenačíst údaje z ARES podle IČO na kartě.'),
+      company_name: str('Firma nebo jméno.'),
+      street: str('Ulice a číslo popisné.'),
+      city: str('Město.'),
+      zip: str('PSČ.'),
+      country_iso2: str('Kód země, dvě písmena.', { minLength: 2, maxLength: 2 }),
+      ic: str('IČO (8 číslic).'),
+      dic: str('DIČ.'),
+      main_email: str('Hlavní e-mail pro zasílání dokladů.'),
+      phone: str('Telefon.'),
+      language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
+      hourly_rate: num('Hodinová sazba pro výkazy práce.', { minimum: 0 }),
+      payment_due_days: int('Splatnost ve dnech.', { minimum: 0 }),
+      is_customer: bool('Je odběratel.'),
+      is_vendor: bool('Je dodavatel.'),
+      note: str('Interní poznámka.'),
+    }, ['id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const current = await c.get(`/clients/${a.id}`, null, tool);
+      if (!current?.id) throw new Error(`Odběratel #${a.id} nenalezen.`);
+
+      let ares = null;
+      let aresNote = 'nepoužit';
+      if (a.refresh_from_ares) {
+        const ic = String(a.ic ?? current.ic ?? '').replace(/\D/g, '');
+        if (ic.length !== 8) {
+          throw new Error('Přenačtení z ARES vyžaduje platné IČO — karta ho nemá a nebylo zadané.');
+        }
+        try {
+          const res = await c.post('/clients/lookup-ares', { ic }, tool);
+          if (res?.found === false || !res?.data) aresNote = `IČO ${ic} v ARES nenalezeno`;
+          else { ares = res.data; aresNote = 'údaje přenačteny z ARES'; }
+        } catch (e) {
+          throw new Error(`ARES je nedostupný (${e.message}), údaje jsem neměnil.`);
+        }
+      }
+
+      // Pořadí priorit: zadání uživatele → ARES → současný stav karty.
+      // Server validuje celý payload (company_name, street, city, zip jsou povinné),
+      // takže neposíláme jen změněná pole, ale kompletní kartu.
+      const pick = (key, aresKey = key) => a[key] ?? ares?.[aresKey] ?? current[key];
+
+      const payload = {
+        company_name: pick('company_name'),
+        street: pick('street'),
+        city: pick('city'),
+        zip: pick('zip'),
+        country_iso2: pick('country_iso2') || 'CZ',
+        ic: a.ic ?? current.ic ?? '',
+        dic: pick('dic'),
+        main_email: a.main_email ?? current.main_email ?? '',
+        phone: a.phone ?? current.phone ?? null,
+        language: a.language ?? current.language ?? 'cs',
+        currency_default_id: current.currency_default_id,
+        is_customer: a.is_customer ?? current.is_customer,
+        is_vendor: a.is_vendor ?? current.is_vendor,
+        is_vat_payer: ares?.is_vat_payer ?? current.is_vat_payer,
+        note: a.note ?? current.note ?? '',
+      };
+      if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
+      else if (current.hourly_rate !== undefined) payload.hourly_rate = current.hourly_rate;
+      if (a.payment_due_days !== undefined) payload.payment_due_days = Number(a.payment_due_days);
+      else if (current.payment_due_days !== undefined) payload.payment_due_days = current.payment_due_days;
+
+      const updated = await c.put(`/clients/${a.id}`, payload, tool);
+      return { ares: aresNote, client: updated };
+    },
+  },
 
   // ──────────────────────────────────────────────────────────────────────────
   // Fakturace
