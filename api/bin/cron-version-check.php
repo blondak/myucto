@@ -27,18 +27,16 @@ if (!defined('STDERR')) {
 }
 
 use MyInvoice\Bootstrap;
-use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Update\VersionService;
 
-$rootDir = Bootstrap::rootDir();
-$config  = Config::load($rootDir);
-$conn    = new Connection($config);
+$container = Bootstrap::buildApp()->getContainer();
+$conn = $container->get(Connection::class);
 
 $run = CronRun::start($conn->pdo(), 'cron-version-check');
 
-$svc    = new VersionService($conn);
+$svc    = $container->get(VersionService::class);
 $status = $svc->refreshLatestVersion();
 
 $current = $status['current'] ?? '?';
