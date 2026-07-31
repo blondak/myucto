@@ -55,9 +55,13 @@ const clientDuePreset = computed<ClientDuePreset>({
     const d = form.value.payment_due_default
     const u = form.value.payment_due_unit
     if (d == null && u == null) return 'inherit'
-    if (u === 'month' && d === 1) return 'month'
-    if ((u === 'days' || u == null) && d === 7) return '7'
-    if ((u === 'days' || u == null) && d === 14) return '14'
+    // NULL jednotka = dědí se z dodavatele, ne „dny" — u legacy klientů (hodnota
+    // zapsaná dřív, než jednotka existovala) proto preset vybíráme podle jednotky,
+    // se kterou splatnost skutečně spočítá backend.
+    const eff = u ?? supplierStore.currentSupplier?.default_payment_due_unit ?? 'days'
+    if (eff === 'month' && d === 1) return 'month'
+    if (eff === 'days' && d === 7) return '7'
+    if (eff === 'days' && d === 14) return '14'
     return 'custom'
   },
   set(v: ClientDuePreset) {

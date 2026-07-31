@@ -10,8 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Invoice\DueDateCalculator;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Invoice\PaymentDueResolver;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -30,7 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   - vytvoří draft (status='draft', varsymbol=null)
  *   - kopie items + work_report (zatím work_report ne — M5)
  *   - auto-increment měsíce v popisech (regex /\b(\d{1,2})\/(\d{4})\b/)
- *   - tax_date/due_date = today (nebo +project.payment_due_days)
+ *   - tax_date = today, due_date podle PaymentDueResolver (zakázka → klient → dodavatel)
  *
  * Žádný draft se neodesílá ani nevystavuje. User musí každý ručně otevřít.
  */
@@ -104,50 +104,36 @@ final class BulkReissueAction
 
         $type = $source['invoice_type'] === 'proforma' ? 'proforma' : 'invoice';
 
-        // Splatnost: stejná priorita jako u nové faktury (InvoiceDefaults::resolve) —
-        // zakázka → klient → dodavatel → 7. Bez tohoto fallbacku dostal klon faktury
-        // bez zakázky splatnost = datum vystavení (0 dní). NULL přeskakujeme (jako ??),
-        // explicitní 0 ctíme — stejně jako u nové faktury.
-        $dueValue = null;
-        $dueUnit = 'days';
+        // Splatnost: stejná pravidla jako u nové faktury — řeší je PaymentDueResolver
+        // (hodnota zakázka → klient → dodavatel → 7, jednotka se dědí nahoru).
+        // Bez tohoto fallbacku dostal klon faktury bez zakázky splatnost = datum
+        // vystavení (0 dní). Klienta i dodavatele načítáme vždy, i když hodnotu
+        // dodá zakázka — může z nich totiž dědit jednotku.
+        $project = null;
+        if (!empty($source['project_id'])) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT payment_due_days, payment_due_unit FROM projects WHERE id = ?'
+            );
+            $stmt->execute([(int) $source['project_id']]);
+            $project = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        }
+
+        $client = null;
+        if (!empty($source['client_id'])) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?'
+            );
+            $stmt->execute([(int) $source['client_id']]);
+            $client = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        }
+
         $stmt = $this->db->pdo()->prepare(
             'SELECT default_payment_due_days, default_payment_due_unit FROM supplier WHERE id = ?'
         );
         $stmt->execute([(int) $source['supplier_id']]);
         $supplier = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
 
-        if (!empty($source['project_id'])) {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT payment_due_days, payment_due_unit FROM projects WHERE id = ?'
-            );
-            $stmt->execute([(int) $source['project_id']]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if ($row !== false) {
-                $dueValue = (int) $row['payment_due_days'];
-                $dueUnit = (string) ($row['payment_due_unit'] ?? 'days');
-            }
-        }
-        if ($dueValue === null && !empty($source['client_id'])) {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?'
-            );
-            $stmt->execute([(int) $source['client_id']]);
-            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            if ($row !== false && $row['payment_due_default'] !== null) {
-                $dueValue = (int) $row['payment_due_default'];
-                $dueUnit = (string) (
-                    $row['payment_due_unit']
-                    ?? $supplier['default_payment_due_unit']
-                    ?? 'days'
-                );
-            }
-        }
-        if ($dueValue === null && $supplier !== null && $supplier['default_payment_due_days'] !== null) {
-            $dueValue = (int) $supplier['default_payment_due_days'];
-            $dueUnit = (string) ($supplier['default_payment_due_unit'] ?? 'days');
-        }
-        $dueValue ??= 7;
-        $dueDate = DueDateCalculator::calculate($issueDate, $dueValue, $dueUnit);
+        $dueDate = PaymentDueResolver::dueDate($issueDate, $project, $client, $supplier);
 
         $taxDate = $type === 'proforma' ? null : $issueDate;
 

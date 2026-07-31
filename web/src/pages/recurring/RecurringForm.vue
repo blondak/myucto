@@ -156,6 +156,7 @@ const form = ref<{
   discount_percent: number
   revenue_category_id: number | null
   payment_due_days: number
+  payment_due_unit: 'days' | 'month' | null
   tax_date_mode: 'same_as_issue' | 'previous_month_last_day'
   draft_open_mode: 'at_issue' | 'period_start'
   reminder_days_before: number
@@ -183,6 +184,7 @@ const form = ref<{
   discount_percent: 0,
   revenue_category_id: null,
   payment_due_days: 14,
+  payment_due_unit: null,
   tax_date_mode: 'same_as_issue',
   draft_open_mode: 'at_issue',
   reminder_days_before: 1,
@@ -468,6 +470,10 @@ watch(() => form.value.client_id, async (newId) => {
       // Pokud má klient default a zvolí se i zakázka, projektová splatnost níže přebije.
       if (formLoaded.value && typeof c.payment_due_default === 'number') {
         form.value.payment_due_days = c.payment_due_default
+        // Bez jednotky by se z klientova „1× měsíc" stala splatnost 1 DEN.
+        // NULL u klienta znamená „dědí dodavatele" — necháme NULL i tady, dědění
+        // dořeší PaymentDueResolver při generování faktury.
+        form.value.payment_due_unit = c.payment_due_unit ?? null
       }
       // RC default dle klienta — zrcadlí InvoiceEditor.applyClientDefaults:
       // plátce přebírá klientský flag; identifikovaná osoba (#94) RC zapne
@@ -498,6 +504,7 @@ watch(() => form.value.project_id, (newId) => {
   const p = projects.value.find(x => x.id === newId)
   if (p && typeof p.payment_due_days === 'number') {
     form.value.payment_due_days = p.payment_due_days
+    form.value.payment_due_unit = p.payment_due_unit ?? null
   }
 })
 
@@ -518,6 +525,7 @@ async function onProjectCreatedInModal(project: Project) {
   form.value.project_id = project.id
   if (typeof project.payment_due_days === 'number') {
     form.value.payment_due_days = project.payment_due_days
+    form.value.payment_due_unit = project.payment_due_unit ?? null
   }
   projectModalOpen.value = false
 }
@@ -658,6 +666,7 @@ onMounted(async () => {
         discount_percent: tpl.discount_percent ?? 0,
         revenue_category_id: tpl.revenue_category_id ?? null,
         payment_due_days: tpl.payment_due_days,
+        payment_due_unit: tpl.payment_due_unit ?? null,
         tax_date_mode: tpl.tax_date_mode ?? 'same_as_issue',
         draft_open_mode: tpl.draft_open_mode ?? 'at_issue',
         reminder_days_before: tpl.reminder_days_before ?? 1,
@@ -752,6 +761,7 @@ async function submit() {
       discount_percent: form.value.discount_percent || 0,
       revenue_category_id: form.value.revenue_category_id,
       payment_due_days: form.value.payment_due_days,
+      payment_due_unit: form.value.payment_due_unit,
       tax_date_mode: form.value.tax_date_mode,
       draft_open_mode: form.value.draft_open_mode,
       reminder_days_before: form.value.reminder_days_before,
@@ -960,9 +970,18 @@ async function submit() {
             </select>
           </div>
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('recurring.payment_due_days') }}</label>
-            <input v-model.number="form.payment_due_days" type="number" min="0"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('recurring.payment_due_label') }}</label>
+            <div class="flex gap-2 items-center">
+              <input v-model.number="form.payment_due_days" type="number" min="0"
+                class="w-20 shrink-0 h-10 px-3 border border-neutral-300 rounded-md text-right font-mono" />
+              <select v-model="form.payment_due_unit"
+                class="flex-1 min-w-0 h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                <option :value="null">{{ t('recurring.payment_due_unit_inherit') }}</option>
+                <option value="days">{{ t('recurring.payment_due_unit_days') }}</option>
+                <option value="month">{{ t('recurring.payment_due_unit_month') }}</option>
+              </select>
+            </div>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('recurring.payment_due_unit_hint') }}</p>
           </div>
           <div>
             <label for="rec_discount_percent" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.discount.label') }}</label>

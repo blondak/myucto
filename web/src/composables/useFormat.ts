@@ -91,6 +91,29 @@ export function formatPercent(value: number | null | undefined, decimals?: numbe
   })} %`
 }
 
+/**
+ * Splatnost jako „14 dní" / „1 měsíc" / „3× měsíc".
+ *
+ * `unit === null` neznamená dny, ale „dědí se z nadřazené úrovně" — u klienta
+ * tedy z dodavatele (backend to řeší v PaymentDueResolver). Bez `fallbackUnit`
+ * by se klientovi se zděděnou měsíční splatností zobrazovaly dny.
+ */
+export function paymentDueLabel(
+  value: number | null | undefined,
+  unit: 'days' | 'month' | null | undefined,
+  fallbackUnit: 'days' | 'month' | null | undefined,
+  emptyLabel: string,
+): string {
+  if (value === null || value === undefined) return emptyLabel
+  const t = i18n.global.t
+  if ((unit ?? fallbackUnit ?? 'days') === 'month') {
+    return value === 1
+      ? t('client.payment_due_preset_month')
+      : `${value}× ${t('client.payment_due_preset_month').toLowerCase()}`
+  }
+  return t('client.due_days_n', { n: value })
+}
+
 export function statusLabel(status: string): string {
   const t = i18n.global.t
   const key = `status.${status}`

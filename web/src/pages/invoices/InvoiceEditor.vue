@@ -393,6 +393,25 @@ function supplierDueDate(issueDate: string): string {
   return computeDueDate(issueDate, value, unit)
 }
 
+// Zrcadlo backendového PaymentDueResolver — jediné místo, kde se ve formuláři
+// rozhoduje o splatnosti. Hodnota: zakázka → klient → dodavatel → 7.
+// Jednotka: NULL na kterékoli úrovni znamená „zděď z nadřazené", takže se dědí
+// od úrovně, ze které pochází hodnota, směrem nahoru (zakázka → klient → dodavatel).
+function resolveDueDate(issueDate: string, projectId?: number | null, clientId?: number | null): string {
+  const sup = supplierStore.currentSupplier
+  const c = clientId ? clients.value.find(x => x.id === clientId) : null
+  const p = projectId ? projects.value.find(x => x.id === projectId) : null
+  const clientUnit = c?.payment_due_unit ?? sup?.default_payment_due_unit ?? null
+
+  if (p && typeof p.payment_due_days === 'number') {
+    return computeDueDate(issueDate, p.payment_due_days, (p.payment_due_unit ?? clientUnit ?? 'days') as DueUnit)
+  }
+  if (c && typeof c.payment_due_default === 'number') {
+    return computeDueDate(issueDate, c.payment_due_default, (clientUnit ?? 'days') as DueUnit)
+  }
+  return supplierDueDate(issueDate)
+}
+
 // RC (přenesená daň. povinnost) je teď jen hlavičkový příznak `reverse_charge` — položky si
 // drží nominální sazbu (21 %), daň vynuluje backend (InvoiceMath). Default sazby RC neřeší,
 // proto se položky při zaškrtnutí RC už nepřepisují na 0% „CZ-RC".
@@ -504,29 +523,12 @@ watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_i
   if (loaded.value && editedStatus.value === 'draft') loadVarsymbolPreview()
 })
 
-// Při změně Vystaveno přepočti Splatnost — projekt přebíjí klienta, klient přebíjí supplier.
-// Jen pro draft / nový (po `loaded`), abys nepřepsal uloženou hodnotu při hydrataci nebo
-// u vystavených dokladů. Projekt má vlastní hodnotu i jednotku, klient může jednotku
-// zdědit od dodavatele.
+// Při změně Vystaveno přepočti Splatnost — priorita zakázka → klient → dodavatel
+// řeší resolveDueDate. Jen pro draft / nový (po `loaded`), abys nepřepsal uloženou
+// hodnotu při hydrataci nebo u vystavených dokladů.
 watch(() => form.value.issue_date, (newIssue) => {
   if (!loaded.value || editedStatus.value !== 'draft' || !newIssue) return
-  // Zakázka přebíjí vše — má vlastní hodnotu i jednotku (NULL unit = dny).
-  if (form.value.project_id) {
-    const p = projects.value.find(x => x.id === form.value.project_id)
-    if (p && typeof p.payment_due_days === 'number') {
-      form.value.due_date = computeDueDate(newIssue, p.payment_due_days, (p.payment_due_unit ?? 'days') as DueUnit)
-      return
-    }
-  }
-  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní dědí supplier),
-  // jinak plně dědí supplier default (hodnotu i jednotku).
-  const c = form.value.client_id ? clients.value.find(x => x.id === form.value.client_id) : null
-  if (c && typeof c.payment_due_default === 'number') {
-    const unit = c.payment_due_unit ?? supplierStore.currentSupplier?.default_payment_due_unit ?? 'days'
-    form.value.due_date = computeDueDate(newIssue, c.payment_due_default, unit as DueUnit)
-  } else {
-    form.value.due_date = supplierDueDate(newIssue)
-  }
+  form.value.due_date = resolveDueDate(newIssue, form.value.project_id, form.value.client_id)
 })
 
 // Přepnutí „Vydaná faktura" (/invoices/new) ⇄ „Zálohová faktura" (?type=proforma) z menu je
@@ -749,14 +751,9 @@ async function applyClientDefaults(clientId: number) {
   if (form.value.revenue_category_id == null && c.default_revenue_category_id != null) {
     form.value.revenue_category_id = c.default_revenue_category_id
   }
-  // Klient s vlastní hodnotou → jeho jednotka (bez vlastní dědí supplier),
-  // jinak plně dědí supplier default (hodnotu i jednotku).
-  if (typeof c.payment_due_default === 'number') {
-    const unit = c.payment_due_unit ?? supplierStore.currentSupplier?.default_payment_due_unit ?? 'days'
-    form.value.due_date = computeDueDate(form.value.issue_date, c.payment_due_default, unit as DueUnit)
-  } else {
-    form.value.due_date = supplierDueDate(form.value.issue_date)
-  }
+  // Splatnost podle nově vybraného klienta (zakázka se aplikuje až po ní,
+  // v applyProjectDefaults, a případně ji přepíše).
+  form.value.due_date = resolveDueDate(form.value.issue_date, null, c.id)
   // Klientská sazba — fallback pro faktury bez zakázky (project rate přepíše později).
   // „Prázdná položka" = prázdný popis; rate mohl naplnit předchozí klient/projekt, přesto chceme refresh.
   if (!form.value.project_id && c.hourly_rate && c.hourly_rate > 0) {
@@ -805,7 +802,7 @@ async function applyProjectDefaults(projectId: number) {
   if (!p) return
   form.value.currency_id = p.currency_id
   form.value.currency = p.currency
-  form.value.due_date = computeDueDate(form.value.issue_date, p.payment_due_days, (p.payment_due_unit ?? 'days') as DueUnit)
+  form.value.due_date = resolveDueDate(form.value.issue_date, p.id, form.value.client_id)
   // Výchozí kategorie tržby zakázky — PŘEDNOST před klientem. Aplikuje se při výběru
   // zakázky (konzistentní s tím, že zakázka přepisuje měnu/splatnost). Když zakázka
   // default nemá, ponecháme hodnotu z klienta.

@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { clientsApi, type Client } from '@/api/clients'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatDate, paymentDueLabel } from '@/composables/useFormat'
+import { useSupplierStore } from '@/stores/supplier'
 import { useRowLink } from '@/composables/useRowLink'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -21,6 +22,7 @@ type RoleFilter = 'all' | 'customers' | 'vendors'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 
 const items = ref<Client[]>([])
 const total = ref(0)
@@ -155,14 +157,14 @@ function openClient(c: Client, e?: MouseEvent) {
 }
 
 // Kompaktní zápis splatnosti (payment_due_default + unit) — stejně jako ClientDetail.
+// Jednotku klient bez vlastní dědí z dodavatele, jinak by tu „1× měsíc" svítilo jako „1 den".
 function formatPaymentDue(c: Client): string {
-  if (c.payment_due_default == null) return '—'
-  if (c.payment_due_unit === 'month') {
-    return c.payment_due_default === 1
-      ? t('client.payment_due_preset_month')
-      : `${c.payment_due_default}× ${t('client.payment_due_preset_month').toLowerCase()}`
-  }
-  return t('client.due_days_n', { n: c.payment_due_default })
+  return paymentDueLabel(
+    c.payment_due_default,
+    c.payment_due_unit,
+    supplierStore.currentSupplier?.default_payment_due_unit,
+    '—',
+  )
 }
 </script>
 

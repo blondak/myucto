@@ -125,27 +125,11 @@ final class InvoiceDefaults
         }
 
         if (empty($data['due_date'])) {
-            if ($project !== null && $project['payment_due_days'] !== null) {
-                $dueValue = (int) $project['payment_due_days'];
-                $dueUnit = (string) ($project['payment_due_unit'] ?? 'days');
-            } elseif ($client !== null && $client['payment_due_default'] !== null) {
-                $dueValue = (int) $client['payment_due_default'];
-                $dueUnit = (string) (
-                    $client['payment_due_unit']
-                    ?? $supplier['default_payment_due_unit']
-                    ?? 'days'
-                );
-            } elseif ($supplier !== null && $supplier['default_payment_due_days'] !== null) {
-                $dueValue = (int) $supplier['default_payment_due_days'];
-                $dueUnit = (string) ($supplier['default_payment_due_unit'] ?? 'days');
-            } else {
-                $dueValue = 7;
-                $dueUnit = 'days';
-            }
-            $data['due_date'] = DueDateCalculator::calculate(
+            $data['due_date'] = PaymentDueResolver::dueDate(
                 $data['issue_date'],
-                $dueValue,
-                $dueUnit,
+                $project,
+                $client,
+                $supplier,
             );
         }
 

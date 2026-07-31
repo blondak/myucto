@@ -11,11 +11,13 @@ import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOv
 import MonthlyRevenueChart from '@/components/charts/MonthlyRevenueChart.vue'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import SendWorkReportLinkModal from '@/components/modals/SendWorkReportLinkModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const showWrLinkModal = ref(false)
 
 const route = useRoute()
@@ -33,10 +35,16 @@ const invoicesPages = ref(1)
 const canDelete = computed(() => (project.value?.invoices_count ?? 0) === 0)
 
 // Splatnost s jednotkou: měsíc → „Měsíc" / „N× měsíc", jinak „N dní".
+// Zakázka bez vlastní jednotky ji dědí z klienta a ten z dodavatele (PaymentDueResolver),
+// takže i tady zobrazujeme jednotku, se kterou se splatnost skutečně spočítá.
 const dueLabel = computed(() => {
   const p = project.value
   if (!p) return ''
-  if (p.payment_due_unit === 'month') {
+  const unit = p.payment_due_unit
+    ?? p.client_payment_due_unit
+    ?? supplierStore.currentSupplier?.default_payment_due_unit
+    ?? 'days'
+  if (unit === 'month') {
     return p.payment_due_days === 1
       ? t('project.payment_due_preset_month')
       : `${p.payment_due_days}× ${t('project.payment_due_preset_month').toLowerCase()}`

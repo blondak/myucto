@@ -16,7 +16,10 @@ export interface Project {
   client_id: number
   name: string
   payment_due_days: number
+  /** NULL = dědit jednotku z klienta → dodavatele (PaymentDueResolver). */
   payment_due_unit?: 'days' | 'month' | null
+  /** Jen v detailu — jednotka klienta, aby šlo zobrazit skutečně platnou splatnost. */
+  client_payment_due_unit?: 'days' | 'month' | null
   project_number?: string | null
   contract_number?: string | null
   budget_total?: number | null

@@ -7,7 +7,8 @@ import { clientsApi, TAX_NUMBER_LABELS, type Client, type ClientBankAccount, typ
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
 import { purchaseInvoicesApi, type PurchaseInvoice } from '@/api/purchaseInvoices'
 import { recurringApi, type RecurringTemplate } from '@/api/recurring'
-import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, taxDateClass, paymentDueLabel } from '@/composables/useFormat'
+import { useSupplierStore } from '@/stores/supplier'
 import MonthlyRevenueChart from '@/components/charts/MonthlyRevenueChart.vue'
 import TopProjectsBarChart from '@/components/charts/TopProjectsBarChart.vue'
 import { useToast } from '@/composables/useToast'
@@ -20,6 +21,7 @@ import { formatAccountNumber } from '@/utils/bankAccount'
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const showWrLinkModal = ref(false)
 
 const route = useRoute()
@@ -164,14 +166,15 @@ const purchaseDisplayCurrency = computed(() =>
   purchaseIsMultiCurrency.value ? 'CZK' : (purchaseCurrencies.value[0] || 'CZK')
 )
 
+// Jednotku klient bez vlastní dědí z dodavatele (stejně jako PaymentDueResolver
+// na backendu) — jinak by se zděděný „1× měsíc" zobrazil jako „1 den".
 function formatPaymentDue(c: Client): string {
-  if (c.payment_due_default == null) return t('client.due_default')
-  if (c.payment_due_unit === 'month') {
-    return c.payment_due_default === 1
-      ? t('client.payment_due_preset_month')
-      : `${c.payment_due_default}× ${t('client.payment_due_preset_month').toLowerCase()}`
-  }
-  return t('client.due_days_n', { n: c.payment_due_default })
+  return paymentDueLabel(
+    c.payment_due_default,
+    c.payment_due_unit,
+    supplierStore.currentSupplier?.default_payment_due_unit,
+    t('client.due_default'),
+  )
 }
 
 // Náklady čteme ze server-side agregace (client.costs_by_month / costs_by_year) — nezávislé na paginaci

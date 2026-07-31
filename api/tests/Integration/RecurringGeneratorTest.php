@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\RecurringTemplateRepository;
+use MyInvoice\Service\Invoice\PaymentDueResolver;
 use MyInvoice\Service\Invoice\RecurringDraftReminder;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
 use PDO;
@@ -252,6 +253,90 @@ final class RecurringGeneratorTest extends TestCase
         $this->assertNotSame($today, $tplData['next_run_date'], 'next_run_date musí být posunut');
         $this->assertGreaterThan($today, $tplData['next_run_date']);
         $this->assertSame('active', $tplData['status']);
+    }
+
+    /**
+     * Šablona bez vlastní jednotky splatnosti ji dědí z klienta (a ten z dodavatele).
+     * Dřív generátor počítal vždy `+N days`, takže z klientova „1× měsíc" vznikla
+     * splatnost 1 DEN.
+     */
+    public function testGeneratorInheritsCalendarMonthDueUnitFromClient(): void
+    {
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $pdo = $this->db->pdo();
+
+        $orig = $pdo->prepare('SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?');
+        $orig->execute([$this->clientId]);
+        $originalClient = $orig->fetch(PDO::FETCH_ASSOC);
+
+        try {
+            $pdo->prepare(
+                "UPDATE clients SET payment_due_default = 1, payment_due_unit = 'month' WHERE id = ?"
+            )->execute([$this->clientId]);
+
+            $tplId = $this->repo->create([
+                'supplier_id'    => $this->supplierId,
+                'client_id'      => $this->clientId,
+                'project_id'     => null,
+                'name'           => 'TEST recurring due unit (PHPUnit)',
+                'frequency'      => 'monthly',
+                'day_of_month'   => null,
+                'end_of_month'   => false,
+                'anchor_date'    => $today,
+                'next_run_date'  => $today,
+                'end_date'       => null,
+                'invoice_type'   => 'invoice',
+                'currency_id'    => $this->currencyId,
+                'language'       => 'cs',
+                'payment_method' => 'bank_transfer',
+                'reverse_charge' => false,
+                'payment_due_days' => 1,
+                'payment_due_unit' => null,
+                'note_above_items' => null,
+                'note_below_items' => null,
+                'increment_month_in_descriptions' => false,
+                'auto_issue'     => false,
+                'auto_send_email' => false,
+                'status'         => 'active',
+            ], $this->userId);
+            $this->createdTemplateIds[] = $tplId;
+
+            $this->repo->replaceItems($tplId, [[
+                'description' => 'Paušál',
+                'quantity' => 1.0,
+                'unit' => 'měs',
+                'unit_price_without_vat' => 1000.00,
+                'vat_rate_id' => $this->vatRateId,
+                'order_index' => 0,
+            ]]);
+
+            $result = $this->generator->generate($tplId, $today, $this->userId, '127.0.0.1', 'phpunit');
+            $this->createdInvoiceIds[] = $result['invoice_id'];
+
+            $due = $pdo->prepare('SELECT issue_date, due_date FROM invoices WHERE id = ?');
+            $due->execute([$result['invoice_id']]);
+            $row = $due->fetch(PDO::FETCH_ASSOC);
+
+            $expected = PaymentDueResolver::dueDate(
+                $today,
+                ['payment_due_days' => 1, 'payment_due_unit' => null],
+                ['payment_due_default' => 1, 'payment_due_unit' => 'month'],
+                null,
+            );
+            $this->assertSame($expected, (string) $row['due_date'], 'splatnost má být +1 kalendářní měsíc');
+            $this->assertNotSame(
+                (new \DateTimeImmutable($today))->modify('+1 day')->format('Y-m-d'),
+                (string) $row['due_date'],
+                'jednotka se nesmí degradovat na dny',
+            );
+        } finally {
+            $pdo->prepare('UPDATE clients SET payment_due_default = ?, payment_due_unit = ? WHERE id = ?')
+                ->execute([
+                    $originalClient['payment_due_default'] ?? null,
+                    $originalClient['payment_due_unit'] ?? null,
+                    $this->clientId,
+                ]);
+        }
     }
 
     public function testGeneratorDraftOnlyWhenAutoIssueFalse(): void

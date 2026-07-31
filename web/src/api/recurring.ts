@@ -62,6 +62,8 @@ export interface RecurringTemplate {
   revenue_category_label?: string | null
   revenue_category_code?: string | null
   payment_due_days: number
+  /** NULL = dědit jednotku z klienta → dodavatele (PaymentDueResolver). */
+  payment_due_unit: 'days' | 'month' | null
   tax_date_mode: TaxDateMode
   draft_open_mode: DraftOpenMode
   reminder_days_before: number
@@ -107,6 +109,7 @@ export interface RecurringTemplatePayload {
   discount_percent?: number
   revenue_category_id?: number | null
   payment_due_days?: number
+  payment_due_unit?: 'days' | 'month' | null
   tax_date_mode?: TaxDateMode
   draft_open_mode?: DraftOpenMode
   reminder_days_before?: number

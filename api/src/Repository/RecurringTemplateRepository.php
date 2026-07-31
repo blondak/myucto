@@ -151,7 +151,7 @@ final class RecurringTemplateRepository
                        t.anchor_date, t.end_date, t.next_run_date, t.last_run_date,
                        t.invoice_type, t.currency_id, t.language, t.payment_method,
                        t.reverse_charge, t.prices_include_vat, t.discount_percent, t.revenue_category_id,
-                       t.payment_due_days, t.draft_open_mode, t.reminder_days_before,
+                       t.payment_due_days, t.payment_due_unit, t.draft_open_mode, t.reminder_days_before,
                        t.auto_issue, t.auto_send_email, t.status,
                        t.last_run_date, t.last_error, t.last_error_at,
                        t.created_at, t.updated_at,
@@ -452,10 +452,10 @@ final class RecurringTemplateRepository
              frequency, day_of_month, end_of_month, anchor_date, end_date, next_run_date,
              invoice_type, currency_id, language, payment_method, reverse_charge, prices_include_vat, discount_percent,
              revenue_category_id,
-             payment_due_days, tax_date_mode, draft_open_mode, reminder_days_before,
+             payment_due_days, payment_due_unit, tax_date_mode, draft_open_mode, reminder_days_before,
              note_above_items, note_below_items,
              increment_month_in_descriptions, auto_issue, auto_send_email, status, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -479,6 +479,7 @@ final class RecurringTemplateRepository
             self::clampDiscountPercent($data['discount_percent'] ?? 0),
             !empty($data['revenue_category_id']) ? (int) $data['revenue_category_id'] : null,
             (int) ($data['payment_due_days'] ?? 14),
+            self::normalizePaymentDueUnit($data['payment_due_unit'] ?? null),
             self::normalizeTaxDateMode($data['tax_date_mode'] ?? null),
             self::normalizeDraftOpenMode($data['draft_open_mode'] ?? null),
             self::normalizeReminderDays($data['reminder_days_before'] ?? null),
@@ -543,7 +544,7 @@ final class RecurringTemplateRepository
                 next_run_date = ?,
                 invoice_type = ?, currency_id = ?, language = ?, payment_method = ?,
                 reverse_charge = ?, prices_include_vat = ?, discount_percent = ?, revenue_category_id = ?,
-                payment_due_days = ?, tax_date_mode = ?,
+                payment_due_days = ?, payment_due_unit = ?, tax_date_mode = ?,
                 draft_open_mode = ?, reminder_days_before = ?,
                 note_above_items = ?, note_below_items = ?,
                 increment_month_in_descriptions = ?, auto_issue = ?, auto_send_email = ?
@@ -568,6 +569,7 @@ final class RecurringTemplateRepository
             self::clampDiscountPercent($data['discount_percent'] ?? 0),
             !empty($data['revenue_category_id']) ? (int) $data['revenue_category_id'] : null,
             (int) ($data['payment_due_days'] ?? 14),
+            self::normalizePaymentDueUnit($data['payment_due_unit'] ?? null),
             self::normalizeTaxDateMode($data['tax_date_mode'] ?? null),
             self::normalizeDraftOpenMode($data['draft_open_mode'] ?? null),
             self::normalizeReminderDays($data['reminder_days_before'] ?? null),
@@ -622,6 +624,12 @@ final class RecurringTemplateRepository
             'UPDATE recurring_invoice_templates SET last_error = NULL, last_error_at = NULL
               WHERE id = ? AND last_error IS NOT NULL'
         )->execute([$id]);
+    }
+
+    /** NULL = dědit jednotku z klienta → dodavatele (viz PaymentDueResolver). */
+    private static function normalizePaymentDueUnit(mixed $value): ?string
+    {
+        return in_array($value, ['days', 'month'], true) ? (string) $value : null;
     }
 
     private static function normalizeTaxDateMode(mixed $value): string
@@ -725,6 +733,9 @@ final class RecurringTemplateRepository
         }
         if (array_key_exists('payment_due_days', $row)) {
             $row['payment_due_days'] = (int) $row['payment_due_days'];
+        }
+        if (array_key_exists('payment_due_unit', $row)) {
+            $row['payment_due_unit'] = $row['payment_due_unit'] !== null ? (string) $row['payment_due_unit'] : null;
         }
         if (array_key_exists('reminder_days_before', $row)) {
             $row['reminder_days_before'] = (int) $row['reminder_days_before'];

@@ -16,6 +16,7 @@ final class ProjectRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT p.*, c.company_name AS client_company_name, c.main_email AS client_main_email,
                     c.supplier_id AS supplier_id,
+                    c.payment_due_unit AS client_payment_due_unit,
                     cur.code AS currency
                FROM projects p
                JOIN clients   c   ON c.id   = p.client_id

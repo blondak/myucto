@@ -343,6 +343,33 @@ final class RecurringInvoiceGenerator
     }
 
     /**
+     * Splatnost šablony. Hodnota je vždy vlastní (`payment_due_days`, NOT NULL),
+     * ale jednotka se smí dědit: NULL = vzít ji z klienta, a když ji nemá ani on,
+     * z dodavatele. Bez toho se šablona založená pro klienta se splatností
+     * „1× měsíc" chovala jako 1 den.
+     *
+     * @param array<string,mixed> $template
+     */
+    private function templateDueDate(array $template, string $issueDate): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT c.payment_due_unit, s.default_payment_due_unit
+               FROM clients c
+               JOIN supplier s ON s.id = c.supplier_id
+              WHERE c.id = ?'
+        );
+        $stmt->execute([(int) $template['client_id']]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+        return PaymentDueResolver::dueDate(
+            $issueDate,
+            $template,
+            ['payment_due_default' => null, 'payment_due_unit' => $row['payment_due_unit'] ?? null],
+            ['default_payment_due_days' => null, 'default_payment_due_unit' => $row['default_payment_due_unit'] ?? null],
+        );
+    }
+
+    /**
      * Insert draft + items. Zachovává payment_method, reverse_charge, language,
      * notes a item description s případným month-increment.
      */
@@ -351,7 +378,7 @@ final class RecurringInvoiceGenerator
         $pdo = $this->db->pdo();
 
         $type = (string) ($template['invoice_type'] ?? 'invoice');
-        $dueDate = date('Y-m-d', strtotime($issueDate . ' +' . (int) $template['payment_due_days'] . ' days'));
+        $dueDate = $this->templateDueDate($template, $issueDate);
         $taxDate = $type === 'proforma'
             ? null
             : self::computeTaxDate($issueDate, (string) ($template['tax_date_mode'] ?? 'same_as_issue'));

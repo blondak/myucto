@@ -8,6 +8,7 @@ import { clientsApi, type Client } from '@/api/clients'
 import { codebooksApi, type Currency } from '@/api/codebooks'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { useToast } from '@/composables/useToast'
+import { useSupplierStore } from '@/stores/supplier'
 
 /**
  * V `embedded` módu komponenta nečte route a vrací výsledek přes `@created`.
@@ -32,6 +33,7 @@ const projectId = computed(() => (isEdit.value ? Number(route.params.id) : null)
 const initialClientId = ref<number | null>(null)
 
 const toast = useToast()
+const supplierStore = useSupplierStore()
 const client = ref<Client | null>(null)
 const currencies = ref<Currency[]>([])
 const revenueCategories = ref<RevenueCategory[]>([])
@@ -76,7 +78,7 @@ function toggleBillingUsage(i: number, code: ProjectEmailUsage) {
 
 // Splatnost zakázky — preset selector. Zakázka má vždy konkrétní hodnotu (žádné
 // „dědit"); 'month' = 1 kalendářní měsíc (days=1, unit='month'), 'custom' odhalí
-// číselný input ve dnech. NULL unit = dny (zpětná kompatibilita).
+// číselný input ve dnech. NULL unit = jednotka se dědí z klienta → dodavatele.
 type ProjectDuePreset = '7' | '14' | 'month' | 'custom'
 // 'custom' musí být „sticky" i když hodnota odpovídá presetu (7/14) — jinak by getter
 // spadl zpět na preset a číselný input by se nikdy neukázal.
@@ -85,10 +87,15 @@ const projectDuePreset = computed<ProjectDuePreset>({
   get() {
     if (dueCustom.value) return 'custom'
     const d = form.value.payment_due_days
+    // NULL jednotka není „dny", ale dědění — preset proto vybíráme podle jednotky,
+    // se kterou splatnost skutečně spočítá backend (PaymentDueResolver).
     const u = form.value.payment_due_unit
+      ?? client.value?.payment_due_unit
+      ?? supplierStore.currentSupplier?.default_payment_due_unit
+      ?? 'days'
     if (u === 'month' && d === 1) return 'month'
-    if ((u === 'days' || u == null) && d === 7) return '7'
-    if ((u === 'days' || u == null) && d === 14) return '14'
+    if (u === 'days' && d === 7) return '7'
+    if (u === 'days' && d === 14) return '14'
     return 'custom'
   },
   set(v: ProjectDuePreset) {
