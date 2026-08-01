@@ -41,7 +41,7 @@ const ACCENT_PILL: Record<NonNullable<NavSection['accent']>, string> = {
 
 const props = defineProps<{
   sections: NavSection[]
-  isActive: (to: string) => boolean
+  isActive: (item: NavItem) => boolean
   canCreate: (item: NavItem) => boolean
   createTarget: (item: NavItem) => string
   /** Popisek klávesové zkratky položky, nebo prázdno když žádnou nemá. */
@@ -57,7 +57,7 @@ const hoverCapable = ref(false)
 let hoverMql: MediaQueryList | null = null
 
 function sectionIsActive(section: NavSection): boolean {
-  return section.items.some(item => !item.external && props.isActive(item.to))
+  return section.items.some(item => !item.external && props.isActive(item))
 }
 
 function toggleSection(key: string) {
@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
               <RouterLink
                 :to="item.to"
                 class="flex items-center gap-2.5 px-3 py-2 text-sm transition-colors"
-                :class="props.isActive(item.to) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
+                :class="props.isActive(item) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
                 role="menuitem"
                 @click="close"
               >
