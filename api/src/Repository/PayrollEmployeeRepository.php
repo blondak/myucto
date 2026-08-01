@@ -18,7 +18,8 @@ final class PayrollEmployeeRepository
 {
     private const COLS = 'id, supplier_id, full_name, birth_date, birth_number, address,
         taxpayer_type, employment_type, tax_declaration_signed,
-        tax_credit_taxpayer, child_count, monthly_gross, auto_post, is_active, created_at, updated_at';
+        tax_credit_taxpayer, child_count, net_settlement_account_code,
+        monthly_gross, auto_post, is_active, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -56,8 +57,9 @@ final class PayrollEmployeeRepository
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, birth_date, birth_number, address,
                  taxpayer_type, employment_type, tax_declaration_signed,
-                 tax_credit_taxpayer, child_count, monthly_gross, auto_post, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 tax_credit_taxpayer, child_count, net_settlement_account_code,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['full_name'],
@@ -69,6 +71,7 @@ final class PayrollEmployeeRepository
             array_key_exists('tax_declaration_signed', $data) ? (int) (bool) $data['tax_declaration_signed'] : 1,
             (int) (bool) $data['tax_credit_taxpayer'],
             $data['child_count'],
+            self::settlementAccountOrNull($data['net_settlement_account_code'] ?? null),
             $data['monthly_gross'] ?? null,
             array_key_exists('auto_post', $data) ? (int) (bool) $data['auto_post'] : 0,
             array_key_exists('is_active', $data) ? (int) (bool) $data['is_active'] : 1,
@@ -85,7 +88,8 @@ final class PayrollEmployeeRepository
         $allowed = [
             'full_name', 'birth_date', 'birth_number', 'address',
             'taxpayer_type', 'employment_type', 'tax_declaration_signed',
-            'tax_credit_taxpayer', 'child_count', 'monthly_gross', 'auto_post', 'is_active',
+            'tax_credit_taxpayer', 'child_count', 'net_settlement_account_code',
+            'monthly_gross', 'auto_post', 'is_active',
         ];
         $sets = [];
         $params = [];
@@ -94,9 +98,15 @@ final class PayrollEmployeeRepository
                 $sets[] = "{$col} = ?";
                 // `tax_declaration_signed` MUSÍ být v seznamu boolean sloupců — jinak by
                 // do TINYINT šlo syrové "false"/"0" z JSONu a MariaDB by z něj udělala 1.
-                $params[] = in_array($col, ['tax_credit_taxpayer', 'is_active', 'tax_declaration_signed', 'auto_post'], true)
-                    ? (int) (bool) $fields[$col]
-                    : $fields[$col];
+                if (in_array($col, ['tax_credit_taxpayer', 'is_active', 'tax_declaration_signed', 'auto_post'], true)) {
+                    $params[] = (int) (bool) $fields[$col];
+                } elseif ($col === 'net_settlement_account_code') {
+                    // Prázdný řetězec z formuláře znamená „bez přeúčtování" — musí dojít
+                    // jako NULL, jinak by kalkulátor hledal účet s prázdným kódem.
+                    $params[] = self::settlementAccountOrNull($fields[$col]);
+                } else {
+                    $params[] = $fields[$col];
+                }
             }
         }
         if ($sets === []) {
@@ -109,6 +119,13 @@ final class PayrollEmployeeRepository
         );
         $stmt->execute($params);
         return $stmt->rowCount() > 0;
+    }
+
+    /** Kód účtu pro přeúčtování čisté mzdy; prázdno i mezery → NULL (bez přeúčtování). */
+    private static function settlementAccountOrNull(mixed $value): ?string
+    {
+        $code = trim((string) ($value ?? ''));
+        return $code === '' ? null : $code;
     }
 
     /** Zaměstnanec s historií mzdových záznamů se nesmí smazat — jen deaktivovat. */

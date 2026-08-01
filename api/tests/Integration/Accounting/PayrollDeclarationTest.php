@@ -268,6 +268,98 @@ final class PayrollDeclarationTest extends TestCase
     }
 
     /**
+     * Měsíční přeúčtování čisté mzdy (migrace 1178). Účetní to dělá jednou za rok ručním
+     * zápočtem proti účtu společníka (v ostrých datech 366/365 k 31. 12.); s nastaveným
+     * účtem to udělá zaúčtování samo každý měsíc a saldo 331 se vynuluje.
+     */
+    public function testNetSettlementAccountClosesPayableInSameEntry(): void
+    {
+        $employeeId = $this->employee(creditClaimed: false, declarationSigned: false);
+        $this->db->pdo()
+            ->prepare('UPDATE payroll_employees SET net_settlement_account_code = ? WHERE id = ?')
+            ->execute(['365', $employeeId]);
+
+        $res = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, self::GROSS, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+
+        $sums = $this->accountSums((int) $res['journal_entry_id']);
+        self::assertSame(886.0, $sums['365']['credit'] ?? null, 'Na 365 jde čistá mzda.');
+        // 331: D 4 500 (hrubá) vs MD 2 939 + 675 + 886 → saldo přesně nula.
+        self::assertSame(
+            round(($sums['331']['debit'] ?? 0) - ($sums['331']['credit'] ?? 0), 2),
+            0.0,
+            'Závazek ze mzdy je zápočtem vypořádaný, na 331 nic nezůstává.',
+        );
+    }
+
+    /** Bez zvoleného účtu se nesmí nic přidat — dosavadní zápis zůstává beze změny. */
+    public function testWithoutSettlementAccountPayableRemains(): void
+    {
+        $employeeId = $this->employee(creditClaimed: false, declarationSigned: false);
+
+        $res = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, self::GROSS, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+
+        $sums = $this->accountSums((int) $res['journal_entry_id']);
+        self::assertArrayNotHasKey('365', $sums);
+        self::assertSame(
+            round(($sums['331']['credit'] ?? 0) - ($sums['331']['debit'] ?? 0), 2),
+            886.0,
+            'Čistá mzda zůstává viset jako závazek.',
+        );
+    }
+
+    /**
+     * Zápočet patří do TÉHOŽ zápisu jako mzda — jinak by přeúčtování měsíce nebo storno
+     * mzdy nechalo zápočet viset samostatně a saldo by se rozešlo.
+     */
+    public function testSettlementIsRewrittenTogetherWithPayroll(): void
+    {
+        $employeeId = $this->employee(creditClaimed: false, declarationSigned: false);
+        $first = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, self::GROSS, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+
+        $this->db->pdo()
+            ->prepare('UPDATE payroll_employees SET net_settlement_account_code = ? WHERE id = ?')
+            ->execute(['365', $employeeId]);
+        $second = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, self::GROSS, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+
+        self::assertSame(
+            (int) $first['journal_entry_id'],
+            (int) $second['journal_entry_id'],
+            'Přeúčtování přepisuje týž zápis, nezakládá druhý.',
+        );
+        self::assertArrayHasKey('365', $this->accountSums((int) $second['journal_entry_id']));
+    }
+
+    /** @return array<string, array{debit?:float, credit?:float}> */
+    private function accountSums(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_code, l.side, SUM(l.amount) AS suma
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ?
+              GROUP BY a.account_code, l.side'
+        );
+        $stmt->execute([$entryId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $out[(string) $r['account_code']][(string) $r['side']] = round((float) $r['suma'], 2);
+        }
+        return $out;
+    }
+
+    /**
      * REGRESE: nové sloupce z migrace 1175 musí z repository chodit ve správných PHP
      * typech. `tax_declaration_signed` na tohle doplatilo (TINYINT místo bool rozešel
      * UI se serverem), takže `auto_post` musí být bool a `monthly_gross` rozlišitelně

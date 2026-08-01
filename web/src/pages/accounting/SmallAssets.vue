@@ -94,6 +94,8 @@ const pageTotal = computed(() => items.value.reduce((sum, c) => sum + Number(c.p
 const showCard = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
+/** Editovaná karta v původní podobě — zdroj read-only shrnutí stavu v modalu. */
+const editingCard = ref<SmallAsset | null>(null)
 const form = reactive<SmallAssetPayload & { quantity: number; unit_price: number }>({
   name: '',
   acquisition_date: new Date().toISOString().slice(0, 10),
@@ -126,12 +128,17 @@ function resetForm() {
 
 function openNew() {
   editingId.value = null
+  editingCard.value = null
   resetForm()
   showCard.value = true
 }
 
 function openEdit(card: SmallAsset) {
   editingId.value = card.id
+  // Celá karta kvůli read-only shrnutí stavu v modalu. Vyřazení ani prodej se tu
+  // needituje (stav a jeho datum spolu drží DB CHECK chk_sma_disposal, mění je jen
+  // příslušná akce) — ale účetní potřebuje vidět, na čem je, aniž by modal zavírala.
+  editingCard.value = card
   form.name = card.name
   form.acquisition_date = card.acquisition_date
   form.price = card.price
@@ -502,6 +509,37 @@ onMounted(load)
 
     <!-- Modal: karta -->
     <Modal v-if="showCard" :title="editingId === null ? t('accounting.small_assets.new') : t('accounting.small_assets.edit')" @close="showCard = false">
+      <!--
+        Read-only shrnutí vyřazení/prodeje. Needituje se tu: stav a jeho datum jsou svázané
+        DB CHECKem (chk_sma_disposal) a mění je jen akce Vyřadit / Prodat / Obnovit — kdyby
+        šlo datum přepsat v editaci, vznikla by karta „v užívání" s datem vyřazení a soupis
+        k inventarizaci by lhal. Účetní ale potřebuje vidět, na čem karta je.
+      -->
+      <div
+        v-if="editingCard && editingCard.status !== 'in_use'"
+        class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-3 py-2 text-xs"
+        :class="editingCard.status === 'sold' ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-600'"
+      >
+        <span class="font-semibold">
+          {{ editingCard.status === 'sold' ? t('accounting.small_assets.status_sold') : t('accounting.small_assets.status_disposed') }}
+        </span>
+        <span v-if="editingCard.status === 'sold' ? editingCard.sold_at : editingCard.disposed_at">
+          {{ editingCard.status === 'sold' ? t('accounting.small_assets.sold_at') : t('accounting.small_assets.disposed_at') }}:
+          {{ formatDate((editingCard.status === 'sold' ? editingCard.sold_at : editingCard.disposed_at) as string) }}
+        </span>
+        <span v-if="editingCard.status === 'sold' && editingCard.sale_price !== null">
+          {{ formatMoney(editingCard.sale_price, 'CZK') }}
+        </span>
+        <span v-if="editingCard.status === 'disposed' && editingCard.disposal_reason" class="min-w-0 truncate">
+          {{ editingCard.disposal_reason }}
+        </span>
+        <RouterLink
+          v-if="editingCard.status === 'sold' && editingCard.sale_invoice_id"
+          :to="{ name: 'invoice-detail', params: { id: editingCard.sale_invoice_id } }"
+          class="underline hover:no-underline"
+        >{{ t('accounting.small_assets.sale_invoice_link') }}</RouterLink>
+      </div>
+
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div class="sm:col-span-2">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_name') }} *</label>

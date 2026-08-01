@@ -32,6 +32,9 @@ final class PayrollEmployeeAction
     /** Pracovněprávní vztah — migrace 1156; řídí režim pojistného a srážkové daně. */
     private const EMPLOYMENT_TYPES = ['hpp', 'dpp', 'dpc'];
 
+    /** Účtové skupiny, na které čistou mzdu přeúčtovat nelze — vlastní modul si je hlídá sám. */
+    private const MONEY_ACCOUNT_PREFIXES = ['21', '22', '26'];
+
     /** Shodný strop jako {@see PayrollAction} — nad ním už rozpad není důvěryhodný. */
     private const MAX_MONTHLY_GROSS = 10_000_000;
 
@@ -39,6 +42,7 @@ final class PayrollEmployeeAction
 
     public function __construct(
         private readonly PayrollEmployeeRepository $employees,
+        private readonly \MyInvoice\Repository\ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -64,7 +68,7 @@ final class PayrollEmployeeAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $data = $this->normalize($body, $response, $err);
+        $data = $this->normalize($supplierId, $body, $response, $err);
         if ($data === null) return $err;
         if (!$this->autoPostHasGross($data, $response, $err)) return $err;
 
@@ -86,7 +90,7 @@ final class PayrollEmployeeAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $fields = $this->normalizePartial($body, $response, $err);
+        $fields = $this->normalizePartial($supplierId, $body, $response, $err);
         if ($fields === null) return $err;
         if (!$this->autoPostHasGross(array_merge($current, $fields), $response, $err)) return $err;
 
@@ -119,7 +123,7 @@ final class PayrollEmployeeAction
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed>|null */
-    private function normalize(array $body, Response $response, ?Response &$err): ?array
+    private function normalize(int $supplierId, array $body, Response $response, ?Response &$err): ?array
     {
         $fullName = trim((string) ($body['full_name'] ?? ''));
         if ($fullName === '') {
@@ -146,6 +150,10 @@ final class PayrollEmployeeAction
             $err = Json::error($response, 'validation_failed', self::GROSS_RANGE_MESSAGE, 422);
             return null;
         }
+        $settlement = $this->settlementAccount($supplierId, $body['net_settlement_account_code'] ?? null, $response, $err);
+        if ($err !== null) {
+            return null;
+        }
 
         $err = null;
         return [
@@ -169,6 +177,8 @@ final class PayrollEmployeeAction
                 ? (string) $body['employment_type']
                 : 'hpp',
             'child_count'         => $childCount,
+            // Migrace 1178 — kam se měsíčně přeúčtuje čistá mzda (typicky 365.x).
+            'net_settlement_account_code' => $settlement,
             // Migrace 1175 — pravidelná mzda a pověření cronu, ať se měsíc od měsíce
             // neopisuje táž konstanta.
             'monthly_gross'       => $monthlyGross,
@@ -182,7 +192,7 @@ final class PayrollEmployeeAction
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed>|null */
-    private function normalizePartial(array $body, Response $response, ?Response &$err): ?array
+    private function normalizePartial(int $supplierId, array $body, Response $response, ?Response &$err): ?array
     {
         $fields = [];
         if (array_key_exists('full_name', $body)) {
@@ -248,6 +258,13 @@ final class PayrollEmployeeAction
             }
             $fields['monthly_gross'] = $monthlyGross;
         }
+        if (array_key_exists('net_settlement_account_code', $body)) {
+            $fields['net_settlement_account_code'] =
+                $this->settlementAccount($supplierId, $body['net_settlement_account_code'], $response, $err);
+            if ($err !== null) {
+                return null;
+            }
+        }
         if (array_key_exists('auto_post', $body)) {
             $fields['auto_post'] = (bool) filter_var($body['auto_post'], FILTER_VALIDATE_BOOLEAN);
         }
@@ -256,6 +273,55 @@ final class PayrollEmployeeAction
         }
         $err = null;
         return $fields;
+    }
+
+    /**
+     * Účet pro měsíční přeúčtování čisté mzdy (migrace 1178). Prázdno = NULL (nepřeúčtovávat).
+     *
+     * Musí existovat v osnově TÉTO firmy — kód přitéká z API a bez scope kontroly by karta
+     * ukazovala na účet cizího tenanta, který by pak zaúčtování stejně neumělo přeložit.
+     *
+     * PENĚŽNÍ ÚČTY SE ODMÍTAJÍ. Výplatu z pokladny musí zapsat výdajový pokladní doklad,
+     * jinak se pokladní kniha (zákonná evidence dle §29 ZoÚ) rozejde s hlavní knihou;
+     * bankovní výplatu zaúčtuje párování výpisu a mzdový automat by ji zdvojil. Obojí má
+     * v aplikaci vlastní modul, tenhle přepínač je na bezhotovostní přeúčtování (365, 479…).
+     */
+    private function settlementAccount(int $supplierId, mixed $value, Response $response, ?Response &$err): ?string
+    {
+        $code = trim((string) ($value ?? ''));
+        if ($code === '') {
+            $err = null;
+            return null;
+        }
+        $account = $this->accounts->findByCode($supplierId, $code);
+        if ($account === null) {
+            $err = Json::error($response, 'validation_failed', sprintf(
+                'Účet %s není v účtové osnově firmy.',
+                $code,
+            ), 422);
+            return null;
+        }
+        if (empty($account['is_active'])) {
+            $err = Json::error($response, 'validation_failed', sprintf(
+                'Účet %s je neaktivní — vyber jiný.',
+                $code,
+            ), 422);
+            return null;
+        }
+        foreach (self::MONEY_ACCOUNT_PREFIXES as $prefix) {
+            if (str_starts_with($code, $prefix)) {
+                $err = Json::error($response, 'validation_failed', sprintf(
+                    'Na peněžní účet (%s) čistou mzdu přeúčtovat nelze — výplatu z pokladny zapiš '
+                        . 'výdajovým pokladním dokladem a výplatu z účtu spáruj v bance, jinak se '
+                        . 'pokladní kniha a výpis rozejdou s deníkem.',
+                    $code,
+                ), 422);
+                return null;
+            }
+        }
+
+        $err = null;
+        return $code;
     }
 
     /**

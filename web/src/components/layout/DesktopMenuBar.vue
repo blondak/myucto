@@ -20,19 +20,23 @@ interface NavSection {
 }
 
 /**
- * Accent → podtržení aktivní sekce. Táž paleta jako tečky a levé lišty v postranním
+ * Accent → tint pilulky aktivní sekce. Táž paleta jako tečky a levé lišty v postranním
  * menu (ACCENT_DOT / ACCENT_RAIL v AppLayout), ať obě navigace mluví stejnou řečí.
- * Plná sytost: proužek je 2px vysoký a tlumený odstín by na něm nebyl poznat.
+ *
+ * Proč `-50` a k tomu NEUTRÁLNÍ text: odstíny -50 mají v `styles/main.css` explicitní
+ * tmavý protějšek (jsou dělané přesně jako „soft pill bg"), kdežto -600/-700 jsou
+ * přemapované jen u primary a success — barevný text by v tmavém režimu u daní, peněz
+ * nebo dokumentů spadl na kontrast pod 3:1. Barvu tak nese pozadí, čitelnost text.
  */
-const ACCENT_BAR: Record<NonNullable<NavSection['accent']>, string> = {
-  primary: 'bg-primary-400',
-  primaryDeep: 'bg-primary-600',
-  warning: 'bg-warning-500',
-  success: 'bg-success-500',
-  danger:  'bg-danger-500',
-  neutral: 'bg-neutral-400',
-  accent:  'bg-accent-500',
-  teal:    'bg-teal-500',
+const ACCENT_PILL: Record<NonNullable<NavSection['accent']>, string> = {
+  primary: 'bg-primary-50',
+  primaryDeep: 'bg-primary-100',
+  warning: 'bg-warning-50',
+  success: 'bg-success-50',
+  danger:  'bg-danger-50',
+  neutral: 'bg-neutral-100',
+  accent:  'bg-accent-50',
+  teal:    'bg-teal-50',
 }
 
 const props = defineProps<{
@@ -114,31 +118,35 @@ onBeforeUnmount(() => {
       @pointerenter="openFromPointer(section.key)"
       @pointerleave="closeFromPointer(section.key)"
     >
+      <!--
+        Pilulka místo bloku přes celou výšku: hover se dřív roztáhl od horní k dolní
+        hraně hlavičky a lišta působila jako řada zámkových dlaždic. `self-center`
+        je nutné — obálka je `items-stretch` kvůli pozicování dropdownu (`top-full`),
+        takže bez něj by se tlačítko roztáhlo zpátky na plnou výšku.
+      -->
       <button
         type="button"
-        class="cursor-pointer relative inline-flex min-w-0 items-center gap-1 px-2 xl:px-2.5 h-full text-[13px] font-semibold uppercase tracking-wide whitespace-nowrap text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
-        :class="sectionIsActive(section) || openSection === section.key ? 'bg-neutral-100 text-primary-700' : ''"
+        class="cursor-pointer group relative inline-flex min-w-0 self-center items-center gap-1.5 px-2.5 xl:px-3 h-8 rounded-lg text-sm font-medium whitespace-nowrap text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
+        :class="sectionIsActive(section)
+          ? `${ACCENT_PILL[section.accent ?? 'primary']} text-neutral-900 font-semibold`
+          : (openSection === section.key ? 'bg-neutral-100 text-neutral-900' : '')"
         :aria-expanded="openSection === section.key"
         aria-haspopup="menu"
         @click.stop="toggleSection(section.key)"
         @keydown.down.prevent="openSection = section.key"
       >
         <span>{{ section.title }}</span>
-        <svg class="w-3 h-3 shrink-0 transition-transform" :class="openSection === section.key ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <!--
+          Šipka je jen našeptání, že položka rozbaluje — proto tlumená. Deset plných
+          šipek vedle sebe přebíjelo samotné názvy sekcí.
+        -->
+        <svg
+          class="w-3 h-3 shrink-0 transition-transform opacity-45 group-hover:opacity-70"
+          :class="openSection === section.key ? 'rotate-180 opacity-70' : ''"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+        >
           <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
-        <!--
-          Lícuje s hlavičkou i s rozbaleným menu: inset-x-0 dá proužku šířku tlačítka
-          (tedy i levou hranu dropdownu, ten je na sekci zarovnaný taky bez odsazení)
-          a -bottom-px ho posadí NA 1px spodní border hlavičky místo nad něj — jinak
-          se skládaly dvě čáry pod sebou. Bez rounded-full, ať konce navazují na hranu.
-        -->
-        <span
-          v-if="sectionIsActive(section)"
-          class="absolute inset-x-0 -bottom-px h-0.5"
-          :class="ACCENT_BAR[section.accent ?? 'primary']"
-          aria-hidden="true"
-        ></span>
       </button>
 
       <transition

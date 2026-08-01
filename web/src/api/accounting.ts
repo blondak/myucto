@@ -602,6 +602,13 @@ export interface PayrollEmployee {
   employment_type: PayrollEmploymentType
   child_count: number
   /**
+   * Účet, na který se měsíčně přeúčtuje čistá mzda (migrace 1178) — typicky 365.x,
+   * tedy zápočet proti účtu společníka, když se odměna reálně nevyplácí.
+   * `null` = čistá mzda zůstane viset jako závazek na 331/366 (výchozí chování).
+   * Peněžní účty (21x/22x/26x) backend odmítá — ty patří pokladnímu dokladu a bance.
+   */
+  net_settlement_account_code: string | null
+  /**
    * Pravidelná měsíční hrubá mzda v celých Kč (migrace 1175). `null` = nesjednaná,
    * což je jiný stav než 0 — bez ní se `auto_post` zapnout nedá.
    */

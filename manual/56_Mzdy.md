@@ -95,6 +95,24 @@ Potvrzením vznikne zápis k poslednímu dni měsíce:
 | Pojistné sražené zaměstnanci | 331 nebo 366 | 336 |
 | Sražená záloha na daň (po slevách) | 331 nebo 366 | 342 |
 
+Po srážkách zůstane na účtu 331 (resp. 366) čistá mzda jako závazek. Pokud se odměna
+reálně nevyplácí — typicky u jednatele-společníka, který si ji nechává na účtu
+společníka — vyplň na kartě zaměstnance **Naložení s čistou mzdou** a vyber účet, na
+který se má měsíčně přeúčtovat (obvykle analytika účtu **365**). Zápis pak dostane
+ještě jeden pár:
+
+| Význam | MD | Dal |
+|---|---:|---:|
+| Zápočet čisté mzdy | 331 nebo 366 | zvolený účet (např. 365.100) |
+
+Pár je součástí **téhož** zápisu, takže saldo 331/366 se každý měsíc vynuluje a
+přeúčtování i storno mzdy s ním zacházejí zároveň. Bez vyplněného účtu se nic
+nepřidává a závazek zůstane viset — to je výchozí chování.
+
+Peněžní účty (21x, 22x, 26x) v nabídce nejsou schválně: výplatu z pokladny musí zapsat
+**výdajový pokladní doklad**, jinak se pokladní kniha rozejde s hlavní knihou, a výplatu
+z účtu zaúčtuje **párování bankovního výpisu** — mzdový automat by ji zdvojil.
+
 Za jednu firmu a měsíc existuje nejvýše jeden zápis tohoto typu. Opakované uložení
 stávající zápis řízeně přepíše, nezaloží druhý. To zároveň znamená, že kalkulátor
 není určen k samostatnému účtování více zaměstnanců v jednom měsíci.

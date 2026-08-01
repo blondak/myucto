@@ -301,10 +301,20 @@ final class PayrollCalculator
      *                            jen to, co se reálně odvede na FÚ
      *                            → na 331/366 zbyde čistá mzda
      *
+     * Volitelně se čistá mzda rovnou přeúčtuje jinam (migrace 1178):
+     *
+     *   331/366 MD / $settlementAccount D   čistá mzda (typicky 365.x — zápočet proti
+     *                                       účtu společníka, když se odměna nevyplácí)
+     *
+     * Pár je součástí TÉHOŽ zápisu, ne samostatného dokladu: jde o jeden hospodářský
+     * případ, saldo 331/366 se tak měsíc co měsíc vynuluje a přeúčtování i storno mzdy
+     * s ním zacházejí automaticky (jeden `source_id` = RRRRMM).
+     *
      * @param array<string,int> $b výstup {@see self::compute()}
+     * @param string|null $settlementAccount kód účtu pro čistou mzdu; NULL = ponechat závazek
      * @return list<array{account_code:string,side:string,amount:float,description?:string}>
      */
-    public static function lines(array $b, string $type): array
+    public static function lines(array $b, string $type, ?string $settlementAccount = null): array
     {
         $a = self::accounts($type);
         $lines = [];
@@ -334,6 +344,14 @@ final class PayrollCalculator
         $withheld = $b['advance_tax_withheld'] ?? $b['advance_tax'];
         $add($a['payable'], 'debit', $withheld, 'Záloha na daň z příjmu');
         $add('342', 'credit', $withheld, 'Záloha na daň z příjmu');
+
+        // Přeúčtování čisté mzdy (1178). `net` je to, co po srážkách zbylo na 331/366 —
+        // stejná částka, jakou by jinak účetní ručně započetla na konci roku.
+        if ($settlementAccount !== null && $settlementAccount !== '') {
+            $net = (int) ($b['net'] ?? 0);
+            $add($a['payable'], 'debit', $net, 'Zápočet čisté mzdy');
+            $add($settlementAccount, 'credit', $net, 'Zápočet čisté mzdy');
+        }
 
         return $lines;
     }

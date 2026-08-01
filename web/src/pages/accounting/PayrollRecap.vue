@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import {
   accountingApi,
   type PayrollPreview, type PayrollTaxpayerType, type PayrollEmploymentType,
-  type PayrollEmployee, type PayrollEmployeePayload,
+  type PayrollEmployee, type PayrollEmployeePayload, type ChartAccount,
 } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -191,6 +191,8 @@ const employeeForm = reactive({
   // se vrátí v ročním zúčtování.
   tax_declaration_signed: false,
   child_count: 0,
+  // Účet pro měsíční přeúčtování čisté mzdy (1178); null = nechat ji viset jako závazek.
+  net_settlement_account_code: null as string | null,
   // Pravidelná měsíční hrubá mzda a pověření cronu, ať se táž konstanta neopisuje
   // ručně měsíc co měsíc. `null` = nesjednaná, což je jiný stav než 0 Kč.
   monthly_gross: null as number | null,
@@ -208,6 +210,7 @@ function resetEmployeeForm() {
   employeeForm.tax_credit_taxpayer = true
   employeeForm.tax_declaration_signed = false
   employeeForm.child_count = 0
+  employeeForm.net_settlement_account_code = null
   employeeForm.monthly_gross = null
   employeeForm.auto_post = false
   employeeForm.is_active = true
@@ -241,6 +244,7 @@ function openEditEmployee(e: PayrollEmployee) {
   employeeForm.tax_credit_taxpayer = e.tax_credit_taxpayer
   employeeForm.tax_declaration_signed = e.tax_declaration_signed ?? false
   employeeForm.child_count = e.child_count
+  employeeForm.net_settlement_account_code = e.net_settlement_account_code ?? null
   employeeForm.monthly_gross = e.monthly_gross ?? null
   employeeForm.auto_post = Boolean(e.auto_post)
   employeeForm.is_active = e.is_active
@@ -264,6 +268,7 @@ async function saveEmployee() {
       tax_credit_taxpayer: employeeForm.tax_credit_taxpayer,
       tax_declaration_signed: employeeForm.tax_declaration_signed,
       child_count: Number(employeeForm.child_count),
+      net_settlement_account_code: employeeForm.net_settlement_account_code || null,
       // Prázdné pole musí odejít jako null, ne 0 — „nesjednaná mzda" a „nula" jsou
       // pro cron dva různé stavy.
       monthly_gross: Number(employeeForm.monthly_gross) > 0 ? Number(employeeForm.monthly_gross) : null,
@@ -325,7 +330,28 @@ async function downloadPayrollSheet() {
   }
 }
 
-onMounted(() => { void loadEmployees() })
+/**
+ * Nabídka účtů pro přeúčtování čisté mzdy. Peněžní skupiny (21x pokladna, 22x banka,
+ * 26x peníze na cestě) se vynechávají — výplatu z pokladny musí zapsat pokladní doklad
+ * a bankovní výplatu párování výpisu, jinak se ty evidence rozejdou s deníkem. Backend
+ * tutéž podmínku hlídá znovu, tohle je jen aby uživatel nedostal 422 za nabídnutou volbu.
+ */
+const settlementAccounts = ref<ChartAccount[]>([])
+const settlementAccountOptions = computed(() =>
+  settlementAccounts.value
+    .filter(a => a.is_active && !/^(21|22|26)/.test(a.account_code))
+    .sort((a, b) => a.account_code.localeCompare(b.account_code)),
+)
+
+async function loadSettlementAccounts() {
+  try {
+    settlementAccounts.value = await accountingApi.listAccounts()
+  } catch {
+    settlementAccounts.value = []   // bez osnovy zůstane jen volba „nepřeúčtovávat"
+  }
+}
+
+onMounted(() => { void loadEmployees(); void loadSettlementAccounts() })
 
 /** Řádky rozpadu pro tabulku „co z hrubé mzdy odchází". */
 const breakdownRows = computed(() => {
@@ -772,6 +798,17 @@ const remittanceRows = computed(() => {
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_monthly_gross') }}</label>
           <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" inputmode="numeric"
                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono bg-surface" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_net_settlement') }}</label>
+          <select v-model="employeeForm.net_settlement_account_code"
+                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option :value="null">{{ t('accounting.payroll.employees.form_net_settlement_none') }}</option>
+            <option v-for="a in settlementAccountOptions" :key="a.account_code" :value="a.account_code">
+              {{ a.account_code }} — {{ a.name }}
+            </option>
+          </select>
+          <p class="text-xs text-neutral-500">{{ t('accounting.payroll.employees.form_net_settlement_hint') }}</p>
         </div>
         <div class="sm:col-span-2">
           <label class="flex items-center gap-2 text-sm text-neutral-700 h-9"

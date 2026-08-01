@@ -150,7 +150,7 @@ Tlačítka **CS / EN** přepínají jazyk preview. Po každé změně toggle / b
 loga se preview obnoví automaticky; tlačítko **↻** vpravo nahoře v hlavičce
 preview je manuální refresh, kdyby si cache hrála.
 
-**Patička emailu** vždy obsahuje malý šedý text „Používá fakturační systém
+**Patička emailu** vždy obsahuje malý šedý text „Používá účetní systém
 [MyÚčto.cz](https://myucto.cz/)" jako attribution — nezakrývá tvoji
 firemní identitu, jen drobně označuje použitou platformu.
 

@@ -74,10 +74,11 @@ final class PayrollPostingService
         $this->assertPeriod($year, $month);
         $this->assertType($taxpayerType);
 
+        $settlementAccount = null;
         if ($supplierId !== null && $employeeId !== null) {
-            [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase] =
+            [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase, $settlementAccount] =
                 $this->employeeContext($supplierId, $employeeId, $year, $month)
-                ?? [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase];
+                ?? [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase, null];
             // Typ z karty prošel jen CHECK constraintem, ne PayrollCalculator::types() —
             // starší řádek s hodnotou, kterou kalkulátor nezná, musí spadnout tady,
             // ne až na chybějícím účtu v kontaci.
@@ -130,7 +131,8 @@ final class PayrollPostingService
             'child_count'     => max(0, $childCount),
             'credits'         => $credits,
             'breakdown'       => $breakdown,
-            'lines'           => PayrollCalculator::lines($breakdown, $taxpayerType),
+            'settlement_account' => $settlementAccount,
+            'lines'           => PayrollCalculator::lines($breakdown, $taxpayerType, $settlementAccount),
             'replaces_gross' => $replaces,
             'warnings'        => self::replacementWarnings($replaces, $gross),
         ];
@@ -338,7 +340,7 @@ final class PayrollPostingService
      * a zaúčtovalo se na jiné účty, než co ukazoval náhled. Nekonzistence tím spíš,
      * že kontace je to jediné, co typ poplatníka rozhoduje.
      *
-     * @return array{0:string, 1:bool, 2:int, 3:?float}|null `null` = zaměstnanec neexistuje
+     * @return array{0:string, 1:bool, 2:int, 3:?float, 4:?string}|null `null` = zaměstnanec neexistuje
      */
     private function employeeContext(int $supplierId, int $employeeId, int $year, int $month): ?array
     {
@@ -356,6 +358,9 @@ final class PayrollPostingService
         $taxpayerCredit = (bool) $employee['tax_credit_taxpayer']
             && (bool) ($employee['tax_declaration_signed'] ?? 0);
 
+        // Účet pro přeúčtování čisté mzdy (1178) — prázdný řetězec z DB je totéž co NULL.
+        $settlement = trim((string) ($employee['net_settlement_account_code'] ?? ''));
+
         return [
             (string) $employee['taxpayer_type'],
             $taxpayerCredit,
@@ -363,6 +368,7 @@ final class PayrollPostingService
             // Se známým zaměstnancem lze uplatnit strop §15a — dosavadní roční základ
             // vezmeme z jeho mzdových listů za předchozí měsíce téhož roku.
             $this->records->socialBaseYearToDate($supplierId, $employeeId, $year, $month),
+            $settlement === '' ? null : $settlement,
         ];
     }
 
