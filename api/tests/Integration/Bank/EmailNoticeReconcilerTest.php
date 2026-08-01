@@ -97,6 +97,9 @@ final class EmailNoticeReconcilerTest extends TestCase
         )->execute([$this->supplierId, ...self::ALL_VS]);
         $pdo->prepare("DELETE FROM bank_statements WHERE file_name LIKE ?")
             ->execute(['%' . self::FILE_MARKER . '%']);
+        // payment_matches na ně visí přes FK ON DELETE CASCADE (tx i přijatá faktura).
+        $pdo->prepare("DELETE FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number LIKE ?")
+            ->execute([$this->supplierId, self::FILE_MARKER . '%']);
         $pdo->prepare("DELETE FROM invoices WHERE supplier_id = ? AND varsymbol IN ($place)")
             ->execute([$this->supplierId, ...self::ALL_VS]);
     }
@@ -155,8 +158,48 @@ final class EmailNoticeReconcilerTest extends TestCase
         return [$statementId, (int) $pdo->lastInsertId()];
     }
 
+    /** Přijatá faktura pro úhrady vedené přes `payment_matches` (nemají invoice_payments). */
+    private function insertPurchaseInvoice(float $total): int
+    {
+        $pdo = $this->db->pdo();
+        $d = '2099-06-15';
+        $pdo->prepare(
+            "INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, issue_date, tax_date, due_date, received_at,
+                 currency_id, vendor_snapshot, total_without_vat, total_vat, total_with_vat, status, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, 0, ?, 'received', ?)"
+        )->execute([
+            $this->supplierId, $this->clientId, self::FILE_MARKER . uniqid('', true),
+            $d, $d, $d, $d, $this->currencyId, $total, $total, $this->userId,
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** Úhrada přijaté faktury z banky — `payment_matches.amount` je vždy absolutní. */
+    private function insertPaymentMatch(int $txId, int $purchaseInvoiceId, float $amount): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type)
+             VALUES (?, ?, ?, ?, 'auto')"
+        )->execute([$this->supplierId, $txId, $purchaseInvoiceId, $amount]);
+    }
+
+    private function payableMatchCountForTx(int $txId): int
+    {
+        return (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = $txId"
+        )->fetchColumn();
+    }
+
+    private function payableMatchAmountForTx(int $txId): string
+    {
+        return (string) $this->db->pdo()->query(
+            "SELECT amount FROM payment_matches WHERE bank_transaction_id = $txId LIMIT 1"
+        )->fetchColumn();
+    }
+
     /** Označí avízo-transakci za spárovanou (po zaevidování plateb). */
-    private function markTxMatched(int $txId, int $matchedInvoiceId, string $status = 'manual'): void
+    private function markTxMatched(int $txId, ?int $matchedInvoiceId, string $status = 'manual'): void
     {
         $this->db->pdo()->prepare(
             "UPDATE bank_transactions
@@ -549,6 +592,127 @@ final class EmailNoticeReconcilerTest extends TestCase
 
         self::assertNull($result, 'GPC se známou protistranou se s bezidentitním avízem nepáruje.');
         self::assertSame(1, $this->paymentCountForTx($emailTx), 'Platba zůstává na avízu.');
+    }
+
+    /**
+     * GPC plní protiúčet u karetních pohybů samými nulami (`0000000000000000`) —
+     * to není protistrana, ale „žádná". Dřív se to bralo jako známý účet, spadlo to
+     * do asymetrické větve a párování zůstalo viset na avízu (reálný nález: 4 karetní
+     * platby z červencového výpisu). Nuly se musí chovat jako prázdno.
+     */
+    public function testTakeOverCardNoticeWhenGpcCounterpartyIsAllZeros(): void
+    {
+        $invA = $this->insertInvoice(self::VS_A, 773.50);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', 773.50, '', 'card-zero-email');
+        $this->payments->recordPayment($invA, 773.50, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx, 'created_by' => $this->userId,
+        ]);
+        $this->markTxMatched($emailTx, $invA, 'manual');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', 773.50, '', 'card-zero-gpc');
+        $this->setCounterpartyAccount($gpcTx, '0000000000000000');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNotNull($result, 'Nulami vyplněný protiúčet nesmí blokovat převzetí.');
+        self::assertSame(1, $this->paymentCountForTx($gpcTx));
+        self::assertSame(0, $this->paymentCountForTx($emailTx));
+    }
+
+    /**
+     * Karetní blokace v cizí měně se zúčtuje jiným kurzem — avízo „Blokace" 831,48
+     * × GPC „GITHUB, INC." 848,35. Bez kurzové tolerance zůstala platba na avízu.
+     * Převzít a přepsat evidovanou částku na skutečně zúčtovanou (GPC = zdroj pravdy).
+     */
+    public function testTakeOverCardNoticeWithFxSettlementDifference(): void
+    {
+        $purchaseId = $this->insertPurchaseInvoice(848.35);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -831.48, '', 'card-fx-email');
+        $this->insertPaymentMatch($emailTx, $purchaseId, 831.48);
+        $this->markTxMatched($emailTx, null, 'auto_partial');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -848.35, '', 'card-fx-gpc');
+        $this->setCounterpartyAccount($gpcTx, '0000000000000000');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNotNull($result, 'Kurzový rozdíl blokace × zúčtování nesmí bránit převzetí.');
+        self::assertSame(0, $this->payableMatchCountForTx($emailTx), 'Avízo zůstane bez úhrady.');
+        self::assertSame(1, $this->payableMatchCountForTx($gpcTx), 'Úhrada patří na GPC transakci.');
+        self::assertSame(
+            '848.35',
+            $this->payableMatchAmountForTx($gpcTx),
+            'Evidovaná částka se má opravit na zúčtovanou, ne zůstat na blokované.',
+        );
+    }
+
+    /**
+     * Kurzová tolerance je fallback, ne konkurence: když je v okně kandidát na haléř,
+     * rozhoduje se jen mezi přesnými. Jinak by blízká blokace shodila jinak jednoznačné
+     * převzetí na „nejednoznačné".
+     */
+    public function testExactCandidateWinsOverFxCandidate(): void
+    {
+        $exactPurchase = $this->insertPurchaseInvoice(848.35);
+        $fuzzyPurchase = $this->insertPurchaseInvoice(831.48);
+
+        [, $exactTx] = $this->insertStatementWithTx('email_notice', -848.35, '', 'card-pref-exact');
+        $this->insertPaymentMatch($exactTx, $exactPurchase, 848.35);
+        $this->markTxMatched($exactTx, null, 'auto_exact');
+
+        [, $fuzzyTx] = $this->insertStatementWithTx('email_notice', -831.48, '', 'card-pref-fuzzy');
+        $this->insertPaymentMatch($fuzzyTx, $fuzzyPurchase, 831.48);
+        $this->markTxMatched($fuzzyTx, null, 'auto_exact');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -848.35, '', 'card-pref-gpc');
+        $this->setCounterpartyAccount($gpcTx, '0000000000000000');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNotNull($result, 'Přesný kandidát existuje → převzít ho.');
+        self::assertSame($exactTx, $result['email_tx_id']);
+        self::assertSame(1, $this->payableMatchCountForTx($fuzzyTx), 'Kurzový kandidát zůstane nedotčený.');
+    }
+
+    /**
+     * Kurzová tolerance smí hýbat jen úhradami přijatých faktur (`payment_matches`),
+     * kde je částka jediným nositelem stavu. U vystavené faktury drží stav
+     * denormalizovaný `invoices.paid_total`, který umí přepočítat jen
+     * InvoicePaymentService — takový pár nepřebíráme.
+     */
+    public function testFxToleranceNotAppliedToIssuedInvoicePayment(): void
+    {
+        $invA = $this->insertInvoice(self::VS_A, 831.48);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -831.48, '', 'card-fx-issued-email');
+        $this->payments->recordPayment($invA, 831.48, '2099-06-15', [
+            'source' => 'bank', 'bank_transaction_id' => $emailTx, 'created_by' => $this->userId,
+        ]);
+        $this->markTxMatched($emailTx, $invA, 'manual');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -848.35, '', 'card-fx-issued-gpc');
+        $this->setCounterpartyAccount($gpcTx, '0000000000000000');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNull($result, 'Rozdílná částka u vystavené faktury se nepřebírá.');
+        self::assertSame(1, $this->paymentCountForTx($emailTx), 'Platba zůstává na avízu.');
+    }
+
+    /** Odchylka nad kurzovou toleranci je jiná platba — nepřebírat. */
+    public function testCardNoticeNotTakenOverWhenAmountDiffersTooMuch(): void
+    {
+        $purchaseId = $this->insertPurchaseInvoice(1000.00);
+        [, $emailTx] = $this->insertStatementWithTx('email_notice', -831.48, '', 'card-far-email');
+        $this->insertPaymentMatch($emailTx, $purchaseId, 831.48);
+        $this->markTxMatched($emailTx, null, 'auto_partial');
+
+        [, $gpcTx] = $this->insertStatementWithTx('gpc', -1000.00, '', 'card-far-gpc');
+        $this->setCounterpartyAccount($gpcTx, '0000000000000000');
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNull($result, '20% odchylka není kurzový rozdíl.');
+        self::assertSame(1, $this->payableMatchCountForTx($emailTx));
     }
 
     /** Dvě stejné karetní blokace v okně → nejednoznačné, nechat na uživateli. */

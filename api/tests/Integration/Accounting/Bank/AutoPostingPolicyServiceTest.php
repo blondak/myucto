@@ -149,6 +149,41 @@ final class AutoPostingPolicyServiceTest extends BankPostingTestCase
         self::assertSame('daily_limit_reached', $limit->note);
     }
 
+    /**
+     * Vybočení částky z historie protistrany nesmí brzdit úhradu navázanou na konkrétní
+     * doklad s jistotou 1.00 — u faktur je větší objednávka běžná (reálně z-score 10,7
+     * u Chromservisu při průměru 20 167 Kč) a právě ty největší platby se pak musely
+     * odklikávat ručně. Podezření na DVOJÍ úhradu se ale k člověku dostat musí.
+     */
+    public function testProvenPaymentMatchIgnoresAmountAnomalyButNotDuplicate(): void
+    {
+        $this->policy->upsertRow($this->supplierId, OperationType::BANK_PAYMENT_MATCHED, 'auto', $this->userId);
+
+        $matched = $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_PAYMENT_MATCHED,
+            source: 'payment_match', confidence: 1.00,
+            debit: '321', credit: '221', anomaly: true,
+        ));
+        self::assertSame('auto', $matched->decision, 'Prokázaná úhrada se zaúčtuje i při vybočení částky.');
+
+        $duplicate = $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_PAYMENT_MATCHED,
+            source: 'payment_match', confidence: 1.00,
+            debit: '321', credit: '221', duplicateSuspect: true, anomaly: true,
+        ));
+        self::assertSame('needs_input', $duplicate->decision);
+        self::assertSame('duplicate_suspect', $duplicate->note);
+
+        // Výjimka je úzká: platí jen pro zdroj `payment_match` s plnou jistotou.
+        $learned = $this->policy->decide($this->supplierId, $this->input(
+            operation: OperationType::BANK_PAYMENT_MATCHED,
+            source: 'learned', confidence: 1.00,
+            debit: '321', credit: '221', anomaly: true,
+        ));
+        self::assertSame('suggest', $learned->decision);
+        self::assertSame('anomaly', $learned->note);
+    }
+
     public function testDetectorSwitchCapsEffectiveLevelAndFullPresetKeepsAiSuggest(): void
     {
         $this->policy->upsertRow($this->supplierId, OperationType::REMITTANCE_VAT, 'auto', $this->userId);

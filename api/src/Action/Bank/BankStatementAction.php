@@ -64,6 +64,14 @@ final class BankStatementAction
     /** Sloučená úhrada: max počet vrácených návrhů kombinací. */
     private const SPLIT_MAX_SUGGESTIONS = 8;
 
+    /**
+     * Podíl pohybů z importovaného PDF, které musí mít protějšek v už existujícím
+     * výpisu, aby se PDF považovalo za jeho oficiální podobu a jen se přiložilo.
+     * Nižší hodnota než 1.0 dává rezervu na pohyb, který GPC odfiltroval jako
+     * duplicitní vůči překrývajícímu se výpisu; pod prahem se založí nový výpis.
+     */
+    private const PDF_ATTACH_MIN_COVERAGE = 0.8;
+
     public function __construct(
         private readonly Connection $db,
         private readonly StatementImporter $importer,
@@ -90,6 +98,9 @@ final class BankStatementAction
         private readonly MatchSuggestionService $matchV2,
         // SEC-01: jediný zdroj pravdy o vlastnictví výpisu/transakce.
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $ownership,
+        // Cross-source dedup GPC ← e-mailové avízo — při importu ho volá
+        // StatementImporter, tady ho potřebuje rematch pro už naimportované výpisy.
+        private readonly \MyInvoice\Service\Bank\EmailNoticeReconciler $reconciler,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -239,9 +250,53 @@ final class BankStatementAction
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
 
-        $resolved = $this->resolveTargetCurrency($request, (string) ($parsed['header']['account_number'] ?? ''));
+        $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
+        $resolved = $this->resolveTargetCurrency($request, $accountNumber);
         if ($resolved['error'] !== null) {
             return $resolved['error']($response);
+        }
+
+        $sid = SupplierGuard::currentId($request);
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $pdfHash = hash('sha256', $pdfBytes);
+
+        // Totéž PDF už u nějakého výpisu visí (naimportované i ručně přiložené) →
+        // idempotentně vrať původní výpis místo druhé kopie.
+        $existingPdfId = $this->statementWithPdfHash($pdfHash, $sid);
+        if ($existingPdfId !== null) {
+            return Json::ok($response, [
+                'statement_id' => $existingPdfId,
+                'transactions' => 0,
+                'matched'      => 0,
+                'duplicate'    => true,
+            ]);
+        }
+
+        // Týž výpis už je v systému z GPC/ABO — PDF je jen jeho oficiální podoba,
+        // ne druhý výpis. Přiložíme ho k němu (transakce už tam jsou; zakládat je
+        // znovu by navíc rozešlo párování mezi dva doklady téhož období).
+        $target = $this->findStatementForPdfAttachment($sid, $parsed, $resolved['currency_id'], $accountNumber);
+        if ($target !== null) {
+            $this->db->pdo()->prepare(
+                'UPDATE bank_statements
+                    SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
+                  WHERE id = ?'
+            )->execute([$pdfBytes, $name, $pdfHash, strlen($pdfBytes), $target]);
+
+            $this->logger->log('bank.statement_pdf_attached', $user['id'] ?? null, 'bank_statement', $target, [
+                'pdf_name' => $name,
+                'size'     => strlen($pdfBytes),
+                'parser'   => $parsed['parser'] ?? null,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+
+            return Json::ok($response, [
+                'statement_id'         => $target,
+                'transactions'         => 0,
+                'matched'              => 0,
+                'duplicate'            => false,
+                'attached_to_existing' => true,
+                'pdf_name'             => $name,
+            ]);
         }
 
         try {
@@ -250,10 +305,133 @@ final class BankStatementAction
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
 
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.statement_pdf_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r + ['parser' => $parsed['parser'] ?? null], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, $r);
+    }
+
+    /**
+     * ID výpisu, u kterého už tohle PDF visí (`pdf_hash` z importu i z ručního
+     * přiložení, `file_hash` u výpisu vzniklého importem PDF). NULL = nikde.
+     */
+    private function statementWithPdfHash(string $pdfHash, int $sid): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM bank_statements WHERE pdf_hash = ? OR file_hash = ? ORDER BY id LIMIT 20'
+        );
+        $stmt->execute([$pdfHash, $pdfHash]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+            if ($this->ownership->statementOwned((int) $id, $sid)) {
+                return (int) $id;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Existující výpis TÉHOŽ období, ke kterému PDF patří jako oficiální podoba —
+     * typicky GPC/ABO stažené z banky, ke kterému uživatel dodatečně přetáhne PDF.
+     * Bez tohohle by import PDF založil druhý výpis se stejnými pohyby (transakce
+     * by se sice odfiltrovaly fingerprintem, ale zůstal by prázdný duplikát).
+     *
+     * Kandidát musí sedět na VŠECH úrovních — jinak radši založíme nový výpis:
+     *   - vlastnictví (SEC-01), zdroj gpc/pdf (virtuální avízo-výpisy PDF nemají),
+     *   - dosud bez přiloženého PDF (existující nikdy nepřepisujeme),
+     *   - shoda čísla účtu a měny,
+     *   - datum výpisu v okně ±10 dní (GPC i PDF datují koncem období, ne na den),
+     *   - shoda čísla výpisu, pokud ho nesou obě strany (GPC „007" × PDF „7"),
+     *   - a hlavně POKRYTÍ POHYBŮ: ≥ 80 % transakcí z PDF musí mít v kandidátovi
+     *     protějšek na datum + částku. To je vlastní důkaz, že jde o tentýž výpis;
+     *     hlavičková shoda sama by u banky s přeskakující numerací nestačila.
+     * Nejednoznačnost (2+ kandidáti) = žádné přiložení.
+     *
+     * @param array{header:array,transactions:list<array>} $parsed
+     */
+    private function findStatementForPdfAttachment(int $sid, array $parsed, ?int $currencyId, string $accountNumber): ?int
+    {
+        $statementDate = (string) ($parsed['header']['statement_date'] ?? '');
+        if ($accountNumber === '' || $statementDate === '') {
+            return null;
+        }
+
+        $currencyCode = null;
+        if ($currencyId !== null) {
+            $cur = $this->db->pdo()->prepare('SELECT code FROM currencies WHERE id = ?');
+            $cur->execute([$currencyId]);
+            $currencyCode = ($cur->fetchColumn() ?: null);
+        }
+
+        $candidates = $this->db->pdo()->prepare(
+            "SELECT id, account_number, currency, statement_number
+               FROM bank_statements
+              WHERE source IN ('gpc','pdf')
+                AND (pdf_content IS NULL OR OCTET_LENGTH(pdf_content) = 0)
+                AND statement_date BETWEEN DATE_SUB(?, INTERVAL 10 DAY) AND DATE_ADD(?, INTERVAL 10 DAY)
+              ORDER BY id"
+        );
+        $candidates->execute([$statementDate, $statementDate]);
+
+        $pdfNumber = ltrim(trim((string) ($parsed['header']['statement_number'] ?? '')), '0');
+        $matches = [];
+        foreach ($candidates->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (!AccountNumberNormalizer::equals($accountNumber, (string) ($row['account_number'] ?? ''))) {
+                continue;
+            }
+            $rowCurrency = trim((string) ($row['currency'] ?? ''));
+            if ($currencyCode !== null && $rowCurrency !== '' && strtoupper($rowCurrency) !== strtoupper((string) $currencyCode)) {
+                continue;
+            }
+            $rowNumber = ltrim(trim((string) ($row['statement_number'] ?? '')), '0');
+            if ($pdfNumber !== '' && $rowNumber !== '' && $pdfNumber !== $rowNumber) {
+                continue;
+            }
+            if (!$this->ownership->statementOwned((int) $row['id'], $sid)) {
+                continue;
+            }
+            if (!$this->pdfCoversStatement((int) $row['id'], $parsed['transactions'])) {
+                continue;
+            }
+            $matches[] = (int) $row['id'];
+        }
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    /**
+     * Mají pohyby z PDF protějšek ve výpisu #$statementId? Porovnává se multimnožina
+     * (datum, částka) — popisy se mezi GPC a PDF liší formátem, a bankovní reference
+     * GPC vůbec nenese, takže na fingerprint se tady spolehnout nedá.
+     *
+     * @param list<array{posted_at?:?string,amount?:mixed}> $transactions
+     */
+    private function pdfCoversStatement(int $statementId, array $transactions): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT posted_at, amount FROM bank_transactions WHERE statement_id = ?'
+        );
+        $stmt->execute([$statementId]);
+
+        $pool = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $key = (string) $row['posted_at'] . '|' . number_format((float) $row['amount'], 2, '.', '');
+            $pool[$key] = ($pool[$key] ?? 0) + 1;
+        }
+
+        // Výpis bez pohybů (banka pošle i prázdný měsíc) — pak musí být prázdné obojí.
+        if ($transactions === []) {
+            return $pool === [];
+        }
+
+        $covered = 0;
+        foreach ($transactions as $tx) {
+            $key = (string) ($tx['posted_at'] ?? '') . '|' . number_format((float) ($tx['amount'] ?? 0), 2, '.', '');
+            if (($pool[$key] ?? 0) > 0) {
+                $pool[$key]--;
+                $covered++;
+            }
+        }
+
+        return $covered / count($transactions) >= self::PDF_ATTACH_MIN_COVERAGE;
     }
 
     /**
@@ -3166,7 +3344,21 @@ final class BankStatementAction
         $newlyMatched = 0;
         $newlyPartial = 0;
         $stillUnmatched = 0;
+        $takenOver = 0;
         foreach ($txIds as $txId) {
+            // Nejdřív cross-source dedup: pokud tatáž platba visí spárovaná na
+            // e-mailovém avízu, převezmi párování na oficiální výpis místo dvojího
+            // párování. Při importu to dělá StatementImporter; tady je to jediná
+            // cesta, jak dorovnat výpisy naimportované dřív (nebo pár, který se
+            // napoprvé nespojil).
+            $takeover = $this->reconciler->takeOverFromEmailNotice((int) $txId);
+            if ($takeover !== null) {
+                $takenOver++;
+                $newlyMatched++;
+                $this->bankPosting->handleTransaction((int) $txId, $userId ?: null);
+                continue;
+            }
+
             $r = $this->matcher->match((int) $txId);
             $s = (string) ($r['status'] ?? 'unmatched');
             if ($s === 'auto_exact') $newlyMatched++;
@@ -3197,6 +3389,7 @@ final class BankStatementAction
             'newly_matched'    => $newlyMatched,
             'newly_partial'    => $newlyPartial,
             'still_unmatched'  => $stillUnmatched,
+            'taken_over'       => $takenOver,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, [
@@ -3204,6 +3397,7 @@ final class BankStatementAction
             'newly_matched'   => $newlyMatched,
             'newly_partial'   => $newlyPartial,
             'still_unmatched' => $stillUnmatched,
+            'taken_over'      => $takenOver,
         ]);
     }
 }

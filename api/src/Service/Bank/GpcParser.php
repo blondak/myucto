@@ -171,7 +171,11 @@ final class GpcParser
             'variable_symbol'      => $vs ?: null,
             'constant_symbol'      => $ks ?: null,
             'specific_symbol'      => $ss ?: null,
-            'counterparty_account' => $counterpartyAccount ?: null,
+            // Karetní pohyby (a poplatky) nemají protistranu — banka pole vyplní samými
+            // nulami (`0000000000000000`). To NENÍ číslo účtu; kdyby se uložilo, tvářilo
+            // by se jako známá protistrana a shodilo by cross-source dedup s e-mailovým
+            // avízem („Blokace" bez protiúčtu vs. GPC s nulami = asymetrie → nepřevzato).
+            'counterparty_account' => ltrim($counterpartyAccount, '0') !== '' ? $counterpartyAccount : null,
             'counterparty_bank'    => $bankCode ?: null,
             'counterparty_name'    => $description ?: null,  // GPC client_name = jméno protistrany
             'description'          => $description ?: null,

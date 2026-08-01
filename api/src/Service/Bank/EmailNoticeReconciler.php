@@ -39,6 +39,17 @@ final class EmailNoticeReconciler
     private const DATE_WINDOW_DAYS = 5;
     /** Částka z avíza i GPC je týž převod — povolíme jen haléřový rozdíl zaokrouhlení. */
     private const AMOUNT_TOLERANCE = 0.005;
+    /**
+     * Karetní BLOKACE se zúčtuje jiným kurzem, než jakým byla blokovaná — u plateb
+     * v cizí měně se výsledná částka liší o jednotky procent (např. avízo „Blokace"
+     * 831,48 Kč × GPC „GITHUB, INC." 848,35 Kč). Bez tolerance takový pár nikdy
+     * nespojíme a platba zůstane viset na avízu, které se nikdy neúčtuje.
+     *
+     * Volnější okno platí VÝHRADNĚ pro symetrický karetní případ (ani jedna strana
+     * nemá VS ani protiúčet) a jen jako fallback, když žádný přesný kandidát není —
+     * viz takeOverFromEmailNotice().
+     */
+    private const CARD_FX_TOLERANCE_RATIO = 0.05;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -84,12 +95,22 @@ final class EmailNoticeReconciler
             return null;
         }
 
+        // Karetní pohyb: ani VS, ani protiúčet. Jen pro něj se níž povolí kurzová
+        // odchylka částky (blokace × zúčtování) — u identifikovatelné platby by
+        // volnější okno bylo bezdůvodné riziko.
+        $gpcCardLike = $gpcVsDigits === ''
+            && AccountNumberNormalizer::normalize((string) ($gpc['counterparty_account'] ?? '')) === '';
+        $amountTolerance = $gpcCardLike
+            ? max(self::AMOUNT_TOLERANCE, abs($amount) * self::CARD_FX_TOLERANCE_RATIO)
+            : self::AMOUNT_TOLERANCE;
+
         // Kandidáti: spárované e-mailové transakce TÉHOŽ supplierа (vlastnictví ověřeno
         // přes invoice_payments/payment_matches.supplier_id) se stejnou částkou (vč.
         // znaménka) v okně ±DATE_WINDOW_DAYS kolem data zaúčtování.
         $cand = $pdo->prepare(
             "SELECT bt.id, bt.source, bt.match_status, bt.matched_invoice_id, bt.matched_at, bt.matched_by,
                     bt.variable_symbol, bt.counterparty_account, bt.currency, bt.statement_id,
+                    bt.amount, bt.posted_at,
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
@@ -116,7 +137,7 @@ final class EmailNoticeReconciler
         $cand->execute([
             $gpcTxId,
             number_format($amount, 2, '.', ''),
-            self::AMOUNT_TOLERANCE,
+            $amountTolerance,
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
             $supplierId,
@@ -141,6 +162,7 @@ final class EmailNoticeReconciler
                 continue;
             }
             // VS: má-li GPC tx variabilní symbol, vyžaduj číselnou shodu.
+            $symmetricCard = false;
             if ($gpcVsDigits !== '') {
                 if (VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? '')) !== $gpcVsDigits) {
                     continue;
@@ -148,8 +170,11 @@ final class EmailNoticeReconciler
             } else {
                 // POZOR: `$gpcAccount` je číslo účtu VÝPISU a používá ho kontrola výš
                 // v každé iteraci — protiúčet proto drž v samostatné proměnné.
-                $gpcCounterparty  = (string) ($gpc['counterparty_account'] ?? '');
-                $candCounterparty = (string) ($r['counterparty_account'] ?? '');
+                // Porovnáváme NORMALIZOVANĚ: GPC u karetních pohybů plní protiúčet
+                // samými nulami (`0000000000000000`), což je „žádná protistrana",
+                // ne účet — surové `!== ''` by shodilo symetrickou větev níž.
+                $gpcCounterparty  = AccountNumberNormalizer::normalize((string) ($gpc['counterparty_account'] ?? ''));
+                $candCounterparty = AccountNumberNormalizer::normalize((string) ($r['counterparty_account'] ?? ''));
                 $candVsDigits     = VariableSymbolNormalizer::digits((string) ($r['variable_symbol'] ?? ''));
 
                 if ($candCounterparty !== '' || $candVsDigits !== '') {
@@ -163,24 +188,89 @@ final class EmailNoticeReconciler
                     // Avízo je bez identity, ale GPC protistranu zná → jde nejspíš o běžný
                     // převod, ne o tentýž karetní pohyb. Nepřebíráme (asymetrie = slabá shoda).
                     continue;
+                } else {
+                    // Zbývá symetrický případ: ani jedna strana nemá VS ani protiúčet — přesně
+                    // takhle vypadá karetní platba (avízo „Blokace" × GPC řádek karty). Identitu
+                    // tu nese shoda účtu výpisu, měny, částky, datového okna, tenantа
+                    // a hlavně JEDNOZNAČNOST kandidáta (count($pool) === 1 níž). Bez téhle
+                    // větve by karetní úhrady zůstaly na avízu napořád — a avízo se nikdy
+                    // neúčtuje, takže platební noha (vč. kurzového rozdílu) nikdy nedoteče
+                    // do deníku.
+                    $symmetricCard = true;
                 }
-                // Zbývá symetrický případ: ani jedna strana nemá VS ani protiúčet — přesně
-                // takhle vypadá karetní platba (avízo „Blokace" × GPC řádek karty). Identitu
-                // tu nese shoda účtu výpisu, měny, částky na haléř, datového okna, tenantа
-                // a hlavně JEDNOZNAČNOST kandidáta (count($matches) === 1 níž). Bez téhle
-                // větve by karetní úhrady zůstaly na avízu napořád — a avízo se nikdy
-                // neúčtuje, takže platební noha (vč. kurzového rozdílu) nikdy nedoteče
-                // do deníku.
             }
+
+            $candAmount = (float) $r['amount'];
+            $exact = abs($candAmount - $amount) <= self::AMOUNT_TOLERANCE;
+            if (!$exact && !$this->acceptableCardFxTwin($pdo, $gpc, $r, $amount, $candAmount, $symmetricCard, $supplierId)) {
+                continue;
+            }
+
+            $r['__exact'] = $exact;
             $matches[] = $r;
         }
 
+        // Kurzový fallback nesmí konkurovat přesné shodě — je-li k dispozici aspoň
+        // jeden kandidát na haléř, rozhoduje se jen mezi nimi (jinak by karetní
+        // blokace v okně shodila jinak jednoznačné převzetí na „nejednoznačné").
+        $exactMatches = array_values(array_filter($matches, static fn (array $m): bool => $m['__exact'] === true));
+        $pool = $exactMatches !== [] ? $exactMatches : $matches;
+
         // Jen jednoznačná shoda — 0 nebo >1 necháme na standardním párování / uživateli.
-        if (count($matches) !== 1) {
+        if (count($pool) !== 1) {
             return null;
         }
 
-        return $this->transfer($pdo, $gpcTxId, $matches[0], $supplierId);
+        return $this->transfer($pdo, $gpcTxId, $pool[0], $supplierId, $amount);
+    }
+
+    /**
+     * Smí se kandidát s ODLIŠNOU částkou brát jako tentýž pohyb? Jen pro karetní
+     * blokaci zúčtovanou jiným kurzem, a to za přísných podmínek:
+     *   - symetrický karetní tvar (ani jedna strana nemá VS ani protiúčet),
+     *   - shodné znaménko (blokace i zúčtování jdou stejným směrem),
+     *   - blokace PŘEDCHÁZÍ zúčtování (avízo nemůže dorazit po výpisu),
+     *   - odchylka do CARD_FX_TOLERANCE_RATIO,
+     *   - platba visí VÝHRADNĚ na `payment_matches` (přijaté faktury). Tam je
+     *     částka jediným nositelem stavu a lze ji rovnou opravit na zúčtovanou;
+     *     `invoice_payments` má denormalizovaný `invoices.paid_total`, který umí
+     *     přepočítat jen InvoicePaymentService — do toho se odsud netrefíme.
+     *
+     * @param array<string,mixed> $gpc
+     * @param array<string,mixed> $twin
+     */
+    private function acceptableCardFxTwin(
+        PDO $pdo,
+        array $gpc,
+        array $twin,
+        float $gpcAmount,
+        float $twinAmount,
+        bool $symmetricCard,
+        int $supplierId,
+    ): bool {
+        if (!$symmetricCard) {
+            return false;
+        }
+        if (($gpcAmount <=> 0.0) !== ($twinAmount <=> 0.0)) {
+            return false;
+        }
+        if ((string) $twin['posted_at'] > (string) $gpc['posted_at']) {
+            return false;
+        }
+        $reference = max(abs($gpcAmount), abs($twinAmount));
+        if ($reference <= 0.0 || abs($gpcAmount - $twinAmount) > $reference * self::CARD_FX_TOLERANCE_RATIO) {
+            return false;
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT
+                (SELECT COUNT(*) FROM invoice_payments ip WHERE ip.bank_transaction_id = ?) AS issued,
+                (SELECT COUNT(*) FROM payment_matches pm WHERE pm.bank_transaction_id = ? AND pm.supplier_id = ?) AS payable'
+        );
+        $stmt->execute([(int) $twin['id'], (int) $twin['id'], $supplierId]);
+        $counts = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['issued' => 0, 'payable' => 0];
+
+        return (int) $counts['issued'] === 0 && (int) $counts['payable'] > 0;
     }
 
     /**
@@ -236,8 +326,9 @@ final class EmailNoticeReconciler
             if ($vs !== '') {
                 if ($vs !== VariableSymbolNormalizer::digits((string) ($candidate['variable_symbol'] ?? ''))) continue;
             } else {
-                $secondaryAccount = (string) ($secondary['counterparty_account'] ?? '');
-                $candidateAccount = (string) ($candidate['counterparty_account'] ?? '');
+                // Normalizovaně — GPC u karetních pohybů plní protiúčet samými nulami.
+                $secondaryAccount = AccountNumberNormalizer::normalize((string) ($secondary['counterparty_account'] ?? ''));
+                $candidateAccount = AccountNumberNormalizer::normalize((string) ($candidate['counterparty_account'] ?? ''));
                 if ($secondaryAccount === '' || $candidateAccount === ''
                     || !AccountNumberNormalizer::equals($secondaryAccount, $candidateAccount)) continue;
             }
@@ -297,13 +388,16 @@ final class EmailNoticeReconciler
      * Přepojí párovací záznamy z e-mailové transakce na GPC a avízo rozpáruje.
      *
      * @param array<string,mixed> $twin
+     * @param float $gpcAmount Zúčtovaná částka z GPC — u karetní blokace se liší od
+     *   blokované (jiný kurz) a je autoritativní, viz acceptableCardFxTwin().
      * @return array{email_tx_id:int,email_statement_id:int,secondary_tx_id:int,secondary_statement_id:int,secondary_source:string,match_status:string}
      */
-    private function transfer(PDO $pdo, int $gpcTxId, array $twin, int $supplierId): array
+    private function transfer(PDO $pdo, int $gpcTxId, array $twin, int $supplierId, float $gpcAmount): array
     {
         $emailTxId        = (int) $twin['id'];
         $emailStatementId = (int) $twin['statement_id'];
         $secondarySource  = (string) ($twin['source'] ?? 'email_notice');
+        $amountDrifted    = abs((float) $twin['amount'] - $gpcAmount) > self::AMOUNT_TOLERANCE;
 
         $owns = !$pdo->inTransaction();
         if ($owns) {
@@ -318,6 +412,17 @@ final class EmailNoticeReconciler
                 ->execute([$gpcTxId, $emailTxId, $supplierId]);
             $pdo->prepare('UPDATE payment_matches SET bank_transaction_id = ? WHERE bank_transaction_id = ? AND supplier_id = ?')
                 ->execute([$gpcTxId, $emailTxId, $supplierId]);
+
+            // Karetní blokace zúčtovaná jiným kurzem: evidovaná úhrada nesla blokovanou
+            // částku, GPC je zdroj pravdy. `payment_matches.amount` je vždy absolutní
+            // (viz StatementMatcher::matchPurchase) a u přijatých faktur je jediným
+            // nositelem uhrazené částky — přepíšeme ji na skutečně zúčtovanou.
+            // Jistota, že tu nejsou `invoice_payments` (a s nimi invoices.paid_total
+            // k přepočtu), plyne z acceptableCardFxTwin(), která fuzzy pár jinak nepustí.
+            if ($amountDrifted) {
+                $pdo->prepare('UPDATE payment_matches SET amount = ? WHERE bank_transaction_id = ? AND supplier_id = ?')
+                    ->execute([number_format(abs($gpcAmount), 2, '.', ''), $gpcTxId, $supplierId]);
+            }
 
             // Zkopíruj párovací metadata (vč. původního matched_at/by pro audit) na GPC tx.
             $pdo->prepare(

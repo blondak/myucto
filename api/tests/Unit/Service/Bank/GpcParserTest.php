@@ -125,6 +125,32 @@ final class GpcParserTest extends TestCase
         self::assertNull($t['specific_symbol']);
     }
 
+    /**
+     * Karetní pohyb nemá protistranu — banka pole vyplní samými nulami. To není
+     * číslo účtu; uložené by se tvářilo jako známá protistrana a shodilo by
+     * cross-source dedup s e-mailovým avízem (EmailNoticeReconciler).
+     */
+    public function testAllZeroCounterpartyAccountBecomesNull(): void
+    {
+        $header = '074' . str_pad('1', 16) . str_pad('', 20) . '010126'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . '001' . '010126';
+        $tx = '075'
+            . str_pad('1', 16) . str_pad('', 16, '0')               // protiúčet = samé nuly
+            . str_pad('D', 13)
+            . str_pad('100', 12, '0', STR_PAD_LEFT) . '1'
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '00' . '0000'
+            . str_pad('0', 4, '0', STR_PAD_LEFT)
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '010126'
+            . str_pad('OPENAI', 20) . '00203' . '010126';
+
+        $t = (new GpcParser())->parse($header . "\n" . $tx)['transactions'][0];
+        self::assertNull($t['counterparty_account']);
+    }
+
     public function testCurrencyMappingFromIsoNumeric(): void
     {
         // 00203 = CZK, 00978 = EUR, 00840 = USD — verify normalize ltrim works

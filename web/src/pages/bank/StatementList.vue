@@ -352,8 +352,10 @@ async function onFileSelected(e: Event) {
       }
     }
   }
+  let attachedCount = 0
   for (const r of results) {
     if (r.duplicate) duplicateCount++
+    else if (r.attached_to_existing) { attachedCount++; lastNonDuplicate = r }
     else { okCount++; lastNonDuplicate = r }
   }
 
@@ -362,14 +364,20 @@ async function onFileSelected(e: Event) {
   // Single-file mode: zachovat původní UX (redirect na detail nové faktury)
   if (files.length === 1 && lastNonDuplicate) {
     lastResult.value = lastNonDuplicate
+    // PDF k už existujícímu (GPC) výpisu se jen přiložilo — dej to najevo, ať to
+    // uživatel nečte jako „import se nepovedl, transakcí je nula".
+    if (attachedCount > 0) toast.success(t('bank.pdf_attached_to_existing'))
     router.push(`/bank/${lastNonDuplicate.statement_id}`)
   } else {
     // Batch mode: souhrnný report
     if (errorCount > 0) {
       error.value = t('bank.upload_batch_error', { ok: okCount, dup: duplicateCount, err: errorCount })
         + (errors.length > 0 ? '\n' + errors.slice(0, 5).join('\n') : '')
-    } else if (okCount > 0 || duplicateCount > 0) {
-      toast.success(t('bank.upload_batch_done', { ok: okCount, dup: duplicateCount }))
+    } else if (okCount > 0 || duplicateCount > 0 || attachedCount > 0) {
+      toast.success(
+        t('bank.upload_batch_done', { ok: okCount, dup: duplicateCount })
+        + (attachedCount > 0 ? ' ' + t('bank.upload_batch_attached', { n: attachedCount }) : ''),
+      )
     }
   }
 

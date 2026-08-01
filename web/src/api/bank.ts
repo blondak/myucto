@@ -224,6 +224,9 @@ export interface ImportResult {
   transactions: number
   matched: number
   duplicate: boolean
+  /** PDF patřilo k už existujícímu výpisu (typicky GPC) — jen se k němu přiložilo. */
+  attached_to_existing?: boolean
+  pdf_name?: string
 }
 
 /** Kandidát účtu při shodném čísle ve více měnách nebo bankách (#167/#206). */

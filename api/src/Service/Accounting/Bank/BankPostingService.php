@@ -368,7 +368,13 @@ final class BankPostingService
         }
 
         if ($this->policy !== null && !$activationBackfill) {
-            $anomaly = $this->hasAnomaly($supplierId, $tx);
+            // Podezření na DVOJÍ ÚHRADU (stejný VS i částka v okně 10 dní) se musí dostat
+            // k člověku i u prokazatelně spárované platby — proto jde vlastním kanálem
+            // (`duplicateSuspect` → needs_input), zatímco vybočení částky z historie
+            // protistrany (`amount_zscore`) u jistoty 1.00 automatiku neblokuje, viz
+            // AutoPostingPolicyService::decide().
+            $codes = $this->anomalyCodes($supplierId, $tx);
+            $anomaly = $codes !== [];
             $policy = $this->policy->decide($supplierId, new PolicyInput(
                 OperationType::BANK_PAYMENT_MATCHED,
                 'payment_match',
@@ -378,6 +384,7 @@ final class BankPostingService
                 (string) $tx['posted_at'],
                 $debitCode,
                 $creditCode,
+                duplicateSuspect: in_array('duplicate_payment', $codes, true),
                 anomaly: $anomaly,
             ));
             if ($policy->decision === 'skip') {
@@ -2341,7 +2348,26 @@ final class BankPostingService
     /** @param array<string,mixed> $tx */
     private function hasAnomaly(int $supplierId, array $tx): bool
     {
-        return $this->anomalies !== null && $this->anomalies->checkBankTx($supplierId, $tx) !== [];
+        return $this->anomalyCodes($supplierId, $tx) !== [];
+    }
+
+    /**
+     * Kódy nalezených anomálií (`amount_zscore`, `duplicate_payment`). Volající se
+     * podle nich rozhoduje různě: dvojí úhrada patří vždy člověku, kdežto vybočení
+     * částky z historie protistrany je u prokazatelně spárované platby jen statistika.
+     *
+     * @param array<string,mixed> $tx
+     * @return list<string>
+     */
+    private function anomalyCodes(int $supplierId, array $tx): array
+    {
+        if ($this->anomalies === null) {
+            return [];
+        }
+        return array_values(array_map(
+            static fn (array $a): string => (string) $a['code'],
+            $this->anomalies->checkBankTx($supplierId, $tx),
+        ));
     }
 
     private function recordAiDecision(int $supplierId, string $source, int $txId, string $metric): void

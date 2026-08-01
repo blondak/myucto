@@ -93,7 +93,17 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
             $decision = 'suggest';
             $note = 'liability_prescription_missing';
         }
-        if ($in->anomaly) {
+        // Anomálie (z-score částky / duplicitní VS) degraduje na návrh — ALE ne u úhrady
+        // navázané na konkrétní doklad s jistotou 1.00. Tam už není co posuzovat: víme,
+        // KTEROU fakturu platba hradí, a kontace je z ní odvozená. Detektor tu jen hlásí,
+        // že částka vybočuje z historie protistrany, což u faktur běžně nastane (Chromservis
+        // z=10,7 při průměru 20 167 Kč — jen větší objednávka). Bez téhle výjimky se právě
+        // ty největší, a přitom nejjistější, platby účtovaly ručně. Nespárované účtování
+        // z pravidel, learned kontací i detektorů si anomálii hlídá dál.
+        $provenPaymentMatch = $in->operationType === OperationType::BANK_PAYMENT_MATCHED
+            && $in->source === 'payment_match'
+            && $in->confidence !== null && $in->confidence >= 1.0;
+        if ($in->anomaly && !$provenPaymentMatch) {
             $decision = 'suggest';
             $note ??= 'anomaly';
         }
