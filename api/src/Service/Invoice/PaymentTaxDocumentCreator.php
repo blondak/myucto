@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
+use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -36,6 +37,7 @@ final class PaymentTaxDocumentCreator
         private readonly InvoiceRepository $repo,
         private readonly InvoiceCalculator $calc,
         private readonly ExchangeRateApplier $rateApplier,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -143,10 +145,13 @@ final class PaymentTaxDocumentCreator
             );
         }
 
-        $sup = $pdo->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');
-        $sup->execute([(int) $proforma['supplier_id']]);
-        if (!(bool) $sup->fetchColumn()) {
-            throw new \RuntimeException('Daňový doklad k přijaté platbě vystavuje jen plátce DPH.');
+        // Povinnost dle § 28 vzniká PŘIJETÍM úplaty — rozhoduje plátcovství k datu
+        // platby (paid_on), ne dnešní cache: platba přijatá v období neplátcovství
+        // DDKP nezakládá, i když firma mezitím plátcem (znovu) je.
+        if (!$this->vatStatus->isVatPayerAt((int) $proforma['supplier_id'], (string) $payment['paid_on'])) {
+            throw new \RuntimeException(
+                'Daňový doklad k přijaté platbě vystavuje jen plátce DPH — firma jím k datu přijetí platby nebyla.'
+            );
         }
 
         // Brutto váhy per sazba ze stored řádkových totálů proformy (vč. slevových řádků).

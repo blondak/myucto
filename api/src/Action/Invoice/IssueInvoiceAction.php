@@ -26,6 +26,7 @@ use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
+use MyInvoice\Service\Vat\VatStatusService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -59,6 +60,7 @@ final class IssueInvoiceAction
         private readonly DocumentAutoPoster $autoPoster,
         private readonly AdvanceCycleLock $cycleLock,
         private readonly InvoiceAssetSaleService $assetSale,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -238,6 +240,35 @@ final class IssueInvoiceAction
 
         $supplierId = (int) $invoice['supplier_id'];
 
+        // Rozhodné datum dokladu pro plátcovství DPH: DUZP (tax_date), jinak issue_date.
+        // U dobropisu se tax_date při vystavení přepisuje datem doručení (§ 42 odst. 3,
+        // UPDATE níže) — rozhodné datum ho musí zohlednit už teď.
+        $vatStatusDate = $invoice['invoice_type'] === 'credit_note' && !empty($invoice['corrective_delivered_on'])
+            ? (string) $invoice['corrective_delivered_on']
+            : (string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']);
+
+        // Neplátce nesmí vystavit doklad s DPH (§ 108 odst. 4 ZDPH: uvedená daň by se
+        // musela odvést). Rozhoduje stav K ROZHODNÉMU DATU dokladu, ne dnešní cache —
+        // firma, která k 30. 6. přestala být plátcem, smí v srpnu doúčtovat červnové
+        // plnění s DPH, ale červencové už ne. Reverse charge se nekontroluje: RC řádky
+        // daň nenesou a identifikovaná osoba (§ 6g–6l) RC doklad vystavit smí.
+        if (
+            (float) ($invoice['total_vat'] ?? 0) > 0
+            && empty($invoice['reverse_charge'])
+            && !$this->vatStatus->isVatPayerAt($supplierId, $vatStatusDate)
+        ) {
+            return Json::error(
+                $response,
+                'not_vat_payer_at_date',
+                sprintf(
+                    'Firma není k rozhodnému datu dokladu (%s) plátcem DPH — doklad s DPH nelze vystavit. '
+                        . 'Přepněte položky na sazbu 0 %%, nebo opravte datum zdanitelného plnění.',
+                    date('j. n. Y', strtotime($vatStatusDate)),
+                ),
+                422,
+            );
+        }
+
         // Sklad (§5.1): předběžná kontrola dostupnosti PŘED přidělením varsymbolu —
         // deterministický nedostatek → 409 bez propáleného čísla řady FV (test #3).
         // Autoritativní kontrolu pod zámky dělá až transakce níže.
@@ -286,6 +317,7 @@ final class IssueInvoiceAction
                 (int) $invoice['currency_id'],
                 $supplierId,
                 isset($invoice['branding_profile_id']) ? (int) $invoice['branding_profile_id'] : null,
+                $vatStatusDate,
             );
         } catch (\RuntimeException $e) {
             return Json::error($response, 'snapshot_failed', $e->getMessage(), 500);

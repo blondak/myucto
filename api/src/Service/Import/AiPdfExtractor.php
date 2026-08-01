@@ -758,8 +758,20 @@ final class AiPdfExtractor
         $fromIban = $bankParser->parse((string) ($aiPayment['iban'] ?? ''));
         $aiVs = $aiPayment['variable_symbol'] ?? ($data['varsymbol'] ?? null);
 
+        // Snapshot plátcovství dodavatele na dokladu (migrace 0133) — explicitně.
+        // Priorita: údaj VYTĚŽENÝ Z DOKLADU (AI vendor.is_vat_payer — doklad může být
+        // zpětně datovaný a nese stav ke svému datu) > dnešní stav z ARES/VIES >
+        // aktuální clients.is_vat_payer (stejné chování jako dřívější implicitní mrazení).
+        $docVendorPayer = array_key_exists('is_vat_payer', (array) ($data['vendor'] ?? []))
+                && $data['vendor']['is_vat_payer'] !== null
+            ? (bool) $data['vendor']['is_vat_payer']
+            : null;
+
         $payload = [
             'vendor_id'             => $vendorId,
+            'vendor_is_vat_payer'   => $docVendorPayer
+                ?? $vendorIsVatPayer
+                ?? $this->liveVendorVatPayer($vendorId),
             'vendor_invoice_number' => $this->sanitizeVendorNumber((string) $data['vendor_invoice_number']),
             'payment'               => [
                 'account_number'  => $fromAccount['account_number'] ?? null,
@@ -1694,6 +1706,15 @@ final class AiPdfExtractor
         }
         $country = $this->vendorCountryInfo($vendorId);
         return $country['iso2'] !== '' && $country['iso2'] !== 'CZ';
+    }
+
+    /** Aktuální clients.is_vat_payer dodavatele (null = nezjištěno). */
+    private function liveVendorVatPayer(int $vendorId): ?bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer FROM clients WHERE id = ?');
+        $stmt->execute([$vendorId]);
+        $v = $stmt->fetchColumn();
+        return $v === false || $v === null ? null : (bool) $v;
     }
 
     /**

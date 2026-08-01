@@ -11,6 +11,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Service\Mail\SafeLogoPath;
+use MyInvoice\Service\Vat\VatStatusService;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -42,6 +43,7 @@ final class WorkReportLinkService
         private readonly WorkReportRepository $workReports,
         private readonly WorkReportLinkRepository $links,
         private readonly LoggerInterface $logger,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     public function ttlMinutes(): int
@@ -498,6 +500,9 @@ final class WorkReportLinkService
             (bool) $row['email_branding_enabled'],
             $row['email_accent_color'],
         );
+        // Náhled výkazu je ŽIVÝ pohled na otevřené koncepty → plátcovství „k dnešku",
+        // ale z historie (SSOT), ne z derivované cache supplier.is_vat_payer.
+        $row['is_vat_payer'] = $this->vatStatus->isVatPayerAt($supplierId, date('Y-m-d')) ? 1 : 0;
         return $row;
     }
 

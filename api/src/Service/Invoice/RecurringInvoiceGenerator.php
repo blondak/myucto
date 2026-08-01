@@ -536,7 +536,14 @@ final class RecurringInvoiceGenerator
      */
     private function coerceNonVatPayerRates(\PDO $pdo, int $supplierId, array $items, string $referenceDate): array
     {
-        $stmt = $pdo->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');
+        // Plátcovství K ROZHODNÉMU DATU generované faktury (DUZP/issue), ne živá cache —
+        // šablona generovaná zpětně do období plátcovství musí sazby zachovat a naopak.
+        $payerAt = \MyInvoice\Service\Vat\VatStatusService::payerAtExpr(
+            (string) $supplierId,
+            $pdo->quote($referenceDate),
+            's.is_vat_payer',
+        );
+        $stmt = $pdo->prepare("SELECT {$payerAt} FROM supplier s WHERE s.id = ?");
         $stmt->execute([$supplierId]);
         $isVatPayer = $stmt->fetchColumn();
         // false = supplier nenalezen → nech beze změny; 1 = plátce → nic neřeš.
@@ -584,6 +591,7 @@ final class RecurringInvoiceGenerator
             (int) $invoice['currency_id'],
             $supplierId,
             isset($invoice['branding_profile_id']) ? (int) $invoice['branding_profile_id'] : null,
+            (string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']),
         );
 
         $issueSql = 'UPDATE invoices SET

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -13,19 +14,27 @@ use PDO;
  *
  * Důvod: pokud později uživatel změní adresu klienta nebo bankovní účet,
  * VYSTAVENÉ faktury musí zachovat údaje platné v okamžiku vystavení.
+ *
+ * Plátcovství DPH dodavatele se mrazí k ROZHODNÉMU DATU dokladu ($vatDate,
+ * typicky tax_date ?? issue_date) přes VatStatusService — živý supplier.is_vat_payer
+ * je jen cache dneška a u zpětně datovaného dokladu by lhal.
  */
 final class SnapshotBuilder
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly VatStatusService $vatStatus,
+    ) {}
 
     /**
+     * @param ?string $vatDate Rozhodné datum dokladu (YYYY-MM-DD) pro plátcovství DPH; null = dnešek.
      * @return array{client: array, supplier: array, bank: ?array}
      */
-    public function build(int $clientId, int $currencyId, int $supplierId, ?int $brandingProfileId = null): array
+    public function build(int $clientId, int $currencyId, int $supplierId, ?int $brandingProfileId = null, ?string $vatDate = null): array
     {
         return [
             'client'   => $this->clientSnapshot($clientId),
-            'supplier' => $this->supplierSnapshot($supplierId, $brandingProfileId),
+            'supplier' => $this->supplierSnapshot($supplierId, $brandingProfileId, $vatDate),
             'bank'     => $this->bankSnapshot($currencyId),
         ];
     }
@@ -60,10 +69,13 @@ final class SnapshotBuilder
             'country_name_en' => $row['country_name_en'],
             'main_email'   => $row['main_email'],
             'phone'        => $row['phone'],
+            // Plátcovství klienta v okamžiku vystavení — živý stav JE snapshot k datu
+            // vystavení (kontakty nemají tabulku historie, jen per-doklad snapshoty).
+            'is_vat_payer' => $row['is_vat_payer'] !== null ? (bool) $row['is_vat_payer'] : null,
         ];
     }
 
-    private function supplierSnapshot(int $supplierId, ?int $brandingProfileId): array
+    private function supplierSnapshot(int $supplierId, ?int $brandingProfileId, ?string $vatDate): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT s.*, co.iso2 AS country_iso2, co.name_cs AS country_name_cs, co.name_en AS country_name_en
@@ -88,7 +100,9 @@ final class SnapshotBuilder
             'country_name_en' => $row['country_name_en'],
             'ic'           => $row['ic'],
             'dic'          => $row['dic'],
-            'is_vat_payer' => (bool) $row['is_vat_payer'],
+            // K rozhodnému datu dokladu z historie (supplier_vat_status_history);
+            // historie sleduje jen is_vat_payer, proto is_identified zůstává z živého řádku.
+            'is_vat_payer' => $this->vatStatus->isVatPayerAt($supplierId, $vatDate ?? date('Y-m-d')),
             // Identifikovaná osoba (§ 6g–6l, issue #94) — PDF podle ní volí RC
             // klauzuli a potlačí „Není plátce DPH" na zahraničním RC dokladu.
             'is_identified' => (bool) ($row['is_identified'] ?? false),

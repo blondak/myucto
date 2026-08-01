@@ -111,12 +111,25 @@ final class RecurringGeneratorTest extends TestCase
         // Test předpokládá PLÁTCE (sazby 21 % na fakturách) — generátor neplátci/IO
         // autoritativně přepíná položky na 0 % (applyNonVatPayerRate), takže reálné
         // nastavení dodavatele v dev DB by test rozbilo. Vynutit a v tearDown vrátit.
+        // Generátor rozhoduje z historie (payerAtExpr k rozhodnému datu faktury),
+        // proto se vynucuje řádkem historie k dnešku, ne jen živou cache.
         $flags = $this->db->pdo()->query(
             "SELECT is_vat_payer, is_identified FROM supplier WHERE id = {$this->supplierId}"
         )->fetch(PDO::FETCH_ASSOC) ?: [];
         $this->origVatFlags = $flags;
         $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = 1, is_identified = 0 WHERE id = ?')
             ->execute([$this->supplierId]);
+        $this->setPayerHistoryToday(true);
+    }
+
+    /** Upsert řádku historie plátcovství s účinností dnes (SSOT pro „plátce k datu"). */
+    private function setPayerHistoryToday(bool $isVatPayer): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
+             VALUES (?, CURDATE(), ?)
+             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer)'
+        )->execute([$this->supplierId, $isVatPayer ? 1 : 0]);
     }
 
     protected function tearDown(): void
@@ -128,6 +141,9 @@ final class RecurringGeneratorTest extends TestCase
                     (int) ($this->origVatFlags['is_identified'] ?? 0),
                     $this->supplierId,
                 ]);
+            $this->db->pdo()
+                ->prepare('DELETE FROM supplier_vat_status_history WHERE supplier_id = ? AND effective_from = CURDATE()')
+                ->execute([$this->supplierId]);
         }
         if (empty($this->createdInvoiceIds) && empty($this->createdTemplateIds)) {
             if (isset($this->db)) $this->db->close();
@@ -503,12 +519,13 @@ final class RecurringGeneratorTest extends TestCase
             'order_index' => 0,
         ]]);
 
-        // Dočasně přepni dodavatele na neplátce DPH; v finally vrať původní hodnotu.
+        // Dočasně přepni dodavatele na neplátce DPH (historie i cache); v finally vrátit.
         $orig = (int) $this->db->pdo()
             ->query("SELECT is_vat_payer FROM supplier WHERE id = {$this->supplierId}")
             ->fetchColumn();
         $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = 0 WHERE id = ?')
             ->execute([$this->supplierId]);
+        $this->setPayerHistoryToday(false);
         try {
             $result = $this->generator->generate($tplId, $today, $this->userId, '127.0.0.1', 'phpunit');
             $this->createdInvoiceIds[] = $result['invoice_id'];
@@ -535,6 +552,7 @@ final class RecurringGeneratorTest extends TestCase
         } finally {
             $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = ? WHERE id = ?')
                 ->execute([$orig, $this->supplierId]);
+            $this->setPayerHistoryToday(true);
         }
     }
 

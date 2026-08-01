@@ -78,8 +78,19 @@ final class IsdocToPurchaseInvoiceMapper
             ];
         }
 
+        // Snapshot plátcovství dodavatele na dokladu (migrace 0133) — explicitně.
+        // Priorita: údaj nesený dokladem > výsledek ARES/VIES z resolveVendor (dnešní
+        // stav, už propsaný do clients.is_vat_payer) > aktuální clients.is_vat_payer.
+        // ISDOC/Pohoda parsery zatím vlastní signál nenesou, klíč je tu defensivně.
+        $docVendorPayer = array_key_exists('is_vat_payer', $vendor) && $vendor['is_vat_payer'] !== null
+            ? (bool) $vendor['is_vat_payer']
+            : null;
+
         $payload = [
             'vendor_id'             => $resolved['id'],
+            'vendor_is_vat_payer'   => $docVendorPayer
+                ?? $resolved['is_vat_payer']
+                ?? $this->liveVendorVatPayer((int) $resolved['id']),
             'vendor_invoice_number' => $this->safeVarsymbol((string) ($parsed['varsymbol'] ?? '')),
             'document_kind'         => $this->mapDocumentKind((string) ($parsed['invoice_type'] ?? 'invoice')),
             'issue_date'            => (string) ($parsed['issue_date'] ?? date('Y-m-d')),
@@ -206,6 +217,14 @@ final class IsdocToPurchaseInvoiceMapper
                 // rounding je „nice to have" — faktura je vytvořená správně i bez něj.
             }
         }
+    }
+
+    private function liveVendorVatPayer(int $vendorId): ?bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer FROM clients WHERE id = ?');
+        $stmt->execute([$vendorId]);
+        $v = $stmt->fetchColumn();
+        return $v === false || $v === null ? null : (bool) $v;
     }
 
     private function fetchTenantIc(int $supplierId): ?string

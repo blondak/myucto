@@ -16,6 +16,7 @@ use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
+use MyInvoice\Service\Vat\VatStatusService;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
 
@@ -48,6 +49,7 @@ final class InvoicePdfRenderer
         private readonly IsdocExporter $isdoc,
         private readonly PdfSigningService $pdfSigning,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -479,16 +481,31 @@ final class InvoicePdfRenderer
     public function resolveSupplier(array $invoice): array
     {
         $live = $this->getSupplierData((int) ($invoice['supplier_id'] ?? 0));
+        $snap = null;
         if (!empty($invoice['supplier_snapshot'])) {
-            $snap = is_string($invoice['supplier_snapshot']) ? json_decode($invoice['supplier_snapshot'], true) : $invoice['supplier_snapshot'];
-            if (is_array($snap)) {
-                // Defensive merge: snapshot je primární (zachovává historické údaje), ale chybějící
-                // klíče (př. legacy snapshoty bez street/is_vat_payer) doplníme z live supplier dat.
-                // Zabrání tomu, aby se vystavená faktura ze stubu vykreslila jen s názvem firmy.
-                return array_merge($live, $snap);
+            $decoded = is_string($invoice['supplier_snapshot']) ? json_decode($invoice['supplier_snapshot'], true) : $invoice['supplier_snapshot'];
+            if (is_array($decoded)) {
+                $snap = $decoded;
             }
         }
-        return $live;
+        // Defensive merge: snapshot je primární (zachovává historické údaje), ale chybějící
+        // klíče (př. legacy snapshoty bez street) doplníme z live supplier dat. Zabrání
+        // tomu, aby se vystavená faktura ze stubu vykreslila jen s názvem firmy.
+        $row = $snap !== null ? array_merge($live, $snap) : $live;
+
+        // Plátcovství DPH ale z live řádku doplňovat NESMÍME — je to cache dneška.
+        // Draft (bez snapshotu) i legacy snapshot bez is_vat_payer dostanou stav
+        // k rozhodnému datu dokladu z historie (VatStatusService).
+        if (($snap === null || !array_key_exists('is_vat_payer', $snap))
+            && !empty($invoice['supplier_id'])
+            && $row !== []
+        ) {
+            $row['is_vat_payer'] = $this->vatStatus->isVatPayerAt(
+                (int) $invoice['supplier_id'],
+                (string) (($invoice['tax_date'] ?? null) ?: ($invoice['issue_date'] ?? date('Y-m-d'))),
+            );
+        }
+        return $row;
     }
 
     public function resolveClient(array $invoice): array
@@ -727,15 +744,32 @@ final class InvoicePdfRenderer
     private function writeSnapshots(array $invoice): array
     {
         try {
+            // Supplier část se staví k rozhodnému datu DOKLADU (tax ?? issue) — rebuild
+            // opravuje adresy/názvy, nesmí přepsat historické plátcovství dnešní cache.
             $built = $this->snapshots->build(
                 (int) $invoice['client_id'],
                 (int) $invoice['currency_id'],
                 (int) ($invoice['supplier_id'] ?? 0),
                 isset($invoice['branding_profile_id']) ? (int) $invoice['branding_profile_id'] : null,
+                (string) (($invoice['tax_date'] ?? null) ?: ($invoice['issue_date'] ?? date('Y-m-d'))),
             );
         } catch (\Throwable) {
             // Pokud klient/dodavatel neexistuje (smazaný), zachovej původní snapshot.
             return $invoice;
+        }
+
+        // Plátcovství klienta u VYSTAVENÉHO dokladu: živý stav dneška nemusí odpovídat
+        // stavu při vystavení a klient historii nemá — zachovej hodnotu ze stávajícího
+        // snapshotu, pokud existuje; jinak (legacy snapshot bez klíče) vezmi živou.
+        if ((string) ($invoice['status'] ?? 'draft') !== 'draft' && !empty($invoice['client_snapshot'])) {
+            $prevClient = is_string($invoice['client_snapshot'])
+                ? json_decode($invoice['client_snapshot'], true)
+                : $invoice['client_snapshot'];
+            if (is_array($prevClient) && array_key_exists('is_vat_payer', $prevClient)) {
+                $built['client']['is_vat_payer'] = $prevClient['is_vat_payer'] !== null
+                    ? (bool) $prevClient['is_vat_payer']
+                    : null;
+            }
         }
 
         $supplierJson = json_encode($built['supplier'], JSON_UNESCAPED_UNICODE);

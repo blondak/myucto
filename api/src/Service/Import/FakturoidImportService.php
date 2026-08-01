@@ -297,6 +297,7 @@ final class FakturoidImportService
             ImportedPaymentStateMapper::fromFakturoid($i),
             (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
             (string) $payload['issue_date'],
+            (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
         );
         return $invoiceId;
     }
@@ -315,11 +316,12 @@ final class FakturoidImportService
      *
      * @param ?array{status:string, paid_at:?string} $state  null = ponechat draft
      */
-    private function applyIssuedPaymentState(int $invoiceId, int $clientId, int $currencyId, int $supplierId, ?array $state, string $fallbackPaidAt, string $issueDate): void
+    private function applyIssuedPaymentState(int $invoiceId, int $clientId, int $currencyId, int $supplierId, ?array $state, string $fallbackPaidAt, string $issueDate, string $documentDate): void
     {
         if ($state === null) return;
 
-        $snapshots = $this->snapshots->build($clientId, $currencyId, $supplierId);
+        // Plátcovství DPH firmy k rozhodnému datu importovaného dokladu (tax ?? issue).
+        $snapshots = $this->snapshots->build($clientId, $currencyId, $supplierId, null, $documentDate);
 
         $snapshotSql = 'client_snapshot = ?, supplier_snapshot = ?, bank_snapshot = ?';
         $snapshotParams = [

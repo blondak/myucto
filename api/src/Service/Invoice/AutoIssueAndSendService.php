@@ -221,6 +221,7 @@ final class AutoIssueAndSendService
             (int) $invoice['currency_id'],
             $supplierId,
             isset($invoice['branding_profile_id']) ? (int) $invoice['branding_profile_id'] : null,
+            (string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']),
         );
 
         $stmt = $this->db->pdo()->prepare(

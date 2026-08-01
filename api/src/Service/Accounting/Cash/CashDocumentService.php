@@ -22,6 +22,7 @@ use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
+use MyInvoice\Service\Vat\VatStatusService;
 use DateTimeImmutable;
 use PDO;
 
@@ -64,6 +65,7 @@ final class CashDocumentService
         private readonly CnbExchangeRateClient $cnb,
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly DocumentLockService $documentLocks,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -1186,14 +1188,14 @@ final class CashDocumentService
             : [];
         return [
             'document'     => $doc,
-            'supplier'     => $this->loadSupplier($supplierId),
+            'supplier'     => $this->loadSupplier($supplierId, (string) $doc['issue_date']),
             'posting'      => $posting,
             'generated_at' => date('Y-m-d'),
         ];
     }
 
     /** @return array<string,mixed> */
-    private function loadSupplier(int $supplierId): array
+    private function loadSupplier(int $supplierId, string $atDate): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT company_name, street, city, zip, ic, dic, is_vat_payer
@@ -1201,7 +1203,13 @@ final class CashDocumentService
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row !== false ? $row : [];
+        if ($row === false) {
+            return [];
+        }
+        // Patička PDF nese plátcovství k datu vystavení DOKLADU (historie),
+        // ne dnešní cache — doklad z období plátcovství ho musí ukazovat i po zrušení registrace.
+        $row['is_vat_payer'] = $this->vatStatus->isVatPayerAt($supplierId, $atDate) ? 1 : 0;
+        return $row;
     }
 
     /**

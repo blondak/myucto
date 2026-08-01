@@ -489,8 +489,15 @@ final class InvoiceImportService
         // Recompute totals (z položek)
         $this->calculator->recompute($invoiceId);
 
-        // Snapshoty z aktuálního supplier/client/bank
-        $snapshots = $this->snapshots->build($clientId, $currencyId, $supplierId);
+        // Snapshoty z aktuálního supplier/client/bank; plátcovství DPH firmy k datu
+        // importovaného dokladu (zpětně datovaná faktura dostane stav k svému datu).
+        $snapshots = $this->snapshots->build(
+            $clientId,
+            $currencyId,
+            $supplierId,
+            null,
+            (string) ($taxDate ?: $inv['issue_date']),
+        );
         $pdo->prepare(
             'UPDATE invoices SET client_snapshot = ?, supplier_snapshot = ?, bank_snapshot = ? WHERE id = ?'
         )->execute([
