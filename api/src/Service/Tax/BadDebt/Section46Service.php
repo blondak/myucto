@@ -451,19 +451,28 @@ final class Section46Service
         return min(1.0, $unpaid / $totalWithVat);
     }
 
-    private const INVOICE_SELECT =
-        'SELECT i.id, i.varsymbol, i.invoice_type, i.client_id, i.tax_date, i.due_date,
+    /**
+     * SELECT vydaného dokladu vč. DIČ odběratele — DIČ preferenčně ze snapshotu
+     * dokladu (stav k vystavení), fallback živý klient. SSOT výrazu:
+     * {@see \MyInvoice\Service\Report\VatLedgerService::saleCounterpartyDicExpr()}.
+     */
+    private function invoiceSelect(): string
+    {
+        $dicExpr = \MyInvoice\Service\Report\VatLedgerService::saleCounterpartyDicExpr($this->db, 'i', 'cl');
+
+        return "SELECT i.id, i.varsymbol, i.invoice_type, i.client_id, i.tax_date, i.due_date,
                 i.total_without_vat, i.total_vat, i.total_with_vat, i.amount_to_pay,
                 i.paid_total, i.advance_paid_amount, i.status, i.reverse_charge,
-                cl.company_name AS client_name, cl.dic AS client_dic
+                cl.company_name AS client_name, {$dicExpr} AS client_dic
            FROM invoices i
-           JOIN clients cl ON cl.id = i.client_id';
+           JOIN clients cl ON cl.id = i.client_id";
+    }
 
     /** @return array<string,mixed>|null */
     private function fetchInvoice(int $supplierId, int $invoiceId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            self::INVOICE_SELECT . ' WHERE i.supplier_id = ? AND i.id = ?'
+            $this->invoiceSelect() . ' WHERE i.supplier_id = ? AND i.id = ?'
         );
         $stmt->execute([$supplierId, $invoiceId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -480,7 +489,7 @@ final class Section46Service
     private function fetchCandidates(int $supplierId, string $asOf): array
     {
         $stmt = $this->db->pdo()->prepare(
-            self::INVOICE_SELECT .
+            $this->invoiceSelect() .
             " WHERE i.supplier_id = ?
                 AND i.invoice_type = 'invoice'
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
@@ -507,16 +516,18 @@ final class Section46Service
             return [];
         }
         $ph = implode(',', array_fill(0, count($months), '?'));
+        // DIČ dlužníka ze snapshotu dokladu, fallback živý klient (viz invoiceSelect()).
+        $dicExpr = \MyInvoice\Service\Report\VatLedgerService::saleCounterpartyDicExpr($this->db, 'i', 'cl');
         $sql =
             "SELECT c.invoice_id, c.movement,
                     SUM(c.vat_amount) AS vat_amount,
                     MAX(c.output_vat) AS output_vat,
-                    i.varsymbol, i.tax_date, cl.dic AS client_dic
+                    i.varsymbol, i.tax_date, {$dicExpr} AS client_dic
                FROM vat_s46_corrections c
                JOIN invoices i ON i.id = c.invoice_id
                JOIN clients cl ON cl.id = i.client_id
               WHERE c.supplier_id = ? AND c.period_year = ? AND c.period_month IN ({$ph})
-           GROUP BY c.invoice_id, c.movement, i.varsymbol, i.tax_date, cl.dic
+           GROUP BY c.invoice_id, c.movement, i.varsymbol, i.tax_date, {$dicExpr}
            ORDER BY c.invoice_id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute(array_merge([$supplierId, $year], $months));

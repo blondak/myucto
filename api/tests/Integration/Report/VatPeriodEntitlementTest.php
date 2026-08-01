@@ -19,10 +19,11 @@ use PHPUnit\Framework\TestCase;
  * tedy ne jednu chybu, ale sérii pokut.
  *
  * Nejdůležitější je {@see testWarnsAboutUnverifiableConditionsEvenWhenTurnoverFits()}:
- * systém ověří jen obrat. Rok registrace, nespolehlivý plátce ani skupinová registrace
- * z účetnictví zjistit nejdou, takže se o nich MLUVÍ i tehdy, když obrat sedí. Tvrdit
- * „nárok máte" na základě jediné ověřené podmínky by bylo horší než dnešní stav — dnes
- * uživatel ví, že si to musí ohlídat sám.
+ * systém ověří obrat a (od EPIC VH-04) rok registrace z historie plátcovství.
+ * Nespolehlivý plátce ani skupinová registrace z účetnictví zjistit nejdou, takže se
+ * o nich MLUVÍ i tehdy, když ověřitelné podmínky sedí. Tvrdit „nárok máte" na základě
+ * jen ověřených podmínek by bylo horší než dnešní stav — dnes uživatel ví, že si to
+ * musí ohlídat sám. Scénáře § 99a odst. 3 (rok registrace) pokrývá VatStatusPeriodTest.
  */
 #[Group('integration')]
 final class VatPeriodEntitlementTest extends TestCase
@@ -113,8 +114,10 @@ final class VatPeriodEntitlementTest extends TestCase
     }
 
     /**
-     * Systém ověří JEN obrat. O zbývajících podmínkách § 99a se mluví i tehdy, když
-     * obrat sedí — mlčení by vypadalo jako potvrzení nároku.
+     * O NEOVĚŘITELNÝCH podmínkách § 99a (nespolehlivý plátce, skupinová registrace)
+     * se mluví i tehdy, když ověřitelné podmínky sedí — mlčení by vypadalo jako
+     * potvrzení nároku. Rok registrace se od EPIC VH-04 ověřuje FAKTICKY z historie
+     * plátcovství (viz VatStatusPeriodTest), takže ve varování být nesmí.
      */
     public function testWarnsAboutUnverifiableConditionsEvenWhenTurnoverFits(): void
     {
@@ -123,8 +126,9 @@ final class VatPeriodEntitlementTest extends TestCase
         $r = $this->service->evaluate($this->supplierId, self::YEAR);
 
         self::assertTrue($r['ok']);
-        self::assertStringContainsString('rok registrace', implode("\n", $r['warnings']));
+        self::assertStringNotContainsString('rok registrace', implode("\n", $r['warnings']), 'rok registrace se ověřuje z historie, ne warningem');
         self::assertStringContainsString('nespolehlivého plátce', implode("\n", $r['warnings']));
+        self::assertStringContainsString('skupinovou registraci', implode("\n", $r['warnings']));
     }
 
     /** Měsíčnímu plátci se nárok neposuzuje — na měsíční období ho mít nemusí. */

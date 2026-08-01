@@ -172,10 +172,12 @@ Pole `street` se ukládá samostatně, EPO chce všechny tři atributy.
 → Vyplň `financial_office_code` v Daňovém nastavení. Bez něj XML neprojde XSD
 validací (`c_ufo` je `use="required"`).
 
-**„Tenant není evidovaný jako plátce DPH"**
-→ V Identifikaci firmy zapni `is_vat_payer = true`. Vyplň DIČ. Pokud jsi
-**identifikovaná osoba**, nech plátce vypnutého a zaškrtni `Identifikovaná
-osoba` — přiznání se pak generuje s `typ_platce='I'`.
+**„Tenant nebyl k poslednímu dni období evidovaný jako plátce DPH"**
+→ Plátcovství se posuzuje **ke konci období výkazu** (historie plátcovství), ne
+podle dnešního stavu. Zkontroluj v Daňovém nastavení historii plátcovství DPH —
+pokud firma v daném období plátcem byla, doplň/oprav řádek historie. Vyplň DIČ.
+Pokud jsi **identifikovaná osoba**, nech plátce vypnutého a zaškrtni
+`Identifikovaná osoba` — přiznání se pak generuje s `typ_platce='I'`.
 
 **Čísla v Veta1/Veta4 nesedí**
 → Zkontroluj **VAT klasifikační kódy** na položkách faktur za období. Každý řádek

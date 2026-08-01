@@ -2853,7 +2853,7 @@
         "fx_open_items": "Open foreign-currency documents to revalue",
         "estimates_balances": "Balances of estimated accounts 388/389",
         "deferrals_balances": "Balances of accruals and deferrals 381–385",
-        "vat_period_entitlement": "Entitlement to quarterly VAT period (§ 99a — prior-year turnover)",
+        "vat_period_entitlement": "Entitlement to quarterly VAT period (§ 99a — prior-year turnover and registration year)",
         "income_tax_hint": "Book the current income tax (591/341) via the Income tax closing step — CIT base report",
         "procurement_111_131_open": "Non-zero balances of 111/131 — unsettled procurement of materials/goods",
         "accounts_unusual_side": "Accounts with a balance on the unusual side (per account type)",

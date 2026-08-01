@@ -50,6 +50,12 @@ final class DphPriznaniAction
     /**
      * GET /api/reports/dphdp3/settings → { vat_period, is_vat_payer }
      * Vrátí supplier nastavení potřebné pro UI (měsíční vs kvartální period picker).
+     *
+     * Volitelné ?year=&month= nebo ?year=&quarter= (EPIC VH-04): is_vat_payer /
+     * is_identified se vrátí ke STAVU K POSLEDNÍMU DNI daného období výkazu
+     * (supplier_vat_status_history přes VatStatusService), ať FE picker ukazuje
+     * relevanci výkazu pro zvolené období, ne pro dnešek. Bez parametrů = dnešní
+     * živý stav (zpětně kompatibilní). is_identified historii nemá — živý flag.
      */
     public function settings(Request $request, Response $response): Response
     {
@@ -63,11 +69,35 @@ final class DphPriznaniAction
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
-        $isIdentified = !((bool) ($row['is_vat_payer'] ?? false)) && (bool) ($row['is_identified'] ?? false);
+
+        $isVatPayer = (bool) ($row['is_vat_payer'] ?? false);
+        $q = $request->getQueryParams();
+        if (isset($q['year']) && (isset($q['month']) || isset($q['quarter']))) {
+            $year = (int) $q['year'];
+            if ($year < 2020 || $year > 2050) {
+                return Json::error($response, 'validation_failed', 'Neplatný rok.', 400);
+            }
+            if (isset($q['quarter'])) {
+                $quarter = (int) $q['quarter'];
+                if ($quarter < 1 || $quarter > 4) {
+                    return Json::error($response, 'validation_failed', 'Neplatný kvartál.', 400);
+                }
+                $endMonth = $quarter * 3;
+            } else {
+                $endMonth = (int) $q['month'];
+                if ($endMonth < 1 || $endMonth > 12) {
+                    return Json::error($response, 'validation_failed', 'Neplatný měsíc.', 400);
+                }
+            }
+            $statusDate = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))
+                ->modify('last day of this month')->format('Y-m-d');
+            $isVatPayer = \MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $statusDate);
+        }
+        $isIdentified = !$isVatPayer && (bool) ($row['is_identified'] ?? false);
         return Json::ok($response, [
             // Identifikovaná osoba podává vždy měsíčně — UI nedostane kvartální volbu.
             'vat_period'            => $isIdentified ? 'monthly' : ($row['vat_period'] ?? null),
-            'is_vat_payer'          => (bool) ($row['is_vat_payer'] ?? false),
+            'is_vat_payer'          => $isVatPayer,
             'is_identified'         => $isIdentified,
             'taxpayer_type'         => $row['taxpayer_type'] ?? null,
             'has_financial_office'  => !empty($row['financial_office_code']),

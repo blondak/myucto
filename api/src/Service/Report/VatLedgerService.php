@@ -192,10 +192,36 @@ final class VatLedgerService
         return $out;
     }
 
+    /**
+     * SQL výraz DIČ odběratele u VYDANÉHO dokladu (EPIC VH-04): preferuje snapshot
+     * z dokladu (`client_snapshot.dic` = stav v okamžiku vystavení) s fallbackem na
+     * živé `dic` klienta — pozdější změna DIČ na kartě klienta se nesmí zpětně
+     * propsat do výkazů. Doklady bez snapshotu (legacy/import) nebo se snapshotem
+     * bez DIČ padají na živý join, tj. dosavadní chování.
+     *
+     * MariaDB JSON_VALUE vrací nequotovaný skalár; SQLite (unit testy) má ekvivalent
+     * json_extract. `hasColumn` kryje minimalistická testovací schémata bez sloupce.
+     * U PŘIJATÝCH dokladů snapshot DIČ neexistuje — tam zůstává živý join.
+     *
+     * @param string $invoiceAlias alias tabulky invoices (např. 'i')
+     * @param string $clientAlias  alias tabulky clients (např. 'c')
+     */
+    public static function saleCounterpartyDicExpr(Connection $db, string $invoiceAlias, string $clientAlias): string
+    {
+        if (!$db->hasColumn('invoices', 'client_snapshot')) {
+            return "{$clientAlias}.dic";
+        }
+        $fn = $db->pdo()->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'json_extract' : 'JSON_VALUE';
+
+        return "COALESCE(NULLIF({$fn}({$invoiceAlias}.client_snapshot, '$.dic'), ''), {$clientAlias}.dic)";
+    }
+
     /** @return list<array<string,mixed>> */
     private function fetchSales(int $supplierId, string $start, string $end, bool $includeDrafts): array
     {
         $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+        // DIČ protistrany ze snapshotu dokladu s fallbackem na živého klienta (viz helper).
+        $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
         $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
             ? 'AND COALESCE(ii.oss_applicable, 0) = 0'
             : '';
@@ -210,7 +236,7 @@ final class VatLedgerService
                    -- od CZK a nastaví příznak exchange_rate_missing (issue #238).
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
                    i.total_with_vat AS inv_total, i.reverse_charge AS rc_flag,
-                   c.company_name AS counterparty_name, c.dic AS counterparty_dic,
+                   c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
                    0 AS is_fixed_asset,
                    COALESCE(

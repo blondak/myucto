@@ -2853,7 +2853,7 @@
         "fx_open_items": "Cizoměnové otevřené doklady k přecenění",
         "estimates_balances": "Zůstatky dohadných účtů 388/389",
         "deferrals_balances": "Zůstatky časového rozlišení 381–385",
-        "vat_period_entitlement": "Nárok na čtvrtletní zdaňovací období (§ 99a — obrat minulého roku)",
+        "vat_period_entitlement": "Nárok na čtvrtletní zdaňovací období (§ 99a — obrat minulého roku a rok registrace)",
         "income_tax_hint": "Splatnou daň z příjmů (591/341) zaúčtujte krokem uzávěrky Daň z příjmů — podklad DPPO",
         "procurement_111_131_open": "Nenulové zůstatky 111/131 — nedočerpané pořízení materiálu/zboží",
         "accounts_unusual_side": "Účty se zůstatkem na neobvyklé straně (dle typu účtu)",

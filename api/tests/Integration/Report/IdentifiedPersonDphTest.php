@@ -83,6 +83,19 @@ final class IdentifiedPersonDphTest extends TestCase
         $this->origIdentified = (int) ($row['is_identified'] ?? 0);
         $pdo->prepare('UPDATE supplier SET is_vat_payer = 0, is_identified = 1 WHERE id = ?')
             ->execute([$this->supplierId]);
+        // EPIC VH-04: výkazy čtou plátcovství K OBDOBÍ z supplier_vat_status_history —
+        // holý UPDATE živého flagu už nestačí, jinak by baseline řádek (plátce) vyhrál.
+        $this->setHistoryForTestYear(0);
+    }
+
+    /** Řádek historie plátcovství pro izolovaný rok testu (2097). */
+    private function setHistoryForTestYear(int $isVatPayer): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer)'
+        )->execute([$this->supplierId, self::YEAR . '-01-01', $isVatPayer]);
     }
 
     protected function tearDown(): void
@@ -104,6 +117,8 @@ final class IdentifiedPersonDphTest extends TestCase
         }
         $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ? WHERE id = ?')
             ->execute([$this->origVatPayer, $this->origIdentified, $this->supplierId]);
+        $pdo->prepare('DELETE FROM supplier_vat_status_history WHERE supplier_id = ? AND effective_from = ?')
+            ->execute([$this->supplierId, self::YEAR . '-01-01']);
         $this->db->close();
     }
 
@@ -177,6 +192,7 @@ final class IdentifiedPersonDphTest extends TestCase
         $pdo = $this->db->pdo();
         $pdo->prepare('UPDATE supplier SET is_vat_payer = 1, is_identified = 0 WHERE id = ?')
             ->execute([$this->supplierId]);
+        $this->setHistoryForTestYear(1); // stav k období čte historii (EPIC VH-04)
 
         $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
         $euVend = $this->client('EU dodavatel plátce', $this->deId, 'DE505050505', vendor: true);

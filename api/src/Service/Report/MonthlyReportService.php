@@ -157,9 +157,11 @@ final class MonthlyReportService
      */
     private function buildVatSection(int $supplierId, int $year, int $month): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        if (!(bool) $stmt->fetchColumn()) {
+        // EPIC VH-04: plátcovství k POSLEDNÍMU DNI reportovaného měsíce, ne živý flag —
+        // přehled za období, kdy firma plátcem byla, musí DPH sekci mít i po odregistraci.
+        $monthEnd = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))
+            ->modify('last day of this month')->format('Y-m-d');
+        if (!\MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $monthEnd)) {
             return null;
         }
         try {

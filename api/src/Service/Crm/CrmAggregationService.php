@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
+use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PayablePredicate;
 
 /**
@@ -74,12 +75,32 @@ final class CrmAggregationService
         return $anchor->setDate((int) $anchor->format('Y'), (int) $anchor->format('n'), $day);
     }
 
-    /** Je dodavatel plátce DPH? Určuje net (plátce) vs gross (neplátce) bázi. */
+    /**
+     * Je dodavatel plátce DPH? Určuje net (plátce) vs gross (neplátce) bázi.
+     *
+     * ZÁMĚRNĚ živý flag (cache „dnes"), ne stav k období: net/gross je prezentační
+     * volba KPI napříč obdobími, ne daňová povinnost — DPH povinnosti k období řeší
+     * taxDeadlineItems()/nextTaxDeadline()/taxCalendarItems() přes VatStatusService.
+     */
     private function isVatPayer(int $supplierId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
         return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Poslední den období výkazu {year, month|quarter} (YYYY-MM-DD) — rozhodné datum
+     * plátcovství pro DPH povinnosti (EPIC VH-04).
+     *
+     * @param array{year:int, month:?int, quarter:?int} $p
+     */
+    private static function periodEndDate(array $p): string
+    {
+        $endMonth = $p['month'] ?? ((int) $p['quarter'] * 3);
+
+        return (new \DateTimeImmutable(sprintf('%04d-%02d-01', $p['year'], $endMonth)))
+            ->modify('last day of this month')->format('Y-m-d');
     }
 
     /**
@@ -1567,13 +1588,10 @@ final class CrmAggregationService
     public function taxDeadlineItems(int $supplierId, \DateTimeImmutable $now, int $maxDaysAhead = 7): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT is_vat_payer, taxpayer_type, vat_period FROM supplier WHERE id = ?'
+            'SELECT is_vat_payer, is_identified, taxpayer_type, vat_period FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
-        if (!(bool) ($row['is_vat_payer'] ?? false)) {
-            return [];
-        }
 
         $taxpayerType = (string) ($row['taxpayer_type'] ?? '');
         $vatPeriod = ((string) ($row['vat_period'] ?? 'monthly')) === 'quarterly' ? 'quarterly' : 'monthly';
@@ -1608,13 +1626,43 @@ final class CrmAggregationService
             ? $this->periodForMonthlyDeadline($dphDeadline)
             : $this->periodForQuarterlyDeadline($dphDeadline);
         $khP = $khMonthly ? $this->periodForMonthlyDeadline($khDeadline) : $dphP;
+
+        // EPIC VH-04: povinnost výkazu se váže na stav plátcovství k POSLEDNÍMU DNI
+        // období, ne na živý flag — firma odregistrovaná k 1. 1. má v lednu pořád podat
+        // za prosinec; nově registrovaná naopak za období před registrací povinnost nemá.
+        $pdo = $this->db->pdo();
+        $dphPayer = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($dphP));
+        $khPayer  = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($khP));
+        // is_identified historii zatím nemá — čte se ŽIVÝ flag; až historie o
+        // is_identified přibude, mění se JEN tenhle řádek.
+        $identified = !$dphPayer && !empty($row['is_identified']);
+        if (!$dphPayer && !$khPayer && !$identified) {
+            return [];
+        }
+
+        $items = [];
+        if ($identified) {
+            // Identifikovaná osoba: přiznání (typ I) vždy měsíčně a JEN za měsíce, kdy
+            // povinnost vznikla (přeshraniční přijatá plnění); KH nepodává (§ 101c).
+            $ioP = $this->periodForMonthlyDeadline($khDeadline);
+            if ($this->submittedAt($supplierId, 'dphdp3', $ioP['year'], $ioP['month'], $ioP['quarter']) === null
+                && $this->hasForeignRcPurchasesForMonthBefore($supplierId, new \DateTimeImmutable($khDeadline))
+            ) {
+                $item = $this->buildDeadlineItem('tax_deadline', 'DPH přiznání (identifikovaná osoba) za uplynulý měsíc',
+                    $khDeadline, '/reports/dph', $now, $maxDaysAhead);
+                if ($item !== null) {
+                    $items[] = $item;
+                }
+            }
+            return $items;
+        }
+
         $dphSubmitted = $this->submittedAt($supplierId, 'dphdp3', $dphP['year'], $dphP['month'], $dphP['quarter']) !== null;
         $khSubmitted = $this->submittedAt($supplierId, 'dphkh1', $khP['year'], $khP['month'], $khP['quarter']) !== null;
 
-        $items = [];
         if ($combine) {
             // Sloučená položka zmizí, až když jsou podané OBĚ povinnosti (DPH i KH).
-            if ($dphActive && !($dphSubmitted && $khSubmitted)) {
+            if ($dphPayer && $dphActive && !($dphSubmitted && $khSubmitted)) {
                 $title = $vatPeriod === 'monthly'
                     ? 'DPH + KH za uplynulý měsíc'
                     : 'DPH + KH ' . $dphPeriod;
@@ -1625,14 +1673,14 @@ final class CrmAggregationService
             }
         } else {
             // Čtvrtletní PO: KH měsíčně + DPH čtvrtletně, dvě samostatné položky.
-            if (!$khSubmitted) {
+            if ($khPayer && !$khSubmitted) {
                 $khItem = $this->buildDeadlineItem('kh_deadline', 'Kontrolní hlášení za uplynulý měsíc',
                     $khDeadline, '/reports/kh', $now, $maxDaysAhead);
                 if ($khItem !== null) {
                     $items[] = $khItem;
                 }
             }
-            if ($dphActive && !$dphSubmitted) {
+            if ($dphPayer && $dphActive && !$dphSubmitted) {
                 $dphItem = $this->buildDeadlineItem('tax_deadline', 'DPH ' . $dphPeriod,
                     $dphDeadline, '/reports/dph', $now, $maxDaysAhead);
                 if ($dphItem !== null) {
@@ -1697,6 +1745,37 @@ final class CrmAggregationService
                       COALESCE(ii.vat_classification_code, i.vat_classification_code) IN ('20','22','31')
                       OR i.reverse_charge = 1
                     )
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $periodStart, $periodEnd]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Měla firma za měsíc PŘED $referenceDate přijatá přeshraniční plnění (zahraniční
+     * dodavatel + reverse charge / kódy 23, 24, 24e)? U identifikované osoby zakládají
+     * povinnost podat přiznání typu I za daný měsíc (§ 101 odst. 5) — bez nich se
+     * přiznání nepodává, takže se termín nezobrazuje. Zrcadlo hasEuSuppliesForMonthBefore
+     * na nákupní straně (EPIC VH-04).
+     */
+    private function hasForeignRcPurchasesForMonthBefore(int $supplierId, \DateTimeImmutable $referenceDate): bool
+    {
+        $prevMonth = $referenceDate->modify('first day of last month');
+        $periodStart = $prevMonth->format('Y-m-01');
+        $periodEnd = $prevMonth->format('Y-m-t');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM purchase_invoices pi
+               JOIN clients c ON c.id = pi.vendor_id
+          LEFT JOIN countries co ON co.id = c.country_id
+              WHERE pi.supplier_id = ?
+                AND pi.status IN ('received','booked','paid')
+                AND COALESCE(co.iso2, 'CZ') <> 'CZ'
+                AND (
+                      pi.reverse_charge = 1
+                      OR COALESCE(pi.vat_classification_code, '') IN ('23','24','24e')
+                    )
+                AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $periodStart, $periodEnd]);
@@ -1838,13 +1917,10 @@ final class CrmAggregationService
     public function nextTaxDeadline(int $supplierId, \DateTimeImmutable $now): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT is_vat_payer, taxpayer_type, vat_period FROM supplier WHERE id = ?'
+            'SELECT is_vat_payer, is_identified, taxpayer_type, vat_period FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
-        if (!(bool) ($row['is_vat_payer'] ?? false)) {
-            return null;
-        }
         $taxpayerType = (string) ($row['taxpayer_type'] ?? '');
         $vatPeriod = ((string) ($row['vat_period'] ?? 'monthly')) === 'quarterly' ? 'quarterly' : 'monthly';
         $khMonthly = $taxpayerType === 'po' || $vatPeriod === 'monthly';
@@ -1852,24 +1928,69 @@ final class CrmAggregationService
         $dphDate = $this->nextPeriodicDeadline($now, $vatPeriod);
         $khDate  = $this->nextPeriodicDeadline($now, $khMonthly ? 'monthly' : 'quarterly');
         $shvDate = $this->nextPeriodicDeadline($now, 'monthly');
-        $shvPending = $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate));
 
-        $earliest = $dphDate < $khDate ? $dphDate : $khDate;
-        $labels = [];
-        if ($dphDate === $earliest) {
-            $labels[] = 'DPH';
-        }
-        if ($khDate === $earliest) {
-            $labels[] = 'KH';
-        }
-        if ($shvPending) {
-            if ($shvDate < $earliest) {
-                $earliest = $shvDate;
-                $labels = ['SH'];
-            } elseif ($shvDate === $earliest) {
+        // EPIC VH-04: povinnost se váže na stav plátcovství k POSLEDNÍMU DNI období
+        // příslušného termínu, ne na živý flag. is_identified historii nemá — živý flag.
+        $pdo = $this->db->pdo();
+        $dphP = $vatPeriod === 'quarterly'
+            ? $this->periodForQuarterlyDeadline($dphDate)
+            : $this->periodForMonthlyDeadline($dphDate);
+        $khP = $khMonthly
+            ? $this->periodForMonthlyDeadline($khDate)
+            : $this->periodForQuarterlyDeadline($khDate);
+        $dphPayer = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($dphP));
+        $khPayer  = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($khP));
+        $identified = !$dphPayer && !empty($row['is_identified']);
+
+        if ($identified) {
+            // Identifikovaná osoba: měsíční přiznání typu I jen za měsíce se vznikem
+            // povinnosti (přijatá přeshraniční plnění), KH nikdy, SH při EU dodávkách.
+            $ioDate = $this->nextPeriodicDeadline($now, 'monthly');
+            $ioPending = $this->hasForeignRcPurchasesForMonthBefore($supplierId, new \DateTimeImmutable($ioDate));
+            $shvPending = $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($ioDate));
+            if (!$ioPending && !$shvPending) {
+                return null;
+            }
+            $labels = [];
+            if ($ioPending) {
+                $labels[] = 'DPH';
+            }
+            if ($shvPending) {
                 $labels[] = 'SH';
             }
+            $days = (int) $now->diff(new \DateTimeImmutable($ioDate))->format('%r%a');
+            return [
+                'label'       => implode(' + ', $labels),
+                'date'        => $ioDate,
+                'days'        => $days,
+                'shv_pending' => $shvPending,
+            ];
         }
+
+        if (!$dphPayer && !$khPayer) {
+            return null;
+        }
+
+        $shvPayer = VatStatusService::payerAt(
+            $pdo,
+            $supplierId,
+            self::periodEndDate($this->periodForMonthlyDeadline($shvDate)),
+        );
+        $shvPending = $shvPayer && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate));
+
+        // Nejbližší termín jen z povinností, které k danému období skutečně existují.
+        $candidates = [];
+        if ($dphPayer) {
+            $candidates['DPH'] = $dphDate;
+        }
+        if ($khPayer) {
+            $candidates['KH'] = $khDate;
+        }
+        if ($shvPending) {
+            $candidates['SH'] = $shvDate;
+        }
+        $earliest = min($candidates);
+        $labels = array_keys(array_filter($candidates, static fn (string $d): bool => $d === $earliest));
 
         $days = (int) $now->diff(new \DateTimeImmutable($earliest))->format('%r%a');
         return [
@@ -1954,53 +2075,81 @@ final class CrmAggregationService
         $today = $now->format('Y-m-d');
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT is_vat_payer, taxpayer_type, vat_period, flat_tax_band FROM supplier WHERE id = ?'
+            'SELECT is_vat_payer, is_identified, taxpayer_type, vat_period, flat_tax_band FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
-        $isVatPayer = (bool) ($row['is_vat_payer'] ?? false);
         $taxpayerType = (string) ($row['taxpayer_type'] ?? '');
         $vatPeriod = ((string) ($row['vat_period'] ?? 'monthly')) === 'quarterly' ? 'quarterly' : 'monthly';
         $flatTaxBand = (string) ($row['flat_tax_band'] ?? 'none');
 
-        if ($isVatPayer) {
+        // EPIC VH-04: povinnost DPH/KH/SH se váže na stav plátcovství k POSLEDNÍMU DNI
+        // období daného termínu (VatStatusService), ne na živý flag. Identifikovaná
+        // osoba (is_identified je živý flag — historii nemá): měsíční přiznání typu I
+        // jen za měsíce se vznikem povinnosti, KH nikdy, SH při EU dodávkách.
+        $pdo = $this->db->pdo();
+        $monthlyDate = $this->nextPeriodicDeadline($now, 'monthly');
+        $payerRecent = VatStatusService::payerAt(
+            $pdo,
+            $supplierId,
+            self::periodEndDate($this->periodForMonthlyDeadline($monthlyDate)),
+        );
+        $ioMode = !$payerRecent && !empty($row['is_identified']);
+        if ($ioMode) {
+            $vatPeriod = 'monthly'; // IO podává vždy za kalendářní měsíc (§ 101/5)
+        }
+
+        // (Guard kryje i kvartální plátce: období kvartálního termínu končí nejdřív
+        //  s obdobím měsíčního, takže payerRecent=false ⇒ ani kvartální povinnost není;
+        //  registrace uprostřed roku kvartál stejně vylučuje — § 99a odst. 3.)
+        if ($payerRecent || $ioMode) {
             $khMonthly = $taxpayerType === 'po' || $vatPeriod === 'monthly';
 
             $dphDate = $this->nextPeriodicDeadline($now, $vatPeriod);
             $dphDays = (int) $now->diff(new \DateTimeImmutable($dphDate))->format('%r%a');
             if ($dphDays >= -3 && $dphDays <= $maxDaysAhead) {
                 $p = $vatPeriod === 'quarterly' ? $this->periodForQuarterlyDeadline($dphDate) : $this->periodForMonthlyDeadline($dphDate);
-                $sub = $this->submittedAt($supplierId, 'dphdp3', $p['year'], $p['month'], $p['quarter']);
-                $items[] = [
-                    'type'         => 'tax_deadline',
-                    'title'        => 'DPH přiznání',
-                    'deadline'     => $dphDate,
-                    'days'         => $dphDays,
-                    'link'         => '/reports/dph',
-                    'submitted'    => $sub !== null,
-                    'submitted_at' => $sub,
-                ];
+                $dphDue = $ioMode
+                    ? $this->hasForeignRcPurchasesForMonthBefore($supplierId, new \DateTimeImmutable($dphDate))
+                    : VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($p));
+                if ($dphDue) {
+                    $sub = $this->submittedAt($supplierId, 'dphdp3', $p['year'], $p['month'], $p['quarter']);
+                    $items[] = [
+                        'type'         => 'tax_deadline',
+                        'title'        => 'DPH přiznání',
+                        'deadline'     => $dphDate,
+                        'days'         => $dphDays,
+                        'link'         => '/reports/dph',
+                        'submitted'    => $sub !== null,
+                        'submitted_at' => $sub,
+                    ];
+                }
             }
 
             $khDate = $this->nextPeriodicDeadline($now, $khMonthly ? 'monthly' : 'quarterly');
             $khDays = (int) $now->diff(new \DateTimeImmutable($khDate))->format('%r%a');
-            if ($khDays >= -3 && $khDays <= $maxDaysAhead) {
+            if ($khDays >= -3 && $khDays <= $maxDaysAhead && !$ioMode) {
                 $p = $khMonthly ? $this->periodForMonthlyDeadline($khDate) : $this->periodForQuarterlyDeadline($khDate);
-                $sub = $this->submittedAt($supplierId, 'dphkh1', $p['year'], $p['month'], $p['quarter']);
-                $items[] = [
-                    'type'         => 'kh_deadline',
-                    'title'        => 'Kontrolní hlášení',
-                    'deadline'     => $khDate,
-                    'days'         => $khDays,
-                    'link'         => '/reports/kh',
-                    'submitted'    => $sub !== null,
-                    'submitted_at' => $sub,
-                ];
+                if (VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($p))) {
+                    $sub = $this->submittedAt($supplierId, 'dphkh1', $p['year'], $p['month'], $p['quarter']);
+                    $items[] = [
+                        'type'         => 'kh_deadline',
+                        'title'        => 'Kontrolní hlášení',
+                        'deadline'     => $khDate,
+                        'days'         => $khDays,
+                        'link'         => '/reports/kh',
+                        'submitted'    => $sub !== null,
+                        'submitted_at' => $sub,
+                    ];
+                }
             }
 
             $shvDate = $this->nextPeriodicDeadline($now, 'monthly');
             $shvDays = (int) $now->diff(new \DateTimeImmutable($shvDate))->format('%r%a');
-            if ($shvDays >= -3 && $shvDays <= $maxDaysAhead && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate))) {
+            if ($shvDays >= -3 && $shvDays <= $maxDaysAhead
+                && ($ioMode || VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($this->periodForMonthlyDeadline($shvDate))))
+                && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate))
+            ) {
                 $p = $this->periodForMonthlyDeadline($shvDate);
                 $sub = $this->submittedAt($supplierId, 'dphshv', $p['year'], $p['month'], $p['quarter']);
                 $items[] = [

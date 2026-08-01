@@ -61,7 +61,6 @@ final class DphBookBuilder
      */
     public function build(int $supplierId, int $year, int $month, ?string $period = null): array
     {
-        $supplier = $this->loadSupplier($supplierId);
         $period = in_array($period, ['monthly', 'quarterly'], true) ? $period : 'monthly';
         // Kvartální období: $month nese (jako u DPH přiznání) libovolný měsíc kvartálu;
         // kvartál odvodíme přes ceil($month/3) a rozsah natáhneme na celé čtvrtletí.
@@ -74,6 +73,8 @@ final class DphBookBuilder
             $start = sprintf('%04d-%02d-01', $year, $month);
             $end = (new \DateTimeImmutable($start))->modify('last day of this month')->format('Y-m-d');
         }
+        // Rozhodný stav plátcovství = POSLEDNÍ DEN období knihy, ne dnešek (EPIC VH-04).
+        $supplier = $this->loadSupplier($supplierId, $end);
 
         // Konstanty pro rok období (číselník daňových konstant, admin override).
         $khItemThreshold = $this->taxConstants->khItemThreshold($year);
@@ -489,9 +490,12 @@ final class DphBookBuilder
     }
 
     /**
+     * S $statusDate (poslední den období knihy) nese is_vat_payer stav k tomuto
+     * datu z historie (VatStatusService), ne živou cache dneška.
+     *
      * @return array<string,mixed>
      */
-    private function loadSupplier(int $supplierId): array
+    private function loadSupplier(int $supplierId, ?string $statusDate = null): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT s.id, s.company_name, s.street, s.city, s.zip,
@@ -505,6 +509,11 @@ final class DphBookBuilder
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($row === false) {
             throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
+        }
+        // hasTable kryje minimalistická SQLite schémata unit testů bez tabulky
+        // historie — tam zůstává živý flag (fallback shodný s VatStatusService).
+        if ($statusDate !== null && $this->db->hasTable('supplier_vat_status_history')) {
+            $row['is_vat_payer'] = \MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $statusDate) ? 1 : 0;
         }
         return $row;
     }

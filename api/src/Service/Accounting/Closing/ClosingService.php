@@ -3865,11 +3865,12 @@ final class ClosingService
 
         // § 99a — nárok na čtvrtletní zdaňovací období. `supplier.vat_period` byl ruční
         // přepínač bez kontroly; nesprávné nastavení znamená celoročně pozdě podávaná
-        // přiznání, ne jednu chybu.
+        // přiznání, ne jednu chybu. `ok=false` kryje obrat nad limitem (odst. 1)
+        // i rok registrace a rok následující (odst. 3, EPIC VH-04) — obojí je error.
         $vatPeriod = $this->vatPeriodEntitlement->evaluate($supplierId, $fiscalYear);
         $checks[] = [
             'key' => 'vat_period_entitlement',
-            'severity' => $vatPeriod['over_limit'] ? 'error' : 'info',
+            'severity' => $vatPeriod['ok'] ? 'info' : 'error',
             'ok' => $vatPeriod['ok'],
             'value' => [
                 'vat_period' => $vatPeriod['vat_period'],

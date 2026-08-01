@@ -58,9 +58,15 @@ final class EpoSupplierBlockBuilder
      * tři vlastní kopie SELECTu byly příčinou, ne důsledkem: helper níž totiž degradoval
      * TIŠE, když volající sloupec zapomněl.
      *
+     * @param ?string $statusDate Rozhodné datum plátcovství (YYYY-MM-DD) — typicky
+     *        POSLEDNÍ DEN období výkazu. Živý supplier.is_vat_payer je jen cache
+     *        stavu „dnes"; s datem se `is_vat_payer` přepíše stavem k tomuto datu
+     *        z historie ({@see \MyInvoice\Service\Vat\VatStatusService}). Ostatní
+     *        pole zůstávají živá. `is_identified` historii zatím NEMÁ — čte se
+     *        vždy živý flag; až ji dostane, rozšíří se POUZE tenhle blok.
      * @return array<string,mixed>
      */
-    public static function loadSupplier(\PDO $pdo, int $supplierId): array
+    public static function loadSupplier(\PDO $pdo, int $supplierId, ?string $statusDate = null): array
     {
         $stmt = $pdo->prepare(
             'SELECT ' . self::supplierSelect() . '
@@ -72,6 +78,9 @@ final class EpoSupplierBlockBuilder
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($row === false) {
             throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
+        }
+        if ($statusDate !== null) {
+            $row['is_vat_payer'] = \MyInvoice\Service\Vat\VatStatusService::payerAt($pdo, $supplierId, $statusDate) ? 1 : 0;
         }
 
         return $row;

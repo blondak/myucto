@@ -81,7 +81,11 @@ final class KontrolniHlaseniBuilder
         $dZjist    = $isFollowUp ? $this->normalizeDate($dZjist) : null;
         $cJedVyzvy = $isFollowUp ? $this->normalizeVyzva($cJedVyzvy) : null;
 
-        $supplier = $this->loadSupplier($supplierId);
+        [$start, $end, $quarter, $endMonth] = self::periodBounds($year, $month, $period);
+
+        // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04)
+        // — firma odregistrovaná dnes musí projít validací KH za období, kdy plátcem byla.
+        $supplier = $this->loadSupplier($supplierId, $end);
         $warnings = $this->validateSupplier($supplier, $period);
         if ($isFollowUp && $dZjist === null && $cJedVyzvy === null) {
             // XSD anotace d_zjist: u následného KH musí být vyplněno buď datum zjištění, nebo
@@ -89,8 +93,6 @@ final class KontrolniHlaseniBuilder
             $warnings[] = 'Následné kontrolní hlášení: doplňte datum zjištění důvodů nebo č.j. výzvy '
                 . 'správce daně (§ 101f odst. 2) — jinak nemusí projít podání na EPO.';
         }
-
-        [$start, $end, $quarter, $endMonth] = self::periodBounds($year, $month, $period);
 
         // Všechny sekce z jedné projekce kanonických řádků (VatLedgerService).
         ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
@@ -711,7 +713,7 @@ final class KontrolniHlaseniBuilder
         ];
     }
 
-    /** @return list<string> warnings */
+    /** @return list<string> warnings — is_vat_payer v $s je stav k poslednímu dni období (viz build) */
     private function validateSupplier(array $s, string $period = 'monthly'): array
     {
         $w = [];
@@ -720,7 +722,7 @@ final class KontrolniHlaseniBuilder
             // jen plátci) — přeshraniční povinnosti pokrývá DPHDP3 typ I + SHV.
             $w[] = !empty($s['is_identified'])
                 ? 'Identifikovaná osoba kontrolní hlášení nepodává (§ 101c — jen plátci DPH). Přeshraniční plnění patří do přiznání DPH (typ I) a souhrnného hlášení.'
-                : 'Tenant není plátce DPH — KH nemusí být relevantní.';
+                : 'Tenant nebyl k poslednímu dni období plátcem DPH — KH nemusí být relevantní.';
         }
         if ($period === 'quarterly' && ($s['taxpayer_type'] ?? '') === 'po') {
             $w[] = 'Právnické osoby podávají kontrolní hlášení VŽDY měsíčně (§ 101e odst. 1 zákona 235/2004 Sb.). Kvartální podání je povoleno pouze fyzickým osobám.';
@@ -730,9 +732,9 @@ final class KontrolniHlaseniBuilder
         return $w;
     }
 
-    private function loadSupplier(int $supplierId): array
+    private function loadSupplier(int $supplierId, ?string $statusDate = null): array
     {
-        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId, $statusDate);
     }
 
 

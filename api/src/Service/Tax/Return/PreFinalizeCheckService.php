@@ -324,7 +324,9 @@ final class PreFinalizeCheckService
 
     private function checkVatReturnsFiled(int $supplierId, int $year): array
     {
-        [$isPayer, $vatPeriod] = $this->vatSettings($supplierId);
+        // EPIC VH-04: plátcovství ke KONCI finalizovaného roku, ne živý flag — firma
+        // odregistrovaná až po Novém roce musí mít přiznání za celý finalizovaný rok.
+        [$isPayer, $vatPeriod] = $this->vatSettings($supplierId, sprintf('%04d-12-31', $year));
         if (!$isPayer || $vatPeriod === null) {
             return ['key' => 'vat_returns_filed', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => ['status' => 'not_payer']];
         }
@@ -446,8 +448,12 @@ final class PreFinalizeCheckService
         return max(0.0, round((float) ($inputs['donations'] ?? 0), 2));
     }
 
-    /** @return array{0:bool,1:?string} [is_vat_payer, vat_period(monthly|quarterly|null)] */
-    private function vatSettings(int $supplierId): array
+    /**
+     * @param ?string $statusDate rozhodné datum plátcovství (EPIC VH-04) — s datem se
+     *        is_vat_payer čte z historie přes VatStatusService, bez něj živá cache dneška.
+     * @return array{0:bool,1:?string} [is_vat_payer, vat_period(monthly|quarterly|null)]
+     */
+    private function vatSettings(int $supplierId, ?string $statusDate = null): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer, vat_period FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
@@ -456,6 +462,9 @@ final class PreFinalizeCheckService
             return [false, null];
         }
         $period = $row['vat_period'] !== null ? (string) $row['vat_period'] : null;
-        return [(bool) $row['is_vat_payer'], $period];
+        $isPayer = $statusDate !== null
+            ? \MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $statusDate)
+            : (bool) $row['is_vat_payer'];
+        return [$isPayer, $period];
     }
 }

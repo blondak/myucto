@@ -129,6 +129,12 @@ final class DphPriznaniBuilder
         if (!in_array($period, ['monthly', 'quarterly'], true)) {
             $period = 'monthly';
         }
+        // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04).
+        // První load výše slouží jen pro default periodicity; typ P/I, warning neplátce
+        // i gates korekcí §74b/§46/§43 níže se řídí supplierem se stavem k období.
+        // (is_identified historii nemá — zůstává živý, viz loadSupplier.)
+        [, $statusDate] = $this->periodRange($year, $month, $period);
+        $supplier = $this->loadSupplier($supplierId, $statusDate);
         // Identifikovaná osoba (§ 6g–6l ZDPH, issue #94): přiznání typu 'I' —
         // vyplňuje JEN samovyměření z přeshraničních přijatých plnění (ř. 3-6
         // pořízení zboží / služby z EU, ř. 12-13 služby ze 3. zemí), vždy měsíčně,
@@ -141,7 +147,7 @@ final class DphPriznaniBuilder
         if ($isIdentified) {
             $warnings[] = 'Přiznání identifikované osoby (typ I): jen samovyměření z přeshraničních plnění, bez nároku na odpočet. Podává se pouze za měsíce, kdy povinnost vznikla (do 25. dne následujícího měsíce).';
         } elseif (!$supplier['is_vat_payer']) {
-            $warnings[] = 'Tenant není evidovaný jako plátce DPH — výkaz nemusí být relevantní.';
+            $warnings[] = 'Tenant nebyl k poslednímu dni období evidovaný jako plátce DPH — výkaz nemusí být relevantní.';
         }
         if (empty($supplier['financial_office_code'])) {
             $warnings[] = 'Chybí kód finančního úřadu — XML nemusí projít validací EPO.';
@@ -888,12 +894,13 @@ final class DphPriznaniBuilder
     }
 
     /**
-     * Načti tax-relevantní info o tenantovi.
+     * Načti tax-relevantní info o tenantovi. S $statusDate (poslední den období
+     * výkazu) je is_vat_payer stavem k tomuto datu, ne živou cache dneška.
      * @return array<string,mixed>
      */
-    private function loadSupplier(int $supplierId): array
+    private function loadSupplier(int $supplierId, ?string $statusDate = null): array
     {
-        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId, $statusDate);
     }
 
     // VetaP a normalizeOkec přesunuto do EpoSupplierBlockBuilder (sdíleno s KH/SHV),

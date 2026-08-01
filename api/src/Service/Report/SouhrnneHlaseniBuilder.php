@@ -59,9 +59,6 @@ final class SouhrnneHlaseniBuilder
      */
     public function build(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
-        $supplier = $this->loadSupplier($supplierId);
-        $warnings = $this->validateSupplier($supplier);
-
         if ($period === 'quarterly') {
             $quarter = (int) ceil($month / 3);
             $startMonth = ($quarter - 1) * 3 + 1;
@@ -76,6 +73,12 @@ final class SouhrnneHlaseniBuilder
             $start = sprintf('%04d-%02d-01', $year, $month);
         }
         $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))->modify('last day of this month')->format('Y-m-d');
+
+        // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu (EPIC VH-04) —
+        // SH sice podávají i identifikované osoby, ale VetaP musí nést konzistentní
+        // stav se zbytkem výkazů za totéž období.
+        $supplier = $this->loadSupplier($supplierId, $end);
+        $warnings = $this->validateSupplier($supplier);
 
         $missingRates = [];
         $rows = $this->collectEuSupplies($supplierId, $start, $end, $missingRates);
@@ -274,9 +277,9 @@ final class SouhrnneHlaseniBuilder
         return $w;
     }
 
-    private function loadSupplier(int $supplierId): array
+    private function loadSupplier(int $supplierId, ?string $statusDate = null): array
     {
-        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        return EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId, $statusDate);
     }
 
 

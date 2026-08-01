@@ -27,7 +27,17 @@ final class VatStatusService
     /** Byla firma plátcem DPH k danému datu (YYYY-MM-DD)? */
     public function isVatPayerAt(int $supplierId, string $date): bool
     {
-        $stmt = $this->db->pdo()->prepare(
+        return self::payerAt($this->db->pdo(), $supplierId, $date);
+    }
+
+    /**
+     * Statická varianta {@see isVatPayerAt()} pro kontexty bez DI kontejneru
+     * (statické buildery jako EpoSupplierBlockBuilder, bin skripty). Táž SQL
+     * sémantika, jeden zdroj pravdy.
+     */
+    public static function payerAt(\PDO $pdo, int $supplierId, string $date): bool
+    {
+        $stmt = $pdo->prepare(
             'SELECT COALESCE(
                 (SELECT is_vat_payer FROM supplier_vat_status_history
                   WHERE supplier_id = ? AND effective_from <= ?
