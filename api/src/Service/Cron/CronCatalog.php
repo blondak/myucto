@@ -159,6 +159,18 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // VH-01: propíše plánované změny plátcovství DPH (budoucí účinnost)
+                // do živé cache supplier.is_vat_payer/is_identified. Běží krátce po
+                // půlnoci, aby nový stav platil od začátku dne účinnosti.
+                'script' => 'cron-vat-status-apply',
+                'recommended' => 'daily_0030',
+                'linux_cron' => '30 0 * * *',
+                'windows_schtasks' => '/sc daily /st 00:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-journal-integrity-check',
                 'recommended' => 'daily_0230',
                 'linux_cron' => '30 2 * * *',

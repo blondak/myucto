@@ -1,0 +1,286 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Settings;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\AccountingSupplierSettingsRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Vat\VatStatusService;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+/**
+ * Správa historie plátcovství DPH (EPIC VH-01) — supplier_vat_status_history.
+ *
+ *   POST   /api/settings/vat-status-history        — přidání/úprava řádku (upsert po effective_from)
+ *   DELETE /api/settings/vat-status-history/{id}   — smazání řádku
+ *
+ * Seznam historie vrací GET /api/settings/supplier (klíč vat_status_history).
+ *
+ * Retro-guard: změna s účinností v uzamčeném období (accounting_periods
+ * closing/closed/approved, zámek k datu locked_until) nebo před/uvnitř období
+ * už podaného přiznání (tax_submissions status submitted/accepted) by tiše
+ * změnila základ, ze kterého výkazy vznikly → 409 s výčtem kolizí; pokračovat
+ * lze jen s explicitním body.acknowledge = true (zapíše se do auditu).
+ */
+final class VatStatusHistoryAction
+{
+    private const BASELINE_DATE = '1900-01-01';
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly VatStatusService $vatStatus,
+        private readonly DocumentLockService $locks,
+        private readonly AccountingSupplierSettingsRepository $accountingSettings,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+    ) {}
+
+    public function save(Request $request, Response $response): Response
+    {
+        if (!$this->guard($request, $response, $err)) return $err;
+        $sid = $this->supplierId($request);
+        if ($sid <= 0) return Json::error($response, 'validation_failed', 'Chybí aktivní firma.', 400);
+
+        $body = (array) ($request->getParsedBody() ?? []);
+
+        $effectiveFrom = trim((string) ($body['effective_from'] ?? ''));
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $effectiveFrom);
+        if ($date === false || $date->format('Y-m-d') !== $effectiveFrom) {
+            return Json::error($response, 'validation_failed', 'Datum účinnosti plátcovství DPH není platné.', 422);
+        }
+
+        $isVatPayer = (bool) ($body['is_vat_payer'] ?? false);
+        $isIdentified = (bool) ($body['is_identified'] ?? false);
+        if ($isVatPayer && $isIdentified) {
+            return Json::error($response, 'validation_failed',
+                'Identifikovaná osoba je z definice neplátce DPH — nelze kombinovat s plátcovstvím.', 422);
+        }
+
+        $note = trim((string) ($body['note'] ?? ''));
+        if (mb_strlen($note) > 255) {
+            return Json::error($response, 'validation_failed', 'Poznámka má max. 255 znaků.', 422);
+        }
+
+        // Paušalista nesmí být plátce DPH (§ 7a ZDP) — stejné pravidlo jako
+        // u flat_tax_band v PUT /settings/supplier, jen z druhé strany.
+        if ($isVatPayer) {
+            $stmt = $this->db->pdo()->prepare("SELECT COALESCE(flat_tax_band, 'none') FROM supplier WHERE id = ?");
+            $stmt->execute([$sid]);
+            if ((string) $stmt->fetchColumn() !== 'none') {
+                return Json::error($response, 'validation_failed',
+                    'Firma je v režimu paušální daně — paušalista nesmí být plátce DPH (§ 7a ZDP). Nejprve zrušte paušální daň.', 422);
+            }
+        }
+
+        $collisions = $this->collisions($sid, $effectiveFrom);
+        $acknowledge = (bool) ($body['acknowledge'] ?? false);
+        if ($collisions !== [] && !$acknowledge) {
+            return Json::error($response, 'vat_status_locked_conflict',
+                'Změna plátcovství zasahuje do uzamčeného období nebo už podaných přiznání.', 409,
+                ['collisions' => $collisions]);
+        }
+
+        $this->vatStatus->upsert($sid, $effectiveFrom, $isVatPayer, $isIdentified, $note !== '' ? $note : null, $this->userId($request));
+        $this->vatStatus->refreshLiveCache($sid);
+
+        $this->log($request, 'supplier.vat_status_changed', $sid, [
+            'effective_from' => $effectiveFrom,
+            'is_vat_payer'   => $isVatPayer,
+            'is_identified'  => $isIdentified,
+            'note'           => $note !== '' ? $note : null,
+            'acknowledged'   => $acknowledge && $collisions !== [],
+            'collisions'     => $collisions,
+        ]);
+
+        return Json::ok($response, $this->statePayload($sid));
+    }
+
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->guard($request, $response, $err)) return $err;
+        $sid = $this->supplierId($request);
+        if ($sid <= 0) return Json::error($response, 'validation_failed', 'Chybí aktivní firma.', 400);
+
+        $id = (int) ($args['id'] ?? 0);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, effective_from, is_vat_payer, is_identified
+               FROM supplier_vat_status_history WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$id, $sid]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            return Json::error($response, 'not_found', 'Řádek historie plátcovství nenalezen.', 404);
+        }
+
+        // Baseline (1900-01-01) drží garanci, že firma má vždy definovaný stav
+        // pro celou minulost; a poslední řádek firmy nesmí zmizet nikdy.
+        if ((string) $row['effective_from'] === self::BASELINE_DATE) {
+            return Json::error($response, 'vat_status_baseline_protected',
+                'Výchozí řádek historie plátcovství nelze smazat.', 409);
+        }
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM supplier_vat_status_history WHERE supplier_id = ?');
+        $count->execute([$sid]);
+        if ((int) $count->fetchColumn() <= 1) {
+            return Json::error($response, 'vat_status_last_row',
+                'Poslední řádek historie plátcovství nelze smazat.', 409);
+        }
+
+        // Smazání retroaktivního řádku mění stav v minulosti úplně stejně jako
+        // jeho přidání → stejný retro-guard + acknowledge flow.
+        $effectiveFrom = (string) $row['effective_from'];
+        $body = (array) ($request->getParsedBody() ?? []);
+        $query = $request->getQueryParams();
+        $acknowledge = (bool) ($body['acknowledge'] ?? $query['acknowledge'] ?? false);
+        $collisions = $this->collisions($sid, $effectiveFrom);
+        if ($collisions !== [] && !$acknowledge) {
+            return Json::error($response, 'vat_status_locked_conflict',
+                'Smazání změny plátcovství zasahuje do uzamčeného období nebo už podaných přiznání.', 409,
+                ['collisions' => $collisions]);
+        }
+
+        $this->db->pdo()->prepare('DELETE FROM supplier_vat_status_history WHERE id = ? AND supplier_id = ?')
+            ->execute([$id, $sid]);
+        $this->vatStatus->refreshLiveCache($sid);
+
+        $this->log($request, 'supplier.vat_status_deleted', $sid, [
+            'effective_from' => $effectiveFrom,
+            'is_vat_payer'   => (bool) $row['is_vat_payer'],
+            'is_identified'  => (bool) $row['is_identified'],
+            'acknowledged'   => $acknowledge && $collisions !== [],
+            'collisions'     => $collisions,
+        ]);
+
+        return Json::ok($response, $this->statePayload($sid));
+    }
+
+    /**
+     * Retro-kolize dané účinnosti: uzamčené účetní období (closing/closed/
+     * approved), zámek účtování k datu (locked_until) a podaná přiznání
+     * s obdobím sahajícím na/za effective_from.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function collisions(int $sid, string $effectiveFrom): array
+    {
+        $collisions = [];
+
+        $lock = $this->locks->forDate($sid, $effectiveFrom);
+        if ($lock->inClosedPeriod || $lock->inClosingPeriod) {
+            $collisions[] = [
+                'type'          => 'locked_period',
+                'period_status' => $lock->periodStatus,
+            ];
+        }
+        if ($lock->dateLocked) {
+            $collisions[] = [
+                'type'         => 'date_lock',
+                'locked_until' => $this->accountingSettings->getLockedUntil($sid),
+            ];
+        }
+
+        // Podané přiznání pokrývá období končící >= effective_from → retro změna
+        // by měnila podklad, ze kterého výkaz vznikl. Jen prokazatelně podané
+        // stavy (submitted/accepted, migrace 1110); jeden řádek na období.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT form_code, period_year, period_month, period_quarter, MAX(submitted_at) AS submitted_at
+               FROM tax_submissions
+              WHERE supplier_id = ? AND status IN ('submitted', 'accepted')
+                AND (CASE
+                        WHEN period_month IS NOT NULL
+                            THEN LAST_DAY(CONCAT(period_year, '-', LPAD(period_month, 2, '0'), '-01'))
+                        WHEN period_quarter IS NOT NULL
+                            THEN LAST_DAY(CONCAT(period_year, '-', LPAD(period_quarter * 3, 2, '0'), '-01'))
+                        ELSE CONCAT(period_year, '-12-31')
+                     END) >= ?
+              GROUP BY form_code, period_year, period_month, period_quarter
+              ORDER BY period_year, period_quarter, period_month
+              LIMIT 50"
+        );
+        $stmt->execute([$sid, $effectiveFrom]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $sub) {
+            $collisions[] = [
+                'type'           => 'tax_submission',
+                'form_code'      => (string) $sub['form_code'],
+                'period_year'    => (int) $sub['period_year'],
+                'period_month'   => $sub['period_month'] !== null ? (int) $sub['period_month'] : null,
+                'period_quarter' => $sub['period_quarter'] !== null ? (int) $sub['period_quarter'] : null,
+                'submitted_at'   => $sub['submitted_at'] !== null ? (string) $sub['submitted_at'] : null,
+            ];
+        }
+
+        return $collisions;
+    }
+
+    /** @return array<string,mixed> historie + živá cache po změně */
+    private function statePayload(int $sid): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, effective_from, is_vat_payer, is_identified, note, annual_deduction_percent
+               FROM supplier_vat_status_history WHERE supplier_id = ? ORDER BY effective_from'
+        );
+        $stmt->execute([$sid]);
+        $history = array_map(static fn (array $item): array => [
+            'id'                       => (int) $item['id'],
+            'effective_from'           => (string) $item['effective_from'],
+            'is_vat_payer'             => (bool) $item['is_vat_payer'],
+            'is_identified'            => (bool) $item['is_identified'],
+            'note'                     => $item['note'] !== null ? (string) $item['note'] : null,
+            'annual_deduction_percent' => (float) $item['annual_deduction_percent'],
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []);
+
+        $live = $this->db->pdo()->prepare('SELECT is_vat_payer, is_identified FROM supplier WHERE id = ?');
+        $live->execute([$sid]);
+        $row = $live->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'vat_status_history' => $history,
+            'is_vat_payer'       => (bool) ($row['is_vat_payer'] ?? false),
+            'is_identified'      => (bool) ($row['is_identified'] ?? false),
+        ];
+    }
+
+    private function supplierId(Request $request): int
+    {
+        return (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+    }
+
+    private function userId(Request $request): ?int
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        return ((int) ($user['id'] ?? 0)) ?: null;
+    }
+
+    private function guard(Request $request, Response $response, ?Response &$err): bool
+    {
+        if (!RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE)) {
+            $err = Json::error($response, 'forbidden', 'Pouze admin.', 403);
+            return false;
+        }
+        $err = null;
+        return true;
+    }
+
+    private function log(Request $request, string $action, int $supplierId, array $payload): void
+    {
+        $this->logger->log(
+            $action,
+            (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0),
+            'supplier',
+            $supplierId,
+            $payload,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+    }
+}

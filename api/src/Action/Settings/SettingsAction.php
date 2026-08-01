@@ -51,6 +51,8 @@ final class SettingsAction
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
         // E4: licenční limit počtu firem (max_companies) při zakládání dodavatele.
         private readonly \MyInvoice\Service\License\LicenseService $license,
+        // VH-01: sdílená zápisová cesta do supplier_vat_status_history.
+        private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -715,19 +717,21 @@ final class SettingsAction
             $this->db->pdo()->prepare($sql)->execute($params);
         }
         if ($vatStatusEffectiveFrom !== null) {
-            $this->db->pdo()->prepare(
-                'INSERT INTO supplier_vat_status_history
-                    (supplier_id, effective_from, is_vat_payer, annual_deduction_percent, created_by)
-                 VALUES (?, ?, ?, 100, ?)
-                 ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer), created_by = VALUES(created_by)'
-            )->execute([
+            // VH-01: stejná kódová cesta jako správa historie (VatStatusHistoryAction).
+            // Živou cache tady NEpřepočítáváme — legacy PUT ji nastavuje přímo
+            // z body výše a přepočet by změnil chování u budoucí účinnosti.
+            $this->vatStatus->upsert(
                 $id,
                 $vatStatusEffectiveFrom,
                 array_key_exists('is_vat_payer', $body)
-                    ? (!empty($body['is_vat_payer']) ? 1 : 0)
-                    : (!empty($cur['is_vat_payer']) ? 1 : 0),
+                    ? !empty($body['is_vat_payer'])
+                    : !empty($cur['is_vat_payer']),
+                array_key_exists('is_identified', $body)
+                    ? !empty($body['is_identified'])
+                    : !empty($cur['is_identified']),
+                null,
                 (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
-            ]);
+            );
         }
         if ($modeEffectiveFrom !== null) {
             $this->accountingModes->record($id, $modeEffectiveFrom, (string) $body['accounting_mode']);
@@ -917,13 +921,16 @@ final class SettingsAction
             $row['cz_nace_code'] ?? null
         );
         $history = $this->db->pdo()->prepare(
-            'SELECT effective_from, is_vat_payer, annual_deduction_percent
+            'SELECT id, effective_from, is_vat_payer, is_identified, note, annual_deduction_percent
                FROM supplier_vat_status_history WHERE supplier_id = ? ORDER BY effective_from'
         );
         $history->execute([$id]);
         $row['vat_status_history'] = array_map(static fn (array $item): array => [
+            'id' => (int) $item['id'],
             'effective_from' => (string) $item['effective_from'],
             'is_vat_payer' => (bool) $item['is_vat_payer'],
+            'is_identified' => (bool) $item['is_identified'],
+            'note' => $item['note'] !== null ? (string) $item['note'] : null,
             'annual_deduction_percent' => (float) $item['annual_deduction_percent'],
         ], $history->fetchAll(\PDO::FETCH_ASSOC) ?: []);
         // Identifikovaná osoba (§ 6g–6l, issue #94) — doplněk k neplátci.

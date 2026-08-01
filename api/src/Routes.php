@@ -1097,6 +1097,9 @@ final class Routes
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
         $app->put ('/api/settings/supplier',                [SettingsAction::class, 'updateSupplier']);
+        // Historie plátcovství DPH (EPIC VH-01) — seznam vrací GET /api/settings/supplier.
+        $app->post   ('/api/settings/vat-status-history',              [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'save']);
+        $app->delete ('/api/settings/vat-status-history/{id:[0-9]+}',  [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'delete']);
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);

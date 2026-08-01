@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
@@ -232,8 +232,6 @@ function selfCopyFallbackLabel(ct: SelfCopyType): string {
 // Audit 2026-07 (G5): stav accounting_mode při načtení — potřeba k detekci
 // přechodu tax_evidence → double_entry v saveSupplier() (confirm dialog).
 const originalAccountingMode = ref<'tax_evidence' | 'double_entry' | null>(null)
-const originalVatPayer = ref<boolean | null>(null)
-const vatStatusEffectiveFrom = ref(new Date().toISOString().slice(0, 10))
 
 // ── CZ-NACE našeptávač nad číselníkem ČINNOSTI ─────────────────────────────
 const naceItems = ref<NaceCode[]>([])
@@ -280,7 +278,6 @@ async function load() {
     // tak vidět hned při načtení, ne až z náhledu přiznání.
     naceResolved.value = supplier.value.cz_nace_resolved ?? null
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
-    originalVatPayer.value = supplier.value.is_vat_payer
   } finally { loading.value = false }
   loadSampleStatus()
 }
@@ -360,11 +357,8 @@ async function saveSupplier() {
       zip: supplier.value.zip,
       ic: supplier.value.ic,
       dic: supplier.value.dic,
-      is_vat_payer: supplier.value.is_vat_payer,
-      ...(originalVatPayer.value !== supplier.value.is_vat_payer
-        ? { vat_status_effective_from: vatStatusEffectiveFrom.value }
-        : {}),
-      is_identified: supplier.value.is_identified ?? false,
+      // Plátcovství DPH + identifikovaná osoba se od VH-01 mění výhradně přes
+      // blok „Plátcovství DPH" (historie) v tabě Daně a účetnictví.
       email: supplier.value.email,
       phone: supplier.value.phone,
       web: supplier.value.web,
@@ -432,7 +426,6 @@ async function saveSupplier() {
     })
     syncSupplierStore(supplier.value)
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
-    originalVatPayer.value = supplier.value.is_vat_payer
     toast.success(t('common.saved'))
   } catch (e: any) {
     if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'backfill_required') {
@@ -453,6 +446,142 @@ async function saveAutoPostFlags(): Promise<void> {
   })
   supplier.value.auto_post_invoices = updated.auto_post_invoices ?? false
   supplier.value.auto_post_purchases = updated.auto_post_purchases ?? false
+}
+
+// ── Plátcovství DPH v čase (VH-01) ──────────────────────────────────────────
+// CRUD historie je okamžitá akce přes API (vzor měnových účtů), NE součást
+// společného Uložit — každá změna hned přepočítá živou cache na backendu.
+type VatStatusKind = 'payer' | 'non_payer' | 'identified'
+const VAT_BASELINE_DATE = '1900-01-01'
+const todayIso = () => new Date().toISOString().slice(0, 10)
+
+const vatHistory = computed<VatStatusHistoryEntry[]>(() => supplier.value?.vat_status_history ?? [])
+
+function vatStatusKind(payer: boolean, identified: boolean): VatStatusKind {
+  return payer ? 'payer' : identified ? 'identified' : 'non_payer'
+}
+function vatKindLabel(kind: VatStatusKind): string {
+  return t(`settings.vat_status.state_${kind}`)
+}
+const vatCurrentStateLabel = computed(() => {
+  if (!supplier.value) return ''
+  return vatKindLabel(vatStatusKind(supplier.value.is_vat_payer, supplier.value.is_identified ?? false))
+})
+
+const vatFormOpen = ref(false)
+const vatFormEditingId = ref<number | null>(null)   // null = nový řádek
+const vatFormDate = ref(todayIso())
+const vatFormKind = ref<VatStatusKind>('payer')
+const vatFormNote = ref('')
+const vatSaving = ref(false)
+
+function openVatForm(entry?: VatStatusHistoryEntry) {
+  vatFormEditingId.value = entry?.id ?? null
+  vatFormDate.value = entry ? entry.effective_from : todayIso()
+  vatFormKind.value = entry ? vatStatusKind(entry.is_vat_payer, entry.is_identified) : 'payer'
+  vatFormNote.value = entry?.note ?? ''
+  vatFormOpen.value = true
+}
+function closeVatForm() {
+  vatFormOpen.value = false
+  vatFormEditingId.value = null
+}
+
+// 409 retro-guard flow: BE vrátí výčet kolizí (zamčená období / podaná
+// přiznání), uživatel je potvrdí a akce se zopakuje s acknowledge=true.
+const vatConflicts = ref<VatStatusCollision[]>([])
+const vatPendingAction = ref<null | { kind: 'save'; payload: VatStatusSavePayload } | { kind: 'delete'; id: number }>(null)
+
+function applyVatState(state: VatStatusState) {
+  if (!supplier.value) return
+  supplier.value.vat_status_history = state.vat_status_history
+  supplier.value.is_vat_payer = state.is_vat_payer
+  supplier.value.is_identified = state.is_identified
+  syncSupplierStore(supplier.value)
+}
+
+async function submitVatForm(acknowledge = false) {
+  if (blockDemoMutation()) return
+  if (!supplier.value) return
+  const payload: VatStatusSavePayload = {
+    effective_from: vatFormDate.value,
+    is_vat_payer: vatFormKind.value === 'payer',
+    is_identified: vatFormKind.value === 'identified',
+    note: vatFormNote.value.trim() || null,
+    ...(acknowledge ? { acknowledge: true } : {}),
+  }
+  vatSaving.value = true
+  try {
+    applyVatState(await settingsApi.saveVatStatus(payload))
+    vatConflicts.value = []
+    vatPendingAction.value = null
+    closeVatForm()
+    toast.success(t('common.saved'))
+  } catch (e: any) {
+    if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'vat_status_locked_conflict') {
+      vatConflicts.value = e.response.data.error.collisions ?? []
+      vatPendingAction.value = { kind: 'save', payload }
+      return
+    }
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    vatSaving.value = false
+  }
+}
+
+const vatDeleteEntry = ref<VatStatusHistoryEntry | null>(null)
+
+async function confirmVatDelete(acknowledge = false) {
+  if (blockDemoMutation()) return
+  const entry = vatDeleteEntry.value
+  if (!entry) return
+  vatSaving.value = true
+  try {
+    applyVatState(await settingsApi.deleteVatStatus(entry.id, acknowledge))
+    vatConflicts.value = []
+    vatPendingAction.value = null
+    vatDeleteEntry.value = null
+    toast.success(t('settings.vat_status.deleted'))
+  } catch (e: any) {
+    if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'vat_status_locked_conflict') {
+      vatConflicts.value = e.response.data.error.collisions ?? []
+      vatPendingAction.value = { kind: 'delete', id: entry.id }
+      return
+    }
+    vatDeleteEntry.value = null
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    vatSaving.value = false
+  }
+}
+
+async function acknowledgeVatConflicts() {
+  const pending = vatPendingAction.value
+  if (!pending) return
+  if (pending.kind === 'save') await submitVatForm(true)
+  else await confirmVatDelete(true)
+}
+
+function dismissVatConflicts() {
+  const wasDelete = vatPendingAction.value?.kind === 'delete'
+  vatConflicts.value = []
+  vatPendingAction.value = null
+  if (wasDelete) vatDeleteEntry.value = null
+}
+
+function vatCollisionLabel(c: VatStatusCollision): string {
+  if (c.type === 'locked_period') {
+    return t('settings.vat_status.collision_locked_period', { status: c.period_status ?? '' })
+  }
+  if (c.type === 'date_lock') {
+    return t('settings.vat_status.collision_date_lock', { date: c.locked_until ?? '' })
+  }
+  const period = c.period_month
+    ? `${String(c.period_month).padStart(2, '0')}/${c.period_year}`
+    : c.period_quarter
+      ? `Q${c.period_quarter}/${c.period_year}`
+      : String(c.period_year ?? '')
+  return t('settings.vat_status.collision_tax_submission', { form: c.form_code ?? '', period })
 }
 
 </script>
@@ -518,27 +647,6 @@ async function saveAutoPostFlags(): Promise<void> {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.dic') }}</label>
             <input v-model="supplier.dic" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-          </div>
-          <div>
-            <label class="flex items-center gap-2 text-sm mt-7">
-              <input v-model="supplier.is_vat_payer" type="checkbox" class="rounded border-neutral-300 text-primary-600"
-                @change="supplier.is_vat_payer && (((supplier as any).flat_tax_band = 'none'), (supplier.is_identified = false))" />
-              {{ t('settings.is_vat_payer') }}
-            </label>
-            <!-- Identifikovaná osoba (§ 6g–6l ZDPH, #94) — jen pro neplátce; plátce ji vypne. -->
-            <label v-if="!supplier.is_vat_payer" class="flex items-center gap-2 text-sm mt-2">
-              <input v-model="supplier.is_identified" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-              {{ t('settings.is_identified') }}
-            </label>
-            <p v-if="!supplier.is_vat_payer && supplier.is_identified" class="text-xs text-neutral-500 mt-1 ml-6">
-              {{ t('settings.is_identified_hint') }}
-            </p>
-            <div v-if="originalVatPayer !== supplier.is_vat_payer" class="mt-3">
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status_effective_from') }}</label>
-              <input v-model="vatStatusEffectiveFrom" type="date"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_status_effective_from_hint') }}</p>
-            </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.email') }} *</label>
@@ -880,6 +988,98 @@ async function saveAutoPostFlags(): Promise<void> {
               </select>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_period_hint') }}</p>
             </div>
+            <!-- Plátcovství DPH v čase (VH-01) — CRUD historie je okamžitá akce
+                 přes API (vzor bloku OSS/měn), NE součást společného Uložit. -->
+            <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
+              <div class="flex items-start justify-between gap-2 flex-wrap">
+                <div>
+                  <p class="text-sm font-medium text-neutral-700">{{ t('settings.vat_status.title') }}</p>
+                  <p class="text-xs text-neutral-500 mt-0.5">
+                    {{ t('settings.vat_status.current') }}: <strong class="text-neutral-700">{{ vatCurrentStateLabel }}</strong>
+                  </p>
+                </div>
+                <button type="button" @click="openVatForm()" :class="btnOutline('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                  {{ t('settings.vat_status.add') }}
+                </button>
+              </div>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_status.hint') }}</p>
+              <div class="overflow-x-auto mt-3">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-xs text-neutral-500 border-b border-neutral-200">
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.vat_status.col_from') }}</th>
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.vat_status.col_state') }}</th>
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.vat_status.col_note') }}</th>
+                      <th class="py-1.5 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="entry in vatHistory" :key="entry.id" class="border-b border-neutral-100">
+                      <td class="py-1.5 pr-3 font-mono whitespace-nowrap">
+                        <template v-if="entry.effective_from === VAT_BASELINE_DATE">{{ t('settings.vat_status.baseline') }}</template>
+                        <template v-else>{{ entry.effective_from }}</template>
+                        <span v-if="entry.effective_from > todayIso()" class="ml-1 text-xs text-warning-600 font-sans">
+                          {{ t('settings.vat_status.future_badge') }}
+                        </span>
+                      </td>
+                      <td class="py-1.5 pr-3">{{ vatKindLabel(vatStatusKind(entry.is_vat_payer, entry.is_identified)) }}</td>
+                      <td class="py-1.5 pr-3 text-neutral-500">{{ entry.note || '—' }}</td>
+                      <td class="py-1.5 text-right whitespace-nowrap">
+                        <button type="button" @click="openVatForm(entry)"
+                          class="cursor-pointer p-1 text-neutral-400 hover:text-primary-600" :title="t('common.edit')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                        </button>
+                        <button v-if="entry.effective_from !== VAT_BASELINE_DATE" type="button" @click="vatDeleteEntry = entry"
+                          class="cursor-pointer p-1 text-neutral-400 hover:text-danger-600" :title="t('common.delete')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                        </button>
+                      </td>
+                    </tr>
+                    <tr v-if="vatHistory.length === 0">
+                      <td colspan="4" class="py-2 text-center text-neutral-400 text-xs">{{ t('settings.vat_status.empty') }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="vatFormOpen" class="mt-3 border-t border-neutral-200 pt-3">
+                <p class="text-xs font-medium text-neutral-700 mb-2">
+                  {{ vatFormEditingId === null ? t('settings.vat_status.form_add_title') : t('settings.vat_status.form_edit_title') }}
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status.form_date') }}</label>
+                    <input v-model="vatFormDate" type="date" :disabled="vatFormEditingId !== null"
+                      class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100 disabled:text-neutral-500" />
+                    <p v-if="vatFormEditingId !== null" class="text-xs text-neutral-400 mt-1">{{ t('settings.vat_status.form_date_locked_hint') }}</p>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status.form_state') }}</label>
+                    <select v-model="vatFormKind" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                      <option value="payer">{{ t('settings.vat_status.state_payer') }}</option>
+                      <option value="non_payer">{{ t('settings.vat_status.state_non_payer') }}</option>
+                      <option value="identified">{{ t('settings.vat_status.state_identified') }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status.form_note') }}</label>
+                    <input v-model="vatFormNote" type="text" maxlength="255"
+                      class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                </div>
+                <p v-if="vatFormKind === 'identified'" class="text-xs text-neutral-500 mt-2">{{ t('settings.is_identified_hint') }}</p>
+                <div class="flex justify-end gap-2 mt-3">
+                  <button type="button" @click="closeVatForm" :disabled="vatSaving" :class="btnOutline('neutral')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button type="button" @click="submitVatForm()" :disabled="vatSaving" :class="btnFilled('primary')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                    {{ vatSaving ? '…' : t('common.save') }}
+                  </button>
+                </div>
+              </div>
+            </div>
             <div v-if="!supplier.is_vat_payer">
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.flat_tax_band') }}</label>
               <select v-model="(supplier as any).flat_tax_band" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
@@ -1127,6 +1327,61 @@ async function saveAutoPostFlags(): Promise<void> {
             :class="btnFilled('danger')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ sampleDeleting ? '…' : t('settings.sample_data.confirm_button') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- VH-01: potvrzení smazání řádku historie plátcovství -->
+    <div v-if="vatDeleteEntry && !vatConflicts.length" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-md p-6">
+        <h3 class="text-base font-semibold text-neutral-900">{{ t('settings.vat_status.delete_confirm_title') }}</h3>
+        <p class="text-sm text-neutral-600 mt-1">
+          {{ t('settings.vat_status.delete_confirm_text', {
+            date: vatDeleteEntry.effective_from,
+            state: vatKindLabel(vatStatusKind(vatDeleteEntry.is_vat_payer, vatDeleteEntry.is_identified)),
+          }) }}
+        </p>
+        <div class="flex justify-end gap-2 mt-4">
+          <button type="button" @click="vatDeleteEntry = null" :disabled="vatSaving" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" @click="confirmVatDelete()" :disabled="vatSaving" :class="btnFilled('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ vatSaving ? '…' : t('common.delete') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- VH-01: retro-guard 409 — výčet kolizí (zamčená období / podaná přiznání) + acknowledge -->
+    <div v-if="vatConflicts.length && vatPendingAction" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-lg p-6">
+        <div class="flex items-start gap-3 mb-3">
+          <div class="w-10 h-10 rounded-full bg-warning-50 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
+          </div>
+          <div>
+            <h3 class="text-base font-semibold text-neutral-900">{{ t('settings.vat_status.conflict_title') }}</h3>
+            <p class="text-sm text-neutral-600 mt-1">{{ t('settings.vat_status.conflict_text') }}</p>
+          </div>
+        </div>
+        <ul class="text-sm text-neutral-700 space-y-1 mb-4 max-h-56 overflow-y-auto border border-neutral-200 rounded-md p-3">
+          <li v-for="(c, i) in vatConflicts" :key="i" class="flex items-start gap-2">
+            <span class="text-warning-600 mt-0.5">•</span>
+            <span>{{ vatCollisionLabel(c) }}</span>
+          </li>
+        </ul>
+        <p class="text-xs text-neutral-500 mb-4">{{ t('settings.vat_status.conflict_hint') }}</p>
+        <div class="flex justify-end gap-2">
+          <button type="button" @click="dismissVatConflicts" :disabled="vatSaving" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" @click="acknowledgeVatConflicts" :disabled="vatSaving" :class="btnFilled('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ vatSaving ? '…' : t('settings.vat_status.conflict_acknowledge') }}
           </button>
         </div>
       </div>

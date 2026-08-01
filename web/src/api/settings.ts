@@ -62,6 +62,45 @@ export interface AiAssistUpdate {
   unmute_source?: 'knn' | 'llm'
 }
 
+/** Řádek historie plátcovství DPH (supplier_vat_status_history, VH-01). */
+export interface VatStatusHistoryEntry {
+  id: number
+  /** Baseline řádek má '1900-01-01' — smazat nejde. */
+  effective_from: string
+  is_vat_payer: boolean
+  /** Identifikovaná osoba (§ 6g–6l ZDPH) — vylučuje se s is_vat_payer. */
+  is_identified: boolean
+  note: string | null
+  annual_deduction_percent: number
+}
+
+/** Kolize retro-guardu (409 vat_status_locked_conflict). */
+export interface VatStatusCollision {
+  type: 'locked_period' | 'date_lock' | 'tax_submission'
+  period_status?: string | null
+  locked_until?: string | null
+  form_code?: string
+  period_year?: number
+  period_month?: number | null
+  period_quarter?: number | null
+  submitted_at?: string | null
+}
+
+export interface VatStatusSavePayload {
+  effective_from: string
+  is_vat_payer: boolean
+  is_identified: boolean
+  note?: string | null
+  /** true = uživatel potvrdil zápis přes kolize (409 flow). */
+  acknowledge?: boolean
+}
+
+export interface VatStatusState {
+  vat_status_history: VatStatusHistoryEntry[]
+  is_vat_payer: boolean
+  is_identified: boolean
+}
+
 export interface Supplier {
   id: number
   company_name: string
@@ -77,11 +116,7 @@ export interface Supplier {
   dic: string | null
   is_vat_payer: boolean
   vat_status_effective_from?: string
-  vat_status_history?: Array<{
-    effective_from: string
-    is_vat_payer: boolean
-    annual_deduction_percent: number
-  }>
+  vat_status_history?: VatStatusHistoryEntry[]
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi. Nelze kombinovat s is_vat_payer. */
   is_identified: boolean
@@ -704,6 +739,15 @@ export const settingsApi = {
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
   // E2: při total > 0 přesměruje FE do průvodce; přímé uložení jistí BE 409 backfill_required.
   getModeSwitchPreview: () => api.get<ModeSwitchPreview>('/settings/mode-switch-preview').then(r => r.data),
+
+  // Historie plátcovství DPH (VH-01) — seznam vrací GET /settings/supplier
+  // (vat_status_history); zápis/mazání vrací čerstvou historii + živé flagy.
+  saveVatStatus: (payload: VatStatusSavePayload) =>
+    api.post<VatStatusState>('/settings/vat-status-history', payload).then(r => r.data),
+  deleteVatStatus: (id: number, acknowledge = false) =>
+    api.delete<VatStatusState>(`/settings/vat-status-history/${id}`, {
+      params: acknowledge ? { acknowledge: 1 } : {},
+    }).then(r => r.data),
   getAiAssist: () => api.get<AiAssistSettings>('/settings/ai-assist').then(r => r.data),
   updateAiAssist: (payload: AiAssistUpdate) => api.put<AiAssistSettings>('/settings/ai-assist', payload).then(r => r.data),
 
