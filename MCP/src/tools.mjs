@@ -338,9 +338,10 @@ export const TOOLS = [
     description:
       'Změní údaje existujícího odběratele. Uveď jen to, co se má změnit — zbytek '
       + 'karty se zachová (nástroj si ji načte a pošle zpět kompletní).\n\n'
-      + '`refresh_from_ares: true` znovu natáhne název, adresu, DIČ a registraci '
-      + 'k DPH z rejstříku podle IČO na kartě. Ručně zadané hodnoty mají i tady '
-      + 'přednost před tím, co vrátí ARES.',
+      + '`refresh_from_ares: true` znovu natáhne název, adresu a DIČ z rejstříku '
+      + 'podle IČO na kartě. Ručně zadané hodnoty mají i tady přednost před tím, '
+      + 'co vrátí ARES. Plátcovství DPH (`is_vat_payer`) se mění VÝHRADNĚ '
+      + 'explicitním zadáním — ani ARES ho tady tiše nepřepíše.',
     inputSchema: schema({
       id: int('ID odběratele.'),
       refresh_from_ares: bool('Přenačíst údaje z ARES podle IČO na kartě.'),
@@ -351,6 +352,7 @@ export const TOOLS = [
       country_iso2: str('Kód země, dvě písmena.', { minLength: 2, maxLength: 2 }),
       ic: str('IČO (8 číslic).'),
       dic: str('DIČ.'),
+      is_vat_payer: bool('Plátce DPH. Bez zadání se stávající hodnota na kartě nemění.'),
       main_email: str('Hlavní e-mail pro zasílání dokladů.'),
       phone: str('Telefon.'),
       language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
@@ -400,7 +402,9 @@ export const TOOLS = [
         currency_default_id: current.currency_default_id,
         is_customer: a.is_customer ?? current.is_customer,
         is_vendor: a.is_vendor ?? current.is_vendor,
-        is_vat_payer: ares?.is_vat_payer ?? current.is_vat_payer,
+        // Jen explicitně poslaná hodnota — refresh_from_ares plátcovství NEPŘEPISUJE
+        // (tichá změna flagu by se propsala do nových dokladů; stávající nesou snapshot).
+        is_vat_payer: a.is_vat_payer ?? current.is_vat_payer,
         note: a.note ?? current.note ?? '',
       };
       if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
@@ -1366,6 +1370,28 @@ export const TOOLS = [
     run: (c, a, tool) => c.get('/tax-evidence/cash-journal', {
       year: a.year, date_from: a.date_from, date_to: a.date_to,
     }, tool),
+  },
+  {
+    name: 'get_vat_status_history',
+    title: 'Historie plátcovství DPH firmy',
+    description:
+      'Historie plátcovství DPH vlastní firmy (tabulka supplier_vat_status_history) — '
+      + 'řádky {effective_from, is_vat_payer, annual_deduction_percent} vzestupně podle '
+      + 'účinnosti. Stav k datu D = poslední řádek s effective_from <= D. Pole '
+      + '`is_vat_payer` na firmě je jen cache dnešního stavu; pro otázky „byla firma '
+      + 'plátce v roce X / k datu Y" použij tuhle historii.',
+    inputSchema: schema(),
+    write: false,
+    run: async (c, _a, tool) => {
+      const supplier = await c.get('/settings/supplier', null, tool);
+      const history = Array.isArray(supplier?.vat_status_history) ? supplier.vat_status_history : [];
+      return {
+        is_vat_payer_today: Boolean(supplier?.is_vat_payer),
+        history: [...history].sort(
+          (x, y) => String(x?.effective_from ?? '').localeCompare(String(y?.effective_from ?? '')),
+        ),
+      };
+    },
   },
 
   // ──────────────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Tax\DpfoCalculator;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
+use MyInvoice\Service\Vat\VatStatusService;
 
 /**
  * Podklady §7 pro DPFO přiznání ({@see DpfoReturnCalculator}) — Epic DP (issue #18).
@@ -41,6 +42,7 @@ final class DpfoReturnDataProvider
         private readonly CashJournalService $cashJournal,
         private readonly NonDeductibleCostsService $nonDeductibleCostsService,
         private readonly AccountingModeRepository $accountingModes,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -59,7 +61,9 @@ final class DpfoReturnDataProvider
         $warnings = [];
         $blockingIssues = [];
         $c = $this->constants->forYear($year);
-        [$isVatPayer] = $this->supplierFlags($supplierId);
+        // Plátcovství k 31. 12. zdaňovacího roku přiznání (ne živá cache „dneška") —
+        // stejný princip jako accounting_mode, který má vlastní historii per rok.
+        $isVatPayer = $this->vatStatus->isVatPayerAt($supplierId, sprintf('%04d-12-31', $year));
         $accountingMode = $this->accountingModes->forYear($supplierId, $year);
 
         $profile = $this->profiles->find($supplierId, $year) ?? $this->defaultProfile($year);
@@ -304,18 +308,6 @@ final class DpfoReturnDataProvider
         $row['row_version'] = (int) $row['row_version'];
         $row['adjustments'] = $sums;
         return $row;
-    }
-
-    /** @return array{0:bool,1:string} [is_vat_payer, accounting_mode] */
-    private function supplierFlags(int $supplierId): array
-    {
-        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer, accounting_mode FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return [false, 'tax_evidence'];
-        }
-        return [(bool) $row['is_vat_payer'], (string) ($row['accounting_mode'] ?? 'tax_evidence')];
     }
 
     private function expenseModeTransitionWarning(int $supplierId, int $year, bool $useActual): string

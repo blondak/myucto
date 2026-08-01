@@ -14,7 +14,8 @@ namespace MyInvoice\Service\Tax;
  * Profil (pole, vše volitelné kromě activity_rate):
  *   activity_rate    int   30|40|60|80  — sazba výdajového paušálu (typ činnosti)
  *   flat_tax_band    string none|band1|band2|band3
- *   is_vat_payer     bool
+ *   is_vat_payer     bool  — stav k rozhodnému roku výpočtu (dodá TaxAction /
+ *                     DpfoReturnDataProvider přes VatStatusService), ne živá cache dneška
  *   is_secondary     bool  — vedlejší činnost (jiná minima pojistného)
  *   spouse_credit    bool  — splněny podmínky slevy na manželku (příjem <68k & dítě <3)
  *   children_count   int

@@ -11,6 +11,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Service\Tax\TaxOptimizer;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
+use MyInvoice\Service\Vat\VatStatusService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -28,6 +29,7 @@ final class TaxAction
         private readonly TaxOptimizer $optimizer,
         private readonly TaxConstantsRepository $constants,
         private readonly CashJournalService $cashJournal,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /** GET /api/tax/analysis */
@@ -45,7 +47,17 @@ final class TaxAction
         }
 
         $flags = $this->supplierFlags($sid);
-        $isVat = $flags['is_vat_payer'];
+        // Plátcovství k rozhodnému roku výpočtu, ne živá cache „dneška":
+        //  - uzavřený i běžící rok → 31. 12. daného roku (retrospektiva srovnává režimy,
+        //    které v TOM roce reálně platily; u běžícího roku zachytí i už zaevidovanou
+        //    změnu s pozdější účinností v témže roce),
+        //  - výhled na příští rok → 1. 1. toho roku (podmínka vstupu do paušálního
+        //    režimu §38la: k 1. lednu nesmí být plátcem DPH — tj. odpověď na otázku
+        //    „mám nárok na paušál od ledna?" včetně naplánované změny plátcovství).
+        $isVat = $this->vatStatus->isVatPayerAt(
+            $sid,
+            $year > $currentYear ? sprintf('%04d-01-01', $year) : sprintf('%04d-12-31', $year),
+        );
         $profileRow = $this->profiles->find($sid, $year);
         $publicProfile = $this->publicProfile($profileRow, $flags);
         $engineProfile = $publicProfile + ['is_vat_payer' => $isVat];
@@ -74,7 +86,7 @@ final class TaxAction
             // výpočtu daně ani pojistného NEvstupují (jsou už vyloučené v annualIncome);
             // tady jen pro transparentní zobrazení „z toho vyloučeno" v UI.
             'exempt_income'   => $this->profiles->annualExemptIncome($sid, $year, $isVat),
-            'last_month'      => $this->lastMonthEstimate($sid, $isVat, $flags),
+            'last_month'      => $this->lastMonthEstimate($sid, $flags),
         ];
 
         if ($year < $currentYear) {
@@ -110,7 +122,11 @@ final class TaxAction
             $payload['compare'] = $this->optimizer->compare($engineProfile, $income, $c);
             // YoY: příjem + konstanty předchozího roku (frontend dopočítá meziroční srovnání).
             $prevYear   = $year - 1;
-            $prevIncome = $this->profiles->annualIncome($sid, $prevYear, $isVat);
+            $prevIncome = $this->profiles->annualIncome(
+                $sid,
+                $prevYear,
+                $this->vatStatus->isVatPayerAt($sid, sprintf('%04d-12-31', $prevYear)),
+            );
             $payload['prev'] = $prevIncome > 0
                 ? ['year' => $prevYear, 'income' => $prevIncome, 'constants' => $this->constants->forYear($prevYear)]
                 : null;
@@ -148,16 +164,20 @@ final class TaxAction
         return Json::ok($response, ['profile' => $saved]);
     }
 
-    /** @return array{is_vat_payer: bool, flat_tax_band: string, accounting_mode: string, taxpayer_type: string} */
+    /**
+     * Plátcovství DPH tu ZÁMĚRNĚ není — živý supplier.is_vat_payer je cache dneška;
+     * rozhodné datum výpočtu obsluhuje {@see VatStatusService::isVatPayerAt()}.
+     *
+     * @return array{flat_tax_band: string, accounting_mode: string, taxpayer_type: string}
+     */
     private function supplierFlags(int $sid): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT is_vat_payer, flat_tax_band, accounting_mode, taxpayer_type FROM supplier WHERE id = ?'
+            'SELECT flat_tax_band, accounting_mode, taxpayer_type FROM supplier WHERE id = ?'
         );
         $stmt->execute([$sid]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
         return [
-            'is_vat_payer'    => (bool) ($row['is_vat_payer'] ?? false),
             'flat_tax_band'   => (string) ($row['flat_tax_band'] ?? 'none'),
             'accounting_mode' => (string) ($row['accounting_mode'] ?? 'double_entry'),
             'taxpayer_type'   => (string) ($row['taxpayer_type'] ?? ''),
@@ -168,7 +188,7 @@ final class TaxAction
      * Profil pro frontend (form) i engine. Default z supplieru, pokud řádek neexistuje.
      * Engine si bere tentýž tvar + `is_vat_payer` (viz analysis()).
      * @param array<string,mixed>|null $row
-     * @param array{is_vat_payer: bool, flat_tax_band: string} $flags
+     * @param array{flat_tax_band: string} $flags
      * @return array<string,mixed>
      */
     private function publicProfile(?array $row, array $flags): array
@@ -224,14 +244,16 @@ final class TaxAction
     /**
      * Pravděpodobný čistý příjem za minulý kalendářní měsíc — vždy nezávisle na
      * zvoleném roce v přepínači (viz {@see TaxOptimizer::estimateMonthly()}).
-     * @param array{is_vat_payer: bool, flat_tax_band: string} $flags
+     * Plátcovství se bere k poslednímu dni minulého měsíce (ne k roku z přepínače).
+     * @param array{flat_tax_band: string} $flags
      * @return array<string,mixed>
      */
-    private function lastMonthEstimate(int $sid, bool $isVat, array $flags): array
+    private function lastMonthEstimate(int $sid, array $flags): array
     {
         $lastMonth = new \DateTimeImmutable('first day of last month');
         $lmYear = (int) $lastMonth->format('Y');
         $lmYm   = $lastMonth->format('Y-m');
+        $isVat  = $this->vatStatus->isVatPayerAt($sid, $lastMonth->format('Y-m-t'));
 
         $profileRow = $this->profiles->find($sid, $lmYear);
         $engineProfile = $this->publicProfile($profileRow, $flags) + ['is_vat_payer' => $isVat];

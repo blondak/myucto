@@ -15747,7 +15747,7 @@ components:
         reverse_charge: { type: boolean, description: "Přenesená daňová povinnost — propisuje se do nových faktur." }
         is_customer: { type: boolean, description: "Role odběratele (vystavujeme mu faktury)" }
         is_vendor: { type: boolean, description: "Role dodavatele (evidujeme přijaté faktury)" }
-        is_vat_payer: { type: boolean, description: "Plátce DPH (ověřitelné přes /clients/{id}/vat-status)" }
+        is_vat_payer: { type: boolean, description: "Plátce DPH — aktuální stav karty (ověřitelné online přes /clients/{id}/vat-status). Klienti historii plátcovství nevedou; doklady nesou per-doklad snapshot k datu vystavení." }
         auto_send_reminders: { type: boolean, description: "Automatické odesílání upomínek" }
         payment_due_default: { type: [integer, "null"], description: "Default splatnost pro nové faktury klienta" }
         payment_due_unit: { type: [string, "null"], enum: [days, month, null], description: "Jednotka splatnosti (dny / konec měsíce)" }
@@ -16986,7 +16986,8 @@ components:
         country_id: { type: integer }
         ic: { type: [string, "null"] }
         dic: { type: [string, "null"] }
-        is_vat_payer: { type: boolean }
+        is_vat_payer: { type: boolean, description: "Aktuální stav plátcovství DPH (cache dneška); změna zapíše řádek do historie supplier_vat_status_history (viz `vat_status_history` v SupplierFull), účinnost lze určit polem `vat_status_effective_from`." }
+        vat_status_effective_from: { type: string, format: date, description: "Účinnost změny plátcovství DPH poslané v témže requestu (default dnešek). Zapíše/aktualizuje řádek historie supplier_vat_status_history k tomuto datu." }
         is_identified: { type: boolean }
         data_box_id: { type: [string, "null"] }
         data_box_type: { type: [string, "null"], enum: [FO, PFO, PO, OVM, null], description: "Druh datové schránky v ISDS; nesouvisí s typem poplatníka." }
@@ -17045,7 +17046,21 @@ components:
         country_iso: { type: string, description: "Odvozený ISO2 kód země" }
         ic: { type: [string, "null"] }
         dic: { type: [string, "null"] }
-        is_vat_payer: { type: boolean }
+        is_vat_payer: { type: boolean, description: "Aktuální stav plátcovství DPH (derivovaná cache dneška); historie změn v `vat_status_history` (tabulka supplier_vat_status_history). Pro rozhodování k datu dokladu/období vždy použij historii, ne tento flag." }
+        vat_status_history:
+          type: array
+          readOnly: true
+          description: |
+            Historie plátcovství DPH firmy (supplier_vat_status_history), vzestupně
+            dle `effective_from`. Stav k datu D = poslední řádek s
+            `effective_from <= D`. Zapisuje se přes `PUT /api/v1/settings/supplier`
+            (`is_vat_payer` + volitelné `vat_status_effective_from`), tady je read-only.
+          items:
+            type: object
+            properties:
+              effective_from: { type: string, format: date, description: "Od kterého data stav platí" }
+              is_vat_payer: { type: boolean }
+              annual_deduction_percent: { type: [number, "null"], format: float, description: "Skutečný roční koeficient odpočtu §76 ZDPH; null = nepoužije se" }
         is_identified: { type: boolean, description: "Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku s přeshraničními povinnostmi (RC faktury do EU, SHV, samovyměření bez odpočtu). Nelze kombinovat s is_vat_payer=true." }
         data_box_id: { type: [string, "null"] }
         data_box_type: { type: [string, "null"], enum: [FO, PFO, PO, OVM, null], description: "Druh datové schránky v ISDS; nesouvisí s typem poplatníka." }

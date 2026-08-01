@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Export;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Vat\VatStatusService;
 
 /**
  * Shared party/payment data resolver for invoice XML exports.
@@ -15,7 +16,12 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class InvoiceExportDataResolver
 {
-    public function __construct(private readonly Connection $db) {}
+    private readonly VatStatusService $vatStatus;
+
+    public function __construct(private readonly Connection $db, ?VatStatusService $vatStatus = null)
+    {
+        $this->vatStatus = $vatStatus ?? new VatStatusService($db);
+    }
 
     /**
      * @param array<string,mixed> $invoice
@@ -23,10 +29,22 @@ final class InvoiceExportDataResolver
      */
     public function supplier(array $invoice): array
     {
-        $live = $this->loadLiveSupplier((int) ($invoice['supplier_id'] ?? 0));
+        $supplierId = (int) ($invoice['supplier_id'] ?? 0);
+        $live = $this->loadLiveSupplier($supplierId);
         $snapshot = $this->snapshot($invoice['supplier_snapshot'] ?? null);
+        $data = $snapshot !== [] ? array_merge($live, $snapshot) : $live;
 
-        return $snapshot !== [] ? array_merge($live, $snapshot) : $live;
+        // Legacy doklady bez snapshotu (nebo se snapshotem bez pole is_vat_payer):
+        // živý supplier.is_vat_payer je jen cache dneška — plátcovství pro export se
+        // dohledá k datu dokladu (tax_date ?? issue_date) ze supplier_vat_status_history.
+        if (!array_key_exists('is_vat_payer', $snapshot) && $supplierId > 0 && $data !== []) {
+            $date = (string) (($invoice['tax_date'] ?? null) ?: ($invoice['issue_date'] ?? ''));
+            if ($date !== '') {
+                $data['is_vat_payer'] = $this->vatStatus->isVatPayerAt($supplierId, substr($date, 0, 10));
+            }
+        }
+
+        return $data;
     }
 
     /**

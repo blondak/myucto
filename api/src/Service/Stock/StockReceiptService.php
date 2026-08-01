@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Stock;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\StockLandedCostRepository;
+use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -48,6 +49,7 @@ final class StockReceiptService
         private readonly StockDocumentService $documents,
         private readonly StockDocumentRepository $docs,
         private readonly StockLandedCostRepository $landedCosts,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     private static function isNotReceivableKind(string $documentKind): bool
@@ -78,7 +80,7 @@ final class StockReceiptService
             ];
         }
 
-        $isVatPayer = $this->isVatPayer($supplierId);
+        $isVatPayer = $this->isVatPayerAtDocument($supplierId, $pi);
         $rate       = $pi['exchange_rate'] !== null ? (float) $pi['exchange_rate'] : 1.0;
         $received   = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
 
@@ -171,7 +173,7 @@ final class StockReceiptService
             $piItemsById = $this->purchaseInvoiceItemsById($supplierId, $piId);
             $received    = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
             $rate        = $pi['exchange_rate'] !== null ? (float) $pi['exchange_rate'] : 1.0;
-            $isVatPayer  = $this->isVatPayer($supplierId);
+            $isVatPayer  = $this->isVatPayerAtDocument($supplierId, $pi);
 
             $docLines = [];
             foreach ($rawLines as $rl) {
@@ -322,7 +324,7 @@ final class StockReceiptService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
-                    pi.currency_id, pi.exchange_rate,
+                    pi.currency_id, pi.exchange_rate, pi.tax_date, pi.issue_date,
                     c.code AS currency_code, cl.company_name AS vendor_name
                FROM purchase_invoices pi
                JOIN currencies c ON c.id = pi.currency_id AND c.supplier_id = pi.supplier_id
@@ -380,12 +382,21 @@ final class StockReceiptService
         return (bool) $stmt->fetchColumn();
     }
 
-    private function isVatPayer(int $supplierId): bool
+    /**
+     * Plátcovství DPH k rozhodnému datu zdrojového dokladu (tax_date ?? issue_date
+     * přijaté faktury) — pořizovací cena bez DPH se smí použít jen tehdy, když měla
+     * firma nárok na odpočet v okamžiku plnění, ne podle dnešní cache
+     * supplier.is_vat_payer ({@see VatStatusService}).
+     *
+     * @param array<string,mixed> $pi řádek purchase_invoices (tax_date, issue_date)
+     */
+    private function isVatPayerAtDocument(int $supplierId, array $pi): bool
     {
-        $stmt = $this->db->pdo()->prepare('SELECT is_vat_payer FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        $v = $stmt->fetchColumn();
-        return $v !== false && (bool) $v;
+        $date = (string) (($pi['tax_date'] ?? null) ?: ($pi['issue_date'] ?? ''));
+        if ($date === '') {
+            $date = date('Y-m-d');
+        }
+        return $this->vatStatus->isVatPayerAt($supplierId, $date);
     }
 
     /**
