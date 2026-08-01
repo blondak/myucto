@@ -324,6 +324,7 @@ final class SetupAction
             (string) ($supplier['default_hourly_rate'] ?? '1500.00'),
         ]);
         $supplierId = (int) $pdo->lastInsertId();
+        \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, !empty($supplier['is_vat_payer']));
 
         // Seed default currencies (CZK + EUR) pro tohoto supplier
         $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;

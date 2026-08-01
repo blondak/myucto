@@ -50,6 +50,39 @@ trait IsolatedSupplierTrait
             throw new RuntimeException('Zdrojový supplier pro izolovaný test neexistuje.');
         }
 
+        $pdo->prepare(
+            "INSERT IGNORE INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
+             SELECT ?, '1900-01-01', is_vat_payer FROM supplier WHERE id = ?"
+        )->execute([$supplierId, $supplierId]);
+
         return $supplierId;
+    }
+
+    /**
+     * Nastaví plátcovství DPH izolovaného supplieru k datu — zapíše řádek historie
+     * a synchronizuje živou cache supplier.is_vat_payer, pokud je účinnost <= dnes.
+     * Testy NESMÍ přepínat plátcovství holým UPDATE supplier: reporty čtou historii.
+     */
+    protected function setVatPayerAt(PDO $pdo, int $supplierId, string $effectiveFrom, bool $isVatPayer): void
+    {
+        $pdo->prepare(
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer)'
+        )->execute([$supplierId, $effectiveFrom, $isVatPayer ? 1 : 0]);
+
+        $pdo->prepare(
+            'UPDATE supplier s
+                SET s.is_vat_payer = (
+                    SELECT h.is_vat_payer FROM supplier_vat_status_history h
+                     WHERE h.supplier_id = s.id AND h.effective_from <= CURRENT_DATE
+                     ORDER BY h.effective_from DESC, h.id DESC LIMIT 1
+                )
+              WHERE s.id = ?
+                AND EXISTS (
+                    SELECT 1 FROM supplier_vat_status_history h2
+                     WHERE h2.supplier_id = s.id AND h2.effective_from <= CURRENT_DATE
+                )'
+        )->execute([$supplierId]);
     }
 }

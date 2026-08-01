@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CashJournalRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Vat\VatStatusService;
 
 /**
  * Peněžní deník daňové evidence (Epic DE, A2) — kasová báze §7b / §23 ZDP.
@@ -36,6 +37,7 @@ final class CashJournalService
         private readonly Connection $db,
         private readonly TaxConstantsRepository $constants,
         private readonly TaxExpenseAllocationCalculator $taxExpenses,
+        private readonly VatStatusService $vatStatus,
     ) {}
 
     /**
@@ -673,15 +675,6 @@ final class CashJournalService
 
     private function isVatPayerAt(int $supplierId, string $date): bool
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(
-                (SELECT is_vat_payer FROM supplier_vat_status_history
-                  WHERE supplier_id = ? AND effective_from <= ?
-                  ORDER BY effective_from DESC, id DESC LIMIT 1),
-                (SELECT is_vat_payer FROM supplier WHERE id = ?)
-            )'
-        );
-        $stmt->execute([$supplierId, $date, $supplierId]);
-        return (bool) $stmt->fetchColumn();
+        return $this->vatStatus->isVatPayerAt($supplierId, $date);
     }
 }

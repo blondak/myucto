@@ -82,6 +82,7 @@ try {
         ]);
         $supplierId = (int) $pdo->lastInsertId();
         $supplierIds[] = $supplierId;
+        \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, true);
 
         $defaultCurrencyId = 0;
         foreach ([

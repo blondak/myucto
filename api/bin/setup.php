@@ -248,6 +248,7 @@ try {
         $vatRateId,
     ]);
     $supplierId = (int) $pdo->lastInsertId();
+    \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, $isVatPayer);
 
     // Seed defaults currencies (CZK + EUR) pro tohoto supplier
     $insertCur = $pdo->prepare(

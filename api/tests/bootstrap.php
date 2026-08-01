@@ -381,6 +381,20 @@ function __normalizeTestTenant(array $cfg, string $chosenDb): void
             )->execute([(int) $second]);
         });
 
+        // Každý supplier musí mít baseline řádek historie plátcovství (jako u ostrých
+        // firem migrace 1180) — reporty čtou stav k datu z historie a firma bez řádku
+        // by potichu jela přes živý fallback, což je přesně stav, který testy nemají
+        // reprodukovat.
+        $step('vat-status-baseline', static function () use ($pdo): void {
+            $pdo->exec(
+                "INSERT IGNORE INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
+                 SELECT s.id, '1900-01-01', s.is_vat_payer FROM supplier s
+                  WHERE NOT EXISTS (
+                      SELECT 1 FROM supplier_vat_status_history h WHERE h.supplier_id = s.id
+                  )"
+            );
+        });
+
         // Ukázkové doklady. Bez nich skipují testy, které potřebují JAKÝKOLI reálný
         // doklad — rozlišení syntetického a skutečného ID v deníku, kolizní scénář
         // cross-tenant, klonování faktury, vazba PF ↔ DMS.

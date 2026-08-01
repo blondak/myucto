@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -107,12 +108,8 @@ final class CashJournalRepository
     {
         $sid = $supplierId; // int, bezpečné pro inline
         $vp = $isVatPayer ? 1 : 0; // literál pro DPH prorata v agregacích (R7)
-        $payerAtIp = "COALESCE((SELECT h.is_vat_payer FROM supplier_vat_status_history h
-                                 WHERE h.supplier_id = {$sid} AND h.effective_from <= ip.paid_on
-                                 ORDER BY h.effective_from DESC, h.id DESC LIMIT 1), {$vp})";
-        $payerAtBank = "COALESCE((SELECT h.is_vat_payer FROM supplier_vat_status_history h
-                                   WHERE h.supplier_id = {$sid} AND h.effective_from <= bt2.posted_at
-                                   ORDER BY h.effective_from DESC, h.id DESC LIMIT 1), {$vp})";
+        $payerAtIp = VatStatusService::payerAtExpr((string) $sid, 'ip.paid_on', (string) $vp);
+        $payerAtBank = VatStatusService::payerAtExpr((string) $sid, 'bt2.posted_at', (string) $vp);
         $legs = [];
 
         // ── Noha A — hotovost (cash_documents posted) ────────────────────────
