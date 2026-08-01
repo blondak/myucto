@@ -1223,6 +1223,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\ActivityLogger::class),
             $container->get(\MyInvoice\Service\Stock\StockIssueService::class),
             $container->get(\MyInvoice\Service\Invoice\RecurringPriceListService::class),
+            $container->get(\MyInvoice\Service\Accounting\DocumentAutoPoster::class),
         );
 
         $tplId = $this->createPeriodTemplate(
@@ -1236,6 +1237,44 @@ final class RecurringGeneratorTest extends TestCase
         $res = $gen->issuePeriod($tplId, $this->userId, '127.0.0.1', 'phpunit');
         $this->assertTrue($res['issued']);
         $this->assertSame(['klient@test.local'], $res['sent_to'], 'auto_send_email=true → issuePeriod dispatchne odeslání');
+    }
+
+    public function testAutoIssuedInvoiceTriggersAutoPostHook(): void
+    {
+        // Faktura vystavená cronem ze šablony musí projít stejným auto-post hookem jako
+        // ta z UI (IssueInvoiceAction) — jinak zůstane vystavená nezaúčtovaná. Samotné
+        // zaúčtování si hlídá DocumentAutoPoster (firemní flag + podvojný režim), tady
+        // testujeme jen že se hook vůbec zavolá.
+        $container = Bootstrap::buildApp()->getContainer();
+        $autoPoster = $this->createMock(\MyInvoice\Service\Accounting\DocumentAutoPoster::class);
+        $autoPoster->expects($this->once())
+            ->method('maybeAutoPost')
+            ->with($this->supplierId, 'invoice', $this->isInt(), $this->userId);
+
+        $gen = new RecurringInvoiceGenerator(
+            $container->get(\MyInvoice\Infrastructure\Database\Connection::class),
+            $container->get(\MyInvoice\Repository\RecurringTemplateRepository::class),
+            $container->get(\MyInvoice\Repository\InvoiceRepository::class),
+            $container->get(\MyInvoice\Service\Invoice\InvoiceCalculator::class),
+            $container->get(\MyInvoice\Service\Currency\ExchangeRateApplier::class),
+            $container->get(\MyInvoice\Service\Invoice\AutoIssueAndSendService::class),
+            $container->get(\MyInvoice\Service\Invoice\VarsymbolGenerator::class),
+            $container->get(\MyInvoice\Service\Invoice\SnapshotBuilder::class),
+            $container->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class),
+            $container->get(\MyInvoice\Service\Stats\StatsRecomputer::class),
+            $container->get(\MyInvoice\Service\ActivityLogger::class),
+            $container->get(\MyInvoice\Service\Stock\StockIssueService::class),
+            $container->get(\MyInvoice\Service\Invoice\RecurringPriceListService::class),
+            $autoPoster,
+        );
+
+        // auto_issue=true, auto_send_email=false → větev issueOnlyWithoutSend()
+        $tplId = $this->createPeriodTemplate('2026-05-31', ['end_of_month' => true]);
+        $res = $gen->generate($tplId, null, $this->userId, '127.0.0.1', 'phpunit');
+        $this->createdInvoiceIds[] = $res['invoice_id'];
+
+        $this->assertTrue($res['issued'], 'auto_issue=true → faktura je vystavená');
+        $this->assertSame('issued', $this->invoiceRow($res['invoice_id'])['status']);
     }
 
     public function testIssuePeriodPicksUpExtraWorkAddedDuringPeriod(): void

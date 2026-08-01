@@ -44,6 +44,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/UserSupplierRepository.php',
     '*/api/src/Security/PermissionResolver.php',
     '*/api/src/Security/UserRoleProfile.php',
+    '*/api/src/Service/Accounting/DocumentAutoPoster.php',
     '*/api/src/Service/Auth/ApiTokenService.php',
     '*/api/src/Service/Auth/BruteForceGuard.php',
     '*/api/src/Service/Auth/EmailOtpService.php',

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Mail\InvoiceEmailVarsBuilder;
 use MyInvoice\Service\Mail\Mailer;
@@ -43,6 +44,7 @@ final class AutoIssueAndSendService
         private readonly PdfArchiveService $pdfArchive,
         private readonly RecipientResolver $recipients,
         private readonly StockIssueService $stockIssue,
+        private readonly DocumentAutoPoster $autoPoster,
     ) {}
 
     /**
@@ -113,6 +115,12 @@ final class AutoIssueAndSendService
             // a tímto blokem vyrenderoval Faktura-VS.pdf jako draft (bez "issued"
             // metadat), nahradíme ho čerstvým renderem.
             $this->renderer->invalidate($invoiceId, 'invalidate_issue');
+
+            // Auto-post hook (A2) — stejný kontrakt jako IssueInvoiceAction: automaticky
+            // vystavená faktura musí být zaúčtovaná stejně jako ta z UI. Chyba se jen
+            // zaloguje (DocumentAutoPoster ji spolkne), odeslání emailu tím neblokujeme.
+            $this->autoPoster->maybeAutoPost($supplierId, 'invoice', $invoiceId, $userId, $ip, $ua);
+
             $invoice = $this->repo->find($invoiceId);
         }
 

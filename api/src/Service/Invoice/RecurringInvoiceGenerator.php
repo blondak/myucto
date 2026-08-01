@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
+use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -58,6 +59,7 @@ final class RecurringInvoiceGenerator
         private readonly ActivityLogger $logger,
         private readonly StockIssueService $stockIssue,
         private readonly RecurringPriceListService $priceList,
+        private readonly DocumentAutoPoster $autoPoster,
     ) {}
 
     /**
@@ -634,6 +636,11 @@ final class RecurringInvoiceGenerator
             'varsymbol'   => $varsymbol,
             'auto_reason' => 'recurring_template',
         ], $ip, $ua);
+
+        // Auto-post hook (A2) — stejný kontrakt jako IssueInvoiceAction: faktura vystavená
+        // cronem ze šablony musí být zaúčtovaná stejně jako ta vystavená z UI. Chybu
+        // DocumentAutoPoster jen zaloguje, generaci nesmí shodit.
+        $this->autoPoster->maybeAutoPost($supplierId, 'invoice', $invoiceId, $userId, $ip, $ua);
 
         return $varsymbol;
     }

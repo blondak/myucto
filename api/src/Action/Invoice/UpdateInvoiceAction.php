@@ -291,6 +291,22 @@ final class UpdateInvoiceAction
         // Force update vystavené faktury → revenue cache musí přijmout nové total/currency
         $this->stats->recomputeForInvoiceId($id);
 
+        // Přesun faktury na jiného klienta/projekt: recomputeForInvoiceId čte vazbu z už
+        // zapsaného řádku, takže přepočte jen nového. Původnímu by v client_revenue_cache
+        // zůstal nafouknutý invoice_count/revenue → dopočítej i jeho.
+        $prevClientId  = (int) ($existing['client_id'] ?? 0);
+        $prevProjectId = (int) ($existing['project_id'] ?? 0);
+        $movedClient   = $prevClientId > 0 && array_key_exists('client_id', $body)
+            && $prevClientId !== (int) $body['client_id'];
+        $movedProject  = $prevProjectId > 0 && array_key_exists('project_id', $body)
+            && $prevProjectId !== (int) $body['project_id'];
+        if ($movedClient || $movedProject) {
+            $this->stats->recomputeForIds(
+                $movedClient ? $prevClientId : null,
+                $movedProject ? $prevProjectId : null,
+            );
+        }
+
         // Force-edit vystavené faktury: přepiš snapshoty z opravených live dat, aby se
         // změny v údajích odběratele/dodavatele/banky promítly do nově generovaného PDF.
         // UI to uživateli avizuje („Změny přepíšou snapshoty"). U draftu se snapshoty
