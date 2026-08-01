@@ -4448,6 +4448,30 @@
     "revoke_last_factor": "This is your last strong factor and two-factor sign-in is enforced — it cannot be removed. Register a second key or enable TOTP first.",
     "revoke_no_method": "There is no way to confirm removal — this browser does not support passkeys and TOTP is unavailable."
   },
+  "recovery_codes": {
+    "title": "Backup codes",
+    "subtitle": "One-time codes for when you lose both your passkey and your authenticator. Without them only a server-side rescue remains.",
+    "none_yet": "You have no backup codes yet. If you lose your only strong factor, you will not get into the account.",
+    "remaining": "{remaining} of {total} codes left.",
+    "exhausted": "All backup codes are used up — generate a new set.",
+    "generate": "Generate backup codes",
+    "regenerate": "Generate a new set",
+    "regenerate_confirm": "Generating a new set immediately invalidates all current codes. Continue?",
+    "shown_once": "Save them now — the server does not store them and will not show them again.",
+    "download": "Download as a file",
+    "copy": "Copy",
+    "copied": "Codes copied to the clipboard.",
+    "copy_failed": "Copying to the clipboard failed.",
+    "dismiss": "I have saved them",
+    "dismiss_confirm": "Have you really saved the codes? Closing the panel loses them and you will need to generate a new set.",
+    "step_up_hint": "Generating is a sensitive operation — confirm it with a passkey or an authenticator code.",
+    "needs_factor": "Only a real factor may issue a new set — register a passkey or enable TOTP. A backup code deliberately cannot.",
+    "totp_label": "Authenticator code",
+    "totp_fallback": "If your key is not at hand, enter the authenticator code and try again.",
+    "failed": "Generating the backup codes failed.",
+    "file_header": "{app} — backup codes for account {email}. Each code works exactly once.",
+    "file_footer": "Keep them away from the computer you sign in from (print, safe, password manager)."
+  },
   "auth": {
     "login": "Sign in",
     "login_title": "Sign in",
@@ -4522,7 +4546,10 @@
     "passkey_cancelled": "The passkey check was cancelled. Try again, or use your authenticator code.",
     "passkey_timeout_extension": "A browser extension (password manager) intercepted the passkey request and crashed. Disable it for this site, or use your authenticator code.",
     "passkey_unsupported_recovery": "This browser does not support passkeys. Use an available TOTP code, a supported device or browser, or ask an administrator to reset MFA.",
-    "use_totp_instead": "Use an authenticator code"
+    "use_totp_instead": "Use an authenticator code",
+    "use_recovery_instead": "No key or authenticator — use a backup code",
+    "recovery_code": "Backup code",
+    "recovery_hint": "One of the codes you saved when they were generated. Each one works only once."
   },
   "demo": {
     "banner": "Demo mode: you can browse data and try the forms, but no changes are saved and no e-mails are sent.",

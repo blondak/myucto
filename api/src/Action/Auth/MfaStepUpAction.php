@@ -27,6 +27,7 @@ final class MfaStepUpAction
         private readonly BruteForceGuard $bruteForce,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
     ) {}
 
     public function totp(Request $request, Response $response): Response
@@ -98,5 +99,79 @@ final class MfaStepUpAction
         );
 
         return Json::ok($response, ['step_up_token' => $proofToken]);
+    }
+
+    /**
+     * Step-up záložním jednorázovým kódem — poslední cesta, jak z účtu odstranit
+     * ztracený faktor, když jiný silný už uživatel nemá.
+     *
+     * Kód se spotřebuje, i když se operace potom nedokončí. Je to záměr: jinak by
+     * šlo jedním kódem zkoušet operace donekonečna a jednorázovost by byla jen
+     * na papíře.
+     */
+    public function recovery(Request $request, Response $response): Response
+    {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené webové session.',
+                403,
+            );
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        $sessionToken = (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, '');
+        if ($userId < 1 || $sessionToken === '') {
+            return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $operation = trim((string) ($body['operation'] ?? ''));
+        try {
+            $operation = $this->stepUp->assertAllowed($userId, $operation, 'recovery');
+        } catch (StepUpOperationException $e) {
+            return Json::error($response, 'step_up_operation_invalid', $e->getMessage(), 400);
+        }
+
+        // Týž zámek jako u TOTP: 50 bitů entropie se hrubou silou uhádnout nedá,
+        // ale nechat na auth endpointu neomezené pokusy je zbytečná laskavost.
+        if ($this->bruteForce->isTotpLocked($userId)) {
+            return Json::error($response, 'too_many_attempts', 'Příliš mnoho pokusů. Zkus to později.', 429);
+        }
+
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $code = (string) ($body['code'] ?? '');
+        if (!$this->recoveryCodes->consume($userId, $code, $ip)) {
+            $this->bruteForce->recordTotpFailure($userId);
+            $this->logger->log(
+                'auth.recovery_code_failed',
+                $userId,
+                'user',
+                $userId,
+                ['operation' => $operation],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+            return Json::error($response, 'invalid_code', 'Neplatný nebo už použitý záložní kód.', 401);
+        }
+
+        $this->bruteForce->recordTotpSuccess($userId);
+        $proofToken = $this->stepUp->issue($userId, $sessionToken, $operation, 'recovery');
+        $remaining = $this->recoveryCodes->remaining($userId);
+        $this->logger->log(
+            'auth.recovery_code_used',
+            $userId,
+            'user',
+            $userId,
+            ['operation' => $operation, 'remaining' => $remaining],
+            $ip,
+            $request->getHeaderLine('User-Agent'),
+        );
+
+        return Json::ok($response, [
+            'step_up_token' => $proofToken,
+            'remaining'     => $remaining,
+        ]);
     }
 }

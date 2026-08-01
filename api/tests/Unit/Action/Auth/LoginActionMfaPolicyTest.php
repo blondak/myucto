@@ -259,6 +259,7 @@ final class LoginActionMfaPolicyTest extends TestCase
             ])),
             $issuer,
             $this->createMock(ClockInterface::class),
+            $this->createMock(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class),
         );
 
         $request = (new ServerRequestFactory())

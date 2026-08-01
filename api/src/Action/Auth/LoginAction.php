@@ -47,6 +47,7 @@ final class LoginAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly LoginSessionIssuer $loginIssuer,
         private readonly ClockInterface $clock,
+        private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
     ) {}
 
     public function passkeyOptions(Request $request, Response $response): Response
@@ -115,6 +116,7 @@ final class LoginAction
         $email = trim((string) ($body['email'] ?? ''));
         $password = (string) ($body['password'] ?? '');
         $totpCode = isset($body['totp']) ? trim((string) $body['totp']) : '';
+        $recoveryCode = isset($body['recovery_code']) ? trim((string) $body['recovery_code']) : '';
         $emailOtpCode = isset($body['email_otp']) ? trim((string) $body['email_otp']) : '';
         $resendOtp = !empty($body['resend_otp']);
         $rememberDevice = !empty($body['remember_device']);
@@ -186,6 +188,44 @@ final class LoginAction
 
         $totpActive = (int) $user['totp_enabled'] === 1 && !empty($user['totp_secret']);
         $totpAllowed = $this->mfaPolicy->isMethodAllowed('totp');
+
+        // Záložní kód se uplatní PŘED výběrem faktoru. Je to break-glass pro člověka,
+        // který zrovna žádný faktor po ruce nemá, takže nesmí být schovaný za výzvou
+        // k passkey ceremonii, kterou nedokončí, ani za TOTP, které ztratil.
+        // Neprochází `allowed_mfa_methods` — ten seznam říká, čím se plní povinné MFA,
+        // ne čím se lze zachránit; kdyby ho musel splnit, byl by k nepotřebě přesně
+        // v konfiguraci, která uživatele zamkla ven.
+        if ($recoveryCode !== '' && $this->recoveryCodes->hasUsable((int) $user['id'])) {
+            if ($this->bf->isTotpLocked((int) $user['id'])) {
+                return Json::error($response, 'too_many_attempts', 'Příliš mnoho pokusů. Zkus to později.', 429);
+            }
+            if (!$this->recoveryCodes->consume((int) $user['id'], $recoveryCode, $ip)) {
+                $this->bf->recordTotpFailure((int) $user['id']);
+                $this->bf->recordFailure($email, $ip);
+                $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
+                    'email' => $email, 'reason' => 'recovery_code_invalid',
+                ], $ip, $userAgent);
+                return Json::error($response, 'invalid_recovery_code', 'Neplatný nebo už použitý záložní kód.', 401);
+            }
+            $this->bf->recordTotpSuccess((int) $user['id']);
+            $this->rehashPasswordIfNeeded($user, $password);
+            $remaining = $this->recoveryCodes->remaining((int) $user['id']);
+            $this->logger->log('auth.recovery_code_login', (int) $user['id'], 'user', (int) $user['id'], [
+                'email' => $email, 'remaining' => $remaining,
+            ], $ip, $userAgent);
+
+            // Session je STRONG schválně: uživatel se hlásí právě proto, aby si pořádek
+            // ve faktorech udělal, a `basic` session by ho při povinném MFA uvěznila
+            // v enrollmentu, kde ztracený klíč odebrat nejde. Jednorázovost kódu,
+            // zámek pokusů a auditní stopa jsou to, co tuhle výjimku drží v mezích.
+            return $this->loginIssuer->issue(
+                $response,
+                $user,
+                $ip,
+                $userAgent,
+                SessionAuthContext::strong('recovery', $this->clock->now()),
+            );
+        }
         $passkeysUsable = $this->mfaPolicy->isMethodAllowed('passkey')
             && $this->passkeys->isAvailable();
         $storedPasskeys = $passkeysUsable
@@ -216,6 +256,11 @@ final class LoginAction
             $methods = ['passkey'];
             if ($totpActive && $totpAllowed) {
                 $methods[] = 'totp';
+            }
+            // Bez tohohle by uživatel se ztraceným klíčem viděl jen výzvu k ceremonii,
+            // kterou nemá čím dokončit, a o existenci záložních kódů by se z UI nedozvěděl.
+            if ($this->recoveryCodes->hasUsable((int) $user['id'])) {
+                $methods[] = 'recovery';
             }
 
             return Json::error(

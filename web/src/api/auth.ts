@@ -73,9 +73,20 @@ export interface LoginPayload {
   password: string
   totp?: string
   email_otp?: string
+  /** Záložní jednorázový kód — break-glass při ztraceném silném faktoru. */
+  recovery_code?: string
   remember_device?: boolean
   resend_otp?: boolean
   cf_turnstile_response?: string
+}
+
+/** Stav sady záložních kódů. Kódy samotné server podruhé nevydá. */
+export interface RecoveryCodeStatus {
+  total: number
+  remaining: number
+  generated_at: string | null
+  low: boolean
+  batch_size: number
 }
 
 export interface WebAuthnFlow {
@@ -297,6 +308,17 @@ export const authApi = {
   totpStepUp: (operation: string, code: string) =>
     api.post<{ step_up_token: string }>('/auth/mfa/step-up/totp', { operation, code })
       .then(r => r.data.step_up_token),
+  recoveryStepUp: (operation: string, code: string) =>
+    api.post<{ step_up_token: string; remaining: number }>('/auth/mfa/step-up/recovery', { operation, code })
+      .then(r => r.data),
+
+  recoveryCodeStatus: () =>
+    api.get<RecoveryCodeStatus>('/auth/mfa/recovery-codes').then(r => r.data),
+  /** Vrátí kódy v plaintextu — jediná a poslední příležitost, kdy je lze zobrazit. */
+  generateRecoveryCodes: (stepUpToken: string) =>
+    api.post<RecoveryCodeStatus & { codes: string[] }>('/auth/mfa/recovery-codes', {
+      step_up_token: stepUpToken,
+    }).then(r => r.data),
 
   logout: () => api.post('/auth/logout').then(() => undefined),
 

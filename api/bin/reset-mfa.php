@@ -77,6 +77,10 @@ $ceremonies = $pdo->prepare('DELETE FROM webauthn_ceremonies WHERE user_id = ?')
 $ceremonies->execute([(int) $user['id']]);
 $proofs = $pdo->prepare('DELETE FROM mfa_step_up_proofs WHERE user_id = ?');
 $proofs->execute([(int) $user['id']]);
+// Záložní kódy jsou taky faktor — rescue, který je nechá platit, by po sobě zanechal
+// tichou zadní vrátka u účtu, jehož ostatní faktory se právě odvolávaly.
+$recoveryCodes = $container->get(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class)
+    ->revokeAll((int) $user['id']);
 
 $killed = $sessions->destroyAllForUser((int) $user['id']);
 $wasEnabled = ((int) ($user['totp_enabled'] ?? 0) === 1) ? 'ano' : 'ne';
@@ -96,6 +100,7 @@ $container->get(\MyInvoice\Service\ActivityLogger::class)->log(
     [
         'passkeys_revoked' => $passkeys->rowCount(),
         'trusted_devices_removed' => $td->rowCount(),
+        'recovery_codes_revoked' => $recoveryCodes,
         'sessions_invalidated' => $killed,
         'totp_was_enabled' => ((int) ($user['totp_enabled'] ?? 0) === 1),
         'via' => 'cli:reset-mfa',
@@ -107,4 +112,4 @@ $container->get(\MyInvoice\Service\ActivityLogger::class)->log(
 echo "✓ MFA reset pro {$user['email']} (id={$user['id']}, TOTP původně aktivní: {$wasEnabled}).\n";
 echo "  Odvoláno {$passkeys->rowCount()} passkeys, {$td->rowCount()} důvěryhodných zařízení, "
     . "{$otp->rowCount()} e-mailových kódů, {$ceremonies->rowCount()} flow, "
-    . "{$proofs->rowCount()} proofů a $killed session(í).\n";
+    . "{$proofs->rowCount()} proofů, $recoveryCodes záložních kódů a $killed session(í).\n";

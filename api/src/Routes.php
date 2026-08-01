@@ -293,6 +293,9 @@ final class Routes
             $g->patch ('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'rename']);
             $g->delete('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'revoke']);
             $g->post  ('/mfa/step-up/totp',                   [MfaStepUpAction::class, 'totp']);
+            $g->post  ('/mfa/step-up/recovery',               [MfaStepUpAction::class, 'recovery']);
+            $g->get   ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'status']);
+            $g->post  ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'generate']);
             $g->get   ('/session/status',                     [SessionAction::class, 'status']);
             $g->post  ('/session/activity',                   [SessionAction::class, 'activity']);
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);

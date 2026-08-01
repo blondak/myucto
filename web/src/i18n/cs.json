@@ -4448,6 +4448,30 @@
     "revoke_last_factor": "Tohle je váš poslední silný faktor a přihlašování dvěma faktory je vynucené — odebrat ho nelze. Zaregistrujte nejdřív druhý klíč nebo si zapněte TOTP.",
     "revoke_no_method": "Odebrání není čím potvrdit — tenhle prohlížeč neumí přístupové klíče a TOTP není k dispozici."
   },
+  "recovery_codes": {
+    "title": "Záložní kódy",
+    "subtitle": "Jednorázové kódy pro případ, že přijdete o přístupový klíč i autentikátor. Bez nich zbývá jen zásah na serveru.",
+    "none_yet": "Zatím nemáte vygenerované žádné záložní kódy. Pokud přijdete o jediný silný faktor, nedostanete se do účtu.",
+    "remaining": "Zbývá {remaining} z {total} kódů.",
+    "exhausted": "Všechny záložní kódy jsou vyčerpané — vygenerujte novou sadu.",
+    "generate": "Vygenerovat záložní kódy",
+    "regenerate": "Vygenerovat novou sadu",
+    "regenerate_confirm": "Vygenerováním nové sady okamžitě přestanou platit všechny dosavadní kódy. Pokračovat?",
+    "shown_once": "Uložte si je hned — server je neukládá a podruhé je nezobrazí.",
+    "download": "Stáhnout jako soubor",
+    "copy": "Kopírovat",
+    "copied": "Kódy zkopírovány do schránky.",
+    "copy_failed": "Kopírování do schránky selhalo.",
+    "dismiss": "Mám je uložené",
+    "dismiss_confirm": "Opravdu jste si kódy uložili? Zavřením panelu je ztratíte a bude nutné vygenerovat novou sadu.",
+    "step_up_hint": "Vygenerování je citlivá operace — potvrdíte ji přístupovým klíčem nebo kódem z autentikátoru.",
+    "needs_factor": "Novou sadu smí vydat jen skutečný faktor — zaregistrujte přístupový klíč nebo zapněte TOTP. Záložním kódem to schválně nejde.",
+    "totp_label": "Kód z autentikátoru",
+    "totp_fallback": "Nemáte-li klíč po ruce, zadejte kód z autentikátoru a zkuste to znovu.",
+    "failed": "Vygenerování záložních kódů se nepodařilo.",
+    "file_header": "{app} — záložní kódy pro účet {email}. Každý kód funguje právě jednou.",
+    "file_footer": "Ulož je mimo počítač, ze kterého se přihlašuješ (tisk, trezor, správce hesel)."
+  },
   "auth": {
     "login": "Přihlásit",
     "login_title": "Přihlášení",
@@ -4522,7 +4546,10 @@
     "passkey_cancelled": "Ověření přístupovým klíčem bylo zrušeno. Zkuste to znovu, nebo použijte kód z autentikátoru.",
     "passkey_timeout_extension": "Přihlášení přístupovým klíčem přerušilo rozšíření prohlížeče (správce hesel), které si přebírá WebAuthn a spadlo. Vypněte ho pro tuto doménu, nebo použijte kód z autentikátoru.",
     "passkey_unsupported_recovery": "Tento prohlížeč přístupové klíče nepodporuje. Použijte dostupný TOTP kód, podporované zařízení nebo prohlížeč, případně požádejte správce o obnovení MFA.",
-    "use_totp_instead": "Použít kód z autentikátoru"
+    "use_totp_instead": "Použít kód z autentikátoru",
+    "use_recovery_instead": "Nemám klíč ani autentikátor — použít záložní kód",
+    "recovery_code": "Záložní kód",
+    "recovery_hint": "Jeden z kódů, které jste si uložili při jejich vygenerování. Každý funguje jen jednou."
   },
   "demo": {
     "banner": "Ukázkový režim: data můžete prohlížet a vyzkoušet si formuláře, žádná změna se ale neuloží a e-maily se neodesílají.",

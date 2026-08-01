@@ -5,6 +5,7 @@ import { authApi, type PasskeyCredential } from '@/api/auth'
 import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
+import RecoveryCodes from '@/components/security/RecoveryCodes.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -245,5 +246,9 @@ onMounted(() => {
 
       <p v-if="list.length === 0" class="text-sm text-neutral-500 text-center py-8">{{ t('passkeys.empty') }}</p>
     </div>
+
+    <!-- Poslední cesta zpátky, když faktor zmizí i s telefonem. Patří sem, ne do
+         zvláštní záložky: kdo řeší klíče, řeší i to, co dělat po jejich ztrátě. -->
+    <RecoveryCodes class="mt-5" />
   </div>
 </template>

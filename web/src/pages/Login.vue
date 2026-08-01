@@ -32,6 +32,12 @@ const passkeyFlow = ref<{ flowToken: string; publicKey: Record<string, any>; met
 // TOTP musí zůstat vidět — jinak by uživatel musel naslepo znovu odeslat heslo.
 const mfaMethods = ref<string[]>([])
 const canUseTotpFallback = computed(() => !totpRequired.value && mfaMethods.value.includes('totp'))
+// Záložní kód nabízíme jen tomu, kdo nějaký nepoužitý má — server to říká
+// v `methods`. Bez toho by uživatel se ztraceným klíčem viděl jen výzvu
+// k ceremonii, kterou nemá čím dokončit.
+const recoveryCode = ref('')
+const recoveryRequired = ref(false)
+const canUseRecovery = computed(() => !recoveryRequired.value && mfaMethods.value.includes('recovery'))
 const passkeyBusy = ref(false)
 const passwordlessBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
@@ -133,6 +139,7 @@ async function submit() {
   try {
     await auth.login(email.value.trim(), password.value, turnstile.token.value || undefined, totp.value || undefined, {
       emailOtp: emailOtp.value || undefined,
+      recoveryCode: recoveryCode.value || undefined,
       rememberDevice: rememberDevice.value,
     })
     router.push(auth.isClientRole ? '/portal' : '/')
@@ -249,6 +256,16 @@ async function verifyPasskey() {
   }
 }
 
+function useRecoveryFallback() {
+  // Stejně jako u TOTP: rozpracovaná ceremony nesmí držet submit disabled.
+  cancelActiveWebAuthnCeremony()
+  passkeyFlow.value = null
+  totpRequired.value = false
+  recoveryRequired.value = true
+  error.value = ''
+  turnstile.reset()
+}
+
 function useTotpFallback() {
   // TOTP dokončuje původní heslový login request. Aktivní passkey flow nesmí
   // držet submit disabled; nevyužitá ceremony pouze krátce expiruje na serveru.
@@ -361,6 +378,20 @@ async function resendCode() {
             <p class="text-xs text-neutral-500 mt-1">{{ t('auth.totp_hint') }}</p>
           </div>
 
+          <div v-if="recoveryRequired">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.recovery_code') }}</label>
+            <input
+              v-model="recoveryCode"
+              type="text"
+              autocomplete="one-time-code"
+              maxlength="16"
+              placeholder="XXXXX-XXXXX"
+              autofocus
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono tracking-widest text-center focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+            />
+            <p class="text-xs text-neutral-500 mt-1">{{ t('auth.recovery_hint') }}</p>
+          </div>
+
           <div v-if="passkeyFlow || canUseTotpFallback"
                class="rounded-md border border-primary-500/40 bg-primary-50 p-3 space-y-2">
             <template v-if="passkeyFlow">
@@ -375,6 +406,10 @@ async function resendCode() {
             <button v-if="canUseTotpFallback" type="button" @click="useTotpFallback"
                     class="w-full text-sm text-primary-700 hover:underline">
               {{ t('auth.use_totp_instead') }}
+            </button>
+            <button v-if="canUseRecovery" type="button" @click="useRecoveryFallback"
+                    class="w-full text-sm text-primary-700 hover:underline">
+              {{ t('auth.use_recovery_instead') }}
             </button>
           </div>
 

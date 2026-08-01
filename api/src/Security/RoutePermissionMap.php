@@ -27,7 +27,10 @@ final class RoutePermissionMap
         '/api/auth/webauthn/credentials',
         '/api/auth/webauthn/register/options', '/api/auth/webauthn/register/verify',
         '/api/auth/webauthn/step-up/options', '/api/auth/webauthn/step-up/verify',
-        '/api/auth/mfa/step-up/totp',
+        '/api/auth/mfa/step-up/totp', '/api/auth/mfa/step-up/recovery',
+        // Vlastní záložní kódy spravuje jen jejich majitel — generování si navíc
+        // vynucuje čerstvý step-up skutečným faktorem (MfaRecoveryCodeAction).
+        '/api/auth/mfa/recovery-codes',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
