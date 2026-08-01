@@ -30,9 +30,11 @@ test('locking discards a stale WebAuthn ceremony without AbortSignal', () => {
 test('a stuck WebAuthn ceremony cannot hang the UI silently', () => {
   // Bez vlastního stropu promise nedoběhne, když se systémový dialog nevykreslí.
   assert.match(webauthn, /CEREMONY_FALLBACK_TIMEOUT_MS/)
-  assert.match(webauthn, /Promise\.race\(\[ceremony, timeout\]\)/)
+  // Třetí větev race je ruční zrušení — bez ní by „Zrušit" jen zneplatnilo generaci.
+  assert.match(webauthn, /Promise\.race\(\[ceremony, timeout, cancelled\]\)/)
   // Přepsané navigator.credentials.* (správci hesel) se hlásí zvlášť.
-  assert.match(webauthn, /isCredentialsApiPatched\(\)[\s\S]{0,40}'webauthn_timeout_extension'/)
+  assert.match(webauthn, /const patched = isCredentialsApiPatched\(\)/)
+  assert.match(webauthn, /patched \? 'webauthn_timeout_extension' : 'webauthn_timeout'/)
   assert.match(webauthn, /includes\('\[native code\]'\)/)
 })
 

@@ -65,6 +65,8 @@ final class RequireMfaMiddlewareTest extends TestCase
             ['POST', '/api/auth/webauthn/register/options'],
             ['POST', '/api/auth/webauthn/register/verify'],
             ['POST', '/api/auth/mfa/step-up/totp'],
+            // Dokončení wizardu — bez toho by při povinném MFA ukázková data tiše nevznikla.
+            ['POST', '/api/auth/setup-sample'],
             ['POST', '/api/auth/logout'],
         ];
 

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
 import { authApi, type TotpSetup } from '@/api/auth'
-import { createCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { createCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 
@@ -14,7 +14,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const sessionSecurity = useSessionSecurityStore()
 
-const method = ref<'passkey' | 'totp'>('passkey')
+const method = ref<'passkey' | 'totp' | null>(null)
+const policyReady = ref(false)
 const busy = ref(false)
 const error = ref('')
 const currentPassword = ref('')
@@ -74,7 +75,10 @@ async function completePasskey() {
     await sessionSecurity.refresh({ force: true })
     await router.replace('/')
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('auth.passkey_failed')
+    const ceremonyError = webAuthnErrorKey(e)
+    error.value = ceremonyError !== null
+      ? t(ceremonyError)
+      : e?.response?.data?.error?.message || t('auth.passkey_failed')
   } finally {
     busy.value = false
   }
@@ -127,14 +131,21 @@ async function logout() {
 }
 
 onMounted(async () => {
+  // Povolené metody bere stránka VÝHRADNĚ ze serveru (/me). Kdyby ve storu zůstala
+  // starší/optimistická hodnota (např. z odpovědi setup wizardu), nabídli bychom
+  // metodu, kterou API zamítne 403 mfa_method_not_allowed.
+  await auth.refresh()
   const requested = route.query.method === 'totp' ? 'totp' : 'passkey'
   if (requested === 'passkey' && passkeyAllowed.value && passkeySupported) {
     method.value = 'passkey'
-    return
-  }
-  if (totpAllowed.value) {
+  } else if (totpAllowed.value) {
     await selectMethod('totp')
+  } else if (passkeyAllowed.value) {
+    // Jediná povolená metoda je passkey, kterou prohlížeč neumí — ať uživatel
+    // vidí proč, ne prázdnou stránku.
+    method.value = 'passkey'
   }
+  policyReady.value = true
 })
 </script>
 
@@ -206,6 +217,11 @@ onMounted(async () => {
           </template>
           <div v-else class="text-center text-sm text-neutral-500 py-4">{{ t('common.loading') }}…</div>
         </div>
+
+        <div v-if="!policyReady" class="text-center text-sm text-neutral-500 py-4">{{ t('common.loading') }}…</div>
+        <p v-else-if="method === null" class="rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
+          {{ t('mfa_setup.no_method_available') }}
+        </p>
 
         <p v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           {{ error }}

@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { authApi } from '@/api/auth'
-import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -104,7 +104,10 @@ async function verifyWithPasskey() {
     )
     form.value.totp_code = ''
   } catch (e: any) {
-    createError.value = e?.response?.data?.error?.message || t('api_tokens.passkey_failed')
+    const ceremonyError = webAuthnErrorKey(e)
+    createError.value = ceremonyError !== null
+      ? t(ceremonyError)
+      : e?.response?.data?.error?.message || t('api_tokens.passkey_failed')
   } finally {
     passkeyBusy.value = false
   }

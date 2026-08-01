@@ -8,7 +8,12 @@ import AppShell from '@/components/layout/AppShell.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { authApi } from '@/api/auth'
-import { cancelActiveWebAuthnCeremony, getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import {
+  cancelActiveWebAuthnCeremony,
+  getCredential,
+  isWebAuthnAvailable,
+  webAuthnErrorKey,
+} from '@/security/webauthn'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -210,7 +215,8 @@ async function loginWithPasskey() {
     } else if (code === 'too_many_attempts') {
       error.value = e?.response?.data?.error?.message || t('auth.too_many_attempts')
     } else {
-      error.value = t('auth.passwordless_passkey_failed')
+      const ceremonyError = webAuthnErrorKey(e)
+      error.value = ceremonyError !== null ? t(ceremonyError) : t('auth.passwordless_passkey_failed')
     }
   } finally {
     turnstile.reset()
@@ -234,11 +240,10 @@ async function verifyPasskey() {
     // Další submit hesla proto vždy získá novou ceremony.
     passkeyFlow.value = null
     turnstile.reset()
-    error.value = e?.message === 'webauthn_timeout_extension'
-      ? t('auth.passkey_timeout_extension')
-      : e?.message === 'webauthn_timeout'
-        ? t('auth.passkey_timeout')
-        : e?.response?.data?.error?.message || t('auth.passkey_failed')
+    const ceremonyError = webAuthnErrorKey(e)
+    error.value = ceremonyError !== null
+      ? t(ceremonyError)
+      : e?.response?.data?.error?.message || t('auth.passkey_failed')
   } finally {
     passkeyBusy.value = false
   }

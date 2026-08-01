@@ -20,7 +20,10 @@ Vytvoříš první uživatelský účet se systémovou rolí **Superadmin** (pln
 | Heslo | Min. 12 znaků, indikátor síly (slabé / střední / silné). Bez maxima — passphrase je OK. |
 | Heslo znovu | Ověřovací duplicita |
 | Vyžadovat silné MFA | Po dokončení wizardu musí admin zaregistrovat passkey nebo zapnout TOTP |
-| Povolené metody | Passkey, TOTP nebo obě možnosti |
+
+Povolené jsou obě metody — uživatel si na stránce `/setup-mfa` vybere. Zúžit
+výběr jde až v konfiguraci přes `auth.allowed_mfa_methods`, viz
+[39. Bezpečnost](39_Bezpecnost.md).
 
 Klikni **Další**.
 

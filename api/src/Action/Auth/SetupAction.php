@@ -79,14 +79,25 @@ final class SetupAction
         }
         $usesLegacyRequest = !array_key_exists('require_mfa', $body);
         $requireMfa = $usesLegacyRequest ? $requireTotp : (bool) $body['require_mfa'];
-        $methods = $body['allowed_mfa_methods']
-            ?? ($usesLegacyRequest ? ['totp'] : ['passkey', 'totp']);
+        $methodsProvided = array_key_exists('allowed_mfa_methods', $body);
+        // Když volající seznam neposlal, platí to, co je v configu — ne domněnka
+        // wizardu. Odpověď pak nese reálnou politiku, kterou vzápětí potvrdí /me.
+        $methods = $methodsProvided
+            ? $body['allowed_mfa_methods']
+            : ($usesLegacyRequest
+                ? ['totp']
+                : $this->config->get('auth.allowed_mfa_methods', ['passkey', 'totp']));
         try {
             // Striktně — vstup z wizardu musí chybu vidět, runtime politika je
             // naopak fail-soft, aby překlep v cfg neshodil celou aplikaci.
             $allowedMfaMethods = MfaPolicyService::validateMethods($methods);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+            if ($methodsProvided || $usesLegacyRequest) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+            }
+            // Překlep v cfg.php nesmí zablokovat první spuštění; stejný fail-soft
+            // fallback jako v MfaPolicyService.
+            $allowedMfaMethods = ['passkey', 'totp'];
         }
 
         $detectedUrl = $this->detectAppUrl($request);
@@ -187,11 +198,17 @@ final class SetupAction
         // To umožní dokončit Docker setup z LAN IP a zároveň ušetří uživateli krok ruční konfigurace
         // (důležité pro reset hesla / schvalovací odkazy v emailech).
         // Pokud uživatel app.url už nastavil přes MYINVOICE_APP_URL env nebo cfg.php, neperepíšeme.
+        // `auth.allowed_mfa_methods` zapisujeme jen když ho volající vážně poslal
+        // (nebo jde o legacy tvar požadavku, kde je seznam odvozený z require_totp).
+        // Wizard ho záměrně neposílá — ať zůstane platná hodnota z cfg.php a per-instance
+        // override nevznikne omylem.
         $keysToWrite = [
             'auth.require_mfa' => $requireMfa,
-            'auth.allowed_mfa_methods' => $allowedMfaMethods,
             'auth.require_totp' => $requireTotp,
         ];
+        if ($methodsProvided || $usesLegacyRequest) {
+            $keysToWrite['auth.allowed_mfa_methods'] = $allowedMfaMethods;
+        }
         if ($willWriteDetectedUrl) {
             $keysToWrite['app.url'] = $detectedUrl;
         }

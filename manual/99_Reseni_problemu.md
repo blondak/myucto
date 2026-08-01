@@ -54,6 +54,15 @@ Zkontroluj:
 - prohlížeč a zařízení podporují WebAuthn a mají nastavený zámek obrazovky,
 - dialog spouštíš explicitním tlačítkem na viditelné stránce.
 
+Když se po kliknutí nic neděje a stránka vypadá zatuhle, čeká se na systémový
+dialog, který se nemusel zobrazit — otevřel se za oknem prohlížeče, na jiném
+monitoru, nebo si volání převzal správce hesel (Keeper, 1Password, Bitwarden)
+a jeho okno se nevykreslilo. Po několika sekundách se dole objeví panel
+**Čekám na potvrzení bezpečnostního dialogu** s tlačítkem *Zrušit čekání*;
+tím se akce ukončí hned a jde ji zopakovat nebo přepnout na TOTP. I bez zásahu
+se čekání samo ukončí po ~2 minutách chybovou hláškou. Když panel hlásí, že
+WebAuthn obsluhuje rozšíření, zkus ho pro tuto doménu vypnout.
+
 Passkey registrovaná na starém hostname nebude po změně domény fungovat.
 Přihlas se pomocí TOTP nebo jiné passkey dostupné pro původní origin a
 zaregistruj nový klíč. Pokud žádná recovery cesta nezůstala, použij CLI rescue

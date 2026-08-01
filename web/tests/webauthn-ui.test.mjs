@@ -171,3 +171,59 @@ test('WebAuthn options are handed over as plain data, never as a reactive proxy'
   assert.match(webauthn, /const options = plainJson\(source\)/)
   assert.match(login, /publicKey: markRaw\(data\.public_key\)/)
 })
+
+test('forced MFA setup offers only methods the server allows', async () => {
+  const setup = await readFile(new URL('pages/ForcedMfaSetup.vue', root), 'utf8')
+
+  // Politiku bere stránka z /me, ne z optimistické hodnoty ve storu — jinak by
+  // nabídla metodu, kterou API zamítne 403 mfa_method_not_allowed.
+  const mounted = setup.match(/onMounted\(async \(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+  assert.match(mounted, /await auth\.refresh\(\)/)
+  assert.match(setup, /const method = ref<'passkey' \| 'totp' \| null>\(null\)/)
+  assert.match(setup, /if \(!allowed\.value\.includes\(next\)\) return/)
+  // Žádná metoda povolená → srozumitelná hláška, ne prázdný box.
+  assert.match(setup, /method === null[\s\S]*no_method_available/)
+})
+
+test('setup wizard does not pin allowed MFA methods per instance', async () => {
+  const wizard = await readFile(new URL('pages/Setup.vue', root), 'utf8')
+
+  // Zaškrtávátka metod jsou pryč (footgun: TOTP-only config + nabídnutá passkey),
+  // wizard posílá jen require_mfa a seznam metod zůstává na cfg.php.
+  assert.doesNotMatch(wizard, /allowed_mfa_methods/)
+  assert.doesNotMatch(wizard, /allowedMfaMethods/)
+  assert.match(wizard, /require_mfa: requireMfa\.value/)
+  // Politika se do storu nesmí propsat z odpovědi setupu (nese požadavek, ne config).
+  assert.doesNotMatch(wizard, /auth\.setMfaPolicy\(/)
+})
+
+test('cancelling a ceremony rejects the pending promise instead of only bumping the generation', async () => {
+  const webauthn = await readFile(new URL('security/webauthn.ts', root), 'utf8')
+  const cancel = webauthn.match(/export function cancelActiveWebAuthnCeremony\(\): void \{([\s\S]*?)\n\}/)?.[1] || ''
+
+  // Bez odmítnutí promise by volající po „Zrušit" visel dál na ceremonii,
+  // která nikdy nedoběhne — přesně ta situace, co vypadá jako zatuhlá appka.
+  assert.match(cancel, /reject\?\.\(new Error\('webauthn_cancelled'\)\)/)
+  assert.match(cancel, /activeWebAuthnCeremony\.value = null/)
+  assert.match(webauthn, /Promise\.race\(\[ceremony, timeout, cancelled\]\)/)
+  // Úklid nesmí přebít novější ceremonii.
+  assert.match(webauthn, /finally \{[\s\S]*if \(isCurrentCeremony\(generation\)\) activeWebAuthnCeremony\.value = null/)
+})
+
+test('a stalled security dialog surfaces a hint with a way out', async () => {
+  const prompt = await readFile(new URL('components/WebAuthnCeremonyPrompt.vue', root), 'utf8')
+  const app = await readFile(new URL('App.vue', root), 'utf8')
+
+  assert.match(prompt, /activeWebAuthnCeremony/)
+  assert.match(prompt, /cancelActiveWebAuthnCeremony\(\)/)
+  assert.match(prompt, /waiting_hint_extension/)
+  // Globálně, ať to platí pro login, odemčení zámku i registraci klíče.
+  assert.match(app, /<WebAuthnCeremonyPrompt \/>/)
+})
+
+test('every passkey entry point explains a timed-out ceremony', async () => {
+  for (const page of ['pages/Login.vue', 'pages/ForcedMfaSetup.vue', 'pages/Passkeys.vue', 'pages/ApiTokens.vue']) {
+    const source = await readFile(new URL(page, root), 'utf8')
+    assert.match(source, /webAuthnErrorKey/, page)
+  }
+})

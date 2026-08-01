@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authApi, type PasskeyCredential } from '@/api/auth'
-import { createCredential, getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 
@@ -69,9 +69,12 @@ async function add() {
     await load()
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
+    const ceremonyError = webAuthnErrorKey(e)
     error.value = e?.message === 'totp_code_required' || code === 'passkey_unavailable'
       ? t('passkeys.totp_required_error')
-      : e?.response?.data?.error?.message || t('passkeys.operation_failed')
+      : ceremonyError !== null
+        ? t(ceremonyError)
+        : e?.response?.data?.error?.message || t('passkeys.operation_failed')
   } finally {
     busy.value = false
   }

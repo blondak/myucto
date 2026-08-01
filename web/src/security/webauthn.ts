@@ -1,3 +1,5 @@
+import { ref } from 'vue'
+
 type JsonObject = Record<string, any>
 
 /**
@@ -12,6 +14,17 @@ type JsonObject = Record<string, any>
  */
 let ceremonyGeneration = 0
 
+/**
+ * Běžící ceremonie je vidět globálně, aby UI mohlo ukázat „čekám na dialog" a
+ * nabídnout zrušení. Bez toho vypadá schovaný systémový dialog (za oknem, na
+ * druhém monitoru, spolknutý správcem hesel) jako zatuhlá aplikace.
+ */
+export const activeWebAuthnCeremony = ref<{ startedAt: number; patched: boolean } | null>(null)
+
+/** Zrušení musí čekající promise ODMÍTNOUT, ne jen zneplatnit generaci — jinak
+ *  volající visí dál na ceremonii, která nikdy nedoběhne. */
+let rejectActiveCeremony: ((reason: unknown) => void) | null = null
+
 export function isWebAuthnAvailable(): boolean {
   return typeof window !== 'undefined'
     && typeof window.PublicKeyCredential !== 'undefined'
@@ -20,6 +33,10 @@ export function isWebAuthnAvailable(): boolean {
 
 export function cancelActiveWebAuthnCeremony(): void {
   ceremonyGeneration += 1
+  const reject = rejectActiveCeremony
+  rejectActiveCeremony = null
+  activeWebAuthnCeremony.value = null
+  reject?.(new Error('webauthn_cancelled'))
 }
 
 function startCeremony(): number {
@@ -67,20 +84,43 @@ async function runCeremony(
     ? configured
     : CEREMONY_FALLBACK_TIMEOUT_MS) + CEREMONY_GRACE_MS
 
-  const ceremony = run(navigator.credentials)
-  const timeout = new Promise<never>((_, reject) => {
-    window.setTimeout(
-      () => reject(new Error(isCredentialsApiPatched()
-        ? 'webauthn_timeout_extension'
-        : 'webauthn_timeout')),
-      limit,
-    )
-  })
+  const patched = isCredentialsApiPatched()
+  activeWebAuthnCeremony.value = { startedAt: Date.now(), patched }
 
-  const credential = await Promise.race([ceremony, timeout])
-  if (!isCurrentCeremony(generation)) throw new Error('webauthn_cancelled')
-  if (!(credential instanceof PublicKeyCredential)) throw new Error('webauthn_cancelled')
-  return credentialToJson(credential)
+  let timer = 0
+  try {
+    const ceremony = run(navigator.credentials)
+    const timeout = new Promise<never>((_, reject) => {
+      timer = window.setTimeout(
+        () => reject(new Error(patched ? 'webauthn_timeout_extension' : 'webauthn_timeout')),
+        limit,
+      )
+    })
+    const cancelled = new Promise<never>((_, reject) => { rejectActiveCeremony = reject })
+
+    const credential = await Promise.race([ceremony, timeout, cancelled])
+    if (!isCurrentCeremony(generation)) throw new Error('webauthn_cancelled')
+    if (!(credential instanceof PublicKeyCredential)) throw new Error('webauthn_cancelled')
+    return credentialToJson(credential)
+  } finally {
+    window.clearTimeout(timer)
+    rejectActiveCeremony = null
+    // Mezitím mohla začít novější ceremonie — tu tenhle úklid přebít nesmí.
+    if (isCurrentCeremony(generation)) activeWebAuthnCeremony.value = null
+  }
+}
+
+/**
+ * i18n klíč pro chybu z ceremonie; `null` = není to naše chyba, ať si ji volající
+ * zpracuje po svém (typicky chybová odpověď API).
+ */
+export function webAuthnErrorKey(error: unknown): string | null {
+  switch ((error as { message?: unknown } | null)?.message) {
+    case 'webauthn_timeout_extension': return 'auth.passkey_timeout_extension'
+    case 'webauthn_timeout':           return 'auth.passkey_timeout'
+    case 'webauthn_cancelled':         return 'auth.passkey_cancelled'
+    default:                           return null
+  }
 }
 
 export function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {

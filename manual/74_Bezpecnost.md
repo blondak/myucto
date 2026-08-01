@@ -206,6 +206,10 @@ MYINVOICE_AUTH_REQUIRE_MFA=true
 MYINVOICE_AUTH_MFA_METHODS=passkey,totp
 ```
 
+Úvodní [wizard](06_Setup_wizard.md) nabízí jen přepínač „vyžadovat silné MFA";
+seznam metod nechává na konfiguraci, takže po instalaci jsou povolené obě. Jeho
+zúžení je vědomý zásah do `cfg.php` / ENV.
+
 Chování:
 
 - Uživatel bez povoleného silného faktoru dostane omezenou setup session a

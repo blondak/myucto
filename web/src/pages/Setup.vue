@@ -19,7 +19,6 @@ const fieldErrors = ref<Record<string, string[]>>({})
 
 const admin = ref({ name: '', email: '', password: '', password_confirm: '' })
 const requireMfa = ref(false)
-const allowedMfaMethods = ref<Array<'passkey' | 'totp'>>(['passkey', 'totp'])
 const skipSupplier = ref(false)
 const generateSample = ref(false)
 const sampleResult = ref<SetupSampleResult | null>(null)
@@ -155,8 +154,7 @@ const adminValid = computed(
     admin.value.name.trim().length > 0 &&
     /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(admin.value.email) &&
     passwordOk.value &&
-    passwordMatch.value &&
-    (!requireMfa.value || allowedMfaMethods.value.length > 0),
+    passwordMatch.value,
 )
 
 onMounted(async () => {
@@ -189,7 +187,6 @@ async function submit() {
         password: admin.value.password,
       },
       require_mfa: requireMfa.value,
-      allowed_mfa_methods: allowedMfaMethods.value,
       require_totp: false,
     }
     if (!skipSupplier.value && supplier.value.company_name.trim()) {
@@ -227,12 +224,10 @@ async function submit() {
     }
     const setupResult = await authApi.setup(payload)
     auth.setSessionCsrfToken(setupResult.csrf_token)
-    if ('require_mfa' in setupResult && 'allowed_mfa_methods' in setupResult) {
-      auth.setMfaPolicy(
-        setupResult.require_mfa === true,
-        setupResult.allowed_mfa_methods as Array<'passkey' | 'totp'>,
-      )
-    }
+    // MFA politiku do storu ZÁMĚRNĚ nepřepisujeme z odpovědi setupu — ta nese
+    // to, co wizard poslal, ne to, co je reálně v configu. Jediný zdroj pravdy
+    // je /me (goToApp() dělá refresh + hard reload), jinak by /setup-mfa mohlo
+    // nabídnout metodu, kterou server odmítne.
 
     // Volitelně: vygenerovat sample data (jen pokud user zaškrtl + supplier vyplněn)
     if (generateSample.value && !skipSupplier.value) {
@@ -326,21 +321,9 @@ async function submit() {
                   <span class="block text-xs text-neutral-500 mt-0.5">{{ t('setup.require_mfa_hint') }}</span>
                 </span>
               </label>
-              <div v-if="requireMfa" class="mt-3 ml-7 space-y-2 text-sm">
-                <label class="flex items-center gap-2">
-                  <input v-model="allowedMfaMethods" type="checkbox" value="passkey"
-                    class="rounded border-neutral-300 text-primary-600" />
-                  <span>{{ t('setup.mfa_passkey') }}</span>
-                </label>
-                <label class="flex items-center gap-2">
-                  <input v-model="allowedMfaMethods" type="checkbox" value="totp"
-                    class="rounded border-neutral-300 text-primary-600" />
-                  <span>{{ t('setup.mfa_totp') }}</span>
-                </label>
-                <p v-if="allowedMfaMethods.length === 0" class="text-xs text-danger-500">
-                  {{ t('setup.mfa_method_required') }}
-                </p>
-              </div>
+              <p v-if="requireMfa" class="mt-2 ml-7 text-xs text-neutral-500">
+                {{ t('setup.require_mfa_methods_hint') }}
+              </p>
             </div>
 
             <button type="submit" :disabled="!adminValid" class="w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition">

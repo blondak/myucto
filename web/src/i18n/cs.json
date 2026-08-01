@@ -4512,6 +4512,7 @@
     "passkey_verifying": "Ověřování…",
     "passkey_failed": "Ověření přístupovým klíčem se nepodařilo.",
     "passkey_timeout": "Systémový dialog pro přístupový klíč se neotevřel nebo nebyl dokončen. Zkuste to znovu, nebo použijte kód z autentikátoru.",
+    "passkey_cancelled": "Ověření přístupovým klíčem bylo zrušeno. Zkuste to znovu, nebo použijte kód z autentikátoru.",
     "passkey_timeout_extension": "Přihlášení přístupovým klíčem přerušilo rozšíření prohlížeče (správce hesel), které si přebírá WebAuthn a spadlo. Vypněte ho pro tuto doménu, nebo použijte kód z autentikátoru.",
     "passkey_unsupported_recovery": "Tento prohlížeč přístupové klíče nepodporuje. Použijte dostupný TOTP kód, podporované zařízení nebo prohlížeč, případně požádejte správce o obnovení MFA.",
     "use_totp_instead": "Použít kód z autentikátoru"
@@ -9069,9 +9070,7 @@
     "require_totp_hint": "Po přihlášení bude každý uživatel přesměrován na nastavení TOTP, dokud 2FA neaktivuje.",
     "require_mfa_label": "Vynutit vícefaktorové ověření (MFA) pro všechny uživatele",
     "require_mfa_hint": "Uživatel musí po zadání hesla použít přístupový klíč nebo TOTP podle povolených metod.",
-    "mfa_passkey": "Přístupový klíč (doporučeno)",
-    "mfa_totp": "TOTP z autentikační aplikace",
-    "mfa_method_required": "Vyber alespoň jednu metodu.",
+    "require_mfa_methods_hint": "Povolený je přístupový klíč i TOTP — uživatel si vybere. Zúžit metody lze později v cfg.php (auth.allowed_mfa_methods).",
     "mfa_setup_next": "Vynucení MFA je aktivní. Po pokračování dokončíš nastavení zvolené metody."
   },
   "mfa_setup": {
@@ -9087,7 +9086,14 @@
     "password_required": "Pro registraci první bezpečnostní metody zadej znovu své heslo.",
     "transition_totp_hint": "Účet už má aktivní TOTP. Potvrď jeho aktuálním kódem bezpečný přechod na přístupový klíč.",
     "transition_totp_required": "Pro registraci přístupového klíče zadej platný 6místný TOTP kód.",
+    "no_method_available": "Tato instalace nemá povolenou žádnou metodu, kterou bys tu mohl aktivovat. Uprav auth.allowed_mfa_methods v cfg.php nebo se obrať na správce.",
     "logout_hint": "Bez dokončení MFA lze účet pouze odhlásit."
+  },
+  "webauthn": {
+    "waiting_title": "Čekám na potvrzení bezpečnostního dialogu",
+    "waiting_hint": "Dialog se možná otevřel za oknem prohlížeče nebo na jiném monitoru — zkontrolujte hlavní panel. Pokud nikde není, akci zrušte a zkuste to znovu.",
+    "waiting_hint_extension": "WebAuthn v tomto prohlížeči obsluhuje rozšíření (správce hesel). Když se jeho okno neukáže, akci zrušte a zkuste to znovu bez rozšíření, nebo použijte kód z autentikátoru.",
+    "waiting_cancel": "Zrušit čekání"
   },
   "validation": {
     "required": "Povinné pole",
