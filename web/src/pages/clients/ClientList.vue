@@ -113,7 +113,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'company', labelKey: 'client.company', required: true, sortable: true },
   { key: 'ic', labelKey: 'common.ic' },
   { key: 'email', labelKey: 'client.email' },
-  { key: 'count', labelKey: 'nav.projects' },
+  { key: 'count', labelKey: 'client.invoice_count_label' },
   { key: 'amount', labelKey: 'common.revenue', required: true, sortable: true },
   { key: 'last_activity', labelKey: 'common.last_activity', sortable: true },
   { key: 'vat_payer', labelKey: 'client.vat_payer_label' },
@@ -248,7 +248,7 @@ function formatPaymentDue(c: Client): string {
             <SortableTh v-if="tbl.isVisible('company')" :label="t('client.company')" sort-key="name" :sort="tbl.sort.value" @toggle="onSortToggle" />
             <th v-if="tbl.isVisible('ic')" class="text-left px-4 py-2.5 font-medium">{{ t('common.ic') }}</th>
             <th v-if="tbl.isVisible('email')" class="text-left px-4 py-2.5 font-medium">{{ t('client.email') }}</th>
-            <th v-if="tbl.isVisible('count')" class="text-center px-4 py-2.5 font-medium">{{ roleFilter === 'vendors' ? t('client.invoice_count_label') : t('nav.projects') }}</th>
+            <th v-if="tbl.isVisible('count')" class="text-center px-4 py-2.5 font-medium">{{ t('client.invoice_count_label') }}</th>
             <SortableTh v-if="tbl.isVisible('amount')" :label="roleFilter === 'vendors' ? t('common.costs') : t('common.revenue')" sort-key="revenue" :sort="tbl.sort.value" align="right" @toggle="onSortToggle" />
             <SortableTh v-if="tbl.isVisible('last_activity')" :label="t('common.last_activity')" sort-key="last_activity" :sort="tbl.sort.value" @toggle="onSortToggle" />
             <th v-if="roleFilter === 'vendors' && tbl.isVisible('vat_payer')" class="text-center px-4 py-2.5 font-medium">{{ t('client.vat_payer_label') }}</th>
@@ -286,8 +286,8 @@ function formatPaymentDue(c: Client): string {
                 <span v-else class="text-neutral-300">—</span>
               </template>
               <template v-else>
-                <span v-if="c.active_projects_count" class="inline-block px-2 py-0.5 text-xs bg-primary-50 text-primary-700 rounded">
-                  {{ c.active_projects_count }}
+                <span v-if="c.invoice_count" class="inline-block px-2 py-0.5 text-xs bg-primary-50 text-primary-700 rounded">
+                  {{ c.invoice_count }}
                 </span>
                 <span v-else class="text-neutral-300">—</span>
               </template>
@@ -362,8 +362,8 @@ function formatPaymentDue(c: Client): string {
             <span v-if="roleFilter === 'vendors' && c.purchase_count" class="px-2 py-0.5 bg-warning-50 text-warning-700 rounded">
               {{ t('client.invoice_count_label') }}: {{ c.purchase_count }}
             </span>
-            <span v-else-if="c.active_projects_count" class="px-2 py-0.5 bg-primary-50 text-primary-700 rounded">
-              {{ t('nav.projects') }}: {{ c.active_projects_count }}
+            <span v-else-if="c.invoice_count" class="px-2 py-0.5 bg-primary-50 text-primary-700 rounded">
+              {{ t('client.invoice_count_label') }}: {{ c.invoice_count }}
             </span>
           </div>
         </div>
