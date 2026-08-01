@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   accountingApi,
-  type PayrollPreview, type PayrollTaxpayerType, type PayrollEmployee, type PayrollEmployeePayload,
+  type PayrollPreview, type PayrollTaxpayerType, type PayrollEmploymentType,
+  type PayrollEmployee, type PayrollEmployeePayload,
 } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -111,7 +112,10 @@ async function post() {
       child_count: form.child_count,
     })
     toast.success(t('accounting.payroll.posted', { id: res.journal_entry_id }))
-    router.push(`/accounting/journal/${res.journal_entry_id}`)
+    // Routa `/accounting/journal/:id` NEEXISTUJE (jen `/accounting/journal` a `/new`) —
+    // detail zápisu se otevírá drill-downem přes `?entry_id=`, jako všude jinde.
+    // Cesta s ID vede na 404, i když se zaúčtování povedlo.
+    router.push({ name: 'accounting-journal', query: { entry_id: String(res.journal_entry_id) } })
   } catch (e: any) {
     error.value = errorMessage(e)
   } finally {
@@ -137,9 +141,10 @@ async function loadEmployees() {
 const activeEmployees = computed(() => employees.value.filter(e => e.is_active))
 
 /**
- * Karta zaměstnance je zdroj pravdy o slevách — server ji při zaúčtování stejně
- * přebije, takže se pole jen zrcadlí a zamknou, aby náhled neukazoval něco jiného,
- * než co se zaúčtuje. Deklarováno až tady kvůli závislosti na `activeEmployees`.
+ * Karta zaměstnance je zdroj pravdy o typu poplatníka i slevách — server ji při
+ * zaúčtování stejně přebije, takže se pole jen zrcadlí a zamknou, aby náhled
+ * neukazoval něco jiného, než co se zaúčtuje. Deklarováno až tady kvůli závislosti
+ * na `activeEmployees`.
  */
 const selectedEmployee = computed(
   () => activeEmployees.value.find(e => e.id === form.employee_id) ?? null
@@ -148,9 +153,15 @@ const creditsLocked = computed(() => selectedEmployee.value !== null)
 
 watch(selectedEmployee, (e) => {
   if (!e) return
+  // Typ poplatníka rozhoduje o kontaci (521/331 vs. 522/366). Formulář mohl mít
+  // „zaměstnanec", zatímco karta říká „jednatel-společník" — zaúčtovalo se pak
+  // na jiné účty, než co ukazoval náhled.
+  form.taxpayer_type = e.taxpayer_type
   // Nárok na slevu a možnost uplatnit ji U TOHOTO PLÁTCE jsou dvě různé věci
   // (§ 38h odst. 4, § 38k odst. 4) — musí platit obě.
-  form.taxpayer_credit = e.tax_credit_taxpayer && (e.tax_declaration_signed ?? false)
+  // Boolean() nutně: checkbox se `v-model` porovnává s `true`, takže netknutá
+  // TINYINT jednička z API by se vykreslila jako nezaškrtnutá.
+  form.taxpayer_credit = Boolean(e.tax_credit_taxpayer) && Boolean(e.tax_declaration_signed)
   form.child_count = e.child_count
 })
 
@@ -163,12 +174,17 @@ const employeeForm = reactive({
   birth_number: '',
   address: '',
   taxpayer_type: 'employee' as PayrollTaxpayerType,
+  employment_type: 'hpp' as PayrollEmploymentType,
   tax_credit_taxpayer: true,
   // § 38k odst. 4 — bez podepsaného prohlášení se měsíční sleva uplatnit nesmí.
   // Výchozí NEpodepsáno: za nesraženou zálohu ručí plátce (§ 38s), kdežto přeplatek
   // se vrátí v ročním zúčtování.
   tax_declaration_signed: false,
   child_count: 0,
+  // Pravidelná měsíční hrubá mzda a pověření cronu, ať se táž konstanta neopisuje
+  // ručně měsíc co měsíc. `null` = nesjednaná, což je jiný stav než 0 Kč.
+  monthly_gross: null as number | null,
+  auto_post: false,
   is_active: true,
 })
 
@@ -178,11 +194,25 @@ function resetEmployeeForm() {
   employeeForm.birth_number = ''
   employeeForm.address = ''
   employeeForm.taxpayer_type = 'employee'
+  employeeForm.employment_type = 'hpp'
   employeeForm.tax_credit_taxpayer = true
   employeeForm.tax_declaration_signed = false
   employeeForm.child_count = 0
+  employeeForm.monthly_gross = null
+  employeeForm.auto_post = false
   employeeForm.is_active = true
 }
+
+/**
+ * Automat bez částky nemá co zaúčtovat — checkbox proto zůstane nepřístupný, dokud
+ * není mzda vyplněná, a smazání částky ho shodí zpátky. Server tutéž podmínku hlídá
+ * znovu; tohle je jen to, aby uživatel nedostal 422 za něco, co mu formulář dovolil.
+ */
+const autoPostAvailable = computed(() => Number(employeeForm.monthly_gross) > 0)
+
+watch(autoPostAvailable, (ok) => {
+  if (!ok) employeeForm.auto_post = false
+})
 
 function openNewEmployee() {
   editingEmployeeId.value = null
@@ -197,9 +227,12 @@ function openEditEmployee(e: PayrollEmployee) {
   employeeForm.birth_number = e.birth_number ?? ''
   employeeForm.address = e.address ?? ''
   employeeForm.taxpayer_type = e.taxpayer_type
+  employeeForm.employment_type = e.employment_type ?? 'hpp'
   employeeForm.tax_credit_taxpayer = e.tax_credit_taxpayer
   employeeForm.tax_declaration_signed = e.tax_declaration_signed ?? false
   employeeForm.child_count = e.child_count
+  employeeForm.monthly_gross = e.monthly_gross ?? null
+  employeeForm.auto_post = Boolean(e.auto_post)
   employeeForm.is_active = e.is_active
   showEmployeeForm.value = true
 }
@@ -217,9 +250,14 @@ async function saveEmployee() {
       birth_number: employeeForm.birth_number.trim() || null,
       address: employeeForm.address.trim() || null,
       taxpayer_type: employeeForm.taxpayer_type,
+      employment_type: employeeForm.employment_type,
       tax_credit_taxpayer: employeeForm.tax_credit_taxpayer,
       tax_declaration_signed: employeeForm.tax_declaration_signed,
       child_count: Number(employeeForm.child_count),
+      // Prázdné pole musí odejít jako null, ne 0 — „nesjednaná mzda" a „nula" jsou
+      // pro cron dva různé stavy.
+      monthly_gross: Number(employeeForm.monthly_gross) > 0 ? Number(employeeForm.monthly_gross) : null,
+      auto_post: autoPostAvailable.value && employeeForm.auto_post,
       is_active: employeeForm.is_active,
     }
     if (editingEmployeeId.value === null) {
@@ -428,7 +466,8 @@ const remittanceRows = computed(() => {
         </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.payroll.taxpayer_type') }}</label>
-          <select v-model="form.taxpayer_type" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+          <select v-model="form.taxpayer_type" :disabled="creditsLocked"
+            class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface disabled:opacity-50">
             <option value="employee">{{ t('accounting.payroll.type.employee') }}</option>
             <option value="managing_partner">{{ t('accounting.payroll.type.managing_partner') }}</option>
           </select>
@@ -608,6 +647,7 @@ const remittanceRows = computed(() => {
               <th class="text-left font-medium px-3 py-2">{{ t('accounting.payroll.employees.col_name') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ t('accounting.payroll.employees.col_type') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ t('accounting.payroll.employees.col_credits') }}</th>
+              <th class="text-left font-medium px-3 py-2">{{ t('accounting.payroll.employees.col_monthly_gross') }}</th>
               <th class="text-left font-medium px-3 py-2">{{ t('accounting.payroll.employees.col_active') }}</th>
               <th class="px-3 py-2"></th>
             </tr>
@@ -618,10 +658,20 @@ const remittanceRows = computed(() => {
                 <div class="font-medium text-neutral-700">{{ e.full_name }}</div>
                 <div class="text-xs text-neutral-500">{{ e.birth_number || e.birth_date || '—' }}</div>
               </td>
-              <td class="px-3 py-2 text-xs text-neutral-600">{{ t(`accounting.payroll.type.${e.taxpayer_type}`) }}</td>
+              <td class="px-3 py-2 text-xs text-neutral-600">
+                <div>{{ t(`accounting.payroll.type.${e.taxpayer_type}`) }}</div>
+                <div class="text-neutral-500">{{ t(`accounting.payroll.employment.${e.employment_type ?? 'hpp'}`) }}</div>
+              </td>
               <td class="px-3 py-2 text-xs text-neutral-600">
                 <div v-if="e.tax_credit_taxpayer">{{ t('accounting.payroll.employees.credit_taxpayer') }}</div>
                 <div v-if="e.child_count > 0">{{ t('accounting.payroll.employees.credit_children', { count: e.child_count }) }}</div>
+              </td>
+              <td class="px-3 py-2 text-xs text-neutral-600 whitespace-nowrap">
+                <div v-if="e.monthly_gross !== null" class="font-mono">{{ formatMoney(e.monthly_gross) }}</div>
+                <div v-else class="text-neutral-400">—</div>
+                <span v-if="e.auto_post" class="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-primary-50 text-primary-600 text-[10px] leading-none">
+                  {{ t('accounting.payroll.employees.auto_post_badge') }}
+                </span>
               </td>
               <td class="px-3 py-2 text-xs">
                 <span class="px-2 py-0.5 rounded-full font-medium" :class="e.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
@@ -696,9 +746,35 @@ const remittanceRows = computed(() => {
           </select>
         </div>
         <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_employment_type') }}</label>
+          <select v-model="employeeForm.employment_type" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option v-for="e in (['hpp', 'dpp', 'dpc'] as const)" :key="e" :value="e">
+              {{ t(`accounting.payroll.employment.${e}`) }}
+            </option>
+          </select>
+        </div>
+        <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_child_count') }}</label>
           <input v-model.number="employeeForm.child_count" type="number" min="0" max="20" step="1"
                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right bg-surface" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_monthly_gross') }}</label>
+          <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" inputmode="numeric"
+                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono bg-surface" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="flex items-center gap-2 text-sm text-neutral-700 h-9"
+                 :class="autoPostAvailable ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'">
+            <input v-model="employeeForm.auto_post" type="checkbox" :disabled="!autoPostAvailable"
+                   class="rounded border-neutral-300 disabled:opacity-50" />
+            {{ t('accounting.payroll.employees.form_auto_post') }}
+          </label>
+          <p class="text-xs" :class="autoPostAvailable ? 'text-neutral-500' : 'text-warning-600'">
+            {{ autoPostAvailable
+                ? t('accounting.payroll.employees.form_auto_post_hint')
+                : t('accounting.payroll.employees.form_auto_post_needs_gross') }}
+          </p>
         </div>
         <div class="sm:col-span-2 flex items-center gap-4">
           <label class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer h-9">

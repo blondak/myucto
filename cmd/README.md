@@ -31,6 +31,7 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
+| `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |
 | `cron-journal-integrity-check.{cmd,sh}` | Noční integrity job nad účetním deníkem (jen podvojné účetnictví) — sirotčí zápisy, Σ MD ≠ Σ D, booked_at bez zápisu a naopak, doklad ≠ zápis částkou. Čistě čtecí, výsledek do dashboardu (`--dry-run`, `--supplier=ID`) |
 | `cron-license-renew.{cmd,sh}` | Denní obnova licenčního tokenu proti licenčnímu serveru (E4); doplněk k obnově z prvního přihlášeného requestu dne — pokryje instalace, které přes den nikdo neotevře. Mutex zajistí max. 1× denně (síťovou chybu jen loguje) |
 | `license-activate.{cmd,sh}` | **Headless aktivace licenčního klíče** (E4) bez přihlášení do UI — `license-activate.cmd MYU-XXXX-XXXX-XXXX-XXXX [--takeover]`. Zavolá licenční server, uloží klíč+token, vypíše tarif / počty / platnost (u doživotní licence „Neomezeně"). Hodí se pro demo instance, servery a automatizaci. `--takeover` vynutí přenos vazby z jiné instalace (po chybě `already_bound`) |
@@ -82,6 +83,7 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
+| `cron-payroll-post` | 1× měsíčně, 1. den | 04:00 (`0 4 1 * *`) |
 | `cron-license-renew` | 1× denně | 05:00 |
 | `cron-version-check` | 1× denně | 06:00 |
 
@@ -107,6 +109,7 @@ schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
+schtasks /create /tn "MyUcto PayrollPost"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-post.cmd"             /sc monthly /d 1 /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
 ```
@@ -154,6 +157,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
+  0  4  1   *   *    /var/www/myucto.cz/cmd/cron-payroll-post.sh
   0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
 ```

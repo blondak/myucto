@@ -32,6 +32,11 @@ final class PayrollEmployeeAction
     /** Pracovněprávní vztah — migrace 1156; řídí režim pojistného a srážkové daně. */
     private const EMPLOYMENT_TYPES = ['hpp', 'dpp', 'dpc'];
 
+    /** Shodný strop jako {@see PayrollAction} — nad ním už rozpad není důvěryhodný. */
+    private const MAX_MONTHLY_GROSS = 10_000_000;
+
+    private const GROSS_RANGE_MESSAGE = 'Pravidelná hrubá mzda musí být celé číslo v rozsahu 0 až 10 000 000 Kč.';
+
     public function __construct(
         private readonly PayrollEmployeeRepository $employees,
         private readonly Connection $db,
@@ -61,6 +66,7 @@ final class PayrollEmployeeAction
         $body = (array) ($request->getParsedBody() ?? []);
         $data = $this->normalize($body, $response, $err);
         if ($data === null) return $err;
+        if (!$this->autoPostHasGross($data, $response, $err)) return $err;
 
         $id = $this->employees->insert($supplierId, $data);
         $this->log($request, 'payroll_employee.created', $id, ['full_name' => $data['full_name']]);
@@ -74,13 +80,15 @@ final class PayrollEmployeeAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
         $id = (int) $args['id'];
-        if ($this->employees->find($supplierId, $id) === null) {
+        $current = $this->employees->find($supplierId, $id);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $fields = $this->normalizePartial($body, $response, $err);
         if ($fields === null) return $err;
+        if (!$this->autoPostHasGross(array_merge($current, $fields), $response, $err)) return $err;
 
         $this->employees->update($supplierId, $id, $fields);
         $this->log($request, 'payroll_employee.updated', $id, array_keys($fields));
@@ -133,6 +141,11 @@ final class PayrollEmployeeAction
             $err = Json::error($response, 'validation_failed', 'Počet dětí musí být v rozsahu 0 až 20.', 422);
             return null;
         }
+        $monthlyGross = $this->nullableGross($body['monthly_gross'] ?? null);
+        if ($monthlyGross === false) {
+            $err = Json::error($response, 'validation_failed', self::GROSS_RANGE_MESSAGE, 422);
+            return null;
+        }
 
         $err = null;
         return [
@@ -156,6 +169,12 @@ final class PayrollEmployeeAction
                 ? (string) $body['employment_type']
                 : 'hpp',
             'child_count'         => $childCount,
+            // Migrace 1175 — pravidelná mzda a pověření cronu, ať se měsíc od měsíce
+            // neopisuje táž konstanta.
+            'monthly_gross'       => $monthlyGross,
+            'auto_post'           => array_key_exists('auto_post', $body)
+                ? (bool) filter_var($body['auto_post'], FILTER_VALIDATE_BOOLEAN)
+                : false,
             'is_active'           => array_key_exists('is_active', $body)
                 ? (bool) filter_var($body['is_active'], FILTER_VALIDATE_BOOLEAN)
                 : true,
@@ -221,11 +240,59 @@ final class PayrollEmployeeAction
             }
             $fields['child_count'] = $childCount;
         }
+        if (array_key_exists('monthly_gross', $body)) {
+            $monthlyGross = $this->nullableGross($body['monthly_gross']);
+            if ($monthlyGross === false) {
+                $err = Json::error($response, 'validation_failed', self::GROSS_RANGE_MESSAGE, 422);
+                return null;
+            }
+            $fields['monthly_gross'] = $monthlyGross;
+        }
+        if (array_key_exists('auto_post', $body)) {
+            $fields['auto_post'] = (bool) filter_var($body['auto_post'], FILTER_VALIDATE_BOOLEAN);
+        }
         if (array_key_exists('is_active', $body)) {
             $fields['is_active'] = (bool) filter_var($body['is_active'], FILTER_VALIDATE_BOOLEAN);
         }
         $err = null;
         return $fields;
+    }
+
+    /**
+     * Zapnutý automat bez částky je past: cron by neměl co zaúčtovat a uživatel by
+     * čekal zápis, který nikdy nepřijde. Kontrola je nutně nad SLOUČENÝM stavem —
+     * částečný update může poslat jen příznak a mzda přitom už na kartě je (a naopak,
+     * vynulování mzdy musí shodit i příznak).
+     *
+     * @param array<string,mixed> $effective stav karty po aplikaci změn
+     */
+    private function autoPostHasGross(array $effective, Response $response, ?Response &$err): bool
+    {
+        $gross = $effective['monthly_gross'] ?? null;
+        if (!empty($effective['auto_post']) && ($gross === null || (int) $gross <= 0)) {
+            $err = Json::error(
+                $response,
+                'validation_failed',
+                'Automatické měsíční účtování jde zapnout jen s vyplněnou pravidelnou hrubou mzdou — bez ní by cron neměl co zaúčtovat.',
+                422,
+            );
+            return false;
+        }
+        $err = null;
+        return true;
+    }
+
+    /** @return int|null|false false = mimo rozsah */
+    private function nullableGross(mixed $v): int|null|false
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (!is_numeric($v)) {
+            return false;
+        }
+        $gross = (int) $v;
+        return ($gross < 0 || $gross > self::MAX_MONTHLY_GROSS) ? false : $gross;
     }
 
     private function nullableString(mixed $v): ?string

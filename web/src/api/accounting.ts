@@ -499,6 +499,9 @@ export interface PostingRulePayload {
 /** 521/331 zaměstnanec vs. 522/366 jednatel-společník. */
 export type PayrollTaxpayerType = 'employee' | 'managing_partner'
 
+/** Pracovní poměr / dohoda o provedení práce / dohoda o pracovní činnosti. */
+export type PayrollEmploymentType = 'hpp' | 'dpp' | 'dpc'
+
 /** Rozpad hrubé mzdy — všechny částky v celých Kč. */
 export interface PayrollBreakdown {
   gross: number
@@ -595,7 +598,16 @@ export interface PayrollEmployee {
    * (`tax_credit_taxpayer`); jsou to dvě různé podmínky a musí platit obě.
    */
   tax_declaration_signed: boolean
+  /** Pracovněprávní vztah (migrace 1156) — řídí režim pojistného a srážkové daně (§6/4). */
+  employment_type: PayrollEmploymentType
   child_count: number
+  /**
+   * Pravidelná měsíční hrubá mzda v celých Kč (migrace 1175). `null` = nesjednaná,
+   * což je jiný stav než 0 — bez ní se `auto_post` zapnout nedá.
+   */
+  monthly_gross: number | null
+  /** Účtovat mzdu měsíčně automaticky cronem `cron-payroll-post`. */
+  auto_post: boolean
   is_active: boolean
   created_at: string
   updated_at: string

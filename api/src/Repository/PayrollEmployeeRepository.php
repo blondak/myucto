@@ -18,7 +18,7 @@ final class PayrollEmployeeRepository
 {
     private const COLS = 'id, supplier_id, full_name, birth_date, birth_number, address,
         taxpayer_type, employment_type, tax_declaration_signed,
-        tax_credit_taxpayer, child_count, is_active, created_at, updated_at';
+        tax_credit_taxpayer, child_count, monthly_gross, auto_post, is_active, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -56,8 +56,8 @@ final class PayrollEmployeeRepository
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, birth_date, birth_number, address,
                  taxpayer_type, employment_type, tax_declaration_signed,
-                 tax_credit_taxpayer, child_count, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 tax_credit_taxpayer, child_count, monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['full_name'],
@@ -69,6 +69,8 @@ final class PayrollEmployeeRepository
             array_key_exists('tax_declaration_signed', $data) ? (int) (bool) $data['tax_declaration_signed'] : 1,
             (int) (bool) $data['tax_credit_taxpayer'],
             $data['child_count'],
+            $data['monthly_gross'] ?? null,
+            array_key_exists('auto_post', $data) ? (int) (bool) $data['auto_post'] : 0,
             array_key_exists('is_active', $data) ? (int) (bool) $data['is_active'] : 1,
         ]);
         return (int) $pdo->lastInsertId();
@@ -83,7 +85,7 @@ final class PayrollEmployeeRepository
         $allowed = [
             'full_name', 'birth_date', 'birth_number', 'address',
             'taxpayer_type', 'employment_type', 'tax_declaration_signed',
-            'tax_credit_taxpayer', 'child_count', 'is_active',
+            'tax_credit_taxpayer', 'child_count', 'monthly_gross', 'auto_post', 'is_active',
         ];
         $sets = [];
         $params = [];
@@ -92,7 +94,7 @@ final class PayrollEmployeeRepository
                 $sets[] = "{$col} = ?";
                 // `tax_declaration_signed` MUSÍ být v seznamu boolean sloupců — jinak by
                 // do TINYINT šlo syrové "false"/"0" z JSONu a MariaDB by z něj udělala 1.
-                $params[] = in_array($col, ['tax_credit_taxpayer', 'is_active', 'tax_declaration_signed'], true)
+                $params[] = in_array($col, ['tax_credit_taxpayer', 'is_active', 'tax_declaration_signed', 'auto_post'], true)
                     ? (int) (bool) $fields[$col]
                     : $fields[$col];
             }
@@ -132,8 +134,38 @@ final class PayrollEmployeeRepository
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['tax_credit_taxpayer'] = (bool) $r['tax_credit_taxpayer'];
+        // Doplněno později (migrace 1156) — bez castu chodí ven TINYINT jako `1`,
+        // ne `true`. PHP strana si to castuje sama, ale checkbox ve frontendu
+        // porovnává s `true`, takže se podepsané prohlášení zobrazovalo jako
+        // NEpodepsané, zatímco server slevu uplatnil. Rozpor UI × zaúčtování.
+        $r['tax_declaration_signed'] = (bool) ($r['tax_declaration_signed'] ?? false);
         $r['child_count'] = (int) $r['child_count'];
+        // Migrace 1175. `monthly_gross` musí zůstat rozlišitelně NULL — 0 Kč je jiný
+        // stav než „pravidelná mzda nesjednaná" a `(int) null` by ty dva slil dohromady.
+        $r['monthly_gross'] = ($r['monthly_gross'] ?? null) === null ? null : (int) $r['monthly_gross'];
+        $r['auto_post'] = (bool) ($r['auto_post'] ?? false);
         $r['is_active'] = (bool) $r['is_active'];
         return $r;
+    }
+
+    /**
+     * Aktivní zaměstnanci, které má cron zaúčtovat sám (migrace 1175).
+     *
+     * Podmínka na `monthly_gross > 0` je součástí dotazu, ne až kontrolou nad výsledkem:
+     * zapnutý příznak bez částky není chyba k nahlášení, ale nedokončené nastavení —
+     * cron o takovém zaměstnanci nemá co reportovat, protože nemá co účtovat.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function autoPostCandidates(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLS . ' FROM payroll_employees
+              WHERE supplier_id = ? AND is_active = 1 AND auto_post = 1
+                AND monthly_gross IS NOT NULL AND monthly_gross > 0
+              ORDER BY id ASC'
+        );
+        $stmt->execute([$supplierId]);
+        return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 }

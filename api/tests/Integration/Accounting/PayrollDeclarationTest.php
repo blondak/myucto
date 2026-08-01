@@ -188,6 +188,131 @@ final class PayrollDeclarationTest extends TestCase
         self::assertSame($posted['breakdown']['net'], $preview['breakdown']['net']);
     }
 
+    /**
+     * REGRESE: `tax_declaration_signed` musí z repository chodit jako BOOLEAN.
+     * TINYINT bez castu leze z PDO jako `1`, přes JSON dorazí jako číslo a checkbox
+     * ve frontendu (`v-model` porovnává s `true`) ho vykreslil jako NEzaškrtnutý —
+     * uživatel viděl „prohlášení nepodepsané", zatímco server slevu uplatnil a
+     * srazil nulu. Cast v `PayrollEmployeeRepository::cast()` se při migraci 1156
+     * nedoplnil spolu se sloupcem.
+     */
+    public function testDeclarationFlagIsExposedAsBoolean(): void
+    {
+        $c = Bootstrap::buildApp()->getContainer();
+        $repo = $c->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
+
+        $signedId = $this->employee(creditClaimed: true, declarationSigned: true);
+        $unsignedId = $this->employee(creditClaimed: true, declarationSigned: false);
+
+        self::assertTrue($repo->find($this->supplierId, $signedId)['tax_declaration_signed']);
+        self::assertFalse($repo->find($this->supplierId, $unsignedId)['tax_declaration_signed']);
+
+        foreach ($repo->listForTenant($this->supplierId) as $row) {
+            self::assertIsBool($row['tax_declaration_signed'], 'Seznam musí vracet boolean, ne TINYINT.');
+            self::assertIsBool($row['tax_credit_taxpayer']);
+        }
+    }
+
+    /**
+     * REGRESE: typ poplatníka se bere z KARTY, ne z požadavku.
+     *
+     * Slevy a počet dětí kartu respektovaly už dřív, typ poplatníka ne — formulář tak
+     * mohl mít „zaměstnanec" (521/331), zatímco karta říká „jednatel-společník"
+     * (522/366), a zaúčtovalo se na jiné účty, než co ukazoval náhled. Typ přitom
+     * nerozhoduje o ničem jiném NEŽ o kontaci, takže rozpor byl přímo v tom jediném,
+     * co ten údaj dělá.
+     */
+    public function testTaxpayerTypeComesFromEmployeeCardNotFromRequest(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: true, declarationSigned: true, taxpayerType: 'managing_partner',
+        );
+
+        $preview = $this->payroll->preview(
+            self::YEAR, self::MONTH, self::GROSS, 'employee',
+            taxpayerCredit: true, childCount: 0, ytdSocialBase: null,
+            supplierId: $this->supplierId, employeeId: $employeeId,
+        );
+        $accounts = array_column($preview['lines'], 'account_code');
+
+        self::assertSame('managing_partner', $preview['taxpayer_type'], 'Karta přebije požadavek.');
+        self::assertContains('522', $accounts);
+        self::assertContains('366', $accounts);
+        self::assertNotContains('521', $accounts);
+        self::assertNotContains('331', $accounts);
+    }
+
+    /** Zaúčtování musí sáhnout na tytéž účty jako náhled — jinak je náhled k ničemu. */
+    public function testPostingUsesTaxpayerTypeFromCard(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: true, declarationSigned: true, taxpayerType: 'managing_partner',
+        );
+
+        $res = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, self::GROSS, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_code
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ?'
+        );
+        $stmt->execute([$res['journal_entry_id']]);
+        $accounts = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+
+        self::assertContains('522', $accounts);
+        self::assertNotContains('521', $accounts);
+    }
+
+    /**
+     * REGRESE: nové sloupce z migrace 1175 musí z repository chodit ve správných PHP
+     * typech. `tax_declaration_signed` na tohle doplatilo (TINYINT místo bool rozešel
+     * UI se serverem), takže `auto_post` musí být bool a `monthly_gross` rozlišitelně
+     * `null` — 0 Kč je jiný stav než „pravidelná mzda nesjednaná".
+     */
+    public function testAutoPostColumnsAreExposedInCorrectPhpTypes(): void
+    {
+        $repo = Bootstrap::buildApp()->getContainer()
+            ->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
+
+        $withGross = $this->employee(
+            creditClaimed: true, declarationSigned: true, monthlyGross: 42_000, autoPost: true,
+        );
+        $withoutGross = $this->employee(creditClaimed: true, declarationSigned: true);
+
+        $a = $repo->find($this->supplierId, $withGross);
+        self::assertSame(42_000, $a['monthly_gross']);
+        self::assertTrue($a['auto_post']);
+
+        $b = $repo->find($this->supplierId, $withoutGross);
+        self::assertNull($b['monthly_gross'], 'Nevyplněná mzda nesmí spadnout na 0.');
+        self::assertFalse($b['auto_post']);
+
+        foreach ($repo->listForTenant($this->supplierId) as $row) {
+            self::assertIsBool($row['auto_post'], 'Seznam musí vracet boolean, ne TINYINT.');
+        }
+    }
+
+    /** Do výběru pro cron patří jen aktivní zaměstnanec s automatem A s částkou. */
+    public function testAutoPostCandidatesRequireBothFlagAndAmount(): void
+    {
+        $repo = Bootstrap::buildApp()->getContainer()
+            ->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
+
+        $ok = $this->employee(creditClaimed: true, declarationSigned: true, monthlyGross: 30_000, autoPost: true);
+        $this->employee(creditClaimed: true, declarationSigned: true, monthlyGross: 30_000, autoPost: false);
+        $this->employee(creditClaimed: true, declarationSigned: true, monthlyGross: null, autoPost: true);
+        $this->employee(creditClaimed: true, declarationSigned: true, monthlyGross: 0, autoPost: true);
+
+        $candidates = $repo->autoPostCandidates($this->supplierId);
+
+        self::assertCount(1, $candidates);
+        self::assertSame($ok, (int) $candidates[0]['id']);
+    }
+
     // ── § 6 odst. 4 ZDP: srážková daň z DPP ──────────────────────────────────
     //
     // DPP do limitu u jednoho zaměstnavatele a BEZ podepsaného prohlášení tvoří
@@ -268,20 +393,30 @@ final class PayrollDeclarationTest extends TestCase
 
     // ── fixtures ─────────────────────────────────────────────────────────────
 
-    private function employee(bool $creditClaimed, bool $declarationSigned, string $employmentType = 'hpp'): int
-    {
+    private function employee(
+        bool $creditClaimed,
+        bool $declarationSigned,
+        string $employmentType = 'hpp',
+        string $taxpayerType = 'employee',
+        ?int $monthlyGross = null,
+        bool $autoPost = false,
+    ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, employment_type,
-                 tax_declaration_signed, tax_credit_taxpayer, child_count, is_active)
-             VALUES (?, ?, "employee", ?, ?, ?, 0, 1)'
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1)'
         )->execute([
             $this->supplierId,
             'Testovací zaměstnanec',
+            $taxpayerType,
             $employmentType,
             $declarationSigned ? 1 : 0,
             $creditClaimed ? 1 : 0,
+            $monthlyGross,
+            $autoPost ? 1 : 0,
         ]);
 
         return (int) $pdo->lastInsertId();

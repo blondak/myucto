@@ -146,6 +146,19 @@ final class CronCatalog
                 'critical' => true,
             ],
             [
+                // Jediná měsíční úloha v katalogu. Účtuje předchozí měsíc, takže musí běžet
+                // až po jeho konci; 04:00 prvního dne je po nočních zálohách a před ranním
+                // provozem. `max_age_hours` = 33 dní: měsíční úloha nesmí hlásit „nejede"
+                // v běžné mezeře mezi dvěma běhy (nejdelší je 31 dní + rezerva na výpadek).
+                'script' => 'cron-payroll-post',
+                'recommended' => 'monthly_day1_0400',
+                'linux_cron' => '0 4 1 * *',
+                'windows_schtasks' => '/sc monthly /d 1 /st 04:00',
+                'max_age_hours' => 792,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-journal-integrity-check',
                 'recommended' => 'daily_0230',
                 'linux_cron' => '30 2 * * *',

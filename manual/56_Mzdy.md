@@ -23,9 +23,18 @@ Obě cesty jsou alternativní; tentýž měsíc nezaúčtovávej dvakrát.
 ## 56.2 Zaměstnanci a podklady
 
 Ve spodní části stránky lze založit zaměstnance a uložit identifikační údaje, typ
-vztahu, příznak základní slevy na poplatníka, počet dětí a aktivní stav. Tyto údaje
-slouží ročnímu mzdovému listu; samy nedokládají podepsané prohlášení poplatníka ani
-nárok na slevu.
+poplatníka, pracovněprávní vztah, příznak základní slevy na poplatníka, počet dětí,
+pravidelnou měsíční hrubou mzdu a aktivní stav. Tyto údaje slouží ročnímu mzdovému
+listu; samy nedokládají podepsané prohlášení poplatníka ani nárok na slevu.
+
+Karta je zdroj pravdy: vyberete-li ve výpočtu zaměstnance, převezme se z ní **typ
+poplatníka i slevy** a příslušná pole ve formuláři se zamknou. Zabraňuje to tomu, aby
+náhled ukazoval kontaci 521/331 a zaúčtovalo se 522/366.
+
+**Pravidelná hrubá mzda** je deklarovaná částka pro příští měsíce, ne historie —
+už zaúčtované měsíce zůstávají v mzdovém listu tak, jak byly zaúčtovány, a pozdější
+změna karty je nepřepíše. Teprve s vyplněnou částkou lze zapnout **Účtovat
+automaticky** (viz § 56.4).
 
 Zaměstnance s historií měsíčních snapshotů nelze smazat. Lze jej deaktivovat,
 aby se nenabízel pro nové měsíce; historický mzdový list zůstane čitelný.
@@ -95,6 +104,26 @@ již zkontrolovaného měsíce ověř dopad na mzdy, odvody a všechny navazují
 Náhled je čistý výpočet bez zápisu; ostrá akce vyžaduje
 `accounting.journal.post`. Výsledný zápis i snapshot vznikají společně v
 transakci, aby mzdový list nemohl tvrdit něco jiného než deník.
+
+### Automatické měsíční zaúčtování
+
+Má-li zaměstnanec na kartě vyplněnou pravidelnou hrubou mzdu a zapnuté **Účtovat
+automaticky**, zaúčtuje jeho rekapitulaci úloha `cron-payroll-post` sama — běží 1. dne
+v měsíci a účtuje měsíc předchozí, s datem k jeho poslednímu dni. Stav běhu je vidět
+v **Systém → Plánované úlohy**.
+
+Automat nikdy nepřepisuje cizí práci:
+
+- měsíc, který už je zaevidovaný (ať cronem, nebo ručně s jinou částkou), přeskočí
+  a ohlásí jako „už bylo",
+- je-li za měsíc už zaúčtovaná rekapitulace patřící někomu jinému — typicky **druhý
+  zaměstnanec s automatem**, protože za firmu a měsíc existuje jen jeden zápis —
+  ohlásí konflikt a nechá mzdu na ruční zaúčtování,
+- uzavřené období, zámek data nebo chyba u jednoho zaměstnance běh neshodí; skončí
+  v reportu úlohy.
+
+Ručně lze úlohu spustit i zpětně: `cmd/cron-payroll-post.sh --period=2026-06`
+(`--dry-run` jen vypíše, co by udělala).
 
 ## 56.5 Slevy a měsíční snapshot zaměstnance
 

@@ -45,6 +45,8 @@ final class PayrollPostingService
      * kartou. Rozdíl byl tichý a po zavedení vazby na podepsané prohlášení narostl:
      * náhled mohl slevu uplatnit a zaúčtování ne.
      *
+     * @param string $taxpayerType typ poplatníka (kontace 521/331 vs. 522/366). Se zadaným
+     *        zaměstnancem se IGNORUJE — rozhoduje karta, stejně jako u slev.
      * @param bool $taxpayerCredit poplatník má podepsané prohlášení (§38k ZDP) →
      *        uplatní se měsíční sleva na poplatníka. Se zadaným zaměstnancem se
      *        IGNORUJE — rozhoduje karta.
@@ -73,9 +75,13 @@ final class PayrollPostingService
         $this->assertType($taxpayerType);
 
         if ($supplierId !== null && $employeeId !== null) {
-            [$taxpayerCredit, $childCount, $ytdSocialBase] =
+            [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase] =
                 $this->employeeContext($supplierId, $employeeId, $year, $month)
-                ?? [$taxpayerCredit, $childCount, $ytdSocialBase];
+                ?? [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase];
+            // Typ z karty prošel jen CHECK constraintem, ne PayrollCalculator::types() —
+            // starší řádek s hodnotou, kterou kalkulátor nezná, musí spadnout tady,
+            // ne až na chybějícím účtu v kontaci.
+            $this->assertType($taxpayerType);
         }
 
         // forExactYear(): mzdový rozpad se NESMÍ tiše počítat sazbami jiného roku —
@@ -153,8 +159,8 @@ final class PayrollPostingService
     /**
      * Zaúčtuje rekapitulaci. Idempotentní na (supplier, RRRRMM).
      *
-     * `$employeeId` je VOLITELNÝ; když je zadaný, jeho evidované prohlášení a počet dětí
-     * PŘEBIJÍ hodnoty z požadavku — karta zaměstnance je zdroj pravdy o slevách, takže
+     * `$employeeId` je VOLITELNÝ; když je zadaný, jeho evidovaný TYP POPLATNÍKA, prohlášení
+     * a počet dětí PŘEBIJÍ hodnoty z požadavku — karta zaměstnance je zdroj pravdy, takže
      * se zaúčtování nemůže rozejít se snapshotem pro mzdový list (§38j).
      *
      * @param array<string,mixed> $meta auditní meta (user_id, ip, user_agent)
@@ -177,7 +183,7 @@ final class PayrollPostingService
         $ytdSocialBase = null;
         $context = $employeeId === null ? null : $this->employeeContext($supplierId, $employeeId, $year, $month);
         if ($context !== null) {
-            [$taxpayerCredit, $childCount, $ytdSocialBase] = $context;
+            [$taxpayerType, $taxpayerCredit, $childCount, $ytdSocialBase] = $context;
         }
 
         // supplierId/employeeId se PŘEDÁVAJÍ dál — jinak by se v náhledu neuplatnila
@@ -195,7 +201,10 @@ final class PayrollPostingService
             $preview['lines'],
             array_merge($meta, [
                 'entry_date'  => $preview['entry_date'],
-                'description' => self::description($year, $month, $taxpayerType),
+                // Popis se bere z NÁHLEDU, ne ze vstupu: s vybraným zaměstnancem rozhoduje
+                // o kontaci typ z karty, a text „mzda zaměstnance" u zápisu 522/366 by
+                // v deníku popíral, co se doopravdy zaúčtovalo.
+                'description' => self::description($year, $month, $preview['taxpayer_type']),
                 'posted'      => true,
                 'posted_by'   => $meta['user_id'] ?? null,
             ]),
@@ -316,15 +325,20 @@ final class PayrollPostingService
     }
 
     /**
-     * Slevy a roční kontext z karty zaměstnance — JEDINÝ zdroj pravdy pro náhled
-     * i zaúčtování.
+     * Typ poplatníka, slevy a roční kontext z karty zaměstnance — JEDINÝ zdroj pravdy
+     * pro náhled i zaúčtování.
      *
      * Dřív tuhle logiku měl jen `post()`; `preview()` počítal z hodnot v požadavku
      * a zaúčtování je pak přebilo kartou. Rozdíl byl tichý a po zavedení vazby na
      * podepsané prohlášení narostl — náhled mohl slevu uplatnit a zaúčtování ne.
      * Sdílená metoda ten rozpor vylučuje konstrukčně, ne disciplínou.
      *
-     * @return array{0:bool, 1:int, 2:?float}|null `null` = zaměstnanec neexistuje
+     * TYP POPLATNÍKA se z karty do teď nebral, ačkoli slevy ano — formulář mohl mít
+     * „zaměstnanec" (521/331), zatímco karta říká „jednatel-společník" (522/366),
+     * a zaúčtovalo se na jiné účty, než co ukazoval náhled. Nekonzistence tím spíš,
+     * že kontace je to jediné, co typ poplatníka rozhoduje.
+     *
+     * @return array{0:string, 1:bool, 2:int, 3:?float}|null `null` = zaměstnanec neexistuje
      */
     private function employeeContext(int $supplierId, int $employeeId, int $year, int $month): ?array
     {
@@ -343,6 +357,7 @@ final class PayrollPostingService
             && (bool) ($employee['tax_declaration_signed'] ?? 0);
 
         return [
+            (string) $employee['taxpayer_type'],
             $taxpayerCredit,
             (int) $employee['child_count'],
             // Se známým zaměstnancem lze uplatnit strop §15a — dosavadní roční základ

@@ -58,6 +58,7 @@ V `cmd/` jsou připravené `.cmd` (Windows Task Scheduler) i `.sh` (Linux cron) 
 | `cron-send-reminders` | 1× denně 09:00, Po–Pá |
 | `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
+| `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
 
 Detaily v `cmd/README.md`.
 
