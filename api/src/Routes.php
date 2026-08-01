@@ -186,6 +186,7 @@ use MyInvoice\Action\Accounting\Attachment\DownloadJournalAttachmentAction;
 use MyInvoice\Action\Accounting\Attachment\ListJournalAttachmentsAction;
 use MyInvoice\Action\Accounting\Attachment\PatchJournalAttachmentDescriptionAction;
 use MyInvoice\Action\Accounting\Attachment\UploadJournalAttachmentAction;
+use MyInvoice\Action\Accounting\JournalRelatedAction;
 use MyInvoice\Action\Accounting\JournalSourceAction;
 use MyInvoice\Action\Accounting\Note\CreateJournalNoteAction;
 use MyInvoice\Action\Accounting\Note\DeleteJournalNoteAction;
@@ -609,6 +610,8 @@ final class Routes
             $g->delete('/journal/{id:[0-9]+}/notes/{noteId:[0-9]+}',      DeleteJournalNoteAction::class);
             // Náhled zdrojového dokladu pro drawer — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/source',         JournalSourceAction::class);
+            // Protějšky zápisu (doklad ↔ úhrada) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
+            $g->get   ('/journal/{id:[0-9]+}/related',        JournalRelatedAction::class);
             // SYSTEM VERSIONING auditní historie (audit 2026-07) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/history',        [JournalAction::class, 'history']);
             $g->get   ('/journal/{id:[0-9]+}',                [JournalAction::class, 'get']);

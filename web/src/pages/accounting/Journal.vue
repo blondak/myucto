@@ -23,6 +23,7 @@ import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import WhyPanel from '@/components/automation/WhyPanel.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -203,6 +204,18 @@ watch(() => route.query, (q) => {
   setTimeout(() => { suppressUrlSync = false }, 0)
 })
 
+/**
+ * Deep-link `?entry_id=` při navigaci na TUTÉŽ routu. `onMounted` se v takovém
+ * případě znovu nespustí, takže bez tohohle watcheru by odkaz mířící z deníku do
+ * deníku jen přepsal adresu a jinak neudělal nic.
+ */
+watch(() => route.query.entry_id, async (raw) => {
+  const id = Number(raw || 0)
+  if (id <= 0 || id === entryIdFilter.value) return
+  sourceDrawerEntryId.value = null
+  if (!await focusEntry(id)) toast.error(t('common.error'))
+})
+
 const COLUMNS: ColumnDef[] = [
   { key: 'date', labelKey: 'accounting.journal.entry_date', required: true },
   { key: 'document_no', labelKey: 'accounting.journal.document_no' },
@@ -269,23 +282,8 @@ onMounted(async () => {
   const qSourceId = Number(route.query.source_id || 0)
   if (qSourceId > 0) sourceIdFilter.value = qSourceId
   const entryId = Number(route.query.entry_id || 0)
-  if (entryId > 0) {
-    try {
-      const d = await accountingApi.getEntry(entryId)
-      // Filtruj přímo na ten zápis. Datum se nastavuje jen jako viditelný kontext
-      // (uživatel hned vidí, kde v čase je); samotné omezení dělá entry_id, takže
-      // se vedle hledaného zápisu neukážou nesouvisející zápisy z téhož dne.
-      entryIdFilter.value = entryId
-      filters.date_from = d.entry_date
-      filters.date_to = d.entry_date
-      await load()
-      expandedId.value = entryId
-      detail.value = d
-      return
-    } catch {
-      /* neexistující/cizí zápis — pokračuje běžné načtení */
-    }
-  }
+  // Neexistující/cizí zápis → pokračuje běžné načtení.
+  if (entryId > 0 && await focusEntry(entryId)) return
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   await load()
 })
@@ -383,24 +381,62 @@ function onDescriptionUpdated(entryId: number, description: string, rowVersion: 
   if (row) { row.description = description; row.row_version = rowVersion }
 }
 
-/** Proklik na stornující zápis (deep-link ?entry_id= v rámci téže stránky). */
-async function openReversal(id: number) {
+/**
+ * Odskok na JEDEN konkrétní zápis v rámci téže stránky — společná cesta pro
+ * deep-link `?entry_id=`, proklik na stornující zápis i proklik z panelu „Souvisí".
+ *
+ * Kolizní filtry se ruší schválně: hledaný zápis by jimi nemusel projít a proklik
+ * by navenek „nefungoval". Omezení dělá `entry_id`, datum se nastavuje jen jako
+ * viditelný kontext (uživatel hned vidí, kde v čase je), takže se vedle hledaného
+ * zápisu neukážou nesouvisející zápisy z téhož dne.
+ *
+ * @returns false, když zápis neexistuje nebo patří jinému tenantovi
+ */
+async function focusEntry(entryId: number): Promise<boolean> {
+  let d: JournalEntryDetail
   try {
-    const d = await accountingApi.getEntry(id)
-    filters.date_from = d.entry_date
-    filters.date_to = d.entry_date
-    // Kolizní filtry pryč — stornující zápis by jinak nemusel projít filtrem a proklik by „nefungoval"
-    filters.period_id = ''
-    filters.source_type = ''
-    filters.posted = ''
-    filters.automation = ''
-    page.value = 1
-    await load()
-    expandedId.value = id
-    detail.value = d
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    d = await accountingApi.getEntry(entryId)
+  } catch {
+    return false
   }
+  filters.document_no = ''
+  filters.period_id = ''
+  filters.source_type = ''
+  filters.posted = ''
+  filters.automation = ''
+  filters.q = ''
+  filters.account_from = ''
+  filters.account_to = ''
+  filters.amount_from = ''
+  filters.amount_to = ''
+  sourceIdFilter.value = ''
+  entryIdFilter.value = entryId
+  filters.date_from = d.entry_date
+  filters.date_to = d.entry_date
+  page.value = 1
+  await load()
+  expandedId.value = entryId
+  detail.value = d
+  return true
+}
+
+/** Proklik na stornující zápis. */
+async function openReversal(id: number) {
+  if (!await focusEntry(id)) toast.error(t('common.error'))
+}
+
+/**
+ * Proklik z panelu „Souvisí" na zaúčtování protějšku. Drawer se zavírá — jinak by
+ * zůstal viset přes výsledek a odskok by nebyl vidět.
+ */
+async function onFocusEntry(entryId: number) {
+  sourceDrawerEntryId.value = null
+  if (!await focusEntry(entryId)) {
+    toast.error(t('common.error'))
+    return
+  }
+  // Adresa musí odpovídat tomu, co je vidět (sdílitelný odkaz, zpětné tlačítko).
+  void router.replace({ query: { entry_id: String(entryId) } })
 }
 
 function sourceLabel(type: string): string {
@@ -621,6 +657,17 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+                    <!--
+                      Odznak „má protějšek" (doklad ↔ úhrada). Bez něj by účetní musel
+                      rozbalit každý řádek, aby zjistil, jestli je zápis na něco navázaný;
+                      obsah vazby ukáže panel Souvisí v rozbaleném detailu.
+                    -->
+                    <span v-if="e.has_related" :title="t('accounting.journal.related.badge_title')"
+                      class="inline-flex items-center text-neutral-400">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
+                      </svg>
+                    </span>
                   </div>
                 </td>
                 <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono">{{ formatMoney(e.amount ?? 0) }}</td>
@@ -681,6 +728,8 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
                     <JournalEntryExtras :entry="detail"
                       @description-updated="(desc, rv) => onDescriptionUpdated(detail!.id, desc, rv)" />
+                    <JournalRelatedPanel class="mt-4 block" :entry-id="detail.id" show-preview
+                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
                     <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
                     <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
                       <div class="text-xs text-neutral-500">
@@ -726,6 +775,6 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
     </nav>
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
-      @close="sourceDrawerEntryId = null" />
+      @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
   </div>
 </template>

@@ -9,6 +9,7 @@ import type { PermissionKey } from '@/security/permissions'
 import Drawer from '@/components/ui/Drawer.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SourceBlockRenderer from '@/components/accounting/SourceBlockRenderer.vue'
+import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 
 /**
  * Náhled zdrojového dokladu účetního zápisu.
@@ -22,7 +23,11 @@ import SourceBlockRenderer from '@/components/accounting/SourceBlockRenderer.vue
  * cizí doklad.
  */
 const props = defineProps<{ entryId: number }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{
+  (e: 'close'): void
+  /** Odskok na zápis v deníku — drawer visí NAD deníkem, takže to musí řešit stránka. */
+  (e: 'focus-entry', entryId: number): void
+}>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -30,6 +35,15 @@ const toast = useToast()
 
 const loading = ref(false)
 const summary = ref<JournalSourceSummary | null>(null)
+
+/**
+ * Zobrazený zápis — NENÍ to vždy `props.entryId`. Z panelu „Souvisí" jde přepnout
+ * na protějšek (účtování úhrady ↔ účtování dokladu), aniž by účetní ztratil pozici
+ * v deníku; zpět se vrací šipkou v hlavičce. Historie je jednoúrovňová záměrně:
+ * graf vazeb je oboustranný, takže hlubší zanořování jen krouží mezi dvěma zápisy.
+ */
+const currentId = ref(props.entryId)
+const rootId = ref(props.entryId)
 
 async function load(id: number) {
   loading.value = true
@@ -45,7 +59,11 @@ async function load(id: number) {
 }
 
 // Drawer se mountuje s v-if, ale entryId se může změnit klikem na jiný řádek.
-watch(() => props.entryId, id => { if (id > 0) load(id) }, { immediate: true })
+watch(() => props.entryId, id => {
+  if (id > 0) { rootId.value = id; currentId.value = id }
+}, { immediate: true })
+
+watch(currentId, id => { if (id > 0) load(id) }, { immediate: true })
 
 const sourceTypeLabel = computed(() => {
   const type = summary.value?.source_type
@@ -131,6 +149,14 @@ function fmt(value: unknown, format: SourceFieldFormat): string {
     <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 
     <template v-else-if="summary">
+      <button v-if="currentId !== rootId" type="button" @click="currentId = rootId"
+              class="cursor-pointer mb-3 inline-flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+        {{ t('accounting.journal.related.back') }}
+      </button>
+
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-4">
         <span v-if="summary.status" class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass">
           {{ statusLabel }}
@@ -163,6 +189,15 @@ function fmt(value: unknown, format: SourceFieldFormat): string {
           :fallback-currency="summary.currency"
         />
       </template>
+
+      <!--
+        Panel je MIMO v-if na `available`: i u zápisu bez náhledu dokladu (např.
+        zápočet) dává smysl ukázat, co s ním souvisí — a v draweru navíc umí
+        přepnout náhled na protějšek.
+      -->
+      <JournalRelatedPanel class="mt-6" :entry-id="currentId" show-preview
+                           @preview="id => currentId = id"
+                           @focus-entry="id => emit('focus-entry', id)" />
     </template>
   </Drawer>
 </template>

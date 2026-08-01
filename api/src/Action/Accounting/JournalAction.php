@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\JournalHistoryService;
+use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\JournalExportService;
@@ -45,6 +46,7 @@ use Psr\Log\LoggerInterface;
  *   POST /api/accounting/journal/{id}/reverse            — storno (zrcadlový protizápis)
  *   GET  /api/accounting/reports/journal/export           — export PDF/XLSX (audit 2026-07)
  *   GET  /api/accounting/journal/{id}/history             — SYSTEM VERSIONING timeline (audit 2026-07)
+ *   GET  /api/accounting/journal/{id}/related             — protějšky doklad ↔ úhrada (JournalRelatedAction)
  */
 final class JournalAction
 {
@@ -75,6 +77,7 @@ final class JournalAction
         private readonly JournalPdfRenderer $pdf,
         private readonly ReportXlsxExporter $xlsx,
         private readonly JournalHistoryService $history,
+        private readonly JournalLinkService $links,
         private readonly JournalEntryAttachmentRepository $attachments,
         private readonly JournalAttachmentStorage $attachmentStorage,
         private readonly LoggerInterface $log,
@@ -96,8 +99,13 @@ final class JournalAction
             $supplierId,
             array_map(static fn (array $item): int => (int) $item['id'], $result['items']),
         );
+        // Odznak „má protějšek" (doklad ↔ úhrada) — batch přes celou stránku,
+        // viz JournalLinkService::hasRelatedMap(). Bez něj by účetní musel rozbalit
+        // každý řádek, aby zjistil, jestli je zápis na něco navázaný.
+        $related = $this->links->hasRelatedMap($supplierId, $result['items']);
         foreach ($result['items'] as &$item) {
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
+            $item['has_related'] = isset($related[(int) $item['id']]);
         }
         unset($item);
         return Json::ok($response, [

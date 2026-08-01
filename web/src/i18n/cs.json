@@ -1434,6 +1434,22 @@
           "validation_failed": "Poznámku se nepodařilo uložit — zkontroluj text."
         }
       },
+      "related": {
+        "title": "Souvisí",
+        "relation": {
+          "payment": "Úhrada",
+          "document": "Doklad"
+        },
+        "allocated": "na doklad",
+        "not_posted": "Nezaúčtováno",
+        "preview": "Náhled",
+        "open_entry": "Zápis",
+        "open_document": "Otevřít doklad",
+        "back": "Zpět na výchozí zápis",
+        "badge_title": "Zápis je propojený s dokladem nebo jeho úhradou",
+        "truncated": "Zobrazeno prvních {shown} vazeb.",
+        "failed": "Související doklady se nepodařilo načíst."
+      },
       "source_drawer": {
         "open": "Zobrazit náhled dokladu",
         "truncated": "Zobrazeno {shown} z {total} — otevři detail dokladu pro celý seznam.",

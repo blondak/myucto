@@ -117,6 +117,11 @@ export interface JournalEntry {
    */
   source_settlement_doc_type?: 'invoice' | 'purchase_invoice' | null
   source_settlement_doc_id?: number | null
+  /**
+   * Obohaceno v listu — zápis má protějšek v grafu doklad ↔ úhrada (banka/pokladna/
+   * zápočet). Podklad pro odznak ve sloupci Zdroj; obsah panelu dodá /journal/{id}/related.
+   */
+  has_related?: boolean
   automation?: AutomationProvenance | null
   _warnings?: Array<'entry_date_outside_document_year'>
 }
@@ -245,6 +250,38 @@ export interface SourceAction {
   permission: string
   route?: SourceRoute
   href?: string
+}
+
+// ── Protějšky zápisu: doklad ↔ úhrada (banka / pokladna / zápočet) ──────────
+/**
+ * Jedna položka panelu „Souvisí". `relation` říká, na které straně případu protějšek
+ * stojí: 'payment' = úhrada tohoto dokladu, 'document' = doklad, který tento pohyb hradí.
+ */
+export interface JournalRelatedItem {
+  relation: 'payment' | 'document'
+  source_type: 'invoice' | 'purchase_invoice' | 'bank' | 'cash' | 'settlement'
+  source_id: number
+  /** Právo, které FE ověří přes auth.canRead() než vykreslí proklik na doklad. */
+  permission: string
+  title: string | null
+  subtitle: string | null
+  date: string | null
+  amount: number | null
+  /** Částka alokovaná na tuhle vazbu — liší se od `amount` u splátek a souhrnných plateb. */
+  allocated_amount: number | null
+  currency: string | null
+  route: SourceRoute | null
+  /** Zaúčtování protějšku; null = doklad ještě zaúčtovaný není. */
+  entry_id: number | null
+  entry_date: string | null
+  entry_document_no: string | null
+  entry_posted: boolean
+}
+
+export interface JournalRelated {
+  entry_id: number
+  items: JournalRelatedItem[]
+  truncated: boolean
 }
 
 export interface JournalSourceSummary {
@@ -1324,6 +1361,13 @@ export const accountingApi = {
    */
   getJournalSource: (id: number) =>
     api.get<JournalSourceSummary>(`/accounting/journal/${id}/source`).then(r => r.data),
+
+  /**
+   * Protějšky zápisu (doklad ↔ úhrada) i s jejich zaúčtováním. Klíčem je opět
+   * ID ZÁPISU, ne dvojice source_type/source_id — stejná obrana proti IDOR.
+   */
+  getJournalRelated: (id: number) =>
+    api.get<JournalRelated>(`/accounting/journal/${id}/related`).then(r => r.data),
 
   // Šablony ručních zápisů (Fáze F, mzdový můstek)
   listJournalTemplates: () =>

@@ -1434,6 +1434,22 @@
           "validation_failed": "The note could not be saved — check the text."
         }
       },
+      "related": {
+        "title": "Related",
+        "relation": {
+          "payment": "Payment",
+          "document": "Document"
+        },
+        "allocated": "allocated",
+        "not_posted": "Not posted",
+        "preview": "Preview",
+        "open_entry": "Entry",
+        "open_document": "Open document",
+        "back": "Back to the original entry",
+        "badge_title": "Entry is linked to a document or its payment",
+        "truncated": "Showing the first {shown} links.",
+        "failed": "Related documents could not be loaded."
+      },
       "source_drawer": {
         "open": "Show document preview",
         "truncated": "Showing {shown} of {total} — open the document detail for the full list.",

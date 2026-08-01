@@ -936,28 +936,7 @@ final class JournalSourceSummaryService
 
     private function partnerName(array $row, string $snapshotKey = 'client_snapshot'): ?string
     {
-        $company = isset($row['company_name']) ? trim((string) $row['company_name']) : '';
-        if ($company !== '') {
-            return $company;
-        }
-        $person = trim(((string) ($row['first_name'] ?? '')) . ' ' . ((string) ($row['last_name'] ?? '')));
-        if ($person !== '') {
-            return $person;
-        }
-        // Fallback na snapshot — klient mohl být smazán, snapshot drží historický stav.
-        if (!empty($row[$snapshotKey])) {
-            $snap = json_decode((string) $row[$snapshotKey], true);
-            if (is_array($snap)) {
-                foreach (['company_name', 'name'] as $k) {
-                    if (!empty($snap[$k])) {
-                        return (string) $snap[$k];
-                    }
-                }
-                $p = trim(((string) ($snap['first_name'] ?? '')) . ' ' . ((string) ($snap['last_name'] ?? '')));
-                if ($p !== '') return $p;
-            }
-        }
-        return null;
+        return DocumentPartnerName::from($row, $snapshotKey);
     }
 
     private function accountWithBank(array $row): ?string

@@ -90,7 +90,9 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 - **Datum dokladu** *(skryto ve výchozím zobrazení)* — datum vyhotovení, pokud se liší od data zápisu,
 - **Popis**,
 - **Zdroj** — typ a číslo zdrojového dokladu; odznak **Automaticky** se u
-  automatického zápisu zobrazuje přímo v tomto sloupci,
+  automatického zápisu zobrazuje přímo v tomto sloupci, stejně jako ikona
+  řetězu u zápisů, které mají protějšek (doklad ↔ jeho úhrada — viz
+  [Souvisí: doklad a jeho úhrada](#souvisí-doklad-a-jeho-úhrada)),
 - **Částka** — celková částka zápisu (Σ MD, u vyváženého zápisu shodná se Σ Dal),
 - **Stav** — badge **Zaúčtováno** (zeleně) nebo **Koncept** (šedě),
 - **Zaúčtováno dne** a **Zaúčtoval** *(skryto ve výchozím zobrazení)*.
@@ -117,6 +119,33 @@ uživatel ztratil rozevřený deník a filtry. Podle typu nabízí odkaz do pln�
 
 U technických zdrojů bez samostatného detailu, například u uzavření knih nebo
 kurzového přecenění, zůstane zdroj textový.
+
+### Souvisí: doklad a jeho úhrada
+
+Deník vede fakturu a její úhradu jako **dva samostatné zápisy** — předpis (311/6xx,
+resp. 5xx/321) a úhradu (221/311, resp. 321/221). Účetní je ale řeší jako jeden
+případ, proto má každý takový zápis panel **Souvisí**: v rozbaleném řádku deníku
+i v postranním náhledu zdrojového dokladu.
+
+Panel u každého protějšku ukazuje typ (banka, pokladna, zápočet, faktura), číslo,
+datum, částku a nabízí tři cesty:
+
+- **Náhled** — přepne postranní panel na *zaúčtování protějšku*, aniž bys opustil
+  deník; zpět se vrátíš šipkou v hlavičce panelu,
+- **Zápis #…** — odskok na protějšek přímo v deníku (deep-link `?entry_id=`),
+- **Otevřít doklad** — detail faktury, bankovní výpis s danou transakcí nebo
+  předfiltrovaná pokladna.
+
+Vazby se hledají přes evidenci plateb, párování bankovních transakcí (včetně
+souhrnných plateb pokrývajících víc dokladů), pokladní doklady navázané na fakturu
+a zápočty. Když transakce pokryla jen část dokladu nebo naopak víc dokladů najednou,
+panel vedle celkové částky pohybu uvádí i **částku připadající na tento doklad**.
+
+Protějšek, který ještě **není zaúčtovaný**, je označený štítkem *Nezaúčtováno* —
+je to typický důvod, proč saldo nesedí s deníkem, takže se záměrně nezamlčuje.
+
+Ikona řetězu ve sloupci **Zdroj** ukazuje, které zápisy protějšek mají, ještě než
+řádek rozbalíš.
 
 ### Filtry
 
