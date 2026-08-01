@@ -455,6 +455,8 @@ final class Section46Service
      * SELECT vydaného dokladu vč. DIČ odběratele — DIČ preferenčně ze snapshotu
      * dokladu (stav k vystavení), fallback živý klient. SSOT výrazu:
      * {@see \MyInvoice\Service\Report\VatLedgerService::saleCounterpartyDicExpr()}.
+     * Fragment KONČÍ tenant predikátem `WHERE i.supplier_id = ?` — volající
+     * připojují jen další AND podmínky (a supplier_id dávají jako první parametr).
      */
     private function invoiceSelect(): string
     {
@@ -465,14 +467,15 @@ final class Section46Service
                 i.paid_total, i.advance_paid_amount, i.status, i.reverse_charge,
                 cl.company_name AS client_name, {$dicExpr} AS client_dic
            FROM invoices i
-           JOIN clients cl ON cl.id = i.client_id";
+           JOIN clients cl ON cl.id = i.client_id
+          WHERE i.supplier_id = ?";
     }
 
     /** @return array<string,mixed>|null */
     private function fetchInvoice(int $supplierId, int $invoiceId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            $this->invoiceSelect() . ' WHERE i.supplier_id = ? AND i.id = ?'
+            $this->invoiceSelect() . ' AND i.id = ?'
         );
         $stmt->execute([$supplierId, $invoiceId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -490,8 +493,7 @@ final class Section46Service
     {
         $stmt = $this->db->pdo()->prepare(
             $this->invoiceSelect() .
-            " WHERE i.supplier_id = ?
-                AND i.invoice_type = 'invoice'
+            "   AND i.invoice_type = 'invoice'
                 AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                 AND i.reverse_charge = 0
                 AND i.total_vat > 0
