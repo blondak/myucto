@@ -396,13 +396,13 @@ async function copySetup() {
     <p v-if="!hasProblems && jobs.length" class="mt-3 text-xs text-success-600">✓ {{ t('cron_jobs.all_ok') }}</p>
 
     <!-- Jak úlohy naplánovat — sbaleno, řeší se jednou při instalaci. -->
-    <details v-if="install && jobs.length" class="mt-6 rounded-lg border border-neutral-200 dark:border-neutral-700">
+    <details v-if="install && jobs.length" class="mt-6 rounded-lg border border-neutral-200">
       <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">
         {{ t('cron_jobs.setup_title') }}
         <span class="ml-2 text-xs font-normal text-neutral-500">{{ t('cron_jobs.setup_paths_hint') }}</span>
       </summary>
 
-      <div class="border-t border-neutral-200 dark:border-neutral-700 px-4 py-3 space-y-3">
+      <div class="border-t border-neutral-200 px-4 py-3 space-y-3">
         <div class="flex flex-wrap items-center gap-2">
           <button
             v-for="p in (['linux', 'windows', 'docker'] as const)"
@@ -410,8 +410,8 @@ async function copySetup() {
             type="button"
             class="text-xs px-2.5 py-1 rounded border"
             :class="platform === p
-              ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200 font-medium'
-              : 'border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300'"
+              ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
+              : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50'"
             @click="platform = p"
           >
             {{ t(`cron_jobs.setup_platform_${p}`) }}
@@ -425,7 +425,7 @@ async function copySetup() {
         <p v-if="!platformIsLive" class="text-xs text-warning-600">{{ t('cron_jobs.setup_foreign_platform') }}</p>
 
         <!-- Vodorovný scroll patří bloku s příkazy, ne stránce. -->
-        <pre class="text-xs font-mono bg-neutral-50 dark:bg-neutral-900 rounded p-3 overflow-x-auto whitespace-pre">{{ setupCommands }}</pre>
+        <pre class="text-xs font-mono bg-neutral-50 border border-neutral-200 rounded p-3 overflow-x-auto whitespace-pre">{{ setupCommands }}</pre>
 
         <dl class="text-xs text-neutral-500 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
           <dt>{{ t('cron_jobs.setup_project_root') }}</dt>
