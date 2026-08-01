@@ -151,8 +151,18 @@ const selectedEmployee = computed(
 )
 const creditsLocked = computed(() => selectedEmployee.value !== null)
 
-watch(selectedEmployee, (e) => {
+watch(selectedEmployee, (e, previous) => {
   if (!e) return
+  // Pravidelná mzda z karty se předvyplní, ať se táž konstanta neopisuje měsíc co
+  // měsíc. NEpřepisuje se ale částka, kterou uživatel zadal ručně — jednorázová
+  // úprava kvůli nemoci nebo odměně by se tím tiše zahodila. Přepíše se jen
+  // prázdné pole, nebo hodnota, která zjevně patřila předchozímu zaměstnanci.
+  const declared = e.monthly_gross ?? null
+  const untouched = form.gross === null
+    || (previous != null && form.gross === previous.monthly_gross)
+  if (declared !== null && declared > 0 && untouched) {
+    form.gross = declared
+  }
   // Typ poplatníka rozhoduje o kontaci (521/331 vs. 522/366). Formulář mohl mít
   // „zaměstnanec", zatímco karta říká „jednatel-společník" — zaúčtovalo se pak
   // na jiné účty, než co ukazoval náhled.

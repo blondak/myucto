@@ -4426,8 +4426,8 @@
     "credential_label": "Název přístupového klíče",
     "label_placeholder": "Název, např. Pixel 9",
     "fresh_auth_hint": "Přidání a odebrání vyžaduje nové ověření existujícím silným faktorem; u prvního faktoru aktuální heslo.",
-    "totp_label": "TOTP kód pro ověření (volitelně)",
-    "totp_optional": "6místný TOTP kód (volitelná alternativa)",
+    "totp_label": "TOTP kód — když nemáte klíč po ruce",
+    "totp_optional": "6místný kód z autentikátoru",
     "totp_label_required": "TOTP kód pro ověření *",
     "totp_required_placeholder": "6místný TOTP kód",
     "totp_required_hint": "Máte aktivní 2FA, ale zatím žádný přístupový klíč — registraci proto lze ověřit jedině kódem z authenticator aplikace.",
@@ -4439,7 +4439,14 @@
     "rename_prompt": "Nový název přístupového klíče",
     "revoke": "Odebrat",
     "revoke_confirm": "Opravdu odebrat přístupový klíč „{label}“?",
-    "operation_failed": "Operace s přístupovým klíčem se nepodařila."
+    "operation_failed": "Operace s přístupovým klíčem se nepodařila.",
+    "method_not_allowed": "Přístupové klíče jsou v konfiguraci vypnuté (auth.allowed_mfa_methods), takže nový nelze zaregistrovat. Existující klíče níž zůstávají a jdou odebrat.",
+    "revoke_hint_totp": "Odebrání klíče je citlivá operace — potvrdíte ji jiným klíčem, nebo TOTP kódem z pole nahoře, když klíč nemáte po ruce.",
+    "revoke_hint_passkey": "Odebrání klíče je citlivá operace — potvrdíte ji systémovým dialogem některého ze svých klíčů.",
+    "revoke_needs_totp": "Zadejte nahoře 6místný TOTP kód — bez něj odebrání nelze potvrdit.",
+    "revoke_totp_fallback": "Nemáte-li klíč po ruce, zadejte nahoře TOTP kód a zkuste to znovu.",
+    "revoke_last_factor": "Tohle je váš poslední silný faktor a přihlašování dvěma faktory je vynucené — odebrat ho nelze. Zaregistrujte nejdřív druhý klíč nebo si zapněte TOTP.",
+    "revoke_no_method": "Odebrání není čím potvrdit — tenhle prohlížeč neumí přístupové klíče a TOTP není k dispozici."
   },
   "auth": {
     "login": "Přihlásit",

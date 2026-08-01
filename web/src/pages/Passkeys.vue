@@ -17,22 +17,52 @@ const busy = ref(false)
 const error = ref('')
 const passkeySupported = isWebAuthnAvailable()
 
+// Politika MFA ze serveru: `allowed_mfa_methods` říká, ČÍM se smí ověřovat, a
+// `require_mfa`, jestli je silný faktor povinný. Stránka to dřív ignorovala,
+// takže nabízela operace, které API vzápětí odmítlo (403 mfa_method_not_allowed,
+// 400 „Nepovolený účel ověření", 409 last_mfa_factor) — a u posledního faktoru
+// až POTÉ, co uživatel prošel celou ceremonií nebo spotřeboval TOTP kód.
+const passkeyAllowed = computed(() => auth.allowedMfaMethods.includes('passkey'))
+const totpAllowed = computed(() => auth.allowedMfaMethods.includes('totp'))
+
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+// TOTP jde k ověření použít, jen když ho uživatel má A politika ho připouští.
+const totpUsable = computed(() => hasTotp.value && totpAllowed.value)
 const totpCodeValid = computed(() => /^\d{6}$/.test(totpCode.value))
 // Step-up umí jen passkey nebo TOTP. Dokud uživatel žádnou passkey nemá, je TOTP
 // jediný použitelný faktor — tedy povinný, ne „volitelná alternativa". Jakmile
 // nějakou passkey má, může se ověřit jí a kód je skutečně volitelný.
-const totpRequired = computed(() => hasTotp.value && list.value.length === 0)
+const totpRequired = computed(() => totpUsable.value && list.value.length === 0)
+
+// Kolik povolených silných faktorů uživateli zbyde po odebrání jednoho klíče.
+// Při povinném MFA server poslední faktor odebrat nedovolí (409 last_mfa_factor),
+// takže tlačítko zamkneme rovnou — dřív se to uživatel dozvěděl až po step-upu.
+const revokeBlocked = computed(() =>
+  auth.requireMfa
+  && list.value.length === 1
+  && !(totpAllowed.value && hasTotp.value)
+)
+
+/** Čím se dá potvrdit odebrání klíče. Prázdné = ničím, operace je zablokovaná. */
+const stepUpMethods = computed<Array<'passkey' | 'totp'>>(() => {
+  const methods: Array<'passkey' | 'totp'> = []
+  if (passkeyAllowed.value && passkeySupported && list.value.length > 0) methods.push('passkey')
+  if (totpUsable.value) methods.push('totp')
+  return methods
+})
 
 async function load() {
   list.value = await authApi.passkeys()
 }
 
 async function stepUp(operation: string): Promise<string> {
-  if (totpCodeValid.value) {
+  // TOTP má přednost, jen když je kód opravdu vyplněný — jinak by zapomenutý kód
+  // z minulého pokusu tiše přepnul metodu ověření a operace by skončila hláškou
+  // „Neplatný TOTP kód" tam, kde ji uživatel chtěl potvrdit klíčem.
+  if (totpCodeValid.value && totpUsable.value) {
     return authApi.totpStepUp(operation, totpCode.value)
   }
-  if (totpRequired.value) {
+  if (totpRequired.value || !stepUpMethods.value.includes('passkey')) {
     throw new Error('totp_code_required')
   }
   const flow = await authApi.passkeyStepUpOptions(operation)
@@ -92,6 +122,7 @@ async function rename(item: PasskeyCredential) {
 }
 
 async function revoke(item: PasskeyCredential) {
+  if (revokeBlocked.value || stepUpMethods.value.length === 0) return
   if (!window.confirm(t('passkeys.revoke_confirm', { label: item.label }))) return
   busy.value = true
   error.value = ''
@@ -103,13 +134,30 @@ async function revoke(item: PasskeyCredential) {
     await sessionSecurity.refresh({ force: true })
     await load()
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('passkeys.operation_failed')
+    // Zrušený nebo vypršelý systémový dialog není „operace se nepodařila" —
+    // uživatel typicky klíč nemá po ruce a potřebuje vědět, že ho lze odebrat
+    // i TOTP kódem. Bez tohohle mapování končila celá cesta u generické hlášky.
+    const ceremonyError = webAuthnErrorKey(e)
+    if (e?.message === 'totp_code_required') {
+      error.value = t('passkeys.revoke_needs_totp')
+    } else if (ceremonyError !== null) {
+      error.value = totpUsable.value
+        ? `${t(ceremonyError)} ${t('passkeys.revoke_totp_fallback')}`
+        : t(ceremonyError)
+    } else {
+      error.value = e?.response?.data?.error?.message || t('passkeys.operation_failed')
+    }
   } finally {
     busy.value = false
   }
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  void load()
+  // Politika chodí z /me — po tvrdém reloadu stránky nemusí být ve storu ještě
+  // načtená a stránka by se rozhodovala podle prázdného seznamu metod.
+  if (auth.allowedMfaMethods.length === 0) void auth.refresh()
+})
 </script>
 
 <template>
@@ -120,7 +168,12 @@ onMounted(() => void load())
       {{ t('passkeys.unsupported') }}
     </p>
 
-    <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm space-y-3 mb-5">
+    <p v-if="!passkeyAllowed"
+       class="mb-5 rounded-md bg-warning-50 border border-warning-300 px-3 py-2 text-sm text-warning-700">
+      {{ t('passkeys.method_not_allowed') }}
+    </p>
+
+    <div v-if="passkeyAllowed" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm space-y-3 mb-5">
       <div>
         <label for="passkey-label" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('passkeys.credential_label') }} *
@@ -137,7 +190,7 @@ onMounted(() => void load())
                type="password" autocomplete="current-password" required
                class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
       </div>
-      <div v-if="hasTotp">
+      <div v-if="totpUsable">
         <label for="passkey-totp" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ totpRequired ? t('passkeys.totp_label_required') : t('passkeys.totp_label') }}
         </label>
@@ -169,15 +222,27 @@ onMounted(() => void load())
             · {{ t('passkeys.last_used') }} {{ item.last_used_at?.replace('T', ' ').slice(0, 16) || '—' }}
           </div>
         </div>
-        <div class="flex gap-3 text-sm">
+        <div class="flex gap-3 text-sm shrink-0">
           <button @click="rename(item)" class="text-primary-600 hover:underline">{{ t('passkeys.rename') }}</button>
           <button @click="revoke(item)"
-                  :disabled="!passkeySupported && !auth.user?.totp_enabled"
+                  :disabled="busy || revokeBlocked || stepUpMethods.length === 0"
+                  :title="revokeBlocked ? t('passkeys.revoke_last_factor') : undefined"
                   class="text-danger-500 hover:underline disabled:text-neutral-400 disabled:no-underline">
             {{ t('passkeys.revoke') }}
           </button>
         </div>
       </div>
+
+      <!-- Čím se odebrání potvrzuje. Bez tohohle uživatel netušil, že po něm
+           aplikace bude chtít step-up, ani že TOTP kód z pole nahoře je plnohodnotná
+           alternativa, když klíč zrovna nemá po ruce. -->
+      <p v-if="list.length > 0" class="text-xs text-neutral-500">
+        <template v-if="revokeBlocked">{{ t('passkeys.revoke_last_factor') }}</template>
+        <template v-else-if="stepUpMethods.length === 0">{{ t('passkeys.revoke_no_method') }}</template>
+        <template v-else-if="stepUpMethods.includes('totp')">{{ t('passkeys.revoke_hint_totp') }}</template>
+        <template v-else>{{ t('passkeys.revoke_hint_passkey') }}</template>
+      </p>
+
       <p v-if="list.length === 0" class="text-sm text-neutral-500 text-center py-8">{{ t('passkeys.empty') }}</p>
     </div>
   </div>

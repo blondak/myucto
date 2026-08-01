@@ -4426,8 +4426,8 @@
     "credential_label": "Passkey name",
     "label_placeholder": "Name, e.g. Pixel 9",
     "fresh_auth_hint": "Adding and removing requires fresh verification with an existing strong factor; the first factor uses your current password.",
-    "totp_label": "TOTP verification code (optional)",
-    "totp_optional": "6-digit TOTP code (optional alternative)",
+    "totp_label": "TOTP code — if your key is not at hand",
+    "totp_optional": "6-digit code from your authenticator",
     "totp_label_required": "TOTP verification code *",
     "totp_required_placeholder": "6-digit TOTP code",
     "totp_required_hint": "You have 2FA enabled but no passkey yet — the registration can only be verified with a code from your authenticator app.",
@@ -4439,7 +4439,14 @@
     "rename_prompt": "New passkey name",
     "revoke": "Remove",
     "revoke_confirm": "Remove passkey “{label}”?",
-    "operation_failed": "The passkey operation failed."
+    "operation_failed": "The passkey operation failed.",
+    "method_not_allowed": "Passkeys are disabled in the configuration (auth.allowed_mfa_methods), so a new one cannot be registered. Existing keys below remain and can still be removed.",
+    "revoke_hint_totp": "Removing a key is a sensitive operation — confirm it with another key, or with the TOTP code from the field above if your key is not at hand.",
+    "revoke_hint_passkey": "Removing a key is a sensitive operation — confirm it with the system dialog of one of your keys.",
+    "revoke_needs_totp": "Enter the 6-digit TOTP code above — removal cannot be confirmed without it.",
+    "revoke_totp_fallback": "If your key is not at hand, enter the TOTP code above and try again.",
+    "revoke_last_factor": "This is your last strong factor and two-factor sign-in is enforced — it cannot be removed. Register a second key or enable TOTP first.",
+    "revoke_no_method": "There is no way to confirm removal — this browser does not support passkeys and TOTP is unavailable."
   },
   "auth": {
     "login": "Sign in",
