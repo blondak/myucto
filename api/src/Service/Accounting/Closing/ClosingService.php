@@ -3937,6 +3937,15 @@ final class ClosingService
             ];
         }
 
+        // § 79 / § 79a ZDPH (EPIC VH-07) — přechod plátcovství v uzavíraném období
+        // bez evidované korekce odpočtu na ř. 45. Warning, ne error: nárok (§ 79)
+        // i povinnost snížení (§ 79a) závisí na obchodním majetku ke dni přechodu,
+        // což systém z dokladů nevidí — rozhodnout musí účetní v agendě Opravy DPH.
+        $s79Check = $this->checkVatStatusS79Missing($supplierId, $startsOn, $endsOn);
+        if ($s79Check !== null) {
+            $checks[] = $s79Check;
+        }
+
         $checks[] = [
             'key' => 'income_tax_hint',
             'severity' => 'info',
@@ -3950,6 +3959,75 @@ final class ClosingService
         // a seznam bez stropu nafoukl payload kroku u velké firmy na jednotky MB, které
         // se posílaly při každém načtení stránky. `$cap = 0` vrací vše (CSV export).
         return (new CheckFindingNormalizer())->normalizeAll($checks, $cap);
+    }
+
+    /**
+     * § 79 / § 79a ZDPH — přechod plátcovství v období bez korekce odpočtu (ř. 45).
+     *
+     * Přechod = řádek historie plátcovství s účinností v období, jehož stav se liší
+     * od stavu den před účinností (0→1 registrace, 1→0 zrušení registrace). Baseline
+     * řádek (1900-01-01) se nikdy nepočítá a firma bez přechodu kontrolu vůbec
+     * nedostane (vrací null). `ok=false`, když k nalezenému druhu přechodu neexistuje
+     * v období žádný řádek vat_registration_corrections stejného kind.
+     *
+     * Public (ne private jako sousední kontroly), aby šla testovat izolovaně bez
+     * sestavení celého precheku — nepotřebuje nic než supplier_id a rozsah období.
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}|null
+     */
+    public function checkVatStatusS79Missing(int $supplierId, string $startsOn, string $endsOn): ?array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            "SELECT effective_from, is_vat_payer FROM supplier_vat_status_history
+              WHERE supplier_id = ? AND effective_from BETWEEN ? AND ?
+                AND effective_from > '1900-01-01'
+              ORDER BY effective_from, id"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn]);
+
+        $transitions = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $effectiveFrom = (string) $row['effective_from'];
+            $isPayer = (bool) $row['is_vat_payer'];
+            $wasPayer = \MyInvoice\Service\Vat\VatStatusService::payerAt(
+                $pdo,
+                $supplierId,
+                (new \DateTimeImmutable($effectiveFrom))->modify('-1 day')->format('Y-m-d'),
+            );
+            if ($wasPayer === $isPayer) {
+                continue;
+            }
+            $transitions[] = [
+                'kind'         => $isPayer ? 'registration' : 'deregistration',
+                'effective_on' => $effectiveFrom,
+            ];
+        }
+        if ($transitions === []) {
+            return null;
+        }
+
+        $corr = $pdo->prepare(
+            'SELECT COUNT(*) FROM vat_registration_corrections
+              WHERE supplier_id = ? AND kind = ? AND effective_on BETWEEN ? AND ?'
+        );
+        $missing = [];
+        foreach ($transitions as $transition) {
+            $corr->execute([$supplierId, $transition['kind'], $startsOn, $endsOn]);
+            if ((int) $corr->fetchColumn() === 0) {
+                $missing[] = $transition;
+            }
+        }
+
+        return [
+            'key' => 'vat_status_s79_missing',
+            'severity' => 'warning',
+            'ok' => $missing === [],
+            'value' => [
+                'transitions' => $transitions,
+                'missing'     => $missing,
+            ],
+        ];
     }
 
     /** @return array{key:string,severity:string,ok:bool,value:array<string,mixed>} */

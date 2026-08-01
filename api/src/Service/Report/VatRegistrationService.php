@@ -118,6 +118,36 @@ final class VatRegistrationService
     }
 
     /**
+     * Termín podání přihlášky k registraci (§ 94 odst. 1 ZDPH, znění od 1. 1. 2025):
+     * do 10 PRACOVNÍCH dnů ode dne překročení obratu. Den překročení se nepočítá,
+     * lhůta končí desátým pracovním dnem po něm (svátky dle 245/2000 Sb.).
+     *
+     * Den překročení služba zná jen u horního limitu ({@see evaluate} —
+     * `crossed_on`); u dolního limitu se den vědomě neuvádí (rozhoduje rok) a
+     * přesnou lhůtu tak nelze z dat odvodit → vrací se INFORMATIVNÍ termín
+     * `becomes_payer_on` (1. leden, den vzniku plátcovství) s basis
+     * `informative`, aby konzument rozdíl uměl říct nahlas.
+     *
+     * @return array{deadline:string, basis:'statutory'|'informative'}|null
+     */
+    public static function applicationDeadline(?string $crossedOn, ?string $becomesPayerOn): ?array
+    {
+        if ($crossedOn !== null) {
+            $d = new \DateTimeImmutable($crossedOn);
+            for ($i = 0; $i < 10; $i++) {
+                $d = CzechWorkingDays::shiftToWorkingDay($d->modify('+1 day'));
+            }
+
+            return ['deadline' => $d->format('Y-m-d'), 'basis' => 'statutory'];
+        }
+        if ($becomesPayerOn !== null) {
+            return ['deadline' => $becomesPayerOn, 'basis' => 'informative'];
+        }
+
+        return null;
+    }
+
+    /**
      * Den, ve kterém kumulovaný obrat překročil limit.
      *
      * Kumuluje se v pořadí rozhodného dne a bere se PRVNÍ den, kdy součet limit přesáhl.

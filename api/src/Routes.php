@@ -1100,6 +1100,8 @@ final class Routes
         // Historie plátcovství DPH (EPIC VH-01) — seznam vrací GET /api/settings/supplier.
         $app->post   ('/api/settings/vat-status-history',              [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'save']);
         $app->delete ('/api/settings/vat-status-history/{id:[0-9]+}',  [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'delete']);
+        // § 6/§ 94 hlídač obratu pro banner Plátcovství DPH (EPIC VH-07).
+        $app->get    ('/api/settings/vat-status-history/registration-check', [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'registrationCheck']);
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);

@@ -14,6 +14,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Report\VatRegistrationService;
 use MyInvoice\Service\Vat\VatStatusService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -21,8 +22,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Správa historie plátcovství DPH (EPIC VH-01) — supplier_vat_status_history.
  *
- *   POST   /api/settings/vat-status-history        — přidání/úprava řádku (upsert po effective_from)
- *   DELETE /api/settings/vat-status-history/{id}   — smazání řádku
+ *   POST   /api/settings/vat-status-history                     — přidání/úprava řádku (upsert po effective_from)
+ *   DELETE /api/settings/vat-status-history/{id}                — smazání řádku
+ *   GET    /api/settings/vat-status-history/registration-check  — § 6/§ 94 hlídač obratu (EPIC VH-07)
  *
  * Seznam historie vrací GET /api/settings/supplier (klíč vat_status_history).
  *
@@ -43,6 +45,7 @@ final class VatStatusHistoryAction
         private readonly AccountingSupplierSettingsRepository $accountingSettings,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly VatRegistrationService $vatRegistration,
     ) {}
 
     public function save(Request $request, Response $response): Response
@@ -90,6 +93,13 @@ final class VatStatusHistoryAction
                 ['collisions' => $collisions]);
         }
 
+        // VH-07: přechod plátcovství (0→1 registrace, 1→0 zrušení registrace) se
+        // pozná porovnáním stavu DEN PŘED účinností s nově zapisovaným stavem —
+        // ještě před upsertem, aby nový řádek srovnání nezkreslil.
+        $wasPayer = VatStatusService::payerAt(
+            $this->db->pdo(), $sid, $date->modify('-1 day')->format('Y-m-d')
+        );
+
         $this->vatStatus->upsert($sid, $effectiveFrom, $isVatPayer, $isIdentified, $note !== '' ? $note : null, $this->userId($request));
         $this->vatStatus->refreshLiveCache($sid);
 
@@ -102,7 +112,46 @@ final class VatStatusHistoryAction
             'collisions'     => $collisions,
         ]);
 
-        return Json::ok($response, $this->statePayload($sid));
+        $payload = $this->statePayload($sid);
+
+        // Přechod s účinností <= dnes → nenásilný hint na § 79/§ 79a agendu
+        // (odpočet při registraci / snížení odpočtu při zrušení, ř. 45 přiznání).
+        // Budoucí přechody hint nedostanou — korekce se řeší až v období účinnosti.
+        // Baseline řádek (1900-01-01) není přechod, ale definice výchozího stavu.
+        if ($wasPayer !== $isVatPayer && $effectiveFrom !== self::BASELINE_DATE && $effectiveFrom <= date('Y-m-d')) {
+            $payload['suggest_s79'] = [
+                'kind'         => $isVatPayer ? 'registration' : 'deregistration',
+                'effective_on' => $effectiveFrom,
+            ];
+        }
+
+        return Json::ok($response, $payload);
+    }
+
+    /**
+     * § 6/§ 4a hlídač obratu pro banner v bloku Plátcovství DPH (EPIC VH-07):
+     * výstup VatRegistrationService za běžný rok + termín přihlášky dle § 94
+     * odst. 1 (10 pracovních dnů ode dne překročení; u dolního limitu jen
+     * informativní datum vzniku plátcovství — den překročení se neeviduje).
+     */
+    public function registrationCheck(Request $request, Response $response): Response
+    {
+        if (!$this->guard($request, $response, $err)) return $err;
+        $sid = $this->supplierId($request);
+        if ($sid <= 0) return Json::error($response, 'validation_failed', 'Chybí aktivní firma.', 400);
+
+        $reg = $this->vatRegistration->evaluate($sid, (int) date('Y'));
+        $reg['application_deadline'] = null;
+        $reg['application_deadline_basis'] = null;
+        if (in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)) {
+            $deadline = VatRegistrationService::applicationDeadline($reg['crossed_on'], $reg['becomes_payer_on']);
+            if ($deadline !== null) {
+                $reg['application_deadline'] = $deadline['deadline'];
+                $reg['application_deadline_basis'] = $deadline['basis'];
+            }
+        }
+
+        return Json::ok($response, $reg);
     }
 
     public function delete(Request $request, Response $response, array $args): Response

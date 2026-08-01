@@ -13,6 +13,7 @@
  *          zásoby vracejí odpočet celý, dlouhodobý majetek jen za zbývající roky lhůty.
  */
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   reportsApi,
@@ -27,6 +28,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -146,8 +148,34 @@ function fmtDate(iso: string | null | undefined): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ')
 }
 
+// Prefill z query (VH-07): odkaz z bloku Plátcovství DPH v Nastavení předává
+// ?tab=s79&kind=registration|deregistration&effective_on=YYYY-MM-DD — otevře
+// záložku § 79 s předvyplněným druhem a rozhodným dnem (formulář jen pro toho,
+// kdo smí zapisovat).
+function applyQueryPrefill(): boolean {
+  const kind = String(route.query.kind ?? '')
+  if (route.query.tab !== 's79' && kind === '') return false
+  tab.value = 's79'
+  if (kind !== 'registration' && kind !== 'deregistration') return false
+  f79.value.kind = kind
+  let yearChanged = false
+  const effectiveOn = String(route.query.effective_on ?? '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveOn)) {
+    f79.value.effective_on = effectiveOn
+    const y = Number(effectiveOn.slice(0, 4))
+    if (Number.isFinite(y) && y !== year.value) {
+      year.value = y   // watch(year) načte data sám
+      yearChanged = true
+    }
+  }
+  if (canWrite.value) show79.value = true
+  return yearChanged
+}
+
 watch(year, load)
-onMounted(load)
+onMounted(() => {
+  if (!applyQueryPrefill()) load()
+})
 </script>
 
 <template>

@@ -40,6 +40,10 @@ final class CrmAggregationService
         // vypršení). `current()` je čistě lokální — čte řádek `license` a dopočítá stav,
         // žádné volání licenčního serveru, takže feed nezpomalí ani neselže offline.
         private readonly ?LicenseService $license = null,
+        // § 6/§ 94 ZDPH (EPIC VH-07) — termín přihlášky k registraci DPH do daňového
+        // kalendáře. Volitelný ze stejného důvodu jako $taxReturns (ruční konstrukce
+        // v testech jen s Connection); produkční binding v Bootstrapu ho dodává.
+        private readonly ?\MyInvoice\Service\Report\VatRegistrationService $vatRegistration = null,
     ) {}
 
     // ── Sjednocená metodika s Tržbami/Náklady (Stats/PurchaseSummary) ──────────
@@ -2226,6 +2230,43 @@ final class CrmAggregationService
                     'submitted'    => $sub !== null,
                     'submitted_at' => $sub,
                 ];
+            }
+        }
+
+        // § 94 odst. 1 ZDPH (EPIC VH-07) — přihláška k registraci DPH: do 10
+        // pracovních dnů ode dne překročení obratu (znění od 1. 1. 2025). Jen když
+        // hlídač § 6 hlásí překročení a firma k dnešku plátcem není (registrací
+        // v historii plátcovství položka sama zmizí). U dolního limitu den
+        // překročení služba neeviduje → informativní termín = den vzniku
+        // plátcovství (1. leden). Bez spodního okna: povinnost nepodáním nezaniká.
+        if ($this->vatRegistration !== null && empty($row['is_vat_payer'])) {
+            try {
+                $reg = $this->vatRegistration->evaluate($supplierId, (int) $now->format('Y'));
+            } catch (\Throwable) {
+                $reg = null;
+            }
+            if ($reg !== null && $reg['applicable']
+                && in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)
+            ) {
+                $dl = \MyInvoice\Service\Report\VatRegistrationService::applicationDeadline(
+                    $reg['crossed_on'], $reg['becomes_payer_on']
+                );
+                if ($dl !== null) {
+                    $days = (int) $now->diff(new \DateTimeImmutable($dl['deadline']))->format('%r%a');
+                    if ($days <= $maxDaysAhead) {
+                        $items[] = [
+                            'type'      => 'vat_registration_deadline',
+                            'title'     => $dl['basis'] === 'statutory'
+                                ? 'Přihláška k registraci DPH (§ 94 — 10 pracovních dnů od překročení obratu)'
+                                : sprintf('Přihláška k registraci DPH (obrat překročen, plátcem od %s — informativní termín)',
+                                    (string) $reg['becomes_payer_on']),
+                            'deadline'  => $dl['deadline'],
+                            'days'      => $days,
+                            'link'      => '/admin/settings',
+                            'submitted' => null,
+                        ];
+                    }
+                }
             }
         }
 

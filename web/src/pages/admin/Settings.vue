@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
@@ -280,6 +280,7 @@ async function load() {
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
   } finally { loading.value = false }
   loadSampleStatus()
+  loadVatRegistrationCheck()
 }
 
 onMounted(load)
@@ -512,11 +513,16 @@ async function submitVatForm(acknowledge = false) {
   }
   vatSaving.value = true
   try {
-    applyVatState(await settingsApi.saveVatStatus(payload))
+    const state = await settingsApi.saveVatStatus(payload)
+    applyVatState(state)
+    // VH-07: přechod plátcovství (0→1 / 1→0) s účinností <= dnes → nenásilná
+    // výzva k evidenci korekce odpočtu § 79/§ 79a (ř. 45) s odkazem na agendu.
+    vatS79Suggest.value = state.suggest_s79 ?? null
     vatConflicts.value = []
     vatPendingAction.value = null
     closeVatForm()
     toast.success(t('common.saved'))
+    loadVatRegistrationCheck()
   } catch (e: any) {
     if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'vat_status_locked_conflict') {
       vatConflicts.value = e.response.data.error.collisions ?? []
@@ -567,6 +573,38 @@ function dismissVatConflicts() {
   vatConflicts.value = []
   vatPendingAction.value = null
   if (wasDelete) vatDeleteEntry.value = null
+}
+
+// ── § 6 hlídač obratu + § 79 hint (VH-07) ───────────────────────────────────
+// Banner „obrat překročen — stáváš se plátcem k datu" nad blokem historie;
+// akce předvyplní běžný formulář přidání řádku (včetně acknowledge flow).
+const vatRegCheck = ref<VatRegistrationCheck | null>(null)
+const vatS79Suggest = ref<VatStatusS79Suggest | null>(null)
+
+async function loadVatRegistrationCheck() {
+  try {
+    vatRegCheck.value = await settingsApi.getVatRegistrationCheck()
+  } catch {
+    vatRegCheck.value = null
+  }
+}
+
+const vatRegBanner = computed(() => {
+  if (!supplier.value || supplier.value.is_vat_payer) return null
+  const c = vatRegCheck.value
+  return c && (c.status === 'exceeded_low' || c.status === 'exceeded_high') ? c : null
+})
+
+const fmtCzk = (v: number) => `${Math.round(v).toLocaleString('cs-CZ')} Kč`
+
+function openVatFormFromRegistration() {
+  const c = vatRegBanner.value
+  if (!c?.becomes_payer_on) return
+  vatFormEditingId.value = null
+  vatFormDate.value = c.becomes_payer_on
+  vatFormKind.value = 'payer'
+  vatFormNote.value = t('settings.vat_status.registration_note')
+  vatFormOpen.value = true
 }
 
 function vatCollisionLabel(c: VatStatusCollision): string {
@@ -1004,6 +1042,50 @@ function vatCollisionLabel(c: VatStatusCollision): string {
                 </button>
               </div>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_status.hint') }}</p>
+              <!-- § 6 hlídač obratu (VH-07) — obrat překročil limit, plátcovství vzniká ze zákona. -->
+              <div v-if="vatRegBanner" class="mt-3 border border-warning-500/40 bg-warning-50 rounded-md p-3">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <p class="text-sm font-medium text-warning-700">{{ t('settings.vat_status.s6_banner_title') }}</p>
+                    <p class="text-xs text-neutral-600 mt-1">
+                      {{ t('settings.vat_status.s6_banner_text', {
+                        turnover: fmtCzk(vatRegBanner.turnover),
+                        limit: fmtCzk(vatRegBanner.status === 'exceeded_high' ? vatRegBanner.limit_high : vatRegBanner.limit_low),
+                        date: vatRegBanner.becomes_payer_on ?? '',
+                      }) }}
+                    </p>
+                    <p v-if="vatRegBanner.application_deadline" class="text-xs text-neutral-600 mt-0.5">
+                      {{ vatRegBanner.application_deadline_basis === 'statutory'
+                        ? t('settings.vat_status.s6_deadline_statutory', { deadline: vatRegBanner.application_deadline })
+                        : t('settings.vat_status.s6_deadline_informative', { deadline: vatRegBanner.application_deadline }) }}
+                    </p>
+                  </div>
+                  <button type="button" @click="openVatFormFromRegistration" :class="btnFilled('primary')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                    {{ t('settings.vat_status.s6_banner_action') }}
+                  </button>
+                </div>
+              </div>
+              <!-- § 79/§ 79a hint po uloženém přechodu plátcovství (VH-07). -->
+              <div v-if="vatS79Suggest" class="mt-3 border border-primary-200 bg-primary-50 rounded-md p-3 flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-primary-800">{{ t('settings.vat_status.s79_prompt_title') }}</p>
+                  <p class="text-xs text-neutral-600 mt-1">
+                    {{ vatS79Suggest.kind === 'registration'
+                      ? t('settings.vat_status.s79_prompt_registration', { date: vatS79Suggest.effective_on })
+                      : t('settings.vat_status.s79_prompt_deregistration', { date: vatS79Suggest.effective_on }) }}
+                  </p>
+                  <RouterLink
+                    :to="{ name: 'reports-vat-corrections', query: { tab: 's79', kind: vatS79Suggest.kind, effective_on: vatS79Suggest.effective_on } }"
+                    class="inline-block mt-1 text-xs font-medium text-primary-700 hover:underline">
+                    {{ t('settings.vat_status.s79_prompt_link') }} →
+                  </RouterLink>
+                </div>
+                <button type="button" @click="vatS79Suggest = null"
+                  class="cursor-pointer p-1 text-neutral-400 hover:text-neutral-600" :title="t('common.close')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                </button>
+              </div>
               <div class="overflow-x-auto mt-3">
                 <table class="w-full text-sm">
                   <thead>

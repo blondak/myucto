@@ -267,7 +267,7 @@ export interface ReminderEffectiveness {
 }
 
 export interface TaxCalendarItem {
-  type: 'tax_deadline' | 'kh_deadline' | 'shv_deadline' | 'tax_advance' | 'income_tax_deadline'
+  type: 'tax_deadline' | 'kh_deadline' | 'shv_deadline' | 'tax_advance' | 'income_tax_deadline' | 'vat_registration_deadline'
   title: string
   deadline: string
   days: number

@@ -95,10 +95,34 @@ export interface VatStatusSavePayload {
   acknowledge?: boolean
 }
 
+/** Hint VH-07: uložený řádek byl přechodem plátcovství s účinností <= dnes. */
+export interface VatStatusS79Suggest {
+  kind: 'registration' | 'deregistration'
+  effective_on: string
+}
+
 export interface VatStatusState {
   vat_status_history: VatStatusHistoryEntry[]
   is_vat_payer: boolean
   is_identified: boolean
+  suggest_s79?: VatStatusS79Suggest
+}
+
+/** § 6/§ 94 hlídač obratu (VH-07) — GET /settings/vat-status-history/registration-check. */
+export interface VatRegistrationCheck {
+  applicable: boolean
+  year: number
+  turnover: number
+  limit_low: number
+  limit_high: number
+  status: 'below' | 'exceeded_low' | 'exceeded_high' | 'already_payer' | 'not_applicable'
+  crossed_on: string | null
+  becomes_payer_on: string | null
+  is_vat_payer: boolean
+  basis: string | null
+  application_deadline: string | null
+  /** 'statutory' = § 94/1 (10 pracovních dnů od překročení); 'informative' = den vzniku plátcovství. */
+  application_deadline_basis: 'statutory' | 'informative' | null
 }
 
 export interface Supplier {
@@ -748,6 +772,9 @@ export const settingsApi = {
     api.delete<VatStatusState>(`/settings/vat-status-history/${id}`, {
       params: acknowledge ? { acknowledge: 1 } : {},
     }).then(r => r.data),
+  // § 6/§ 94 hlídač obratu (VH-07) — banner „obrat překročen" v bloku Plátcovství DPH.
+  getVatRegistrationCheck: () =>
+    api.get<VatRegistrationCheck>('/settings/vat-status-history/registration-check').then(r => r.data),
   getAiAssist: () => api.get<AiAssistSettings>('/settings/ai-assist').then(r => r.data),
   updateAiAssist: (payload: AiAssistUpdate) => api.put<AiAssistSettings>('/settings/ai-assist', payload).then(r => r.data),
 
