@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router'
+import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
   accountingApi,
   type JournalEntry,
@@ -28,6 +28,7 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 
 const entries = ref<JournalEntry[]>([])
 const periods = ref<AccountingPeriod[]>([])
@@ -107,6 +108,7 @@ function applyFilters() {
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
   page.value = 1
+  syncFiltersToUrl()
   load()
 }
 function resetFilters() {
@@ -149,7 +151,25 @@ function buildQuery(): Record<string, string> {
   return q
 }
 
+/**
+ * Aplikované filtry se zrcadlí do URL. Nejde jen o sdílitelný odkaz: bez query
+ * v adrese je klik na „Účetní deník" v menu navigace na TOTOŽNOU cestu, kterou
+ * router vůbec neprovede — stránka se nepřekreslí a filtry zůstanou viset.
+ * S query je to skutečná změna adresy a `route.query` watcher níž filtry vyčistí.
+ */
+let suppressUrlSync = false
+function syncFiltersToUrl() {
+  if (suppressUrlSync) return
+  void router.replace({ query: buildQuery() })
+}
+
 function applyQueryToPage(q: Record<string, string>) {
+  // Uložený filtr přepisuje URL sám — sync i reset watcher se na ten jeden tick uspí,
+  // ať se nepřepíšou navzájem (prázdný uložený filtr by se jinak vyhodnotil jako
+  // „klik z menu" a hned se zase zrušil).
+  suppressUrlSync = true
+  setTimeout(() => { suppressUrlSync = false }, 0)
+  void router.replace({ query: q })
   filters.document_no = q.document_no ?? ''
   filters.period_id = q.period_id ? Number(q.period_id) : ''
   filters.date_from = q.date_from ?? ''
@@ -166,6 +186,22 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.amount_to = q.amount_to ? Number(q.amount_to) : ''
   applyFilters()
 }
+
+/** Je nastavený aspoň jeden filtr (včetně drill-downu z jiné stránky)? */
+function hasActiveFilters(): boolean {
+  return Object.keys(buildQuery()).length > 0
+    || sourceIdFilter.value !== '' || entryIdFilter.value !== ''
+}
+
+// Klik na „Účetní deník" v menu vede na cestu BEZ query — a to je jediný signál,
+// podle kterého se dá poznat od navigace s drill-downem (`?entry_id=`, `?source_id=`)
+// nebo z uloženého filtru. Prázdná query tedy znamená „chci čistý deník".
+watch(() => route.query, (q) => {
+  if (suppressUrlSync || Object.keys(q).length > 0 || !hasActiveFilters()) return
+  suppressUrlSync = true
+  resetFilters()
+  setTimeout(() => { suppressUrlSync = false }, 0)
+})
 
 const COLUMNS: ColumnDef[] = [
   { key: 'date', labelKey: 'accounting.journal.entry_date', required: true },

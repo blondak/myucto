@@ -14,6 +14,27 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+/**
+ * Kdo skript spustil — do auditu. Na Windows je to USERNAME, na unixu USER/LOGNAME;
+ * `posix_geteuid()` je spolehlivější (ENV lze podvrhnout), ale rozšíření nemusí být.
+ */
+function cliOperator(): ?string
+{
+    if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+        $pw = @posix_getpwuid(posix_geteuid());
+        if (is_array($pw) && ($pw['name'] ?? '') !== '') {
+            return (string) $pw['name'];
+        }
+    }
+    foreach (['USER', 'LOGNAME', 'USERNAME'] as $key) {
+        $value = getenv($key);
+        if (is_string($value) && trim($value) !== '') {
+            return trim($value);
+        }
+    }
+    return null;
+}
+
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "Tento skript musí běžet z CLI.\n");
     exit(1);
@@ -60,17 +81,28 @@ $proofs->execute([(int) $user['id']]);
 $killed = $sessions->destroyAllForUser((int) $user['id']);
 $wasEnabled = ((int) ($user['totp_enabled'] ?? 0) === 1) ? 'ano' : 'ne';
 
-$pdo->prepare(
-    "INSERT INTO activity_log (user_id, action, entity_type, entity_id, payload)
-     VALUES (?, 'auth.mfa_reset', 'user', ?, ?)"
-)->execute([
+// Přes ActivityLogger, NE syrovým INSERTem: jen tudy se článek zapečetí do
+// hash-chainu (§ 33a). Syrový zápis nechával `hash = NULL`, takže nejcitlivější
+// administrativní operace v systému ležela mimo tamper-evident řetěz a šla
+// beze stopy smazat.
+//
+// `user_id` je tu OBĚŤ resetu (entita, které se to týká), takže kdo reset spustil
+// musí být v payloadu — CLI nemá session ani přihlášeného uživatele.
+$container->get(\MyInvoice\Service\ActivityLogger::class)->log(
+    'auth.mfa_reset',
     (int) $user['id'],
+    'user',
     (int) $user['id'],
-    json_encode([
+    [
         'passkeys_revoked' => $passkeys->rowCount(),
+        'trusted_devices_removed' => $td->rowCount(),
         'sessions_invalidated' => $killed,
-    ], JSON_THROW_ON_ERROR),
-]);
+        'totp_was_enabled' => ((int) ($user['totp_enabled'] ?? 0) === 1),
+        'via' => 'cli:reset-mfa',
+        'operator_os_user' => cliOperator(),
+        'operator_host' => gethostname() ?: null,
+    ],
+);
 
 echo "✓ MFA reset pro {$user['email']} (id={$user['id']}, TOTP původně aktivní: {$wasEnabled}).\n";
 echo "  Odvoláno {$passkeys->rowCount()} passkeys, {$td->rowCount()} důvěryhodných zařízení, "

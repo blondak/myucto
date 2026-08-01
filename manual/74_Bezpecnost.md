@@ -153,8 +153,39 @@ Skript vypne TOTP, odvolá všechny passkeys, zruší důvěryhodná zařízení
 čekající OTP, WebAuthn flow a step-up proofy a invaliduje všechny session
 uživatele. Původní název `reset-2fa.php` zůstává kompatibilním aliasem.
 
+#### Docker
+
+V kontejneru je aplikace v `/var/www/html` a běží pod `www-data`. Spouštěj skript
+pod tímto uživatelem — jako `root` sice projde taky, ale případné soubory, které
+by po sobě zanechal, by pak měly špatného vlastníka:
+
+```bash
+# docker compose (název služby `app` dle docker-compose.yml)
+docker compose exec -u www-data app php api/bin/reset-mfa.php tvuj@email.cz
+
+# samostatný kontejner
+docker exec -u www-data -w /var/www/html <container> php api/bin/reset-mfa.php tvuj@email.cz
+```
+
+Ověření, že reset opravdu proběhl (řádek `auth.mfa_reset` nese i jméno účtu, pod
+kterým se skript spustil):
+
+```bash
+docker compose exec -u www-data app \
+  php -r 'require "api/vendor/autoload.php";
+    $c = MyInvoice\Bootstrap::buildApp()->getContainer();
+    $pdo = $c->get(MyInvoice\Infrastructure\Database\Connection::class)->pdo();
+    foreach ($pdo->query("SELECT created_at, payload FROM activity_log
+                           WHERE action = \"auth.mfa_reset\"
+                           ORDER BY id DESC LIMIT 5") as $r) {
+        echo $r["created_at"], "  ", $r["payload"], PHP_EOL;
+    }'
+```
+
 > ⚠️ Rescue používej jen z důvěryhodného shellu serveru. Přímý SQL zásah není
 > ekvivalentní: snadno ponechá aktivní session nebo rozpracované ověřovací flow.
+> Reset je zapsaný do auditní stopy a zapečetěný v hash-chainu (§ 33a) — kdo ho
+> spustil a odkud, tedy zpětně dohledáš.
 
 ### 74.2.5 Vynucení silného MFA
 

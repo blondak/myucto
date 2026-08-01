@@ -136,7 +136,65 @@ final class CronJobsAction
         return Json::ok($response, [
             'jobs'        => $rows,
             'server_time' => date('c'),
+            'install'     => $this->installContext(),
         ]);
+    }
+
+    /**
+     * Podklady pro návod „jak úlohy naplánovat" v UI. Cesty se berou ze SKUTEČNÉHO
+     * běžícího nasazení (`Bootstrap::rootDir()`), ne z příkladů v dokumentaci — jinak
+     * si je admin musí přepisovat ručně a udělá překlep.
+     *
+     * @return array{
+     *   project_root:string, cmd_dir:string, log_dir:string, os_family:string,
+     *   is_docker:bool, data_dir:?string, php_binary:string, docker_managed:bool
+     * }
+     */
+    private function installContext(): array
+    {
+        $root = \MyInvoice\Bootstrap::rootDir();
+        $dataDir = getenv('MYINVOICE_DATA_DIR');
+        $dataDir = is_string($dataDir) && trim($dataDir) !== '' ? trim($dataDir) : null;
+        // V Docker image plánuje úlohy vestavěný cron generovaný z CronCatalog
+        // (DockerCrontabGenerator) — admin tam nemá co nastavovat, jen ověřit.
+        $isDocker = is_file('/.dockerenv') || is_file('/usr/local/bin/myinvoice-cron-run');
+
+        $windows = PHP_OS_FAMILY === 'Windows';
+        $sep = $windows ? '\\' : '/';
+
+        return [
+            'project_root'   => $root,
+            'cmd_dir'        => $root . $sep . 'cmd',
+            'log_dir'        => ($dataDir ?? $root) . $sep . 'log' . $sep . 'cron',
+            'os_family'      => PHP_OS_FAMILY,
+            'is_docker'      => $isDocker,
+            'data_dir'       => $dataDir,
+            'php_binary'     => self::cliPhpBinary(),
+            'docker_managed' => $isDocker,
+        ];
+    }
+
+    /**
+     * PHP_BINARY je binárka WEBOVÉHO SAPI — pod IIS/FastCGI `php-cgi.exe`, pod
+     * FPM `php-fpm`. Cron potřebuje CLI. Zobrazit sem web SAPI by svádělo dát ho
+     * do plánované úlohy, kde se chová jinak (CGI hlavičky, jiné php.ini sekce),
+     * takže hledáme sourozence php/php.exe ve stejném adresáři.
+     */
+    private static function cliPhpBinary(): string
+    {
+        $binary = PHP_BINARY;
+        $base = basename($binary);
+        if (!preg_match('/^php-(cgi|fpm)(\d[\d.]*)?(\.exe)?$/i', $base)) {
+            return $binary;
+        }
+        $dir = dirname($binary);
+        foreach (['php.exe', 'php'] as $candidate) {
+            $path = $dir . DIRECTORY_SEPARATOR . $candidate;
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+        return $binary;
     }
 
     /**

@@ -296,9 +296,22 @@ export interface CronJob {
   counts_24h: { ok: number; error: number; total: number }
 }
 
+/** Skutečné cesty běžícího nasazení — návod na plánování úloh se z nich sestaví. */
+export interface CronInstallContext {
+  project_root: string
+  cmd_dir: string
+  log_dir: string
+  os_family: string
+  is_docker: boolean
+  data_dir: string | null
+  php_binary: string
+  docker_managed: boolean
+}
+
 export interface CronJobsResponse {
   jobs: CronJob[]
   server_time: string
+  install?: CronInstallContext
 }
 
 export interface ApprovalListMeta {

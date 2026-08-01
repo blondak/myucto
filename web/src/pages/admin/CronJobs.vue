@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { adminApi, type CronJob, type CronJobHealth } from '@/api/admin'
+import { adminApi, type CronJob, type CronJobHealth, type CronInstallContext } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
@@ -10,6 +10,7 @@ const { t } = useI18n()
 const toast = useToast()
 
 const jobs = ref<CronJob[]>([])
+const install = ref<CronInstallContext | null>(null)
 const serverTime = ref<string>('')
 const loading = ref(false)
 const expanded = ref<Record<string, boolean>>({})
@@ -20,6 +21,7 @@ async function load(signal?: AbortSignal) {
   try {
     const r = await adminApi.cronJobs(signal)
     jobs.value = r.jobs
+    install.value = r.install ?? null
     serverTime.value = r.server_time
   } finally {
     loading.value = false
@@ -125,6 +127,95 @@ function healthTooltip(j: CronJob): string {
 }
 
 const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok'))
+
+// ── Návod na naplánování úloh ───────────────────────────────────────────────
+// Skládá se z KATALOGU (frekvence) a ze SKUTEČNÝCH cest běžícího nasazení
+// (`install`), aby šel příkaz zkopírovat bez přepisování. Sbaleno, protože se
+// to řeší jednou při instalaci.
+
+type Platform = 'linux' | 'windows' | 'docker'
+
+const platform = ref<Platform>('linux')
+watch(install, (i) => {
+  if (!i) return
+  platform.value = i.is_docker ? 'docker' : (i.os_family === 'Windows' ? 'windows' : 'linux')
+}, { immediate: true })
+
+/** `cron-generate-recurring-invoices` → `MyUcto Generate Recurring Invoices` */
+function taskName(script: string): string {
+  const words = script.replace(/^cron-/, '').split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+  return `MyUcto ${words}`
+}
+
+/** Běží server na platformě, kterou má uživatel zvolenou v záložce? */
+const platformIsLive = computed<boolean>(() => {
+  const i = install.value
+  if (!i) return false
+  if (i.is_docker) return platform.value === 'docker'
+  return platform.value === (i.os_family === 'Windows' ? 'windows' : 'linux')
+})
+
+/**
+ * Adresář `cmd/` pro zvolenou platformu. Skutečnou cestu serveru použijeme JEN
+ * na jeho vlastní platformě — přeložit `C:\inetpub\…` na lomítka a vydávat to za
+ * cestu pro crontab by byl nesmysl, který se zkopíruje a nefunguje. Pro cizí
+ * platformu radši zjevný vzorový kořen, u kterého je vidět, že se má přepsat.
+ */
+const setupCmdDir = computed<string>(() => {
+  const i = install.value
+  if (!i) return ''
+  if (platformIsLive.value) return i.cmd_dir
+  return platform.value === 'windows'
+    ? 'C:\\inetpub\\wwwroot\\myucto.cz\\cmd'
+    : '/var/www/myucto.cz/cmd'
+})
+
+const setupLogDir = computed<string>(() =>
+  platformIsLive.value && install.value ? install.value.log_dir : '/data/log/cron'
+)
+
+const setupCommands = computed<string>(() => {
+  if (!install.value || jobs.value.length === 0) return ''
+  const dir = setupCmdDir.value
+
+  if (platform.value === 'windows') {
+    // Jednořádkově — `^` (pokračovací znak cmd.exe) by se v PowerShellu rozbil,
+    // a admin si příkaz stejně kopíruje po jednom.
+    return jobs.value.map(j =>
+      `schtasks /create /tn "${taskName(j.script)}" /tr "${dir}\\${j.script}.cmd" ${j.windows_schtasks} /ru SYSTEM`
+    ).join('\n')
+  }
+
+  if (platform.value === 'docker') {
+    return [
+      '# Cron je součástí image a generuje se z katalogu při buildu —',
+      '# ručně se nic neplánuje, jen se ověřuje:',
+      'docker compose exec app cat /etc/cron.d/myucto',
+      `docker compose exec app ls -l ${setupLogDir.value}`,
+      '',
+      '# Po změně frekvence v CronCatalog.php se image musí přebuildit:',
+      'docker compose build app && docker compose up -d app',
+    ].join('\n')
+  }
+
+  return [
+    '# crontab -e  (uživatel s právem zápisu do log/ a storage/)',
+    ...jobs.value.map(j => `${j.linux_cron}\t${dir}/${j.script}.sh`),
+  ].join('\n')
+})
+
+const copied = ref(false)
+async function copySetup() {
+  try {
+    await navigator.clipboard.writeText(setupCommands.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    toast.error(t('cron_jobs.setup_copy_failed'))
+  }
+}
 </script>
 
 <template>
@@ -303,5 +394,54 @@ const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok'))
     </div>
 
     <p v-if="!hasProblems && jobs.length" class="mt-3 text-xs text-success-600">✓ {{ t('cron_jobs.all_ok') }}</p>
+
+    <!-- Jak úlohy naplánovat — sbaleno, řeší se jednou při instalaci. -->
+    <details v-if="install && jobs.length" class="mt-6 rounded-lg border border-neutral-200 dark:border-neutral-700">
+      <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">
+        {{ t('cron_jobs.setup_title') }}
+        <span class="ml-2 text-xs font-normal text-neutral-500">{{ t('cron_jobs.setup_paths_hint') }}</span>
+      </summary>
+
+      <div class="border-t border-neutral-200 dark:border-neutral-700 px-4 py-3 space-y-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            v-for="p in (['linux', 'windows', 'docker'] as const)"
+            :key="p"
+            type="button"
+            class="text-xs px-2.5 py-1 rounded border"
+            :class="platform === p
+              ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200 font-medium'
+              : 'border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300'"
+            @click="platform = p"
+          >
+            {{ t(`cron_jobs.setup_platform_${p}`) }}
+          </button>
+          <button type="button" :class="[btnOutline('neutral'), 'ml-auto']" @click="copySetup">
+            {{ copied ? t('cron_jobs.setup_copied') : t('cron_jobs.setup_copy') }}
+          </button>
+        </div>
+
+        <p class="text-xs text-neutral-500">{{ t(`cron_jobs.setup_intro_${platform}`) }}</p>
+        <p v-if="!platformIsLive" class="text-xs text-warning-600">{{ t('cron_jobs.setup_foreign_platform') }}</p>
+
+        <!-- Vodorovný scroll patří bloku s příkazy, ne stránce. -->
+        <pre class="text-xs font-mono bg-neutral-50 dark:bg-neutral-900 rounded p-3 overflow-x-auto whitespace-pre">{{ setupCommands }}</pre>
+
+        <dl class="text-xs text-neutral-500 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
+          <dt>{{ t('cron_jobs.setup_project_root') }}</dt>
+          <dd class="font-mono break-all">{{ install.project_root }}</dd>
+          <dt>{{ t('cron_jobs.setup_log_dir') }}</dt>
+          <dd class="font-mono break-all">{{ install.log_dir }}</dd>
+          <dt>{{ t('cron_jobs.setup_php_binary') }}</dt>
+          <dd class="font-mono break-all">{{ install.php_binary }}</dd>
+          <template v-if="install.data_dir">
+            <dt>MYINVOICE_DATA_DIR</dt>
+            <dd class="font-mono break-all">{{ install.data_dir }}</dd>
+          </template>
+        </dl>
+
+        <p class="text-xs text-neutral-500">{{ t('cron_jobs.setup_note') }}</p>
+      </div>
+    </details>
   </div>
 </template>
