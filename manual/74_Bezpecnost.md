@@ -35,7 +35,7 @@ E-mailové OTP je kompatibilní druhý krok pro účet bez silného faktoru, ale
 nesplňuje povinnou silnou MFA politiku. Důvěryhodné zařízení se týká pouze
 e-mailového OTP.
 
-### 39.2.1 Passkeys
+### 74.2.1 Passkeys
 
 Passkey zaregistruješ v **Profil → Přístupové klíče**. Každý klíč má
 vlastní název, datum vytvoření a posledního použití. Lze jej přejmenovat nebo
@@ -74,7 +74,7 @@ je až po přidání prvního klíče. Další klíče už vyžadují aktuálně
 
 TOTP = time-based one-time password (RFC 6238).
 
-### 39.2.2 Aktivace TOTP
+### 74.2.2 Aktivace TOTP
 
 **Profil → 2FA / TOTP → Aktivovat**.
 
@@ -128,7 +128,7 @@ zruš systémový dialog a přihlas se e-mailem a heslem.
 Účet s passkey nedostane automatický fallback na e-mailový kód. Pokud passkey
 na aktuálním zařízení není dostupná, použij jinou passkey, TOTP nebo rescue.
 
-### 39.2.4 Obnova přístupu
+### 74.2.4 Obnova přístupu
 
 Kde passkey fyzicky leží, rozhoduje o tom, co se stane při ztrátě zařízení:
 
@@ -206,7 +206,7 @@ MYINVOICE_AUTH_REQUIRE_MFA=true
 MYINVOICE_AUTH_MFA_METHODS=passkey,totp
 ```
 
-Úvodní [wizard](06_Setup_wizard.md) nabízí jen přepínač „vyžadovat silné MFA";
+Úvodní [wizard](07_Setup_wizard.md) nabízí jen přepínač „vyžadovat silné MFA";
 seznam metod nechává na konfiguraci, takže po instalaci jsou povolené obě. Jeho
 zúžení je vědomý zásah do `cfg.php` / ENV.
 
@@ -286,7 +286,7 @@ Chování:
 > uživateli zrušit i důvěryhodná zařízení a čekající kódy:
 > `php api/bin/reset-mfa.php <email>`.
 
-### 39.2.7 Serverový zámek session
+### 74.2.7 Serverový zámek session
 
 Automatický zámek browserové a PWA session je ve výchozím stavu vypnutý, aby se
 po aktualizaci nezměnilo chování existujících instalací. Správce nastavuje
@@ -346,7 +346,7 @@ zachovaný jen dokud prohlížeč stránku drží v paměti; po ukončení strá
 Androidem se neuložená data ztratí. Offline odemčení není možné, protože server
 musí vydat a ověřit jednorázovou challenge.
 
-### 39.2.8 Nasazení změny autentizačního modelu
+### 74.2.8 Nasazení změny autentizačního modelu
 
 Aktivní session vytvořené před doplněním autentizačního kontextu se po migraci
 označí jako `legacy`; migrace z pouhé existence TOTP neodvozuje, že konkrétní
