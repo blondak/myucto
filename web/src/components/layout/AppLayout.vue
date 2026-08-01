@@ -246,10 +246,15 @@ const navSections = computed<NavSection[]>(() => {
   // Daňový optimalizátor (paušál vs standardní režim) je jen pro OSVČ (fyzická osoba).
   const isOsvc = supplierStore.currentSupplier?.taxpayer_type === 'fo'
   const ossEnabled = supplierStore.currentSupplier?.oss_enabled === true
+  // „Vést účetnictví" (migrace 1179) — firemní opt-out účetní nadstavby. Vypnuté schová
+  // účetní sekce z menu úplně stejně, jako by nebyla licence; fakturace, DPH a sklad
+  // zůstávají. Undefined = zapnuto (starší /auth/me bez pole), aby chybějící migrace
+  // uživateli nesebrala účetnictví.
+  const accountingEnabled = supplierStore.currentSupplier?.accounting_enabled !== false
   // Účetnictví (Epic F1) — sekce se zobrazí jen firmám v režimu podvojného účetnictví.
-  const isDoubleEntry = supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  const isDoubleEntry = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   // Daňová evidence (Epic DE) — zrcadlo isDoubleEntry; sekce jen pro režim daňové evidence.
-  const isTaxEvidence = supplierStore.currentSupplier?.accounting_mode === 'tax_evidence'
+  const isTaxEvidence = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'tax_evidence'
   // Sklad (Epic SKLAD) — nezávislé na accounting_mode (funguje i pro tax_evidence).
   const isStockEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true
   const sections: NavSection[] = [
@@ -1030,7 +1035,11 @@ onMounted(async () => {
   navResizeObserver = new ResizeObserver(evaluateDesktopNavFit)
   if (desktopNavHost.value) navResizeObserver.observe(desktopNavHost.value)
   void nextTick(evaluateDesktopNavFit)
-  if (supplierStore.currentSupplier?.accounting_mode === 'double_entry' && auth.canRead('accounting')) {
+  // Bez zapnutého účetnictví nemá smysl ani polling automatu — jeho badge visí
+  // u položky, která v menu není.
+  if (supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+      && supplierStore.currentSupplier?.accounting_enabled !== false
+      && auth.canRead('accounting')) {
     automationStore.startPolling()
   }
   try { versionInfo.value = await updateApi.publicVersion() } catch {}

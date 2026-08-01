@@ -7168,6 +7168,12 @@
     "numbering_collision_hint": "Bankovní platba s tímto VS by se pak spárovala nejednoznačně (nebo omylem s cizím dokladem). Uprav šablony tak, aby se lišily číslicí (např. jiná číslice na začátku), ne jen písmenem — to párování normalizuje pryč.",
     "tax_section": "Daňové nastavení (EPO výkazy DPH/KH)",
     "tax_hint": "Údaje potřebné pro generování XML výkazů (DPHDP3, Kontrolní hlášení). Mimo to volitelné.",
+    "accounting_enabled": {
+      "title": "Vést účetnictví",
+      "label": "Vést účetnictví",
+      "hint": "Zpřístupní účetní deník, hlavní knihu, výkazy, majetek, mzdy a uzávěrku. Vypnuté je z menu schová — fakturace, DPH přiznání, kontrolní hlášení i sklad fungují dál. Na licenci to nemá vliv: licencují se všechny firmy i uživatelé bez ohledu na toto nastavení.",
+      "off_note": "Účetní sekce zmizí z menu po uložení. Data se nemažou — po zapnutí se vrátí i s historií."
+    },
     "accounting_mode": "Režim účetnictví",
     "accounting_mode_tax_evidence": "Daňová evidence",
     "accounting_mode_double_entry": "Podvojné účetnictví",

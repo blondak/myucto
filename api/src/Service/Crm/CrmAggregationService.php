@@ -9,6 +9,8 @@ use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use MyInvoice\Support\Sql\PayablePredicate;
 
@@ -33,6 +35,10 @@ final class CrmAggregationService
         private readonly Connection $db,
         private readonly ?TaxReturnService $taxReturns = null,
         private readonly ?JournalIntegrityService $journalIntegrity = null,
+        // Licence do „Akcí pro tebe" (blížící se konec trialu / překročený rozsah /
+        // vypršení). `current()` je čistě lokální — čte řádek `license` a dopočítá stav,
+        // žádné volání licenčního serveru, takže feed nezpomalí ani neselže offline.
+        private readonly ?LicenseService $license = null,
     ) {}
 
     // ── Sjednocená metodika s Tržbami/Náklady (Stats/PurchaseSummary) ──────────
@@ -1425,10 +1431,117 @@ final class CrmAggregationService
             ];
         }
 
+        // 6. Licence — konec trialu, překročený rozsah, vypršení. Banner v layoutu je
+        // pasivní (uživatel ho přeskočí očima), tohle je položka v seznamu úkolů, kterou
+        // musí odbavit nebo vědomě skrýt. Blížící se konec trialu je jediná varianta
+        // s termínem; ostatní stavy už dopad MAJÍ, proto bez odpočtu.
+        if ($licenseItem = $this->licenseItem($dismissals, $nowDt)) {
+            $items[] = $licenseItem;
+        }
+
         return [
             'items' => $items,
             'total' => count($items),
             'dismissed_count' => count($dismissals),
+        ];
+    }
+
+    /**
+     * Položka „Akcí pro tebe" ke stavu licence.
+     *
+     * Okno pro trial je 7 dní předem — banner v layoutu naskakuje až od 5 dní a uživatel,
+     * který se do aplikace dívá obden, tak o končícím trialu nemusí vědět skoro do konce.
+     * Aktivní ani doživotní licence nic negeneruje.
+     *
+     * @param array<string,mixed> $dismissals
+     * @return array<string,mixed>|null
+     */
+    private function licenseItem(array $dismissals, \DateTimeImmutable $now): ?array
+    {
+        if ($this->license === null || $this->isFullyDismissed($dismissals, 'license')) {
+            return null;
+        }
+        try {
+            $state = $this->license->current();
+        } catch (\Throwable) {
+            return null;   // stav licence nesmí shodit celý feed úkolů
+        }
+
+        return self::licenseActionItem($state, $now->getTimestamp());
+    }
+
+    /**
+     * Čistý překlad stavu licence na položku seznamu — bez DB a bez času „teď" z okolí,
+     * aby šel otestovat na hraničních dnech (poslední den trialu, propadlý deadline).
+     *
+     * @return array<string,mixed>|null
+     */
+    public static function licenseActionItem(LicenseState $state, int $ts): ?array
+    {
+        $daysTo = static fn (?int $at): ?int => $at === null
+            ? null
+            : (int) ceil(($at - $ts) / 86400);
+
+        [$severity, $title, $hint, $days] = match ($state->state) {
+            LicenseState::TRIAL => (function () use ($state, $daysTo): array {
+                $left = $daysTo($state->trialEndsAt);
+                if ($left === null || $left > 7) {
+                    return ['', '', '', null];
+                }
+                return [
+                    $left <= 2 ? 'high' : 'medium',
+                    'Zkušební období končí',
+                    $left <= 0
+                        ? 'Trial vyprší dnes — bez aktivace přestanou být dostupné účetní moduly.'
+                        : sprintf('Zbývá %d %s. Po vypršení přestanou být dostupné účetní moduly.',
+                            $left, $left === 1 ? 'den' : ($left < 5 ? 'dny' : 'dní')),
+                    $left,
+                ];
+            })(),
+            LicenseState::TRIAL_EXPIRED => [
+                'high',
+                'Zkušební období skončilo',
+                'Účetní moduly nejsou dostupné. Fakturace funguje dál.',
+                null,
+            ],
+            LicenseState::DEGRADED => [
+                'high',
+                'Licence vypršela',
+                'Účetní moduly nejsou dostupné. Fakturace funguje dál.',
+                null,
+            ],
+            LicenseState::OVERAGE => (function () use ($state, $daysTo): array {
+                $left = $daysTo($state->overageDeadline);
+                $counts = sprintf('%d z %d uživatelů', $state->usersActive, $state->usersLicensed);
+                if ($state->maxCompanies !== null) {
+                    $counts .= sprintf(', %d z %d firem', $state->companiesActive, $state->maxCompanies);
+                }
+                return [
+                    $left !== null && $left <= 3 ? 'high' : 'medium',
+                    'Překročený rozsah licence',
+                    $left !== null
+                        ? sprintf('%s. Rozšiř předplatné do %d dní, jinak se obnova pozastaví.', $counts, max($left, 0))
+                        : $counts . '. Rozšiř předplatné, jinak se obnova pozastaví.',
+                    $left,
+                ];
+            })(),
+            default => ['', '', '', null],
+        };
+
+        if ($severity === '') {
+            return null;
+        }
+
+        return [
+            // Jeden typ pro všechny stavy: uživatel skrývá „upozornění na licenci",
+            // ne konkrétní stav, a přechodem trial → vypršelo by mu skrytí jinak spadlo.
+            'type'     => 'license',
+            'severity' => $severity,
+            'title'    => $title,
+            'hint'     => $hint,
+            // Stav licence vidí i admin bez práva nakupovat; odtud vede odkaz dál.
+            'link'     => '/activation/license',
+            'days'     => $days,
         ];
     }
 

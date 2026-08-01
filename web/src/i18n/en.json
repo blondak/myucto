@@ -7168,6 +7168,12 @@
     "numbering_collision_hint": "A bank payment with this VS would then match ambiguously (or accidentally match the wrong document). Adjust the templates to differ by a digit (e.g. a different leading digit), not just a letter — matching normalizes letters away.",
     "tax_section": "Tax settings (EPO returns DPH/KH)",
     "tax_hint": "Fields needed for XML report generation (DPHDP3, Kontrolní hlášení). Optional otherwise.",
+    "accounting_enabled": {
+      "title": "Keep accounting records",
+      "label": "Keep accounting records",
+      "hint": "Enables the journal, general ledger, statements, assets, payroll and year-end closing. Turning it off hides them from the menu — invoicing, VAT returns, control statements and stock keep working. It has no effect on licensing: every company and user is licensed regardless of this setting.",
+      "off_note": "The accounting sections disappear from the menu once saved. Nothing is deleted — turning it back on restores everything including history."
+    },
     "accounting_mode": "Accounting mode",
     "accounting_mode_tax_evidence": "Tax evidence (daňová evidence)",
     "accounting_mode_double_entry": "Double-entry accounting",

@@ -158,6 +158,7 @@ final class Bootstrap
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class),
                 $c->get(\MyInvoice\Service\Accounting\JournalIntegrityService::class),
+                $c->get(\MyInvoice\Service\License\LicenseService::class),
             ),
             // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
             // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.

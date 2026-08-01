@@ -38,6 +38,7 @@ function syncSupplierStore(s: Supplier) {
     payment_thanks_enabled: s.payment_thanks_enabled,
     payment_thanks_default_checked: s.payment_thanks_default_checked,
     stock_enabled: s.stock_enabled ?? false,
+    accounting_enabled: s.accounting_enabled ?? true,
   })
 }
 
@@ -396,6 +397,8 @@ async function saveSupplier() {
       stock_auto_issue: supplier.value.stock_auto_issue ?? true,
       // Tax settings (EPO výkazy DPH/KH)
       accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
+      // „Vést účetnictví" (1179) — opt-out účetní nadstavby v menu; na licenci bez vlivu.
+      accounting_enabled: supplier.value.accounting_enabled ?? true,
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,
@@ -778,6 +781,24 @@ async function saveAutoPostFlags(): Promise<void> {
           </div>
         </div>
 
+      </section>
+
+      <!--
+        Vést účetnictví (1179) — firemní opt-out účetní nadstavby. Box je první v záložce,
+        protože rozhoduje o tom, jestli má zbytek účetních nastavení pod ním vůbec smysl.
+      -->
+      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.accounting_enabled.title') }}</h2>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input v-model="supplier.accounting_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+          <span>
+            <span class="font-medium">{{ t('settings.accounting_enabled.label') }}</span>
+            <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.accounting_enabled.hint') }}</p>
+          </span>
+        </label>
+        <p v-if="supplier.accounting_enabled === false" class="text-xs text-warning-600 mt-2">
+          {{ t('settings.accounting_enabled.off_note') }}
+        </p>
       </section>
 
       <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode -->

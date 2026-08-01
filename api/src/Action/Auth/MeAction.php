@@ -64,7 +64,7 @@ final class MeAction
                 'SELECT id, company_name, ic, is_vat_payer, is_identified, taxpayer_type,
                         default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
                         auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                        accounting_mode, stock_enabled, ' . $ossSelect . ',
+                        accounting_mode, accounting_enabled, stock_enabled, ' . $ossSelect . ',
                         ai_provider, ai_data_region, ai_eu_residency_required
                    FROM supplier' . $where . ' ORDER BY id'
             );
@@ -77,6 +77,10 @@ final class MeAction
             // Režim účetnictví (Epic F1) — 'double_entry' zpřístupní účetní UI (deník,
             // osnova, období). Nav sekce se řídí touto hodnotou přes supplier store.
             $s['accounting_mode']          = (string) ($s['accounting_mode'] ?? 'tax_evidence');
+            // „Vést účetnictví" (migrace 1179) — vypnuté schová účetní sekce z menu stejně,
+            // jako by nebyla licence. Default TRUE i pro řádky bez sloupce (starší schéma),
+            // aby vypnutí bylo vždy vědomé rozhodnutí, ne důsledek chybějící migrace.
+            $s['accounting_enabled']       = (bool) ($s['accounting_enabled'] ?? true);
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; nav sekce Sklad se řídí
             // touto hodnotou (stejný vzor jako accounting_mode výše).
             $s['stock_enabled']            = (bool) ($s['stock_enabled'] ?? false);

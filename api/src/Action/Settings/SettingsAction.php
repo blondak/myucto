@@ -449,6 +449,8 @@ final class SettingsAction
             'self_copy',
             // Režim účetnictví (Epic F0, migrace 1001) — daňová evidence vs podvojné
             'accounting_mode',
+            // „Vést účetnictví" (migrace 1179) — opt-out účetní nadstavby v menu.
+            'accounting_enabled',
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul evidence zásob + auto-výdejka
             // při vystavení FV; smí přepínat i účetní (viz bypass guard() výše).
             'stock_enabled', 'stock_auto_issue',
@@ -701,7 +703,7 @@ final class SettingsAction
         foreach ($allowed as $f) {
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required'], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'accounting_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required'], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -940,6 +942,9 @@ final class SettingsAction
         $row['embed_isdoc']              = (bool) ($row['embed_isdoc'] ?? true);
         // Režim účetnictví (Epic F0, migrace 1001)
         $row['accounting_mode']          = (string) ($row['accounting_mode'] ?? 'tax_evidence');
+        // „Vést účetnictví" (migrace 1179) — vypnuté schová účetní sekce z menu. Na licenci
+        // vliv nemá: licencují se všechny firmy i uživatelé bez ohledu na tenhle přepínač.
+        $row['accounting_enabled']       = (bool) ($row['accounting_enabled'] ?? true);
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);
