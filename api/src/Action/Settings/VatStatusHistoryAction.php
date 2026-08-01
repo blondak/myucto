@@ -8,10 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
-use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
-use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\VatRegistrationService;
@@ -41,8 +39,7 @@ final class VatStatusHistoryAction
     public function __construct(
         private readonly Connection $db,
         private readonly VatStatusService $vatStatus,
-        private readonly DocumentLockService $locks,
-        private readonly AccountingSupplierSettingsRepository $accountingSettings,
+        private readonly \MyInvoice\Service\Vat\VatStatusGuard $vatGuard,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly VatRegistrationService $vatRegistration,
@@ -130,9 +127,12 @@ final class VatStatusHistoryAction
 
     /**
      * § 6/§ 4a hlídač obratu pro banner v bloku Plátcovství DPH (EPIC VH-07):
-     * výstup VatRegistrationService za běžný rok + termín přihlášky dle § 94
-     * odst. 1 (10 pracovních dnů ode dne překročení; u dolního limitu jen
-     * informativní datum vzniku plátcovství — den překročení se neeviduje).
+     * výstup VatRegistrationService + termín přihlášky dle § 94 odst. 1
+     * (10 pracovních dnů ode dne překročení obratu 2 000 000 Kč).
+     *
+     * Kouká i na PŘEDCHOZÍ rok: obrat loňska zakládá plátcovství od 1. ledna
+     * letoška (§ 6 odst. 1) a novoroční reset obratu běžného roku nesmí banner
+     * zhasnout, dokud firma registraci nevyřídila.
      */
     public function registrationCheck(Request $request, Response $response): Response
     {
@@ -141,10 +141,19 @@ final class VatStatusHistoryAction
         if ($sid <= 0) return Json::error($response, 'validation_failed', 'Chybí aktivní firma.', 400);
 
         $reg = $this->vatRegistration->evaluate($sid, (int) date('Y'));
+        if (!in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)) {
+            $prev = $this->vatRegistration->evaluate($sid, (int) date('Y') - 1);
+            if (in_array($prev['status'], ['exceeded_low', 'exceeded_high'], true)) {
+                $reg = $prev;
+            }
+        }
         $reg['application_deadline'] = null;
         $reg['application_deadline_basis'] = null;
         if (in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)) {
-            $deadline = VatRegistrationService::applicationDeadline($reg['crossed_on'], $reg['becomes_payer_on']);
+            $deadline = VatRegistrationService::applicationDeadline(
+                $reg['crossed_low_on'] ?? null,
+                $reg['becomes_payer_on'],
+            );
             if ($deadline !== null) {
                 $reg['application_deadline'] = $deadline['deadline'];
                 $reg['application_deadline_basis'] = $deadline['basis'];
@@ -213,61 +222,14 @@ final class VatStatusHistoryAction
     }
 
     /**
-     * Retro-kolize dané účinnosti: uzamčené účetní období (closing/closed/
-     * approved), zámek účtování k datu (locked_until) a podaná přiznání
-     * s obdobím sahajícím na/za effective_from.
+     * Retro-kolize dané účinnosti — sdílená logika ve {@see \MyInvoice\Service\Vat\VatStatusGuard}
+     * (používá ji i legacy checkbox v PUT /settings/supplier).
      *
      * @return list<array<string,mixed>>
      */
     private function collisions(int $sid, string $effectiveFrom): array
     {
-        $collisions = [];
-
-        $lock = $this->locks->forDate($sid, $effectiveFrom);
-        if ($lock->inClosedPeriod || $lock->inClosingPeriod) {
-            $collisions[] = [
-                'type'          => 'locked_period',
-                'period_status' => $lock->periodStatus,
-            ];
-        }
-        if ($lock->dateLocked) {
-            $collisions[] = [
-                'type'         => 'date_lock',
-                'locked_until' => $this->accountingSettings->getLockedUntil($sid),
-            ];
-        }
-
-        // Podané přiznání pokrývá období končící >= effective_from → retro změna
-        // by měnila podklad, ze kterého výkaz vznikl. Jen prokazatelně podané
-        // stavy (submitted/accepted, migrace 1110); jeden řádek na období.
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT form_code, period_year, period_month, period_quarter, MAX(submitted_at) AS submitted_at
-               FROM tax_submissions
-              WHERE supplier_id = ? AND status IN ('submitted', 'accepted')
-                AND (CASE
-                        WHEN period_month IS NOT NULL
-                            THEN LAST_DAY(CONCAT(period_year, '-', LPAD(period_month, 2, '0'), '-01'))
-                        WHEN period_quarter IS NOT NULL
-                            THEN LAST_DAY(CONCAT(period_year, '-', LPAD(period_quarter * 3, 2, '0'), '-01'))
-                        ELSE CONCAT(period_year, '-12-31')
-                     END) >= ?
-              GROUP BY form_code, period_year, period_month, period_quarter
-              ORDER BY period_year, period_quarter, period_month
-              LIMIT 50"
-        );
-        $stmt->execute([$sid, $effectiveFrom]);
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $sub) {
-            $collisions[] = [
-                'type'           => 'tax_submission',
-                'form_code'      => (string) $sub['form_code'],
-                'period_year'    => (int) $sub['period_year'],
-                'period_month'   => $sub['period_month'] !== null ? (int) $sub['period_month'] : null,
-                'period_quarter' => $sub['period_quarter'] !== null ? (int) $sub['period_quarter'] : null,
-                'submitted_at'   => $sub['submitted_at'] !== null ? (string) $sub['submitted_at'] : null,
-            ];
-        }
-
-        return $collisions;
+        return $this->vatGuard->collisions($sid, $effectiveFrom);
     }
 
     /** @return array<string,mixed> historie + živá cache po změně */

@@ -59,11 +59,11 @@ final class EpoSupplierBlockBuilder
      * TIŠE, když volající sloupec zapomněl.
      *
      * @param ?string $statusDate Rozhodné datum plátcovství (YYYY-MM-DD) — typicky
-     *        POSLEDNÍ DEN období výkazu. Živý supplier.is_vat_payer je jen cache
-     *        stavu „dnes"; s datem se `is_vat_payer` přepíše stavem k tomuto datu
-     *        z historie ({@see \MyInvoice\Service\Vat\VatStatusService}). Ostatní
-     *        pole zůstávají živá. `is_identified` historii zatím NEMÁ — čte se
-     *        vždy živý flag; až ji dostane, rozšíří se POUZE tenhle blok.
+     *        POSLEDNÍ DEN období výkazu. Živé supplier.is_vat_payer/is_identified
+     *        jsou jen cache stavu „dnes"; s datem se OBA flagy přepíší stavem
+     *        k tomuto datu z historie (migrace 1181 historizuje i identifikovanou
+     *        osobu — {@see \MyInvoice\Service\Vat\VatStatusService::flagsAt()}).
+     *        Ostatní pole zůstávají živá.
      * @return array<string,mixed>
      */
     public static function loadSupplier(\PDO $pdo, int $supplierId, ?string $statusDate = null): array
@@ -80,7 +80,9 @@ final class EpoSupplierBlockBuilder
             throw new \RuntimeException("Supplier #{$supplierId} nenalezen.");
         }
         if ($statusDate !== null) {
-            $row['is_vat_payer'] = \MyInvoice\Service\Vat\VatStatusService::payerAt($pdo, $supplierId, $statusDate) ? 1 : 0;
+            $flags = \MyInvoice\Service\Vat\VatStatusService::flagsAt($pdo, $supplierId, $statusDate);
+            $row['is_vat_payer'] = $flags['is_vat_payer'] ? 1 : 0;
+            $row['is_identified'] = $flags['is_identified'] ? 1 : 0;
         }
 
         return $row;

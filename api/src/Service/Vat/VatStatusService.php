@@ -49,6 +49,68 @@ final class VatStatusService
         return (bool) $stmt->fetchColumn();
     }
 
+    /** Stav obou flagů (plátce + identifikovaná osoba) k danému datu. @return array{is_vat_payer:bool,is_identified:bool} */
+    public function statusAt(int $supplierId, string $date): array
+    {
+        return self::flagsAt($this->db->pdo(), $supplierId, $date);
+    }
+
+    /**
+     * Statická varianta {@see statusAt()}: oba flagy z řádku historie k datu
+     * (migrace 1181 historizuje i is_identified), fallback na živý supplier
+     * řádek u firem bez použitelného řádku historie.
+     *
+     * @return array{is_vat_payer:bool,is_identified:bool}
+     */
+    public static function flagsAt(\PDO $pdo, int $supplierId, string $date): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT is_vat_payer, is_identified FROM supplier_vat_status_history
+              WHERE supplier_id = ? AND effective_from <= ?
+              ORDER BY effective_from DESC, id DESC LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $date]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            $live = $pdo->prepare('SELECT is_vat_payer, is_identified FROM supplier WHERE id = ?');
+            $live->execute([$supplierId]);
+            $row = $live->fetch(\PDO::FETCH_ASSOC) ?: [];
+        }
+
+        return [
+            'is_vat_payer'  => (bool) ($row['is_vat_payer'] ?? false),
+            'is_identified' => (bool) ($row['is_identified'] ?? false),
+        ];
+    }
+
+    /** Byla firma plátcem kdykoli BĚHEM intervalu [from, to]? */
+    public function wasPayerDuring(int $supplierId, string $from, string $to): bool
+    {
+        return self::payerDuring($this->db->pdo(), $supplierId, $from, $to);
+    }
+
+    /**
+     * Statická varianta {@see wasPayerDuring()}. Plátcovství byť jen po část
+     * období zakládá povinnosti za CELÉ období (přiznání/KH za období, v němž
+     * plátcovství zaniklo, se pořád podává) — kontroly „je plátce?" nad obdobím
+     * proto nesmí testovat jen poslední den.
+     */
+    public static function payerDuring(\PDO $pdo, int $supplierId, string $from, string $to): bool
+    {
+        if (self::payerAt($pdo, $supplierId, $from)) {
+            return true;
+        }
+        $stmt = $pdo->prepare(
+            'SELECT 1 FROM supplier_vat_status_history
+              WHERE supplier_id = ? AND effective_from > ? AND effective_from <= ?
+                AND is_vat_payer = 1
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $from, $to]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     /**
      * Korelovaný SQL výraz "plátce k datu" pro použití uvnitř větších dotazů.
      *
@@ -69,13 +131,13 @@ final class VatStatusService
      * Statická, aby ji mohly volat i bin skripty bez DI kontejneru; idempotentní
      * přes INSERT IGNORE (UNIQUE supplier_id + effective_from).
      */
-    public static function seedInitialStatus(\PDO $pdo, int $supplierId, bool $isVatPayer): void
+    public static function seedInitialStatus(\PDO $pdo, int $supplierId, bool $isVatPayer, bool $isIdentified = false): void
     {
         $pdo->prepare(
             'INSERT IGNORE INTO supplier_vat_status_history
-                (supplier_id, effective_from, is_vat_payer, annual_deduction_percent)
-             VALUES (?, \'1900-01-01\', ?, 100)'
-        )->execute([$supplierId, $isVatPayer ? 1 : 0]);
+                (supplier_id, effective_from, is_vat_payer, is_identified, annual_deduction_percent)
+             VALUES (?, \'1900-01-01\', ?, ?, 100)'
+        )->execute([$supplierId, $isVatPayer ? 1 : 0, (!$isVatPayer && $isIdentified) ? 1 : 0]);
     }
 
     /**

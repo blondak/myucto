@@ -53,6 +53,7 @@ final class SettingsAction
         private readonly \MyInvoice\Service\License\LicenseService $license,
         // VH-01: sdílená zápisová cesta do supplier_vat_status_history.
         private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
+        private readonly \MyInvoice\Service\Vat\VatStatusGuard $vatStatusGuard,
     ) {}
 
     /**
@@ -317,11 +318,12 @@ final class SettingsAction
                 (float) ($b['default_hourly_rate'] ?? 1500.00),
             ]);
             $newSupplierId = (int) $pdo->lastInsertId();
-            $pdo->prepare(
-                'INSERT INTO supplier_vat_status_history
-                    (supplier_id, effective_from, is_vat_payer, annual_deduction_percent)
-                 VALUES (?, ?, ?, 100)'
-            )->execute([$newSupplierId, '1900-01-01', $isIdentified ? 0 : (!empty($b['is_vat_payer']) ? 1 : (!empty($b['dic']) ? 1 : 0))]);
+            \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus(
+                $pdo,
+                $newSupplierId,
+                $isIdentified ? false : (!empty($b['is_vat_payer']) || !empty($b['dic'])),
+                $isIdentified,
+            );
 
             // 2. Seed default currencies pro nového supplier (CZK + EUR, bez bank polí)
             $insertCur = $pdo->prepare(
@@ -549,13 +551,23 @@ final class SettingsAction
             }
         }
         $vatStatusEffectiveFrom = null;
-        $vatStatusChanged = array_key_exists('is_vat_payer', $body)
-            && (bool) $body['is_vat_payer'] !== (bool) ($cur['is_vat_payer'] ?? false);
+        $vatStatusChanged = (array_key_exists('is_vat_payer', $body)
+                && (bool) $body['is_vat_payer'] !== (bool) ($cur['is_vat_payer'] ?? false))
+            || (array_key_exists('is_identified', $body)
+                && (bool) $body['is_identified'] !== (bool) ($cur['is_identified'] ?? false));
         if ($vatStatusChanged || array_key_exists('vat_status_effective_from', $body)) {
             $vatStatusEffectiveFrom = trim((string) ($body['vat_status_effective_from'] ?? date('Y-m-d')));
             $effectiveDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $vatStatusEffectiveFrom);
             if ($effectiveDate === false || $effectiveDate->format('Y-m-d') !== $vatStatusEffectiveFrom) {
                 return Json::error($response, 'validation_failed', 'Datum účinnosti plátcovství DPH není platné.', 422);
+            }
+            // Retro-guard sdílený s VatStatusHistoryAction — legacy checkbox nesmí
+            // obcházet zámky období a podaná přiznání (nález review security-tenant).
+            $collisions = $this->vatStatusGuard->collisions($id, $vatStatusEffectiveFrom);
+            if ($collisions !== [] && empty($body['vat_status_acknowledge'])) {
+                return Json::error($response, 'vat_status_locked_conflict',
+                    'Změna plátcovství zasahuje do uzamčeného období nebo už podaných přiznání.', 409,
+                    ['collisions' => $collisions]);
             }
         }
         // Validace tax fields
@@ -703,6 +715,11 @@ final class SettingsAction
         $sets = [];
         $params = [];
         foreach ($allowed as $f) {
+            // Plátcovství/IO jde přes historii + přepočet cache (níže) — přímý zápis
+            // by u budoucí účinnosti přepnul cache hned a cron ji druhý den vracel.
+            if ($vatStatusEffectiveFrom !== null && in_array($f, ['is_vat_payer', 'is_identified'], true)) {
+                continue;
+            }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
                 $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'accounting_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required'], true)
@@ -717,9 +734,9 @@ final class SettingsAction
             $this->db->pdo()->prepare($sql)->execute($params);
         }
         if ($vatStatusEffectiveFrom !== null) {
-            // VH-01: stejná kódová cesta jako správa historie (VatStatusHistoryAction).
-            // Živou cache tady NEpřepočítáváme — legacy PUT ji nastavuje přímo
-            // z body výše a přepočet by změnil chování u budoucí účinnosti.
+            // Stejná kódová cesta jako správa historie (VatStatusHistoryAction):
+            // upsert řádku + přepočet živé cache z historie. Budoucí účinnost tak
+            // cache nemění — propíše ji až cron vat-status-apply v den účinnosti.
             $this->vatStatus->upsert(
                 $id,
                 $vatStatusEffectiveFrom,
@@ -732,6 +749,7 @@ final class SettingsAction
                 null,
                 (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
             );
+            $this->vatStatus->refreshLiveCache($id);
         }
         if ($modeEffectiveFrom !== null) {
             $this->accountingModes->record($id, $modeEffectiveFrom, (string) $body['accounting_mode']);

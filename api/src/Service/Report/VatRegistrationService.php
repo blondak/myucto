@@ -68,6 +68,7 @@ final class VatRegistrationService
             'limit_high'       => $high,
             'status'           => 'below',
             'crossed_on'       => null,
+            'crossed_low_on'   => null,
             'becomes_payer_on' => null,
             'is_vat_payer'     => $isPayer,
             'basis'            => null,
@@ -97,6 +98,9 @@ final class VatRegistrationService
             return array_merge($base, [
                 'status'           => 'exceeded_high',
                 'crossed_on'       => $crossedOn,
+                // Registrační povinnost (§ 94/1) běží už od překročení DOLNÍHO limitu —
+                // kotva lhůty je den překročení 2 000 000 Kč, ne 2 536 500 Kč.
+                'crossed_low_on'   => $this->dayTurnoverCrossed($supplierId, $year, $low),
                 // § 6 odst. 2 — plátcem DNEM NÁSLEDUJÍCÍM po dni překročení.
                 'becomes_payer_on' => $crossedOn === null
                     ? null
@@ -108,6 +112,7 @@ final class VatRegistrationService
         if ($turnover > $low) {
             return array_merge($base, [
                 'status'           => 'exceeded_low',
+                'crossed_low_on'   => $this->dayTurnoverCrossed($supplierId, $year, $low),
                 // § 6 odst. 1 — plátcem od 1. ledna NÁSLEDUJÍCÍHO kalendářního roku.
                 'becomes_payer_on' => sprintf('%04d-01-01', $year + 1),
                 'basis'            => 'vat_registration_next_year',
@@ -119,21 +124,22 @@ final class VatRegistrationService
 
     /**
      * Termín podání přihlášky k registraci (§ 94 odst. 1 ZDPH, znění od 1. 1. 2025):
-     * do 10 PRACOVNÍCH dnů ode dne překročení obratu. Den překročení se nepočítá,
-     * lhůta končí desátým pracovním dnem po něm (svátky dle 245/2000 Sb.).
+     * do 10 PRACOVNÍCH dnů ode dne překročení obratu 2 000 000 Kč (registrační
+     * povinnost zakládá už DOLNÍ limit; překročení 2 536 500 Kč mění jen den
+     * vzniku plátcovství, ne kotvu lhůty). Den překročení se nepočítá, lhůta
+     * končí desátým pracovním dnem po něm (svátky dle 245/2000 Sb.).
      *
-     * Den překročení služba zná jen u horního limitu ({@see evaluate} —
-     * `crossed_on`); u dolního limitu se den vědomě neuvádí (rozhoduje rok) a
-     * přesnou lhůtu tak nelze z dat odvodit → vrací se INFORMATIVNÍ termín
-     * `becomes_payer_on` (1. leden, den vzniku plátcovství) s basis
-     * `informative`, aby konzument rozdíl uměl říct nahlas.
+     * Bez známého dne překročení (chybí denní data obratu) se vrací INFORMATIVNÍ
+     * termín `becomes_payer_on` s basis `informative`, aby konzument rozdíl uměl
+     * říct nahlas.
      *
+     * @param ?string $crossedLowOn den překročení 2 000 000 Kč ({@see evaluate} — `crossed_low_on`)
      * @return array{deadline:string, basis:'statutory'|'informative'}|null
      */
-    public static function applicationDeadline(?string $crossedOn, ?string $becomesPayerOn): ?array
+    public static function applicationDeadline(?string $crossedLowOn, ?string $becomesPayerOn): ?array
     {
-        if ($crossedOn !== null) {
-            $d = new \DateTimeImmutable($crossedOn);
+        if ($crossedLowOn !== null) {
+            $d = new \DateTimeImmutable($crossedLowOn);
             for ($i = 0; $i < 10; $i++) {
                 $d = CzechWorkingDays::shiftToWorkingDay($d->modify('+1 day'));
             }

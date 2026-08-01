@@ -108,6 +108,21 @@ final class CrmAggregationService
     }
 
     /**
+     * Plátcovství kdykoli BĚHEM období výkazu — povinnost podat vzniká i při
+     * zrušení registrace uprostřed období (poslední přiznání/KH se pořád podává),
+     * proto nestačí stav k poslednímu dni.
+     *
+     * @param array{year:int, month:?int, quarter:?int} $p
+     */
+    private static function payerForPeriod(\PDO $pdo, int $supplierId, array $p): bool
+    {
+        $startMonth = $p['month'] ?? ((int) $p['quarter'] * 3 - 2);
+        $start = sprintf('%04d-%02d-01', $p['year'], $startMonth);
+
+        return VatStatusService::payerDuring($pdo, $supplierId, $start, self::periodEndDate($p));
+    }
+
+    /**
      * Zálohovou (advance) přijatou fakturu vyřaď z nákladů, pokud není zaplacená
      * NEBO je spárovaná s vyúčtovací fakturou (proti dvojímu započtení) — shodně
      * s PurchaseSummaryAction::advanceCostExclude.
@@ -1635,8 +1650,8 @@ final class CrmAggregationService
         // období, ne na živý flag — firma odregistrovaná k 1. 1. má v lednu pořád podat
         // za prosinec; nově registrovaná naopak za období před registrací povinnost nemá.
         $pdo = $this->db->pdo();
-        $dphPayer = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($dphP));
-        $khPayer  = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($khP));
+        $dphPayer = self::payerForPeriod($pdo, $supplierId, $dphP);
+        $khPayer  = self::payerForPeriod($pdo, $supplierId, $khP);
         // is_identified historii zatím nemá — čte se ŽIVÝ flag; až historie o
         // is_identified přibude, mění se JEN tenhle řádek.
         $identified = !$dphPayer && !empty($row['is_identified']);
@@ -1942,8 +1957,8 @@ final class CrmAggregationService
         $khP = $khMonthly
             ? $this->periodForMonthlyDeadline($khDate)
             : $this->periodForQuarterlyDeadline($khDate);
-        $dphPayer = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($dphP));
-        $khPayer  = VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($khP));
+        $dphPayer = self::payerForPeriod($pdo, $supplierId, $dphP);
+        $khPayer  = self::payerForPeriod($pdo, $supplierId, $khP);
         $identified = !$dphPayer && !empty($row['is_identified']);
 
         if ($identified) {
@@ -1975,11 +1990,7 @@ final class CrmAggregationService
             return null;
         }
 
-        $shvPayer = VatStatusService::payerAt(
-            $pdo,
-            $supplierId,
-            self::periodEndDate($this->periodForMonthlyDeadline($shvDate)),
-        );
+        $shvPayer = self::payerForPeriod($pdo, $supplierId, $this->periodForMonthlyDeadline($shvDate));
         $shvPending = $shvPayer && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate));
 
         // Nejbližší termín jen z povinností, které k danému období skutečně existují.
@@ -2093,11 +2104,7 @@ final class CrmAggregationService
         // jen za měsíce se vznikem povinnosti, KH nikdy, SH při EU dodávkách.
         $pdo = $this->db->pdo();
         $monthlyDate = $this->nextPeriodicDeadline($now, 'monthly');
-        $payerRecent = VatStatusService::payerAt(
-            $pdo,
-            $supplierId,
-            self::periodEndDate($this->periodForMonthlyDeadline($monthlyDate)),
-        );
+        $payerRecent = self::payerForPeriod($pdo, $supplierId, $this->periodForMonthlyDeadline($monthlyDate));
         $ioMode = !$payerRecent && !empty($row['is_identified']);
         if ($ioMode) {
             $vatPeriod = 'monthly'; // IO podává vždy za kalendářní měsíc (§ 101/5)
@@ -2115,7 +2122,7 @@ final class CrmAggregationService
                 $p = $vatPeriod === 'quarterly' ? $this->periodForQuarterlyDeadline($dphDate) : $this->periodForMonthlyDeadline($dphDate);
                 $dphDue = $ioMode
                     ? $this->hasForeignRcPurchasesForMonthBefore($supplierId, new \DateTimeImmutable($dphDate))
-                    : VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($p));
+                    : self::payerForPeriod($pdo, $supplierId, $p);
                 if ($dphDue) {
                     $sub = $this->submittedAt($supplierId, 'dphdp3', $p['year'], $p['month'], $p['quarter']);
                     $items[] = [
@@ -2134,7 +2141,7 @@ final class CrmAggregationService
             $khDays = (int) $now->diff(new \DateTimeImmutable($khDate))->format('%r%a');
             if ($khDays >= -3 && $khDays <= $maxDaysAhead && !$ioMode) {
                 $p = $khMonthly ? $this->periodForMonthlyDeadline($khDate) : $this->periodForQuarterlyDeadline($khDate);
-                if (VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($p))) {
+                if (self::payerForPeriod($pdo, $supplierId, $p)) {
                     $sub = $this->submittedAt($supplierId, 'dphkh1', $p['year'], $p['month'], $p['quarter']);
                     $items[] = [
                         'type'         => 'kh_deadline',
@@ -2151,7 +2158,7 @@ final class CrmAggregationService
             $shvDate = $this->nextPeriodicDeadline($now, 'monthly');
             $shvDays = (int) $now->diff(new \DateTimeImmutable($shvDate))->format('%r%a');
             if ($shvDays >= -3 && $shvDays <= $maxDaysAhead
-                && ($ioMode || VatStatusService::payerAt($pdo, $supplierId, self::periodEndDate($this->periodForMonthlyDeadline($shvDate))))
+                && ($ioMode || self::payerForPeriod($pdo, $supplierId, $this->periodForMonthlyDeadline($shvDate)))
                 && $this->hasEuSuppliesForMonthBefore($supplierId, new \DateTimeImmutable($shvDate))
             ) {
                 $p = $this->periodForMonthlyDeadline($shvDate);
@@ -2242,6 +2249,14 @@ final class CrmAggregationService
         if ($this->vatRegistration !== null && empty($row['is_vat_payer'])) {
             try {
                 $reg = $this->vatRegistration->evaluate($supplierId, (int) $now->format('Y'));
+                // Obrat LOŇSKA zakládá plátcovství od 1. ledna letoška (§ 6/1) —
+                // novoroční reset obratu nesmí termín zhasnout před registrací.
+                if (!in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)) {
+                    $prev = $this->vatRegistration->evaluate($supplierId, (int) $now->format('Y') - 1);
+                    if (in_array($prev['status'], ['exceeded_low', 'exceeded_high'], true)) {
+                        $reg = $prev;
+                    }
+                }
             } catch (\Throwable) {
                 $reg = null;
             }
@@ -2249,7 +2264,7 @@ final class CrmAggregationService
                 && in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)
             ) {
                 $dl = \MyInvoice\Service\Report\VatRegistrationService::applicationDeadline(
-                    $reg['crossed_on'], $reg['becomes_payer_on']
+                    $reg['crossed_low_on'] ?? null, $reg['becomes_payer_on']
                 );
                 if ($dl !== null) {
                     $days = (int) $now->diff(new \DateTimeImmutable($dl['deadline']))->format('%r%a');

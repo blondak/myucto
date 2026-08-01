@@ -53,9 +53,9 @@ final class DphPriznaniAction
      *
      * Volitelné ?year=&month= nebo ?year=&quarter= (EPIC VH-04): is_vat_payer /
      * is_identified se vrátí ke STAVU K POSLEDNÍMU DNI daného období výkazu
-     * (supplier_vat_status_history přes VatStatusService), ať FE picker ukazuje
-     * relevanci výkazu pro zvolené období, ne pro dnešek. Bez parametrů = dnešní
-     * živý stav (zpětně kompatibilní). is_identified historii nemá — živý flag.
+     * (supplier_vat_status_history přes VatStatusService::flagsAt — migrace 1181
+     * historizuje i identifikovanou osobu), ať FE picker ukazuje relevanci výkazu
+     * pro zvolené období, ne pro dnešek. Bez parametrů = dnešní živý stav (BC).
      */
     public function settings(Request $request, Response $response): Response
     {
@@ -91,7 +91,9 @@ final class DphPriznaniAction
             }
             $statusDate = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $endMonth)))
                 ->modify('last day of this month')->format('Y-m-d');
-            $isVatPayer = \MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $statusDate);
+            $flags = \MyInvoice\Service\Vat\VatStatusService::flagsAt($this->db->pdo(), $supplierId, $statusDate);
+            $isVatPayer = $flags['is_vat_payer'];
+            $row['is_identified'] = $flags['is_identified'] ? 1 : 0;
         }
         $isIdentified = !$isVatPayer && (bool) ($row['is_identified'] ?? false);
         return Json::ok($response, [

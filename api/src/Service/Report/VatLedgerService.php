@@ -211,9 +211,22 @@ final class VatLedgerService
         if (!$db->hasColumn('invoices', 'client_snapshot')) {
             return "{$clientAlias}.dic";
         }
-        $fn = $db->pdo()->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'json_extract' : 'JSON_VALUE';
 
-        return "COALESCE(NULLIF({$fn}({$invoiceAlias}.client_snapshot, '$.dic'), ''), {$clientAlias}.dic)";
+        // Živé DIČ jen jako fallback pro doklady BEZ snapshotu (drafty) nebo se stub
+        // snapshotem bez klíče dic (staré importy). Snapshot s klíčem dic — byť
+        // prázdným — znamená „odběratel DIČ v okamžiku vystavení neměl" a později
+        // přidělené živé DIČ nesmí historický výkaz změnit (žádná resurekce).
+        if ($db->pdo()->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return "CASE WHEN {$invoiceAlias}.client_snapshot IS NULL THEN {$clientAlias}.dic
+                         WHEN json_type({$invoiceAlias}.client_snapshot, '$.dic') IS NOT NULL
+                              THEN NULLIF(json_extract({$invoiceAlias}.client_snapshot, '$.dic'), '')
+                         ELSE {$clientAlias}.dic END";
+        }
+
+        return "CASE WHEN {$invoiceAlias}.client_snapshot IS NULL THEN {$clientAlias}.dic
+                     WHEN JSON_CONTAINS_PATH({$invoiceAlias}.client_snapshot, 'one', '$.dic')
+                          THEN NULLIF(JSON_VALUE({$invoiceAlias}.client_snapshot, '$.dic'), '')
+                     ELSE {$clientAlias}.dic END";
     }
 
     /** @return list<array<string,mixed>> */
@@ -331,6 +344,19 @@ final class VatLedgerService
         $statusFilter = $includeDrafts ? "pi.status != 'cancelled'" : "pi.status NOT IN ('draft', 'cancelled')";
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období.
         $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+
+        // § 72 filtr plátcovství k DUZP dokladu (viz komentář ve WHERE). Fallback 1
+        // (firmy bez historie) i chybějící tabulka (SQLite unit schémata) = beze změny.
+        $payerFilter = '';
+        if ($this->db->hasTable('supplier_vat_status_history')) {
+            $payerAtDuzp = \MyInvoice\Service\Vat\VatStatusService::payerAtExpr(
+                'pi.supplier_id', 'COALESCE(pi.tax_date, pi.issue_date)', '1'
+            );
+            $payerFilter = "AND ({$payerAtDuzp} = 1
+                    OR (COALESCE(pii.total_vat, 0) = 0
+                        AND (pi.reverse_charge = 1
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))";
+        }
 
         // Období odpočtu (tuzemská plnění). Zákonně rozhoduje datum, kdy plátce doklad
         // fyzicky DRŽÍ (§ 73 odst. 1 písm. a ZDPH). received_at ale importy (iDoklad/
@@ -471,6 +497,12 @@ final class VatLedgerService
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
                              OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))
+               -- § 72: nárok na odpočet jen z plnění přijatých v době plátcovství. Doklad
+               -- s DUZP mimo plátcovství (před registrací / po zrušení) do odpočtu nepatří —
+               -- majetek při registraci řeší § 79 vlastní agendou (ř. 45). Samovyměření
+               -- (RC/dovoz) zůstává: povinnost přiznat daň má i identifikovaná osoba a
+               -- čerstvý plátce (§ 108) — normalize()+mapper mu odpočet odepřou jinde.
+               {$payerFilter}
                -- Období odpočtu — sdílený výraz periodExpr (purchaseClaimDateExpr; zdůvodnění
                -- § 73, zahraniční RC dle DUZP i received_at_source='manual' viz tam). Sdílí ho
                -- purchaseClaimInfo (kontrola 343), aby se zařazení do období nikdy nerozešlo.

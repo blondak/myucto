@@ -27,7 +27,7 @@ $config = Config::load(Bootstrap::rootDir());
 $pdo = (new Connection($config))->pdo();
 
 $rows = $pdo->query(
-    "SELECT id, supplier_id, varsymbol
+    "SELECT id, supplier_id, varsymbol, COALESCE(tax_date, issue_date) AS vat_date
        FROM invoices
       WHERE supplier_snapshot IS NOT NULL
         AND (
@@ -89,7 +89,11 @@ foreach ($rows as $r) {
         'country_name_en' => $row['country_name_en'],
         'ic'              => $row['ic'],
         'dic'             => $row['dic'],
-        'is_vat_payer'    => (bool) $row['is_vat_payer'],
+        // Historické doklady dostávají plátcovství k ROZHODNÉMU DATU dokladu
+        // z historie, ne dnešní cache (supplier_vat_status_history, VH follow-up).
+        'is_vat_payer'    => \MyInvoice\Service\Vat\VatStatusService::payerAt(
+            $pdo, $sid, (string) ($r['vat_date'] ?? date('Y-m-d'))
+        ),
         'email'           => $row['email'],
         'phone'           => $row['phone'],
         'web'             => $row['web'],

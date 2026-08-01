@@ -103,7 +103,7 @@ final class VatStatusPeriodTest extends TestCase
 
         self::assertSame('P', (string) $dp->VetaD['typ_platce'], 'Za 12/2024 byla firma plátcem → typ P.');
         self::assertStringNotContainsString(
-            'nebyl k poslednímu dni období',
+            'nebyl v průběhu období',
             implode("\n", $result['warnings']),
             'Za období plátcovství nesmí být warning neplátce.',
         );
@@ -118,7 +118,7 @@ final class VatStatusPeriodTest extends TestCase
         $result = $this->dph->build($this->supplierId, 2026, 3, 'monthly');
 
         self::assertStringContainsString(
-            'nebyl k poslednímu dni období evidovaný jako plátce DPH',
+            'nebyl v průběhu období evidovaný jako plátce DPH',
             implode("\n", $result['warnings']),
             'Za 03/2026 už firma plátcem nebyla — warning musí mluvit o období.',
         );
@@ -135,13 +135,13 @@ final class VatStatusPeriodTest extends TestCase
         $result = $this->kh->build($this->supplierId, 2024, 12, 'monthly');
         $warnings = implode("\n", $result['warnings']);
 
-        self::assertStringNotContainsString('nebyl k poslednímu dni období plátcem DPH', $warnings);
+        self::assertStringNotContainsString('nebyl v průběhu období plátcem DPH', $warnings);
         self::assertStringNotContainsString('Identifikovaná osoba', $warnings);
 
         // Kontrast: za období po odregistraci warning JE.
         $after = $this->kh->build($this->supplierId, 2026, 3, 'monthly');
         self::assertStringContainsString(
-            'nebyl k poslednímu dni období plátcem DPH',
+            'nebyl v průběhu období plátcem DPH',
             implode("\n", $after['warnings']),
         );
     }

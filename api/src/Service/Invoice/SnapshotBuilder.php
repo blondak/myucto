@@ -88,6 +88,7 @@ final class SnapshotBuilder
         if (!$row) {
             throw new \RuntimeException("Supplier #$supplierId nenalezen.");
         }
+        $flags = $this->vatStatus->statusAt($supplierId, $vatDate ?? date('Y-m-d'));
         $snapshot = [
             'id'           => (int) $row['id'],
             'company_name' => $row['company_name'],
@@ -100,12 +101,11 @@ final class SnapshotBuilder
             'country_name_en' => $row['country_name_en'],
             'ic'           => $row['ic'],
             'dic'          => $row['dic'],
-            // K rozhodnému datu dokladu z historie (supplier_vat_status_history);
-            // historie sleduje jen is_vat_payer, proto is_identified zůstává z živého řádku.
-            'is_vat_payer' => $this->vatStatus->isVatPayerAt($supplierId, $vatDate ?? date('Y-m-d')),
-            // Identifikovaná osoba (§ 6g–6l, issue #94) — PDF podle ní volí RC
-            // klauzuli a potlačí „Není plátce DPH" na zahraničním RC dokladu.
-            'is_identified' => (bool) ($row['is_identified'] ?? false),
+            // Oba flagy k rozhodnému datu dokladu z historie (supplier_vat_status_history,
+            // migrace 1181 historizuje i identifikovanou osobu) — PDF podle is_identified
+            // volí RC klauzuli a potlačí „Není plátce DPH" na zahraničním RC dokladu.
+            'is_vat_payer' => $flags['is_vat_payer'],
+            'is_identified' => $flags['is_identified'],
             'email'        => $row['email'],
             'phone'        => $row['phone'],
             'web'          => $row['web'],

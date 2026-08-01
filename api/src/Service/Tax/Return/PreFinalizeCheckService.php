@@ -324,10 +324,14 @@ final class PreFinalizeCheckService
 
     private function checkVatReturnsFiled(int $supplierId, int $year): array
     {
-        // EPIC VH-04: plátcovství ke KONCI finalizovaného roku, ne živý flag — firma
-        // odregistrovaná až po Novém roce musí mít přiznání za celý finalizovaný rok.
-        [$isPayer, $vatPeriod] = $this->vatSettings($supplierId, sprintf('%04d-12-31', $year));
-        if (!$isPayer || $vatPeriod === null) {
+        // Plátcovství KDYKOLI BĚHEM finalizovaného roku, ne živý flag ani jen 31. 12. —
+        // firma odregistrovaná v průběhu roku musí mít přiznání za období do zrušení
+        // registrace a check nesmí celý rok tiše přeskočit (nález review VH follow-up).
+        $payerDuringYear = \MyInvoice\Service\Vat\VatStatusService::payerDuring(
+            $this->db->pdo(), $supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)
+        );
+        [, $vatPeriod] = $this->vatSettings($supplierId, sprintf('%04d-12-31', $year));
+        if (!$payerDuringYear || $vatPeriod === null) {
             return ['key' => 'vat_returns_filed', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => ['status' => 'not_payer']];
         }
 
@@ -348,11 +352,29 @@ final class PreFinalizeCheckService
             }
         }
 
+        // Očekávaná období jen ta, ve kterých firma byla plátcem aspoň jeden den —
+        // registrace v průběhu roku nesmí vyžadovat přiznání za měsíce před ní.
+        $pdo = $this->db->pdo();
         if ($vatPeriod === 'monthly') {
-            $expected = range(1, 12);
+            $expected = [];
+            foreach (range(1, 12) as $m) {
+                $start = sprintf('%04d-%02d-01', $year, $m);
+                $end = (new \DateTimeImmutable($start))->modify('last day of this month')->format('Y-m-d');
+                if (\MyInvoice\Service\Vat\VatStatusService::payerDuring($pdo, $supplierId, $start, $end)) {
+                    $expected[] = $m;
+                }
+            }
             $submitted = array_keys($submittedMonths);
         } else {
-            $expected = range(1, 4);
+            $expected = [];
+            foreach (range(1, 4) as $q) {
+                $start = sprintf('%04d-%02d-01', $year, $q * 3 - 2);
+                $end = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $q * 3)))
+                    ->modify('last day of this month')->format('Y-m-d');
+                if (\MyInvoice\Service\Vat\VatStatusService::payerDuring($pdo, $supplierId, $start, $end)) {
+                    $expected[] = $q;
+                }
+            }
             $submitted = array_keys($submittedQuarters);
         }
         $missing = array_values(array_diff($expected, $submitted));

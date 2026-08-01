@@ -88,14 +88,14 @@ final class IdentifiedPersonDphTest extends TestCase
         $this->setHistoryForTestYear(0);
     }
 
-    /** Řádek historie plátcovství pro izolovaný rok testu (2097). */
+    /** Řádek historie plátcovství pro izolovaný rok testu (2097) — IO = neplátce s is_identified. */
     private function setHistoryForTestYear(int $isVatPayer): void
     {
         $this->db->pdo()->prepare(
-            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
-             VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer)'
-        )->execute([$this->supplierId, self::YEAR . '-01-01', $isVatPayer]);
+            'INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE is_vat_payer = VALUES(is_vat_payer), is_identified = VALUES(is_identified)'
+        )->execute([$this->supplierId, self::YEAR . '-01-01', $isVatPayer, $isVatPayer === 0 ? 1 : 0]);
     }
 
     protected function tearDown(): void

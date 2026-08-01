@@ -387,8 +387,8 @@ function __normalizeTestTenant(array $cfg, string $chosenDb): void
         // reprodukovat.
         $step('vat-status-baseline', static function () use ($pdo): void {
             $pdo->exec(
-                "INSERT IGNORE INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer)
-                 SELECT s.id, '1900-01-01', s.is_vat_payer FROM supplier s
+                "INSERT IGNORE INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified)
+                 SELECT s.id, '1900-01-01', s.is_vat_payer, s.is_identified FROM supplier s
                   WHERE NOT EXISTS (
                       SELECT 1 FROM supplier_vat_status_history h WHERE h.supplier_id = s.id
                   )"

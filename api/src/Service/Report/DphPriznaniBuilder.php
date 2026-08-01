@@ -131,9 +131,9 @@ final class DphPriznaniBuilder
         }
         // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04).
         // První load výše slouží jen pro default periodicity; typ P/I, warning neplátce
-        // i gates korekcí §74b/§46/§43 níže se řídí supplierem se stavem k období.
-        // (is_identified historii nemá — zůstává živý, viz loadSupplier.)
-        [, $statusDate] = $this->periodRange($year, $month, $period);
+        // i gates korekcí §74b/§46/§43 níže se řídí supplierem se stavem k období
+        // (oba flagy z historie — migrace 1181 historizuje i identifikovanou osobu).
+        [$rangeStart, $statusDate] = $this->periodRange($year, $month, $period);
         $supplier = $this->loadSupplier($supplierId, $statusDate);
         // Identifikovaná osoba (§ 6g–6l ZDPH, issue #94): přiznání typu 'I' —
         // vyplňuje JEN samovyměření z přeshraničních přijatých plnění (ř. 3-6
@@ -146,8 +146,13 @@ final class DphPriznaniBuilder
         $warnings = [];
         if ($isIdentified) {
             $warnings[] = 'Přiznání identifikované osoby (typ I): jen samovyměření z přeshraničních plnění, bez nároku na odpočet. Podává se pouze za měsíce, kdy povinnost vznikla (do 25. dne následujícího měsíce).';
-        } elseif (!$supplier['is_vat_payer']) {
-            $warnings[] = 'Tenant nebyl k poslednímu dni období evidovaný jako plátce DPH — výkaz nemusí být relevantní.';
+        } elseif (!$supplier['is_vat_payer']
+            && !\MyInvoice\Service\Vat\VatStatusService::payerDuring($this->db->pdo(), $supplierId, $rangeStart, $statusDate)
+        ) {
+            // Plátcovství byť po část období = přiznání za období se podává (zrušení
+            // registrace uprostřed období poslední přiznání neruší) — warning patří
+            // jen firmě, která nebyla plátcem ani jediný den období.
+            $warnings[] = 'Tenant nebyl v průběhu období evidovaný jako plátce DPH — výkaz nemusí být relevantní.';
         }
         if (empty($supplier['financial_office_code'])) {
             $warnings[] = 'Chybí kód finančního úřadu — XML nemusí projít validací EPO.';

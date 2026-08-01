@@ -157,11 +157,13 @@ final class MonthlyReportService
      */
     private function buildVatSection(int $supplierId, int $year, int $month): ?array
     {
-        // EPIC VH-04: plátcovství k POSLEDNÍMU DNI reportovaného měsíce, ne živý flag —
-        // přehled za období, kdy firma plátcem byla, musí DPH sekci mít i po odregistraci.
-        $monthEnd = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))
+        // EPIC VH-04: plátcovství BĚHEM reportovaného měsíce, ne živý flag ani jen
+        // poslední den — při zrušení registrace uprostřed měsíce se poslední přiznání
+        // pořád podává a přehled o něm musí říct.
+        $monthStart = sprintf('%04d-%02d-01', $year, $month);
+        $monthEnd = (new \DateTimeImmutable($monthStart))
             ->modify('last day of this month')->format('Y-m-d');
-        if (!\MyInvoice\Service\Vat\VatStatusService::payerAt($this->db->pdo(), $supplierId, $monthEnd)) {
+        if (!\MyInvoice\Service\Vat\VatStatusService::payerDuring($this->db->pdo(), $supplierId, $monthStart, $monthEnd)) {
             return null;
         }
         try {
