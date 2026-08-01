@@ -5186,6 +5186,17 @@
     "price_list_add": "Vložit z ceníku",
     "price_list_added": "Ceníková položka byla vložena do dokladu.",
     "price_list_requires_context": "Před vložením z ceníku vyberte zákazníka a měnu dokladu.",
+    "asset_sale": {
+      "toggle": "Prodej majetku",
+      "hint": "Zapne u položek našeptávač karet majetku. Vybraná karta určí výnosový účet a po vystavení faktury se sama uzavře — drobný majetek přejde na prodáno, dlouhodobý se vyřadí včetně doúčtování zůstatkové ceny.",
+      "card": "Karta majetku",
+      "search_placeholder": "Hledat kartu majetku…",
+      "kind_small": "Drobný majetek",
+      "kind_long": "Dlouhodobý majetek",
+      "posts_641": "Výnos na 641",
+      "posts_642": "Výnos na 642",
+      "not_closed": "Faktura je vystavená, ale kartu „{name}\" se nepodařilo uzavřít:"
+    },
     "summary": "Sumace",
     "discount": {
       "label": "Sleva z celé faktury",

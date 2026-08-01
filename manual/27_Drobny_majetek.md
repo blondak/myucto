@@ -117,6 +117,16 @@ propojí s dokladem a může uložit prodejní cenu bez DPH. Výnos a DPH vznika
 zaúčtováním vydané faktury, nikoli kartou; pořizovací náklad už byl uplatněn,
 takže karta neúčtuje zůstatkovou cenu.
 
+Pohodlnější cesta vede z druhé strany, přímo z faktury. V editoru vydané faktury
+zaškrtni **Prodej majetku** — u každé položky se objeví našeptávač karet v užívání
+(drobný i dlouhodobý majetek pohromadě). Vybraná karta předvyplní popis řádku a
+určí, kam půjde výnos: drobný majetek na **642** (tržby z prodeje materiálu,
+protože pořízením šel do spotřeby na 501), dlouhodobý na **641**. Rozpad je po
+řádcích, takže jedna faktura může vedle sebe prodat majetek i fakturovat službu a
+každý řádek sedne na svůj účet. Po vystavení faktury se karta uzavře sama —
+drobný majetek přejde na *prodáno*, dlouhodobý se vyřadí včetně doúčtování
+zůstatkové ceny. Storno faktury karty vrátí do užívání.
+
 Vyřazenou nebo prodanou kartu lze vrátit do stavu v používání. Obnovení vymaže
 údaje vyřazení/prodeje na kartě, ale nestornuje zdrojovou fakturu ani jiné
 ruční účetní zápisy. Ty musí účetní posoudit samostatně.

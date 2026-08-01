@@ -257,7 +257,13 @@ final class UpdateInvoiceAction
             }
             throw $e;
         }
-        $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        try {
+            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        } catch (\InvalidArgumentException $e) {
+            // Neplatná vazba řádku na kartu majetku (1177) — hlavička je už uložená, ale položky
+            // zůstaly nedotčené (validace běží před DELETE), takže doklad je konzistentní.
+            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+        }
         $this->paymentSchedule->saveFromPayload(\MyInvoice\Http\SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
 

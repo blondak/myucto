@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 type Option = { value: T; label: string; secondary?: string }
 
@@ -18,6 +18,12 @@ const props = withDefaults(defineProps<{
   loadingLabel?: string
   /** Vybraná položka pro zobrazení labelu, i když není v options (edit / po hledání). */
   selectedOption?: Option | null
+  /**
+   * Nabídku vykreslit do <body> s position:fixed. Nutné uvnitř kontejneru s overflow
+   * (např. tabulka položek faktury s overflow-x-auto), který by absolutně polohovaný
+   * seznam oříznul — stejný důvod i řešení jako ve StockDescriptionField.
+   */
+  teleport?: boolean
 }>(), {
   placeholder: '',
   emptyLabel: '',
@@ -28,6 +34,7 @@ const props = withDefaults(defineProps<{
   loading: false,
   loadingLabel: 'Hledám…',
   selectedOption: null,
+  teleport: false,
 })
 
 const emit = defineEmits<{
@@ -145,18 +152,51 @@ function scrollHighlightIntoView() {
 
 function onClickOutside(e: MouseEvent) {
   if (!root.value) return
-  if (!root.value.contains(e.target as Node)) {
+  const target = e.target as Node
+  // V teleport režimu je nabídka mimo `root` (visí na <body>) — bez téhle větve by
+  // mousedown na položce zavřel seznam dřív, než se stihne vybrat.
+  if (!root.value.contains(target) && !(listbox.value?.contains(target) ?? false)) {
     open.value = false
     // při zavření bez výběru: pokud query neshodí s vybraným, vrať na vybraný label
     query.value = selected.value?.label ?? ''
   }
 }
 
+// Teleportovaná nabídka nedědí pozici od rodiče → dopočítáváme ji z bounding rectu
+// inputu (a přepočítáváme při scrollu i resize, jinak by při rolování odplula).
+const menuStyle = reactive<Record<string, string>>({ position: 'fixed', left: '0px', top: '0px', width: '0px', zIndex: '60' })
+
+function updateMenuPosition() {
+  if (!props.teleport || !open.value || !root.value) return
+  const r = root.value.getBoundingClientRect()
+  const below = window.innerHeight - r.bottom
+  menuStyle.left = `${r.left}px`
+  menuStyle.width = `${r.width}px`
+  // Málo místa pod inputem → nabídku otoč nad něj (jinak by u spodního okraje byla nedostupná).
+  if (below < 200 && r.top > below) {
+    menuStyle.top = ''
+    menuStyle.bottom = `${window.innerHeight - r.top + 4}px`
+    menuStyle.maxHeight = `${Math.max(120, r.top - 12)}px`
+  } else {
+    menuStyle.bottom = ''
+    menuStyle.top = `${r.bottom + 4}px`
+    menuStyle.maxHeight = `${Math.max(120, below - 12)}px`
+  }
+}
+
+watch(open, (o) => {
+  if (o && props.teleport) nextTick(updateMenuPosition)
+})
+
 onMounted(() => {
   document.addEventListener('mousedown', onClickOutside)
+  window.addEventListener('scroll', updateMenuPosition, true)
+  window.addEventListener('resize', updateMenuPosition)
 })
 onUnmounted(() => {
   document.removeEventListener('mousedown', onClickOutside)
+  window.removeEventListener('scroll', updateMenuPosition, true)
+  window.removeEventListener('resize', updateMenuPosition)
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -192,12 +232,17 @@ onUnmounted(() => {
       >×</button>
       <span class="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none text-xs">▼</span>
     </div>
+    <Teleport to="body" :disabled="!teleport">
     <div
       v-if="open"
       ref="listbox"
       id="searchable-select-listbox"
       role="listbox"
-      class="absolute z-50 left-0 right-0 mt-1 bg-surface border border-neutral-200 rounded-md shadow-lg max-h-72 overflow-y-auto"
+      :style="teleport ? menuStyle : undefined"
+      :class="[
+        'bg-surface border border-neutral-200 rounded-md shadow-lg overflow-y-auto',
+        teleport ? '' : 'absolute z-50 left-0 right-0 mt-1 max-h-72',
+      ]"
     >
       <div v-if="remote && loading" class="px-3 py-2 text-sm text-neutral-400">
         {{ loadingLabel }}
@@ -224,5 +269,6 @@ onUnmounted(() => {
         <div v-if="o.secondary" class="text-xs text-neutral-500 truncate">{{ o.secondary }}</div>
       </button>
     </div>
+    </Teleport>
   </div>
 </template>

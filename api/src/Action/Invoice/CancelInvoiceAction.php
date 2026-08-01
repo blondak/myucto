@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -51,6 +52,7 @@ final class CancelInvoiceAction
         private readonly StockIssueService $stockIssue,
         private readonly DocumentJournalSync $journalSync,
         private readonly AdvanceCycleLock $cycleLock,
+        private readonly InvoiceAssetSaleService $assetSale,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -263,6 +265,16 @@ final class CancelInvoiceAction
             'cancellation_id' => $cancellationId,
             'reason' => $reason,
         ], $ip, $request->getHeaderLine('User-Agent'));
+
+        // Prodej majetku (1177): stornovaná faktura prodej neuskutečnila → karty navázané na
+        // její řádky se vrací do užívání. Mimo transakci storna a s polykáním chyb (AssetService
+        // si drží vlastní transakci a revert vyřazení jde jen v otevřeném období) — nedokončený
+        // revert se zaloguje a účetní ho dořeší z karty, storno faktury kvůli tomu nespadne.
+        $this->assetSale->revertForInvoice($supplierId, (int) $invoice['id'], [
+            'user_id'    => $userId,
+            'ip'         => $ip,
+            'user_agent' => $request->getHeaderLine('User-Agent'),
+        ]);
 
         // Stornovaná faktura odejde z revenue cache
         $this->stats->recomputeForInvoiceId((int) $invoice['id']);

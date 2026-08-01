@@ -28,6 +28,8 @@ import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { stockApi, type StockItemSearchResult, type Warehouse } from '@/api/stock'
+import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
+import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 
 const supplierStore = useSupplierStore()
@@ -260,6 +262,104 @@ async function hydrateStockSelections() {
   await refreshAvailability()
 }
 
+// ─── PRODEJ MAJETKU (1177) ──────────────────────────────────────────────
+// Checkbox je čistě UI pomůcka: zapíná našeptávač karet u položek. Účetní obsah nese
+// vazba NA ŘÁDKU (small_asset_id / asset_id), ze které backend odvodí výnosový účet
+// (642 / 641) i to, že se má karta po vystavení uzavřít. Proto se checkbox nikam
+// neukládá — po znovunačtení se sám zapne, když má aspoň jeden řádek vazbu.
+const assetSaleMode = ref(false)
+// Evidence majetku je součást podvojného účetnictví; v daňové evidenci by našeptávač
+// nabízel prázdno (a vyřazení DHM se stejně neúčtuje).
+const assetSaleAvailable = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+
+type AssetOption = { value: string; label: string; secondary?: string }
+const assetRowOptions = reactive<Record<number, AssetOption[]>>({})
+const assetRowLoading = reactive<Record<number, boolean>>({})
+// Klíč našeptávače musí nést i DRUH karty — id se mezi tabulkami small_assets a assets
+// překrývají, takže samotné číslo by prodalo jinou věc, než uživatel vybral.
+const assetOptionByKey = reactive<Record<string, AssetOption>>({})
+
+function assetKeyOf(item: InvoiceItem): string | null {
+  if (item.asset_id) return `dhm:${item.asset_id}`
+  if (item.small_asset_id) return `dm:${item.small_asset_id}`
+  return null
+}
+
+function assetSelectedFor(item: InvoiceItem): AssetOption | null {
+  const key = assetKeyOf(item)
+  if (!key) return null
+  // Fallback na název z JOINu — po načtení faktury ještě nic nehledal.
+  return assetOptionByKey[key] ?? {
+    value: key,
+    label: item.asset_name || item.small_asset_name || key,
+    secondary: item.asset_id ? t('invoice.asset_sale.kind_long') : t('invoice.asset_sale.kind_small'),
+  }
+}
+
+async function onAssetSearch(rowIndex: number, q: string) {
+  assetRowLoading[rowIndex] = true
+  try {
+    const [small, long] = await Promise.all([
+      smallAssetsApi.list({ status: 'in_use', q, per_page: 20 }).then(r => r.items).catch(() => [] as SmallAsset[]),
+      assetsApi.list({ status: 'in_use', q, per_page: 20 }).then(r => r.items).catch(() => [] as AssetListItem[]),
+    ])
+    const opts: AssetOption[] = [
+      ...small.map(c => ({
+        value: `dm:${c.id}`,
+        label: c.name,
+        secondary: `${t('invoice.asset_sale.kind_small')} · ${formatMoney(c.price, 'CZK')}`,
+      })),
+      ...long.map(a => ({
+        value: `dhm:${a.id}`,
+        label: a.name,
+        secondary: `${t('invoice.asset_sale.kind_long')} · ${a.inventory_number}`,
+      })),
+    ]
+    for (const o of opts) assetOptionByKey[o.value] = o
+    assetRowOptions[rowIndex] = opts
+  } catch {
+    assetRowOptions[rowIndex] = []
+  } finally {
+    assetRowLoading[rowIndex] = false
+  }
+}
+
+function onAssetSelect(rowIndex: number, key: string | null) {
+  const item = form.value.items[rowIndex]
+  if (!item) return
+  if (key === null) {
+    item.small_asset_id = null
+    item.asset_id = null
+    return
+  }
+  const [kind, rawId] = key.split(':')
+  const id = Number(rawId)
+  item.small_asset_id = kind === 'dm' ? id : null
+  item.asset_id = kind === 'dhm' ? id : null
+  // Popis předvyplníme názvem karty (prázdný nebo ještě nedotčený řádek), cenu NE —
+  // pořizovací cena z karty není prodejní cena a tiché předvyplnění by se lehko
+  // přehlédlo. V nabídce ji uživatel vidí jako sekundární text.
+  const opt = assetOptionByKey[key]
+  if (opt && !item.description.trim()) item.description = opt.label
+}
+
+/** Po načtení faktury: zapni režim, když už nějaký řádek kartu nese. */
+function hydrateAssetSelections() {
+  if (form.value.items.some(it => it.small_asset_id || it.asset_id)) {
+    assetSaleMode.value = true
+  }
+}
+
+// Vypnutí přepínače je zároveň zrušení vazeb — jinak by řádky dál mířily na 641/642,
+// aniž by to bylo v UI vidět, a automat by po vystavení kartu prodal „bez příčiny".
+watch(assetSaleMode, (on) => {
+  if (on) return
+  for (const it of form.value.items) {
+    it.small_asset_id = null
+    it.asset_id = null
+  }
+})
+
 // „Osvobozeno od daně z příjmů" má smysl jen pro OSVČ (FO): osvobození dle § 4 ZDP
 // platí výhradně pro fyzické osoby, u s.r.o. (PO) žádný § 4 není a prodej majetku je
 // vždy zdanitelný výnos. U PO proto checkbox skryjeme. Ponecháme ho ale, pokud už je
@@ -490,6 +590,8 @@ function blankItem(): InvoiceItem {
     order_index: form.value.items.length,
     stock_item_id: null,
     warehouse_id: null,
+    small_asset_id: null,
+    asset_id: null,
     oss_applicable: false,
     oss_consumer_country: null,
     oss_rate_type: 'standard',
@@ -642,6 +744,7 @@ onMounted(async () => {
     await loadWorkReport()
     await loadAttachments()
     await hydrateStockSelections()
+    hydrateAssetSelections()
     if (editedStatus.value === 'draft') await loadVarsymbolPreview()
   } else {
     // New invoice — pre-select from query
@@ -1560,6 +1663,9 @@ async function submit() {
         // B5: MUSÍ se posílat zpět, jinak je InvoiceRepository::replaceItems (DELETE+INSERT) tiše smaže.
         stock_item_id: it.stock_item_id ?? null,
         warehouse_id: it.warehouse_id ?? null,
+        // Totéž pro vazbu na kartu majetku (1177) — bez round-tripu by prodej zmizel.
+        small_asset_id: it.small_asset_id ?? null,
+        asset_id: it.asset_id ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         oss_rate_type: it.oss_applicable ? (it.oss_rate_type || 'standard') : null,
@@ -1962,6 +2068,11 @@ async function deleteDraft() {
         <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.items') }}</h3>
           <div class="flex flex-wrap items-center justify-end gap-2">
+            <label v-if="assetSaleAvailable" class="inline-flex items-center gap-1.5 text-sm text-neutral-700 mr-1"
+              :title="t('invoice.asset_sale.hint')">
+              <input v-model="assetSaleMode" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+              <span>{{ t('invoice.asset_sale.toggle') }}</span>
+            </label>
             <template v-if="hasPriceList">
               <div class="w-80 max-w-full">
                 <SearchableSelect
@@ -2062,6 +2173,31 @@ async function deleteDraft() {
                 </div>
               </td>
             </tr>
+            <tr v-if="assetSaleMode && assetSaleAvailable" :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']">
+              <td></td>
+              <td :colspan="supplierIsVatPayer ? 7 : 6" class="px-3 pb-2">
+                <div class="flex items-center gap-2">
+                  <span class="shrink-0 text-xs text-neutral-500">{{ t('invoice.asset_sale.card') }}</span>
+                  <div class="w-96 max-w-full">
+                    <SearchableSelect
+                      :model-value="assetKeyOf(item)"
+                      :options="assetRowOptions[i] ?? []"
+                      :selected-option="assetSelectedFor(item)"
+                      :loading="assetRowLoading[i]"
+                      remote
+                      teleport
+                      :placeholder="t('invoice.asset_sale.search_placeholder')"
+                      :no-results-label="t('common.no_results')"
+                      @search="(q: string) => onAssetSearch(i, q)"
+                      @update:modelValue="(v: string | null) => onAssetSelect(i, v)"
+                    />
+                  </div>
+                  <span v-if="assetKeyOf(item)" class="text-xs text-neutral-400">
+                    {{ item.asset_id ? t('invoice.asset_sale.posts_641') : t('invoice.asset_sale.posts_642') }}
+                  </span>
+                </div>
+              </td>
+            </tr>
             <tr v-if="item.oss_applicable" :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']">
               <td></td>
               <td :colspan="supplierIsVatPayer ? 7 : 6" class="px-3 pb-2">
@@ -2135,6 +2271,20 @@ async function deleteDraft() {
                 :unlink-label="t('common.unlink_stock')"
                 @search="(q: string) => onStockSearch(i, q)"
                 @select="(v: number | null) => onStockSelect(i, v)"
+              />
+            </div>
+            <div v-if="assetSaleMode && assetSaleAvailable">
+              <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.asset_sale.card') }}</label>
+              <SearchableSelect
+                :model-value="assetKeyOf(item)"
+                :options="assetRowOptions[i] ?? []"
+                :selected-option="assetSelectedFor(item)"
+                :loading="assetRowLoading[i]"
+                remote
+                :placeholder="t('invoice.asset_sale.search_placeholder')"
+                :no-results-label="t('common.no_results')"
+                @search="(q: string) => onAssetSearch(i, q)"
+                @update:modelValue="(v: string | null) => onAssetSelect(i, v)"
               />
             </div>
             <div v-if="ossAvailable || item.oss_applicable" class="border border-neutral-200 rounded-md p-2">

@@ -195,8 +195,8 @@ final class FinalFromProformaCreator
                    (invoice_id, description, quantity, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
-                    stock_item_id, warehouse_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)'
+                    stock_item_id, warehouse_id, small_asset_id, asset_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?)'
             );
             $maxOrder = 0;
             foreach ($proforma['items'] as $item) {
@@ -214,6 +214,10 @@ final class FinalFromProformaCreator
                     // sklad hýbe až finál, proto vazba nesmí cestou zaniknout).
                     $item['stock_item_id'] ?? null,
                     $item['warehouse_id'] ?? null,
+                    // Stejný důvod u prodeje majetku (1177): kartu uzavírá až vyúčtovací
+                    // faktura (proforma není doklad o prodeji), takže vazba musí přejít s ní.
+                    $item['small_asset_id'] ?? null,
+                    $item['asset_id'] ?? null,
                 ]);
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
@@ -242,7 +246,9 @@ final class FinalFromProformaCreator
                     $r['vat_rate_snapshot'],
                     ++$maxOrder,
                     'standard',
-                    // Odpočtový řádek není zboží — bez skladové vazby.
+                    // Odpočtový řádek není zboží ani majetek — bez skladové vazby i bez karty.
+                    null,
+                    null,
                     null,
                     null,
                 ]);

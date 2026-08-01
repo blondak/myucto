@@ -241,6 +241,16 @@ roky vrátit, případně chybějící předchozí rok zaúčtovat nebo přeruš
 > **vydanou fakturou** — vyřazovací zápis řeší jen odúčtování majetku
 > a jeho oprávek, ne inkaso od kupujícího.
 
+> [!TIP]
+> Prodej jde spustit i **z opačné strany, přímo z faktury**, a ušetřit si ruční
+> vyřazování. V editoru vydané faktury zaškrtni **Prodej majetku**, u položky vyber
+> kartu z našeptávače a fakturu vystav. Řádek pak zaúčtuje výnos na **641** (u
+> drobného majetku na 642) a systém sám provede vyřazení typu Prodej se všemi
+> kroky popsanými výše, včetně vazby karty na doklad. Faktura navíc dostane
+> klasifikaci DPH **1m/2m** — prodej dlouhodobého majetku se podle §76 odst. 4
+> ZDPH nezapočítává do koeficientu. Storno faktury vyřazení vrátí (jen dokud je
+> období otevřené, viz níže).
+
 > [!WARNING]
 > U **darování** majetku, u kterého byl uplatněn odpočet DPH, systém upozorní
 > na nutnost ověřit odvod DPH z ceny obvyklé (§13 odst. 4 písm. a) a §36

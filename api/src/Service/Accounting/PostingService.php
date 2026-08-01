@@ -535,6 +535,17 @@ final class PostingService
         $revenue    = $rule['credit_account_code'] ?? '602';
         $cc = $opts['cost_center'] ?? null;
 
+        // Rozpad výnosu po POLOŽKÁCH (1177) — zrcadlo nákladové strany z §DM. Faktura běžně
+        // míchá prodej majetku se službami a jedna noha by celý základ poslala na jeden účet.
+        // Váhy se počítají jen když je aspoň jedna položka navázaná na kartu majetku; jinak
+        // zůstane null a doklad se zaúčtuje jednou nohou jako dosud (byte-identické chování).
+        // Explicitní rule_key od volajícího je adresný pokyn pro CELÝ doklad (ruční zaúčtování
+        // s vybranou předkontací) → rozpad se pak nedělá; hlavičkový revenue_rule_key naopak
+        // slouží jen jako výchozí účet NEklasifikovaných řádků, takže rozpad neruší.
+        $weights = isset($opts['rule_key'])
+            ? null
+            : $this->revenueWeights($supplierId, $invoiceId, $rate, $revenue);
+
         // Normálně 311 MD / 6xx+343 D; dobropis obrací obě strany (§ vratka výnosu i DPH).
         $receivableSide = $isCreditNote ? 'credit' : 'debit';
         $otherSide      = $isCreditNote ? 'debit'  : 'credit';
@@ -542,7 +553,7 @@ final class PostingService
         $lines = [];
         // Saldokonto 311 nese i cizí měnu/kurz/částku (§4/12 — přecenění §24/6).
         $lines[] = $this->withForeign($this->line($receivable, $receivableSide, abs($totalCzk), $cc), $inv, $rate);
-        $lines[] = $this->line($revenue, $otherSide, abs($net), $cc);
+        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net, $cc);
         if ($vat !== 0.0) {
             $lines[] = $this->line('343', $otherSide, abs($vat), $cc);
         }
@@ -800,7 +811,7 @@ final class PostingService
         $lines = [];
         if ($isRc) {
             // Vendor fakturuje bez DPH → závazek = základ; daň se samovyměří na 343 (obě strany).
-            $this->appendExpense($lines, $weights, $expense, $expenseSide, $net, $cc);
+            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
             if ($vat !== 0.0) {
                 $lines[] = $this->line('343', $expenseSide, abs($vat), $cc); // nárok na odpočet
                 $lines[] = $this->line('343', $payableSide, abs($vat), $cc); // povinnost přiznat daň
@@ -809,21 +820,21 @@ final class PostingService
             $this->appendRounding($lines, $totalCzk, $net, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'none') {
             $expenseAmount = round($net + $vat, 2);
-            $this->appendExpense($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'proportional') {
             $deductibleVat    = round($vat * $pct, 2);
             $nonDeductibleVat = round($vat - $deductibleVat, 2);
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
-            $this->appendExpense($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
             if ($deductibleVat !== 0.0) {
                 $lines[] = $this->line('343', $expenseSide, abs($deductibleVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } else {
-            $this->appendExpense($lines, $weights, $expense, $expenseSide, $net, $cc);
+            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
             if ($vat !== 0.0) {
                 $lines[] = $this->line('343', $expenseSide, abs($vat), $cc);
             }
@@ -992,7 +1003,76 @@ final class PostingService
     }
 
     /**
-     * Nákladová strana: buď jedna noha (dosud), nebo rozpad dle vah.
+     * Váhy pro rozpad VÝNOSOVÉ strany podle vazby položek na karty majetku (migrace 1177).
+     * Zrcadlo {@see purchaseExpenseWeights}, jen klasifikace není enum druhu, ale vazba na
+     * kartu — z ní plyne účet:
+     *
+     *   asset_id       → 641 (tržba z prodeje dlouhodobého majetku, rule asset.sale.revenue)
+     *   small_asset_id → 642 (tržba z prodeje materiálu — drobný majetek se pořízením
+     *                    zaúčtoval na 501, nikdy nebyl na 02x, takže 641 mu nepatří)
+     *   bez vazby      → $defaultAccount (hlavičkový revenue_rule_key, default 602)
+     *
+     * Vrací NULL (tedy dosavadní jedna noha) když doklad nemá položky, žádná položka není
+     * navázaná, nebo |Σ vah| ≈ 0 (podíly by dělily nulou).
+     *
+     * SLEVOVÉ ŘÁDKY (item_kind='discount') vazbu na kartu nemají a spadnou proto na
+     * $defaultAccount — procentní sleva z hlavičky se generuje per sazba DPH, ne per položka,
+     * takže není ke které kartě ji přiřadit. Shodné chování má nákladová strana (viz komentář
+     * o slevách Alzy v appendSplit); u prodeje majetku se sleva na hlavičce stejně nepoužívá,
+     * cena se zadá rovnou na řádku.
+     *
+     * @return array<string,float>|null
+     */
+    private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT small_asset_id, asset_id, total_without_vat
+               FROM invoice_items
+              WHERE invoice_id = ?'
+        );
+        $stmt->execute([$invoiceId]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($items === []) {
+            return null;
+        }
+
+        $anyClassified = false;
+        $weights = [];
+        foreach ($items as $row) {
+            // asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant to zakazuje,
+            // CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
+            if ($row['asset_id'] !== null) {
+                $anyClassified = true;
+                $account = $this->ruleCode($supplierId, 'asset.sale.revenue', 'credit', '641');
+            } elseif ($row['small_asset_id'] !== null) {
+                $anyClassified = true;
+                $account = $this->ruleCode($supplierId, 'small_asset.sale.revenue', 'credit', '642');
+            } else {
+                $account = $defaultAccount;
+            }
+
+            $w = round((float) $row['total_without_vat'] * $rate, 2);
+            $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
+        }
+
+        if (!$anyClassified) {
+            return null;
+        }
+        if (count($weights) === 1) {
+            // Celý doklad na jeden účet → rozpad vyrobí tutéž jedinou nohu. Váhy se vrací i tak:
+            // účet z klasifikace se MUSÍ prosadit proti $defaultAccount (jinak by prodej majetku
+            // na samostatné faktuře spadl na 602).
+            return $weights;
+        }
+        if (abs(array_sum($weights)) < 0.005) {
+            return null;
+        }
+        return $weights;
+    }
+
+    /**
+     * Druhová strana dokladu (náklad u přijaté, výnos u vydané): buď jedna noha (dosud),
+     * nebo rozpad dle vah z klasifikace položek.
      *
      * Σ rozpadu se MUSÍ rovnat $amount na haléř — $amount je autoritativní (u plného odpočtu
      * pochází z VatLedgerService, ne ze součtu položek). Proto se rozděluje $amount podle vah,
@@ -1001,7 +1081,7 @@ final class PostingService
      * @param list<array<string,mixed>> $lines
      * @param array<string,float>|null $weights
      */
-    private function appendExpense(array &$lines, ?array $weights, string $account, string $side, float $amount, ?string $cc): void
+    private function appendSplit(array &$lines, ?array $weights, string $account, string $side, float $amount, ?string $cc): void
     {
         if ($weights === null) {
             $lines[] = $this->line($account, $side, abs($amount), $cc);

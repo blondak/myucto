@@ -146,6 +146,41 @@ v PDF.
 Křížek vpravo. Pokud položka je propojená s výkazem víceprací (viz § 15.6),
 smazání se zeptá, jestli i smazat výkaz.
 
+### 15.3.3 Prodej majetku
+
+Zaškrtávátko **Prodej majetku** v hlavičce sekce položek (jen v podvojném
+účetnictví) přidá ke každému řádku našeptávač **Karty majetku** — hledá v kartách
+v užívání, drobný i dlouhodobý majetek pohromadě. Samotné zaškrtávátko je jen
+pomůcka pro zobrazení našeptávače; nikam se neukládá a po znovuotevření faktury
+se zapne samo, když už některý řádek kartu nese. Odškrtnutí naopak vazby ze všech
+řádků zruší.
+
+Vybraná karta předvyplní popis řádku (cenu ne — pořizovací cena z karty není
+prodejní cena, v nabídce ji vidíš jen jako informaci) a určí dvě věci:
+
+| Druh karty | Výnos řádku | Co se stane po vystavení faktury |
+|---|---|---|
+| Drobný majetek | **642** (tržby z prodeje materiálu) | karta přejde na *prodáno* a naváže se na doklad; nic dalšího se neúčtuje, zůstatková cena je nula |
+| Dlouhodobý majetek | **641** | karta se vyřadí typem *Prodej* — účetní odpis do měsíce prodeje, daňový půlodpis §26/7, zůstatková cena 541/08x a vyřazení 08x/02x |
+
+Rozpad je **po řádcích**, takže jedna faktura může vedle sebe prodat majetek
+i fakturovat službu a každý řádek sedne na svůj účet; nenavázané řádky zůstávají
+na 602. Řádek s dlouhodobým majetkem navíc dostane klasifikaci DPH **1m/2m** —
+prodej dlouhodobého majetku se podle §76 odst. 4 ZDPH nezapočítává do koeficientu.
+Ruční volba klasifikace má přednost.
+
+Pokud se karta uzavřít nepodaří — zavřené účetní období, nebo u dlouhodobého majetku
+rok, který nemá potvrzený ani přerušený daňový odpis — **faktura se přesto vystaví
+a zaúčtuje** a systém hned po vystavení upozorní, která karta zůstala v užívání
+a proč (např. „rok 2025 nemá potvrzený ani přerušený daňový odpis"). Doděláš odpisy
+(viz [§ 57.6](57_Majetek.md#576-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
+z její vlastní stránky.
+
+Jednu kartu lze prodat jen jednou: pokud už ji prodal jiný doklad nebo je
+vyřazená, uložení faktury skončí chybou. Storno faktury karty vrátí do užívání
+(u dlouhodobého majetku jen dokud je období vyřazení otevřené — jinak zůstane
+záznam v auditu a kartu vrátí účetní ručně).
+
 ## 15.4 Sumář (vpravo)
 
 Automaticky se přepočítává:

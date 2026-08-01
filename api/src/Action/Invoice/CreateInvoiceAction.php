@@ -85,7 +85,14 @@ final class CreateInvoiceAction
             }
             throw $e;
         }
-        $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        try {
+            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+        } catch (\InvalidArgumentException $e) {
+            // Neplatná vazba řádku na kartu majetku (1177). Rozdělaný draft po sobě uklidíme —
+            // jinak by po každém odmítnutém pokusu zůstala prázdná faktura se spáleným číslem.
+            $this->repo->delete($id);
+            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+        }
         $this->paymentSchedule->saveFromPayload(SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
         $rateMeta = $this->rateApplier->applyToInvoice($id);

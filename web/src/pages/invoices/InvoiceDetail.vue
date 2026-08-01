@@ -655,6 +655,12 @@ async function issue() {
   try {
     invoice.value = await invoicesApi.issue(invoice.value.id)
     toast.success( t('invoice.issued_as', { varsymbol: invoice.value.varsymbol }))
+    // Prodej majetku (1177): faktura je vystavená, ale karta zůstala v užívání (zavřené
+    // období, nedoúčtovaný odpis minulého roku…). Bez téhle hlášky by jediná stopa byla
+    // v auditním logu a účetní by na to přišla až u inventarizace.
+    for (const w of invoice.value.asset_sale_warnings ?? []) {
+      toast.warning(`${t('invoice.asset_sale.not_closed', { name: w.name })} ${w.message}`)
+    }
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
     invoicesApi.listPdfs(invoice.value.id).then(items => { pdfHistory.value = items }).catch(() => {})
     // Sklad (Epic SKLAD, B5): auto-výdejka vznikla v téže transakci co issue —

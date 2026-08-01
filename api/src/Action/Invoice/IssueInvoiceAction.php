@@ -12,6 +12,7 @@ use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\WorkReportRepository;
+use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
@@ -57,6 +58,7 @@ final class IssueInvoiceAction
         private readonly StockIssueService $stockIssue,
         private readonly DocumentAutoPoster $autoPoster,
         private readonly AdvanceCycleLock $cycleLock,
+        private readonly InvoiceAssetSaleService $assetSale,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -432,7 +434,24 @@ final class IssueInvoiceAction
             $request->getHeaderLine('User-Agent'),
         );
 
+        // Prodej majetku (1177): řádky navázané na kartu ji uzavřou — drobný majetek přejde na
+        // 'sold', dlouhodobý se vyřadí (541/08x + 08x/02x). Až PO auto-postu, aby v deníku
+        // seděla chronologie doklad → vyřazení. Chyby si service polyká do audit warningu ze
+        // stejného důvodu jako auto-post: faktura je vystavená a zákazník ji má.
+        $assetSaleWarnings = $this->assetSale->applyForIssuedInvoice($supplierId, $id, [
+            'user_id'    => isset($user['id']) ? (int) $user['id'] : null,
+            'ip'         => $ip,
+            'user_agent' => $request->getHeaderLine('User-Agent'),
+        ]);
+
         $issued = $this->repo->find($id);
+
+        // Karta majetku, kterou se nepodařilo uzavřít (zavřené období, nedoúčtovaný odpis
+        // minulého roku, daňová evidence). Faktura je platná a zaúčtovaná, ale uživatel to
+        // musí vidět hned — jinak se o neuzavřené kartě dozví až při inventarizaci.
+        if ($assetSaleWarnings !== []) {
+            $issued['asset_sale_warnings'] = $assetSaleWarnings;
+        }
 
         // § 42 odst. 3 — bez data doručení zůstává obdobím opravy `tax_date` z okamžiku
         // vytvoření dobropisu. Přes přelom měsíce to bývá JINÉ zdaňovací období, než do

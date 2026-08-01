@@ -116,6 +116,13 @@ export interface InvoiceItem {
   stock_item_id?: number | null
   /** Sklad, ze kterého se položka vydá při vystavení (auto-výdejka); null = default sklad supplieru. */
   warehouse_id?: number | null
+  /** Prodávaná karta drobného majetku (1177) — výnos 642 a po vystavení karta → prodáno. */
+  small_asset_id?: number | null
+  /** Prodávaná karta dlouhodobého majetku (1177) — výnos 641 a po vystavení vyřazení type=sold. */
+  asset_id?: number | null
+  /** Název karty z JOINu (read-only) — našeptávač jím zobrazí vybranou položku bez dalšího dotazu. */
+  small_asset_name?: string | null
+  asset_name?: string | null
   oss_applicable?: boolean
   oss_consumer_country?: string | null
   oss_rate_type?: 'standard' | 'reduced' | 'second_reduced' | 'parking' | string | null
@@ -299,6 +306,11 @@ export interface Invoice {
   }
   /** Non-blocking varování z create/update (kódy → t('invoice.warning.<code>')). */
   _warnings?: string[]
+  /**
+   * Karty majetku (1177), které se po vystavení nepodařilo uzavřít — faktura je platná,
+   * ale kartu musí účetní dořešit ručně. `message` je adresný důvod z backendu.
+   */
+  asset_sale_warnings?: Array<{ code: string; name: string; message: string }>
   /** Detaily k `_warnings` kódům pro interpolaci v UI (§C kurz vs ČNB). */
   _warning_meta?: {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
@@ -435,6 +447,8 @@ export interface InvoicePayload {
     order_index: number
     stock_item_id?: number | null
     warehouse_id?: number | null
+    small_asset_id?: number | null
+    asset_id?: number | null
     oss_applicable?: boolean
     oss_consumer_country?: string | null
     oss_rate_type?: string | null

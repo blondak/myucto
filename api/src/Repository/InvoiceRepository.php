@@ -498,10 +498,14 @@ final class InvoiceRepository
                     ii.unit_price_without_vat, ii.vat_rate_id, ii.vat_rate_snapshot,
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
                     ii.order_index, ii.item_kind, ii.linked_work_report_id,
-                    ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id' . $ossSelect . ',
+                    ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id,
+                    ii.small_asset_id, ii.asset_id,
+                    sa.name AS small_asset_name, a.name AS asset_name' . $ossSelect . ',
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM invoice_items ii
                JOIN vat_rates vr ON vr.id = ii.vat_rate_id
+          LEFT JOIN small_assets sa ON sa.id = ii.small_asset_id
+          LEFT JOIN assets a        ON a.id  = ii.asset_id
               WHERE ii.invoice_id = ?
               ORDER BY ii.order_index, ii.id'
         );
@@ -1049,9 +1053,132 @@ final class InvoiceRepository
      * Příchozí položky s item_kind='discount' se ignorují (sleva je vždy generovaná
      * z header pole, nikdy se neukládá z UI jako uživatelský řádek → žádné zdvojení).
      */
+    /** Kladné id z payloadu, jinak NULL (0, '', null i nesmysly padnou na NULL). */
+    private static function positiveIdOrNull(mixed $value): ?int
+    {
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
+    }
+
+    /**
+     * Ověří vazby řádků na prodávané karty majetku (1177) — replaceItems je jediné místo,
+     * kde vazba vzniká, takže je to jediné místo, kde ji jde uhlídat.
+     *
+     * Kontroluje čtyři věci:
+     *   1. nejvýš JEDEN druh karty na řádek — DB CHECK to vynutit nemůže, oba sloupce mají
+     *      FK ON DELETE SET NULL (MariaDB chyba 1901, narazilo se na to už v 1094),
+     *   2. karta patří TÉŽE firmě jako faktura — id přitéká z API jako cizí vstup,
+     *   3. karta je prodejná (v užívání) a není prodaná JINOU fakturou — jinak by automat
+     *      prodal jednu věc dvakrát a soupis k inventarizaci by lhal,
+     *   4. jedna karta nejvýš na jednom řádku dokladu.
+     *
+     * Vlastní faktura se z bodu 3 vyjímá: po vystavení je karta ve stavu 'sold'/'disposed'
+     * právě tímhle dokladem a jeho re-uložení (force-edit, přepočet) nesmí spadnout.
+     *
+     * @param array<mixed> $items
+     * @throws \InvalidArgumentException
+     */
+    private function assertItemAssetLinks(int $invoiceId, array $items): void
+    {
+        $smallIds = [];
+        $longIds  = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $small = self::positiveIdOrNull($item['small_asset_id'] ?? null);
+            $long  = self::positiveIdOrNull($item['asset_id'] ?? null);
+            if ($small !== null && $long !== null) {
+                throw new \InvalidArgumentException(
+                    'Řádek nemůže prodávat drobný i dlouhodobý majetek zároveň — vyberte jednu kartu.'
+                );
+            }
+            if ($small !== null) {
+                if (isset($smallIds[$small])) {
+                    throw new \InvalidArgumentException(
+                        'Tatáž karta majetku je na faktuře na více řádcích — prodat ji lze jen jednou.'
+                    );
+                }
+                $smallIds[$small] = true;
+            }
+            if ($long !== null) {
+                if (isset($longIds[$long])) {
+                    throw new \InvalidArgumentException(
+                        'Tatáž karta majetku je na faktuře na více řádcích — prodat ji lze jen jednou.'
+                    );
+                }
+                $longIds[$long] = true;
+            }
+        }
+        if ($smallIds === [] && $longIds === []) {
+            return;
+        }
+
+        $stmt = $this->db->pdo()->prepare('SELECT supplier_id FROM invoices WHERE id = ?');
+        $stmt->execute([$invoiceId]);
+        $supplierId = (int) ($stmt->fetchColumn() ?: 0);
+
+        $this->assertCardsSellable('small_assets', array_keys($smallIds), $supplierId, $invoiceId, 'drobného');
+        $this->assertCardsSellable('assets', array_keys($longIds), $supplierId, $invoiceId, 'dlouhodobého');
+    }
+
+    /**
+     * @param list<int> $ids
+     * @throws \InvalidArgumentException
+     */
+    private function assertCardsSellable(string $table, array $ids, int $supplierId, int $invoiceId, string $label): void
+    {
+        if ($ids === []) {
+            return;
+        }
+        // Jména tabulek jsou literály z volajícího (ne user input), id jsou vázané parametry.
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, name, status, sale_invoice_id FROM {$table}
+              WHERE id IN ({$placeholders}) AND supplier_id = ?"
+        );
+        $stmt->execute([...$ids, $supplierId]);
+        $found = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $found[(int) $row['id']] = $row;
+        }
+
+        foreach ($ids as $id) {
+            $card = $found[$id] ?? null;
+            if ($card === null) {
+                throw new \InvalidArgumentException(
+                    'Karta ' . $label . ' majetku #' . $id . ' nebyla nalezena.'
+                );
+            }
+            $soldBy = $card['sale_invoice_id'] !== null ? (int) $card['sale_invoice_id'] : null;
+            if ($soldBy === $invoiceId) {
+                continue;   // prodaná právě touhle fakturou — re-uložení dokladu je v pořádku
+            }
+            $name = (string) $card['name'];
+            if ($soldBy !== null) {
+                throw new \InvalidArgumentException(
+                    'Majetek „' . $name . '" je už prodaný jinou fakturou (#' . $soldBy . ').'
+                );
+            }
+            $status = (string) $card['status'];
+            if ($status === 'disposed') {
+                throw new \InvalidArgumentException('Majetek „' . $name . '" je vyřazený z evidence.');
+            }
+            if ($status !== 'in_use') {
+                throw new \InvalidArgumentException(
+                    'Majetek „' . $name . '" není v užívání (stav ' . $status . ') — prodat lze jen zařazený majetek.'
+                );
+            }
+        }
+    }
+
     public function replaceItems(int $invoiceId, array $items): void
     {
         $pdo = $this->db->pdo();
+
+        // Vazby na karty majetku (1177) se ověřují PŘED smazáním starých řádků — chybná vazba
+        // tak nechá fakturu netknutou, místo aby ji nechala bez položek.
+        $this->assertItemAssetLinks($invoiceId, $items);
+
         $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$invoiceId]);
 
         $supportsOss = $this->supportsOssItemColumns();
@@ -1061,19 +1188,19 @@ final class InvoiceRepository
                     (invoice_id, description, quantity, unit, unit_price_without_vat,
                      vat_rate_id, vat_rate_snapshot,
                      total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                     stock_item_id, warehouse_id,
+                     stock_item_id, warehouse_id, small_asset_id, asset_id,
                      oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
                      oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
                      oss_vat_amount_return, oss_original_period)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )
             : $pdo->prepare(
                 'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                 stock_item_id, warehouse_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)'
+                 stock_item_id, warehouse_id, small_asset_id, asset_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)'
             );
 
         $vatRates = $this->loadVatRates();
@@ -1109,8 +1236,20 @@ final class InvoiceRepository
             $rate = $vatRates[$vatRateId] ?? 0.0;
             // Auto-klasifikace pro DPH přiznání / KH — bez ní by faktura nedorazila
             // do výkazů (VatClassificationMapper SKIPNE řádky s code=NULL).
-            $code = $item['vat_classification_code']
-                ?? self::defaultSaleClassificationCode($rate, $reverseCharge, $countryIso, (string) ($item['unit'] ?? '') ?: null);
+            $explicitCode = ($item['vat_classification_code'] ?? null) !== null;
+            $code = $explicitCode
+                ? $item['vat_classification_code']
+                : self::defaultSaleClassificationCode($rate, $reverseCharge, $countryIso, (string) ($item['unit'] ?? '') ?: null);
+            $assetId = self::positiveIdOrNull($item['asset_id'] ?? null);
+            // § 76/4 ZDPH: prodej DLOUHODOBÉHO majetku se vylučuje z výpočtu koeficientu —
+            // číselník na to má varianty '1m'/'2m' (tatáž řádka přiznání i sekce KH jako
+            // '1'/'2', liší se jen tímhle). Jen když kód NEPŘIŠEL z payloadu: ruční volba
+            // účetní má přednost (a `??` sám o sobě ruční '1' od defaultního '1' nerozliší).
+            // Drobný majetek se sem NEPOČÍTÁ — pořízením šel do spotřeby (501), dlouhodobým
+            // majetkem nikdy nebyl, takže se z koeficientu nevylučuje.
+            if (!$explicitCode && $assetId !== null && ($code === '1' || $code === '2')) {
+                $code .= 'm';
+            }
             $orderIndex = (int) ($item['order_index'] ?? $i);
             $params = [
                 $invoiceId,
@@ -1126,6 +1265,9 @@ final class InvoiceRepository
                 // Vazba na skladovou kartu (Epic SKLAD, B5) — řídí auto-výdejku.
                 isset($item['stock_item_id']) && (int) $item['stock_item_id'] > 0 ? (int) $item['stock_item_id'] : null,
                 isset($item['warehouse_id']) && (int) $item['warehouse_id'] > 0 ? (int) $item['warehouse_id'] : null,
+                // Vazba na prodávanou kartu majetku (1177) — řídí výnosový účet i automat prodeje.
+                self::positiveIdOrNull($item['small_asset_id'] ?? null),
+                $assetId,
             ];
             if ($supportsOss) {
                 $params = array_merge($params, self::ossItemParams($item));
@@ -1213,7 +1355,10 @@ final class InvoiceRepository
                 $order++,
                 'discount',
                 $g['code'] !== null ? (string) $g['code'] : null,
-                // Slevový řádek nikdy nenese skladovou vazbu.
+                // Slevový řádek nikdy nenese skladovou vazbu ani vazbu na kartu majetku
+                // (sleva se generuje per sazba DPH, ne per položka — není ke které kartě).
+                null,
+                null,
                 null,
                 null,
             ];
@@ -1878,6 +2023,12 @@ final class InvoiceRepository
         }
         if (array_key_exists('warehouse_id', $row)) {
             $row['warehouse_id'] = $row['warehouse_id'] !== null ? (int) $row['warehouse_id'] : null;
+        }
+        // Vazba řádku na prodávanou kartu majetku (1177) — řídí výnosový účet i automat prodeje.
+        foreach (['small_asset_id', 'asset_id'] as $assetField) {
+            if (array_key_exists($assetField, $row)) {
+                $row[$assetField] = $row[$assetField] !== null ? (int) $row[$assetField] : null;
+            }
         }
         if (array_key_exists('oss_applicable', $row)) {
             $row['oss_applicable'] = (bool) $row['oss_applicable'];

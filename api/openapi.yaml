@@ -17200,6 +17200,14 @@ components:
         warehouse_id:
           type: [integer, "null"]
           description: "FK na sklad (/api/stock/warehouses), ze kterého se položka vydává. Relevantní jen když je vyplněn stock_item_id."
+        small_asset_id:
+          type: [integer, "null"]
+          description: "FK na kartu drobného majetku (/accounting/small-assets). Výnos řádku jde na 642 (small_asset.sale.revenue) a po vystavení faktury karta přejde do stavu `sold`."
+        asset_id:
+          type: [integer, "null"]
+          description: "FK na kartu dlouhodobého majetku (/accounting/assets). Výnos řádku jde na 641 (asset.sale.revenue) a po vystavení faktury se karta vyřadí (type=sold) včetně doúčtování zůstatkové ceny 541/08x."
+        small_asset_name: { type: [string, "null"], description: "Název navázané karty drobného majetku (read-only, z JOINu)." }
+        asset_name: { type: [string, "null"], description: "Název navázané karty dlouhodobého majetku (read-only, z JOINu)." }
         oss_applicable: { type: boolean }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
@@ -17227,6 +17235,12 @@ components:
         warehouse_id:
           type: [integer, "null"]
           description: "Sklad, ze kterého se má vydat (jen ve spojení se stock_item_id)."
+        small_asset_id:
+          type: [integer, "null"]
+          description: "Prodávaná karta drobného majetku. Nesmí být vyplněná zároveň s `asset_id`; karta musí patřit téže firmě, být v užívání a nesmí být prodaná jinou fakturou (jinak 400 integrity_violation)."
+        asset_id:
+          type: [integer, "null"]
+          description: "Prodávaná karta dlouhodobého majetku. Stejná pravidla jako u `small_asset_id`."
         oss_applicable: { type: boolean, default: false }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }

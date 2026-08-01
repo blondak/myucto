@@ -5186,6 +5186,17 @@
     "price_list_add": "Insert from price list",
     "price_list_added": "The price list item was inserted into the document.",
     "price_list_requires_context": "Select a customer and document currency before inserting a price list item.",
+    "asset_sale": {
+      "toggle": "Asset sale",
+      "hint": "Shows an asset card picker on every line. The selected card decides the revenue account and closes itself once the invoice is issued — a minor asset becomes sold, a fixed asset is disposed of including its residual value.",
+      "card": "Asset card",
+      "search_placeholder": "Search asset cards…",
+      "kind_small": "Minor asset",
+      "kind_long": "Fixed asset",
+      "posts_641": "Revenue to 641",
+      "posts_642": "Revenue to 642",
+      "not_closed": "The invoice was issued, but the card “{name}” could not be closed:"
+    },
     "summary": "Summary",
     "discount": {
       "label": "Whole-invoice discount",

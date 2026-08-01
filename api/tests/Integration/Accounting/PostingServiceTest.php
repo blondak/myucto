@@ -735,6 +735,107 @@ final class PostingServiceTest extends TestCase
         $this->assertBalanced($entry['lines']);
     }
 
+    public function testRevenueSplitsPerItemBetweenAssetKindsAndServices(): void
+    {
+        // 1177 — jádro rozpadu: jedna faktura prodává dlouhodobý majetek (641), drobný
+        // majetek (642) a k tomu fakturuje službu (602). Před rozpadem šel celý základ na
+        // jediný účet z hlavičky, takže smíšená faktura buď zdanila službu jako prodej
+        // majetku, nebo naopak. 343 i 311 se rozpadem hnout NESMÍ — DPH podání na tom stojí.
+        $client    = $this->client('Kupující smíšené faktury', true, false);
+        $invoiceId = $this->sale('FV-2099-MIX', $client, '1', 2000.00, 420.00, 21.00);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET total_without_vat = 15000.00, total_vat = 3150.00, total_with_vat = 18150.00 WHERE id = ?'
+        )->execute([$invoiceId]);
+
+        $small = $this->smallAssetCard('Notebook z evidence', 3000.00);
+        $long  = $this->assetCard('Osobní automobil', 10000.00);
+        $this->addLinkedItem($invoiceId, 3000.00, 630.00, 21.00, 1, $small, null);
+        $this->addLinkedItem($invoiceId, 10000.00, 2100.00, 21.00, 2, null, $long);
+
+        $lines   = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => self::YEAR . '-06-15']);
+        $entry   = $this->journal->find($entryId, $this->supplierId);
+
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+        self::assertEqualsWithDelta(2000.00, $byAccount['602']['credit'], 0.001, 'Služba zůstává na 602.');
+        self::assertEqualsWithDelta(3000.00, $byAccount['642']['credit'], 0.001, 'Drobný majetek na 642.');
+        self::assertEqualsWithDelta(10000.00, $byAccount['641']['credit'], 0.001, 'Dlouhodobý majetek na 641.');
+        self::assertEqualsWithDelta(18150.00, $byAccount['311']['debit'], 0.001, 'Pohledávka se rozpadem nehnula.');
+        self::assertEqualsWithDelta(3150.00, $byAccount['343']['credit'], 0.001, 'DPH se rozpadem nehnula.');
+        $this->assertBalanced($entry['lines']);
+    }
+
+    public function testSmallAssetSaleAlonePostsTo642WithoutHeaderRuleKey(): void
+    {
+        // Klasifikace řádku musí přebít default z hlavičky i tehdy, když je na dokladu
+        // jediná — jinak by samostatný prodej drobného majetku spadl na 602 (rozpad by
+        // vyrobil „jednu nohu" a tiše použil výchozí účet).
+        $client    = $this->client('Kupující drobného majetku', true, false);
+        $invoiceId = $this->sale('FV-2099-642', $client, '1', 5000.00, 1050.00, 21.00);
+        $card      = $this->smallAssetCard('Prodaná tiskárna', 5000.00);
+        $this->db->pdo()->prepare('UPDATE invoice_items SET small_asset_id = ? WHERE invoice_id = ?')
+            ->execute([$card, $invoiceId]);
+
+        $lines   = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => self::YEAR . '-06-15']);
+        $entry   = $this->journal->find($entryId, $this->supplierId);
+
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+        self::assertEqualsWithDelta(5000.00, $byAccount['642']['credit'], 0.001);
+        self::assertArrayNotHasKey('602', $byAccount, 'Drobný majetek nesmí spadnout na 602.');
+        self::assertArrayNotHasKey('641', $byAccount, 'Drobný majetek nikdy nebyl na 02x → ne 641.');
+        $this->assertBalanced($entry['lines']);
+    }
+
+    public function testAssetSaleCreditNoteReversesSplitSides(): void
+    {
+        // Dobropis prodeje majetku: rozpad musí obrátit strany stejně jako jedna noha
+        // (641/642 MD = storno výnosu), ne poslat abs() částky na credit.
+        $client = $this->client('Odběratel dobropisu majetku', true, false);
+        $issue  = self::YEAR . '-06-15';
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
+                 status, vat_classification_code, created_by)
+             VALUES (?, ?, "credit_note", ?, ?, ?, ?, ?, 0, -8000.00, -1680.00, -9680.00, "issued", "1", ?)'
+        )->execute([$this->supplierId, 'DOB-2099-MAJ', $client, $issue, $issue, $issue, $this->currencyId, $this->userId]);
+        $invoiceId = (int) $this->db->pdo()->lastInsertId();
+
+        $long = $this->assetCard('Vrácený stroj', 8000.00);
+        $this->addLinkedItem($invoiceId, -8000.00, -1680.00, 21.00, 0, null, $long);
+
+        $lines   = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => $issue]);
+        $entry   = $this->journal->find($entryId, $this->supplierId);
+
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+        self::assertEqualsWithDelta(8000.00, $byAccount['641']['debit'], 0.001, '641 MD = storno výnosu z prodeje.');
+        self::assertSame(0.0, $byAccount['641']['credit'], 'Dobropis nesmí výnos znovu naúčtovat na D.');
+        self::assertEqualsWithDelta(9680.00, $byAccount['311']['credit'], 0.001);
+        $this->assertBalanced($entry['lines']);
+    }
+
+    public function testExplicitRuleKeyOverridesItemSplit(): void
+    {
+        // Ruční zaúčtování s vybranou předkontací je adresný pokyn pro CELÝ doklad —
+        // rozpad po položkách se pak nedělá (zrcadlo debitOverride na přijaté straně).
+        $client    = $this->client('Kupující s ruční kontací', true, false);
+        $invoiceId = $this->sale('FV-2099-OVR', $client, '1', 4000.00, 840.00, 21.00);
+        $card      = $this->smallAssetCard('Karta k přebití', 4000.00);
+        $this->db->pdo()->prepare('UPDATE invoice_items SET small_asset_id = ? WHERE invoice_id = ?')
+            ->execute([$card, $invoiceId]);
+
+        $lines   = $this->posting->buildFromInvoice($this->supplierId, $invoiceId, ['rule_key' => 'invoice.goods.issued']);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => self::YEAR . '-06-15']);
+        $entry   = $this->journal->find($entryId, $this->supplierId);
+
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+        self::assertEqualsWithDelta(4000.00, $byAccount['604']['credit'], 0.001, 'Vyhrává ručně zvolená předkontace.');
+        self::assertArrayNotHasKey('642', $byAccount);
+        $this->assertBalanced($entry['lines']);
+    }
+
     public function testInvoiceWithoutRevenueRuleKeyStillPostsTo602(): void
     {
         // Guard: default chování (revenue_rule_key NULL) se nesmí hnout — výnos dál 602.
@@ -1391,6 +1492,52 @@ final class PostingServiceTest extends TestCase
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->insertItem('purchase_invoice_items', 'purchase_invoice_id', $id, $base, $vat, $rate);
         return $id;
+    }
+
+    /** Karta drobného majetku (1094) — cíl vazby invoice_items.small_asset_id. */
+    private function smallAssetCard(string $name, float $price): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO small_assets (supplier_id, name, acquisition_date, quantity, unit_price, price, status)
+             VALUES (?, ?, ?, 1, ?, ?, "in_use")'
+        )->execute([$this->supplierId, $name, self::YEAR . '-01-15', $price, $price]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Karta dlouhodobého majetku (F3) — cíl vazby invoice_items.asset_id. */
+    private function assetCard(string $name, float $price): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO assets (supplier_id, inventory_number, name, kind, input_price,
+                                 acquisition_date, put_into_use_date, status, tax_group)
+             VALUES (?, ?, ?, "tangible", ?, ?, ?, "in_use", 2)'
+        )->execute([
+            $this->supplierId, 'INV-' . uniqid('a', false), $name, $price,
+            self::YEAR . '-01-15', self::YEAR . '-01-15',
+        ]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Další řádek faktury, volitelně navázaný na kartu majetku. */
+    private function addLinkedItem(
+        int $invoiceId,
+        float $base,
+        float $vat,
+        float $rate,
+        int $order,
+        ?int $smallAssetId,
+        ?int $assetId,
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
+                 vat_classification_code, small_asset_id, asset_id)
+             VALUES (?, "Prodej majetku", 1, "ks", ?, ?, ?, ?, ?, ?, ?, "1", ?, ?)'
+        )->execute([
+            $invoiceId, $base, $this->vatRateId, $rate, $base, $vat, $base + $vat, $order,
+            $smallAssetId, $assetId,
+        ]);
     }
 
     private function insertItem(string $table, string $fk, int $id, float $base, float $vat, float $rate): void
