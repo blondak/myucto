@@ -4722,6 +4722,7 @@
     "filters": "Filtry",
     "filter_remove": "Zrušit filtr {name}",
     "filter_clear_all": "Zrušit vše",
+    "expand_items": "Zobrazit položky dokladu",
     "bulk_selected": "Vybráno: {n}",
     "bulk_clear": "Zrušit výběr",
     "export": "Export",

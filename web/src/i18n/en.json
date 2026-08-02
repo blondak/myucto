@@ -4722,6 +4722,7 @@
     "filters": "Filters",
     "filter_remove": "Clear filter {name}",
     "filter_clear_all": "Clear all",
+    "expand_items": "Show document items",
     "bulk_selected": "Selected: {n}",
     "bulk_clear": "Clear selection",
     "export": "Export",

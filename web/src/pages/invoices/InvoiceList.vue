@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { invoicesApi, type MonthGroup, type InvoiceListItem } from '@/api/invoices'
-import { formatMoney, formatDate, formatMonth, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
+import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem } from '@/api/invoices'
+import { formatMoney, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
@@ -159,6 +159,48 @@ const { activeIndex } = useListKeyboard({
   toggle: (i) => { const inv = flatRows.value[i]; if (inv) toggleSelected(inv.id) },
   clear: () => { selectedIds.value = [] },
 })
+
+/**
+ * Rozbalený náhled položek dokladu přímo v seznamu.
+ *
+ * Why: nejčastější důvod, proč uživatel klikne na fakturu, je „co na ní vlastně
+ * je" — a pak se musí vracet zpátky do seznamu, který se mezitím překreslil a
+ * odscrolloval. Rozbalení odpoví na tutéž otázku bez opuštění kontextu.
+ * Položky se dotahují až na vyžádání, seznam sám je nenačítá.
+ */
+const expandedId = ref<number | null>(null)
+const expandedItems = ref<InvoiceItem[] | null>(null)
+const expandedLoading = ref(false)
+
+/**
+ * Šířka rozbaleného řádku = počet viditelných sloupců + zaškrtávátko + rozbalovací
+ * tlačítko. Napevno zadaná hodnota by se rozešla s ColumnPickerem, kterým si
+ * uživatel sloupce zapíná a vypíná.
+ */
+const expandedColspan = computed(() => COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2)
+
+/** Vnořená tabulka položek nemá dědit skin datových tabulek — je to náhled uvnitř řádku. */
+
+async function toggleExpand(inv: InvoiceListItem) {
+  if (expandedId.value === inv.id) {
+    expandedId.value = null
+    expandedItems.value = null
+    return
+  }
+  expandedId.value = inv.id
+  expandedItems.value = null
+  expandedLoading.value = true
+  try {
+    const full = await invoicesApi.get(inv.id)
+    // Slevová položka je systémová (generuje se z discount_percent) — v náhledu
+    // by mátla, protože na papírové faktuře je součástí rekapitulace, ne řádků.
+    expandedItems.value = full.items.filter(i => i.item_kind !== 'discount')
+  } catch {
+    expandedId.value = null
+  } finally {
+    expandedLoading.value = false
+  }
+}
 
 const selectedIds = ref<number[]>([])
 const bulkBusy = ref(false)
@@ -993,12 +1035,16 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
                   <span class="sr-only">{{ t('lock.column') }}</span>
                 </th>
+                <th class="px-1 py-2 w-8">
+                  <span class="sr-only">{{ t('common.expand_items') }}</span>
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100" :class="staggerRows ? 'stagger-in' : ''">
+              <!-- <template v-for>, protože k jednomu dokladu patří dva řádky:
+                   samotný doklad a jeho rozbalený náhled položek. -->
+              <template v-for="(inv, ri) in g.invoices" :key="inv.id">
               <tr
-                v-for="(inv, ri) in g.invoices"
-                :key="inv.id"
                 @click="openInvoice(inv, $event)"
                 @auxclick.prevent="openInvoice(inv, $event)"
                 class="cursor-pointer hover:bg-neutral-50 transition"
@@ -1086,7 +1132,47 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
                   </svg>
                 </td>
+                <td class="px-1 py-2.5 w-8 text-center" @click.stop>
+                  <button type="button"
+                    class="cursor-pointer inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                    :aria-expanded="expandedId === inv.id"
+                    :title="t('common.expand_items')"
+                    @click="toggleExpand(inv)">
+                    <svg class="h-4 w-4 transition-transform" :class="expandedId === inv.id ? 'rotate-90' : ''"
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </td>
               </tr>
+
+              <!-- Náhled položek dokladu. Neklikatelný řádek (žádné @click), aby
+                   klik do náhledu neotevřel fakturu — uživatel si tu chce jen číst. -->
+              <tr v-if="expandedId === inv.id" class="bg-neutral-50/60">
+                <td :colspan="expandedColspan" class="px-6 py-3">
+                  <div v-if="expandedLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
+                  <div v-else-if="!expandedItems || expandedItems.length === 0" class="text-xs text-neutral-500">{{ t('common.no_data') }}</div>
+                  <table v-else class="w-full text-xs table-plain">
+                    <thead>
+                      <tr class="text-neutral-500">
+                        <th class="py-1 text-left font-medium">{{ t('invoice.items_table.description') }}</th>
+                        <th class="py-1 text-right font-medium w-24">{{ t('invoice.items_table.qty') }}</th>
+                        <th class="py-1 text-right font-medium w-32">{{ t('invoice.items_table.unit_price') }}</th>
+                        <th class="py-1 text-right font-medium w-32">{{ t('invoice.items_table.total_incl_vat') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
+                        <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
           </div>
