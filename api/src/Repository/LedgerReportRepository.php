@@ -149,10 +149,11 @@ final class LedgerReportRepository
      *
      * @return list<array<string,mixed>>
      */
-    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset): array
+    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false): array
     {
         $limit = max(1, $limit);
         $offset = max(0, $offset);
+        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
             "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
@@ -165,12 +166,12 @@ final class LedgerReportRepository
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
-                   AND e.entry_date BETWEEN ? AND ?
+                   AND e.entry_date BETWEEN ? AND ?{$technicalSql}
             ) t
             ORDER BY t.entry_date, t.entry_id, t.line_no
             LIMIT {$limit} OFFSET {$offset}"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to]);
+        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
         return array_map(static function (array $r): array {
             $r['entry_id'] = (int) $r['entry_id'];
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
@@ -179,6 +180,44 @@ final class LedgerReportRepository
             $r['running_delta'] = round((float) $r['running_delta'], 2);
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Vyloučení TECHNICKÝCH zápisů z pohybů opisu účtu.
+     *
+     * Otevírací zápis je datovaný na první den období a `accountOpening()` ho
+     * záměrně počítá do PS. Dokud ho pohyby zároveň nevyloučily, byl započítaný
+     * DVAKRÁT — pokladní kniha za 2026 ukazovala konečný zůstatek 28 464 Kč
+     * místo 14 232 Kč, přesný dvojnásobek, a opis 221 se mýlil o 4,1 mil.
+     * Předvaha tutéž opravu má od začátku (viz trialBalanceRows), do opisu účtu
+     * se nikdy neprotáhla.
+     *
+     * Ve výchozím („reálný stav peněz") pohledu padají VŠECHNY otevírací zápisy,
+     * ne jen ten na počátečním datu. Okno přes přelom roku totiž obsahuje pár
+     * uzavření+otevření: ten se sice v součtu vyruší, ale zůstatek mezitím
+     * spadne na nulu a vyskočí zpátky, obraty se nafouknou o převáděnou částku
+     * a banner „záporný zůstatek" hlásí poplach. Protože uzávěrkový zápis už
+     * vylučujeme, musí jít jeho protějšek pryč taky — jinak vznikne asymetrie
+     * a konečný zůstatek přeroste o převod (28 464 místo 14 232).
+     *
+     * Výjimka u uzávěrky je stejná jako jinde: slotované skladové zápisy §3.4
+     * (source_id >= STOCK_SLOT_BASE) jsou reálné pohyby a zůstávají.
+     *
+     * S `after_closing=1` si uživatel technické zápisy vyžádal — pak se
+     * vylučuje jen otevírací zápis datovaný na `from`, který je v PS vždycky.
+     *
+     * @return array{0: string, 1: list<mixed>}
+     */
+    private function technicalEntryFilter(string $from, bool $excludeClosing): array
+    {
+        if (!$excludeClosing) {
+            return [" AND NOT (e.entry_date = ? AND e.source_type = 'opening')", [$from]];
+        }
+        return [
+            " AND e.source_type <> 'opening'"
+            . " AND NOT (e.source_type = 'closing' AND e.source_id < ?)",
+            [ClosingSourceId::STOCK_SLOT_BASE],
+        ];
     }
 
     /**
@@ -213,18 +252,19 @@ final class LedgerReportRepository
     /**
      * Celkový počet řádků opisu účtu v rozsahu (pro paginaci).
      */
-    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to): int
+    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): int
     {
+        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*)
+            "SELECT COUNT(*)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
-                AND e.entry_date BETWEEN ? AND ?'
+                AND e.entry_date BETWEEN ? AND ?{$technicalSql}"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to]);
+        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
         return (int) $stmt->fetchColumn();
     }
 
@@ -233,8 +273,9 @@ final class LedgerReportRepository
      *
      * @return array{md: float, d: float}
      */
-    public function accountTurnovers(int $supplierId, int $accountId, string $from, string $to): array
+    public function accountTurnovers(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): array
     {
+        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
@@ -243,9 +284,9 @@ final class LedgerReportRepository
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
-                AND e.entry_date BETWEEN ? AND ?"
+                AND e.entry_date BETWEEN ? AND ?{$technicalSql}"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to]);
+        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
             'md' => round((float) ($row['md'] ?? 0), 2),

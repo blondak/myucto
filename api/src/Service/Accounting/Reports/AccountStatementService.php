@@ -35,12 +35,16 @@ final class AccountStatementService
         $period = $this->periods->findForDate($supplierId, $from);
         $periodStart = $period !== null ? (string) $period['starts_on'] : $from;
 
-        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, !$afterClosing);
-        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to);
+        // Stejný filtr technických zápisů musí dostat PS i pohyby, jinak se
+        // otevírací zápis započítá dvakrát a KS vyjde jako dvojnásobek PS.
+        $excludeClosing = !$afterClosing;
+
+        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing);
+        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing);
 
         $page = max(1, $page);
         $perPage = max(1, $perPage);
-        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage);
+        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing);
 
         $items = [];
         foreach ($lines as $l) {
@@ -57,7 +61,7 @@ final class AccountStatementService
             ];
         }
 
-        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to);
+        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
 
         return [
             'account' => [

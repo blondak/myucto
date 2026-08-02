@@ -183,6 +183,72 @@ final class AccountStatementReportTest extends TestCase
         self::assertSame(self::cents(1210.00), self::cents($fromFeb['closing_balance']));
     }
 
+    /**
+     * Regrese: otevírací zápis se počítal DVAKRÁT — jednou v počátečním stavu
+     * (kam patří) a podruhé mezi pohyby. Pokladní kniha za 2026 pak tvrdila
+     * konečný zůstatek 28 464 Kč místo 14 232, přesný dvojnásobek; opis účtu
+     * 221 se mýlil o 4,1 mil. Předvaha tuhle opravu měla, do opisu se nikdy
+     * neprotáhla.
+     */
+    public function testOpeningEntryCountsOnlyIntoOpeningBalance(): void
+    {
+        $accountId = $this->accountId('211');
+        $this->technical(
+            [self::l('211', 'debit', 14232.00), self::l('701', 'credit', 14232.00)],
+            self::YEAR . '-01-01',
+            'opening',
+            null,
+            'OT-' . self::YEAR . '-0001',
+        );
+        $this->manual([self::l('518', 'debit', 1000.00), self::l('211', 'credit', 1000.00)], self::YEAR . '-03-03');
+
+        $data = $this->statement->build($this->supplierId, $accountId, self::YEAR . '-01-01', self::YEAR . '-12-31', 1, 50);
+
+        self::assertSame(self::cents(14232.00), self::cents($data['opening_balance']), 'Otevírací zápis tvoří počáteční stav.');
+        self::assertSame(1, $data['total'], 'Mezi pohyby patří jen reálný výdej.');
+        self::assertCount(1, $data['items']);
+        self::assertNotSame('opening', $data['items'][0]['source_type']);
+        self::assertSame(self::cents(0.00), self::cents($data['turnover_md']), 'Otevírací zápis se nesmí objevit v obratech MD.');
+        self::assertSame(self::cents(1000.00), self::cents($data['turnover_d']));
+        self::assertSame(self::cents(13232.00), self::cents($data['closing_balance']));
+        self::assertSame(self::cents(13232.00), self::cents($data['items'][0]['balance']), 'Běžící zůstatek startuje od PS, ne od nuly.');
+    }
+
+    /**
+     * Okno přes přelom roku ukazovalo uzávěrkový i otevírací zápis jako běžné
+     * pohyby hotovosti — v knize se tak zůstatek propadl na nulu a zase vyskočil.
+     */
+    public function testClosingAndOpeningEntriesStayOutOfMovements(): void
+    {
+        $accountId = $this->accountId('211');
+        $nextYear = self::YEAR + 1;
+        $this->periods->create($this->supplierId, $nextYear, $nextYear . '-01-01', $nextYear . '-12-31');
+
+        $this->manual([self::l('211', 'debit', 14232.00), self::l('602', 'credit', 14232.00)], self::YEAR . '-06-15');
+        $this->technical(
+            [self::l('702', 'debit', 14232.00), self::l('211', 'credit', 14232.00)],
+            self::YEAR . '-12-31',
+            'closing',
+            $this->periodId,
+            'UZ-' . self::YEAR . '-0002',
+        );
+        $this->technical(
+            [self::l('211', 'debit', 14232.00), self::l('701', 'credit', 14232.00)],
+            $nextYear . '-01-01',
+            'opening',
+            null,
+            'OT-' . $nextYear . '-0001',
+        );
+
+        $data = $this->statement->build($this->supplierId, $accountId, self::YEAR . '-01-01', $nextYear . '-12-31', 1, 50);
+
+        $sourceTypes = array_column($data['items'], 'source_type');
+        self::assertNotContains('closing', $sourceTypes, 'Uzavření knih není pohyb hotovosti.');
+        self::assertNotContains('opening', $sourceTypes, 'Otevření knih není pohyb hotovosti.');
+        self::assertSame(1, $data['total'], 'Zůstává jediný reálný příjem.');
+        self::assertSame(self::cents(14232.00), self::cents($data['closing_balance']), 'V pokladně je to, co v ní reálně je.');
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function accountId(string $code): int
@@ -192,6 +258,29 @@ final class AccountStatementReportTest extends TestCase
         );
         $stmt->execute([$this->supplierId, $code]);
         return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Technický zápis (uzavření / otevření knih). Nejde poslat přes `manual()` —
+     * `source_type` je parametr postDocument(), ne meta, a účty 701/702 smí
+     * PostingService zaúčtovat jen v uzávěrkovém zápisu.
+     *
+     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     */
+    private function technical(array $lines, string $date, string $sourceType, ?int $sourceId, string $documentNo): int
+    {
+        return $this->posting->postDocument(
+            $this->supplierId,
+            $sourceType,
+            $sourceId,
+            $lines,
+            [
+                'entry_date' => $date,
+                'document_no' => $documentNo,
+                'posted_by' => $this->userId,
+                'user_id' => $this->userId,
+            ],
+        );
     }
 
     /**

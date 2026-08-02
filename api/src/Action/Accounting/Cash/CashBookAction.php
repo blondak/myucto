@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
+use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use MyInvoice\Service\Pdf\AccountStatementPdfRenderer;
 use PDO;
@@ -241,7 +242,13 @@ final class CashBookAction
         ];
     }
 
-    /** MIN kumulativní delty přes CELÉ okno (tvar dle LedgerReportRepository::accountLines). */
+    /**
+     * MIN kumulativní delty přes CELÉ okno (tvar dle LedgerReportRepository::accountLines).
+     *
+     * Filtr technických zápisů musí být shodný s opisem účtu — jinak by banner
+     * „záporný zůstatek" počítal s otevíracím zápisem, který je už započítaný
+     * v počátečním stavu, a hlásil by poplach tam, kde žádný není (a naopak).
+     */
     private function minRunningDelta(int $supplierId, int $accountId, string $from, string $to): float
     {
         $stmt = $this->db->pdo()->prepare(
@@ -255,9 +262,14 @@ final class CashBookAction
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date BETWEEN ? AND ?
+                   AND NOT (e.entry_date = ? AND e.source_type = 'opening')
+                   AND NOT (e.source_type = 'closing' AND e.source_id < ?)
             ) t"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to]);
+        $stmt->execute([
+            $supplierId, $accountId, $accountId, $from, $to, $from,
+            ClosingSourceId::STOCK_SLOT_BASE,
+        ]);
         return round((float) $stmt->fetchColumn(), 2);
     }
 
