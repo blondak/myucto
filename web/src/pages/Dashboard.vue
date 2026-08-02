@@ -186,8 +186,16 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
         <p v-if="supplierIdentity" class="text-sm text-neutral-500 mt-0.5">{{ supplierIdentity }}</p>
       </header>
 
-      <!-- ═══ Akce pro tebe (přesunuto z CRM) — první část Přehledu (skryto pro readonly) ═══ -->
-      <ActionItemsWidget v-if="auth.canWrite('dashboard')" />
+      <!-- „Akce pro tebe" a „Daňový kalendář" jsou obojí resty s termínem — na
+           širokém monitoru patří vedle sebe, jinak jeden vytlačí druhý pod ohyb.
+           `flex-wrap` s min-šířkou místo grid sloupců schválně: oba widgety se
+           samy skrývají (readonly uživatel, neplátce DPH) a v gridu by po tom
+           skrytém zůstala prázdná půlka. Takhle zbylý widget roztáhne celou
+           šířku, protože prázdná komponenta nevytvoří flex položku. -->
+      <div class="flex flex-wrap items-start gap-4">
+        <ActionItemsWidget v-if="auth.canWrite('dashboard')" class="flex-1 min-w-[26rem]" />
+        <TaxCalendarWidget class="flex-1 min-w-[26rem]" />
+      </div>
 
       <!-- ═══ Výkazy práce — rozpracované (draft) vystavené faktury k doplnění (skryto pro readonly) ═══ -->
       <section v-if="auth.canWrite('dashboard') && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
@@ -238,9 +246,6 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
 
       <!-- Nadcházející zálohy na daň a pojistné (E9) — self-gating -->
       <TaxAdvancesWidget />
-
-      <!-- Daňový kalendář (Fáze F, audit 2026-07) — DPH/KH/SH + zálohy + roční DP, self-gating -->
-      <TaxCalendarWidget />
 
       <!-- ═══ Sekce 1: VYSTAVENÉ FAKTURY ═══ -->
       <section class="space-y-3">
