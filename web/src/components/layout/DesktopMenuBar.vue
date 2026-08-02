@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 interface NavItem {
   to: string
@@ -51,6 +51,7 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 const root = ref<HTMLElement | null>(null)
 const openSection = ref<string | null>(null)
 const hoverCapable = ref(false)
@@ -60,12 +61,35 @@ function sectionIsActive(section: NavSection): boolean {
   return section.items.some(item => !item.external && props.isActive(item))
 }
 
-function toggleSection(key: string) {
-  if (hoverCapable.value) {
-    openSection.value = key
+/** První položka sekce, na kterou se dá přejít routerem (externí odkazy přeskoč). */
+function firstInternalTarget(section: NavSection): string | null {
+  return section.items.find(item => !item.external)?.to ?? null
+}
+
+/**
+ * Klik na název sekce. Na myši je submenu otevřené už od hoveru, takže klik
+ * rovnou skočí na první položku (Prodej → Vydané faktury) — jinak by nedělal nic
+ * a musel bys mířit do rozbalené nabídky na něco, co je stejně první v pořadí.
+ *
+ * Na klávesnici hover nenastane, takže první Enter sekci otevře a teprve druhý
+ * naviguje — `aria-haspopup="menu"` tím zůstává pravdivé.
+ *
+ * Na dotyku se navigace nespouští vůbec: tam je klepnutí jediný způsob, jak
+ * submenu otevřít i zavřít, a odskok na první položku by byl past na překlep.
+ */
+function activateSection(section: NavSection) {
+  if (openSection.value !== section.key) {
+    openSection.value = section.key
     return
   }
-  openSection.value = openSection.value === key ? null : key
+  if (!hoverCapable.value) {
+    openSection.value = null
+    return
+  }
+  const target = firstInternalTarget(section)
+  if (target === null) return
+  close()
+  router.push(target)
 }
 
 function openFromPointer(key: string) {
@@ -132,7 +156,7 @@ onBeforeUnmount(() => {
           : (openSection === section.key ? 'bg-neutral-100 text-neutral-900' : '')"
         :aria-expanded="openSection === section.key"
         aria-haspopup="menu"
-        @click.stop="toggleSection(section.key)"
+        @click.stop="activateSection(section)"
         @keydown.down.prevent="openSection = section.key"
       >
         <span>{{ section.title }}</span>
