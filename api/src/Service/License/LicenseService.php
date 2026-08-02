@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\License;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use Psr\Log\LoggerInterface;
@@ -42,9 +43,15 @@ final class LicenseService
         private readonly LicenseTokenVerifier $verifier,
         private readonly LicenseClient $client,
         ?LoggerInterface $logger = null,
+        ?EntityCache $cache = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
+        // Volitelná kvůli testovacím dvojníkům, které službu staví ručně.
+        // NullEntityCache je průchozí, takže bez ní se chování nemění.
+        $this->cache = $cache ?? EntityCache::disabled();
     }
+
+    private readonly EntityCache $cache;
 
     public function current(): LicenseState
     {
@@ -335,12 +342,23 @@ final class LicenseService
             return $this->rowCache;
         }
 
-        $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            // Řádek chybí (seed migrace neproběhl) — vytvoř ho lazily.
-            $this->writeLicense("INSERT INTO license (id, instance_id, trial_started_at) VALUES (1, UUID(), NOW())");
-            $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
-        }
+        // Mezi requesty přes EntityCache (skupina `license`); zápisy do tabulky
+        // ji přetáčejí automaticky na úrovni PDO, takže po activate/deactivate/renew
+        // se čte znovu. Uvnitř requestu pak platí $rowCache výše.
+        $row = $this->cache->remember(
+            EntityCache::GROUP_LICENSE,
+            'row',
+            function (): array {
+                $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
+                if (!is_array($row)) {
+                    // Řádek chybí (seed migrace neproběhl) — vytvoř ho lazily.
+                    $this->writeLicense("INSERT INTO license (id, instance_id, trial_started_at) VALUES (1, UUID(), NOW())");
+                    $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
+                }
+
+                return is_array($row) ? $row : [];
+            },
+        );
 
         return $this->rowCache = (is_array($row) ? $row : []);
     }
@@ -461,6 +479,18 @@ final class LicenseService
         if (!$this->db->hasTable('users')) {
             return 0;
         }
+
+        // Licenční místa se přepočítávají na každý request, ale mění se jen při
+        // zásahu do users/roles — a ten cache invaliduje na úrovni PDO.
+        return (int) $this->cache->remember(
+            EntityCache::GROUP_USER,
+            'license:active_users',
+            fn (): int => $this->queryActiveUsers(),
+        );
+    }
+
+    private function queryActiveUsers(): int
+    {
         // Aktivní uživatelé s rolí != readonly (a != client — portálové účty
         // zákazníků nejsou provozní licenční místa). Deaktivované se nepočítají.
         // Přes roles JOIN, protože vlastní staff role mají legacy `role`='readonly'
@@ -480,7 +510,12 @@ final class LicenseService
         if (!$this->db->hasTable('supplier')) {
             return 0;
         }
-        return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
+
+        return (int) $this->cache->remember(
+            EntityCache::GROUP_SUPPLIER,
+            'license:companies',
+            fn (): int => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn(),
+        );
     }
 
     private function publicKey(): string

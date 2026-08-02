@@ -39,6 +39,18 @@ final class RedisFactory
             'port'     => (int) $this->config->get('redis.port', 6379),
             'database' => (int) $this->config->get('redis.db', 0),
             'timeout'  => 1.5,
+            // Perzistentní socket (pfsockopen) — pod FPM/FastCGI přežije mezi
+            // requesty stejného workera, takže se TCP connect neplatí znovu.
+            // Není to kosmetika: na Windows loopbacku stojí connect ~15 ms, což
+            // je víc než všechna práce, kterou má cache ušetřit.
+            //
+            // Na rozdíl od perzistentních PDO spojení (ta jsou v Connection
+            // ZÁMĚRNĚ vypnutá) tady nehrozí prosakování stavu: aplikace nepoužívá
+            // MULTI/WATCH ani SUBSCRIBE, takže socket nese jen vybranou databázi
+            // a autentizaci — obojí se nastavuje při připojení a nemění se.
+            // Zmrtvělý socket (restart Redisu) odhalí `ping()` níž a klient
+            // degraduje na běh bez Redisu.
+            'persistent' => (bool) $this->config->get('redis.persistent', true),
         ];
 
         // Bez tohohle by se heslo z cfg/ENV nikdy neposlalo a spojení proti Redisu

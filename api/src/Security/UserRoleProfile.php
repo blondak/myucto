@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Security;
 
+use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 
 /**
@@ -17,7 +18,12 @@ final class UserRoleProfile
     /** @var array<int, array<string, mixed>> */
     private array $memo = [];
 
-    public function __construct(private readonly Connection $db) {}
+    private readonly EntityCache $cache;
+
+    public function __construct(private readonly Connection $db, ?EntityCache $cache = null)
+    {
+        $this->cache = $cache ?? EntityCache::disabled();
+    }
 
     /**
      * @return array{id:int,name:string,type:string,is_active:bool,system_key:?string}
@@ -32,26 +38,40 @@ final class UserRoleProfile
             return $this->memo[$userId];
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT u.role_id, r.name AS role_name, r.role_type,
-                    r.is_active AS role_active, r.system_key
-               FROM users u
-               JOIN roles r ON r.id = u.role_id
-              WHERE u.id = ?'
-        );
-        $stmt->execute([$userId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return $this->memo[$userId] = self::empty();
-        }
+        // Role uživatele je bezpečnostní údaj — odebrání role se MUSÍ projevit
+        // okamžitě. Proto je cache ve skupině `user`, kterou přetočí jakýkoli zápis
+        // do users/roles/role_permissions/user_suppliers (detekce na úrovni PDO,
+        // viz EntityCache). Identita requestu se navíc čte ze session vždy živě,
+        // takže odhlášení ani zneplatnění session tahle cache neovlivňuje.
+        /** @var array{id:int,name:string,type:string,is_active:bool,system_key:?string} $profile */
+        $profile = $this->cache->remember(
+            EntityCache::GROUP_USER,
+            'role_profile:' . $userId,
+            function () use ($userId): array {
+                $stmt = $this->db->pdo()->prepare(
+                    'SELECT u.role_id, r.name AS role_name, r.role_type,
+                            r.is_active AS role_active, r.system_key
+                       FROM users u
+                       JOIN roles r ON r.id = u.role_id
+                      WHERE u.id = ?'
+                );
+                $stmt->execute([$userId]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+                if ($row === false) {
+                    return self::empty();
+                }
 
-        return $this->memo[$userId] = [
-            'id'         => (int) $row['role_id'],
-            'name'       => (string) $row['role_name'],
-            'type'       => (string) $row['role_type'],
-            'is_active'  => (bool) $row['role_active'],
-            'system_key' => $row['system_key'] !== null ? (string) $row['system_key'] : null,
-        ];
+                return [
+                    'id'         => (int) $row['role_id'],
+                    'name'       => (string) $row['role_name'],
+                    'type'       => (string) $row['role_type'],
+                    'is_active'  => (bool) $row['role_active'],
+                    'system_key' => $row['system_key'] !== null ? (string) $row['system_key'] : null,
+                ];
+            },
+        );
+
+        return $this->memo[$userId] = $profile;
     }
 
     public function isSuperadmin(int $userId): bool

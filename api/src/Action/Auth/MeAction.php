@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Auth;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
@@ -22,6 +23,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class MeAction
 {
+    private readonly EntityCache $cache;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
@@ -32,7 +35,13 @@ final class MeAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly ClockInterface $clock,
-    ) {}
+        ?EntityCache $cache = null,
+    ) {
+        // Volitelná a na konci, ať se nerozbijí volající, kteří akci staví
+        // pozičně (unit testy). Produkci ji předává explicitní bind v Bootstrapu —
+        // PHP-DI volitelný class-param sám nevyplní.
+        $this->cache = $cache ?? EntityCache::disabled();
+    }
 
     public function __invoke(Request $request, Response $response): Response
     {
@@ -60,16 +69,30 @@ final class MeAction
                 $where  = ' WHERE id IN (' . implode(',', array_fill(0, count($allowed), '?')) . ')';
                 $params = $allowed;
             }
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT id, company_name, ic, is_vat_payer, is_identified, taxpayer_type,
-                        default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
-                        auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                        accounting_mode, accounting_enabled, stock_enabled, ' . $ossSelect . ',
-                        ai_provider, ai_data_region, ai_eu_residency_required
-                   FROM supplier' . $where . ' ORDER BY id'
+            // /api/auth/me volá frontend při každém načtení stránky, takže tenhle
+            // seznam je na horké cestě. Skupina `supplier` — změna nastavení firmy
+            // (plátcovství DPH, režim účetnictví, sklad) ji přetočí na úrovni PDO.
+            // Rozsah přiřazených firem je součástí KLÍČE, takže změna membershipu
+            // vede na jiný klíč a starou odpověď nemůže vrátit.
+            $cacheKey = 'me:suppliers:' . ($allowed === [] ? 'all' : implode(',', $allowed))
+                . ':' . ($ossSelect === 'oss_enabled' ? '1' : '0');
+            $suppliers = (array) $this->cache->remember(
+                EntityCache::GROUP_SUPPLIER,
+                $cacheKey,
+                function () use ($where, $params, $ossSelect): array {
+                    $stmt = $this->db->pdo()->prepare(
+                        'SELECT id, company_name, ic, is_vat_payer, is_identified, taxpayer_type,
+                                default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
+                                auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
+                                accounting_mode, accounting_enabled, stock_enabled, ' . $ossSelect . ',
+                                ai_provider, ai_data_region, ai_eu_residency_required
+                           FROM supplier' . $where . ' ORDER BY id'
+                    );
+                    $stmt->execute($params);
+
+                    return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+                },
             );
-            $stmt->execute($params);
-            $suppliers = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         }
         foreach ($suppliers as &$s) {
             $s['id']                       = (int) $s['id'];

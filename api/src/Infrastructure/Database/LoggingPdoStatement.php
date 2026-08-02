@@ -20,10 +20,19 @@ final class LoggingPdoStatement extends PDOStatement
     public function execute(?array $params = null): bool
     {
         try {
-            return parent::execute($params);
+            $ok = parent::execute($params);
         } catch (PDOException $e) {
             DbErrorLogger::log($this->logger, $e, (string) $this->queryString, $params ?? []);
             throw $e;
         }
+
+        // Invalidace entity cache — až po úspěšném provedení. Detekce write
+        // příkazu je uvnitř, čtení odfiltruje hned první regex, takže SELECTy
+        // (drtivá většina volání) platí jen jedno porovnání.
+        if ($ok) {
+            WriteWatcher::noteStatement((string) $this->queryString);
+        }
+
+        return $ok;
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tenant;
 
+use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -41,7 +42,12 @@ final class SupplierAccessResolver
     public function __construct(
         private readonly Connection $db,
         private readonly UserSupplierRepository $memberships,
-    ) {}
+        ?EntityCache $cache = null,
+    ) {
+        $this->cache = $cache ?? EntityCache::disabled();
+    }
+
+    private readonly EntityCache $cache;
 
     public function resolve(Request $request): SupplierAccess
     {
@@ -152,6 +158,12 @@ final class SupplierAccessResolver
         if ($requested > 0 && $this->exists($requested)) {
             return $requested;
         }
-        return (int) $this->db->pdo()->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        // Nejnižší supplier id se mění jen při založení/smazání firmy — cache
+        // ho drží mezi requesty a zápis do `supplier` skupinu přetočí (PDO hook).
+        return (int) $this->cache->remember(
+            EntityCache::GROUP_SUPPLIER,
+            'min_id',
+            fn (): int => (int) $this->db->pdo()->query('SELECT MIN(id) FROM supplier')->fetchColumn(),
+        );
     }
 }

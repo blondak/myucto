@@ -315,7 +315,12 @@ final class Connection
         return $this->sharedSchema = new SchemaCache(
             $path,
             $database,
-            (int) $this->config->get('cache.schema_ttl', 300),
+            // 1 hodina: schéma se v téhle instalaci mění výhradně migracemi a ty
+            // cache invalidují explicitně (viz bin/migrate.php). TTL je tu jen
+            // jako pojistka pro ruční zásah do schématu mimo migrace — a delší
+            // okno navíc znamená, že se cache stihne naplnit klíči napříč všemi
+            // endpointy, ne jen těmi z posledních pěti minut.
+            (int) $this->config->get('cache.schema_ttl', 3600),
         );
     }
 

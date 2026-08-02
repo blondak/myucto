@@ -43,20 +43,27 @@ final class LoggingPdo extends PDO
     public function exec(string $statement): int|false
     {
         try {
-            return parent::exec($statement);
+            $result = parent::exec($statement);
         } catch (PDOException $e) {
             DbErrorLogger::log($this->logger, $e, $statement, []);
             throw $e;
         }
+        // Až PO úspěšném zápisu — neúspěšný příkaz nemá co invalidovat.
+        WriteWatcher::noteStatement($statement);
+
+        return $result;
     }
 
     public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
     {
         try {
-            return parent::query($query, $fetchMode, ...$fetchModeArgs);
+            $result = parent::query($query, $fetchMode, ...$fetchModeArgs);
         } catch (PDOException $e) {
             DbErrorLogger::log($this->logger, $e, $query, []);
             throw $e;
         }
+        WriteWatcher::noteStatement($query);
+
+        return $result;
     }
 }

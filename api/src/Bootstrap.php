@@ -181,6 +181,19 @@ final class Bootstrap
             \MyInvoice\Service\Update\NativeUpdateService::class => fn () => new \MyInvoice\Service\Update\NativeUpdateService(),
             RedisProbe::class      => fn (ContainerInterface $c) => new RedisProbe($c->get(Config::class)),
             RedisFactory::class    => fn (ContainerInterface $c) => new RedisFactory($c->get(Config::class)),
+            // Entity cache se při vytvoření zaregistruje do WriteWatcheru, aby
+            // invalidaci odchytávala PDO vrstva. Bez toho by cache držela
+            // zastaralá data po jakémkoli zápisu, který nejde přes její API —
+            // a takových je u `users` většina.
+            \MyInvoice\Infrastructure\Cache\EntityCache::class => function (ContainerInterface $c) {
+                $cache = new \MyInvoice\Infrastructure\Cache\EntityCache(
+                    $c->get(RedisFactory::class),
+                    $c->get(Config::class),
+                );
+                \MyInvoice\Infrastructure\Database\WriteWatcher::attach($cache);
+
+                return $cache;
+            },
             PasskeyService::class  => fn (ContainerInterface $c) => new PasskeyService(
                 $c->get(WebAuthnConfigProvider::class),
             ),
@@ -288,6 +301,41 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\SupplierBankAccountRepository::class),
             ),
 
+            // EntityCache je v obou službách volitelný class-param (kvůli testovacím
+            // dvojníkům) a PHP-DI s useAttributes(false) takový parametr NEVYPLNÍ —
+            // dosadí null. Bez těchhle bindů by obě spadly na EntityCache::disabled()
+            // a cache by v produkci tiše nedělala vůbec nic. Přesně to se stalo při
+            // prvním nasazení: dotazy zůstaly na osmi, dokud se bindy nedoplnily.
+            \MyInvoice\Service\License\LicenseService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\License\LicenseService(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Service\License\LicenseTokenVerifier::class),
+                $c->get(\MyInvoice\Service\License\LicenseClient::class),
+                $c->get(LoggerInterface::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+            ),
+            \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+            ),
+            \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+            ),
+            \MyInvoice\Action\Auth\MeAction::class => fn (ContainerInterface $c) => new \MyInvoice\Action\Auth\MeAction(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
+                $c->get(\MyInvoice\Security\PermissionResolver::class),
+                $c->get(\MyInvoice\Service\License\LicenseService::class),
+                $c->get(\MyInvoice\Repository\PasskeyCredentialRepository::class),
+                $c->get(\MyInvoice\Service\Auth\MfaPolicyService::class),
+                $c->get(\MyInvoice\Service\Auth\SessionLockPolicy::class),
+                $c->get(ClockInterface::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+            ),
+
             // Licenční klient (E4) má volitelný `?GuzzleHttp\Client $http = null` (test
             // seam). Autowire by ho vyplnil bare Guzzle (bez base_uri/verify z cfg) →
             // definujeme explicitně s $http = null, ať si klient postaví vlastní klienta.
@@ -370,7 +418,19 @@ final class Bootstrap
             ]),
         ]);
 
-        return $builder->build();
+        $container = $builder->build();
+
+        // Entity cache se resolvuje EAGERNĚ, na rozdíl od middleware. Důvod je
+        // korektnost, ne výkon: registrace do WriteWatcheru musí proběhnout dřív,
+        // než stihne poběžet první zápis. Kdyby se cache vytvořila až u prvního
+        // čtení, zápis provedený před tím by neinvalidoval generaci v Redisu a
+        // NÁSLEDUJÍCÍ request by dostal zastaralá data.
+        //
+        // Cena je jen konstrukce objektu — spojení do Redisu si RedisFactory
+        // otevírá až při prvním použití.
+        $container->get(\MyInvoice\Infrastructure\Cache\EntityCache::class);
+
+        return $container;
     }
 
     /** @return App<ContainerInterface|null> */

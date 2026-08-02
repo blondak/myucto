@@ -34,6 +34,13 @@ final class ExplicitDiBindingArityTest extends TestCase
      */
     private const MUST_BE_FULLY_WIRED = [
         \MyInvoice\Service\Crm\CrmAggregationService::class,
+        // Obě mají volitelný ?EntityCache. Bez vyplnění spadnou na průchozí
+        // EntityCache::disabled() a cache v produkci tiše nedělá nic — přesně
+        // to se stalo při prvním nasazení, než se doplnily bindy v Bootstrapu.
+        \MyInvoice\Service\License\LicenseService::class,
+        \MyInvoice\Service\Tenant\SupplierAccessResolver::class,
+        \MyInvoice\Security\UserRoleProfile::class,
+        \MyInvoice\Action\Auth\MeAction::class,
     ];
 
     public function testExplicitlyBoundServicesGetAllConstructorDependencies(): void
