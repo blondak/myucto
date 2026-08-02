@@ -6,6 +6,7 @@ import {
 } from 'chart.js'
 import { useChartColors, useTheme } from '@/composables/useTheme'
 import { formatCompactNumber } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -18,6 +19,9 @@ let chart: Chart | null = null
 const { locale } = useI18n()
 const colors = useChartColors()
 const { isDark } = useTheme()
+
+// Prázdno = žádný koš velikosti faktur nemá jediný doklad.
+const isEmpty = computed(() => props.buckets.length === 0 || props.buckets.every(b => !b.count))
 
 // Gradient velikosti faktur; v dark posunutý do viditelného rozsahu (nejtmavší indigo splývá).
 const palette = computed(() => isDark.value
@@ -72,5 +76,8 @@ watch(colors, build)
 </script>
 
 <template>
-  <div class="relative h-56"><canvas ref="canvas"></canvas></div>
+  <div class="relative h-56">
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
+  </div>
 </template>

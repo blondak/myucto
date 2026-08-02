@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -10,40 +13,53 @@ function transformDevelopmentCss() {
   // Vite loads the native Lightning CSS binding for the configured transformer.
   // Keeping that binding in a node:test worker can race its N-API teardown after
   // server.close(). Isolate the real development transform in a disposable
-  // process and synchronously emit its result before exiting; the test process
-  // itself never initializes a second native parser.
-  const script = `
-    import { writeFileSync } from 'node:fs'
-    import { createServer } from 'vite'
+  // process and hand the result over before exiting; the test process itself
+  // never initializes a second native parser.
+  //
+  // The child writes to a temp FILE, not to stdout. Synchronously writing the
+  // whole stylesheet to a pipe throws EAGAIN once it outgrows the pipe buffer —
+  // which is exactly what happened on CI after the stylesheet grew past ~130 kB.
+  // A file has no such limit and keeps the transfer independent of stylesheet size.
+  const outDir = mkdtempSync(join(tmpdir(), 'myucto-css-'))
+  const outFile = join(outDir, 'main.css')
 
-    try {
-      const server = await createServer({
-        root: ${JSON.stringify(webRoot)},
-        configFile: ${JSON.stringify(configFile)},
-        logLevel: 'silent',
-        server: { middlewareMode: true, hmr: false },
-      })
-      const transformed = await server.transformRequest('/src/styles/main.css')
-      if (transformed === null) throw new Error('Vite did not transform the stylesheet')
-      writeFileSync(1, transformed.code)
-      process.exit(0)
-    } catch (error) {
-      writeFileSync(2, String(error?.stack || error))
-      process.exit(1)
-    }
-  `
+  try {
+    const script = `
+      import { writeFileSync } from 'node:fs'
+      import { createServer } from 'vite'
 
-  return execFileSync(
-    process.execPath,
-    ['--input-type=module', '--eval', script],
-    {
-      cwd: webRoot,
-      encoding: 'utf8',
-      maxBuffer: 4 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 25_000,
-    },
-  )
+      try {
+        const server = await createServer({
+          root: ${JSON.stringify(webRoot)},
+          configFile: ${JSON.stringify(configFile)},
+          logLevel: 'silent',
+          server: { middlewareMode: true, hmr: false },
+        })
+        const transformed = await server.transformRequest('/src/styles/main.css')
+        if (transformed === null) throw new Error('Vite did not transform the stylesheet')
+        writeFileSync(${JSON.stringify(outFile)}, transformed.code)
+        process.exit(0)
+      } catch (error) {
+        writeFileSync(2, String(error?.stack || error))
+        process.exit(1)
+      }
+    `
+
+    execFileSync(
+      process.execPath,
+      ['--input-type=module', '--eval', script],
+      {
+        cwd: webRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'ignore', 'pipe'],
+        timeout: 25_000,
+      },
+    )
+
+    return readFileSync(outFile, 'utf8')
+  } finally {
+    rmSync(outDir, { recursive: true, force: true })
+  }
 }
 
 function parseCssBlocks(css) {

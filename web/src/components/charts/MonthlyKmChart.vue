@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import {
   Chart,
   BarController,
@@ -10,6 +10,7 @@ import {
   Legend,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
@@ -25,6 +26,9 @@ const MONTHS = ['Led', 'Úno', 'Bře', 'Dub', 'Kvě', 'Čvn', 'Čvc', 'Srp', 'Z�
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const colors = useChartColors()
+
+// Prázdno = ani aktuální, ani loňský rok nemá jediný najetý km v žádném měsíci.
+const isEmpty = computed(() => props.current.every(v => !v) && props.previous.every(v => !v))
 
 function build() {
   if (!canvas.value) return
@@ -71,7 +75,7 @@ function build() {
           ticks: { color: colors.value.tick, font: { size: 11 }, callback: (v) => `${Number(v) >= 1000 ? (Number(v) / 1000).toFixed(0) + 'k' : v}` },
           grid: { color: colors.value.grid },
         },
-        x: { ticks: { color: colors.value.tick, font: { size: 10 } }, grid: { display: false } },
+        x: { ticks: { color: colors.value.tick, font: { size: 11 } }, grid: { display: false } },
       },
     },
   })
@@ -85,6 +89,7 @@ watch(colors, build)
 
 <template>
   <div class="relative h-56">
-    <canvas ref="canvas"></canvas>
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
   </div>
 </template>

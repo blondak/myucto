@@ -21,7 +21,7 @@ import BankMatchModal from '@/components/bank/BankMatchModal.vue'
 import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 
 const { t, locale } = useI18n()
@@ -211,6 +211,84 @@ async function rematchStatement() {
     rematching.value = false
   }
 }
+
+const pdfInput = ref<HTMLInputElement | null>(null)
+
+/**
+ * Akce nad výpisem pro sdílený ActionBar.
+ *
+ * Každé tlačítko si nese vlastní `loading`/`disabled` — tři nezávislé operace
+ * (párování, nahrání PDF, mazání výpisu) můžou běžet každá zvlášť a sloučit je
+ * do jednoho příznaku by zablokovalo i to, co běžet může.
+ *
+ * Stažení a nahrání PDF se navzájem vylučují stavem `has_pdf`, takže inline
+ * trojice zůstává čitelná v obou případech.
+ */
+const statementActions = computed<ActionItem[]>(() => {
+  const s = statement.value
+  if (!s) return []
+  return [
+    {
+      key: 'rematch',
+      label: rematching.value ? t('bank.rematch_running') : t('bank.rematch'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'primary',
+      show: auth.canWrite('bank.match'),
+      disabled: rematching.value,
+      run: () => { void rematchStatement() },
+    },
+    {
+      key: 'gpc',
+      label: 'GPC',
+      icon: 'download',
+      tier: 'secondary',
+      show: s.has_file,
+      title: t('bank.download_gpc'),
+      href: bankApi.downloadUrl(s.id),
+    },
+    {
+      key: 'pdf',
+      label: 'PDF',
+      icon: 'download',
+      tier: 'secondary',
+      show: s.has_pdf,
+      title: s.pdf_name ?? t('bank.download_pdf'),
+      href: bankApi.pdfUrl(s.id),
+    },
+    {
+      key: 'pdf_upload',
+      label: t('bank.pdf_upload'),
+      icon: 'upload',
+      tier: 'secondary',
+      show: auth.canWrite('bank.import') && !s.has_pdf && !isVirtual.value,
+      title: t('bank.pdf_upload_hint'),
+      loading: uploadingPdf.value,
+      run: () => pdfInput.value?.click(),
+    },
+    {
+      key: 'pdf_delete',
+      label: t('bank.pdf_delete'),
+      icon: 'trash',
+      tier: 'overflow',
+      variant: 'danger',
+      show: auth.canWrite('bank.import') && s.has_pdf,
+      run: () => { void onDeletePdf() },
+    },
+    {
+      key: 'statement_delete',
+      label: t('bank.statement_delete'),
+      icon: 'trash',
+      tier: 'advanced',
+      variant: 'danger',
+      show: auth.isSuperadmin && isVirtual.value && s.matched_count === 0,
+      title: t('bank.statement_delete_hint'),
+      disabled: deletingStatement.value,
+      loading: deletingStatement.value,
+      run: () => { void onDeleteStatement() },
+    },
+  ]
+})
 </script>
 
 <template>
@@ -313,45 +391,11 @@ async function rematchStatement() {
             <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
             <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
           </select>
-          <a v-if="statement.has_file" :href="bankApi.downloadUrl(statement.id)"
-             :title="t('bank.download_gpc')"
-             :class="btnOutline('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            GPC
-          </a>
-          <a v-if="statement.has_pdf" :href="bankApi.pdfUrl(statement.id)"
-             :title="statement.pdf_name ?? t('bank.download_pdf')"
-             :class="btnOutline('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            PDF
-          </a>
-          <label v-if="auth.canWrite('bank.import') && !statement.has_pdf && !isVirtual"
-             :title="t('bank.pdf_upload_hint')"
-             :class="btnOutline('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
-            {{ uploadingPdf ? '…' : t('bank.pdf_upload') }}
-            <input type="file" accept=".pdf,application/pdf" class="hidden" @change="onPdfSelected" />
-          </label>
-          <button v-if="auth.canWrite('bank.import') && statement.has_pdf" type="button" @click="onDeletePdf"
-             :title="t('bank.pdf_delete')"
-             :class="btnOutline('danger')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-            {{ t('bank.pdf_delete') }}
-          </button>
-          <button v-if="auth.canWrite('bank.match')" type="button" @click="rematchStatement" :disabled="rematching"
-            :class="btnOutline('neutral')">
-            <svg class="w-4 h-4" :class="{ 'animate-spin': rematching }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
-            </svg>
-            {{ rematching ? t('bank.rematch_running') : t('bank.rematch') }}
-          </button>
-          <button v-if="auth.isSuperadmin && isVirtual && statement.matched_count === 0"
-            type="button" @click="onDeleteStatement" :disabled="deletingStatement"
-            :title="t('bank.statement_delete_hint')"
-            :class="btnOutline('danger')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-            {{ deletingStatement ? '…' : t('bank.statement_delete') }}
-          </button>
+          <!-- Pět akcí v řadě porušovalo konvenci „max 3 a zbytek do …". ActionBar
+               cap řeší sám; nahrávání PDF jede přes skrytý input, protože položka
+               lišty je tlačítko, ne <label>. -->
+          <ActionBar :actions="statementActions" />
+          <input ref="pdfInput" type="file" accept=".pdf,application/pdf" class="hidden" @change="onPdfSelected" />
         </div>
       </header>
       <!-- Desktop: tabulka -->

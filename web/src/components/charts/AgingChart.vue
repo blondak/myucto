@@ -4,6 +4,7 @@ import {
   Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js'
 import { useChartColors, useTheme } from '@/composables/useTheme'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
@@ -32,6 +33,10 @@ const palette = computed(() => isDark.value
 const bucketKeys = ['current', 'b1_30', 'b31_60', 'b61_90', 'b90_plus'] as const
 const bucketLabels = ['Aktuální', '1–30 dní', '31–60 dní', '61–90 dní', '90+ dní']
 
+// Prázdno = žádný řádek měny, nebo všechny věkové koše ve všech měnách na nule.
+const isEmpty = computed(() => props.rows.length === 0
+  || props.rows.every(r => bucketKeys.every(k => !r[k])))
+
 function build() {
   if (!canvas.value) return
   if (chart) chart.destroy()
@@ -41,7 +46,7 @@ function build() {
     label: bucketLabels[idx],
     data: props.rows.map(r => r[k]),
     backgroundColor: palette.value[idx],
-    borderRadius: 2,
+    borderRadius: 4,
     stack: 'agg',
   }))
 
@@ -82,6 +87,7 @@ watch(colors, build)
 
 <template>
   <div class="relative" :style="{ height: (Math.max(80, props.rows.length * 60)) + 'px' }">
-    <canvas ref="canvas"></canvas>
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
   </div>
 </template>

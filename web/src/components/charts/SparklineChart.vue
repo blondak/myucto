@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import {
   Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -29,6 +30,10 @@ const props = defineProps<{
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const colors = useChartColors()
+
+// Prázdno = žádná hodnota v řadě. V praxi volající kartu už dnes v tomto stavu
+// sparkline vůbec nevykreslí (viz Dashboard.vue), ale komponenta ať je bezpečná i sama o sobě.
+const isEmpty = computed(() => props.values.length === 0 || props.values.every(v => !v))
 
 /** #RRGGBB → rgba(). Canvas neumí spolehlivě color-mix(), alfu si musíme spočítat. */
 function withAlpha(color: string, alpha: number): string {
@@ -127,7 +132,8 @@ watch(colors, build)
 </script>
 
 <template>
-  <div class="relative" :style="{ height: (height ?? 40) + 'px' }">
-    <canvas ref="canvas"></canvas>
+  <div class="relative overflow-hidden" :style="{ height: (height ?? 40) + 'px' }">
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
   </div>
 </template>

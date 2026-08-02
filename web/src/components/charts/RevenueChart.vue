@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart,
@@ -15,6 +15,7 @@ import {
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
 import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend)
 
@@ -29,6 +30,9 @@ let chart: Chart | null = null
 
 const { locale } = useI18n()
 const colors = useChartColors()
+
+// Prázdno = ani aktuální okno, ani loňské srovnání nemá jediný nenulový měsíc.
+const isEmpty = computed(() => props.months.every(m => !m.total) && props.prevYear.every(m => !m.total))
 
 /** Label „04/2026" — měsíc/rok podle aktuální řady (months). */
 function labelFor(ym: string): string {
@@ -123,6 +127,7 @@ watch(colors, build)
 
 <template>
   <div class="relative h-64">
-    <canvas ref="canvas"></canvas>
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
   </div>
 </template>

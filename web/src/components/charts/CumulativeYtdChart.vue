@@ -14,6 +14,7 @@ import {
 } from 'chart.js'
 import { useChartColors, withAlpha } from '@/composables/useTheme'
 import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler)
 
@@ -64,6 +65,9 @@ const seriesData = computed(() => {
   }
   return { labels, thisCum, prevCum, thisYear, prevYear }
 })
+
+// Prázdno = ani aktuální, ani loňské okno nemá jediný nenulový měsíc.
+const isEmpty = computed(() => props.months.every(m => !m.total) && props.prevYear.every(m => !m.total))
 
 function formatVal(n: number): string {
   return formatNumber(n, { maximumFractionDigits: 0 })
@@ -146,5 +150,8 @@ void t
 </script>
 
 <template>
-  <div class="relative h-64"><canvas ref="canvas"></canvas></div>
+  <div class="relative h-64">
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
+  </div>
 </template>

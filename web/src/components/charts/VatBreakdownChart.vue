@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
 import { formatNumber, formatPercent } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
 
@@ -91,6 +92,8 @@ watch(colors, build)
 </script>
 
 <template>
-  <div v-if="!filtered.length" class="text-sm text-neutral-400 text-center py-12">—</div>
-  <div v-else class="relative h-64"><canvas ref="canvas"></canvas></div>
+  <div class="relative h-64">
+    <ChartEmptyState v-if="!filtered.length" />
+    <canvas v-else ref="canvas"></canvas>
+  </div>
 </template>

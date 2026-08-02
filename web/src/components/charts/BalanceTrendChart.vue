@@ -13,6 +13,7 @@ import {
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
 import { formatCompactNumber, formatMoney, formatMonth } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler)
 
@@ -51,6 +52,9 @@ const colors = useChartColors()
 const resolvedDatasets = computed<BalanceTrendDataset[]>(() => props.datasets?.length
   ? props.datasets
   : [{ label: '', values: props.values ?? [], color: props.color ?? colors.value.primary, fill: props.fill }])
+
+// Prázdno = žádná řada nemá jedinou nenulovou hodnotu (null = mezera, počítá se jako prázdno).
+const isEmpty = computed(() => resolvedDatasets.value.every(ds => ds.values.every(v => !v)))
 
 function formatTick(n: number): string {
   return formatCompactNumber(n)
@@ -129,9 +133,12 @@ watch(colors, build)
 
 <template>
   <div class="flex h-full w-full flex-col">
-    <div class="relative min-h-0 flex-1"><canvas ref="canvas"></canvas></div>
+    <div class="relative min-h-0 flex-1">
+      <ChartEmptyState v-if="isEmpty" />
+      <canvas v-else ref="canvas"></canvas>
+    </div>
     <div
-      v-if="resolvedDatasets.length > 1"
+      v-if="!isEmpty && resolvedDatasets.length > 1"
       class="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted"
       role="list"
     >

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart,
@@ -11,6 +11,7 @@ import {
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
 import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -24,6 +25,9 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const { locale } = useI18n()
 const colors = useChartColors()
+
+// Prázdno = žádný měsíc s nenulovým obratem.
+const isEmpty = computed(() => props.values.length === 0 || props.values.every(v => !v))
 
 function build() {
   if (!canvas.value) return
@@ -84,6 +88,7 @@ watch(colors, build)
 
 <template>
   <div class="relative h-56">
-    <canvas ref="canvas"></canvas>
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
   </div>
 </template>

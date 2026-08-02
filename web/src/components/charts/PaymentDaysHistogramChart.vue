@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import {
   Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
+import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
@@ -14,6 +15,9 @@ const props = defineProps<{
 const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const colors = useChartColors()
+
+// Prázdno = žádný koš splatnosti nemá jedinou fakturu.
+const isEmpty = computed(() => props.buckets.length === 0 || props.buckets.every(b => !b.count))
 
 const palette = ['#4CAF7A', '#A99CD8', '#E8A547', '#D45B5B']
 
@@ -53,5 +57,8 @@ watch(colors, build)
 </script>
 
 <template>
-  <div class="relative h-56"><canvas ref="canvas"></canvas></div>
+  <div class="relative h-56">
+    <ChartEmptyState v-if="isEmpty" />
+    <canvas v-else ref="canvas"></canvas>
+  </div>
 </template>
