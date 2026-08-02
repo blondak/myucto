@@ -13,6 +13,7 @@ import { adminApi, type AdminUser } from '@/api/admin'
 import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
 import TagInput from '@/components/documents/TagInput.vue'
 import { ICONS, BTN_BASE, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -792,30 +793,27 @@ onMounted(() => {
         </template>
       </nav>
 
-      <!-- bulk toolbar -->
-      <div v-if="selCount > 0" class="flex items-center gap-2 mb-3 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm flex-wrap">
-        <span class="font-medium text-primary-700">{{ t('documents.selected', { n: selCount }) }}</span>
-        <div class="flex-1"></div>
-        <button v-if="auth.canWrite('documents.move')" type="button" class="bg-surface" :class="btnOutline('neutral')" @click="openMove">
+      <!-- Hromadné akce v plovoucí liště u spodní hrany (BulkActionBar). Panel nad
+           seznamem odsouval obsah dolů a při každém výběru/odvýběru poskočila
+           celá stránka. -->
+      <BulkActionBar :count="selCount" @clear="clearSel">
+        <button v-if="auth.canWrite('documents.move')" type="button" :class="btnOutline('neutral')" @click="openMove">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" /></svg>
           {{ t('documents.bulk_move') }}
         </button>
-        <button v-if="auth.canWrite('documents') && selDocCount > 0" type="button" class="bg-surface" :class="btnOutline('neutral')" @click="bulkTag">
+        <button v-if="auth.canWrite('documents') && selDocCount > 0" type="button" :class="btnOutline('neutral')" @click="bulkTag">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           {{ t('documents.bulk_tag') }}
         </button>
-        <button type="button" class="bg-surface" :class="btnOutline('primary')" @click="bulkDownload">
+        <button type="button" :class="btnOutline('primary')" @click="bulkDownload">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('documents.bulk_download') }}
         </button>
-        <button v-if="auth.canWrite('documents.delete')" type="button" class="bg-surface" :class="btnOutline('danger')" @click="bulkDelete">
+        <button v-if="auth.canWrite('documents.delete')" type="button" :class="btnOutline('danger')" @click="bulkDelete">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ t('documents.bulk_delete') }}
         </button>
-        <button type="button" class="cursor-pointer inline-flex items-center justify-center h-8 w-8 rounded-md text-neutral-500 hover:bg-neutral-100" :title="t('documents.clear_selection')" @click="clearSel">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
-      </div>
+      </BulkActionBar>
 
       <div v-if="loading" class="text-sm text-neutral-400 py-8 text-center">…</div>
       <div v-else>

@@ -116,30 +116,32 @@ function typeBadgeClass(itemType: string): string {
       něco visí, viděl jen prázdnou stránku a neměl kam jít dál. Proto rovnou
       odkazujeme na obrazovky, kde návrhy čekají na schválení.
     -->
-    <div v-else-if="items.length === 0" class="rise-in py-12 text-center">
-      <div class="relative mx-auto mb-4 h-16 w-16">
-        <span class="absolute inset-0 rounded-full bg-success-500/10" aria-hidden="true"></span>
-        <span class="absolute inset-0 grid place-content-center">
-          <svg class="h-7 w-7 text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+    <div v-else-if="items.length === 0" class="rise-in mx-auto max-w-2xl rounded-xl border border-success-500/25 bg-surface-raised p-8 shadow-md">
+      <div class="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-start sm:text-left">
+        <span class="relative grid h-14 w-14 shrink-0 place-content-center">
+          <span class="absolute inset-0 rounded-full bg-success-500/10" aria-hidden="true"></span>
+          <svg class="relative h-7 w-7 text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
           </svg>
         </span>
-      </div>
-      <p class="text-base font-medium text-neutral-800">{{ t('manualQueue.empty') }}</p>
-      <p class="mx-auto mt-1.5 max-w-lg text-sm text-neutral-500">{{ t('manualQueue.empty_hint') }}</p>
-      <div class="mt-5 flex flex-wrap justify-center gap-2">
-        <RouterLink to="/bank?tab=posting" :class="btnOutline('primary')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M5 6h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
-          </svg>
-          {{ t('manualQueue.empty_cta_bank') }}
-        </RouterLink>
-        <RouterLink to="/automation" :class="btnOutline('neutral')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          {{ t('manualQueue.empty_cta_automation') }}
-        </RouterLink>
+        <div class="min-w-0">
+          <p class="text-base font-medium text-neutral-800">{{ t('manualQueue.empty') }}</p>
+          <p class="mt-1.5 text-sm text-neutral-500">{{ t('manualQueue.empty_hint') }}</p>
+          <div class="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
+            <RouterLink to="/bank?tab=posting" :class="btnOutline('primary')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M5 6h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
+              </svg>
+              {{ t('manualQueue.empty_cta_bank') }}
+            </RouterLink>
+            <RouterLink to="/automation" :class="btnOutline('neutral')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              {{ t('manualQueue.empty_cta_automation') }}
+            </RouterLink>
+          </div>
+        </div>
       </div>
     </div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">

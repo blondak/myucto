@@ -21,6 +21,7 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -630,7 +631,20 @@ async function bulkSetKind() {
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
-        <!-- Bulk actions — viditelné jen pokud něco vybráno -->
+        <RouterLink
+          v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
+          to="/purchase-invoices/new"
+          :class="btnFilled('primary')"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('purchase_invoice.new') }}
+        </RouterLink>
+      </div>
+    </div>
+
+    <!-- Hromadné akce v plovoucí liště u spodní hrany — u výběru řádků, ne
+         v hlavičce mimo zorné pole (viz BulkActionBar). -->
+    <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
         <button v-if="(selectedIds.length > 0) && auth.canWrite('purchase_invoices.payment_orders') && !auth.isClientRole"
           @click="goToPaymentOrder"
           :class="btnOutline('primary')">
@@ -683,17 +697,7 @@ async function bulkSetKind() {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.delete', { n: draftsSelected.length }) }}
         </button>
-
-        <RouterLink
-          v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
-          to="/purchase-invoices/new"
-          :class="btnFilled('primary')"
-        >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-          {{ t('purchase_invoice.new') }}
-        </RouterLink>
-      </div>
-    </div>
+    </BulkActionBar>
 
     <!-- ═══ Filtry v boxu ═══ -->
     <FilterBar
