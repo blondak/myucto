@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Crm;
 
+use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
@@ -44,7 +45,15 @@ final class CrmAggregationService
         // kalendáře. Volitelný ze stejného důvodu jako $taxReturns (ruční konstrukce
         // v testech jen s Connection); produkční binding v Bootstrapu ho dodává.
         private readonly ?\MyInvoice\Service\Report\VatRegistrationService $vatRegistration = null,
-    ) {}
+        // Cache náhledu doplatku daně (viz taxBalanceDueItem). Volitelná ze stejného
+        // důvodu jako ostatní — ruční konstrukce v testech; produkční binding
+        // v Bootstrapu ji dodává. Bez ní se výpočet dělá vždy znovu.
+        ?EntityCache $cache = null,
+    ) {
+        $this->cache = $cache ?? EntityCache::disabled();
+    }
+
+    private readonly EntityCache $cache;
 
     // ── Sjednocená metodika s Tržbami/Náklady (Stats/PurchaseSummary) ──────────
     // Tržby/náklady/zisk se prezentují BEZ DPH pro plátce (DPH je průběžná položka),
@@ -1385,19 +1394,11 @@ final class CrmAggregationService
             }
         }
 
-        // 4c. Doplatek/přeplatek DPPO + jeho splatnost (Epic #48) — jen podvojné
-        // účetnictví, právnická osoba (FO/daňová evidence mají vlastní widget „co mi
-        // zbyde", TaxNetWidget). Radši skutečná daňová povinnost z UŽ FINALIZOVANÉHO
-        // přiznání za předchozí rok (splatnost už běží/proběhla); jinak živá projekce
-        // BĚŽÍCÍHO (draft) přiznání za aktuální rok — stejný náhled jako na
-        // /reports/income-tax, ať dopředu ví, kolik si na doplatek odložit. Přeplatek
-        // (balance_due <= 0) se nezobrazuje — akce je jen pro NEZAPLACENÝ doplatek.
-        if ($isDoubleEntry && $taxpayerType === 'po' && !$this->isFullyDismissed($dismissals, 'dppo_balance_due')) {
-            $balanceItem = $this->dppoBalanceDueItem($supplierId, $nowDt);
-            if ($balanceItem !== null) {
-                $items[] = $balanceItem;
-            }
-        }
+        // 4c. Doplatek DPPO se tady ZÁMĚRNĚ NEPOČÍTÁ — má vlastní endpoint,
+        //     viz taxBalanceDueItem(). Je to živá projekce závěrkových operací přes
+        //     celý rok a naměřeno dělala 444 z 473 ms celého feedu, tedy 94 %.
+        //     Dashboard by na jednu dlaždici čekal půl vteřiny, i když zbytek je hotový
+        //     za desítky milisekund. Frontend si ji dotahuje zvlášť a doplní do seznamu.
 
         // 4d. Nezaplacené (nadcházející/po splatnosti) zálohy na daň §38a — z fronty
         // předpisů (tax_advance_schedules, E9); po #46 má předpis stav zaplaceno
@@ -1808,6 +1809,51 @@ final class CrmAggregationService
      * BĚŽÍCÍHO roku (draft). Vrací null, když ani jeden nemá kladný (nezaplacený)
      * doplatek, nebo když $taxReturns není k dispozici (viz konstruktor).
      */
+    /**
+     * Doplatek DPPO jako samostatná položka „Akcí pro tebe" — vlastní endpoint
+     * `GET /api/crm/action-items/tax-balance`.
+     *
+     * Vyčleněno z {@see actionItems()}, protože jde o živou projekci závěrkových
+     * operací přes celý rok: naměřeno 444 ms z 473 ms celého feedu. Dashboard
+     * díky tomu naběhne za desítky milisekund a dlaždice s daní se doplní, až
+     * dopočítá.
+     *
+     * Gating je stejný jako dřív uvnitř feedu: jen podvojné účetnictví a právnická
+     * osoba (FO/daňová evidence mají vlastní widget „co mi zbyde"), a jen když si
+     * uživatel kartu natrvalo neodklikl.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function taxBalanceDueItem(int $supplierId, ?int $userId = null, ?\DateTimeImmutable $now = null): ?array
+    {
+        $nowDt = $now ?? new \DateTimeImmutable();
+
+        $modeStmt = $this->db->pdo()->prepare('SELECT accounting_mode, taxpayer_type FROM supplier WHERE id = ?');
+        $modeStmt->execute([$supplierId]);
+        $row = $modeStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        if ((string) ($row['accounting_mode'] ?? '') !== 'double_entry' || (string) ($row['taxpayer_type'] ?? '') !== 'po') {
+            return null;
+        }
+        if ($this->isFullyDismissed($this->loadDismissals($supplierId, $userId), 'dppo_balance_due')) {
+            return null;
+        }
+
+        // Výsledek se drží v cache: je to projekce celoročního účetnictví (naměřeno
+        // 444–560 ms) a mezi dvěma načteními dashboardu se skoro nikdy nezmění.
+        // Ruší ho automaticky jakýkoli zápis do účetních tabulek — detekce je na
+        // úrovni PDO, viz EntityCache, takže na ni nejde zapomenout.
+        //
+        // Klíč nese datum, ne jen rok: výsledek závisí na „dnešku" (která lhůta
+        // je aktuální, kolik dní zbývá), takže o půlnoci musí zestárnout sám.
+        $key = sprintf('crm:tax_balance:%d:%s', $supplierId, $nowDt->format('Y-m-d'));
+
+        return $this->cache->remember(
+            EntityCache::GROUP_ACCOUNTING,
+            $key,
+            fn (): ?array => $this->dppoBalanceDueItem($supplierId, $nowDt),
+        );
+    }
+
     private function dppoBalanceDueItem(int $supplierId, \DateTimeImmutable $now): ?array
     {
         if ($this->taxReturns === null) {

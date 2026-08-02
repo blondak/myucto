@@ -173,6 +173,26 @@ final class CrmDashboardAction
     }
 
     /**
+     * GET /api/crm/action-items/tax-balance
+     *
+     * Doplatek DPPO — vyčleněno z `actionItems()`, protože jde o živou projekci
+     * závěrkových operací přes celý rok (naměřeno 444 z 473 ms celého feedu).
+     * Frontend si ji dotahuje zvlášť a doplní do seznamu, takže dashboard naběhne
+     * bez čekání na daňový výpočet.
+     *
+     * Vrací `{ item: {...} | null }` — null je běžný stav (daňová evidence, FO,
+     * odkliknutá karta, nulový doplatek), ne chyba.
+     */
+    public function taxBalanceItem(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+
+        return Json::ok($response, ['item' => $this->crm->taxBalanceDueItem($supplierId, $userId)]);
+    }
+
+    /**
      * Daňový kalendář (Fáze F, audit 2026-07 P2/S) — širší okno než action-items:
      * DPH/KH/SH + zálohy (E9) + roční termín DPFO/DPPO, každá se stavem "podáno"
      * dle archivu tax_submissions.

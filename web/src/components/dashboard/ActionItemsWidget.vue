@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { crmApi, type ActionItemsResult } from '@/api/crm'
+import { crmApi, type ActionItem, type ActionItemsResult } from '@/api/crm'
 import { apiErrorMessage } from '@/api/errors'
 
 const { t } = useI18n()
@@ -22,7 +22,7 @@ async function dismissItem(itemType: string, mode: 'day' | 'week' | 'forever' | 
   try {
     await crmApi.dismissActionItem(itemType, mode)
     openMenuIdx.value = null
-    actionItems.value = await crmApi.actionItems()
+    await reload()
     toast.success(t('crm.action_items.dismissed'))
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -32,11 +32,43 @@ async function dismissItem(itemType: string, mode: 'day' | 'week' | 'forever' | 
 async function restoreAllDismissed() {
   try {
     const r = await crmApi.restoreAllActionItems()
-    actionItems.value = await crmApi.actionItems()
+    await reload()
     toast.success(t('crm.action_items.restored_n', { n: r.restored }))
   } catch (e) {
     toast.error(apiErrorMessage(e))
   }
+}
+
+/**
+ * Doplatek DPPO se dotahuje ZVLÁŠŤ. Je to živá projekce celoročního účetnictví
+ * (naměřeno 444 z 473 ms původního feedu), takže kdyby byl součástí action-items,
+ * čekal by dashboard půl vteřiny na jednu dlaždici. Takhle se seznam vykreslí hned
+ * a daňová položka do něj přibude, až dopočítá.
+ *
+ * Selhání je tiché a bez následků — zbytek seznamu je už zobrazený.
+ */
+async function loadTaxBalance() {
+  try {
+    const r = await crmApi.actionItemTaxBalance()
+    if (r.item && actionItems.value) {
+      appendItem(r.item)
+    }
+  } catch {
+    // dlaždice se prostě neobjeví
+  }
+}
+
+function appendItem(item: ActionItem) {
+  if (!actionItems.value) return
+  // Ochrana proti dvojímu vložení (dismiss/restore znovu načte seznam i dlaždici).
+  if (actionItems.value.items.some(i => i.type === item.type)) return
+  actionItems.value.items.push(item)
+  actionItems.value.total += 1
+}
+
+async function reload() {
+  actionItems.value = await crmApi.actionItems()
+  await loadTaxBalance()
 }
 
 onMounted(async () => {
@@ -44,7 +76,9 @@ onMounted(async () => {
     actionItems.value = await crmApi.actionItems()
   } catch {
     // tichý fail — widget se prostě nezobrazí
+    return
   }
+  void loadTaxBalance()
 })
 </script>
 

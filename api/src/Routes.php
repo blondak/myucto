@@ -926,6 +926,9 @@ final class Routes
         $app->get    ('/api/crm/revenue-breakdown', [CrmDashboardAction::class, 'revenueBreakdown']);
         $app->get    ('/api/crm/churn-risk',        [CrmDashboardAction::class, 'churnRisk']);
         $app->get    ('/api/crm/action-items',      [CrmDashboardAction::class, 'actionItems']);
+        // Doplatek DPPO má vlastní endpoint — je to nejdražší výpočet feedu a
+        // dashboard na něj nemá čekat. Musí být PŘED /{script}-like patterny níže.
+        $app->get    ('/api/crm/action-items/tax-balance', [CrmDashboardAction::class, 'taxBalanceItem']);
         $app->post   ('/api/crm/action-items/dismiss', [CrmDashboardAction::class, 'dismissActionItem']);
         $app->post   ('/api/crm/action-items/restore', [CrmDashboardAction::class, 'restoreActionItem']);
         $app->post   ('/api/crm/action-items/restore-all', [CrmDashboardAction::class, 'restoreAllActionItems']);

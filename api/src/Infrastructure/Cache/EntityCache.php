@@ -53,6 +53,7 @@ final class EntityCache
     public const GROUP_LICENSE = 'license';
     public const GROUP_USER = 'user';
     public const GROUP_SUPPLIER = 'supplier';
+    public const GROUP_ACCOUNTING = 'accounting';
 
     /**
      * Tabulka → skupina. Zápis do kterékoli z nich přetočí generaci své skupiny.
@@ -60,14 +61,34 @@ final class EntityCache
      * `users`/`roles`/oprávnění jsou ve stejné skupině schválně: odebrání role je
      * bezpečnostní událost a musí se projevit okamžitě, i kdyby se zapisovalo jen
      * do vazební tabulky.
+     *
+     * Skupina `accounting` je široká záměrně. Drží náhled doplatku daně, což je
+     * projekce celoročního účetnictví — závisí prakticky na všem, co se účtuje.
+     * Vyjmenovat přesně ty tabulky, které do výpočtu vstupují, by znamenalo
+     * udržovat seznam synchronně s 2900řádkovou službou; přeinvalidovat je levné
+     * (výpočet se prostě spočítá znovu), podinvalidovat by znamenalo ukazovat
+     * uživateli špatnou částku daně.
      */
     private const TABLE_GROUPS = [
-        'license'          => self::GROUP_LICENSE,
-        'users'            => self::GROUP_USER,
-        'roles'            => self::GROUP_USER,
-        'role_permissions' => self::GROUP_USER,
-        'user_suppliers'   => self::GROUP_USER,
-        'supplier'         => self::GROUP_SUPPLIER,
+        'license'                => self::GROUP_LICENSE,
+        'users'                  => self::GROUP_USER,
+        'roles'                  => self::GROUP_USER,
+        'role_permissions'       => self::GROUP_USER,
+        'user_suppliers'         => self::GROUP_USER,
+        'supplier'               => self::GROUP_SUPPLIER,
+        'journal_entries'        => self::GROUP_ACCOUNTING,
+        'journal_lines'          => self::GROUP_ACCOUNTING,
+        'invoices'               => self::GROUP_ACCOUNTING,
+        'invoice_items'          => self::GROUP_ACCOUNTING,
+        'purchase_invoices'      => self::GROUP_ACCOUNTING,
+        'purchase_invoice_items' => self::GROUP_ACCOUNTING,
+        'bank_transactions'      => self::GROUP_ACCOUNTING,
+        'cash_documents'         => self::GROUP_ACCOUNTING,
+        'assets'                 => self::GROUP_ACCOUNTING,
+        'accounting_periods'     => self::GROUP_ACCOUNTING,
+        'closing_steps'          => self::GROUP_ACCOUNTING,
+        'tax_returns'            => self::GROUP_ACCOUNTING,
+        'tax_advance_schedules'  => self::GROUP_ACCOUNTING,
     ];
 
     /** Write příkazy, po kterých má smysl hledat jméno tabulky. */

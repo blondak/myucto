@@ -81,8 +81,37 @@ final class EntityCacheTest extends TestCase
      */
     public function testWritesToUnwatchedTablesAreIgnored(): void
     {
-        self::assertSame([], EntityCache::groupsForSql('INSERT INTO invoices (id) VALUES (1)'));
-        self::assertSame([], EntityCache::groupsForSql('UPDATE journal_entries SET x = 1'));
+        // Tabulky mimo hlídané skupiny — zápis do nich nesmí nic invalidovat,
+        // jinak by se cache přetáčela při běžném provozu a nikdy nic netrefila.
+        self::assertSame([], EntityCache::groupsForSql('INSERT INTO sessions (id) VALUES (1)'));
+        self::assertSame([], EntityCache::groupsForSql('UPDATE activity_log SET x = 1'));
+        self::assertSame([], EntityCache::groupsForSql('DELETE FROM cron_runs WHERE id = 1'));
+    }
+
+    /**
+     * Náhled doplatku daně je projekce celoročního účetnictví, takže ho musí
+     * shodit jakýkoli účetní zápis. Podinvalidace by znamenala ukazovat
+     * uživateli zastaralou částku daně — proto je skupina široká.
+     *
+     * @return iterable<string,array{string}>
+     */
+    public static function accountingWrites(): iterable
+    {
+        yield 'zápis do deníku' => ['INSERT INTO journal_entries (id) VALUES (1)'];
+        yield 'řádek deníku' => ['UPDATE journal_lines SET amount = 1 WHERE id = 2'];
+        yield 'vydaná faktura' => ['UPDATE invoices SET total = 1 WHERE id = 3'];
+        yield 'položka přijaté faktury' => ['DELETE FROM purchase_invoice_items WHERE id = 4'];
+        yield 'bankovní transakce' => ['INSERT INTO bank_transactions (id) VALUES (5)'];
+        yield 'majetek' => ['UPDATE assets SET disposal_date = NULL WHERE id = 6'];
+        yield 'účetní období' => ['UPDATE accounting_periods SET status = ? WHERE id = 7'];
+        yield 'závěrkový krok' => ['INSERT INTO closing_steps (id) VALUES (8)'];
+        yield 'daňové přiznání' => ['UPDATE tax_returns SET status = ? WHERE id = 9'];
+    }
+
+    #[DataProvider('accountingWrites')]
+    public function testAccountingWritesInvalidateTaxPreview(string $sql): void
+    {
+        self::assertContains(EntityCache::GROUP_ACCOUNTING, EntityCache::groupsForSql($sql));
     }
 
     /**

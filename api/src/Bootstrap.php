@@ -172,6 +172,9 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\JournalIntegrityService::class),
                 $c->get(\MyInvoice\Service\License\LicenseService::class),
                 $c->get(\MyInvoice\Service\Report\VatRegistrationService::class),
+                // Bez tohohle argumentu spadne služba na průchozí EntityCache::disabled()
+                // a náhled doplatku daně (~450 ms) se počítá při každém načtení znovu.
+                $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
             ),
             // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
             // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.

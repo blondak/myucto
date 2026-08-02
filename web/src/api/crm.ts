@@ -189,6 +189,14 @@ export const crmApi = {
   // ─── Tier 1 (action + predictive) ───────────────────────────────────
   actionItems: () =>
     api.get<ActionItemsResult>('/crm/action-items').then(r => r.data),
+  /**
+   * Doplatek DPPO — vlastní endpoint, protože je to živá projekce celoročního
+   * účetnictví (naměřeno 444 z 473 ms celého feedu). Dashboard se vykreslí bez
+   * čekání na něj a dlaždice se doplní, až dopočítá. `item: null` je běžný stav
+   * (daňová evidence, FO, odkliknuté, nulový doplatek), ne chyba.
+   */
+  actionItemTaxBalance: () =>
+    api.get<{ item: ActionItem | null }>('/crm/action-items/tax-balance').then(r => r.data),
   dismissActionItem: (itemType: string, mode: 'day' | 'week' | 'forever' | 'historical') =>
     api.post<{ ok: boolean }>('/crm/action-items/dismiss', { item_type: itemType, mode }).then(r => r.data),
   restoreActionItem: (itemType: string) =>
