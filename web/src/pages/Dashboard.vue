@@ -560,7 +560,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="i in summary.overdue" :key="i.id" @click="openInvoice(i.id)" class="cursor-pointer hover:bg-neutral-50">
                 <td class="px-3 py-2 font-mono text-xs">
-                  {{ i.varsymbol }}
+                  <RouterLink class="row-link" :to="`/invoices/${i.id}`" @click.stop @auxclick.stop>{{ i.varsymbol }}</RouterLink>
                   <span v-if="i.invoice_type === 'proforma'" class="ml-1 px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-sans font-medium uppercase tracking-wide">{{ t('type.proforma') }}</span>
                 </td>
                 <td class="px-3 py-2 truncate max-w-[200px]">{{ i.client_company_name }}</td>
@@ -584,7 +584,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
               </div>
               <div class="flex items-baseline justify-between gap-2 mt-0.5">
                 <span class="flex items-center gap-1.5 min-w-0">
-                  <span class="font-mono text-xs text-neutral-500">{{ i.varsymbol }}</span>
+                  <RouterLink class="row-link font-mono text-xs text-neutral-500" :to="`/invoices/${i.id}`" @click.stop @auxclick.stop>{{ i.varsymbol }}</RouterLink>
                   <span v-if="i.invoice_type === 'proforma'" class="px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-medium uppercase tracking-wide">{{ t('type.proforma') }}</span>
                 </span>
                 <span class="text-xs px-1.5 py-0.5 rounded bg-danger-50 text-danger-500 font-medium whitespace-nowrap">
@@ -624,7 +624,9 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="i in summary.unpaid_upcoming" :key="i.id" @click="openInvoice(i.id)" class="cursor-pointer hover:bg-neutral-50">
-                <td class="px-3 py-2 font-mono text-xs">{{ i.varsymbol }}</td>
+                <td class="px-3 py-2 font-mono text-xs">
+                  <RouterLink class="row-link" :to="`/invoices/${i.id}`" @click.stop @auxclick.stop>{{ i.varsymbol }}</RouterLink>
+                </td>
                 <td class="px-3 py-2 truncate max-w-[200px]">{{ i.client_company_name }}</td>
                 <td class="px-3 py-2 text-right font-mono text-xs">{{ formatMoney(i.amount_to_pay, i.currency) }}</td>
                 <td class="px-3 py-2 text-center text-xs">{{ formatDate(i.due_date) }}</td>
@@ -641,7 +643,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                 <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(i.amount_to_pay, i.currency) }}</div>
               </div>
               <div class="flex items-baseline justify-between gap-2 mt-0.5 text-xs text-neutral-500">
-                <span class="font-mono">{{ i.varsymbol }}</span>
+                <RouterLink class="row-link font-mono" :to="`/invoices/${i.id}`" @click.stop @auxclick.stop>{{ i.varsymbol }}</RouterLink>
                 <span class="font-mono">{{ formatDate(i.due_date) }}</span>
               </div>
             </div>
@@ -672,7 +674,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                 @click="router.push(`/clients/${c.client_id}`)">
               <td class="px-4 py-2.5 text-neutral-400 font-mono text-xs">{{ i + 1 }}</td>
               <td class="px-4 py-2.5 font-medium">
-                {{ c.company_name }}
+                <RouterLink class="row-link" :to="`/clients/${c.client_id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                 <span v-if="c.currencies && c.currencies !== 'CZK'" class="ml-1.5 text-xs text-neutral-400 font-normal">({{ c.currencies }})</span>
               </td>
               <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ c.invoice_count }}</td>
@@ -695,7 +697,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             <div class="flex items-baseline justify-between gap-2">
               <div class="flex items-baseline gap-2 min-w-0">
                 <span class="text-neutral-400 font-mono text-xs whitespace-nowrap">{{ i + 1 }}.</span>
-                <span class="font-medium text-neutral-900 truncate">{{ c.company_name }}</span>
+                <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="`/clients/${c.client_id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                 <span v-if="c.currencies && c.currencies !== 'CZK'" class="text-xs text-neutral-400 whitespace-nowrap">({{ c.currencies }})</span>
               </div>
               <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(c.total_czk, 'CZK') }}</div>

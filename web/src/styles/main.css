@@ -881,6 +881,42 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   }
 
   /*
+   * Odkaz na detail v identifikační buňce řádku (číslo dokladu, varsymbol, název).
+   *
+   * Why: klikatelný řádek řešený jen přes @click + router.push není pro prohlížeč
+   * odkaz — nefunguje Ctrl/⌘+klik, prostřední tlačítko, „Otevřít v novém panelu"
+   * z kontextového menu ani cíl ve stavovém řádku. Skutečné <a> (RouterLink) v jedné
+   * buňce to všechno vrátí, aniž bychom museli sahat na <tr> (do řádku tabulky se
+   * odkaz zabalit nedá).
+   *
+   * ::after roztáhne cíl kliknutí na celou buňku, takže se trefíš i vedle textu.
+   * Přes okraje buňky nejde — jinak by překryl checkbox a tlačítka v sousedních
+   * buňkách. Padding se tím nemusí dublovat v šablonách a přežije i změnu hustoty.
+   *
+   * Roztažení se zapíná samo, ale jen když je odkaz jediným prvkem buňky
+   * (`:only-child`). Buňka s odznaky nebo ikonami s tooltipem by si je překrytím
+   * umlčela, tam odkaz zůstane jen na svém textu. Mimo tabulku (mobilní karty)
+   * neplatí vůbec — absolutní ::after by se chytlo prvního poziciovaného předka.
+   *
+   * How to apply: <RouterLink class="row-link" :to="…" @click.stop @auxclick.stop>
+   * — .stop drží navigaci na odkazu, aby handler řádku nenavigoval podruhé.
+   */
+  /* Celé v :where(), tedy specificita 0: první buňka `.table-sticky-first` si musí
+     udržet `position: sticky`. Kontejner pro ::after z ní je tak jako tak — sticky
+     je poziciovaný prvek stejně jako relative. */
+  :where(td:has(> .row-link:only-child), th:has(> .row-link:only-child)) {
+    position: relative;
+  }
+  :where(td, th) > .row-link:only-child::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+  .row-link:hover {
+    text-decoration: underline;
+  }
+
+  /*
    * Záblesk na řádku, kterého se právě týkala akce (viz composables/useRowFlash).
    * Why: po hromadné akci vypadá seznam stejně jako předtím a uživatel nevidí,
    * které řádky se změnily. Barva odchází do ztracena, takže po vteřině nezůstane

@@ -550,7 +550,7 @@ async function onFileSelected(e: Event) {
           <tr v-for="s in group.items" :key="s.id" @click="router.push(`/bank/${s.id}`)" class="cursor-pointer hover:bg-neutral-50">
             <td class="px-3 py-2 text-xs">
               <span class="inline-flex items-center gap-1.5">
-                <span>{{ statementDateLabel(s) }}</span>
+                <RouterLink class="row-link" :to="`/bank/${s.id}`" @click.stop @auxclick.stop>{{ statementDateLabel(s) }}</RouterLink>
                 <span v-if="s.source === 'email_notice'" :title="t('bank.email_notice_hint')"
                   class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                   {{ t('bank.email_notice_badge') }}
@@ -627,7 +627,7 @@ async function onFileSelected(e: Event) {
           class="cursor-pointer hover:bg-neutral-50 px-3 py-3">
           <div class="flex items-baseline justify-between gap-2">
             <div class="font-medium text-neutral-900 flex items-center gap-1.5 flex-wrap">
-              {{ statementDateLabel(s) }}<span v-if="s.statement_number" class="text-neutral-400 ml-1">#{{ s.statement_number }}</span>
+              <RouterLink class="row-link" :to="`/bank/${s.id}`" @click.stop @auxclick.stop>{{ statementDateLabel(s) }}</RouterLink><span v-if="s.statement_number" class="text-neutral-400 ml-1">#{{ s.statement_number }}</span>
               <span v-if="s.source === 'email_notice'" :title="t('bank.email_notice_hint')"
                 class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                 {{ t('bank.email_notice_badge') }}

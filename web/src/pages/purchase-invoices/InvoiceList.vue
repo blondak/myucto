@@ -981,8 +981,10 @@ async function bulkSetKind() {
                     />
                   </td>
                   <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
-                    <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
-                    <span v-else class="text-neutral-400">#{{ inv.id }}</span>
+                    <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
+                      <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
+                      <span v-else class="text-neutral-400">#{{ inv.id }}</span>
+                    </RouterLink>
                   </td>
                   <td v-if="tbl.isVisible('vendor')" class="px-4 py-2.5">
                     <div class="font-medium text-neutral-900">{{ inv.vendor_company_name }}</div>
@@ -1165,7 +1167,7 @@ async function bulkSetKind() {
                 </div>
                 <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
                   <div class="font-mono truncate">
-                    <span>{{ inv.varsymbol || '#' + inv.id }}</span>
+                    <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || '#' + inv.id }}</RouterLink>
                     <span class="text-neutral-400"> · </span>
                     <span>{{ inv.vendor_invoice_number }}</span>
                   </div>

@@ -307,7 +307,9 @@ const projectActions = computed<ActionItem[]>(() => {
           <tr v-for="inv in invoices" :key="inv.id" class="cursor-pointer hover:bg-neutral-50"
               :class="invoiceRowClass(inv.due_date, inv.status)"
               @click="router.push(`/invoices/${inv.id}`)">
-            <td class="px-4 py-2.5 font-mono">{{ inv.varsymbol || `#${inv.id}` }}</td>
+            <td class="px-4 py-2.5 font-mono">
+              <RouterLink class="row-link" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || `#${inv.id}` }}</RouterLink>
+            </td>
             <td class="px-4 py-2.5 text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
             <td class="px-4 py-2.5 text-neutral-600">{{ formatDate(inv.issue_date) }}</td>
             <td class="px-4 py-2.5">
@@ -334,7 +336,7 @@ const projectActions = computed<ActionItem[]>(() => {
           class="cursor-pointer hover:bg-neutral-50 px-4 py-3"
           :class="invoiceRowClass(inv.due_date, inv.status)">
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-mono font-medium text-neutral-900">{{ inv.varsymbol || `#${inv.id}` }}</div>
+            <RouterLink class="row-link font-mono font-medium text-neutral-900" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || `#${inv.id}` }}</RouterLink>
             <div class="font-mono text-sm font-semibold whitespace-nowrap">
               {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
             </div>

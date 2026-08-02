@@ -425,7 +425,9 @@ const recurringActions = computed<ActionItem[]>(() => {
               <tr v-for="inv in invoices" :key="inv.id"
                 @click="router.push({ name: 'invoice-detail', params: { id: inv.id } })"
                 class="cursor-pointer hover:bg-neutral-50">
-                <td class="px-4 py-3 font-mono text-primary-700">{{ inv.varsymbol ?? `#${inv.id}` }}</td>
+                <td class="px-4 py-3 font-mono text-primary-700">
+                  <RouterLink class="row-link" :to="{ name: 'invoice-detail', params: { id: inv.id } }" @click.stop @auxclick.stop>{{ inv.varsymbol ?? `#${inv.id}` }}</RouterLink>
+                </td>
                 <td class="px-4 py-3">
                   <span class="text-xs px-2 py-0.5 rounded" :class="invoiceBadgeClass(inv.status)">
                     {{ t('status.' + inv.status) }}
@@ -445,7 +447,7 @@ const recurringActions = computed<ActionItem[]>(() => {
             @click="router.push({ name: 'invoice-detail', params: { id: inv.id } })"
             class="cursor-pointer hover:bg-neutral-50 px-4 py-3">
             <div class="flex items-baseline justify-between gap-2">
-              <span class="font-mono text-primary-700 font-medium">{{ inv.varsymbol ?? `#${inv.id}` }}</span>
+              <RouterLink class="row-link font-mono text-primary-700 font-medium" :to="{ name: 'invoice-detail', params: { id: inv.id } }" @click.stop @auxclick.stop>{{ inv.varsymbol ?? `#${inv.id}` }}</RouterLink>
               <span class="font-mono text-sm">{{ formatMoney(inv.total_with_vat, inv.currency) }}</span>
             </div>
             <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">

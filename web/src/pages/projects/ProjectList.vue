@@ -130,7 +130,9 @@ watch([status, clientId, sort], () => load(true))
         <tbody class="divide-y divide-neutral-100">
           <tr v-for="p in items" :key="p.id" class="cursor-pointer hover:bg-neutral-50"
               @click="router.push(`/projects/${p.id}`)">
-            <td class="px-4 py-3 font-medium">{{ p.name }}</td>
+            <td class="px-4 py-3 font-medium">
+              <RouterLink class="row-link" :to="`/projects/${p.id}`" @click.stop @auxclick.stop>{{ p.name }}</RouterLink>
+            </td>
             <td class="px-4 py-3 text-neutral-600">
               <div>{{ p.client_company_name }}</div>
               <div v-if="emailsFor(p)" class="text-xs text-neutral-400 mt-0.5 truncate max-w-xs" :title="emailsFor(p)">
@@ -169,7 +171,7 @@ watch([status, clientId, sort], () => load(true))
           class="cursor-pointer hover:bg-neutral-50 transition px-4 py-3"
         >
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-neutral-900 truncate">{{ p.name }}</div>
+            <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="`/projects/${p.id}`" @click.stop @auxclick.stop>{{ p.name }}</RouterLink>
             <div class="font-mono text-sm whitespace-nowrap">
               <span v-if="p.revenue && p.revenue > 0">{{ formatMoney(p.revenue, p.currency) }}</span>
               <span v-else class="text-neutral-300">—</span>

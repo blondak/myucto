@@ -595,7 +595,7 @@ const hasAnyData = computed(() =>
                     @click="$router.push(`/clients/${c.client_id}`)">
                   <td class="px-4 py-2 text-neutral-400 font-mono text-xs">{{ i + 1 }}</td>
                   <td class="px-4 py-2 truncate max-w-[260px]">
-                    {{ c.company_name }}
+                    <RouterLink class="row-link" :to="`/clients/${c.client_id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                     <span v-if="c.currencies && c.currencies !== 'CZK'" class="ml-1 text-xs text-neutral-400">({{ c.currencies }})</span>
                   </td>
                   <td class="px-4 py-2 text-right font-mono">{{ formatMoney(c.total_czk, 'CZK') }}</td>
@@ -627,7 +627,7 @@ const hasAnyData = computed(() =>
                     @click="$router.push(`/projects/${p.id}`)">
                   <td class="px-4 py-2 text-neutral-400 font-mono text-xs">{{ i + 1 }}</td>
                   <td class="px-4 py-2 truncate max-w-[260px]">
-                    <div>{{ p.name }}</div>
+                    <RouterLink class="row-link block" :to="`/projects/${p.id}`" @click.stop @auxclick.stop>{{ p.name }}</RouterLink>
                     <div class="text-xs text-neutral-500 truncate">{{ p.client_company_name }}</div>
                   </td>
                   <td class="px-4 py-2 text-right font-mono">{{ formatMoney(p.revenue, 'CZK') }}</td>

@@ -301,7 +301,9 @@ async function runBook() {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="a in sortedItems" :key="a.id" class="cursor-pointer hover:bg-neutral-50" @click="openDetail(a)">
-              <td v-if="tbl.isVisible('inventory_number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ a.inventory_number }}</td>
+              <td v-if="tbl.isVisible('inventory_number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                <RouterLink class="row-link" :to="{ name: 'accounting-asset-detail', params: { id: a.id } }" @click.stop @auxclick.stop>{{ a.inventory_number }}</RouterLink>
+              </td>
               <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ a.name }}</td>
               <td v-if="tbl.isVisible('account')" class="px-3 py-2 font-mono text-xs">{{ a.asset_account_code }}</td>
               <td v-if="tbl.isVisible('put_into_use')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(a.put_into_use_date) }}</td>

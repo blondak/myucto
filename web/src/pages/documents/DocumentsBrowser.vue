@@ -868,7 +868,8 @@ onMounted(() => {
               <span v-else :class="['px-3 py-1.5 rounded text-sm font-bold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
             </div>
             <div class="p-2">
-              <p class="text-xs font-medium text-neutral-700 truncate" :title="d.title">{{ d.title }}</p>
+              <RouterLink class="row-link block text-xs font-medium text-neutral-700 truncate"
+                :to="{ name: 'document-detail', params: { id: d.id } }" :title="d.title" @click.stop @auxclick.stop>{{ d.title }}</RouterLink>
               <p class="text-[10px] text-neutral-400">{{ formatBytes(d.size_bytes) }}</p>
             </div>
           </div>
@@ -901,7 +902,9 @@ onMounted(() => {
           <tbody>
             <tr v-for="d in sortedDocuments" :key="d.id" :class="['border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer', selected.has(d.id) && 'bg-primary-50']" @click="openDoc(d)">
               <td class="py-2" @click.stop><input type="checkbox" :checked="selected.has(d.id)" @change="toggleSel(d.id)" /></td>
-              <td class="py-2 text-neutral-700 truncate">{{ d.title }}</td>
+              <td class="py-2 text-neutral-700 truncate">
+                <RouterLink class="row-link" :to="{ name: 'document-detail', params: { id: d.id } }" @click.stop @auxclick.stop>{{ d.title }}</RouterLink>
+              </td>
               <td class="py-2"><span :class="['px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span></td>
               <td class="py-2 text-right text-neutral-500 tabular-nums pr-8">{{ formatBytes(d.size_bytes) }}</td>
               <td class="py-2 text-neutral-500 pl-2">{{ d.created_at.slice(0, 10) }}</td>

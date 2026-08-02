@@ -776,7 +776,7 @@ const clientActions = computed<ActionItem[]>(() => {
           @click="router.push(`/projects/${p.id}`)"
           class="cursor-pointer hover:bg-neutral-50 px-4 py-3">
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-neutral-900 truncate">{{ p.name }}</div>
+            <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="`/projects/${p.id}`" @click.stop @auxclick.stop>{{ p.name }}</RouterLink>
             <span class="text-xs px-2 py-0.5 rounded whitespace-nowrap"
               :class="{
                 'bg-success-50 text-success-600': p.status === 'active',
@@ -826,7 +826,9 @@ const clientActions = computed<ActionItem[]>(() => {
           <tr v-for="inv in invoices" :key="inv.id" class="cursor-pointer hover:bg-neutral-50"
               :class="invoiceRowClass(inv.due_date, inv.status)"
               @click="router.push(`/invoices/${inv.id}`)">
-            <td class="px-4 py-2.5 font-mono">{{ inv.varsymbol || `#${inv.id}` }}</td>
+            <td class="px-4 py-2.5 font-mono">
+              <RouterLink class="row-link" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || `#${inv.id}` }}</RouterLink>
+            </td>
             <td class="px-4 py-2.5 text-neutral-600">{{ typeLabel(inv.invoice_type) }}</td>
             <td class="px-4 py-2.5 text-neutral-600">{{ formatDate(inv.issue_date) }}</td>
             <td class="px-4 py-2.5" :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ inv.tax_date ? formatDate(inv.tax_date) : '—' }}</td>
@@ -854,7 +856,7 @@ const clientActions = computed<ActionItem[]>(() => {
           class="cursor-pointer hover:bg-neutral-50 px-4 py-3"
           :class="invoiceRowClass(inv.due_date, inv.status)">
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-mono font-medium text-neutral-900">{{ inv.varsymbol || `#${inv.id}` }}</div>
+            <RouterLink class="row-link font-mono font-medium text-neutral-900" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || `#${inv.id}` }}</RouterLink>
             <div class="font-mono text-sm font-semibold whitespace-nowrap">
               {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
             </div>
@@ -918,7 +920,9 @@ const clientActions = computed<ActionItem[]>(() => {
         <tbody class="divide-y divide-neutral-100">
           <tr v-for="pi in purchaseInvoices" :key="pi.id" class="cursor-pointer hover:bg-neutral-50"
               @click="router.push(`/purchase-invoices/${pi.id}`)">
-            <td class="px-4 py-2.5 font-mono">{{ pi.vendor_invoice_number || `#${pi.id}` }}</td>
+            <td class="px-4 py-2.5 font-mono">
+              <RouterLink class="row-link" :to="`/purchase-invoices/${pi.id}`" @click.stop @auxclick.stop>{{ pi.vendor_invoice_number || `#${pi.id}` }}</RouterLink>
+            </td>
             <td class="px-4 py-2.5 text-neutral-600">{{ formatDate(pi.issue_date) }}</td>
             <td class="px-4 py-2.5" :class="taxDateClass(pi.tax_date, pi.issue_date)">{{ pi.tax_date ? formatDate(pi.tax_date) : '—' }}</td>
             <td class="px-4 py-2.5 text-neutral-600">{{ formatDate(pi.due_date) }}</td>
@@ -969,7 +973,9 @@ const clientActions = computed<ActionItem[]>(() => {
             <tr v-for="tpl in recurringTemplates" :key="tpl.id"
               @click="router.push({ name: 'recurring-detail', params: { id: tpl.id } })"
               class="cursor-pointer hover:bg-neutral-50">
-              <td class="px-4 py-3 font-medium text-primary-700">{{ tpl.name }}</td>
+              <td class="px-4 py-3 font-medium text-primary-700">
+                <RouterLink class="row-link" :to="{ name: 'recurring-detail', params: { id: tpl.id } }" @click.stop @auxclick.stop>{{ tpl.name }}</RouterLink>
+              </td>
               <td class="px-4 py-3">{{ freqLabel(tpl.frequency) }}<span v-if="tpl.end_of_month" class="text-neutral-400"> · EOM</span></td>
               <td class="px-4 py-3 font-mono text-xs">{{ formatDate(tpl.next_run_date) }}</td>
               <td class="px-4 py-3">
@@ -996,7 +1002,7 @@ const clientActions = computed<ActionItem[]>(() => {
           @click="router.push({ name: 'recurring-detail', params: { id: tpl.id } })"
           class="cursor-pointer hover:bg-neutral-50 px-4 py-3">
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-neutral-900 truncate">{{ tpl.name }}</div>
+            <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="{ name: 'recurring-detail', params: { id: tpl.id } }" @click.stop @auxclick.stop>{{ tpl.name }}</RouterLink>
             <span class="text-xs px-2 py-0.5 rounded border whitespace-nowrap" :class="recurringStatusBadgeClass(tpl.status)">
               {{ t('recurring.status.' + tpl.status) }}
             </span>

@@ -141,9 +141,6 @@ function gotoNew() {
 function gotoDetail(id: number, e?: MouseEvent) {
   navigateRow({ name: 'recurring-detail', params: { id } }, e)
 }
-function gotoClient(clientId: number, e?: MouseEvent) {
-  navigateRow({ name: 'client-detail', params: { id: clientId } }, e)
-}
 </script>
 
 <template>
@@ -214,9 +211,10 @@ function gotoClient(clientId: number, e?: MouseEvent) {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="tpl in filtered" :key="tpl.id" class="hover:bg-neutral-50/50">
               <td class="px-4 py-3 align-top">
-                <button @click="gotoDetail(tpl.id, $event)" @auxclick.prevent="gotoDetail(tpl.id, $event)" class="cursor-pointer block text-left text-primary-700 font-medium hover:underline">
+                <RouterLink :to="{ name: 'recurring-detail', params: { id: tpl.id } }"
+                  class="row-link cursor-pointer block text-left text-primary-700 font-medium">
                   {{ tpl.name }}
-                </button>
+                </RouterLink>
                 <span v-if="tpl.last_error" :title="tpl.last_error"
                   class="mt-0.5 inline-block text-xs px-1.5 py-0.5 rounded bg-danger-50 text-danger-700 border border-danger-200 whitespace-nowrap">
                   ⚠ {{ t('recurring.last_error_badge') }}
@@ -232,9 +230,10 @@ function gotoClient(clientId: number, e?: MouseEvent) {
                 </span>
               </td>
               <td class="px-4 py-3 align-top">
-                <button @click="gotoClient(tpl.client_id, $event)" @auxclick.prevent="gotoClient(tpl.client_id, $event)" class="cursor-pointer block text-left text-neutral-700 hover:underline">
+                <RouterLink :to="{ name: 'client-detail', params: { id: tpl.client_id } }"
+                  class="row-link cursor-pointer block text-left text-neutral-700">
                   {{ tpl.client_company_name }}
-                </button>
+                </RouterLink>
                 <span v-if="tpl.project_name" class="block text-xs text-neutral-500">{{ tpl.project_name }}</span>
               </td>
               <td class="px-4 py-3">
@@ -259,11 +258,11 @@ function gotoClient(clientId: number, e?: MouseEvent) {
                 </span>
               </td>
               <td class="px-4 py-3 text-right whitespace-nowrap align-top">
-                <button @click="gotoDetail(tpl.id, $event)" @auxclick.prevent="gotoDetail(tpl.id, $event)"
+                <RouterLink :to="{ name: 'recurring-detail', params: { id: tpl.id } }"
                   class="cursor-pointer inline-flex items-center gap-1 px-2.5 h-7 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded mr-1.5">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                   {{ t('recurring.actions.detail') }}
-                </button>
+                </RouterLink>
                 <button v-if="tpl.status === 'active' && auth.canWrite('recurring.pause')" @click="pause(tpl)" :disabled="busy === tpl.id"
                   :title="t('recurring.actions.pause')"
                   class="cursor-pointer inline-flex items-center justify-center w-7 h-7 text-xs border border-warning-500/40 text-warning-700 hover:bg-warning-50 rounded mr-1.5">
@@ -294,15 +293,17 @@ function gotoClient(clientId: number, e?: MouseEvent) {
           class="cursor-pointer hover:bg-neutral-50 transition px-4 py-3"
         >
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-neutral-900 truncate">{{ tpl.name }}</div>
+            <RouterLink class="row-link font-medium text-neutral-900 truncate"
+              :to="{ name: 'recurring-detail', params: { id: tpl.id } }" @click.stop @auxclick.stop>{{ tpl.name }}</RouterLink>
             <span class="text-xs px-2 py-0.5 rounded border whitespace-nowrap" :class="statusBadgeClass(tpl.status)">
               {{ t('recurring.status.' + tpl.status) }}
             </span>
           </div>
           <div class="text-xs text-neutral-500 truncate mt-0.5">
-            <button @click.stop="gotoClient(tpl.client_id, $event)" @auxclick.stop.prevent="gotoClient(tpl.client_id, $event)" class="cursor-pointer hover:underline text-neutral-700">
+            <RouterLink :to="{ name: 'client-detail', params: { id: tpl.client_id } }" @click.stop @auxclick.stop
+              class="row-link cursor-pointer text-neutral-700">
               {{ tpl.client_company_name }}
-            </button>
+            </RouterLink>
             <span v-if="tpl.project_name"> · {{ tpl.project_name }}</span>
           </div>
           <div v-if="tpl.last_error" class="mt-1 text-xs text-danger-700 truncate" :title="tpl.last_error">
@@ -339,11 +340,11 @@ function gotoClient(clientId: number, e?: MouseEvent) {
             {{ t('recurring.catalog_estimate', { date: formatDate(tpl.catalog_estimate_rate_date ?? null) }) }}
           </div>
           <div class="flex items-center gap-1.5 mt-2.5">
-            <button @click.stop="gotoDetail(tpl.id, $event)" @auxclick.stop.prevent="gotoDetail(tpl.id, $event)"
+            <RouterLink :to="{ name: 'recurring-detail', params: { id: tpl.id } }" @click.stop @auxclick.stop
               class="cursor-pointer inline-flex items-center gap-1 px-2.5 h-7 text-xs border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
               {{ t('recurring.actions.detail') }}
-            </button>
+            </RouterLink>
             <button v-if="tpl.status === 'active' && auth.canWrite('recurring.pause')" @click.stop="pause(tpl)" :disabled="busy === tpl.id"
               :title="t('recurring.actions.pause')"
               class="cursor-pointer inline-flex items-center justify-center w-7 h-7 text-xs border border-warning-500/40 text-warning-700 hover:bg-warning-50 rounded">

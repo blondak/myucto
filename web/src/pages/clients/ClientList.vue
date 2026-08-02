@@ -278,7 +278,7 @@ function formatPaymentDue(c: Client): string {
           >
             <td v-if="tbl.isVisible('company')" class="px-4 py-3">
               <div class="flex items-center gap-2">
-                <div class="font-medium text-neutral-900">{{ c.company_name }}</div>
+                <RouterLink class="row-link font-medium text-neutral-900" :to="`/clients/${c.id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                 <span v-if="c.is_customer !== false && c.is_vendor === true"
                       class="inline-block px-1.5 py-0 text-[10px] bg-primary-100 text-primary-700 rounded font-medium uppercase tracking-wide"
                       :title="t('client.dual_role_tooltip')">K+D</span>
@@ -344,7 +344,7 @@ function formatPaymentDue(c: Client): string {
           class="cursor-pointer hover:bg-neutral-50 transition px-4 py-3"
         >
           <div class="flex items-baseline justify-between gap-2">
-            <div class="font-medium text-neutral-900 truncate">{{ c.company_name }}</div>
+            <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="`/clients/${c.id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
             <div class="font-mono text-sm whitespace-nowrap">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.costs && c.costs > 0">{{ formatMoney(c.costs, 'CZK') }}</span>

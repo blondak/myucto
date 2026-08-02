@@ -1121,8 +1121,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                   />
                 </td>
                 <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
-                  <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
-                  <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
+                  <RouterLink class="row-link" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>
+                    <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
+                    <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
+                  </RouterLink>
                 </td>
                 <td v-if="tbl.isVisible('client')" class="px-4 py-2.5">
                   <div class="font-medium text-neutral-900">{{ inv.client_company_name }}</div>
@@ -1265,10 +1267,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 </div>
                 <div class="flex items-baseline justify-between gap-2 mt-0.5 text-xs text-neutral-500">
                   <div class="truncate">
-                    <span class="font-mono">
+                    <RouterLink class="row-link font-mono" :to="`/invoices/${inv.id}`" @click.stop @auxclick.stop>
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
-                    </span>
+                    </RouterLink>
                     <span class="text-neutral-400"> · </span>
                     <span>{{ typeLabel(inv.invoice_type) }}</span>
                     <span v-if="inv.project_name" class="text-neutral-400"> · </span>

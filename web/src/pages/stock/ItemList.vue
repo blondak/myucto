@@ -304,7 +304,9 @@ onMounted(async () => {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="i in sortedItems" :key="i.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-50': !i.is_active }"
               @click="openDetail(i, $event)" @auxclick.prevent="openDetail(i, $event)">
-              <td v-if="tbl.isVisible('sku')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ i.sku }}</td>
+              <td v-if="tbl.isVisible('sku')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                <RouterLink class="row-link" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
+              </td>
               <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ i.name }}</td>
               <td v-if="tbl.isVisible('type')" class="px-3 py-2">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
@@ -333,7 +335,7 @@ onMounted(async () => {
       <div v-for="i in sortedItems" :key="`m-${i.id}`" @click="openDetail(i, $event)"
         class="cursor-pointer bg-surface border border-neutral-200 rounded-lg shadow-sm p-3" :class="{ 'opacity-50': !i.is_active }">
         <div class="flex items-center justify-between gap-2">
-          <span class="font-mono text-xs text-neutral-500">{{ i.sku }}</span>
+          <RouterLink class="row-link font-mono text-xs text-neutral-500" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
           <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
         </div>
         <div class="font-medium mt-0.5">{{ i.name }}</div>

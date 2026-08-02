@@ -194,7 +194,9 @@ const STATUS_BADGE: Record<string, string> = {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="tk in takes" :key="tk.id" class="cursor-pointer hover:bg-neutral-50" @click="router.push(`/stock/takes/${tk.id}`)">
-              <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(tk.take_date) }}</td>
+              <td class="px-3 py-2 whitespace-nowrap">
+                <RouterLink class="row-link" :to="`/stock/takes/${tk.id}`" @click.stop @auxclick.stop>{{ formatDate(tk.take_date) }}</RouterLink>
+              </td>
               <td class="px-3 py-2">{{ warehouseName(tk.warehouse_id) }}</td>
               <td class="px-3 py-2 text-center">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[tk.status]">{{ t(`stock.take_status.${tk.status}`) }}</span>

@@ -441,7 +441,7 @@ const hasAnyData = computed(() =>
                     @click="$router.push(`/clients/${v.vendor_id}`)">
                   <td class="px-4 py-2 text-neutral-400 font-mono text-xs">{{ i + 1 }}</td>
                   <td class="px-4 py-2 truncate max-w-[260px]">
-                    {{ v.company_name }}
+                    <RouterLink class="row-link" :to="`/clients/${v.vendor_id}`" @click.stop @auxclick.stop>{{ v.company_name }}</RouterLink>
                     <span v-if="v.currencies && v.currencies !== 'CZK'" class="ml-1 text-xs text-neutral-400">({{ v.currencies }})</span>
                   </td>
                   <td class="px-4 py-2 text-right font-mono">{{ formatMoney(v.total_czk, 'CZK') }}</td>

@@ -260,7 +260,9 @@ watch(() => route.query.type, (v) => {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="d in documents" :key="d.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-60': d.status === 'reversed' }"
               @click="openDetail(d, $event)" @auxclick.prevent="openDetail(d, $event)">
-              <td v-if="tbl.isVisible('number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ d.doc_number || t('stock.doc_status.draft') }}</td>
+              <td v-if="tbl.isVisible('number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                <RouterLink class="row-link" :to="`/stock/documents/${d.id}`" @click.stop @auxclick.stop>{{ d.doc_number || t('stock.doc_status.draft') }}</RouterLink>
+              </td>
               <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(d.doc_date) }}</td>
               <td v-if="tbl.isVisible('type')" class="px-3 py-2">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[d.doc_type]">{{ t(`stock.doc_type.${d.doc_type}_short`) }}</span>

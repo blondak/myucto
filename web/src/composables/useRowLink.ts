@@ -5,6 +5,11 @@ import { useRouter, type RouteLocationRaw } from 'vue-router'
  * prostředním tlačítkem (otevření v novém panelu) — což čisté @click + router.push
  * neumí (není to skutečný odkaz).
  *
+ * Pokrývá jen kliknutí na řádek jako celek; do <tr> se odkaz zabalit nedá, takže
+ * kontextové menu a cíl ve stavovém řádku tudy nezískáš. Ty nese skutečný
+ * <RouterLink class="row-link"> v identifikační buňce (číslo dokladu / název) —
+ * viz `.row-link` ve styles/main.css. Obojí platí vedle sebe.
+ *
  * Použití:
  *   const navigate = useRowLink()
  *   function openInvoice(inv, e) { navigate(`/invoices/${inv.id}`, e) }
