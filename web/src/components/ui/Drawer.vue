@@ -41,18 +41,21 @@ void props
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 bg-black/50" @click.self="emit('close')">
+    <div class="fixed inset-0 z-50 bg-neutral-900/45 backdrop-blur-[3px]" @click.self="emit('close')">
+      <!-- Vjezd spring křivkou (--ease-spring): panel dojede a nepatrně dosedne,
+           místo aby lineárně dokloužl. Odjezd je kratší a lineární — zavírání
+           nemá na co čekat. -->
       <transition
         appear
-        enter-active-class="transition-transform duration-200 ease-in-out"
+        enter-active-class="transition-transform duration-300 ease-[cubic-bezier(0.22,1.2,0.36,1)]"
         enter-from-class="translate-x-full"
         enter-to-class="translate-x-0"
-        leave-active-class="transition-transform duration-200 ease-in-out"
+        leave-active-class="transition-transform duration-150 ease-in"
         leave-from-class="translate-x-0"
         leave-to-class="translate-x-full"
       >
         <aside
-          class="ml-auto flex h-full w-full flex-col bg-surface shadow-xl"
+          class="ml-auto flex h-full w-full flex-col bg-surface-raised shadow-2xl ring-1 ring-neutral-200"
           :class="widthClass"
           role="dialog"
           aria-modal="true"

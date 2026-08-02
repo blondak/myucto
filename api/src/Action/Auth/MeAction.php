@@ -81,7 +81,11 @@ final class MeAction
                 $cacheKey,
                 function () use ($where, $params, $ossSelect): array {
                     $stmt = $this->db->pdo()->prepare(
-                        'SELECT id, company_name, ic, is_vat_payer, is_identified, taxpayer_type,
+                        // dic + adresa: dashboard pod názvem firmy vypisuje identifikaci
+                        // (IČ · DIČ · adresa) na jeden řádek — bez nich by musel dělat
+                        // druhý dotaz jen kvůli hlavičce stránky.
+                        'SELECT id, company_name, ic, dic, street, city, zip,
+                                is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
                                 auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
                                 accounting_mode, accounting_enabled, stock_enabled, ' . $ossSelect . ',
@@ -97,6 +101,13 @@ final class MeAction
         foreach ($suppliers as &$s) {
             $s['id']                       = (int) $s['id'];
             $s['is_vat_payer']             = (bool) $s['is_vat_payer'];
+            // Identifikace firmy pro hlavičku dashboardu. `??` drží kompatibilitu
+            // se záznamy, které mohou ještě viset v entity cache z doby před
+            // rozšířením SELECTu výš — chybějící sloupec nesmí shodit odpověď.
+            $s['dic']                      = isset($s['dic']) && $s['dic'] !== null ? (string) $s['dic'] : null;
+            $s['street']                   = (string) ($s['street'] ?? '');
+            $s['city']                     = (string) ($s['city'] ?? '');
+            $s['zip']                      = (string) ($s['zip'] ?? '');
             // Režim účetnictví (Epic F1) — 'double_entry' zpřístupní účetní UI (deník,
             // osnova, období). Nav sekce se řídí touto hodnotou přes supplier store.
             $s['accounting_mode']          = (string) ($s['accounting_mode'] ?? 'tax_evidence');

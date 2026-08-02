@@ -6,11 +6,16 @@ const { t } = useI18n()
 
 <template>
   <div class="min-h-screen flex flex-col bg-neutral-50">
-    <header class="border-b border-neutral-200 bg-surface">
+    <!-- Stejná tmavá lišta jako v aplikaci: přihlášení a veřejné stránky jsou
+         první, co uživatel vidí, a nemají vypadat jako jiný produkt. -->
+    <header class="nav-inverted border-b border-neutral-200 bg-surface shadow-md">
       <div class="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
         <img src="/styles/logo.svg" alt="MyÚčto" class="w-9 h-9" />
         <div>
-          <h1 class="text-lg font-semibold leading-tight">
+          <!-- `font-sans` je vědomý opt-out z globálního display řezu pro H1:
+               tenhle nadpis je značka, ne titulek stránky, a musí sedět s logem
+               v topbaru aplikace. -->
+          <h1 class="font-sans text-lg font-semibold leading-tight">
             My<span class="text-primary-600">Účto</span><span class="text-neutral-500 font-normal">.cz</span>
           </h1>
           <p class="text-xs text-neutral-500 leading-tight">{{ title ?? t('app.subtitle') }}</p>

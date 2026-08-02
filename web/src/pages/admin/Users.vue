@@ -160,7 +160,9 @@ onMounted(load)
           </p>
         </section>
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
-        <footer class="flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="showForm=false">{{ t('common.cancel') }}</button><button type="submit" :disabled="saving || supplierRequired" :class="btnFilled('primary')">{{ t('common.save') }}</button></footer>
+        <!-- Oddělovač a vzduch nad tlačítky: bez nich seděla lišta akcí nalepená
+             na posledním poli formuláře a vypadala jako jeho součást. -->
+        <footer class="flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-4 mt-2"><button type="button" :class="btnOutline('neutral')" @click="showForm=false">{{ t('common.cancel') }}</button><button type="submit" :disabled="saving || supplierRequired" :class="btnFilled('primary')">{{ t('common.save') }}</button></footer>
       </form>
     </div>
   </div>

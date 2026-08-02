@@ -6,6 +6,10 @@
     <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Kritické řezy předsáhnout, ať text neblikne fallbackem. Latin-ext (háčky)
+         se dotáhne až s CSS — bez preloadu by první paint českého textu čekal. -->
+    <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/geist-latin-ext.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="theme-color" content="#3B2D83" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="MyÚčto" />

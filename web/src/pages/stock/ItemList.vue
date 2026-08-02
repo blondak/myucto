@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -41,6 +42,43 @@ const filters = reactive({
   active: true,
   q: '',
 })
+
+/**
+ * Počet aktivních filtrů pro odznáček na tlačítku „Filtry (N)".
+ * `active` se počítá jen když je VYPNUTÝ — zapnutý je výchozí stav (jen aktivní
+ * karty), takže by odznáček svítil pořád a přestal by cokoliv znamenat.
+ * Hledání se nepočítá, je vždy vidět v lište.
+ */
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (filters.type) n++
+  if (filters.warehouse_id !== '') n++
+  if (filters.only_below_min) n++
+  if (!filters.active) n++
+  return n
+})
+
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (filters.type) chips.push({ key: 'type', value: t(`stock.item_type.${filters.type}`) })
+  if (filters.warehouse_id !== '') {
+    const w = warehouses.value.find(x => x.id === filters.warehouse_id)
+    if (w) chips.push({ key: 'warehouse', value: w.name })
+  }
+  if (filters.only_below_min) chips.push({ key: 'below_min', value: t('stock.items.filter_below_min') })
+  if (!filters.active) chips.push({ key: 'active', value: t('stock.items.filter_inactive_included') })
+  return chips
+})
+
+function clearFilter(key: string) {
+  switch (key) {
+    case 'type': filters.type = ''; break
+    case 'warehouse': filters.warehouse_id = ''; break
+    case 'below_min': filters.only_below_min = false; break
+    case 'active': filters.active = true; break
+  }
+  applyFilters()
+}
 
 async function load(reset = true) {
   if (reset) {
@@ -191,48 +229,56 @@ onMounted(async () => {
       </RouterLink>
     </div>
 
-    <!-- Filtry -->
-    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.items.filter_type') }}</label>
-          <select v-model="filters.type" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="material">{{ t('stock.item_type.material') }}</option>
-            <option value="goods">{{ t('stock.item_type.goods') }}</option>
-            <option value="product">{{ t('stock.item_type.product') }}</option>
-          </select>
+    <!-- Filtry — stejná lišta jako u faktur a banky: hledání vpředu a nejširší,
+         ostatní filtry sbalené za „Filtry (N)", aktivní stav nesou chipy.
+         Původní mřížka s popisky nad poli zabírala dva řádky i při nulovém
+         filtrování a hledání (nejpoužívanější prvek) bylo až vpravo dole. -->
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="resetFilters"
+    >
+      <template #primary>
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input v-model="filters.q" type="search" :placeholder="t('stock.items.filter_q_placeholder')"
+            @keyup.enter="applyFilters" @change="applyFilters"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.documents.filter_warehouse') }}</label>
-          <select v-model="filters.warehouse_id" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-            <option value="">{{ t('common.all') }}</option>
-            <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
-          </select>
-        </div>
-        <div class="flex items-end pb-2 gap-4">
-          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input v-model="filters.only_below_min" type="checkbox" @change="applyFilters" class="rounded border-neutral-300 text-primary-600" />
-            {{ t('stock.items.filter_below_min') }}
-          </label>
-          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input v-model="filters.active" type="checkbox" @change="applyFilters" class="rounded border-neutral-300 text-primary-600" />
-            {{ t('stock.items.filter_active') }}
-          </label>
-        </div>
-        <div class="sm:col-span-2 lg:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.items.filter_q') }}</label>
-          <input v-model="filters.q" type="text" :placeholder="t('stock.items.filter_q_placeholder')"
-            @keyup.enter="applyFilters" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-        </div>
-      </div>
-      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
-        <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('stock.items.reset_filters') }}</button>
+      </template>
+
+      <select v-model="filters.type" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        :title="t('stock.items.filter_type')">
+        <option value="">{{ t('stock.items.filter_type') }}: {{ t('common.all') }}</option>
+        <option value="material">{{ t('stock.item_type.material') }}</option>
+        <option value="goods">{{ t('stock.item_type.goods') }}</option>
+        <option value="product">{{ t('stock.item_type.product') }}</option>
+      </select>
+      <select v-model="filters.warehouse_id" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        :title="t('stock.documents.filter_warehouse')">
+        <option value="">{{ t('stock.documents.filter_warehouse') }}: {{ t('common.all') }}</option>
+        <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+      </select>
+      <label class="inline-flex items-center gap-2 text-sm text-neutral-700 px-2 cursor-pointer">
+        <input v-model="filters.only_below_min" type="checkbox" @change="applyFilters" />
+        {{ t('stock.items.filter_below_min') }}
+      </label>
+      <label class="inline-flex items-center gap-2 text-sm text-neutral-700 px-2 cursor-pointer">
+        <input v-model="filters.active" type="checkbox" @change="applyFilters" />
+        {{ t('stock.items.filter_active') }}
+      </label>
+
+      <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
-      </div>
-    </div>
+      </template>
+    </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
     <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.items.empty') }}</div>

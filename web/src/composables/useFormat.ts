@@ -28,7 +28,11 @@ export function formatMoney(value: number | null | undefined, currency: string =
     maximumFractionDigits: dec,
   })
   const symbol = currency === 'CZK' ? 'Kč' : currency === 'EUR' ? '€' : currency
-  return `${formatter.format(value)} ${symbol}`
+  // Nezlomitelná mezera (U+00A0) před jednotkou. S obyčejnou mezerou se v úzkém
+  // sloupci (účetní deník, banka) odlomilo „Kč" na druhý řádek a částka se
+  // rozpadla na dva řádky. Odpovídá to i české typografii — číslo a jednotka
+  // k sobě patří. Oddělovač tisíců z Intl(cs-CZ) je nezlomitelný už sám o sobě.
+  return `${formatter.format(value)} ${symbol}`
 }
 
 export function formatNumber(
@@ -129,21 +133,29 @@ export function typeLabel(type: string): string {
 }
 
 /**
- * Vrací class objekt pro status badge.
+ * Vrací class string pro status badge.
+ *
+ * Pravidlo „barva = anomálie": běžný průběh života dokladu (koncept → vystaveno →
+ * odesláno → zaplaceno) je tichý — barvu nese jen 6px tečka, text zůstává neutrální.
+ * Plnou výplň dostávají výhradně stavy, které po uživateli něco chtějí nebo
+ * signalizují nesoulad (upomínáno, částečně uhrazeno, přeplaceno). Díky tomu
+ * v seznamu stovky faktur okamžitě vidíš ty, kterými se musíš zabývat.
+ *
+ * Vzhled samotných tříd je v styles/main.css (.badge-*).
  */
 export function statusBadgeClass(status: string): string {
   const classes: Record<string, string> = {
-    draft:     'bg-neutral-100 text-neutral-600',
-    issued:    'bg-primary-100 text-primary-700',
-    sent:      'bg-teal-50 text-teal-600',
-    reminded:  'bg-warning-50 text-warning-600',
-    paid:      'bg-success-50 text-success-600',
-    cancelled: 'bg-neutral-100 text-neutral-400',
+    draft:     'badge badge-quiet badge-draft',
+    issued:    'badge badge-quiet badge-issued',
+    sent:      'badge badge-quiet badge-sent',
+    paid:      'badge badge-quiet badge-paid',
+    cancelled: 'badge badge-quiet badge-cancelled',
+    reminded:        'badge badge-loud badge-reminded bg-warning-50 text-warning-700',
     // Odvozený platební stav (#89) — zobrazuje se místo lifecycle badge, když nese informaci.
-    partially_paid: 'bg-amber-50 text-amber-700',
-    overpaid:       'bg-purple-50 text-purple-700',
+    partially_paid:  'badge badge-loud badge-partial bg-amber-50 text-amber-700',
+    overpaid:        'badge badge-loud badge-overpaid bg-purple-50 text-purple-700',
   }
-  return classes[status] ?? 'bg-neutral-100 text-neutral-600'
+  return classes[status] ?? 'badge badge-quiet badge-draft'
 }
 
 /**
@@ -184,8 +196,13 @@ export function isOverdue(dueDate: string, status: string): boolean {
  *  - jinak                                 → bez změny
  */
 export function invoiceRowClass(dueDate: string, status: string): string {
-  if (isOverdue(dueDate, status)) return 'bg-danger-50/60 hover:bg-danger-50'
-  if (status === 'paid')      return 'bg-success-50/40 hover:bg-success-50'
+  // Po splatnosti: 2px hrana vlevo (.row-flagged) + jen velmi jemný tint.
+  // Plošná červená byla při dvaceti řádcích na obrazovce hlučnější než signál,
+  // který měla nést.
+  if (isOverdue(dueDate, status)) return 'row-flagged bg-danger-50/35 hover:bg-danger-50'
+  // Zaplaceno je normální stav, ne úspěch hodný zvýraznění — tint pryč,
+  // informaci nese tichý badge se zelenou tečkou.
+  if (status === 'paid')      return 'hover:bg-neutral-50'
   if (status === 'cancelled') return 'opacity-40 line-through hover:opacity-70'
   return ''
 }

@@ -35,10 +35,15 @@ void props
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+    <!--
+      Backdrop rozostřuje pozadí a je o odstín hlubší: modál je modální, obsah
+      pod ním má ustoupit. Panel přijíždí spring křivkou (.rise-in) — naskočení
+      bez pohybu působí jako překreslení stránky, ne jako otevření dialogu.
+    -->
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/45 backdrop-blur-[3px]"
       @click.self="emit('close')">
-      <div class="bg-surface rounded-lg shadow-xl w-full flex flex-col max-h-[90vh]" :class="widthClass">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between shrink-0">
+      <div class="rise-in bg-surface-raised rounded-xl shadow-2xl ring-1 ring-neutral-200 w-full flex flex-col max-h-[90vh]" :class="widthClass">
+        <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between shrink-0">
           <h2 class="text-lg font-semibold">{{ title }}</h2>
           <button type="button" @click="emit('close')" aria-label="Close"
             class="cursor-pointer w-8 h-8 inline-flex items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900">

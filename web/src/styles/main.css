@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts.css";
 
 /* Dark mode řízený třídou .dark na <html> (nastavuje composable useTheme přes VueUse).
    :where() drží specificitu na 0, aby utility nebyly přebity. */
@@ -31,6 +32,9 @@
 
   /* ─── Surfaces (hodnoty přepínané v .dark) ─── */
   --color-surface:   #FFFFFF;   /* karty, panely, modály, topbar, sidebar (light = bílá) */
+  /* O stupeň „výš" než surface — modály, popovery, dropdowny, hero karty.
+     V light je rozdíl nulový (bílá je strop), v dark nese celý pocit hloubky. */
+  --color-surface-raised: #FFFFFF;
 
   /* ─── Accent — pastel sky blue ─── */
   --color-accent-50:   #EFF6FC;
@@ -69,13 +73,34 @@
   --color-status-cancelled-bg: #F4F2F8;
   --color-status-cancelled-fg: #A7A0BA;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* ─── Typografie ───
+     Self-hostované subsety, viz styles/fonts.css. Display řez (Instrument Serif)
+     je záměrně jen pro H1 stránek a hero čísla — v tabulkách a formulářích nikdy. */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* ─── Elevation ladder ───
+     Why: default Tailwind stíny jsou neutrálně černé a na teplé indigo paletě
+     vypadají špinavě. Tónujeme je do brand indiga (#211A4B) a stavíme dvouvrstvě
+     (kontaktní stín + měkký ambient), což je to, co dělá plochu „zvednutou".
+     Přebití tokenů propíše změnu do všech existujících shadow-* utilit. */
+  --shadow-2xs: 0 1px 1px rgb(33 26 75 / 0.04);
+  --shadow-xs:  0 1px 2px rgb(33 26 75 / 0.05);
+  --shadow-sm:  0 1px 2px rgb(33 26 75 / 0.05), 0 2px 6px -2px rgb(33 26 75 / 0.06);
+  --shadow-md:  0 2px 4px -1px rgb(33 26 75 / 0.06), 0 10px 24px -14px rgb(33 26 75 / 0.20);
+  --shadow-lg:  0 4px 8px -2px rgb(33 26 75 / 0.07), 0 18px 36px -18px rgb(33 26 75 / 0.24);
+  --shadow-xl:  0 8px 16px -4px rgb(33 26 75 / 0.09), 0 32px 64px -28px rgb(33 26 75 / 0.30);
+  --shadow-2xl: 0 12px 24px -6px rgb(33 26 75 / 0.12), 0 48px 96px -40px rgb(33 26 75 / 0.38);
+
+  /* Přechodové křivky — jedna „spring" pro vjezdy panelů, jedna tichá pro hover. */
+  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --ease-quiet: cubic-bezier(0.3, 0, 0.2, 1);
 }
 
 /* ═══════════════════════ DARK MODE ═══════════════════════
@@ -104,6 +129,7 @@
 
   /* Plochy nad pozadím */
   --color-surface:   #1E1B2B;   /* karty / panely / topbar / sidebar */
+  --color-surface-raised: #272338;  /* modály, popovery, hero karty — o stupeň výš */
 
   /* Primary — zesvětlené pro kontrast a sytost na tmavém podkladu */
   --color-primary-50:  #221C3A;   /* soft pill bg (bg-primary-50) */
@@ -135,6 +161,98 @@
   --color-amber-700:  #E2AE5C;
   --color-purple-50:  #241A33;
   --color-purple-700: #C2A6EC;
+
+  /* Elevation ladder v dark: indigo tint tady nefunguje (na tmavém není vidět),
+     stíny musí být černé a hlubší. Zvednutost pak nese hlavně rim highlight níž. */
+  --shadow-2xs: 0 1px 1px rgb(0 0 0 / 0.30);
+  --shadow-xs:  0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-sm:  0 1px 2px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.40);
+  --shadow-md:  0 2px 4px -1px rgb(0 0 0 / 0.40), 0 10px 24px -14px rgb(0 0 0 / 0.60);
+  --shadow-lg:  0 4px 8px -2px rgb(0 0 0 / 0.45), 0 18px 36px -18px rgb(0 0 0 / 0.65);
+  --shadow-xl:  0 8px 16px -4px rgb(0 0 0 / 0.50), 0 32px 64px -28px rgb(0 0 0 / 0.70);
+  --shadow-2xl: 0 12px 24px -6px rgb(0 0 0 / 0.55), 0 48px 96px -40px rgb(0 0 0 / 0.75);
+}
+
+/* ═══════════════════════ INVERTOVANÁ NAVIGACE ═══════════════════════
+ * Why: topbar i postranní menu byly bílé jako obsah, takže aplikace neměla „hlavu"
+ * a brand indigo bylo vidět jen na dvou tlačítkách. Tmavá navigace nad světlým
+ * plátnem je klasický vzor účetního/pracovního nástroje — okamžitě odděluje
+ * ovládání od dat a nese značku.
+ *
+ * How to apply: class="nav-inverted" na <header> / <aside>. Nepřebarvujeme jednotlivé
+ * prvky — jen v tomto rozsahu přepíšeme HODNOTY tokenů, přesně jako to dělá `.dark`.
+ * Všechna existující `text-neutral-600`, `hover:bg-neutral-100`, `bg-surface`,
+ * `border-neutral-200` uvnitř navigace se tím překlopí sama, včetně rozbalených
+ * nabídek (ty jsou potomky headeru, takže zůstanou konzistentně tmavé).
+ *
+ * Accent tečky sekcí (-400/-500/-600) jsou dost syté, aby na tmavém podkladu
+ * držely čitelnost — ty se schválně nepřepisují. */
+.nav-inverted {
+  color-scheme: dark;
+  /* Text, který si barvu nikde nenastavuje, dědí `color` z <body> — a to je
+     v light režimu skoro černá. Bez tohohle řádku by v tmavé liště zmizel
+     (přesně to potkalo „My" v logu MyÚčto.cz). */
+  color: var(--color-neutral-900);
+
+  --color-surface: #211A4B;          /* deep brand */
+  --color-surface-raised: #2A2159;
+
+  /* Neutral obrácená a natónovaná do indiga. -50/-100 jsou tady výhradně hover
+     plochy, proto musí být SVĚTLEJŠÍ než surface (jinak by hover „propadal"). */
+  --color-neutral-50:  #2A2260;
+  --color-neutral-100: #332A70;
+  --color-neutral-200: #382F78;      /* dělicí linky */
+  --color-neutral-300: #453B8C;
+  --color-neutral-400: #8C82C0;      /* tlumené ikony */
+  --color-neutral-500: #A79EDA;
+  --color-neutral-600: #C6BFEE;      /* běžná položka menu */
+  --color-neutral-700: #DAD5F6;
+  --color-neutral-800: #EDEAFB;
+  --color-neutral-900: #FFFFFF;      /* aktivní / hover text */
+
+  --color-primary-50:  #332A70;      /* pilulka aktivní sekce */
+  --color-primary-100: #3F3488;
+  --color-primary-400: #A899EA;
+  --color-primary-600: #A493EA;
+  --color-primary-700: #C7BCF6;      /* aktivní položka menu */
+  --color-primary-800: #DAD3FA;
+  --color-primary-900: #ECE8FD;
+
+  /* Soft tinty stavů — stejná logika jako v .dark, jinak by v tmavé liště zářily. */
+  --color-success-50: #1B2E24;
+  --color-warning-50: #33280F;
+  --color-warning-100: #3D3013;
+  --color-warning-700: #E7B968;
+  --color-danger-50:  #34191C;
+  --color-accent-50:  #172B3D;
+  --color-accent-100: #1C3A52;
+  --color-teal-50:    #12313A;
+}
+
+/* V tmavém režimu musí navigace sedět na TÉŽE barevné ose jako plátno — sytě
+   indigová lišta (#1B1638) vedle tlumeně šedofialového obsahu se tlouklo, lišta
+   působila jako cizí prvek. Držíme proto stejný odstín, jen o stupeň hlouběji
+   než karty, takže chrome zůstává čitelně oddělený, ale barevně patří k sobě.
+   V light režimu problém není — tam je kontrast bílá vs. deep indigo záměr. */
+.dark .nav-inverted {
+  --color-surface: #191628;
+  --color-surface-raised: #221F35;
+  --color-neutral-50:  #232032;   /* hover plochy */
+  --color-neutral-100: #2A2740;
+  --color-neutral-200: #302C46;   /* dělicí linky */
+  --color-neutral-300: #3C3757;
+  --color-neutral-400: #7A7396;
+  --color-neutral-500: #9A93B4;
+  --color-neutral-600: #BAB3D0;
+  --color-neutral-700: #D2CCE4;
+  --color-neutral-800: #E6E2F0;
+
+  --color-primary-50:  #2A2447;   /* pilulka aktivní sekce */
+  --color-primary-100: #332C55;
+  --color-primary-600: #9585D8;
+  --color-primary-700: #B3A7E8;
+  --color-primary-800: #C9C0F0;
+  --color-primary-900: #E0DAF8;
 }
 
 html, body {
@@ -143,12 +261,221 @@ html, body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Široké seznamy (faktury, přijaté faktury) přetékaly na tabletu o pár desítek
+     pixelů a rozhoupaly celou stránku do stran, i když tabulka má vlastní
+     `overflow-x-auto`. Vodorovný scroll patří dovnitř tabulky, ne na stránku.
+     Musí to být `clip`, ne `hidden`: `hidden` udělá ze stránky scroll kontejner
+     a rozbilo by to `position: sticky` u topbaru i měsíčních rozdělovníků. */
+  overflow-x: clip;
+}
+
+/* ═══════════════════════ ATMOSFÉRA ═══════════════════════
+ * Why: plochá výplň #FBFAFD působí levně. Dvě vrstvy, obě pointer-events:none:
+ *   ::before — sotva znatelný radiální indigo nádech pod hlavičkou (dává stránce „hlavu"),
+ *   ::after  — filmové zrno 2,5 %, které rozbije digitální plochost.
+ * Obojí je fixed, takže se při scrollu nehýbe a nestojí nic navíc. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+body::before {
+  background:
+    radial-gradient(120rem 32rem at 50% -14rem, rgb(59 45 131 / 0.07), transparent 70%);
+}
+body::after {
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+.dark body::before {
+  background:
+    radial-gradient(120rem 32rem at 50% -14rem, rgb(124 104 196 / 0.10), transparent 70%);
+}
+.dark body::after {
+  opacity: 0.35;
+}
+/* Vlastní obsah aplikace musí ležet nad atmosférou. */
+#app { position: relative; z-index: 1; }
+
+@media (prefers-reduced-transparency: reduce) {
+  body::after { display: none; }
+}
+
+/* ═══════════════════════ FOCUS ═══════════════════════
+ * Why: focus stavy byly do teď různé podle komponenty (někde nativní outline,
+ * někde ring utilita, někde nic). Jeden prstenec všude = přístupnost i dojem
+ * záměrného designu. :where() drží specificitu na 0, takže lokální ring-* utility
+ * mají pořád přednost, když je potřeba výjimka. */
+:where(a, button, summary, input, select, textarea, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+/* Myš/dotyk nemá dostávat prstenec — jen klávesnice. */
+:where(a, button, summary, [role="button"]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ═══════════════════════ ČÍSLA ═══════════════════════
+ * Why: v účetní aplikaci se čísla čtou ve sloupci pod sebou. Proporcionální
+ * číslice rozhoupou desetinnou čárku a součty se opticky nedají porovnat.
+ * Mono řez i všechny buňky s částkou proto vždy tabulární. */
+:where(.font-mono, code, kbd, samp, pre) {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ═══════════════════════ DISPLAY ŘEZ ═══════════════════════
+ * Instrument Serif má malý x-height a pod ~20 px se rozpadá — proto ho nosí jen
+ * nadpisy stránek a hero čísla, nikdy ne tabulky, formuláře nebo popisky.
+ *
+ * H1 stylujeme globálně (mimo @layer, aby přebilo `font-semibold` z utilit):
+ * v aplikaci je přes 140 nadpisů stránek a ručně jim třídu dopisovat by znamenalo
+ * sáhnout do stovky souborů. font-weight musí být 400 — řez má jen jeden tah a
+ * `font-semibold` by vyrobil ošklivý syntetický tučný text.
+ *
+ * Opt-out je `class="font-sans"` na H1 — používá ho logo v hlavičce přihlašovacích
+ * a veřejných stránek, kde H1 nese značku „MyÚčto.cz" a ta musí vypadat stejně
+ * jako v topbaru aplikace, ne jako nadpis. */
+.font-display,
+h1:not(.font-sans) {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+/* Serif s malým x-heightem opticky ubere velikost — nejčastější `text-2xl`
+   nadpisy proto o kus zvětšíme, ať mají stejnou váhu jako dřív groteskem. */
+h1:where(.text-2xl) { font-size: 1.75rem; }
+h1:where(.text-xl) { font-size: 1.5rem; }
+
+/* Nadpisy detailů nesou vedle názvu i odznaky stavu a akční tlačítka (číslo
+   faktury + „Vystaveno" + „Zaúčtováno" + …). Ty musí zůstat v groteskovém řezu —
+   `font-family` se dědí, takže by se serif propsal i do 11px pilulek, kde se
+   rozpadá. Poznáme je podle zaoblení (každý odznak i tlačítko má `rounded*`). */
+h1 :where(.badge, button, [class*="rounded"]) {
+  font-family: var(--font-sans);
+  letter-spacing: normal;
 }
 
 :where(select, option, optgroup) {
   background-color: var(--color-surface);
   color: var(--color-neutral-900);
 }
+
+/* ═══════════════════════ SELECT ═══════════════════════
+ * Why: řada nativních <select> vedle sebe (Všechny stavy / Typy / Klienti / Měny /
+ * rok / období…) byla jediný prvek, který v celé aplikaci vypadal jako systémový
+ * dialog — Windows kreslí vlastní rámeček i šipku a ty ignorují paletu i radius.
+ * Kreslíme si šipku sami.
+ *
+ * Pravidla jsou schválně MIMO @layer: Tailwind utility (px-2, pr-3…) by jinak
+ * přebily `padding-inline-end` a text by se schoval pod šipku — nevrstvené CSS
+ * má přednost před vším, co je v layerech. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-inline-end: 1.9rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237A748C' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 0.875rem;
+}
+.dark select:not([multiple]):not([size]),
+.nav-inverted select:not([multiple]):not([size]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23968FAD' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+select:not([multiple]):not([size]):disabled {
+  opacity: 0.6;
+}
+
+/* ═══════════════════════ DATOVÉ TABULKY ═══════════════════════
+ * Why: v aplikaci je přes 250 tabulek ve 130 souborech a každá si vzhled hlavičky
+ * skládala z utilit ručně — existovalo přes deset variant `<thead class="...">`
+ * (někde `text-xs`, jinde nic, někde `uppercase`, jinde ne). Seznamy tak nevypadaly
+ * jako jeden systém. Sjednocujeme centrálně, ne přepisem 130 souborů.
+ *
+ * Pravidla, která mají platit BEZ VÝJIMKY (typografie hlavičky, tabulární číslice),
+ * jsou schválně mimo @layer, aby přebila utility jako `text-xs` / `tracking-wide`,
+ * které jsou v jednotlivých šablonách rozeseté. Vzhledové defaulty, které smí
+ * stránka přebít (pozadí hlavičky, hairline, hover), jsou níž v @layer components
+ * přes :where() — tam má utilita přednost.
+ *
+ * Opt-out: `class="table-plain"` na <table> vypne skin celý (pro tabulky použité
+ * k rozvržení nebo pro tiskové sestavy s vlastní typografií). */
+table:not(.table-plain) > :where(thead) > tr > th {
+  font-size: 0.6875rem;          /* 11px — hlavička je popisek, ne obsah */
+  font-weight: 600;
+  /* Prostrkání drží caps čitelné, ale každé setinky em se u dvanácti sloupců
+     sečtou do šířky tabulky — 0.11em stálo na tabletu 34 px navíc. */
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  /* Když se víceslovný popisek musí zalomit, ať se zalomí rovnoměrně
+     („ČÍSLO DOKLADU / DODAVATELE") místo osamělého slova na posledním řádku. */
+  text-wrap: balance;
+  /* Pozor: `white-space: nowrap` sem NEPATŘÍ. Vypadá to na hlavičce lépe, ale
+     zvětší min-content šířku tabulky (u seznamu faktur měřeno +111 px) a na
+     tabletu tím vytlačí celou stránku do vodorovného scrollu. Popisky sloupců
+     se musí umět zalomit. */
+}
+/* Číslice v tabulce musí stát ve sloupci pod sebou — jinak nejdou porovnat
+   řádové velikosti ani zkontrolovat součet. Textu se `tnum` nedotkne. */
+table:not(.table-plain) :where(td, th) {
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+/* Číselná buňka se nikdy nezalamuje — rozpadlá částka na dva řádky (viděno
+   v účetním deníku: „2 058 057,00" / „Kč") zničí čitelnost sloupce i jeho
+   zarovnání. Doplněk k nezlomitelné mezeře ve formatMoney(): ta drží pohromadě
+   číslo s jednotkou, tohle celou buňku (rozsahy, kurzy, „12 / 24").
+   Podmínkou je `font-mono`, ne jen `text-right`. Zarovnání doprava totiž nosí
+   i sloupce s větami (uzávěrkové kontroly), a `nowrap` na nich rozhodí šířky
+   celé tabulky — jedna dlouhá věta si vezme veškeré místo a ostatní sloupce
+   se smrsknou na pár znaků. */
+table:not(.table-plain) > :where(tbody, tfoot) > tr > td.text-right.font-mono {
+  white-space: nowrap;
+}
+/* Hlavní číselný sloupec je to, kvůli čemu se na seznam chodí — musí mít větší
+   váhu než datumy a popisky vedle. Vynechávají se buňky, které si barvu textu
+   řeší samy (`text-neutral-500` u kurzů, `text-danger-*` u záporných hodnot):
+   tam je ztlumení nebo obarvení záměr a přebít ho by byla chyba.
+   Opt-out pro další případy: dej buňce vlastní `text-*` třídu. */
+table:not(.table-plain) > tbody > tr > td.text-right.font-mono:not([class*="text-neutral-"]):not([class*="text-danger"]):not([class*="text-success"]):not([class*="text-warning"]):not([class*="text-primary"]) {
+  font-weight: 600;
+  color: var(--color-neutral-900);
+}
+
+/* ═══════════════════════ ZÁLOŽKY ═══════════════════════
+ * Podstránky (Banka, Účetní nastavení, Sklad, Profil…) používají shodný vzor
+ * `border-b-2` + `border-primary-600` na aktivní, `border-transparent` na
+ * ostatních — je jich 18 souborů a každý si ho skládá z utilit sám.
+ * Sjednocujeme tady, ať se nemusí přepisovat jeden po druhém.
+ *
+ * POZOR: záložky bývají v kontejneru s `overflow-x-auto` (scroll na mobilu).
+ * Ten je scroll kontejnerem i svisle, takže jakékoliv přetečení na výšku — třeba
+ * `margin-bottom: -1px`, kterým by pruh aktivní záložky sedl přesně na linku
+ * kontejneru — vyrobí na desktopu zbytečný svislý scrollbar. Proto tu měníme
+ * jen barvy a přechody, nic co zasahuje do rozvržení. */
+:where(button, a).border-b-2 {
+  transition: color 140ms var(--ease-quiet), border-color 140ms var(--ease-quiet);
+}
+/* Neaktivní záložka napoví podtržením, že je klikací — samotná změna barvy
+   textu se v hustém řádku snadno přehlédne. */
+:where(button, a).border-b-2.border-transparent:hover {
+  border-color: var(--color-neutral-300);
+}
+
+/* Nativní ikona kalendáře v input[type=date] je v light šedá, v dark skoro
+   neviditelná — sjednotíme ji na tlumenou neutrální a zvětšíme klikací plochu. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 120ms var(--ease-quiet);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 :where(select) {
   color-scheme: inherit;
@@ -221,4 +548,290 @@ html, body {
     padding-bottom: 0.3rem !important;
     font-size: 0.8125rem;
   }
+
+  /*
+   * ─── Datové tabulky: vzhledové defaulty ───
+   * Doplněk k nevrstveným pravidlům výš. Tady schválně přes :where() (specificita 0),
+   * takže utilita na konkrétní tabulce vždy vyhraje — sem patří jen to, co má
+   * platit, když si stránka nic vlastního neřekne. Díky tomu dostaly jednotný
+   * vzhled i tabulky s holým <thead> bez jediné třídy.
+   */
+  :where(table:not(.table-plain) > thead) {
+    background-color: var(--color-neutral-50);
+    color: var(--color-neutral-500);
+  }
+  :where(table:not(.table-plain) > thead > tr > th) {
+    border-bottom: 1px solid var(--color-neutral-200);
+  }
+  /* Hairline mezi řádky i tam, kde tbody nemá divide-y. */
+  :where(table:not(.table-plain) > tbody > tr + tr) {
+    border-top: 1px solid var(--color-neutral-100);
+  }
+  :where(table:not(.table-plain) > tbody > tr) {
+    transition: background-color 120ms var(--ease-quiet);
+  }
+  /*
+   * Zebra a hover pro VŠECHNY seznamy.
+   * Why: hairline mezi řádky stačí na deset řádků, ne na sto — v účetním deníku
+   * nebo v bance oko při čtení doprava sklouzne o řádek. Pruh je schválně
+   * mikroskopický (4 % neutrální barvy), takže nekřičí a funguje v obou motivech
+   * bez druhé sady hodnot.
+   * :where() drží specificitu na 0 → stavové tinty na řádku (po splatnosti,
+   * stornováno) i vlastní hover utility na stránce mají pořád přednost.
+   */
+  :where(table:not(.table-plain) > tbody > tr:nth-child(even)) {
+    background-color: color-mix(in oklab, var(--color-neutral-500) 4%, transparent);
+  }
+  :where(table:not(.table-plain) > tbody > tr):hover {
+    background-color: color-mix(in oklab, var(--color-primary-500) 7%, transparent);
+  }
+  /* Souhrnný řádek (tfoot) je závěr, ne další položka — oddělíme ho silněji. */
+  :where(table:not(.table-plain) > tfoot > tr > :where(td, th)) {
+    border-top: 2px solid var(--color-neutral-200);
+    font-weight: 600;
+  }
+
+  /*
+   * ─── Stavové odznaky: barva = anomálie ───
+   * Why: dokud měl každý stav stejně sytou pastelovou pilulku, byly „Vystaveno",
+   * „Odesláno" i „Po splatnosti" opticky rovnocenné a v seznamu stovky faktur
+   * nevyčnívalo nic. Běžné stavy proto ztišíme na tečku + text (tečka nese barvu,
+   * text čitelnost) a plnou výplň si necháme pro to, co vyžaduje akci.
+   * How to apply: přes statusBadgeClass() v composables/useFormat.ts.
+   */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    line-height: 1.25;
+  }
+  .badge-quiet {
+    background-color: transparent;
+    color: var(--color-neutral-600);
+    font-weight: 500;
+  }
+  .badge-quiet::before {
+    content: "";
+    flex: none;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background-color: var(--badge-dot, var(--color-neutral-400));
+  }
+  .badge-loud {
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px var(--badge-ring, transparent);
+  }
+
+  /*
+   * Tvar odznaků napříč moduly.
+   * Why: sklad, dokumenty, banka, automatizace a další si pilulky skládají inline
+   * z utilit (`text-xs px-2 py-0.5 rounded` + barevný tint) — je jich přes 700
+   * a přepsat je jeden po druhém není reálné ani bezpečné. Sjednotíme aspoň tvar:
+   * plné zaoblení a jemný prstenec v barvě textu, takže tint dostane definici
+   * a všechny odznaky v aplikaci vypadají jako jedna rodina.
+   *
+   * `[class~="rounded"]` matchuje jen holý token `rounded` (ne `rounded-md`),
+   * v kombinaci s `py-0.5` je to přesně vzor odznaku.
+   * Výjimky: `.badge` (tiché stavové odznaky mají průhledné pozadí, prstenec by
+   * je udělal z ničeho viditelné) a cokoliv s vlastním `border` (drobná tlačítka
+   * typu „Výkaz" — dvojitý obrys).
+   */
+  :where(span, a, button)[class~="rounded"][class*="py-0.5"]:not(.badge):not([class*="border"]) {
+    border-radius: 9999px;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 16%, transparent);
+  }
+
+  .badge-draft     { --badge-dot: var(--color-neutral-400); }
+  .badge-issued    { --badge-dot: var(--color-primary-500); }
+  .badge-sent      { --badge-dot: var(--color-teal-500); }
+  .badge-paid      { --badge-dot: var(--color-success-500); }
+  .badge-cancelled { --badge-dot: var(--color-neutral-300); color: var(--color-neutral-400); }
+  .badge-reminded  { --badge-ring: color-mix(in oklab, var(--color-warning-500) 30%, transparent); }
+  .badge-partial   { --badge-ring: color-mix(in oklab, var(--color-amber-600) 30%, transparent); }
+  .badge-overpaid  { --badge-ring: color-mix(in oklab, var(--color-purple-700) 30%, transparent); }
+
+  /*
+   * Levá lišta u řádku, který volá po akci (po splatnosti).
+   * Why: plošný červený tint řádku je při dvaceti fakturách na obrazovce hlučný;
+   * 2px hrana je stejně jednoznačná a nechá data v klidu.
+   * Kreslíme ji inset stínem na první buňce — `border-left` na <tr> se
+   * v border-collapse tabulce nevykreslí.
+   */
+  tr.row-flagged > :where(td, th):first-child {
+    box-shadow: inset 2px 0 0 var(--color-danger-500);
+  }
+
+  /*
+   * Lišta akcí na konci formuláře.
+   * Why: „Zrušit / Uložit" nalepené na posledním poli vypadá jako jeho součást —
+   * v modálu úpravy uživatele seděla tlačítka těsně pod polem Heslo. Linka
+   * a vzduch je oddělí jako závěr formuláře.
+   * Platí na každý <footer> zarovnaný doprava uvnitř <form>, takže to nemusí
+   * řešit každý dialog zvlášť.
+   */
+  :where(form footer[class*="justify-end"]) {
+    border-top: 1px solid var(--color-neutral-200);
+    padding-top: 1rem;
+  }
+
+  /*
+   * Rim highlight na plochách v dark módu.
+   * Why: tmavé UI vypadá prémiově díky 1px světlé hraně nahoře — simuluje světlo
+   * dopadající na zvednutou plochu. Bez ní jsou karty jen tmavé obdélníky.
+   * :where() drží specificitu 0, takže jakákoliv shadow-* utilita na téže kartě
+   * vyhraje a rim se neuplatní (což je správně — tam hloubku nese stín).
+   */
+  :where(.dark .bg-surface) {
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045);
+  }
+
+  /*
+   * Sekční štítek v editoriálním stylu: caps popisek a hairline táhnoucí se
+   * k pravému okraji. Nahrazuje plovoucí „pill" štítky sekcí na dashboardu.
+   * How to apply: <h2 class="rule-label"><span>Vystavené faktury</span></h2>
+   */
+  .rule-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-neutral-500);
+  }
+  .rule-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, var(--color-neutral-200), transparent);
+  }
+
+  /*
+   * Mikro-bar za částkou v buňce.
+   * Why: seznam faktur je zeď čísel; podíl na největší částce v měsíci se dá
+   * ukázat bez jediného pixelu navíc — proužek leží POD textem v buňce.
+   * How to apply: na <td class="amount-cell" style="--bar: 62%">.
+   */
+  .amount-cell {
+    position: relative;
+    isolation: isolate;
+  }
+  .amount-cell::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0.25rem;
+    bottom: 0.25rem;
+    width: var(--bar, 0%);
+    z-index: -1;
+    border-radius: 2px;
+    background: linear-gradient(to left, var(--color-primary-500), transparent);
+    opacity: 0.1;
+    transition: opacity 150ms var(--ease-quiet);
+  }
+  tr:hover > .amount-cell::before { opacity: 0.18; }
+
+  /*
+   * Vlastní checkbox.
+   * Why: nativní Windows checkbox je jediný prvek, který v celé appce vypadá
+   * jako systémový dialog. Kreslíme vlastní z brand tokenů — funkčně beze změny
+   * (pořád je to input[type=checkbox], takže klávesnice i a11y drží).
+   */
+  input[type="checkbox"]:where(:not([data-native])) {
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    border: 1.5px solid var(--color-neutral-300);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-surface);
+    display: inline-grid;
+    place-content: center;
+    cursor: pointer;
+    transition: border-color 120ms var(--ease-quiet), background-color 120ms var(--ease-quiet);
+  }
+  input[type="checkbox"]:where(:not([data-native]))::before {
+    content: "";
+    width: 0.625rem;
+    height: 0.625rem;
+    transform: scale(0);
+    transition: transform 120ms var(--ease-spring);
+    background-color: #fff;
+    clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 16%, 82% 0%, 38% 65%);
+  }
+  input[type="checkbox"]:where(:not([data-native])):checked {
+    background-color: var(--color-primary-600);
+    border-color: var(--color-primary-600);
+  }
+  input[type="checkbox"]:where(:not([data-native])):checked::before { transform: scale(1); }
+  input[type="checkbox"]:where(:not([data-native])):indeterminate {
+    background-color: var(--color-primary-600);
+    border-color: var(--color-primary-600);
+  }
+  input[type="checkbox"]:where(:not([data-native])):indeterminate::before {
+    transform: scale(1);
+    clip-path: inset(42% 12% 42% 12% round 1px);
+  }
+  input[type="checkbox"]:where(:not([data-native])):hover:not(:checked):not(:disabled) {
+    border-color: var(--color-primary-400);
+  }
+  input[type="checkbox"]:where(:not([data-native])):disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /*
+   * Postupné nabíhání řádků — POUZE při prvním vykreslení seznamu.
+   * Why: animovat řádky při filtrování by zdržovalo práci; při prvním otevření
+   * naopak dá seznamu rytmus. Zpoždění řídí --i na řádku, strop je 14 řádků,
+   * aby dlouhý seznam nedobíhal vteřinu.
+   * How to apply: class="stagger-in" na <tbody>.
+   */
+  .stagger-in > tr {
+    animation: row-in 260ms var(--ease-quiet) backwards;
+    animation-delay: calc(min(var(--i, 0), 14) * 18ms);
+  }
+  @keyframes row-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* Vjezd karet/panelů — stejný rytmus jako řádky, jen o kus měkčí. */
+  .rise-in {
+    animation: rise-in 380ms var(--ease-spring) backwards;
+    animation-delay: calc(min(var(--i, 0), 8) * 45ms);
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
 }
+
+/* Bez výjimky respektujeme systémové omezení pohybu. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ═══════════════════════ PŘECHODY STRÁNEK ═══════════════════════
+ * View Transitions API (Chromium/Edge). Přechod je záměrně krátký a bez posunu
+ * do stran — u pracovního nástroje jde o plynulost, ne o efekt. */
+@view-transition { navigation: auto; }
+::view-transition-old(root) {
+  animation: vt-out 90ms var(--ease-quiet) both;
+}
+::view-transition-new(root) {
+  animation: vt-in 180ms var(--ease-quiet) both;
+}
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(4px); } }

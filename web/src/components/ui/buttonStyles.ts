@@ -12,25 +12,41 @@
  */
 export type ActionVariant = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'accent'
 
+/*
+ * `transition-all` + `active:translate-y-px`: tlačítko musí na stisk reagovat,
+ * jinak působí jako obrázek. Posun o pixel dolů je nejlevnější „tactile" signál
+ * a nepotřebuje žádný stav v JS.
+ */
 export const BTN_BASE =
-  'cursor-pointer px-3 h-9 text-sm font-medium rounded-md inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed'
+  'cursor-pointer px-3 h-9 text-sm font-medium rounded-md inline-flex items-center gap-1.5 whitespace-nowrap ' +
+  'transition-all duration-150 active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'disabled:active:translate-y-0 disabled:shadow-none'
 
+/*
+ * Plná tlačítka nesou stín: bez něj splývají s plochou karty a hlavní akce
+ * stránky nemá žádnou převahu nad ostatními. Stín je v brand indigu (viz
+ * --shadow-* v main.css), takže sedí do palety a nešpiní barvu tlačítka.
+ */
 export const FILLED: Record<ActionVariant, string> = {
-  primary: 'bg-primary-600 hover:bg-primary-700 text-white',
-  success: 'bg-success-600 hover:bg-success-700 text-white',
-  warning: 'bg-warning-500 hover:bg-warning-600 text-white',
-  danger:  'bg-danger-600 hover:bg-danger-700 text-white',
-  neutral: 'bg-neutral-700 hover:bg-neutral-800 text-white',
-  accent:  'bg-accent-600 hover:bg-accent-700 text-white',
+  primary: 'bg-primary-600 hover:bg-primary-700 text-white shadow-sm hover:shadow-md',
+  success: 'bg-success-600 hover:bg-success-700 text-white shadow-sm hover:shadow-md',
+  warning: 'bg-warning-500 hover:bg-warning-600 text-white shadow-sm hover:shadow-md',
+  danger:  'bg-danger-600 hover:bg-danger-700 text-white shadow-sm hover:shadow-md',
+  neutral: 'bg-neutral-700 hover:bg-neutral-800 text-white shadow-sm hover:shadow-md',
+  accent:  'bg-accent-600 hover:bg-accent-700 text-white shadow-sm hover:shadow-md',
 }
 
+/*
+ * Outline varianty dostávají na hover sytější okraj — samotná změna pozadí
+ * na -50 tintu je v dark módu skoro neviditelná a tlačítko působilo mrtvě.
+ */
 export const OUTLINE: Record<ActionVariant, string> = {
-  primary: 'border border-primary-500/40 text-primary-700 hover:bg-primary-50',
-  success: 'border border-success-500/50 text-success-600 hover:bg-success-50',
-  warning: 'border border-warning-500/50 text-warning-600 hover:bg-warning-50',
-  danger:  'border border-danger-500/50 text-danger-500 hover:bg-danger-50',
-  neutral: 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50',
-  accent:  'border border-accent-500/40 text-accent-700 hover:bg-accent-50',
+  primary: 'border border-primary-500/40 text-primary-700 hover:bg-primary-50 hover:border-primary-500/70',
+  success: 'border border-success-500/50 text-success-600 hover:bg-success-50 hover:border-success-500/80',
+  warning: 'border border-warning-500/50 text-warning-600 hover:bg-warning-50 hover:border-warning-500/80',
+  danger:  'border border-danger-500/50 text-danger-500 hover:bg-danger-50 hover:border-danger-500/80',
+  neutral: 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50 hover:border-neutral-400',
+  accent:  'border border-accent-500/40 text-accent-700 hover:bg-accent-50 hover:border-accent-500/70',
 }
 
 export const MENU_ICON: Record<ActionVariant, string> = {
@@ -53,7 +69,9 @@ export function btnOutline(variant: ActionVariant = 'neutral'): string {
 // Kompaktní varianta (h-7, text-xs) pro husté řádky tabulek — akce v řádku výpisu
 // transakcí apod., kde plná výška h-9 zabere moc místa.
 export const BTN_SM_BASE =
-  'cursor-pointer px-2 h-7 text-xs font-medium rounded-md inline-flex items-center gap-1 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed'
+  'cursor-pointer px-2 h-7 text-xs font-medium rounded-md inline-flex items-center gap-1 whitespace-nowrap ' +
+  'transition-all duration-150 active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'disabled:active:translate-y-0 disabled:shadow-none'
 
 export function btnFilledSm(variant: ActionVariant = 'primary'): string {
   return `${BTN_SM_BASE} ${FILLED[variant]}`

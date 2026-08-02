@@ -44,8 +44,10 @@ function statusClass(item: TaxCalendarItem): string {
 
 <template>
   <div v-if="items.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-    <header class="px-5 py-3 border-b border-neutral-200 bg-gradient-to-r from-primary-50 to-white rounded-t-lg">
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-primary-700">📅 {{ t('crm.tax_calendar.title') }}</h3>
+    <!-- `to-white` byla natvrdo zapsaná barva: v dark módu z ní byl doslova bílý
+         pruh přes celou hlavičku. Gradient musí končit v tokenu plochy. -->
+    <header class="px-5 py-3 border-b border-neutral-200 bg-gradient-to-r from-primary-50 to-surface rounded-t-lg">
+      <h3 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.12em] text-primary-700"><span aria-hidden="true">📅</span>{{ t('crm.tax_calendar.title') }}</h3>
     </header>
     <ul class="divide-y divide-neutral-100">
       <li v-for="(item, idx) in items" :key="idx" class="px-5 py-3">

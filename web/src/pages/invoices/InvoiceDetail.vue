@@ -2040,9 +2040,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
             <dt>{{ t('invoice.totals.vat_total') }}</dt>
             <dd class="font-mono">{{ formatMoney(invoice.totals.vat, invoice.currency) }}</dd>
           </div>
-          <div class="flex justify-between border-t border-neutral-300 pt-2 mt-2 text-lg font-semibold text-primary-700">
-            <dt>{{ t('invoice.totals.total') }}</dt>
-            <dd class="font-mono">{{ formatMoney(invoice.totals.with_vat, invoice.currency) }}</dd>
+          <!-- Celková částka je závěr celého dokladu — dostává silnější linku,
+               vzduch a o dva stupně větší číslo. Dřív se lišila od mezisoučtů
+               jen barvou a oko po ní muselo hledat. -->
+          <div class="flex items-baseline justify-between gap-4 border-t-2 border-neutral-300 pt-3 mt-3">
+            <dt class="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{{ t('invoice.totals.total') }}</dt>
+            <dd class="font-mono text-2xl font-semibold text-primary-700 tabular-nums">{{ formatMoney(invoice.totals.with_vat, invoice.currency) }}</dd>
           </div>
           <div v-if="invoice.advance_paid_amount > 0" class="flex justify-between text-sm text-neutral-600 pt-2">
             <dt>{{ t('invoice.totals.advance_deduction') }}</dt>

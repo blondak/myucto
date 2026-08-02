@@ -709,7 +709,7 @@ const quickActions = computed(() => {
     { to: '/logbook?tab=fuel&new=fuel', label: t('nav.quick_fueling'), icon: ICONS.fuel },
     { to: '/accounting/journal/new', label: t('nav.quick_journal'), icon: ICONS.accounting },
   ]
-  return [
+  const actions = [
     { to: '/invoices/new',          label: t('nav.quick_invoice'),   icon: ICONS.invoices },
     { to: '/invoices/new?type=proforma', label: t('nav.quick_proforma'), icon: ICONS.proforma },
     { to: '/recurring/new',         label: t('nav.quick_recurring'), icon: ICONS.recurring },
@@ -734,6 +734,18 @@ const quickActions = computed(() => {
     icon: action.icon,
     newTo: action.to,
   }))
+  // AI import přijaté faktury patří do rychlého „+" hned za Přijatou fakturu —
+  // je to druhá nejčastější cesta, jak doklad do systému dostat (nahraju PDF,
+  // AI z něj udělá draft). Nejde o zakládací route, takže `canCreate` by ji
+  // vyhodila; gate je stejný jako u položky v menu — právo `purchase_invoices.scan`
+  // (zrcadlí BE check v AiExtractPdfAction, readonly ji nevidí).
+  if (!auth.isDemo && auth.canWrite('purchase_invoices.scan')) {
+    const purchaseIdx = actions.findIndex(a => a.to === '/purchase-invoices/new')
+    const aiImport = { to: '/purchase-invoices/ai-import', label: t('nav.ai_import'), icon: ICONS.ai }
+    if (purchaseIdx === -1) actions.push(aiImport)
+    else actions.splice(purchaseIdx + 1, 0, aiImport)
+  }
+  return actions
 })
 
 /**
@@ -1065,7 +1077,7 @@ onBeforeUnmount(() => {
   <div class="min-h-screen flex flex-col bg-neutral-50" @keydown.esc="userMenuOpen = false; quickOpen = false">
 
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
-    <header class="sticky top-0 z-30 bg-surface border-b border-neutral-200 dark:border-neutral-300 shadow-sm dark:shadow-[0_3px_14px_rgba(0,0,0,0.38)]">
+    <header class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
       <div class="h-12 px-3 flex items-center gap-1">
         <RouterLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
           <img src="/styles/logo.svg" alt="MyÚčto" class="w-7 h-7" />
@@ -1284,7 +1296,7 @@ onBeforeUnmount(() => {
             ? 'top-[5.125rem] h-[calc(100vh-5.125rem)]'
             : 'top-12 h-[calc(100vh-3rem)]',
           'w-full lg:w-60 shrink-0',
-          'bg-surface border-r border-neutral-200 dark:border-neutral-300 dark:shadow-[3px_0_14px_rgba(0,0,0,0.28)]',
+          'nav-inverted bg-surface border-r border-neutral-200 shadow-lg lg:shadow-none',
           'flex flex-col',
           'transition-transform duration-200 ease-in-out',
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
@@ -1484,7 +1496,10 @@ onBeforeUnmount(() => {
           <RouterView />
         </main>
 
-        <footer class="sticky bottom-0 z-20 border-t border-neutral-200 dark:border-neutral-300 bg-surface shadow-[0_-2px_8px_rgba(21,19,29,0.05)] dark:shadow-[0_-4px_16px_rgba(0,0,0,0.34)]">
+        <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
+             takže nosí i stejnou tmavou plochu. Světlá patička pod tmavou lištou
+             působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
+        <footer class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
           <div class="hidden lg:grid h-11 grid-cols-[minmax(14rem,1fr)_auto_minmax(23rem,1fr)] items-center gap-4 px-3">
             <div class="w-full max-w-sm">
               <GlobalSearch

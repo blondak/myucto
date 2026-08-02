@@ -15,7 +15,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -40,6 +40,12 @@ const router = useRouter()
 const route = useRoute()
 
 const groups = ref<MonthGroup[]>([])
+/**
+ * Postupné nabíhání řádků (.stagger-in) běží JEN u prvního vykreslení seznamu.
+ * Při filtrování by animace zdržovala práci — a filtr je tady to nejpoužívanější,
+ * co uživatel dělá. Vypínáme ho hned, jak dorazí první dávka dat.
+ */
+const staggerRows = ref(true)
 const total = ref(0)
 const page = ref(1)
 const pages = ref(1)
@@ -76,6 +82,57 @@ const activeFilterCount = computed(() => {
   return n
 })
 
+/**
+ * Aktivní filtry jako odstranitelné chipy pod lištou.
+ *
+ * Why: filtry jsou nově sbalené za tlačítko „Filtry (N)" i na desktopu — deset
+ * trvale rozbalených selectů zabíralo dva řádky nad každým seznamem, i když
+ * uživatel nefiltroval. Chipy nesou tutéž informaci čitelněji: rovnou vidíš CO
+ * je zapnuté, místo abys v řadě ovládacích prvků hledal, který není na výchozí
+ * hodnotě. Rok se nezobrazuje ze stejného důvodu, proč se nepočítá do
+ * `activeFilterCount` — má výchozí hodnotu a byl by v chipech pořád.
+ */
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (statusFilter.value) chips.push({ key: 'status', value: statusLabel(statusFilter.value) })
+  if (typeFilter.value) chips.push({ key: 'type', value: typeLabel(typeFilter.value) })
+  if (clientFilter.value !== '') {
+    const c = clients.value.find(x => x.id === clientFilter.value)
+    if (c) chips.push({ key: 'client', value: c.company_name })
+  }
+  if (currencyFilter.value) chips.push({ key: 'currency', value: currencyFilter.value })
+  if (monthFilter.value !== '') {
+    chips.push({ key: 'month', value: monthOptions.value[Number(monthFilter.value) - 1] ?? String(monthFilter.value) })
+  }
+  if (dateFrom.value || dateTo.value) {
+    chips.push({ key: 'dates', value: `${dateFrom.value ? formatDate(dateFrom.value) : '…'} – ${dateTo.value ? formatDate(dateTo.value) : '…'}` })
+  }
+  if (overdueOnly.value) chips.push({ key: 'overdue', value: t('invoice.overdue_only') })
+  if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('invoice.unpaid_only') })
+  if (bookedFilter.value) {
+    chips.push({ key: 'booked', value: bookedFilter.value === '1' ? t('common.booked_badge') : t('common.unbooked_badge') })
+  }
+  return chips
+})
+
+function clearFilter(key: string) {
+  switch (key) {
+    case 'status': statusFilter.value = ''; break
+    case 'type': typeFilter.value = ''; break
+    case 'client': clientFilter.value = ''; break
+    case 'currency': currencyFilter.value = ''; break
+    case 'month': monthFilter.value = ''; break
+    case 'dates': dateFrom.value = ''; dateTo.value = ''; break
+    case 'overdue': overdueOnly.value = false; break
+    case 'unpaid': unpaidOnly.value = false; break
+    case 'booked': bookedFilter.value = ''; break
+  }
+}
+
+function clearAllFilters() {
+  for (const chip of filterChips.value) clearFilter(chip.key)
+}
+
 const selectedIds = ref<number[]>([])
 const bulkBusy = ref(false)
 const bulkPdfOpen = ref(false)
@@ -105,6 +162,29 @@ function rowLockedForMe(inv: InvoiceListItem): boolean {
 function lockTitle(inv: InvoiceListItem): string {
   const reasons = (inv.locked?.reasons ?? []).map(r => t(`lock.reason.${r}`)).join(', ')
   return reasons ? `${t('lock.badge')}: ${reasons}` : (t('lock.badge') as string)
+}
+
+/**
+ * Šířka mikro-baru za částkou = podíl na nejvyšší faktuře TÉŽE měny v měsíci.
+ *
+ * Why: seznam je zeď čísel, ve které se řádově velká faktura ztrácí stejně jako
+ * drobná. Proužek pod textem (viz .amount-cell v styles/main.css) dá řádu velikosti
+ * tvar, aniž by zabral jediný pixel navíc.
+ *
+ * Měny se nemíchají — 100 EUR a 100 CZK nejsou porovnatelné, takže každá měna má
+ * ve skupině vlastní maximum. Minimum 4 % drží proužek viditelný i u drobných částek.
+ */
+function amountBarWidth(inv: InvoiceListItem, g: MonthGroup): string {
+  const value = Math.abs(inv.amount_to_pay ?? inv.total_with_vat ?? 0)
+  if (value === 0) return '0%'
+  let max = 0
+  for (const other of g.invoices) {
+    if (other.currency !== inv.currency) continue
+    const v = Math.abs(other.amount_to_pay ?? other.total_with_vat ?? 0)
+    if (v > max) max = v
+  }
+  if (max === 0) return '0%'
+  return `${Math.max(4, Math.round((value / max) * 100))}%`
 }
 
 function toggleSelected(id: number) {
@@ -487,6 +567,11 @@ async function load(reset = true) {
   } finally {
     loading.value = false
     loadingMore.value = false
+    // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
+    // „načíst další") už musí být okamžité.
+    if (staggerRows.value) {
+      window.setTimeout(() => { staggerRows.value = false }, 600)
+    }
   }
 }
 
@@ -705,14 +790,28 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
     </div>
 
     <!-- Filtry -->
-    <FilterBar :active-count="activeFilterCount">
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="clearAllFilters"
+    >
       <template #primary>
-        <input
-          v-model="search"
-          type="search"
-          :placeholder="t('invoice.search_placeholder')"
-          class="flex-1 min-w-48 h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
-        />
+        <!-- Hledání je nejpoužívanější prvek lišty, takže dostává nejvíc místa
+             a ikonu lupy uvnitř — dřív bylo nejmenší z deseti ovládacích prvků. -->
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            v-model="search"
+            type="search"
+            :placeholder="t('invoice.search_placeholder')"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          />
+        </div>
       </template>
         <select v-model="statusFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('invoice.all_statuses') }}</option>
@@ -799,12 +898,18 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
 
       <!-- Skupiny po měsících -->
       <section v-for="g in groups" :key="g.month" class="mb-5">
-        <header class="sticky top-16 z-[5] flex items-center justify-between bg-neutral-50/95 backdrop-blur border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
-          <div class="flex items-center gap-3">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ formatMonth(g.month) }}</h2>
-            <span class="text-xs text-neutral-500">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
+        <!-- Měsíční rozdělovník ve stylu účetní knihy: název měsíce vlevo, součet
+             v mono vpravo, mezi tím vzduch. Sticky, protože při dvaceti řádcích
+             na obrazovce je „ve kterém měsíci jsem" ta nejčastější otázka. -->
+        <header class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+          <div class="flex items-baseline gap-2.5 shrink-0">
+            <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
+            <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }} {{ g.count === 1 ? t('invoice.doc_1') : (g.count < 5 ? t('invoice.doc_2_4') : t('invoice.doc_5plus')) }}</span>
           </div>
-          <div class="flex items-center gap-3 text-xs">
+          <span class="hidden sm:block flex-1 h-px bg-gradient-to-r from-neutral-200 to-transparent" aria-hidden="true"></span>
+          <!-- Na mobilu se součty musí umět zalomit — `shrink-0` by je vytlačilo
+               za pravou hranu a vyrobilo vodorovný scroll celé stránky. -->
+          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 min-w-0 text-xs">
             <span v-for="tot in g.totals_per_currency" :key="tot.currency" class="font-mono">
               <span class="text-neutral-500">{{ tot.currency }}:</span>
               <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tot.with_vat, tot.currency) }}</span>
@@ -821,7 +926,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
           <div class="overflow-x-auto">
           <table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
-            <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+            <thead class="bg-neutral-50/70 text-neutral-500 text-[11px] uppercase tracking-[0.11em] border-b border-neutral-200">
               <tr>
                 <th class="px-2 py-2 w-10 text-center">
                   <input
@@ -851,14 +956,15 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 </th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-neutral-100">
+            <tbody class="divide-y divide-neutral-100" :class="staggerRows ? 'stagger-in' : ''">
               <tr
-                v-for="inv in g.invoices"
+                v-for="(inv, ri) in g.invoices"
                 :key="inv.id"
                 @click="openInvoice(inv, $event)"
                 @auxclick.prevent="openInvoice(inv, $event)"
                 class="cursor-pointer hover:bg-neutral-50 transition"
                 :class="invoiceRowClass(inv.due_date, inv.status)"
+                :style="staggerRows ? { '--i': ri } : undefined"
               >
                 <td class="px-2 py-2.5 text-center" @click.stop>
                   <input
@@ -885,7 +991,11 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     {{ formatDate(inv.due_date) }}
                   </span>
                 </td>
-                <td v-if="tbl.isVisible('amount')" class="px-4 py-2.5 text-right font-mono">
+                <td
+                  v-if="tbl.isVisible('amount')"
+                  class="amount-cell px-4 py-2.5 text-right font-mono font-semibold text-neutral-900"
+                  :style="{ '--bar': amountBarWidth(inv, g) }"
+                >
                   {{ formatMoney(inv.amount_to_pay ?? inv.total_with_vat, inv.currency) }}
                 </td>
                 <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center" @click.stop>

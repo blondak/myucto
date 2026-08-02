@@ -84,11 +84,16 @@ onMounted(async () => {
 
 <template>
   <!-- ═══ Action items widget (daily TODO) ═══ -->
-  <div v-if="actionItems && actionItems.total > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-    <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between bg-gradient-to-r from-primary-50 to-white rounded-t-lg">
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-primary-700">
-        ⚡ {{ t('crm.action_items.title') }}
-        <span class="ml-2 px-1.5 py-0.5 bg-primary-600 text-white rounded text-xs">{{ actionItems.total }}</span>
+  <!-- Nejcennější widget na dashboardu (co mám dneska udělat) měl doteď vzhled
+       nejtišší karty. Zvednutá plocha + brand rámeček mu dávají váhu, kterou
+       jeho obsah zaslouží. `to-white` bylo navíc v dark módu doslova bílé —
+       gradient musí končit v tokenu plochy, ne v natvrdo zapsané barvě. -->
+  <div v-if="actionItems && actionItems.total > 0" class="bg-surface-raised border border-primary-500/25 rounded-xl shadow-md overflow-hidden">
+    <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between gap-3 bg-gradient-to-r from-primary-50 to-surface">
+      <h3 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.12em] text-primary-700">
+        <span aria-hidden="true">⚡</span>
+        {{ t('crm.action_items.title') }}
+        <span class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 bg-primary-600 text-white rounded-full text-xs font-semibold tabular-nums">{{ actionItems.total }}</span>
       </h3>
       <button v-if="actionItems.dismissed_count > 0 && auth.canWrite('dashboard')" type="button" @click="restoreAllDismissed"
         class="text-xs text-neutral-500 hover:text-primary-600 underline decoration-dotted">
@@ -109,7 +114,7 @@ onMounted(async () => {
           </div>
         </RouterLink>
         <div class="flex items-center gap-1 ml-3 shrink-0">
-          <RouterLink :to="item.link" class="text-neutral-400 hover:text-neutral-600 p-1" :title="t('crm.action_items.go_to')">
+          <RouterLink :to="item.link" class="text-neutral-400 hover:text-primary-700 p-1 transition-transform hover:translate-x-0.5" :title="t('crm.action_items.go_to')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </RouterLink>
           <button v-if="auth.canWrite('dashboard')" type="button" @click.stop="toggleMenu(idx)"

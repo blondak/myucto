@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -43,6 +44,34 @@ const filters = reactive({
   status: '' as '' | StockDocStatus,
   q: '',
 })
+
+/**
+ * Odznáček a chipy pro sbalenou lištu filtrů.
+ * `doc_type` se nepočítá — ten se přepíná záložkami nad lištou (Vše / Příjemky /
+ * Výdejky / Převodky), takže je vidět sám o sobě a jako chip by informaci zdvojil.
+ */
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (filters.warehouse_id !== '') n++
+  if (filters.status) n++
+  return n
+})
+
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (filters.warehouse_id !== '') {
+    const w = warehouses.value.find(x => x.id === filters.warehouse_id)
+    if (w) chips.push({ key: 'warehouse', value: w.name })
+  }
+  if (filters.status) chips.push({ key: 'status', value: t(`stock.doc_status.${filters.status}`) })
+  return chips
+})
+
+function clearFilter(key: string) {
+  if (key === 'warehouse') filters.warehouse_id = ''
+  if (key === 'status') filters.status = ''
+  applyFilters()
+}
 
 async function load() {
   loading.value = true
@@ -169,38 +198,46 @@ watch(() => route.query.type, (v) => {
       </button>
     </div>
 
-    <!-- Filtry -->
-    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.documents.filter_warehouse') }}</label>
-          <select v-model="filters.warehouse_id" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-            <option value="">{{ t('common.all') }}</option>
-            <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
-          </select>
+    <!-- Filtry — sjednoceno se zbytkem aplikace: hledání vpředu, ostatní filtry
+         sbalené za „Filtry (N)", aktivní stav nesou chipy. -->
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="resetFilters"
+    >
+      <template #primary>
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input v-model="filters.q" type="search" :placeholder="t('stock.documents.filter_q')"
+            @keyup.enter="applyFilters" @change="applyFilters"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.documents.filter_status') }}</label>
-          <select v-model="filters.status" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="draft">{{ t('stock.doc_status.draft') }}</option>
-            <option value="posted">{{ t('stock.doc_status.posted') }}</option>
-            <option value="reversed">{{ t('stock.doc_status.reversed') }}</option>
-          </select>
-        </div>
-        <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.documents.filter_q') }}</label>
-          <input v-model="filters.q" type="text" @keyup.enter="applyFilters" @change="applyFilters"
-            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-        </div>
-      </div>
-      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
-        <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('stock.documents.reset_filters') }}</button>
+      </template>
+
+      <select v-model="filters.warehouse_id" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        :title="t('stock.documents.filter_warehouse')">
+        <option value="">{{ t('stock.documents.filter_warehouse') }}: {{ t('common.all') }}</option>
+        <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+      </select>
+      <select v-model="filters.status" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        :title="t('stock.documents.filter_status')">
+        <option value="">{{ t('stock.documents.filter_status') }}: {{ t('common.all') }}</option>
+        <option value="draft">{{ t('stock.doc_status.draft') }}</option>
+        <option value="posted">{{ t('stock.doc_status.posted') }}</option>
+        <option value="reversed">{{ t('stock.doc_status.reversed') }}</option>
+      </select>
+
+      <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
-      </div>
-    </div>
+      </template>
+    </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
     <div v-else-if="documents.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.documents.empty') }}</div>

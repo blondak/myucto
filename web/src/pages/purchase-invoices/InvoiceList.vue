@@ -20,7 +20,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -91,6 +91,81 @@ const activeFilterCount = computed(() => {
   if (importBatchFilter.value) n++
   return n
 })
+
+/**
+ * Aktivní filtry jako odstranitelné chipy — stejný vzor jako u vydaných faktur.
+ * Filtry jsou sbalené za tlačítko „Filtry (N)" i na desktopu, takže musí být
+ * na první pohled vidět, co je zapnuté; jinak uživatel netuší, proč seznam
+ * nic nevrací. Rok se nezobrazuje, má výchozí hodnotu a byl by tam pořád.
+ */
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (statusFilter.value) chips.push({ key: 'status', value: t(`purchase_invoice.status.${statusFilter.value}`) })
+  if (kindFilter.value) chips.push({ key: 'kind', value: t(`purchase_invoice.kind.${kindFilter.value}`) })
+  if (vendorFilter.value !== '') {
+    const v = vendors.value.find(x => x.id === vendorFilter.value)
+    if (v) chips.push({ key: 'vendor', value: v.company_name })
+  }
+  if (currencyFilter.value) chips.push({ key: 'currency', value: currencyFilter.value })
+  if (monthFilter.value !== '') {
+    chips.push({ key: 'month', value: monthOptions.value[Number(monthFilter.value) - 1] ?? String(monthFilter.value) })
+  }
+  if (dateFrom.value || dateTo.value) {
+    chips.push({ key: 'dates', value: `${dateFrom.value ? formatDate(dateFrom.value) : '…'} – ${dateTo.value ? formatDate(dateTo.value) : '…'}` })
+  }
+  if (overdueOnly.value) chips.push({ key: 'overdue', value: t('purchase_invoice.filters.overdue') })
+  if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('purchase_invoice.filters.unpaid_only') })
+  if (unmatchedOnly.value) chips.push({ key: 'unmatched', value: t('purchase_invoice.filters.unmatched') })
+  if (needsReviewOnly.value) chips.push({ key: 'needsReview', value: t('purchase_invoice.filters.needs_review') })
+  if (paymentOrderedFilter.value) {
+    chips.push({ key: 'paymentOrdered', value: t(paymentOrderedFilter.value === '1' ? 'purchase_invoice.filters.payment_ordered_yes' : 'purchase_invoice.filters.payment_ordered_no') })
+  }
+  if (bookedFilter.value) {
+    chips.push({ key: 'booked', value: t(bookedFilter.value === '1' ? 'common.booked_badge' : 'common.unbooked_badge') })
+  }
+  if (importBatchFilter.value) chips.push({ key: 'importBatch', value: t('purchase_invoice.filters.import_batch') })
+  return chips
+})
+
+function clearFilter(key: string) {
+  switch (key) {
+    case 'status': statusFilter.value = ''; break
+    case 'kind': kindFilter.value = ''; break
+    case 'vendor': vendorFilter.value = ''; break
+    case 'currency': currencyFilter.value = ''; break
+    case 'month': monthFilter.value = ''; break
+    case 'dates': dateFrom.value = ''; dateTo.value = ''; break
+    case 'overdue': overdueOnly.value = false; break
+    case 'unpaid': unpaidOnly.value = false; break
+    case 'unmatched': unmatchedOnly.value = false; break
+    case 'needsReview': needsReviewOnly.value = false; break
+    case 'paymentOrdered': paymentOrderedFilter.value = ''; break
+    case 'booked': bookedFilter.value = ''; break
+    case 'importBatch': importBatchFilter.value = ''; break
+  }
+}
+
+function clearAllFilters() {
+  for (const chip of filterChips.value) clearFilter(chip.key)
+}
+
+/**
+ * Šířka mikro-baru za částkou = podíl na nejvyšším dokladu TÉŽE měny v měsíci.
+ * Stejná logika jako u vydaných faktur (viz .amount-cell v styles/main.css) —
+ * dá zdi čísel řád velikosti, aniž by zabrala místo. Měny se nemíchají.
+ */
+function amountBarWidth(inv: PurchaseInvoiceListItem, g: PurchaseMonthGroup): string {
+  const value = Math.abs(inv.total_with_vat ?? 0)
+  if (value === 0) return '0%'
+  let max = 0
+  for (const other of g.invoices) {
+    if (other.currency !== inv.currency) continue
+    const v = Math.abs(other.total_with_vat ?? 0)
+    if (v > max) max = v
+  }
+  if (max === 0) return '0%'
+  return `${Math.max(4, Math.round((value / max) * 100))}%`
+}
 
 // Hromadné akce
 const selectedIds = ref<number[]>([])
@@ -621,14 +696,26 @@ async function bulkSetKind() {
     </div>
 
     <!-- ═══ Filtry v boxu ═══ -->
-    <FilterBar :active-count="activeFilterCount">
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="clearAllFilters"
+    >
       <template #primary>
-        <input
-          v-model="search"
-          type="search"
-          :placeholder="t('purchase_invoice.filters.search_placeholder')"
-          class="flex-1 min-w-48 h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
-        />
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            v-model="search"
+            type="search"
+            :placeholder="t('purchase_invoice.filters.search_placeholder')"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          />
+        </div>
       </template>
         <select v-model="statusFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('purchase_invoice.filters.all_statuses') }}</option>
@@ -742,12 +829,16 @@ async function bulkSetKind() {
 
       <!-- ═══ Skupiny po měsících ═══ -->
       <section v-for="g in groups" :key="g.month" class="mb-5">
-        <header class="sticky top-16 z-[5] flex items-center justify-between bg-neutral-50/95 backdrop-blur border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
-          <div class="flex items-center gap-3">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ formatMonth(g.month) }}</h2>
-            <span class="text-xs text-neutral-500">{{ g.count }}</span>
+        <!-- Měsíční rozdělovník ve stylu účetní knihy — stejný vzor jako u vydaných
+             faktur: název měsíce vlevo, hairline přes volné místo, součet v mono
+             vpravo. Součty se musí umět zalomit, jinak by na mobilu vytlačily stránku. -->
+        <header class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+          <div class="flex items-baseline gap-2.5 shrink-0">
+            <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
+            <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }}</span>
           </div>
-          <div class="flex items-center gap-3 text-xs">
+          <span class="hidden sm:block flex-1 h-px bg-gradient-to-r from-neutral-200 to-transparent" aria-hidden="true"></span>
+          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 min-w-0 text-xs">
             <span v-for="tc in g.totals_per_currency" :key="tc.currency" class="font-mono">
               <span class="text-neutral-500">{{ tc.currency }}:</span>
               <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tc.with_vat, tc.currency) }}</span>
@@ -847,7 +938,11 @@ async function bulkSetKind() {
                       {{ formatDate(inv.due_date) }}
                     </span>
                   </td>
-                  <td v-if="tbl.isVisible('amount')" class="px-4 py-2.5 text-right font-mono">
+                  <td
+                    v-if="tbl.isVisible('amount')"
+                    class="amount-cell px-4 py-2.5 text-right font-mono font-semibold text-neutral-900"
+                    :style="{ '--bar': amountBarWidth(inv, g) }"
+                  >
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center">

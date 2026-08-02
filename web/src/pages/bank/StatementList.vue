@@ -10,7 +10,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
@@ -89,6 +89,42 @@ function resetFilters() {
   clientFilter.value = ''
   amountFilter.value = ''
   postingFilter.value = ''
+}
+
+/**
+ * Aktivní filtry jako odstranitelné chipy — stejný vzor jako u seznamů faktur.
+ * Filtry jsou sbalené za tlačítko „Filtry (N)", takže co je zapnuté musí být
+ * vidět i se zavřenou lištou. Rok se ukazuje (na rozdíl od faktur) proto, že tady
+ * je výchozí hodnota „všechny roky" — když je vybraný, je to skutečné zúžení.
+ */
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (yearFilter.value !== '') chips.push({ key: 'year', value: String(yearFilter.value) })
+  if (monthFilter.value !== '') {
+    chips.push({ key: 'month', value: monthOptions.value[Number(monthFilter.value) - 1] ?? String(monthFilter.value) })
+  }
+  if (accountFilter.value !== '') {
+    const a = accounts.value.find(x => x.account_number === accountFilter.value)
+    chips.push({ key: 'account', value: a ? accountLabel(a) : accountFilter.value })
+  }
+  if (clientFilter.value !== '') {
+    const c = counterparties.value.find(x => x.id === clientFilter.value)
+    if (c) chips.push({ key: 'client', value: c.company_name })
+  }
+  if (amountFilter.value !== '') chips.push({ key: 'amount', value: String(amountFilter.value) })
+  if (postingFilter.value !== '') chips.push({ key: 'posting', value: t('bank.posting_filter_unposted_statements') })
+  return chips
+})
+
+function clearFilter(key: string) {
+  switch (key) {
+    case 'year': yearFilter.value = ''; monthFilter.value = ''; break
+    case 'month': monthFilter.value = ''; break
+    case 'account': accountFilter.value = ''; bankCodeFilter.value = ''; break
+    case 'client': clientFilter.value = ''; break
+    case 'amount': amountFilter.value = ''; break
+    case 'posting': postingFilter.value = ''; break
+  }
 }
 const uploading = ref(false)
 const scanning = ref(false)
@@ -408,11 +444,23 @@ async function onFileSelected(e: Event) {
     </div>
 
     <!-- Filtry hlaviček výpisů + hledání v transakcích -->
-    <FilterBar :active-count="activeFilterCount">
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="resetFilters"
+    >
       <template #primary>
-        <input v-model.trim="counterpartyAccountFilter" type="search"
-          :placeholder="t('bank.search_counterparty_account')"
-          class="h-9 w-full sm:w-64 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input v-model.trim="counterpartyAccountFilter" type="search"
+            :placeholder="t('bank.search_counterparty_account')"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+        </div>
       </template>
       <select v-model="yearFilter"
         class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">

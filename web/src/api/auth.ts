@@ -28,6 +28,11 @@ export interface SupplierBrief {
   id: number
   company_name: string
   ic: string | null
+  /** Identifikace firmy pro hlavičku Přehledu (IČ · DIČ · adresa na jednom řádku). */
+  dic?: string | null
+  street?: string
+  city?: string
+  zip?: string
   is_vat_payer: boolean
   /** Identifikovaná osoba (§ 6g–6l ZDPH, issue #94) — neplátce v tuzemsku
    *  s přeshraničními povinnostmi (RC faktury do EU, SHV, samovyměření). */

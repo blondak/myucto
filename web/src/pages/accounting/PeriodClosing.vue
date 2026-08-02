@@ -762,9 +762,12 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
             <table class="w-full text-sm">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
+                  <!-- Šířky explicitně: popis kontroly je tu to podstatné, ale sám by
+                       o místo prohrál s dlouhými hodnotami vpravo a smrskl se na
+                       dvouslovné řádky. -->
                   <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.closing.precheck_severity') }}</th>
-                  <th class="px-3 py-2 text-left font-medium">{{ t('accounting.closing.precheck_check') }}</th>
-                  <th class="px-3 py-2 text-right font-medium w-56">{{ t('accounting.closing.precheck_value') }}</th>
+                  <th class="px-3 py-2 text-left font-medium w-2/5">{{ t('accounting.closing.precheck_check') }}</th>
+                  <th class="px-3 py-2 text-right font-medium">{{ t('accounting.closing.precheck_value') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
