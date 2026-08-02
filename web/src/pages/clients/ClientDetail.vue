@@ -438,6 +438,9 @@ const clientActions = computed<ActionItem[]>(() => {
       <div class="min-w-0">
         <RouterLink to="/clients" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('client.back_to_list') }}</RouterLink>
         <h1 class="text-2xl font-semibold mt-1">{{ client.company_name }}</h1>
+        <div v-if="client.first_name || client.last_name" class="text-sm text-neutral-600 mt-0.5">
+          {{ [client.first_name, client.last_name].filter(Boolean).join(' ') }}
+        </div>
         <div class="text-sm text-neutral-500 mt-1 flex flex-wrap items-center gap-x-2">
           <span v-if="client.ic"><span>{{ t('common.ic') }}</span> <span class="font-mono">{{ client.ic }}</span></span>
           <!-- Národní daňové číslo (#120): SK DIČ / Steuernummer / NIP / Adószám; u SK je `dic` = IČ DPH -->

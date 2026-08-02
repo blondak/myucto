@@ -98,6 +98,8 @@ const supplierDueLabel = computed(() => {
 
 const form = ref<ClientPayload>({
   company_name: '',
+  first_name: null,
+  last_name: null,
   ic: null,
   dic: null,
   tax_number: null,
@@ -582,6 +584,21 @@ async function submit() {
           <input autocomplete="off" v-model="form.company_name" required
             class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
           <p v-if="errors.company_name" class="text-xs text-danger-500 mt-1">{{ errors.company_name[0] }}</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.first_name') }}</label>
+            <input autocomplete="off" v-model="form.first_name" maxlength="60"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p v-if="errors.first_name" class="text-xs text-danger-500 mt-1">{{ errors.first_name[0] }}</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.last_name') }}</label>
+            <input autocomplete="off" v-model="form.last_name" maxlength="60"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p v-if="errors.last_name" class="text-xs text-danger-500 mt-1">{{ errors.last_name[0] }}</p>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
