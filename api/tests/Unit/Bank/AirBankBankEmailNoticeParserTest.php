@@ -16,11 +16,11 @@ final class AirBankBankEmailNoticeParserTest extends TestCase
         $body = <<<TEXT
 Dobrý den,
 
-zůstatek na účtu Podnikatelský účet CZK číslo 1234567890/3030 se zvýšil o částku 1,00 CZK. Dostupný zůstatek k 24.07.2026 v 15:20 je 2,00 CZK.
+zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se zvýšil o částku 1,00 CZK. Dostupný zůstatek k 24.07.2026 v 15:20 je 2,00 CZK.
 
 Pro úplnost uvádíme detaily této úhrady:
 
-Příchozí úhrada z účtu Firma Demo s.r.o. číslo 9876543210/0300
+Příchozí úhrada z účtu Firma Demo s.r.o. číslo 2000145399/0300
 Částka: 1,00 CZK
 Datum zaúčtování: 24.07.2026
 Variabilní symbol: 202600009
@@ -42,8 +42,8 @@ TEXT;
         self::assertSame(1.0, $parsed->amount);
         self::assertSame('CZK', $parsed->currency);
         self::assertSame('2026-07-24', $parsed->postedAt);
-        self::assertSame('1234567890/3030', $parsed->recipientAccount);
-        self::assertSame('9876543210', $parsed->counterpartyAccount);
+        self::assertSame('1000000005/3030', $parsed->recipientAccount);
+        self::assertSame('2000145399', $parsed->counterpartyAccount);
         self::assertSame('0300', $parsed->counterpartyBank);
         self::assertSame('Firma Demo s.r.o.', $parsed->counterpartyName);
         self::assertSame('100000000001', $parsed->bankRef);
@@ -53,9 +53,9 @@ TEXT;
     public function testParsesIncomingNoticeWithoutVariableSymbol(): void
     {
         $body = <<<TEXT
-zůstatek na účtu Podnikatelský účet CZK číslo 1234567890/3030 se zvýšil o částku 1,00 CZK. Dostupný zůstatek k 24.07.2026 v 15:20 je 1,00 CZK.
+zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se zvýšil o částku 1,00 CZK. Dostupný zůstatek k 24.07.2026 v 15:20 je 1,00 CZK.
 
-Příchozí úhrada z účtu Jan Novák číslo 9876543210/0300
+Příchozí úhrada z účtu Jan Novák číslo 2000145399/0300
 Částka: 1,00 CZK
 Datum zaúčtování: 24.07.2026
 Kód transakce: 100000000002
@@ -69,14 +69,14 @@ TEXT;
 
         self::assertSame('', $parsed->variableSymbol);
         self::assertSame(1.0, $parsed->amount);
-        self::assertSame('1234567890/3030', $parsed->recipientAccount);
+        self::assertSame('1000000005/3030', $parsed->recipientAccount);
         self::assertSame('100000000002', $parsed->bankRef);
     }
 
     public function testParsesEurIncomingNotice(): void
     {
         $body = <<<TEXT
-zůstatek na účtu Podnikatelský účet EUR číslo 1234567891/3030 se zvýšil o částku 12,50 EUR. Dostupný zůstatek k 01.08.2026 v 10:00 je 100,00 EUR.
+zůstatek na účtu Podnikatelský účet EUR číslo 2000145399/3030 se zvýšil o částku 12,50 EUR. Dostupný zůstatek k 01.08.2026 v 10:00 je 100,00 EUR.
 
 Příchozí úhrada z účtu Client Demo číslo 1111222233/0100
 Částka: 12,50 EUR
@@ -94,13 +94,13 @@ TEXT;
         self::assertSame('2608001', $parsed->variableSymbol);
         self::assertSame(12.5, $parsed->amount);
         self::assertSame('EUR', $parsed->currency);
-        self::assertSame('1234567891/3030', $parsed->recipientAccount);
+        self::assertSame('2000145399/3030', $parsed->recipientAccount);
     }
 
     public function testParsesOutgoingNoticeAsNegativeAmount(): void
     {
         $body = <<<TEXT
-zůstatek na účtu Podnikatelský účet CZK číslo 1234567890/3030 se snížil o částku 500,00 CZK. Dostupný zůstatek k 02.08.2026 v 09:00 je 9 500,00 CZK.
+zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se snížil o částku 500,00 CZK. Dostupný zůstatek k 02.08.2026 v 09:00 je 9 500,00 CZK.
 
 Odchozí úhrada na účet Dodavatel Demo číslo 19-2000145399/0800
 Částka: 500,00 CZK
@@ -120,7 +120,7 @@ TEXT;
         self::assertSame('2026001', $parsed->variableSymbol);
         self::assertSame(-500.0, $parsed->amount);
         self::assertSame('CZK', $parsed->currency);
-        self::assertSame('1234567890/3030', $parsed->recipientAccount);
+        self::assertSame('1000000005/3030', $parsed->recipientAccount);
         self::assertSame('19-2000145399', $parsed->counterpartyAccount);
         self::assertSame('0800', $parsed->counterpartyBank);
     }
@@ -128,7 +128,7 @@ TEXT;
     public function testSupportsDiacriticFoldedSubjectAndBody(): void
     {
         $body = <<<TEXT
-zustatek na uctu Podnikatelsky ucet CZK cislo 1234567890/3030 se zvysil o castku 1,00 CZK.
+zustatek na uctu Podnikatelsky ucet CZK cislo 1000000005/3030 se zvysil o castku 1,00 CZK.
 Castka: 1,00 CZK
 Datum zauctovani: 24.07.2026
 Variabilni symbol: 1
@@ -137,6 +137,31 @@ TEXT;
         $parser = new AirBankBankEmailNoticeParser();
         $message = $this->message($body, 'Zvyseni zustatku na uctu Podnikatelsky ucet CZK');
         self::assertTrue($parser->supports($message, $this->provider($parser)));
+    }
+
+    public function testUsesSubjectDirectionWhenBodyQuotesOppositeNotice(): void
+    {
+        $body = <<<TEXT
+zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se zvýšil o částku 1,00 CZK.
+Příchozí úhrada z účtu Firma Demo s.r.o. číslo 2000145399/0300
+Částka: 1,00 CZK
+Datum zaúčtování: 24.07.2026
+Kód transakce: 100000000005
+
+----- Původní zpráva -----
+zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se snížil o částku 50,00 CZK.
+Odchozí úhrada na účet Dodavatel Demo číslo 19-2000145399/0800
+Částka: 50,00 CZK
+Datum zaúčtování: 23.07.2026
+Kód transakce: 100000000000
+TEXT;
+
+        $parser = new AirBankBankEmailNoticeParser();
+        $message = $this->message($body, 'FW: Zvýšení zůstatku na účtu Podnikatelský účet CZK');
+        $provider = $this->provider($parser);
+
+        self::assertTrue($parser->supports($message, $provider));
+        self::assertSame(1.0, $parser->parse($message, $provider)->amount);
     }
 
     public function testRejectsSpoofedSenderDomain(): void
@@ -148,7 +173,7 @@ TEXT;
             date: new \DateTimeImmutable('2026-07-24 15:21:00'),
             sender: 'Air Bank <attacker@airbank.cz.evil.com>',
             subject: 'Zvýšení zůstatku na účtu',
-            text: "zůstatek na účtu číslo 1/3030 se zvýšil o částku 1,00 CZK.\nČástka: 1,00 CZK",
+            text: "zůstatek na účtu číslo 1000000005/3030 se zvýšil o částku 1,00 CZK.\nČástka: 1,00 CZK",
             raw: '',
         );
         self::assertFalse($parser->supports($message, $this->provider($parser)));
@@ -156,7 +181,7 @@ TEXT;
 
     public function testThrowsWithoutAmount(): void
     {
-        $body = "zůstatek na účtu číslo 1234567890/3030 se zvýšil.\nDatum zaúčtování: 24.07.2026";
+        $body = "zůstatek na účtu číslo 1000000005/3030 se zvýšil.\nDatum zaúčtování: 24.07.2026";
         $parser = new AirBankBankEmailNoticeParser();
 
         $this->expectException(\RuntimeException::class);

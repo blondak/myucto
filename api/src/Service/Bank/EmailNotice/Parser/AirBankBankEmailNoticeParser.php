@@ -11,10 +11,10 @@ use MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice;
  * Air Bank — avízo „Zvýšení/Snížení zůstatku na účtu …" (info@airbank.cz).
  *
  * Plain-text šablona (ověřeno 2026-07; čísla anonymizována):
- *   zůstatek na účtu Podnikatelský účet CZK číslo 1234567890/3030 se zvýšil o částku 1,00 CZK.
+ *   zůstatek na účtu Podnikatelský účet CZK číslo 1000000005/3030 se zvýšil o částku 1,00 CZK.
  *   Dostupný zůstatek k 24.07.2026 v 15:20 je 1,00 CZK.
  *
- *   Příchozí úhrada z účtu Jméno Protistrany číslo 9876543210/0300
+ *   Příchozí úhrada z účtu Jméno Protistrany číslo 2000145399/0300
  *   Částka: 1,00 CZK
  *   Datum zaúčtování: 24.07.2026
  *   Variabilní symbol: 202600009   (řádek chybí, pokud plátce VS nevyplnil)
@@ -36,7 +36,7 @@ final class AirBankBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         return 'Air Bank';
     }
 
-    public function defaultProvider(): ?BankEmailNoticeProvider
+    public function defaultProvider(): BankEmailNoticeProvider
     {
         return new BankEmailNoticeProvider(
             id: null,
@@ -139,7 +139,9 @@ final class AirBankBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         [$cpAccount, $cpBank] = $this->splitAccount((string) ($counterparty['account'] ?? ''));
         $cpName = isset($counterparty['name']) ? $this->cleanNullable((string) $counterparty['name']) : null;
 
-        $outgoing = preg_match('/se\s+snizil\s+o\s+castku|snizeni\s+zustatku/iu', $folded) === 1;
+        $subject = $this->compact(mb_strtolower($this->foldDiacritics($message->subject), 'UTF-8'));
+        preg_match('/(?<direction>zvyseni|snizeni)\s+zustatku/u', $subject, $directionMatch);
+        $outgoing = ($directionMatch['direction'] ?? '') === 'snizeni';
         $direction = $outgoing ? 'odchozí' : 'příchozí';
 
         return new ParsedBankEmailNotice(
