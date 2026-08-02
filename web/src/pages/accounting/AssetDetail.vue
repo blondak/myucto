@@ -15,6 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney, formatMonth } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -236,6 +237,97 @@ async function runDispose() {
 // ── Inventární karta (PDF, #49) ────────────────────────────────────────────
 const downloadingCard = ref(false)
 
+/**
+ * Akce karty majetku pro sdílený ActionBar.
+ *
+ * Pořadí určuje, co zůstane inline: první je primary (plné tlačítko = další
+ * logický krok podle stavu), pak dvě secondary, zbytek spadne do „…".
+ * Mazání a stornování vyřazení jsou `overflow` — destruktivní a vzácné akce
+ * nepatří do hlavičky, kde se dají trefit omylem.
+ */
+const assetActions = computed<ActionItem[]>(() => {
+  const a = asset.value
+  if (!a) return []
+  const canWrite = auth.canWrite('assets.write')
+  const draft = a.status === 'draft'
+  const inUse = a.status === 'in_use'
+  const disposed = !draft && !inUse
+
+  return [
+    {
+      key: 'put_into_use',
+      label: t('accounting.assets.lifecycle.put_into_use'),
+      icon: 'checkCircle',
+      tier: 'primary',
+      variant: 'primary',
+      show: canWrite && draft,
+      run: () => { showPutIntoUse.value = true },
+    },
+    {
+      key: 'improvement',
+      label: t('accounting.assets.lifecycle.improvement'),
+      icon: 'plus',
+      tier: 'primary',
+      variant: 'primary',
+      show: canWrite && inUse,
+      run: () => { showImprovement.value = true },
+    },
+    {
+      key: 'revert',
+      label: t('accounting.assets.lifecycle.revert'),
+      icon: 'uturn',
+      tier: 'primary',
+      variant: 'neutral',
+      show: canWrite && disposed,
+      disabled: acting.value,
+      run: () => { void runRevertDisposal() },
+    },
+    {
+      key: 'edit',
+      label: t('common.edit'),
+      icon: 'edit',
+      tier: 'secondary',
+      show: canWrite && (draft || inUse),
+      to: { name: 'accounting-asset-edit', params: { id: a.id } },
+    },
+    {
+      key: 'download_card',
+      label: t('accounting.assets.lifecycle.download_card'),
+      icon: 'download',
+      tier: 'secondary',
+      loading: downloadingCard.value,
+      run: () => { void downloadDepreciationCard() },
+    },
+    {
+      key: 'pause',
+      label: t('accounting.assets.lifecycle.pause'),
+      icon: 'pause',
+      tier: 'secondary',
+      show: canWrite && inUse && canPause.value,
+      run: () => { showPause.value = true },
+    },
+    {
+      key: 'dispose',
+      label: t('accounting.assets.lifecycle.dispose'),
+      icon: 'archive',
+      tier: 'overflow',
+      variant: 'danger',
+      show: canWrite && inUse,
+      run: () => { showDispose.value = true },
+    },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: 'trash',
+      tier: 'overflow',
+      variant: 'danger',
+      show: canWrite && (draft || inUse),
+      disabled: acting.value,
+      run: () => { void removeAsset() },
+    },
+  ]
+})
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -305,54 +397,10 @@ const yearOptions = computed(() => {
           <RouterLink :to="{ name: 'accounting-assets' }" class="text-sm text-neutral-500 hover:text-neutral-700 mr-1">
             {{ t('common.back') }}
           </RouterLink>
-          <button :class="btnOutline('neutral')" :disabled="downloadingCard" @click="downloadDepreciationCard">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            {{ t('accounting.assets.lifecycle.download_card') }}
-          </button>
-          <template v-if="auth.canWrite('assets.write')">
-            <template v-if="asset.status === 'draft'">
-              <button :class="btnFilled('primary')" @click="showPutIntoUse = true">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
-                {{ t('accounting.assets.lifecycle.put_into_use') }}
-              </button>
-              <RouterLink :class="btnOutline('neutral')" :to="{ name: 'accounting-asset-edit', params: { id: asset.id } }">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-                {{ t('common.edit') }}
-              </RouterLink>
-              <button :class="btnOutline('danger')" @click="removeAsset">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                {{ t('common.delete') }}
-              </button>
-            </template>
-            <template v-else-if="asset.status === 'in_use'">
-              <button :class="btnOutline('primary')" @click="showImprovement = true">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-                {{ t('accounting.assets.lifecycle.improvement') }}
-              </button>
-              <button v-if="canPause" :class="btnOutline('neutral')" @click="showPause = true">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
-                {{ t('accounting.assets.lifecycle.pause') }}
-              </button>
-              <RouterLink :class="btnOutline('neutral')" :to="{ name: 'accounting-asset-edit', params: { id: asset.id } }">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-                {{ t('common.edit') }}
-              </RouterLink>
-              <button :class="btnOutline('danger')" @click="showDispose = true">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" /></svg>
-                {{ t('accounting.assets.lifecycle.dispose') }}
-              </button>
-              <button :disabled="acting" :class="btnOutline('danger')" @click="removeAsset">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                {{ t('common.delete') }}
-              </button>
-            </template>
-            <template v-else>
-              <button :class="btnOutline('neutral')" :disabled="acting" @click="runRevertDisposal">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
-                {{ t('accounting.assets.lifecycle.revert') }}
-              </button>
-            </template>
-          </template>
+          <!-- Šest tlačítek v řadě porušovalo konvenci „max 3 a zbytek do …"
+               (AGENTS.md §Frontend). ActionBar to řeší sám: primary zůstává plná,
+               další dvě outline, zbytek spadne do dropdownu. -->
+          <ActionBar :actions="assetActions" />
         </div>
       </div>
 

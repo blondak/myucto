@@ -17,6 +17,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -47,6 +48,12 @@ const groups = ref<MonthGroup[]>([])
  * co uživatel dělá. Vypínáme ho hned, jak dorazí první dávka dat.
  */
 const staggerRows = ref(true)
+/**
+ * Řádky k probliknutí po hromadné akci. Značku zapisují bulk handlery přes
+ * markRowsTouched(), tady se po překreslení jednou spotřebuje — bez toho se
+ * seznam po akci překreslí úplně stejně a uživatel nevidí, čeho se to týkalo.
+ */
+const flashedIds = ref<Set<number>>(new Set())
 const total = ref(0)
 const page = ref(1)
 const pages = ref(1)
@@ -385,6 +392,7 @@ async function bulkMarkPaid() {
         errors.push(`${inv.varsymbol || `#${inv.id}`}: ${e?.response?.data?.error?.message || 'chyba'}`)
       }
     }
+    markRowsTouched('invoice', list.map(i => i.id))
     selectedIds.value = []
     let msg = errors.length
       ? t('invoice.bulk_mark_paid_partial', { ok: okCount, err: errors.length })
@@ -422,6 +430,7 @@ async function bulkIssue() {
         errors.push(`#${inv.id}: ${e?.response?.data?.error?.message || 'chyba'}`)
       }
     }
+    markRowsTouched('invoice', list.map(i => i.id))
     selectedIds.value = []
     if (errors.length) {
       toast.warning(t('invoice.bulk_issue_partial', { ok: okCount, err: errors.length }) + '\n' + errors.join('\n'))
@@ -459,6 +468,9 @@ async function bulkPost() {
   bulkBusy.value = true
   try {
     const r = await accountingApi.postInvoicesBulk(list.map(i => i.id))
+    // `posted` vrací rovnou ID, ne objekty — probliknou jen doklady, které se
+    // opravdu zaúčtovaly, ne celý výběr.
+    markRowsTouched('invoice', r.posted.length ? r.posted : list.map(i => i.id))
     selectedIds.value = []
     if (r.failed.length) {
       const detail = r.failed.map(f => `#${f.id}: ${t(postingErrorI18nKey(f.error_code))}`).join('\n')
@@ -568,6 +580,7 @@ async function load(reset = true) {
   } finally {
     loading.value = false
     loadingMore.value = false
+    flashedIds.value = consumeFlashedRows('invoice')
     // Po první dávce dat je stagger odbytý — další načtení (filtr, stránkování,
     // „načíst další") už musí být okamžité.
     if (staggerRows.value) {
@@ -970,7 +983,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 @click="openInvoice(inv, $event)"
                 @auxclick.prevent="openInvoice(inv, $event)"
                 class="cursor-pointer hover:bg-neutral-50 transition"
-                :class="invoiceRowClass(inv.due_date, inv.status)"
+                :class="[invoiceRowClass(inv.due_date, inv.status), flashedIds.has(inv.id) ? 'row-flash' : '']"
                 :style="staggerRows ? { '--i': ri } : undefined"
               >
                 <td class="px-2 py-2.5 text-center" @click.stop>
@@ -1067,7 +1080,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
             @click="openInvoice(inv, $event)"
             @auxclick.prevent="openInvoice(inv, $event)"
             class="cursor-pointer hover:bg-neutral-50 transition px-3 py-3"
-            :class="invoiceRowClass(inv.due_date, inv.status)"
+            :class="[invoiceRowClass(inv.due_date, inv.status), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
               <input

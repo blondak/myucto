@@ -856,6 +856,23 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     to   { opacity: 1; transform: none; }
   }
 
+  /*
+   * Záblesk na řádku, kterého se právě týkala akce (viz composables/useRowFlash).
+   * Why: po hromadné akci vypadá seznam stejně jako předtím a uživatel nevidí,
+   * které řádky se změnily. Barva odchází do ztracena, takže po vteřině nezůstane
+   * v tabulce nic navíc — je to upozornění, ne stav.
+   * :where() drží specificitu na 0, aby stavové tinty řádku (po splatnosti)
+   * vyhrály hned, jak záblesk dohoří.
+   */
+  :where(tr.row-flash) {
+    animation: row-flash 1.6s var(--ease-quiet) 1;
+  }
+  @keyframes row-flash {
+    0%   { background-color: color-mix(in oklab, var(--color-primary-500) 22%, transparent); }
+    60%  { background-color: color-mix(in oklab, var(--color-primary-500) 14%, transparent); }
+    100% { background-color: transparent; }
+  }
+
   /* Vjezd karet/panelů — stejný rytmus jako řádky, jen o kus měkčí. */
   .rise-in {
     animation: rise-in 380ms var(--ease-spring) backwards;
