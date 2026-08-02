@@ -89,6 +89,14 @@ final class SchemaCache
      *
      * Volá se na konci requestu (shutdown handler v {@see Connection}), ne po každém
      * zápisu — jinak by první request po invalidaci zapisoval šestkrát za sebou.
+     *
+     * ⚠️ SLUČUJE, nepřepisuje. Každý endpoint se ptá na jinou podmnožinu schématu:
+     * `/api/auth/me` na jednu, dashboard na jinou. Kdyby request zapsal jen to, co
+     * sám objevil, sebral by cache klíče, na které se zrovna neptal — a další
+     * request by je musel znovu vytáhnout z information_schema. Dvojice requestů
+     * s různými potřebami by si tak cache donekonečna přepisovala a celá
+     * optimalizace by se rozpadla. Slučování zároveň řeší souběh: dva requesty
+     * píšící naráz o sebe nepřijdou.
      */
     public function flush(): void
     {
@@ -102,11 +110,24 @@ final class SchemaCache
                 return;
             }
 
+            // Znovu načti aktuální obsah — mezitím ho mohl doplnit jiný request.
+            // Naše hodnoty vyhrávají: pocházejí z právě proběhlého dotazu do DB.
+            //
+            // Čte se PŘES TTL, takže z prošlého souboru se nepřevezme nic. Jinak by
+            // se staré klíče při každém zápisu „omladily" na aktuální written_at a
+            // TTL by přestalo existovat jako pojistka — schéma změněné mimo migrace
+            // by se nikdy neprojevilo.
+            $merged = self::readEntries($this->path, $this->database, $this->ttlSeconds);
+            foreach ($this->entries as $key => $value) {
+                $merged[$key] = $value;
+            }
+            $this->entries = $merged;
+
             $payload = json_encode([
                 'format'     => self::FORMAT,
                 'database'   => $this->database,
                 'written_at' => time(),
-                'entries'    => $this->entries,
+                'entries'    => $merged,
             ], JSON_UNESCAPED_SLASHES);
 
             if ($payload === false) {
@@ -148,45 +169,57 @@ final class SchemaCache
             return $this->entries;
         }
 
-        $this->entries = [];
-
         try {
-            if (!is_file($this->path)) {
-                return $this->entries;
-            }
-            $raw = @file_get_contents($this->path);
-            if ($raw === false || $raw === '') {
-                return $this->entries;
-            }
-            $data = json_decode($raw, true);
-            if (!is_array($data)) {
-                return $this->entries;
-            }
-
-            // Nesouhlasící formát nebo databáze → ignoruj (přepíše se novým zápisem).
-            if ((int) ($data['format'] ?? 0) !== self::FORMAT) {
-                return $this->entries;
-            }
-            if ((string) ($data['database'] ?? '') !== $this->database) {
-                return $this->entries;
-            }
-            if ($this->ttlSeconds > 0 && time() - (int) ($data['written_at'] ?? 0) > $this->ttlSeconds) {
-                return $this->entries;
-            }
-
-            $entries = $data['entries'] ?? null;
-            if (!is_array($entries)) {
-                return $this->entries;
-            }
-            foreach ($entries as $key => $value) {
-                if (is_string($key) && is_bool($value)) {
-                    $this->entries[$key] = $value;
-                }
-            }
+            $this->entries = self::readEntries($this->path, $this->database, $this->ttlSeconds);
         } catch (Throwable) {
+            $this->entries = [];
             $this->loadFailed = true;
         }
 
         return $this->entries;
+    }
+
+    /**
+     * Přečte platné položky ze souboru. Neplatný formát, jiná databáze, prošlé TTL
+     * nebo poškozený JSON = prázdné pole, nikdy výjimka — cache je optimalizace.
+     *
+     * @return array<string,bool>
+     */
+    private static function readEntries(string $path, string $database, int $ttlSeconds): array
+    {
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            return [];
+        }
+        if ((int) ($data['format'] ?? 0) !== self::FORMAT) {
+            return [];
+        }
+        if ((string) ($data['database'] ?? '') !== $database) {
+            return [];
+        }
+        if ($ttlSeconds > 0 && time() - (int) ($data['written_at'] ?? 0) > $ttlSeconds) {
+            return [];
+        }
+
+        $entries = $data['entries'] ?? null;
+        if (!is_array($entries)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($entries as $key => $value) {
+            if (is_string($key) && is_bool($value)) {
+                $out[$key] = $value;
+            }
+        }
+
+        return $out;
     }
 }

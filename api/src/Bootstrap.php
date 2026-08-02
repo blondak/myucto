@@ -383,6 +383,8 @@ final class Bootstrap
 
         $app = AppFactory::create();
 
+        self::enableRouteCache($app, $config);
+
         Routes::register($app);
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
@@ -418,6 +420,71 @@ final class Bootstrap
         $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
 
         return $app;
+    }
+
+    /**
+     * Zapne FastRoute cache — předpočítané regexy pro 586 rout.
+     *
+     * Bez ní se vzory parsují při KAŽDÉM requestu: naměřeno 10,2 ms dispatch
+     * proti 1,5 ms s cache. Registrace rout se tím neušetří (Route objekty
+     * vznikají vždy), ale kompilace regexů ano — a ta je tou drahou částí.
+     *
+     * INVALIDACE JMÉNEM SOUBORU: v názvu je otisk Routes.php (mtime + velikost)
+     * a verze aplikace. Změna rout tedy automaticky vede na JINÝ soubor, takže
+     * zastaralá cache nemůže vzniknout ani při zapomenutém úklidu na deployi.
+     * To je podstatné: stará cache by znamenala 404 na nové routě nebo, hůř,
+     * routování na starý handler — a to bez jediné chybové hlášky.
+     *
+     * Selhání je vždy tiché a bezpečné: bez cache aplikace jen běží pomaleji.
+     *
+     * @param App<ContainerInterface|null> $app
+     */
+    private static function enableRouteCache(App $app, Config $config): void
+    {
+        try {
+            if ((bool) $config->get('cache.routes_enabled', true) === false) {
+                return;
+            }
+            // Pod PHPUnitem ne: testy staví aplikaci tisíckrát a sdílený soubor
+            // by mezi nimi přenášel stav.
+            if (defined('PHPUNIT_COMPOSER_INSTALL')) {
+                return;
+            }
+
+            $routesFile = __DIR__ . DIRECTORY_SEPARATOR . 'Routes.php';
+            $mtime = @filemtime($routesFile);
+            $size = @filesize($routesFile);
+            if ($mtime === false || $size === false) {
+                return;
+            }
+
+            $versionFile = self::rootDir() . DIRECTORY_SEPARATOR . 'VERSION';
+            $version = is_file($versionFile) ? trim((string) @file_get_contents($versionFile)) : '';
+
+            $fingerprint = substr(hash('xxh128', $version . '|' . $mtime . '|' . $size), 0, 16);
+            $dir = ($config->dataDir() ?? self::rootDir())
+                . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cache';
+            if (!is_dir($dir) && !@mkdir($dir, 0o775, true) && !is_dir($dir)) {
+                return;
+            }
+            if (!is_writable($dir)) {
+                return;
+            }
+
+            $cacheFile = $dir . DIRECTORY_SEPARATOR . 'routes-' . $fingerprint . '.php';
+
+            // Nový otisk → ukliď cache předchozích verzí, ať se v data adresáři
+            // nehromadí po každém deployi jeden soubor navíc.
+            if (!is_file($cacheFile)) {
+                foreach (glob($dir . DIRECTORY_SEPARATOR . 'routes-*.php') ?: [] as $stale) {
+                    @unlink($stale);
+                }
+            }
+
+            $app->getRouteCollector()->setCacheFile($cacheFile);
+        } catch (\Throwable) {
+            // Cache je optimalizace — nikdy nesmí bránit startu aplikace.
+        }
     }
 
     /**

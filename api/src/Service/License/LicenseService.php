@@ -28,6 +28,14 @@ final class LicenseService
 
     private readonly LoggerInterface $logger;
 
+    /**
+     * Licenční řádek načtený v tomhle requestu. Zahazuje ho každý zápis přes
+     * {@see writeLicense()} — viz komentář u {@see loadRow()}.
+     *
+     * @var array<string,mixed>|null
+     */
+    private ?array $rowCache = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
@@ -93,17 +101,18 @@ final class LicenseService
             return ['ok' => false, 'error' => 'invalid_token'];
         }
 
-        $this->db->pdo()->prepare(
+        $this->writeLicense(
             'UPDATE license
                 SET license_key = ?, token = ?, token_payload = ?, last_nonce = ?,
                     counter = 0, last_check_at = NOW(), last_check_ok = 1
-              WHERE id = 1'
-        )->execute([
-            $licenseKey,
-            $token,
-            json_encode($payload, JSON_UNESCAPED_UNICODE),
-            $this->nonceOf($payload),
-        ]);
+              WHERE id = 1',
+            [
+                $licenseKey,
+                $token,
+                json_encode($payload, JSON_UNESCAPED_UNICODE),
+                $this->nonceOf($payload),
+            ],
+        );
 
         return ['ok' => true, 'state' => $this->current()];
     }
@@ -131,7 +140,7 @@ final class LicenseService
             }
         }
 
-        $this->db->pdo()->exec(
+        $this->writeLicense(
             'UPDATE license
                 SET license_key = NULL, token = NULL, token_payload = NULL,
                     last_nonce = NULL, counter = 0, last_check_ok = 1
@@ -156,12 +165,28 @@ final class LicenseService
             return; // trial → není co obnovovat
         }
 
+        // Předfiltr nad už načteným řádkem: mutex níž je zápis a bere zámek na
+        // řádku license id=1, ale drtivá většina requestů ho poslala jen proto,
+        // aby dostala „0 dotčených řádků". Při souběhu se na tom všechny requesty
+        // instalace potkávaly. Když z dat vidíme, že dnes už kontrola proběhla,
+        // nemá smysl na DB sahat vůbec.
+        //
+        // Není to náhrada mutexu, jen zkratka: samotný mutex zůstává atomický
+        // a rozhoduje o právu obnovit. Session time_zone je nastavená z PHP
+        // (viz Connection::pdo()), takže CURDATE() a date('Y-m-d') mluví o témž dni;
+        // kdyby se přesto rozešly, dopad je nanejvýš o request odložená obnova.
+        $lastCheck = $row['last_check_at'] ?? null;
+        if (is_string($lastCheck) && $lastCheck !== '' && str_starts_with($lastCheck, date('Y-m-d'))) {
+            return;
+        }
+
         $pdo = $this->db->pdo();
         $mutex = $pdo->prepare(
             'UPDATE license SET last_check_at = NOW()
               WHERE id = 1 AND (last_check_at IS NULL OR DATE(last_check_at) <> CURDATE())'
         );
         $mutex->execute();
+        $this->rowCache = null; // mutex právě přepsal last_check_at
         if ($mutex->rowCount() === 0) {
             return; // dnes už proběhlo (jiný request / cron)
         }
@@ -181,7 +206,7 @@ final class LicenseService
                 $this->appVersion(),
             );
         } catch (LicenseNetworkException $e) {
-            $pdo->prepare('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1')->execute([$counter]);
+            $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
             $this->logger->info('license.renew.network_error', ['error' => $e->getMessage()]);
             return;
         }
@@ -190,22 +215,23 @@ final class LicenseService
             $token = (string) $resp['token'];
             $payload = $this->verifier->verify($token, $this->publicKey());
             if ($payload === null) {
-                $pdo->prepare('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1')->execute([$counter]);
+                $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
                 $this->logger->warning('license.renew.bad_signature');
                 return;
             }
-            $pdo->prepare(
+            $this->writeLicense(
                 'UPDATE license
                     SET token = ?, token_payload = ?, last_nonce = ?, counter = ?,
                         last_check_at = NOW(), last_check_ok = 1
-                  WHERE id = 1'
-            )->execute([$token, json_encode($payload, JSON_UNESCAPED_UNICODE), $this->nonceOf($payload), $counter]);
+                  WHERE id = 1',
+                [$token, json_encode($payload, JSON_UNESCAPED_UNICODE), $this->nonceOf($payload), $counter],
+            );
             return;
         }
 
         // Server odmítl (not_bound / clone_suspected / subscription_expired / overage_expired) —
         // stávající token necháme doběhnout, stav se degraduje až vyprší.
-        $pdo->prepare('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1')->execute([$counter]);
+        $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
     }
 
@@ -285,7 +311,7 @@ final class LicenseService
         if (!$this->db->hasTable('license')) {
             return;
         }
-        $this->db->pdo()->exec('UPDATE license SET last_check_at = NULL WHERE id = 1');
+        $this->writeLicense('UPDATE license SET last_check_at = NULL WHERE id = 1');
         $this->renewIfDue();
     }
 
@@ -299,13 +325,44 @@ final class LicenseService
     /** @return array<string,mixed> */
     private function loadRow(): array
     {
+        // Licenční řádek se v rámci JEDNOHO requestu čte opakovaně: renewIfDue()
+        // i current() si ho oba načítaly zvlášť, takže LicenseMiddleware posílal
+        // `SELECT * FROM license` dvakrát na každý přihlášený request.
+        //
+        // Memo je vázané na instanci služby, tedy na request (PHP-DI vrací singleton
+        // per kontejner). Každý zápis do řádku ho zahodí — viz writeLicense().
+        if ($this->rowCache !== null) {
+            return $this->rowCache;
+        }
+
         $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             // Řádek chybí (seed migrace neproběhl) — vytvoř ho lazily.
-            $this->db->pdo()->exec("INSERT INTO license (id, instance_id, trial_started_at) VALUES (1, UUID(), NOW())");
+            $this->writeLicense("INSERT INTO license (id, instance_id, trial_started_at) VALUES (1, UUID(), NOW())");
             $row = $this->db->pdo()->query('SELECT * FROM license WHERE id = 1')->fetch(\PDO::FETCH_ASSOC);
         }
-        return is_array($row) ? $row : [];
+
+        return $this->rowCache = (is_array($row) ? $row : []);
+    }
+
+    /**
+     * JEDINÁ cesta, kterou se smí zapisovat do tabulky `license`.
+     *
+     * Důvod je memo v {@see loadRow()}: kdyby zápis šel mimo tuhle metodu, služba
+     * by ve zbytku requestu pracovala se zastaralým řádkem — a u licence to nejsou
+     * kosmetické následky (počet míst, platnost, degradovaný stav). Invariant hlídá
+     * architektonický test, ne jen tenhle komentář.
+     *
+     * @param list<mixed> $params
+     * @return int počet dotčených řádků
+     */
+    private function writeLicense(string $sql, array $params = []): int
+    {
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $this->rowCache = null;
+
+        return $stmt->rowCount();
     }
 
     /** @param array<string,mixed> $row */
@@ -384,7 +441,7 @@ final class LicenseService
         }
         $fingerprint = $this->fingerprint();
         try {
-            $this->db->pdo()->prepare('UPDATE license SET fingerprint = ? WHERE id = 1')->execute([$fingerprint]);
+            $this->writeLicense('UPDATE license SET fingerprint = ? WHERE id = 1', [$fingerprint]);
         } catch (\Throwable) {
             // nekritické — fingerprint dopočítáme příště
         }

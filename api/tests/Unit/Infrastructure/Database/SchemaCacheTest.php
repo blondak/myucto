@@ -110,6 +110,50 @@ final class SchemaCacheTest extends TestCase
         self::assertNull($c->get('table:license'), 'Poškozený soubor = cache miss, ne výjimka.');
     }
 
+    /**
+     * Každý endpoint se ptá na jinou podmnožinu schématu. Kdyby zápis soubor
+     * přepisoval, dvojice requestů s různými potřebami by si cache donekonečna
+     * mazala a introspekční dotazy by se vrátily.
+     */
+    public function testFlushMergesInsteadOfOverwriting(): void
+    {
+        $a = new SchemaCache($this->path(), 'testdb');
+        $a->put('table:license', true);
+        $a->flush();
+
+        $b = new SchemaCache($this->path(), 'testdb');
+        $b->put('table:supplier', true);
+        $b->flush();
+
+        $reader = new SchemaCache($this->path(), 'testdb');
+        self::assertTrue($reader->get('table:license'), 'Klíč z prvního zápisu nesmí zmizet.');
+        self::assertTrue($reader->get('table:supplier'));
+    }
+
+    /**
+     * Slučování se NESMÍ týkat prošlého souboru — jinak by se staré klíče při
+     * každém zápisu omladily na aktuální written_at a TTL by přestalo fungovat
+     * jako pojistka proti schématu změněnému mimo migrace.
+     */
+    public function testMergeDoesNotResurrectExpiredEntries(): void
+    {
+        $old = new SchemaCache($this->path(), 'testdb', 300);
+        $old->put('table:stary_klic', true);
+        $old->flush();
+
+        $raw = json_decode((string) file_get_contents($this->path()), true);
+        $raw['written_at'] = time() - 301;
+        file_put_contents($this->path(), json_encode($raw));
+
+        $fresh = new SchemaCache($this->path(), 'testdb', 300);
+        $fresh->put('table:novy_klic', true);
+        $fresh->flush();
+
+        $reader = new SchemaCache($this->path(), 'testdb', 300);
+        self::assertTrue($reader->get('table:novy_klic'));
+        self::assertNull($reader->get('table:stary_klic'), 'Prošlý klíč se nesmí vrátit zpět do cache.');
+    }
+
     public function testFlushWithoutChangesDoesNotCreateFile(): void
     {
         $c = new SchemaCache($this->path(), 'testdb');
