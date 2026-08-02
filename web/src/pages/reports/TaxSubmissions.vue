@@ -29,6 +29,7 @@ import {
   btnOutline,
   btnOutlineSm,
 } from '@/components/ui/buttonStyles'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 defineProps<{ embedded?: boolean }>()
 
@@ -906,6 +907,112 @@ async function loadEpoEnvironment() {
   }
 }
 
+/**
+ * Akce nad vybraným podáním pro sdílený ActionBar.
+ *
+ * Podmínky jsou převzaté 1:1 z původních tlačítek — viditelnost pěti z osmi jede
+ * přes stavové helpery nad `attempts[]` a rozejít se s nimi by znamenalo nabízet
+ * podání, které EPO odmítne. Proto se tu nic „nezjednodušuje".
+ *
+ * Pořadí drží scénář: podat → pokračovat na EPO → ověřit/stáhnout. Zotavovací
+ * akce (obnovit stav, dohledat potvrzení, vyřešit nepodáno) patří do dropdownu:
+ * používají se výjimečně a v hlavičce by rozmělnily to hlavní. Smazání je
+ * `advanced`, aby se nedalo trefit omylem.
+ */
+const submissionActions = computed<ActionItem[]>(() => {
+  const s = selected.value
+  if (!s) return []
+  const attempt = latestDirectAttempt(s)
+
+  return [
+    {
+      key: 'submit_direct',
+      label: t(epoEnvironment.value === 'test' ? 'reports.submissions.submit_direct_sandbox' : 'reports.submissions.submit_direct'),
+      icon: 'send',
+      tier: 'primary',
+      variant: 'success',
+      show: canDirectSubmit(s),
+      disabled: directBusy.value,
+      run: () => openSubmitModal(s),
+    },
+    {
+      key: 'continue_epo',
+      label: t('reports.submissions.continue_epo'),
+      icon: 'send',
+      tier: 'primary',
+      variant: 'warning',
+      show: !!handoffLinks.value[s.id],
+      run: () => reopenHandoff(s),
+    },
+    {
+      // v-else-if k předchozí položce: rozdělaný handoff má přednost před založením nového.
+      key: 'handoff',
+      label: handoffButtonLabel(s),
+      icon: 'send',
+      tier: 'primary',
+      variant: 'primary',
+      show: !handoffLinks.value[s.id] && canHandoff(s),
+      run: () => createHandoff(s),
+    },
+    {
+      key: 'run_test',
+      label: t('reports.submissions.run_direct_test'),
+      icon: 'badgeCheck',
+      tier: 'secondary',
+      variant: 'primary',
+      show: canDirectTest(s),
+      disabled: directBusy.value,
+      run: () => openTestModal(s),
+    },
+    {
+      key: 'download_xml',
+      label: t('reports.submissions.download_xml'),
+      icon: 'download',
+      tier: 'secondary',
+      href: epoSubmissionsApi.xmlUrl(s.id),
+    },
+    {
+      key: 'refresh_status',
+      label: t('reports.submissions.refresh_epo_status'),
+      icon: 'cycle',
+      tier: 'overflow',
+      show: attempt?.refresh_available,
+      disabled: directBusy.value,
+      run: () => refreshDirectStatus(s),
+    },
+    {
+      key: 'recover_confirmation',
+      label: t('reports.submissions.recover_confirmation'),
+      icon: 'upload',
+      tier: 'overflow',
+      variant: 'warning',
+      show: attempt?.confirmation_recovery_available
+        && ['submitting', 'processing', 'confirmed', 'uncertain'].includes(attempt?.status ?? ''),
+      disabled: directBusy.value,
+      run: () => openRecoveryModal(s, 'confirmation'),
+    },
+    {
+      key: 'resolve_not_submitted',
+      label: t('reports.submissions.resolve_not_submitted'),
+      icon: 'x',
+      tier: 'overflow',
+      variant: 'danger',
+      show: canResolveDirectAttempt(attempt),
+      disabled: directBusy.value,
+      run: () => openRecoveryModal(s, 'not_submitted'),
+    },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: 'trash',
+      tier: 'advanced',
+      variant: 'danger',
+      show: mayDelete(s),
+      run: () => deleteItem(s),
+    },
+  ]
+})
+
 onMounted(async () => {
   restoreHandoffLinks()
   await Promise.all([load(), loadCredentials(), loadEpoEnvironment()])
@@ -1126,80 +1233,10 @@ onMounted(async () => {
           <h2 class="font-semibold">{{ formCodeLabel(selected.form_code) }} · {{ periodLabel(selected) }}</h2>
           <p class="text-xs text-neutral-500 mt-1">{{ t('reports.submissions.snapshot') }} #{{ selected.id }}</p>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <button v-if="canDirectTest(selected)" type="button" :class="btnOutline('primary')" :disabled="directBusy" @click="openTestModal(selected)">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4M12 3l7 4v5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V7l7-4Z"/>
-            </svg>
-            {{ t('reports.submissions.run_direct_test') }}
-          </button>
-          <button v-if="canDirectSubmit(selected)" type="button" :class="btnFilled('success')" :disabled="directBusy" @click="openSubmitModal(selected)">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
-            </svg>
-            {{ t(epoEnvironment === 'test' ? 'reports.submissions.submit_direct_sandbox' : 'reports.submissions.submit_direct') }}
-          </button>
-          <button
-            v-if="latestDirectAttempt(selected)?.refresh_available"
-            type="button"
-            :class="btnOutline('neutral')"
-            :disabled="directBusy"
-            @click="refreshDirectStatus(selected)"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle"/>
-            </svg>
-            {{ t('reports.submissions.refresh_epo_status') }}
-          </button>
-          <button
-            v-if="latestDirectAttempt(selected)?.confirmation_recovery_available && ['submitting', 'processing', 'confirmed', 'uncertain'].includes(latestDirectAttempt(selected)?.status ?? '')"
-            type="button"
-            :class="btnOutline('warning')"
-            :disabled="directBusy"
-            @click="openRecoveryModal(selected, 'confirmation')"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/>
-            </svg>
-            {{ t('reports.submissions.recover_confirmation') }}
-          </button>
-          <button
-            v-if="canResolveDirectAttempt(latestDirectAttempt(selected))"
-            type="button"
-            :class="btnOutline('danger')"
-            :disabled="directBusy"
-            @click="openRecoveryModal(selected, 'not_submitted')"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x"/>
-            </svg>
-            {{ t('reports.submissions.resolve_not_submitted') }}
-          </button>
-          <button v-if="handoffLinks[selected.id]" type="button" :class="btnFilled('warning')" @click="reopenHandoff(selected)">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
-            </svg>
-            {{ t('reports.submissions.continue_epo') }}
-          </button>
-          <button v-else-if="canHandoff(selected)" type="button" :class="btnFilled('primary')" @click="createHandoff(selected)">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
-            </svg>
-            {{ handoffButtonLabel(selected) }}
-          </button>
-          <a :href="epoSubmissionsApi.xmlUrl(selected.id)" target="_blank" :class="btnOutline('neutral')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download"/>
-            </svg>
-            {{ t('reports.submissions.download_xml') }}
-          </a>
-          <button v-if="mayDelete(selected)" type="button" :class="btnOutline('danger')" @click="deleteItem(selected)">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash"/>
-            </svg>
-            {{ t('common.delete') }}
-          </button>
-        </div>
+        <!-- Až osm akcí nad jedním podáním porušovalo konvenci „max 3 a zbytek
+             do …". ActionBar cap řeší sám a drží pořadí: podat → pokračovat na
+             EPO → test/XML, zotavovací akce a mazání v dropdownu. -->
+        <ActionBar :actions="submissionActions" />
       </div>
 
       <div class="p-4 grid lg:grid-cols-3 gap-4">
