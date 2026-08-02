@@ -310,10 +310,6 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/purchase-invoices/ai-import', label: t('nav.ai_import'),         icon: ICONS.ai, permission: 'purchase_invoices.scan' },
         { to: '/clients?role=vendors',       label: t('nav.vendors'),            icon: ICONS.suppliers, newTo: '/clients/new?role=vendor' },
         { to: '/purchase-invoices/payment-orders', label: t('nav.payment_orders'), icon: ICONS.payment_orders },
-        // Drobný majetek patří k nákupu (vzniká z přijatých faktur), ale cesta i oprávnění
-        // jsou účetní — proto explicitní `permission`: navPermission() by z prefixu
-        // /accounting/ vrátil totéž, jenže spoléhat na to je křehké.
-        ...(auth.hasCommercialFeatures && isDoubleEntry ? [{ to: '/accounting/small-assets', label: t('nav.small_assets'), icon: ICONS.tag, permission: 'accounting' as PermissionKey }] : []),
         // Pravidla zaúčtování nákladů se přesunula pod Šablony (záložka „Pravidla nákladů" na
         // /templates?section=expense) — patří k šablonám, ne do fronty přijatých faktur.
         // Export/Import přijatých (reorg UX 2026-07, vytažené z Nástrojů) — Import jen pro
@@ -404,6 +400,11 @@ const navSections = computed<NavSection[]>(() => {
         // Mzdová rekapitulace je v demu skrytá — počítá odvody za konkrétního
         // poplatníka a na sdílených ukázkových datech nedává smysl.
         ...(auth.isDemo ? [] : [{ to: '/accounting/payroll', label: t('nav.accounting_payroll'), icon: ICONS.users }]),
+        // Drobný majetek stojí před Majetkem — je to jeho levnější varianta pod
+        // hranicí §26/2 a uživatel volí mezi nimi, takže patří vedle sebe.
+        // Explicitní `permission`: navPermission() by z prefixu /accounting/ vrátil
+        // totéž, jenže spoléhat na odvození z cesty je křehké.
+        { to: '/accounting/small-assets',     label: t('nav.small_assets'),                icon: ICONS.tag, permission: 'accounting' as PermissionKey },
         { to: '/accounting/assets',           label: t('nav.accounting_assets'),           icon: ICONS.accounting, newTo: '/accounting/assets/new' },
       ],
     })
