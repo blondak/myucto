@@ -6,10 +6,9 @@ namespace MyInvoice\Service\Crm;
 
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Report\CzechWorkingDays;
-use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
@@ -1234,64 +1233,17 @@ final class CrmAggregationService
         $isDoubleEntry = (string) ($supplierModeRow['accounting_mode'] ?? '') === 'double_entry';
         $taxpayerType = (string) ($supplierModeRow['taxpayer_type'] ?? '');
         if ($isDoubleEntry && !$this->isFullyDismissed($dismissals, 'unbooked_documents')) {
-            // Rozsah dokladů musí sedět 1:1 s filtrem `booked=0` v repozitářích, jinak
-            // karta slibuje akci, která v seznamu není vidět. Typy vydaných ber ze sdílené
-            // konstanty (InvoiceRepository, DocumentBackfill, PendingBackfillCounter čtou
-            // tutéž) — opsaný seznam se rozjel a chyběla v něm 'penalty'.
-            $issuedTypes = PostingService::POSTABLE_ISSUED_INVOICE_TYPES;
-            $issuedPlaceholders = implode(',', array_fill(0, count($issuedTypes), '?'));
-            $invStmt = $pdo->prepare(
-                "SELECT COUNT(*) FROM invoices
-                  WHERE supplier_id = ?
-                    AND booked_at IS NULL
-                    AND status NOT IN ('draft', 'cancelled')
-                    AND invoice_type IN ({$issuedPlaceholders})"
-            );
-            $invStmt->execute(array_merge([$supplierId], $issuedTypes));
-            $invUnbooked = (int) $invStmt->fetchColumn();
-
-            // Zálohové faktury se neúčtují (účtuje se inkaso zálohy a vyúčtování), engine
-            // je odmítá — viz PostingService::post() a PendingBackfillCounter.
-            $piStmt = $pdo->prepare(
-                "SELECT COUNT(*) FROM purchase_invoices
-                  WHERE supplier_id = ?
-                    AND booked_at IS NULL
-                    AND status NOT IN ('draft', 'cancelled')
-                    AND COALESCE(document_kind, 'invoice') <> 'advance'"
-            );
-            $piStmt->execute([$supplierId]);
-            $piUnbooked = (int) $piStmt->fetchColumn();
-
-            // Banka se počítá TÝMŽ dotazem, na který proklik vede — unpostedCount() je
-            // zdroj i pro badge tabu „K zaúčtování" (BankPage.vue). Dřív se tu počítaly
-            // pending návrhy (`bank_posting_suggestions.status='pending'`), jenže stav
-            // návrhu je jen proxy, která se od reality rozchází: na ostrých datech bylo
-            // 88 pending návrhů k transakcím, které UŽ měly živý zápis v deníku, takže
-            // karta hlásila 88 a tab pod prokliknutím poctivě 0. Autoritativní je
-            // „transakce nemá živý journal_entry (source_type='bank')", ne stav fronty.
-            $bankPending = (new BankPostingSuggestionRepository($this->db))->unpostedCount($supplierId);
-
-            $unbookedTotal = $invUnbooked + $piUnbooked + $bankPending;
+            // Rozsah i prokliky drží UnbookedDocumentsCounter — jeden zdroj pro tuhle kartu
+            // i pro přehled firem (/portfolio). Dva opisy téhož součtu se rozešly s cílem
+            // prokliku: přehled hlásil 7 a vedl na `/invoices?booked=0`, kde bylo 0 faktur,
+            // protože všech 7 položek byly bankovní pohyby.
+            $breakdown = (new UnbookedDocumentsCounter($this->db))->breakdown($supplierId);
+            $unbookedTotal = UnbookedDocumentsCounter::totalOf($breakdown);
             if ($unbookedTotal > 0) {
-                $breakdown = [];
-                if ($invUnbooked > 0) {
-                    $breakdown[] = ['key' => 'invoices', 'count' => $invUnbooked, 'link' => '/invoices?booked=0'];
-                }
-                if ($piUnbooked > 0) {
-                    $breakdown[] = ['key' => 'purchase_invoices', 'count' => $piUnbooked, 'link' => '/purchase-invoices?booked=0'];
-                }
-                if ($bankPending > 0) {
-                    $breakdown[] = ['key' => 'bank', 'count' => $bankPending, 'link' => '/bank?tab=posting'];
-                }
+                $partLabels = ['invoices' => 'vydaných', 'purchase_invoices' => 'přijatých', 'bank' => 'z banky'];
                 $parts = [];
-                if ($invUnbooked > 0) {
-                    $parts[] = sprintf('%d vydaných', $invUnbooked);
-                }
-                if ($piUnbooked > 0) {
-                    $parts[] = sprintf('%d přijatých', $piUnbooked);
-                }
-                if ($bankPending > 0) {
-                    $parts[] = sprintf('%d z banky', $bankPending);
+                foreach ($breakdown as $b) {
+                    $parts[] = sprintf('%d %s', $b['count'], $partLabels[$b['key']]);
                 }
                 $items[] = [
                     'type'      => 'unbooked_documents',

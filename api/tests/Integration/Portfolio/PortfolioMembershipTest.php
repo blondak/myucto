@@ -177,11 +177,51 @@ final class PortfolioMembershipTest extends TestCase
         self::assertArrayHasKey('accounting_mode', $row);
         self::assertArrayHasKey('next_deadline', $row);
         self::assertArrayHasKey('unbooked_documents', $row);
+        self::assertArrayHasKey('unbooked_breakdown', $row);
         self::assertArrayHasKey('unmatched_bank_transactions', $row);
         self::assertArrayHasKey('purchase_drafts', $row);
         self::assertArrayHasKey('period_status', $row);
         self::assertArrayHasKey('last_bank_import_at', $row);
         self::assertSame($res['total'], count($res['companies']));
+    }
+
+    /**
+     * Regrese: „K doúčtování" sčítá tři různé entity, ale proklik byl natvrdo
+     * `/invoices?booked=0`. Na ostrých datech tvořilo číslo 7 sedm bankovních pohybů
+     * a seznam vydaných faktur pod prokliknutím byl prázdný. Číslo proto musí přijít
+     * s rozpadem, jehož každá položka nese vlastní (neprázdný) cíl a jehož součet
+     * sedí na celek — bez toho se UI nemá čeho chytit.
+     */
+    public function testUnbookedBreakdownMaSoucetAVlastniProklikNaTyp(): void
+    {
+        $expectedLinks = [
+            'invoices' => '/invoices?booked=0',
+            'purchase_invoices' => '/purchase-invoices?booked=0',
+            'bank' => '/bank?tab=posting',
+        ];
+
+        $res = $this->portfolio->overview(0, true, new \DateTimeImmutable());
+        self::assertNotSame([], $res['companies'], 'Superadmin musí vidět aspoň jednu firmu.');
+
+        foreach ($res['companies'] as $row) {
+            $sum = 0;
+            $seen = [];
+            foreach ($row['unbooked_breakdown'] as $part) {
+                self::assertArrayHasKey($part['key'], $expectedLinks, 'Neznámý typ v rozpadu.');
+                self::assertSame($expectedLinks[$part['key']], $part['link'],
+                    'Každý typ vede na vlastní seznam, ne na natvrdo zadrátované faktury.');
+                self::assertGreaterThan(0, $part['count'], 'Nulový typ se do rozpadu nedává.');
+                self::assertNotContains($part['key'], $seen, 'Typ se v rozpadu nesmí opakovat.');
+                $seen[] = $part['key'];
+                $sum += $part['count'];
+            }
+            self::assertSame($row['unbooked_documents'], $sum,
+                'Součet rozpadu musí sedět na číslo, které se v přehledu zobrazuje.');
+            if ($row['accounting_mode'] !== 'double_entry') {
+                self::assertSame([], $row['unbooked_breakdown'],
+                    'V daňové evidenci se do deníku neúčtuje — rozpad je prázdný.');
+            }
+        }
     }
 
     private function roleId(string $legacy): int

@@ -57,6 +57,16 @@ function countClass(n: number): string {
   return n > 0 ? 'text-warning-600 font-medium' : 'text-neutral-400'
 }
 
+/**
+ * „K doúčtování" sčítá tři různé entity (FV / PF / bankovní pohyby), takže napevno
+ * zadrátovaný proklik na `/invoices?booked=0` končil na prázdném seznamu, kdykoliv
+ * číslo tvořily jen banka nebo přijaté faktury. Cíl proto bere BE rozpad — první
+ * neprázdný typ; jednotlivé typy jsou prolinkované vedle čísla.
+ */
+function unbookedLink(c: PortfolioCompany): string {
+  return c.unbooked_breakdown?.[0]?.link ?? '/invoices?booked=0'
+}
+
 function periodBadgeClass(status: string): string {
   if (status === 'open') return 'bg-success-50 text-success-600'
   if (status === 'closing') return 'bg-warning-50 text-warning-600'
@@ -116,9 +126,16 @@ function periodBadgeClass(status: string): string {
                 <span v-else class="text-neutral-400 text-xs">{{ t('portfolio.no_deadline') }}</span>
               </td>
               <td class="px-3 py-2.5 text-right">
-                <button type="button" class="cursor-pointer" :class="countClass(c.unbooked_documents)" @click="switchTo(c.supplier_id, '/invoices?booked=0')">
+                <button type="button" class="cursor-pointer" :class="countClass(c.unbooked_documents)" @click="switchTo(c.supplier_id, unbookedLink(c))">
                   {{ c.unbooked_documents }}
                 </button>
+                <div v-if="(c.unbooked_breakdown?.length ?? 0) > 1" class="flex justify-end flex-wrap gap-1 mt-1">
+                  <button v-for="b in c.unbooked_breakdown" :key="b.key" type="button"
+                    class="cursor-pointer px-1.5 rounded-full bg-neutral-100 hover:bg-primary-50 text-xs text-neutral-600 hover:text-primary-700 whitespace-nowrap"
+                    @click="switchTo(c.supplier_id, b.link)">
+                    {{ t('crm.action_items.breakdown_' + b.key) }} <span class="font-semibold">{{ b.count }}</span>
+                  </button>
+                </div>
               </td>
               <td class="px-3 py-2.5 text-right">
                 <button type="button" class="cursor-pointer" :class="countClass(c.unmatched_bank_transactions)" @click="switchTo(c.supplier_id, '/bank')">
@@ -163,10 +180,10 @@ function periodBadgeClass(status: string): string {
             {{ c.next_deadline.label }} · {{ c.next_deadline.date }}
           </div>
           <div class="grid grid-cols-3 gap-2 text-xs text-center">
-            <div class="bg-neutral-50 rounded p-2">
+            <button type="button" class="cursor-pointer bg-neutral-50 rounded p-2" @click="switchTo(c.supplier_id, unbookedLink(c))">
               <div class="text-neutral-400">{{ t('portfolio.col_unbooked') }}</div>
               <div class="font-semibold" :class="countClass(c.unbooked_documents)">{{ c.unbooked_documents }}</div>
-            </div>
+            </button>
             <div class="bg-neutral-50 rounded p-2">
               <div class="text-neutral-400">{{ t('portfolio.col_bank_unmatched') }}</div>
               <div class="font-semibold" :class="countClass(c.unmatched_bank_transactions)">{{ c.unmatched_bank_transactions }}</div>

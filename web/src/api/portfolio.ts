@@ -13,6 +13,13 @@ export interface PortfolioPeriodStatus {
   status: 'open' | 'closing' | 'closed'
 }
 
+/** Rozpad „k doúčtování" po typech (UnbookedDocumentsCounter) — každý typ má vlastní cíl prokliku. */
+export interface PortfolioUnbookedPart {
+  key: 'invoices' | 'purchase_invoices' | 'bank'
+  count: number
+  link: string
+}
+
 export interface PortfolioCompany {
   supplier_id: number
   company_name: string
@@ -21,6 +28,7 @@ export interface PortfolioCompany {
   accounting_mode: 'tax_evidence' | 'double_entry'
   next_deadline: PortfolioDeadline | null
   unbooked_documents: number
+  unbooked_breakdown: PortfolioUnbookedPart[]
   unmatched_bank_transactions: number
   purchase_drafts: number
   period_status: PortfolioPeriodStatus | null

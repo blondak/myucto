@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Portfolio;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\UserSupplierRepository;
-use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\Crm\CrmAggregationService;
 
 /**
@@ -102,6 +102,12 @@ final class PortfolioAggregationService
         $accountingMode = (string) $sup['accounting_mode'];
         $isDoubleEntry = $accountingMode === 'double_entry';
 
+        // Rozpad se posílá i do UI: součet míchá tři různé entity a bez něj se nedá
+        // proklik nasměrovat tam, kde položky opravdu leží.
+        $unbookedBreakdown = $isDoubleEntry
+            ? (new UnbookedDocumentsCounter($this->db))->breakdown($supplierId)
+            : [];
+
         return [
             'supplier_id'     => $supplierId,
             'company_name'    => (string) ($sup['display_name'] !== null && $sup['display_name'] !== '' ? $sup['display_name'] : $sup['company_name']),
@@ -109,45 +115,13 @@ final class PortfolioAggregationService
             'is_vat_payer'    => (bool) $sup['is_vat_payer'],
             'accounting_mode' => $accountingMode,
             'next_deadline'   => $this->crm->nextTaxDeadline($supplierId, $now),
-            'unbooked_documents'          => $isDoubleEntry ? $this->unbookedDocumentsCount($supplierId) : 0,
+            'unbooked_documents'          => UnbookedDocumentsCounter::totalOf($unbookedBreakdown),
+            'unbooked_breakdown'          => $unbookedBreakdown,
             'unmatched_bank_transactions' => $this->unmatchedBankCount($supplierId, $now),
             'purchase_drafts'             => $this->purchaseDraftsCount($supplierId),
             'period_status'      => $this->periodStatus($supplierId),
             'last_bank_import_at' => $this->lastBankImportAt($supplierId),
         ];
-    }
-
-    /**
-     * Nezaúčtované doklady (FV + PF + fronta bankovních návrhů) — stejná definice
-     * jako action item `unbooked_documents` (CrmAggregationService::actionItems 3c).
-     */
-    private function unbookedDocumentsCount(int $supplierId): int
-    {
-        $issuedTypes = PostingService::POSTABLE_ISSUED_INVOICE_TYPES;
-        $issuedPlaceholders = implode(',', array_fill(0, count($issuedTypes), '?'));
-        $invStmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM invoices
-              WHERE supplier_id = ? AND booked_at IS NULL
-                AND status NOT IN ('draft', 'cancelled')
-                AND invoice_type IN ({$issuedPlaceholders})"
-        );
-        $invStmt->execute(array_merge([$supplierId], $issuedTypes));
-        $inv = (int) $invStmt->fetchColumn();
-
-        // Zálohové PF se neúčtují (účtuje se inkaso a vyúčtování) — viz PostingService::post().
-        $piStmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM purchase_invoices
-              WHERE supplier_id = ? AND booked_at IS NULL AND status NOT IN ('draft', 'cancelled')
-                AND COALESCE(document_kind, 'invoice') <> 'advance'"
-        );
-        $piStmt->execute([$supplierId]);
-        $pi = (int) $piStmt->fetchColumn();
-
-        // Banka = pohyby bez živého zápisu v deníku, týž zdroj jako karta „Zaúčtuj doklady"
-        // a badge tabu „K zaúčtování" (stav návrhu je jen proxy a rozchází se s realitou).
-        $bank = (new \MyInvoice\Repository\BankPostingSuggestionRepository($this->db))->unpostedCount($supplierId);
-
-        return $inv + $pi + $bank;
     }
 
     /**
