@@ -134,6 +134,8 @@ function reportSummary(report: unknown): string {
 function healthBadgeClass(h: CronJobHealth): string {
   switch (h) {
     case 'ok': return 'bg-success-50 text-success-600'
+    // Nečinnost není varování — je to normální provozní stav gatované úlohy.
+    case 'idle': return 'bg-neutral-100 text-neutral-600'
     case 'overdue': return 'bg-warning-50 text-warning-600'
     case 'failing':
     case 'overdue_and_failing':
@@ -146,6 +148,7 @@ function healthLabel(h: CronJobHealth): string {
 }
 
 function healthTooltip(j: CronJob): string {
+  if (j.health === 'idle') return t('cron_jobs.tooltip_idle', { script: schedule.value?.dispatcher_script ?? 'cron-dispatch' })
   if (j.health === 'overdue' || j.health === 'overdue_and_failing') {
     return t('cron_jobs.tooltip_overdue', { hours: j.max_age_hours })
   }
@@ -154,7 +157,7 @@ function healthTooltip(j: CronJob): string {
   return ''
 }
 
-const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok'))
+const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok' && j.health !== 'idle'))
 
 // ── Návod na naplánování úloh ───────────────────────────────────────────────
 // Skládá se z KATALOGU (frekvence) a ze SKUTEČNÝCH cest běžícího nasazení
@@ -398,6 +401,9 @@ async function copySetup() {
                       <span class="font-mono text-neutral-700">{{ fmtTime(j.last_ok_started_at) }}</span>
                     </div>
                   </div>
+                  <div v-if="j.health === 'idle'" class="mt-2 text-xs text-neutral-500">
+                    {{ healthTooltip(j) }}
+                  </div>
                   <div v-if="j.last_message" class="mt-2 text-xs">
                     <span class="text-neutral-500">{{ t('cron_jobs.message_label') }}: </span>
                     <span class="font-mono text-danger-600 break-all">{{ j.last_message }}</span>
@@ -437,7 +443,7 @@ async function copySetup() {
         <div v-for="j in jobs" :key="`m-${j.script}`" class="p-3 space-y-1.5">
           <div class="flex items-start justify-between gap-2">
             <div class="font-mono text-xs font-medium break-all">{{ j.script }}</div>
-            <span class="text-xs px-2 py-0.5 rounded font-medium shrink-0" :class="healthBadgeClass(j.health)">{{ healthLabel(j.health) }}</span>
+            <span class="text-xs px-2 py-0.5 rounded font-medium shrink-0" :class="healthBadgeClass(j.health)" :title="healthTooltip(j)">{{ healthLabel(j.health) }}</span>
           </div>
           <div class="text-xs text-neutral-600">{{ fmtFreq(j.recommended) }}</div>
           <div class="flex items-baseline justify-between gap-2 text-xs">

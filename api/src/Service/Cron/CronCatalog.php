@@ -273,4 +273,20 @@ final class CronCatalog
     {
         return array_map(static fn ($e) => (string) $e['script'], self::all());
     }
+
+    /**
+     * Limit stáří posledního úspěšného běhu pro daný skript.
+     *
+     * Fallback 24 h je pro jistotu — skript mimo katalog by neměl existovat,
+     * ale výjimka kvůli přehledu stavu je horší než konzervativní odhad.
+     */
+    public static function maxAgeHours(string $script): int
+    {
+        foreach (self::all() as $job) {
+            if ($job['script'] === $script) {
+                return (int) $job['max_age_hours'];
+            }
+        }
+        return 24;
+    }
 }

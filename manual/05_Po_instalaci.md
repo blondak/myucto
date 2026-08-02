@@ -87,3 +87,10 @@ chybí nebo je starší než `max_age_hours` (typicky 36 h), je tu varování
 **Stáří** / **Selhává** / **Neběželo**. Tím se odhalí "cron vůbec není
 nastavený" i "cron běží, ale failuje" — bez ohledu na OS (crontab vs.
 Task Scheduler vs. Docker host).
+
+**Stav „Nemá práci" (jen režim jednoho dispatcheru).** Dispatcher úlohy, které
+mají levnou kontrolu práce (`cron-epo-status`, `cron-ai-worker`), vůbec
+nespouští, dokud pro ně není co dělat — jejich poslední běh proto legitimně
+stárne. Že plánování funguje, dokládá heartbeat samotného `cron-dispatch`,
+a takové úloze se místo varování ukáže neutrální **Nemá práci**. Jakmile
+dispatcher sám zestárne nebo začne selhávat, vrátí se u nich normální varování.

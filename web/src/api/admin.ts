@@ -273,7 +273,12 @@ export interface SampleDataStatus {
   >>
 }
 
-export type CronJobHealth = 'ok' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
+/**
+ * `idle` = úloha se v režimu dispatcheru nespouští, protože pro ni není práce.
+ * Není to problém — zdraví se u ní posuzuje podle heartbeatu dispatcheru
+ * (`health_source: 'dispatcher'`).
+ */
+export type CronJobHealth = 'ok' | 'idle' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
 
 export interface CronJob {
   script: string
@@ -284,6 +289,8 @@ export interface CronJob {
   critical: boolean
   max_age_hours: number
   health: CronJobHealth
+  /** Z čeho stav vychází: vlastní heartbeat úlohy, nebo heartbeat dispatcheru. */
+  health_source?: 'self' | 'dispatcher'
   last_started_at: string | null
   last_finished_at: string | null
   last_status: 'running' | 'ok' | 'error' | null

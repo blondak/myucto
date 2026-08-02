@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Cron\CronCatalog;
+use MyInvoice\Service\Cron\CronDispatcher;
+use MyInvoice\Service\Cron\CronHealth;
 use MyInvoice\Service\Cron\CronJobGate;
 use MyInvoice\Service\Cron\CronScheduleMode;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -68,6 +70,23 @@ final class CronJobsAction
         );
 
         $now = time();
+
+        // V režimu dispatcheru je jeho heartbeat důkazem, že plánovací smyčka
+        // žije — a tím pádem že ticho gatované úlohy (`cron-epo-status`,
+        // `cron-ai-worker`) znamená „není práce", ne výpadek. Viz CronHealth.
+        $dispatcherAlive = false;
+        $gatedScripts = [];
+        if ($mode === CronScheduleMode::DISPATCHER) {
+            $stmt->execute([CronCatalog::DISPATCHER_SCRIPT]);
+            $dispatcherHeartbeat = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+            $dispatcherAlive = CronHealth::isDispatcherAlive(
+                $dispatcherHeartbeat,
+                CronCatalog::maxAgeHours(CronCatalog::DISPATCHER_SCRIPT) * 3600,
+                $now,
+            );
+            $gatedScripts = CronDispatcher::gatedScripts();
+        }
+
         $rows = [];
         foreach ($catalog as $job) {
             // Podmíněné úlohy (bank scan, scan inbox) skryj, dokud není nastaven
@@ -86,16 +105,15 @@ final class CronJobsAction
             // Prázdný tick ('noop') je pro účely zdraví úspěch — cron žije a
             // korektně zjistil, že nemá co dělat. Proto se do last_ok_at počítá.
             $lastOkAt = $last['last_ok_at'] ?? null;
-            $maxAgeSec = (int) $job['max_age_hours'] * 3600;
-            $health = 'never_ran';
-            $ageSec = null;
-            if ($lastOkAt !== null) {
-                $ageSec = $now - (int) strtotime((string) $lastOkAt);
-                $health = ($ageSec > $maxAgeSec) ? 'overdue' : 'ok';
-            }
-            if (($last['last_status'] ?? null) === 'error') {
-                $health = ($health === 'ok') ? 'failing' : ($health === 'never_ran' ? 'failing' : 'overdue_and_failing');
-            }
+            $ageSec = $lastOkAt !== null ? $now - (int) strtotime((string) $lastOkAt) : null;
+
+            [$health, $healthSource] = CronHealth::evaluate(
+                $ageSec,
+                $last['last_status'] ?? null,
+                (int) $job['max_age_hours'] * 3600,
+                in_array($script, $gatedScripts, true),
+                $dispatcherAlive,
+            );
 
             $report = null;
             if ($last !== null && !empty($last['last_report'])) {
@@ -110,7 +128,10 @@ final class CronJobsAction
                 'weekdays_only'       => (bool) $job['weekdays_only'],
                 'critical'            => (bool) $job['critical'],
                 'max_age_hours'       => (int) $job['max_age_hours'],
-                'health'              => $health,                          // ok | overdue | failing | overdue_and_failing | never_ran
+                'health'              => $health,                          // ok | idle | overdue | failing | overdue_and_failing | never_ran
+                // Podle čeho se stav určil: 'self' = vlastní heartbeat úlohy,
+                // 'dispatcher' = úloha nemá práci a živý je za ni dispatcher.
+                'health_source'       => $healthSource,
                 'last_started_at'     => $last['last_started_at']    ?? null,
                 'last_finished_at'    => $last['last_finished_at']   ?? null,
                 'last_status'         => $last['last_status']        ?? null,

@@ -59,6 +59,20 @@ final class CronDispatcher
     ) {}
 
     /**
+     * Skripty, které dispatcher spouští jen když pro ně je práce.
+     *
+     * Potřebuje to UI: takové úloze v klidné instalaci heartbeat legitimně stárne
+     * (nespustí se → nemá co zapsat), takže se její zdraví posuzuje podle
+     * dispatcheru. Viz {@see CronHealth}.
+     *
+     * @return list<string>
+     */
+    public static function gatedScripts(): array
+    {
+        return array_keys(self::WORK_GATES);
+    }
+
+    /**
      * Odbav jednu minutu.
      *
      * @return array{minute:string,due:list<string>,launched:list<string>,skipped:array<string,string>,errors:array<string,string>}
