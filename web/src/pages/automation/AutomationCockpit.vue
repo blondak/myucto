@@ -16,6 +16,7 @@ import AutomationChecklist from './AutomationChecklist.vue'
 import AutomationHistory from './AutomationHistory.vue'
 import AutomationWizard from './AutomationWizard.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import BulkImpactDialog from '@/components/automation/BulkImpactDialog.vue'
 import RejectReasonDialog from '@/components/automation/RejectReasonDialog.vue'
 import SourceDetailDrawer from '@/components/automation/SourceDetailDrawer.vue'
@@ -323,12 +324,13 @@ onMounted(async () => {
         <button type="button" class="h-10 whitespace-nowrap rounded border border-neutral-300 px-3 text-sm" @click="direction = direction === 'desc' ? 'asc' : 'desc'">{{ direction === 'desc' ? '↓' : '↑' }} {{ t(`automation.sort_${direction}`) }}</button>
         <label class="text-xs text-neutral-500">{{ t('common.from') }}<input v-model="from" type="date" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-500">{{ t('common.to') }}<input v-model="to" type="date" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"></label>
-        <div v-if="tab==='pending' && selectedIds.length" class="ml-auto flex flex-wrap gap-2">
-          <button :disabled="busy" class="whitespace-nowrap rounded border border-danger-300 px-4 py-2 text-sm font-medium text-danger-600" @click="rejectTarget='bulk'">{{ t('automation.bulk_reject',{count:selectedIds.length}) }}</button>
-          <button :disabled="busy" class="whitespace-nowrap rounded bg-primary-600 px-4 py-2 text-sm font-medium text-white" @click="bulkApprove">{{ t('automation.bulk_approve',{count:selectedIds.length}) }}</button>
-        </div>
       </template>
     </div>
+    <!-- Hromadné schválení/zamítnutí v plovoucí liště u spodní hrany (jen tab pending). -->
+    <BulkActionBar v-if="tab==='pending'" :count="selectedIds.length" @clear="selectedIds=[]">
+      <button :disabled="busy" class="whitespace-nowrap rounded border border-danger-300 px-4 py-2 text-sm font-medium text-danger-600" @click="rejectTarget='bulk'">{{ t('automation.bulk_reject',{count:selectedIds.length}) }}</button>
+      <button :disabled="busy" class="whitespace-nowrap rounded bg-primary-600 px-4 py-2 text-sm font-medium text-white" @click="bulkApprove">{{ t('automation.bulk_approve',{count:selectedIds.length}) }}</button>
+    </BulkActionBar>
     <section v-if="feedTab === 'needs_input' && topReasons.length" class="rounded-lg border border-warning-200 bg-warning-50 p-4"><h2 class="text-sm font-semibold text-warning-800">{{ t('automation.top_reasons_title') }}</h2><div class="mt-2 flex flex-wrap gap-2"><span v-for="reason in topReasons" :key="reason.code" class="rounded-full bg-surface px-3 py-1 text-xs text-warning-700">{{ reasonLabel(reason.code) }} · {{ reason.count }}×</span></div></section>
     <p v-if="loading" class="py-12 text-center text-neutral-500">{{ t('common.loading') }}</p><p v-else-if="error" class="rounded bg-danger-50 p-4 text-danger-500">{{ error }}</p>
     <template v-else-if="feedTab"><FeedTable v-if="items.length" ref="feedRef" :items="items" :tab="feedTab" :cursor-index="cursor" :show-supplier="showSupplier" :busy="busy" @approve="approve" @reject="reject" @snooze="snooze" @inspect="sourceDetail=$event" @unpost="unpost" @resolved="refresh" @update:selected="selectedIds=$event"/><div v-else class="rounded-lg border border-neutral-200 bg-surface p-10 text-center text-neutral-500"><p>{{ t(`automation.empty_${tab==='needs_input'?'needs':tab}`) }}</p></div><PaginationBar :page="page" :per-page="perPage" :total="total" @update:page="page = $event"/><p class="hidden md:block text-right text-xs text-neutral-400">{{ t('automation.hotkeys_hint') }}</p></template>

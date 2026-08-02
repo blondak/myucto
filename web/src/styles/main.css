@@ -315,6 +315,17 @@ body::after {
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
+/*
+ * Formulářová pole mají prstenec DOVNITŘ.
+ * Why: pole často sedí těsně u hrany scrollovaného panelu (modály s dlouhým
+ * formulářem) a prstenec kreslený 2 px vně se ořízne — viděno na modálu atributu
+ * v e-shopu, kde byl vidět jen ze tří stran. Uvnitř se oříznout nemůže nikdy
+ * a u pole s rámečkem to navíc čte přirozeně jako „zvýrazněný rámeček".
+ * Tlačítek a odkazů se to netýká, ty stojí volně a vně vypadají líp.
+ */
+:where(input, select, textarea):focus-visible {
+  outline-offset: -2px;
+}
 /* Myš/dotyk nemá dostávat prstenec — jen klávesnice. */
 :where(a, button, summary, [role="button"]):focus:not(:focus-visible) {
   outline: none;
@@ -854,6 +865,19 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   @keyframes row-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: none; }
+  }
+
+  /*
+   * Aktivní řádek při ovládání klávesnicí (j/k) — viz composables/useListKeyboard.
+   * Why: tichý hover tady nestačí. Uživatel, který nemá ruku na myši, potřebuje
+   * vidět kurzor v seznamu stejně jednoznačně jako v textovém editoru, proto
+   * levá lišta v brand barvě, ne jen podbarvení.
+   */
+  tr[data-row-active="true"] > :where(td, th):first-child {
+    box-shadow: inset 3px 0 0 var(--color-primary-500);
+  }
+  :where(tr[data-row-active="true"]) {
+    background-color: color-mix(in oklab, var(--color-primary-500) 8%, transparent);
   }
 
   /*

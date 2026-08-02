@@ -18,6 +18,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
+import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -140,6 +141,24 @@ function clearFilter(key: string) {
 function clearAllFilters() {
   for (const chip of filterChips.value) clearFilter(chip.key)
 }
+
+/**
+ * Ploché pořadí řádků napříč měsíčními skupinami — klávesnice se pohybuje po
+ * seznamu tak, jak ho uživatel vidí, ne po skupinách.
+ */
+const flatRows = computed(() => groups.value.flatMap(g => g.invoices))
+const rowIndexById = computed(() => {
+  const map = new Map<number, number>()
+  flatRows.value.forEach((inv, i) => map.set(inv.id, i))
+  return map
+})
+
+const { activeIndex } = useListKeyboard({
+  count: () => flatRows.value.length,
+  open: (i) => { const inv = flatRows.value[i]; if (inv) openInvoice(inv) },
+  toggle: (i) => { const inv = flatRows.value[i]; if (inv) toggleSelected(inv.id) },
+  clear: () => { selectedIds.value = [] },
+})
 
 const selectedIds = ref<number[]>([])
 const bulkBusy = ref(false)
@@ -984,6 +1003,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                 @auxclick.prevent="openInvoice(inv, $event)"
                 class="cursor-pointer hover:bg-neutral-50 transition"
                 :class="[invoiceRowClass(inv.due_date, inv.status), flashedIds.has(inv.id) ? 'row-flash' : '']"
+                :data-row-active="rowIndexById.get(inv.id) === activeIndex"
                 :style="staggerRows ? { '--i': ri } : undefined"
               >
                 <td class="px-2 py-2.5 text-center" @click.stop>

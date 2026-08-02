@@ -343,7 +343,9 @@ async function deleteOption(opt: AttributeOption) {
     </div>
 
     <Modal v-if="modalOpen" :title="editing ? t('eshop.attributes.edit') : t('eshop.attributes.new')" widthClass="max-w-xl" @close="modalOpen = false">
-      <div class="space-y-4 max-h-[80vh] overflow-y-auto scrollbar-slim pr-1">
+      <!-- `px-1`, ne jen `pr-1`: pole sedělo těsně u levé hrany scroll kontejneru
+           a ten ořezával focus prstenec (kreslí se 2 px vně prvku). -->
+      <div class="space-y-4 max-h-[80vh] overflow-y-auto scrollbar-slim px-1">
         <div class="grid grid-cols-2 gap-3">
           <CodeNameFields
             v-model:code="form.code"

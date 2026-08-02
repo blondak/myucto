@@ -84,9 +84,9 @@ const money = (item: AutomationFeedItem) => new Intl.NumberFormat(undefined, { s
     <NeedsInputCard v-for="item in items" :key="item.id" :item="item" @resolved="emit('resolved')" @snooze="emit('snooze', item)" @inspect="emit('inspect', item)" />
   </div>
   <div v-else>
+    <!-- Počet vybraných teď nese plovoucí BulkActionBar v rodičovské stránce, tady zůstává jen ovládání "vybrat vše". -->
     <div v-if="tab === 'pending' && allEligible.length" class="hidden md:flex items-center gap-3 mb-3 text-sm">
       <label class="inline-flex items-center gap-2"><input type="checkbox" :checked="selected.size === allEligible.length" @change="toggleAll">{{ t('automation.select_page') }}</label>
-      <span class="text-neutral-500">{{ t('automation.selected_count', { count: selected.size }) }}</span>
     </div>
     <div class="hidden md:block overflow-x-auto rounded-lg border border-neutral-200 bg-surface">
       <table class="w-full text-sm">

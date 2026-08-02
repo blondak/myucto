@@ -568,26 +568,32 @@ const yearOptions = computed(() => {
                     {{ formatMoney(num(row.amount)) }}
                   </td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.residual_end)) }}</td>
-                  <td class="px-3 py-2 text-center">
-                    <span class="text-xs px-2 py-0.5 rounded font-medium" :class="rowStatusClass(row)">{{ rowStatus(row) }}</span>
-                    <!-- Proklik do deníku na zápis tohoto odpisu (FEATURA C, audit 2026-07 follow-up). -->
-                    <RouterLink v-if="row.journal_entry_id"
-                      :to="{ name: 'accounting-journal', query: { entry_id: String(row.journal_entry_id) } }"
-                      @click.stop
-                      class="block mx-auto mt-1 text-xs text-primary-600 hover:underline">
-                      {{ t('common.view_in_journal') }}
-                    </RouterLink>
-                    <button v-if="row.is_paused && row.source === 'confirmed' && planTab === 'tax' && auth.canWrite('assets.write') && asset.status === 'in_use'"
-                      @click.stop="runUnpause(row.fiscal_year)"
-                      class="cursor-pointer block mx-auto mt-1 text-xs text-primary-600 hover:underline">
-                      {{ t('accounting.assets.lifecycle.unpause') }}
-                    </button>
-                    <button v-if="row.source === 'confirmed' && row.journal_entry_id && row.fiscal_year === latestMaterializedYear && auth.canWrite('assets.write')"
-                      :disabled="acting" :class="`${btnOutlineSm('danger')} mx-auto mt-1`"
-                      @click.stop="runDeleteDepreciation(row)">
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                      {{ t('accounting.assets.plan.delete_booking') }}
-                    </button>
+                  <!-- Stav + akce na JEDEN řádek: každý prvek byl `block ... mt-1`
+                       pod sebou, takže potvrzený rok byl třikrát vyšší než ostatní
+                       a tabulka se rozpadala. `flex-wrap` je pojistka pro úzké
+                       obrazovky, kde se to zalomí až když opravdu musí. -->
+                  <td class="px-3 py-2">
+                    <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                      <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="rowStatusClass(row)">{{ rowStatus(row) }}</span>
+                      <!-- Proklik do deníku na zápis tohoto odpisu (FEATURA C, audit 2026-07 follow-up). -->
+                      <RouterLink v-if="row.journal_entry_id"
+                        :to="{ name: 'accounting-journal', query: { entry_id: String(row.journal_entry_id) } }"
+                        @click.stop
+                        class="text-xs text-primary-600 hover:underline whitespace-nowrap">
+                        {{ t('common.view_in_journal') }}
+                      </RouterLink>
+                      <button v-if="row.is_paused && row.source === 'confirmed' && planTab === 'tax' && auth.canWrite('assets.write') && asset.status === 'in_use'"
+                        @click.stop="runUnpause(row.fiscal_year)"
+                        class="cursor-pointer text-xs text-primary-600 hover:underline whitespace-nowrap">
+                        {{ t('accounting.assets.lifecycle.unpause') }}
+                      </button>
+                      <button v-if="row.source === 'confirmed' && row.journal_entry_id && row.fiscal_year === latestMaterializedYear && auth.canWrite('assets.write')"
+                        :disabled="acting" :class="btnOutlineSm('danger')"
+                        @click.stop="runDeleteDepreciation(row)">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                        {{ t('accounting.assets.plan.delete_booking') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="expandedYear === row.fiscal_year && row.months && row.months.length > 0">

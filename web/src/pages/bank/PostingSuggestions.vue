@@ -15,6 +15,7 @@ import {
   type PostingSuggestion, type SuggestionStatus,
 } from '@/api/bankPosting'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import {
@@ -298,13 +299,13 @@ function resolveLink(it: PostingSuggestion) {
       </div>
     </div>
 
-    <!-- Bulk lišta (jen pending, desktop) -->
-    <div v-if="isPending && auth.canWrite('bank.post') && selected.size > 0" class="hidden md:flex items-center gap-3 mb-2">
+    <!-- Hromadné schválení v plovoucí liště u spodní hrany (jen pending, výběr jen na desktopu). -->
+    <BulkActionBar v-if="isPending && auth.canWrite('bank.post')" :count="selected.size" @clear="selected.clear()">
       <button @click="bulkApprove" :disabled="busyId === -1" :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
         {{ t('bank.posting.bulk_approve', { count: selected.size }) }}
       </button>
-    </div>
+    </BulkActionBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 

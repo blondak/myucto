@@ -22,6 +22,7 @@ import { apiErrorMessage } from '@/api/errors'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -543,62 +544,20 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
       </div>
 
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="flex items-center gap-4 flex-wrap">
-          <label class="flex items-center gap-1.5 text-sm text-neutral-700">
-            <input v-model="markPaid" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            {{ t('payment_order.mark_paid') }}
-          </label>
-          <label class="flex items-center gap-1.5 text-sm text-neutral-700">
-            <input v-model="hideOrdered" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            {{ t('payment_order.hide_ordered') }}
-          </label>
-          <label class="flex items-center gap-1.5 text-sm text-neutral-700"
-            :title="t('payment_method.include_non_transfer_hint')">
-            <input v-model="includeNonTransfer" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            {{ t('payment_method.include_non_transfer') }}
-          </label>
-        </div>
-
-        <div class="flex items-center gap-2 flex-wrap">
-          <span v-if="selectedIds.length > 0" class="text-sm text-neutral-500 mr-1">
-            {{ t('payment_order.selected_summary', { n: selectedIds.length }) }}
-            <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}</span>
-          </span>
-          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="markOnly"
-            :disabled="creating || selectedIds.length === 0"
-            :title="t('payment_order.mark_only_hint')"
-            :class="btnOutline('neutral')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
-            {{ t('payment_order.mark_only') }}
-          </button>
-          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('csv')"
-            :disabled="creating || selectedIds.length === 0"
-            :class="btnOutline('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            {{ t('payment_order.export_csv') }}
-          </button>
-          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('pdf')"
-            :disabled="creating || selectedIds.length === 0"
-            :class="btnOutline('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            {{ t('payment_order.export_pdf') }}
-          </button>
-          <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('abo')"
-            :disabled="creating || selectedIds.length === 0 || !isCzk"
-            :title="!isCzk ? t('payment_order.abo_only_czk') : ''"
-            :class="btnFilled('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            {{ creating ? '…' : t('payment_order.export_abo') }}
-          </button>
-          <button v-if="auth.canWrite('purchase_invoices.payment_orders') && isEur" type="button" @click="createAndDownload('sepa')"
-            :disabled="creating || selectedIds.length === 0 || !selectedPayer?.iban"
-            :title="!selectedPayer?.iban ? t('payment_order.no_payer_iban') : ''"
-            :class="btnFilled('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-            {{ creating ? '…' : t('payment_order.export_sepa') }}
-          </button>
-        </div>
+      <div class="flex items-center gap-4 flex-wrap">
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700">
+          <input v-model="markPaid" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          {{ t('payment_order.mark_paid') }}
+        </label>
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700">
+          <input v-model="hideOrdered" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          {{ t('payment_order.hide_ordered') }}
+        </label>
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700"
+          :title="t('payment_method.include_non_transfer_hint')">
+          <input v-model="includeNonTransfer" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          {{ t('payment_method.include_non_transfer') }}
+        </label>
       </div>
 
       <!-- Varování: vybrané faktury bez CZ účtu nejdou do ABO -->
@@ -616,6 +575,46 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         {{ t('payment_order.readonly_hint') }}
       </div>
     </div>
+
+    <!-- Hromadné akce nad vybranými fakturami v plovoucí liště u spodní hrany (BulkActionBar). -->
+    <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
+      <span class="px-1.5 text-sm font-mono font-semibold text-neutral-900 whitespace-nowrap">
+        {{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}
+      </span>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="markOnly"
+        :disabled="creating || selectedIds.length === 0"
+        :title="t('payment_order.mark_only_hint')"
+        :class="btnOutline('neutral')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
+        {{ t('payment_order.mark_only') }}
+      </button>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('csv')"
+        :disabled="creating || selectedIds.length === 0"
+        :class="btnOutline('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ t('payment_order.export_csv') }}
+      </button>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('pdf')"
+        :disabled="creating || selectedIds.length === 0"
+        :class="btnOutline('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ t('payment_order.export_pdf') }}
+      </button>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('abo')"
+        :disabled="creating || selectedIds.length === 0 || !isCzk"
+        :title="!isCzk ? t('payment_order.abo_only_czk') : ''"
+        :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ creating ? '…' : t('payment_order.export_abo') }}
+      </button>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders') && isEur" type="button" @click="createAndDownload('sepa')"
+        :disabled="creating || selectedIds.length === 0 || !selectedPayer?.iban"
+        :title="!selectedPayer?.iban ? t('payment_order.no_payer_iban') : ''"
+        :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ creating ? '…' : t('payment_order.export_sepa') }}
+      </button>
+    </BulkActionBar>
 
     <!-- ═══ Kandidáti ═══ -->
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
