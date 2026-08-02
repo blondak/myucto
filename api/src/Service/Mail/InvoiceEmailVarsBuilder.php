@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Mail;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 
@@ -220,98 +219,10 @@ final class InvoiceEmailVarsBuilder
 
     /**
      * Vrátí kompletní supplier kontext pro patičku emailu (podle invoice.supplier_id).
-     * Preferuje supplier_snapshot, fallback na live supplier+countries lookup.
+     * Logika žije v SupplierEmailContext — sdílí ji i ApprovalEmailVarsBuilder.
      */
     private function loadSupplierFooter(array $invoice): ?array
     {
-        $row = null;
-        // 1. Snapshot — frozen footer text (company_name, address, contact)
-        if (!empty($invoice['supplier_snapshot'])) {
-            $snap = is_string($invoice['supplier_snapshot'])
-                ? json_decode($invoice['supplier_snapshot'], true)
-                : $invoice['supplier_snapshot'];
-            if (is_array($snap)) {
-                $row = [
-                    'company_name' => $snap['company_name'] ?? '',
-                    'display_name' => $snap['display_name'] ?? null,
-                    'tagline'      => $snap['tagline'] ?? null,
-                    'street'       => $snap['street'] ?? '',
-                    'city'         => $snap['city'] ?? '',
-                    'zip'          => $snap['zip'] ?? '',
-                    'country'      => $snap['country_name_cs'] ?? '',
-                    'email'        => $snap['email'] ?? null,
-                    'phone'        => $snap['phone'] ?? null,
-                    'web'          => $snap['web'] ?? null,
-                    'email_footer' => $snap['email_footer'] ?? null,
-                    'branding_profile_id' => $snap['branding_profile_id'] ?? null,
-                    'email_branding_enabled' => (bool) ($snap['email_branding_enabled'] ?? false),
-                    'email_accent_color' => $snap['email_accent_color'] ?? '#3B2D83',
-                    'logo_path' => $snap['logo_path'] ?? null,
-                    'email_profile_id' => $snap['email_profile_id'] ?? null,
-                ];
-            }
-        }
-        // 2. Live fallback pro footer text (pokud chybí snapshot)
-        $sid = (int) ($invoice['supplier_id'] ?? 0);
-        if ($row === null && $sid > 0) {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT s.id, s.company_name, s.display_name, s.tagline, s.street, s.city, s.zip,
-                        s.email, s.phone, s.web, co.name_cs AS country
-                   FROM supplier s
-              LEFT JOIN countries co ON co.id = s.country_id
-                  WHERE s.id = ?'
-            );
-            $stmt->execute([$sid]);
-            $live = $stmt->fetch(\PDO::FETCH_ASSOC);
-            $row = $live ?: null;
-        }
-        // Ensure id present pro SafeLogoPath ve sink stages (Mailer::sendTemplate +
-        // addLogoDisplaySize). Když row vznikl ze snapshotu, sid může chybět.
-        if ($row !== null && empty($row['id']) && $sid > 0) {
-            $row['id'] = $sid;
-        }
-
-        // 3. Profilový branding vystaveného dokladu je immutable ve snapshotu.
-        //    Bez profilového snapshotu je základ VŽDY živý branding ze supplier
-        //    (shodně s PDF resolveSupplier: logo/barva/přepínač nejsou ve snapshotu) —
-        //    platí pro vypnutý modul i pro zapnutý modul u dokladu bez vybraného
-        //    profilu. Explicitní profil (draft) tento základ přebije živým overlayem.
-        if ($row !== null && $sid > 0) {
-            $hasSnapshotProfile = !empty($row['branding_profile_id']);
-            if (!$hasSnapshotProfile) {
-                $legacyStmt = $this->db->pdo()->prepare(
-                    'SELECT branding_profiles_enabled, email_branding_enabled, email_accent_color, logo_path
-                       FROM supplier WHERE id = ?'
-                );
-                $legacyStmt->execute([$sid]);
-                $legacy = $legacyStmt->fetch(\PDO::FETCH_ASSOC);
-
-                if ($legacy !== false) {
-                    $row['email_branding_enabled'] = (bool) $legacy['email_branding_enabled'];
-                    $row['email_accent_color'] = (string) ($legacy['email_accent_color'] ?: '#3B2D83');
-                    $row['logo_path'] = $legacy['logo_path'] ?: null;
-                }
-
-                if ($legacy !== false && !empty($legacy['branding_profiles_enabled']) && !empty($invoice['branding_profile_id'])) {
-                    $profileId = (int) $invoice['branding_profile_id'];
-                    $bStmt = $this->db->pdo()->prepare(
-                        'SELECT bp.* FROM supplier s
-                           JOIN branding_profiles bp ON bp.id = ?
-                                                    AND bp.supplier_id = s.id AND bp.is_active = 1
-                          WHERE s.id = ? AND s.branding_profiles_enabled = 1'
-                    );
-                    $bStmt->execute([$profileId, $sid]);
-                    $br = $bStmt->fetch(\PDO::FETCH_ASSOC);
-                    if ($br !== false) {
-                        $row = \MyInvoice\Service\Branding\BrandingProfileOverlay::apply($row, $br);
-                    }
-                }
-            }
-            $row['email_branding_enabled'] = (bool) ($row['email_branding_enabled'] ?? false);
-            $row['email_accent_color'] = (string) ($row['email_accent_color'] ?? '#3B2D83');
-            $row['accent_soft'] = AccentColor::emailBackground($row['email_branding_enabled'], $row['email_accent_color']);
-        }
-
-        return $row;
+        return (new SupplierEmailContext($this->db))->forInvoice($invoice);
     }
 }

@@ -34,6 +34,7 @@ use MyInvoice\Repository\DocumentRequestRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Mail\Mailer;
+use MyInvoice\Service\Mail\SupplierEmailContext;
 
 // Parse args
 $days = 3;
@@ -59,6 +60,8 @@ $mailer = $container->get(Mailer::class);
 $logger = $container->get(ActivityLogger::class);
 /** @var \MyInvoice\Infrastructure\Database\Connection $conn */
 $conn = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
+
+$supplierContext = new SupplierEmailContext($conn);
 
 $run = CronRun::start($conn->pdo(), 'cron-document-request-reminders');
 $startedAt = microtime(true);
@@ -98,6 +101,10 @@ foreach ($candidates as $c) {
 
     try {
         $vars = [
+            // Bez `supplier` by Mailer sáhl po svém fallbacku MIN(id) FROM supplier
+            // a upomínka by odešla s logem a SMTP profilem cizí firmy. ID tu máme,
+            // filtrujeme jím i příjemce o pár řádků výš.
+            'supplier'           => $supplierContext->forSupplier($supplierId),
             'supplier_name'      => $supplierName,
             'description'        => (string) $c['description'],
             'amount'             => $c['amount'] !== null ? (float) $c['amount'] : null,

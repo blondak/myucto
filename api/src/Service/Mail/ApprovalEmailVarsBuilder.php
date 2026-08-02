@@ -94,37 +94,14 @@ final class ApprovalEmailVarsBuilder
         return (string) ($stmt->fetchColumn() ?: '');
     }
 
+    /**
+     * Dřív si tenhle builder tahal jen „patičkovou" podmnožinu sloupců — bez
+     * `id`, `email_branding_enabled`, `email_accent_color` a `logo_path`. Layout
+     * pak vykreslil výchozí hlavičku MyÚčto.cz místo dodavatele a Mailer ani
+     * nepřipojil logo. Sdílený kontext vrací totéž co u odeslání faktury.
+     */
     private function loadSupplierFooter(array $invoice): ?array
     {
-        if (!empty($invoice['supplier_snapshot'])) {
-            $snap = is_string($invoice['supplier_snapshot'])
-                ? json_decode($invoice['supplier_snapshot'], true)
-                : $invoice['supplier_snapshot'];
-            if (is_array($snap)) {
-                return [
-                    'company_name' => $snap['company_name'] ?? '',
-                    'display_name' => $snap['display_name'] ?? null,
-                    'tagline'      => $snap['tagline'] ?? null,
-                    'street'       => $snap['street'] ?? '',
-                    'city'         => $snap['city'] ?? '',
-                    'zip'          => $snap['zip'] ?? '',
-                    'country'      => $snap['country_name_cs'] ?? '',
-                    'email'        => $snap['email'] ?? null,
-                    'phone'        => $snap['phone'] ?? null,
-                    'web'          => $snap['web'] ?? null,
-                ];
-            }
-        }
-        $sid = (int) ($invoice['supplier_id'] ?? 0);
-        if ($sid <= 0) return null;
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT s.company_name, s.display_name, s.tagline, s.street, s.city, s.zip,
-                    s.email, s.phone, s.web, co.name_cs AS country
-               FROM supplier s
-          LEFT JOIN countries co ON co.id = s.country_id
-              WHERE s.id = ?'
-        );
-        $stmt->execute([$sid]);
-        return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        return (new SupplierEmailContext($this->db))->forInvoice($invoice);
     }
 }
