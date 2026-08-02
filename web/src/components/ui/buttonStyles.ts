@@ -80,6 +80,20 @@ export function btnOutlineSm(variant: ActionVariant = 'neutral'): string {
   return `${BTN_SM_BASE} ${OUTLINE[variant]}`
 }
 
+// Čtvercová ikona bez popisku pro akce ve sloupci tabulky. Textová varianta
+// (`btnOutlineSm`) je v úzkém sloupci širší než zbytek řádku a akce se zalomí
+// pod sebe — řádek pak přeroste ostatní. Popisek nese `title`/`aria-label`,
+// takže se význam neztratí. Používat JEN tam, kde akci jistí potvrzení nebo je
+// vratná; nevratná akce bez popisku je past.
+export const BTN_ICON_SM_BASE =
+  'cursor-pointer w-7 h-7 rounded-md inline-flex items-center justify-center shrink-0 ' +
+  'transition-all duration-150 active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'disabled:active:translate-y-0'
+
+export function btnIconSm(variant: ActionVariant = 'neutral'): string {
+  return `${BTN_ICON_SM_BASE} ${OUTLINE[variant]}`
+}
+
 // ─── ikony (stroke, viewBox 24) — sjednocené z původních toolbarů ───
 export const ICONS = {
   edit:      'M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828l8.586-8.586z',

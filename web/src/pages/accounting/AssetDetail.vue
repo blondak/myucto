@@ -14,7 +14,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney, formatMonth } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
-import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
@@ -543,7 +543,7 @@ const yearOptions = computed(() => {
                 <th class="px-3 py-2 text-right font-medium">{{ t('accounting.assets.plan.col_amount') }}</th>
                 <th v-if="showClaimedCol" class="px-3 py-2 text-right font-medium">{{ t('accounting.assets.plan.col_claimed') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('accounting.assets.plan.col_residual_end') }}</th>
-                <th class="px-3 py-2 text-center font-medium w-32">{{ t('accounting.assets.plan.col_status') }}</th>
+                <th class="px-3 py-2 text-right font-medium w-44">{{ t('accounting.assets.plan.col_status') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -568,30 +568,33 @@ const yearOptions = computed(() => {
                     {{ formatMoney(num(row.amount)) }}
                   </td>
                   <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(num(row.residual_end)) }}</td>
-                  <!-- Stav + akce na JEDEN řádek: každý prvek byl `block ... mt-1`
-                       pod sebou, takže potvrzený rok byl třikrát vyšší než ostatní
-                       a tabulka se rozpadala. `flex-wrap` je pojistka pro úzké
-                       obrazovky, kde se to zalomí až když opravdu musí. -->
+                  <!-- Stav + akce na JEDEN řádek. Textová tlačítka se do sloupce
+                       nevešla a zalomila se pod sebe, takže potvrzený rok byl
+                       třikrát vyšší než ostatní a tabulka se opticky rozpadla.
+                       Akce jsou proto ikony s `title` — mazání jistí confirm(),
+                       proklik do deníku je vratný, takže popisek stačí na hover. -->
                   <td class="px-3 py-2">
-                    <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                    <div class="flex items-center justify-end gap-1.5">
                       <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="rowStatusClass(row)">{{ rowStatus(row) }}</span>
                       <!-- Proklik do deníku na zápis tohoto odpisu (FEATURA C, audit 2026-07 follow-up). -->
                       <RouterLink v-if="row.journal_entry_id"
                         :to="{ name: 'accounting-journal', query: { entry_id: String(row.journal_entry_id) } }"
                         @click.stop
-                        class="text-xs text-primary-600 hover:underline whitespace-nowrap">
-                        {{ t('common.view_in_journal') }}
+                        :title="t('common.view_in_journal')" :aria-label="t('common.view_in_journal')"
+                        :class="btnIconSm('primary')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
                       </RouterLink>
                       <button v-if="row.is_paused && row.source === 'confirmed' && planTab === 'tax' && auth.canWrite('assets.write') && asset.status === 'in_use'"
                         @click.stop="runUnpause(row.fiscal_year)"
-                        class="cursor-pointer text-xs text-primary-600 hover:underline whitespace-nowrap">
-                        {{ t('accounting.assets.lifecycle.unpause') }}
+                        :title="t('accounting.assets.lifecycle.unpause')" :aria-label="t('accounting.assets.lifecycle.unpause')"
+                        :class="btnIconSm('primary')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
                       </button>
                       <button v-if="row.source === 'confirmed' && row.journal_entry_id && row.fiscal_year === latestMaterializedYear && auth.canWrite('assets.write')"
-                        :disabled="acting" :class="btnOutlineSm('danger')"
+                        :disabled="acting" :class="btnIconSm('danger')"
+                        :title="t('accounting.assets.plan.delete_booking')" :aria-label="t('accounting.assets.plan.delete_booking')"
                         @click.stop="runDeleteDepreciation(row)">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                        {{ t('accounting.assets.plan.delete_booking') }}
                       </button>
                     </div>
                   </td>
