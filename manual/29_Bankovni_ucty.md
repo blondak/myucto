@@ -11,7 +11,7 @@ záložky: **Měny a účty**, **Stavy na účtech** a **Bankovní avíza z e-ma
 Tato kapitola popisuje správu **bankovních účtů dodavatele** (pro PDF faktury,
 QR platby a GPC výpisy) a **bankovních e-mailových avíz přes IMAP**. Bankovní avízo je
 e-mail od banky s údaji o platbě — MyÚčto ho umí pravidelně načítat, vytěžit
-z něj VS, částku, měnu, datum a cílový účet a vytvořit z něj bankovní transakci
+z něj VS, částku, měnu, datum a vlastní účet a vytvořit z něj bankovní transakci
 stejně jako z [výpisu](28_Banka.md).
 
 ## 29.1 Bankovní účty
@@ -110,6 +110,12 @@ upravit, použij u něj tlačítko **Duplikovat** — vytvoří se editovatelná
 ve které si dolaď vzory a otestuj ji přes **Test parseru**. V mapování účtu pak
 přepneš účet z původního providera na svou kopii. Duplikovat lze i vlastní regex
 provider.
+
+Systémový provider Raiffeisenbank rozlišuje směr převodu podle úvodního textu
+o příchozí nebo odchozí platbě; u starší či odlišné šablony použije jako záložní
+údaj znaménko částky. U odchozí úhrady je vlastním účtem pole **Z účtu** a
+protiúčtem pole **Na účet**; u příchozí úhrady je to opačně. Díky tomu se odchozí
+avízo mapuje na účet, ze kterého byla platba skutečně odepsána.
 
 Detekce e-mailu i vytěžení polí pracují **tolerantně k diakritice**: pokud avízo
 dorazí v jiném kódování nebo s rozbitou diakritikou (typicky u přeposlaných

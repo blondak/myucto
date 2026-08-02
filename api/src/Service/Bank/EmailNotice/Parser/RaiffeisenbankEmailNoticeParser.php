@@ -58,25 +58,41 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
         $text = $this->normalizeText($message->text);
 
         $postedAt = $this->required($text, '/Datum\s+a\s+čas\s*(?<value>\d{1,2}\.\s*\d{1,2}\.\s*\d{4}\s+\d{1,2}:\d{2})/iu', 'datum');
-        $recipientAccount = $this->required($text, '/Na\s+účet\s*(?<value>[0-9\-]+\/[0-9]{4})/iu', 'cílový účet');
         $amountCurrency = $this->match($text, '/Částka\s+v\s+měně\s+účtu\s*(?<amount>[+\-]?[0-9 .]+,[0-9]{2})\s*(?<currency>[A-Z]{3})/iu');
         if ($amountCurrency === null) {
             throw new \RuntimeException('Raiffeisenbank parser nenašel částku a měnu.');
         }
-        $counterparty = $this->match($text, '/Z\s+účtu\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)Variabilní\s+symbol/isu');
+        $amount = $this->parseAmount((string) $amountCurrency['amount']);
+        $to = $this->match(
+            $text,
+            '/Na\s+účet\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
+        );
+        if ($to === null) {
+            throw new \RuntimeException('Raiffeisenbank parser nenašel účet příjemce.');
+        }
+        $from = $this->match(
+            $text,
+            '/Z\s+účtu\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
+        );
         $variableSymbol = $this->required($text, '/Variabilní\s+symbol\s*(?<value>[0-9]+)/iu', 'variabilní symbol');
         $constantSymbol = $this->optional($text, '/Konstantní\s+symbol\s*(?<value>[0-9]+)/iu');
         $note = $this->optional($text, '/Zpráva\s+pro\s+příjemce\s*(?<value>.*?)Disponibilní\s+zůstatek/isu');
         $balance = $this->optional($text, '/Disponibilní\s+zůstatek(?:\s+po\s+pohybu)?\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu');
 
+        $isOutgoing = $this->isOutgoingTransfer($text, $amount);
+        if ($isOutgoing && $from === null) {
+            throw new \RuntimeException('Raiffeisenbank parser nenašel vlastní účet plátce.');
+        }
+        $ownAccount = (string) ($isOutgoing ? $from['account'] : $to['account']);
+        $counterparty = $isOutgoing ? $to : $from;
         [$counterpartyAccount, $counterpartyBank] = $this->splitAccount((string) ($counterparty['account'] ?? ''));
 
         return new ParsedBankEmailNotice(
             variableSymbol: $variableSymbol,
-            amount: $this->parseAmount((string) $amountCurrency['amount']),
+            amount: $amount,
             currency: strtoupper((string) $amountCurrency['currency']),
             postedAt: $this->parseDate($postedAt),
-            recipientAccount: $recipientAccount,
+            recipientAccount: $ownAccount,
             counterpartyAccount: $counterpartyAccount,
             counterpartyBank: $counterpartyBank,
             counterpartyName: $this->cleanNullable((string) ($counterparty['name'] ?? '')),
@@ -84,6 +100,20 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             message: $note,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
         );
+    }
+
+    private function isOutgoingTransfer(string $text, float $amount): bool
+    {
+        $folded = mb_strtolower($this->foldDiacritics($text));
+        if (preg_match(
+            '/na\s+ucte\s+byla\s+provedena\s+nasledujici\s+(?<direction>prichozi|odchozi)\s+platba/u',
+            $folded,
+            $match,
+        ) === 1) {
+            return $match['direction'] === 'odchozi';
+        }
+
+        return $amount < 0;
     }
 
 }
