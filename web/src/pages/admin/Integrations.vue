@@ -483,15 +483,12 @@ onMounted(() => {
       <button
         v-for="tt in (['idoklad', 'fakturoid', 'ai'] as const)" :key="tt"
         @click="tab = tt"
-        class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5"
+        class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
         :class="tab === tt
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'"
       >
         {{ t('integrations.' + tt + '.tab') }}
-        <span v-if="tt === 'ai'" class="text-[10px] uppercase tracking-wide bg-warning-50 text-warning-600 border border-warning-500/40 px-1.5 py-0.5 rounded">
-          BETA
-        </span>
       </button>
     </div>
 

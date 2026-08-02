@@ -331,45 +331,23 @@ function candidateReject() {
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
     </div>
-    <PostingRowActions v-if="isDoubleEntry" class="w-full flex justify-end"
-      :tx="tx" :currency="currency()"
-      @changed="emit('changed')" @posted="onPosted" />
-    <div class="flex flex-wrap gap-2 pt-1">
-      <button type="button" @click="toggleDocs(tx.id)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-neutral-300 text-neutral-600 hover:bg-neutral-50 rounded-md">
-        {{ expandedDocs.has(tx.id) ? t('bank.documents_hide') : t('bank.documents_action') }}
-      </button>
-      <RouterLink v-if="tx.matched_invoice_id" :to="`/invoices/${tx.matched_invoice_id}`"
-        class="flex-1 h-9 inline-flex items-center justify-center text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md">
-        {{ t('bank.open') }}
-      </RouterLink>
-      <RouterLink v-else-if="tx.matched_purchase_invoice_id" :to="`/purchase-invoices/${tx.matched_purchase_invoice_id}`"
-        class="flex-1 h-9 inline-flex items-center justify-center text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md">
-        {{ t('bank.open') }}
-      </RouterLink>
-      <button v-if="(tx.amount < 0 && tx.match_status === 'unmatched') && auth.canWrite('purchase_invoices.create')" @click="openCreate(tx)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md">
-        {{ t('bank.create_purchase') }}
-      </button>
-      <button v-if="(tx.match_status === 'unmatched' || tx.match_status === 'auto_partial') && auth.canWrite('bank.match')"
-        @click="startMatch(tx)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md">
-        {{ t('bank.match') }}
-      </button>
-      <button v-if="(tx.match_status === 'unmatched' || tx.match_status === 'auto_partial') && auth.canWrite('documents.requests')"
-        @click="openRequestDoc(tx)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-warning-500/40 text-warning-600 hover:bg-warning-50 font-medium rounded-md">
-        {{ t('bank.document_request.action') }}
-      </button>
-      <button v-if="(tx.match_status === 'unmatched') && auth.canWrite('bank.match')" @click="ignoreTx(tx)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-neutral-300 text-neutral-600 hover:bg-neutral-50 rounded-md">
-        {{ t('bank.ignore') }}
-      </button>
-      <button v-if="(['auto_exact','auto_partial','manual','ignored'].includes(tx.match_status)) && auth.canWrite('bank.match')"
-        @click="unmatchTx(tx)"
-        class="cursor-pointer flex-1 h-9 text-sm border border-neutral-300 text-neutral-600 hover:bg-danger-50 hover:text-danger-600 rounded-md">
-        {{ t('bank.unmatch') }}
-      </button>
+    <!-- Akce mobilní karty jedou ze stejného `matchActions(tx)` jako desktopový
+         řádek. Dřív tu byla ručně psaná mřížka tlačítek se stejným obsahem:
+         duplicitní, bez ikon a hlavně s `flex-1`, které třem tlačítkům přidělilo
+         po třetině šířky — delší popisek („Zrušit spárování") se pak lámal
+         doprostřed tlačítka. RowActionsMenu drží popisky vcelku a zbytek schová
+         do „…", takže karta má jeden úhledný pruh akcí místo dvou rozsypaných.
+
+         `inline-count` je 1 schválně: vedle akce zaúčtování (~132 px) se do
+         308 px široké karty na 390px displeji vejde právě jedno tlačítko a „…".
+         Při dvou se pruh zalomil. První akce v `matchActions` je vždycky ta
+         stavově relevantní — Otevřít u spárovaného pohybu, Spárovat u ostatních
+         — takže na očích zůstane to, co uživatel na daném řádku opravdu chce. -->
+    <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+      <PostingRowActions v-if="isDoubleEntry"
+        :tx="tx" :currency="currency()"
+        @changed="emit('changed')" @posted="onPosted" />
+      <RowActionsMenu :actions="matchActions(tx)" :inline-count="1" />
     </div>
   </div>
 </template>
