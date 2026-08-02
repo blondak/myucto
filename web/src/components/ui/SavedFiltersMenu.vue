@@ -183,7 +183,7 @@ async function onOverwrite() {
 
         <!-- Uložit aktuální filtry -->
         <div class="border-t border-neutral-100 mt-1 pt-2 px-3 pb-2 space-y-2">
-          <div class="text-xs font-medium text-neutral-500">{{ t('common.save_current_filter') }}</div>
+          <div class="text-xs font-medium text-neutral-500">{{ t('common.save_current_as_view') }}</div>
           <input
             v-model="newName"
             type="text"

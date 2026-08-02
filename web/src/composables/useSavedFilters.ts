@@ -26,6 +26,24 @@ function stableStringify(q: Record<string, string>): string {
   return JSON.stringify(sorted)
 }
 
+/**
+ * Barevná povaha uloženého pohledu pro tečku v liště záložek.
+ *
+ * Why: řádek pohledů je jinak šedá uniformita, ve které uživatel hledá ten svůj
+ * podle textu. Tečka nese to jediné, co jde z payloadu odvodit spolehlivě —
+ * jestli pohled ukazuje problém (po splatnosti / nezaplacené), hotovou práci
+ * (zaúčtované / zaplacené), nebo je to neutrální výběr.
+ */
+export type SavedFilterTone = 'danger' | 'warning' | 'success' | 'neutral'
+
+export function savedFilterTone(payload: Record<string, string>): SavedFilterTone {
+  const on = (v: string | undefined) => v === '1' || v === 'true'
+  if (on(payload.overdue)) return 'danger'
+  if (on(payload.unpaid)) return 'warning'
+  if (payload.booked === '1' || payload.status === 'paid') return 'success'
+  return 'neutral'
+}
+
 function toastError(e: unknown): void {
   const code = (e as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code
   const key = code ? ERROR_KEYS[code] : undefined
@@ -59,6 +77,11 @@ export function useSavedFilters(pageKey: string, opts: SavedFiltersOpts) {
     opts.applyQuery({ ...f.payload })
   }
 
+  // Zrušení pohledu = prázdná query, tedy přesně stav „Vše" po vstupu na stránku.
+  function clearActive(): void {
+    opts.applyQuery({})
+  }
+
   async function rename(id: number, name: string): Promise<void> {
     try { await updateSavedFilter(id, { name }) }
     catch (e) { toastError(e); throw e }
@@ -86,7 +109,7 @@ export function useSavedFilters(pageKey: string, opts: SavedFiltersOpts) {
   return {
     filters, activeId, ready,
     getQuery: opts.getQuery,
-    saveCurrent, overwrite, apply, rename, setDefault, remove, applyDefaultIfAny,
+    saveCurrent, overwrite, apply, clearActive, rename, setDefault, remove, applyDefaultIfAny,
   }
 }
 

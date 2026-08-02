@@ -81,9 +81,13 @@ export function useListKeyboard(opts: Options): { activeIndex: Ref<number> } {
         }
         break
       case 'Escape':
-        if (opts.clear) {
+        // Kurzor v seznamu se ruší VŽDY, i když stránka nemá výběr (klienti).
+        // Dokud to bylo schované za `if (opts.clear)`, na takovém seznamu Esc
+        // nedělal nic a zvýrazněný řádek už nešlo zhasnout.
+        if (activeIndex.value >= 0 || opts.clear) {
+          e.preventDefault()
           activeIndex.value = -1
-          opts.clear()
+          opts.clear?.()
         }
         break
     }

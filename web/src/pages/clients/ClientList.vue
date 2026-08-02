@@ -8,6 +8,7 @@ import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategor
 import { formatMoney, formatDate, paymentDueLabel } from '@/composables/useFormat'
 import { useSupplierStore } from '@/stores/supplier'
 import { useRowLink } from '@/composables/useRowLink'
+import { useListKeyboard } from '@/composables/useListKeyboard'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
@@ -156,6 +157,15 @@ function openClient(c: Client, e?: MouseEvent) {
   navigateRow(`/clients/${c.id}`, e)
 }
 
+/**
+ * Klávesové ovládání j/k + Enter. Seznam klientů nemá hromadný výběr, takže se
+ * `toggle`/`clear` nepředávají — „x" ani Esc tu nemají co dělat.
+ */
+const { activeIndex } = useListKeyboard({
+  count: () => filteredItems.value.length,
+  open: (i) => { const c = filteredItems.value[i]; if (c) openClient(c) },
+})
+
 // Kompaktní zápis splatnosti (payment_due_default + unit) — stejně jako ClientDetail.
 // Jednotku klient bez vlastní dědí z dodavatele, jinak by tu „1× měsíc" svítilo jako „1 den".
 function formatPaymentDue(c: Client): string {
@@ -259,11 +269,12 @@ function formatPaymentDue(c: Client): string {
         </thead>
         <tbody class="divide-y divide-neutral-100">
           <tr
-            v-for="c in filteredItems"
+            v-for="(c, ri) in filteredItems"
             :key="c.id"
             @click="openClient(c, $event)"
             @auxclick.prevent="openClient(c, $event)"
             class="cursor-pointer hover:bg-neutral-50"
+            :data-row-active="ri === activeIndex"
           >
             <td v-if="tbl.isVisible('company')" class="px-4 py-3">
               <div class="flex items-center gap-2">

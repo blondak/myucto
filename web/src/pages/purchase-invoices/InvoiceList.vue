@@ -7,11 +7,12 @@ import {
   purchaseInvoicesApi,
   type PurchaseMonthGroup,
   type PurchaseInvoiceListItem,
+  type PurchaseInvoiceItem,
   type PurchaseInvoiceStatus,
   type PurchaseDocumentKind,
   type ImportBatch,
 } from '@/api/purchaseInvoices'
-import { formatMoney, formatDate, formatMonth, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
@@ -22,6 +23,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
+import { useListKeyboard } from '@/composables/useListKeyboard'
 import { clientsApi, type Client } from '@/api/clients'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -51,6 +54,12 @@ const pages = ref(1)
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref('')
+/**
+ * Řádky k probliknutí po hromadné akci. Značku zapisují bulk handlery přes
+ * markRowsTouched(), tady se po překreslení jednou spotřebuje — bez toho se
+ * seznam po akci překreslí úplně stejně a uživatel nevidí, čeho se to týkalo.
+ */
+const flashedIds = ref<Set<number>>(new Set())
 
 // Filtry
 const search = ref('')
@@ -171,6 +180,62 @@ function amountBarWidth(inv: PurchaseInvoiceListItem, g: PurchaseMonthGroup): st
 // Hromadné akce
 const selectedIds = ref<number[]>([])
 const bulkBusy = ref(false)
+
+/**
+ * Ploché pořadí řádků napříč měsíčními skupinami — klávesnice se pohybuje po
+ * seznamu tak, jak ho uživatel vidí, ne po skupinách.
+ */
+const flatRows = computed(() => groups.value.flatMap(g => g.invoices))
+const rowIndexById = computed(() => {
+  const map = new Map<number, number>()
+  flatRows.value.forEach((inv, i) => map.set(inv.id, i))
+  return map
+})
+
+const { activeIndex } = useListKeyboard({
+  count: () => flatRows.value.length,
+  open: (i) => { const inv = flatRows.value[i]; if (inv) openInvoice(inv) },
+  toggle: (i) => { const inv = flatRows.value[i]; if (inv) toggleSelected(inv.id) },
+  clear: () => { selectedIds.value = [] },
+})
+
+/**
+ * Rozbalený náhled položek dokladu přímo v seznamu.
+ *
+ * Why: nejčastější důvod, proč uživatel klikne na přijatou fakturu, je „co na ní
+ * vlastně je" — a pak se musí vracet zpátky do seznamu, který se mezitím
+ * překreslil a odscrolloval. Položky se dotahují až na vyžádání (seznam je
+ * nenese), takže rozbalení nic nestojí, dokud si o něj uživatel neřekne.
+ */
+const expandedId = ref<number | null>(null)
+const expandedItems = ref<PurchaseInvoiceItem[] | null>(null)
+const expandedLoading = ref(false)
+
+/**
+ * Šířka rozbaleného řádku = počet viditelných sloupců + zaškrtávátko + rozbalovací
+ * tlačítko. Napevno zadaná hodnota by se rozešla s ColumnPickerem, kterým si
+ * uživatel sloupce zapíná a vypíná.
+ */
+const expandedColspan = computed(() => COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2)
+
+async function toggleExpand(inv: PurchaseInvoiceListItem) {
+  if (expandedId.value === inv.id) {
+    expandedId.value = null
+    expandedItems.value = null
+    return
+  }
+  expandedId.value = inv.id
+  expandedItems.value = null
+  expandedLoading.value = true
+  try {
+    const full = await purchaseInvoicesApi.get(inv.id)
+    expandedItems.value = full.items
+  } catch {
+    expandedId.value = null
+  } finally {
+    expandedLoading.value = false
+  }
+}
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -395,6 +460,7 @@ async function load(reset = true) {
   } finally {
     loading.value = false
     loadingMore.value = false
+    flashedIds.value = consumeFlashedRows('purchase_invoice')
   }
 }
 
@@ -512,13 +578,17 @@ async function bulkTransition(target: PurchaseInvoiceStatus, ids: number[]) {
   if (ids.length === 0 || bulkBusy.value) return
   if (target === 'cancelled' && !confirm(t('purchase_invoice.bulk.confirm_cancel', { n: ids.length }))) return
   bulkBusy.value = true
-  let ok = 0, fail = 0
+  // Probliknout jen doklady, kterým přechod opravdu prošel — u částečného
+  // selhání by záblesk celého výběru tvrdil něco, co se nestalo.
+  const done: number[] = []
+  let fail = 0
   for (const id of ids) {
-    try { await purchaseInvoicesApi.transition(id, target); ok++ } catch { fail++ }
+    try { await purchaseInvoicesApi.transition(id, target); done.push(id) } catch { fail++ }
   }
   bulkBusy.value = false
-  if (fail === 0) toast.success(t('purchase_invoice.bulk.success', { n: ok }))
-  else            toast.error(t('purchase_invoice.bulk.partial', { ok, fail }))
+  if (fail === 0) toast.success(t('purchase_invoice.bulk.success', { n: done.length }))
+  else            toast.error(t('purchase_invoice.bulk.partial', { ok: done.length, fail }))
+  markRowsTouched('purchase_invoice', done)
   await load()
 }
 
@@ -575,6 +645,9 @@ async function bulkPost() {
   bulkBusy.value = true
   try {
     const r = await accountingApi.postPurchasesBulk(ids)
+    // `posted` vrací rovnou ID — probliknou jen doklady, které se opravdu
+    // zaúčtovaly, ne celý výběr.
+    markRowsTouched('purchase_invoice', r.posted.length ? r.posted : ids)
     selectedIds.value = []
     if (r.failed.length) {
       const detail = r.failed.map(f => `#${f.id}: ${t(postingErrorI18nKey(f.error_code))}`).join('\n')
@@ -609,14 +682,16 @@ async function bulkSetKind() {
   const ids = kindEditableSelected.value
   if (!kind || ids.length === 0 || bulkBusy.value) { bulkKindTarget.value = ''; return }
   bulkBusy.value = true
-  let ok = 0, fail = 0
+  const done: number[] = []
+  let fail = 0
   for (const id of ids) {
-    try { await purchaseInvoicesApi.setDocumentKind(id, kind); ok++ } catch { fail++ }
+    try { await purchaseInvoicesApi.setDocumentKind(id, kind); done.push(id) } catch { fail++ }
   }
   bulkBusy.value = false
   bulkKindTarget.value = ''
-  if (fail === 0) toast.success(t('purchase_invoice.bulk.kind_success', { n: ok }))
-  else            toast.error(t('purchase_invoice.bulk.partial', { ok, fail }))
+  if (fail === 0) toast.success(t('purchase_invoice.bulk.kind_success', { n: done.length }))
+  else            toast.error(t('purchase_invoice.bulk.partial', { ok: done.length, fail }))
+  markRowsTouched('purchase_invoice', done)
   await load()
 }
 </script>
@@ -881,16 +956,21 @@ async function bulkSetKind() {
                   <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
                     <span class="sr-only">{{ t('lock.column') }}</span>
                   </th>
+                  <th class="px-1 py-2 w-8">
+                    <span class="sr-only">{{ t('common.expand_items') }}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
+                <!-- <template v-for>, protože k jednomu dokladu patří dva řádky:
+                     samotný doklad a jeho rozbalený náhled položek. -->
+                <template v-for="inv in g.invoices" :key="inv.id">
                 <tr
-                  v-for="inv in g.invoices"
-                  :key="inv.id"
                   @click="openInvoice(inv, $event)"
                   @auxclick.prevent="openInvoice(inv, $event)"
                   class="cursor-pointer hover:bg-neutral-50 transition"
-                  :class="rowClass(inv)"
+                  :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
+                  :data-row-active="rowIndexById.get(inv.id) === activeIndex"
                 >
                   <td class="px-2 py-2.5 text-center" @click.stop>
                     <input
@@ -990,7 +1070,47 @@ async function bulkSetKind() {
                       <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z" />
                     </svg>
                   </td>
+                  <td class="px-1 py-2.5 w-8 text-center" @click.stop>
+                    <button type="button"
+                      class="cursor-pointer inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                      :aria-expanded="expandedId === inv.id"
+                      :title="t('common.expand_items')"
+                      @click="toggleExpand(inv)">
+                      <svg class="h-4 w-4 transition-transform" :class="expandedId === inv.id ? 'rotate-90' : ''"
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </td>
                 </tr>
+
+                <!-- Náhled položek dokladu. Neklikatelný řádek (žádné @click), aby
+                     klik do náhledu neotevřel fakturu — uživatel si tu chce jen číst. -->
+                <tr v-if="expandedId === inv.id" class="bg-neutral-50/60">
+                  <td :colspan="expandedColspan" class="px-6 py-3">
+                    <div v-if="expandedLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
+                    <div v-else-if="!expandedItems || expandedItems.length === 0" class="text-xs text-neutral-500">{{ t('common.no_data') }}</div>
+                    <table v-else class="w-full text-xs table-plain">
+                      <thead>
+                        <tr class="text-neutral-500">
+                          <th class="py-1 text-left font-medium">{{ t('purchase_invoice.items.description') }}</th>
+                          <th class="py-1 text-right font-medium w-24">{{ t('purchase_invoice.items.quantity') }}</th>
+                          <th class="py-1 text-right font-medium w-32">{{ t('purchase_invoice.items.unit_price') }}</th>
+                          <th class="py-1 text-right font-medium w-32">{{ t('purchase_invoice.items.total_with_vat') }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
+                          <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -1004,7 +1124,7 @@ async function bulkSetKind() {
             @click="openInvoice(inv, $event)"
             @auxclick.prevent="openInvoice(inv, $event)"
             class="cursor-pointer hover:bg-neutral-50 transition px-3 py-3"
-            :class="rowClass(inv)"
+            :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
               <input
