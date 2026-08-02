@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:pwa": "node --test \"tests/*.test.mjs\""
+    "test:pwa": "node --test \"tests/*.test.mjs\"",
+    "gen:i18n": "node scripts/gen-i18n-map.mjs"
   },
   "dependencies": {
     "@vue/devtools-api": "^8.1.5",

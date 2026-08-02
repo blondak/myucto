@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { Features } from 'lightningcss'
 import { fileURLToPath, URL } from 'node:url'
+import i18nSplit from './plugins/i18n-split.mjs'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -14,6 +15,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      i18nSplit({ srcDir: fileURLToPath(new URL('./src', import.meta.url)) }),
       vue({
         template: {
           // Vue plugin defaultně transformuje absolutní URL (např. <img src="/styles/logo.svg">)

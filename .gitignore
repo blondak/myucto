@@ -46,3 +46,6 @@ storage/mpdf-temp/*
 COMMIT_MSG.tmp
 ISSUE_COMMENT.tmp
 RELEASE_NOTES.tmp
+
+# Kousky prekladu generuje build (web/plugins/i18n-split.mjs) ze zdrojovych cs.json/en.json.
+web/src/i18n/chunks/

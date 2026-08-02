@@ -1,0 +1,678 @@
+{
+  "core": [
+    "auth",
+    "client",
+    "codebooks",
+    "command",
+    "common",
+    "crm",
+    "demo",
+    "keyboard_shortcuts",
+    "license",
+    "nav",
+    "passkeys",
+    "search",
+    "session_lock",
+    "status",
+    "supplier",
+    "support",
+    "theme",
+    "type",
+    "updates",
+    "webauthn"
+  ],
+  "lazy": [
+    "accounting",
+    "activation",
+    "activity_log",
+    "aiGateway",
+    "api_tokens",
+    "app",
+    "approval_inbox",
+    "automation",
+    "bank",
+    "bank_accounts",
+    "bank_template_admin",
+    "cash",
+    "checks",
+    "codebookTransfer",
+    "costs",
+    "cron_jobs",
+    "dashboard",
+    "documentCompleteness",
+    "document_requests",
+    "documents",
+    "electronic_signatures",
+    "errors",
+    "eshop",
+    "expense_categories",
+    "export",
+    "imports",
+    "integrations",
+    "invoice",
+    "lock",
+    "logbook",
+    "manualQueue",
+    "mfa_setup",
+    "monthly_report",
+    "payment_method",
+    "payment_order",
+    "permissions",
+    "portal",
+    "portfolio",
+    "price_list",
+    "profile_signing",
+    "project",
+    "purchase_invoice",
+    "recovery_codes",
+    "recurring",
+    "reports",
+    "revenue_categories",
+    "roles",
+    "sent_emails",
+    "settings",
+    "setup",
+    "smtp_logs",
+    "stats",
+    "stock",
+    "tax",
+    "taxReturn",
+    "tax_evidence",
+    "template_tools",
+    "users",
+    "validation",
+    "vat_classifications",
+    "vendor",
+    "workReportTracking"
+  ],
+  "routes": {
+    "home": [
+      "activation",
+      "automation",
+      "bank",
+      "dashboard",
+      "errors",
+      "invoice",
+      "taxReturn"
+    ],
+    "portal": [
+      "portal",
+      "reports"
+    ],
+    "portal-document-requests": [
+      "document_requests",
+      "portal"
+    ],
+    "clients": [
+      "purchase_invoice"
+    ],
+    "client-new": [
+      "errors",
+      "payment_method",
+      "purchase_invoice"
+    ],
+    "client-detail": [
+      "documents",
+      "invoice",
+      "project",
+      "purchase_invoice",
+      "recurring",
+      "workReportTracking"
+    ],
+    "client-edit": [
+      "errors",
+      "payment_method",
+      "purchase_invoice"
+    ],
+    "projects": [
+      "invoice",
+      "project"
+    ],
+    "project-new": [
+      "errors",
+      "invoice",
+      "project"
+    ],
+    "project-detail": [
+      "documents",
+      "invoice",
+      "project",
+      "workReportTracking"
+    ],
+    "project-edit": [
+      "errors",
+      "invoice",
+      "project"
+    ],
+    "invoices": [
+      "accounting",
+      "invoice",
+      "lock",
+      "payment_method",
+      "project"
+    ],
+    "invoice-ai-import": [
+      "aiGateway",
+      "integrations"
+    ],
+    "invoice-new": [
+      "errors",
+      "invoice",
+      "lock",
+      "payment_method",
+      "price_list",
+      "project",
+      "purchase_invoice",
+      "stock"
+    ],
+    "invoice-detail": [
+      "accounting",
+      "cash",
+      "documents",
+      "invoice",
+      "lock",
+      "payment_method",
+      "recurring",
+      "settings",
+      "smtp_logs",
+      "stock"
+    ],
+    "invoice-edit": [
+      "errors",
+      "invoice",
+      "lock",
+      "payment_method",
+      "price_list",
+      "project",
+      "purchase_invoice",
+      "stock"
+    ],
+    "invoices-export": [
+      "export",
+      "imports",
+      "purchase_invoice"
+    ],
+    "invoices-import": [
+      "export",
+      "imports",
+      "purchase_invoice"
+    ],
+    "purchase-invoices": [
+      "accounting",
+      "invoice",
+      "lock",
+      "purchase_invoice"
+    ],
+    "purchase-invoices-export": [
+      "export",
+      "imports",
+      "purchase_invoice"
+    ],
+    "purchase-invoices-import": [
+      "export",
+      "imports",
+      "purchase_invoice"
+    ],
+    "purchase-invoices-payment-orders": [
+      "payment_method",
+      "payment_order",
+      "purchase_invoice"
+    ],
+    "purchase-invoice-ai-import": [
+      "aiGateway",
+      "integrations"
+    ],
+    "purchase-invoice-new": [
+      "accounting",
+      "automation",
+      "errors",
+      "invoice",
+      "lock",
+      "payment_method",
+      "purchase_invoice",
+      "vendor"
+    ],
+    "purchase-invoice-detail": [
+      "accounting",
+      "automation",
+      "cash",
+      "documents",
+      "invoice",
+      "lock",
+      "payment_method",
+      "purchase_invoice",
+      "stock"
+    ],
+    "purchase-invoice-edit": [
+      "accounting",
+      "automation",
+      "errors",
+      "invoice",
+      "lock",
+      "payment_method",
+      "purchase_invoice",
+      "vendor"
+    ],
+    "documents": [
+      "documents"
+    ],
+    "document-detail": [
+      "documents"
+    ],
+    "document-requests": [
+      "document_requests"
+    ],
+    "accounting-accounts": [
+      "accounting",
+      "codebookTransfer",
+      "users"
+    ],
+    "accounting-periods": [
+      "accounting"
+    ],
+    "accounting-journal": [
+      "accounting",
+      "activation",
+      "automation",
+      "documents"
+    ],
+    "accounting-journal-new": [
+      "accounting"
+    ],
+    "accounting-payroll": [
+      "accounting"
+    ],
+    "accounting-general-ledger": [
+      "accounting",
+      "activation"
+    ],
+    "accounting-trial-balance": [
+      "accounting",
+      "activation"
+    ],
+    "accounting-account-statement": [
+      "accounting"
+    ],
+    "accounting-balance-sheet": [
+      "accounting",
+      "activation",
+      "reports"
+    ],
+    "accounting-income-statement": [
+      "accounting",
+      "activation",
+      "reports"
+    ],
+    "accounting-income-statement-by-function": [
+      "accounting"
+    ],
+    "accounting-saldo": [
+      "accounting"
+    ],
+    "accounting-document-completeness": [
+      "documentCompleteness"
+    ],
+    "accounting-balance-inventory": [
+      "accounting",
+      "activation"
+    ],
+    "accounting-section18-statements": [
+      "accounting",
+      "activation"
+    ],
+    "accounting-monthly-check": [
+      "accounting",
+      "checks"
+    ],
+    "accounting-tax-base-adjustments": [
+      "accounting"
+    ],
+    "manual-posting-queue": [
+      "manualQueue"
+    ],
+    "accounting-monthly-report": [
+      "monthly_report"
+    ],
+    "accounting-offsets": [
+      "accounting"
+    ],
+    "accounting-assets": [
+      "accounting",
+      "codebookTransfer"
+    ],
+    "accounting-asset-new": [
+      "accounting"
+    ],
+    "accounting-asset-detail": [
+      "accounting"
+    ],
+    "accounting-asset-edit": [
+      "accounting"
+    ],
+    "accounting-small-assets": [
+      "accounting"
+    ],
+    "accounting-period-closing": [
+      "accounting",
+      "checks"
+    ],
+    "accounting-closing-package": [
+      "accounting",
+      "reports"
+    ],
+    "accounting-statement-notes": [
+      "accounting"
+    ],
+    "accounting-retention": [
+      "accounting"
+    ],
+    "accounting-transition-report": [
+      "accounting"
+    ],
+    "accounting-cash": [
+      "accounting",
+      "cash"
+    ],
+    "accounting-cash-new": [
+      "accounting",
+      "cash"
+    ],
+    "accounting-cash-book": [
+      "cash"
+    ],
+    "tax-evidence-cash-journal": [
+      "tax_evidence"
+    ],
+    "tax-evidence-receivables-payables": [
+      "tax_evidence"
+    ],
+    "stock-items": [
+      "stock"
+    ],
+    "stock-item-new": [
+      "eshop",
+      "stock"
+    ],
+    "stock-item-detail": [
+      "stock"
+    ],
+    "stock-item-edit": [
+      "eshop",
+      "stock"
+    ],
+    "stock-documents": [
+      "stock"
+    ],
+    "stock-document-new": [
+      "stock"
+    ],
+    "stock-document-detail": [
+      "stock"
+    ],
+    "stock-warehouses": [
+      "stock"
+    ],
+    "stock-takes": [
+      "stock"
+    ],
+    "stock-take-detail": [
+      "stock"
+    ],
+    "stock-reports": [
+      "stock"
+    ],
+    "eshop": [
+      "eshop",
+      "stock"
+    ],
+    "logbook": [
+      "logbook"
+    ],
+    "stats": [
+      "dashboard",
+      "errors",
+      "project",
+      "stats"
+    ],
+    "purchase-stats": [
+      "costs",
+      "dashboard",
+      "errors",
+      "purchase_invoice"
+    ],
+    "bank-statements": [
+      "accounting",
+      "automation",
+      "bank",
+      "bank_accounts",
+      "document_requests",
+      "documents",
+      "errors",
+      "payment_method",
+      "purchase_invoice",
+      "vendor"
+    ],
+    "bank-detail": [
+      "accounting",
+      "automation",
+      "bank",
+      "document_requests",
+      "documents",
+      "errors",
+      "invoice",
+      "payment_method",
+      "purchase_invoice",
+      "vendor"
+    ],
+    "activity-log": [
+      "activity_log"
+    ],
+    "sent-emails": [
+      "invoice",
+      "sent_emails"
+    ],
+    "cron-jobs": [
+      "cron_jobs"
+    ],
+    "admin-users": [
+      "roles",
+      "settings",
+      "users"
+    ],
+    "admin-roles": [
+      "permissions",
+      "roles"
+    ],
+    "admin-settings": [
+      "activation",
+      "automation",
+      "settings",
+      "stock"
+    ],
+    "accounting-activation": [
+      "activation"
+    ],
+    "admin-branding": [
+      "settings"
+    ],
+    "admin-suppliers": [
+      "settings"
+    ],
+    "admin-codebooks": [
+      "expense_categories",
+      "revenue_categories",
+      "vat_classifications"
+    ],
+    "admin-tax-constants": [
+      "expense_categories",
+      "revenue_categories",
+      "vat_classifications"
+    ],
+    "admin-electronic-signatures": [
+      "electronic_signatures",
+      "profile_signing",
+      "reports",
+      "settings"
+    ],
+    "admin-bank-rule-templates": [
+      "bank",
+      "bank_template_admin"
+    ],
+    "templates": [
+      "accounting",
+      "automation",
+      "bank",
+      "purchase_invoice",
+      "template_tools",
+      "vendor"
+    ],
+    "tools": [
+      "accounting",
+      "codebookTransfer"
+    ],
+    "admin-integrations": [
+      "aiGateway",
+      "automation",
+      "integrations"
+    ],
+    "portfolio-overview": [
+      "portfolio"
+    ],
+    "automation-cockpit": [
+      "accounting",
+      "automation",
+      "bank",
+      "settings"
+    ],
+    "reports-dph": [
+      "reports"
+    ],
+    "reports-kh": [
+      "reports"
+    ],
+    "reports-dph-book": [
+      "reports"
+    ],
+    "reports-s74b": [
+      "reports"
+    ],
+    "reports-related-parties": [
+      "reports"
+    ],
+    "reports-vat-coefficient": [
+      "reports"
+    ],
+    "reports-s46": [
+      "reports"
+    ],
+    "reports-vat-corrections": [
+      "reports"
+    ],
+    "reports-shv": [
+      "reports"
+    ],
+    "reports-income-tax": [
+      "accounting",
+      "taxReturn"
+    ],
+    "reports-cnb-rate-audit": [
+      "reports"
+    ],
+    "reports-submissions": [
+      "reports"
+    ],
+    "reports-monthly-export": [
+      "reports"
+    ],
+    "reports-oss": [
+      "reports"
+    ],
+    "tax-optimizer": [
+      "settings",
+      "tax"
+    ],
+    "admin-email-templates": [
+      "users"
+    ],
+    "admin-emails": [
+      "electronic_signatures",
+      "invoice",
+      "profile_signing",
+      "reports",
+      "sent_emails",
+      "settings",
+      "smtp_logs",
+      "users"
+    ],
+    "admin-approvals": [
+      "approval_inbox",
+      "errors",
+      "invoice"
+    ],
+    "admin-price-list": [
+      "price_list"
+    ],
+    "admin-price-list-new": [
+      "price_list"
+    ],
+    "admin-price-list-edit": [
+      "price_list"
+    ],
+    "recurring": [
+      "recurring"
+    ],
+    "recurring-new": [
+      "errors",
+      "invoice",
+      "payment_method",
+      "project",
+      "purchase_invoice",
+      "recurring"
+    ],
+    "recurring-detail": [
+      "invoice",
+      "payment_method",
+      "recurring"
+    ],
+    "recurring-edit": [
+      "errors",
+      "invoice",
+      "payment_method",
+      "project",
+      "purchase_invoice",
+      "recurring"
+    ],
+    "profile-password": [
+      "recovery_codes"
+    ],
+    "profile-api-tokens": [
+      "api_tokens"
+    ],
+    "login": [
+      "app"
+    ],
+    "setup": [
+      "app",
+      "settings",
+      "setup",
+      "users"
+    ],
+    "setup-mfa": [
+      "app",
+      "mfa_setup"
+    ],
+    "forgot": [
+      "app"
+    ],
+    "reset": [
+      "app",
+      "errors"
+    ],
+    "work-report-tracking": [
+      "workReportTracking"
+    ],
+    "not-found": [
+      "errors"
+    ]
+  }
+}

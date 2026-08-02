@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
+import { ensureNamespaces, namespacesForRoute } from '@/i18n'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -612,5 +613,28 @@ router.beforeEach(async (to) => {
     return { name: 'home' }
   }
 
+  return true
+})
+
+/**
+ * Dotáhne překlady, které daná routa potřebuje nad rámec jádra (viz i18n/index.ts).
+ *
+ * `beforeResolve`, ne `beforeEach`: až tady jsou vyřešená všechna přesměrování
+ * i líné komponenty, takže se nenačítají překlady pro stránku, na kterou se
+ * nakonec vůbec nedostaneme. Navigace na výsledek čeká — bez toho by se stránka
+ * na okamžik vykreslila se syrovými klíči.
+ *
+ * Selhání načtení nesmí zablokovat navigaci: bez překladu je stránka ošklivá,
+ * bez navigace je aplikace rozbitá. Chybějící klíče stejně spadnou na fallback.
+ */
+router.beforeResolve(async (to) => {
+  const needed = namespacesForRoute(to.name as string | undefined)
+  if (needed.length > 0) {
+    try {
+      await ensureNamespaces(needed)
+    } catch {
+      // viz komentář výš — navigaci pouštíme dál
+    }
+  }
   return true
 })
