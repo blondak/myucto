@@ -17,13 +17,14 @@ let chart: Chart | null = null
 const { t, locale } = useI18n()
 const colors = useChartColors()
 
-const palette: Record<string, string> = {
-  paid:      '#4CAF7A',
-  booked:    '#5C45A0',
-  received:  '#E8A547',
-  draft:     '#A7A0BA',
-  cancelled: '#D45B5B',
-}
+/** Stavy přijatého dokladu sémanticky, ze sdílených chart tokenů (viz StatusDoughnutChart). */
+const palette = computed<Record<string, string>>(() => ({
+  paid:      colors.value.success,
+  booked:    colors.value.primary,
+  received:  colors.value.warning,
+  draft:     colors.value.neutral,
+  cancelled: colors.value.danger,
+}))
 
 function statusLabel(k: string): string {
   return t(`purchase_invoice.status.${k}`)
@@ -39,7 +40,7 @@ const slice = computed(() => {
     if (v > 0) {
       labelArr.push(statusLabel(k))
       valueArr.push(v)
-      colorArr.push(palette[k] || '#A99CD8')
+      colorArr.push(palette.value[k] || colors.value.primarySoft)
     }
   }
   return { labelArr, valueArr, colorArr }

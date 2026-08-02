@@ -13,11 +13,14 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 let chart: Chart | null = null
 const colors = useChartColors()
 
-const palette: Record<string, string> = {
-  active: '#4CAF7A',
-  paused: '#E5A23B',
-  closed: '#A7A0BA',
-}
+/** Stavy zakázky sémanticky, ze sdílených chart tokenů (viz StatusDoughnutChart).
+ *  `paused` mělo navíc odstín #E5A23B, který neodpovídal žádnému tokenu —
+ *  vypadá to na starou hodnotu warning, ne na záměr. */
+const palette = computed<Record<string, string>>(() => ({
+  active: colors.value.success,
+  paused: colors.value.warning,
+  closed: colors.value.neutral,
+}))
 
 const slice = computed(() => {
   const order = ['active', 'paused', 'closed']
@@ -29,7 +32,7 @@ const slice = computed(() => {
     if (v > 0) {
       labelArr.push(k === 'active' ? t('common.active') : k === 'paused' ? t('project.status_paused') : t('project.status_closed'))
       valueArr.push(v)
-      colorArr.push(palette[k] || '#A99CD8')
+      colorArr.push(palette.value[k] || colors.value.primarySoft)
     }
   }
   return { labelArr, valueArr, colorArr }

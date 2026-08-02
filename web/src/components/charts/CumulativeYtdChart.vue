@@ -12,7 +12,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
-import { useChartColors } from '@/composables/useTheme'
+import { useChartColors, withAlpha } from '@/composables/useTheme'
 import { formatCompactNumber, formatNumber } from '@/composables/useFormat'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler)
@@ -77,6 +77,10 @@ function build() {
   if (!canvas.value) return
   if (chart) chart.destroy()
   const { labels, thisCum, prevCum, thisYear, prevYear } = seriesData.value
+  // Loňskou řadu kreslíme jen když vůbec existuje. U nové firmy je to samá nula
+  // a plochá čára po dně jen zabírá graf a mate legendu (CumulativeKmChart to
+  // řešil, tenhle graf ne).
+  const hasPrev = prevCum.some(v => (v ?? 0) > 0)
 
   chart = new Chart(canvas.value, {
     type: 'line',
@@ -87,7 +91,7 @@ function build() {
           label: `${thisYear}`,
           data: thisCum,
           borderColor: colors.value.primary,
-          backgroundColor: 'rgba(92, 69, 160, 0.15)',
+          backgroundColor: withAlpha(colors.value.primary, 0.15),
           borderWidth: 2.5,
           tension: 0.3,
           pointRadius: 3,
@@ -95,7 +99,7 @@ function build() {
           fill: true,
           spanGaps: false,
         },
-        {
+        ...(hasPrev ? [{
           label: `${prevYear}`,
           data: prevCum,
           borderColor: colors.value.primarySoft,
@@ -105,7 +109,7 @@ function build() {
           tension: 0.3,
           pointRadius: 2,
           pointBackgroundColor: colors.value.primarySoft,
-        },
+        }] : []),
       ],
     },
     options: {
@@ -113,7 +117,7 @@ function build() {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12, color: colors.value.tick } },
+        legend: { display: hasPrev, position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12, color: colors.value.tick } },
         tooltip: {
           backgroundColor: colors.value.tooltipBg,
           callbacks: {

@@ -11,7 +11,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
-import { useChartColors } from '@/composables/useTheme'
+import { useChartColors, withAlpha } from '@/composables/useTheme'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Filler)
 
@@ -65,7 +65,7 @@ function build() {
           label: String(props.year),
           data: thisCum,
           borderColor: colors.value.primary,
-          backgroundColor: 'rgba(92, 69, 160, 0.15)',
+          backgroundColor: withAlpha(colors.value.primary, 0.15),
           borderWidth: 2.5,
           tension: 0.3,
           pointRadius: 3,

@@ -21,15 +21,27 @@ let chart: Chart | null = null
 const { locale } = useI18n()
 const colors = useChartColors()
 
-// Barevné mapování podle obvyklých CZ sazeb (21 % red, 12 % blue, 0 % grey, RC purple).
-const palette: Record<string, string> = {
-  '21 %': '#D45B5B',
-  '12 %': '#5C45A0',
-  '15 %': '#4CAF7A',
-  '10 %': '#E8A547',
-  '0 %':  '#A7A0BA',
-  'RC (reverse charge)': '#A99CD8',
-}
+/**
+ * Sazba DPH je identita kategorie, ne stav — mapujeme ji proto na sloty
+ * KATEGORIÁLNÍ palety, ne na sémantické barvy. Základní 21% sazba byla dřív
+ * červená (danger token) a v grafu vypadala jako varování, přestože je to ta
+ * nejběžnější sazba na světě.
+ *
+ * Pevné přiřazení slotu k sazbě (ne pořadí ve výsledku) je záměr: účetní pozná
+ * „svou" sazbu podle barvy i mezi obdobími, kde se skladba sazeb liší.
+ * Nulová sazba dostává neutrální slot — je to nepřítomnost daně, ne kategorie.
+ */
+const palette = computed<Record<string, string>>(() => {
+  const p = colors.value.palette
+  return {
+    '21 %': p[0],
+    '12 %': p[1],
+    '15 %': p[2],
+    '10 %': p[4],
+    'RC (reverse charge)': p[3],
+    '0 %':  p[p.length - 1],
+  }
+})
 
 const filtered = computed(() => props.items.filter(i => i.currency === props.currency && i.base !== 0))
 
@@ -46,7 +58,7 @@ function build() {
   const total = items.reduce((s, i) => s + i.base, 0)
   const labels = items.map(i => i.label)
   const data = items.map(i => i.base)
-  const segmentColors = items.map(i => palette[i.label] ?? '#5C45A0')
+  const segmentColors = items.map(i => palette.value[i.label] ?? colors.value.primary)
 
   chart = new Chart(canvas.value, {
     type: 'doughnut',

@@ -38,15 +38,17 @@ function build() {
       datasets: [
         ...(hasPrev ? [{
           label: String(props.prevYear),
+          // `grid` je barva mřížky — loňský rok v ní vypadal jako pozadí, ne jako
+          // datová řada. Všude jinde nese předchozí období `primarySoft`.
           data: props.previous,
-          backgroundColor: colors.value.grid,
-          borderRadius: 3,
+          backgroundColor: colors.value.primarySoft,
+          borderRadius: 4,
         }] : []),
         {
           label: String(props.year),
           data: props.current,
           backgroundColor: colors.value.primary,
-          borderRadius: 3,
+          borderRadius: 4,
         },
       ],
     },
@@ -54,7 +56,8 @@ function build() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { display: hasPrev, position: 'top', labels: { color: colors.value.tick, font: { size: 11 }, boxWidth: 12 } },
+        // Legenda dole jako u všech ostatních grafů — tohle byl jediný, co ji měl nahoře.
+        legend: { display: hasPrev, position: 'bottom', labels: { color: colors.value.tick, font: { size: 11 }, boxWidth: 12 } },
         tooltip: {
           backgroundColor: colors.value.tooltipBg,
           callbacks: {

@@ -13,14 +13,20 @@ let chart: Chart | null = null
 const { t, locale } = useI18n()
 const colors = useChartColors()
 
-const palette: Record<string, string> = {
-  paid:      '#4CAF7A',
-  sent:      '#5C45A0',
-  reminded:  '#E8A547',
-  issued:    '#A99CD8',
-  cancelled: '#D45B5B',
-  draft:     '#A7A0BA',
-}
+/**
+ * Stavy dokladu jsou sémantika, ne kategorie — zelená = zaplaceno, červená =
+ * stornováno. Barvy proto berou ze sdílených chart tokenů, aby se překlopily
+ * s režimem; dřív tu byly natvrdo light hodnoty a v tmavém režimu segmenty
+ * nesouhlasily se zbytkem aplikace.
+ */
+const palette = computed<Record<string, string>>(() => ({
+  paid:      colors.value.success,
+  sent:      colors.value.primary,
+  reminded:  colors.value.warning,
+  issued:    colors.value.primarySoft,
+  cancelled: colors.value.danger,
+  draft:     colors.value.neutral,
+}))
 
 function statusLabel(k: string): string {
   if (k === 'issued') return t('status.issued_not_sent')
@@ -37,7 +43,7 @@ const slice = computed(() => {
     if (v > 0) {
       labelArr.push(statusLabel(k))
       valueArr.push(v)
-      colorArr.push(palette[k] || '#A99CD8')
+      colorArr.push(palette.value[k] || colors.value.primarySoft)
     }
   }
   return { labelArr, valueArr, colorArr }

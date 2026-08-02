@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import type { RevenueCategoryBreakdownItem } from '@/api/dashboard'
 import { formatMoney, formatPercent } from '@/composables/useFormat'
-import { useChartColors } from '@/composables/useTheme'
+import { useChartColors, categoryColors, CHART_MAX_CATEGORIES } from '@/composables/useTheme'
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
 
@@ -18,23 +18,26 @@ const colors = useChartColors()
 
 const sliceData = computed(() => {
   const rows = props.categories.filter(c => c.total > 0)
-  if (rows.length === 0) return { labels: [] as string[], values: [] as number[] }
+  if (rows.length === 0) return { labels: [] as string[], values: [] as number[], hasOther: false }
   const sorted = [...rows].sort((a, b) => b.total - a.total)
-  const top = sorted.slice(0, 8)
-  const rest = sorted.slice(8)
+  // Viz TopClientsPieChart: paleta má šest rozlišitelných tónů + neutrální slot
+  // pro „Ostatní", proto se slučuje od sedmé kategorie výš.
+  const top = sorted.slice(0, CHART_MAX_CATEGORIES)
+  const rest = sorted.slice(CHART_MAX_CATEGORIES)
   const labels = top.map(c => c.label || t('stats.revenue_breakdown.uncategorized'))
   const values = top.map(c => c.total)
-  if (rest.length > 0) {
+  const hasOther = rest.length > 0
+  if (hasOther) {
     labels.push(t('common.other'))
     values.push(rest.reduce((s, c) => s + c.total, 0))
   }
-  return { labels, values }
+  return { labels, values, hasOther }
 })
 
 function build() {
   if (!canvas.value) return
   if (chart) { chart.destroy(); chart = null }
-  const { labels, values } = sliceData.value
+  const { labels, values, hasOther } = sliceData.value
   if (labels.length === 0) return
   const total = values.reduce((s, v) => s + v, 0)
   chart = new Chart(canvas.value, {
@@ -43,7 +46,7 @@ function build() {
       labels,
       datasets: [{
         data: values,
-        backgroundColor: labels.map((_, i) => colors.value.palette[i % colors.value.palette.length]),
+        backgroundColor: categoryColors(labels.length, hasOther, colors.value.palette),
         borderWidth: 1,
         borderColor: colors.value.border,
       }],
