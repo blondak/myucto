@@ -448,6 +448,53 @@ table:not(.table-plain) > tbody > tr > td.text-right.font-mono:not([class*="text
   color: var(--color-neutral-900);
 }
 
+/* ═══════════════════════ BARVA MODULU ═══════════════════════
+ * Každá sekce menu má accent (Prodej indigo, Nákup jantar, Peníze zelená,
+ * Daně červená, Sklad modrá, Dokumenty neutrální…). Dosud žil jen v menu jako
+ * tečka u nadpisu a levá lišta u položek — po kliknutí do obsahu byla aplikace
+ * zase jednolitě indigová a nebylo poznat, ve které agendě jsi.
+ *
+ * AppLayout posílá klíč accentu na <main data-accent="...">, tady ho převedeme
+ * na dvojici proměnných a obarvíme jimi tři místa: proužek pod topbarem,
+ * podtržení aktivní záložky a linku sekčních štítků. Jinam accent nesahá —
+ * tlačítka a stavy si musí držet vlastní sémantiku (červené primární tlačítko
+ * v Daních by znamenalo „pozor", ne „hlavní akce").
+ *
+ * `-soft` varianta je tlumené pozadí, `--module-accent` plná barva pro linky. */
+[data-accent="primary"]     { --module-accent: var(--color-primary-500);  --module-accent-soft: var(--color-primary-50); }
+[data-accent="primaryDeep"] { --module-accent: var(--color-primary-600);  --module-accent-soft: var(--color-primary-100); }
+[data-accent="warning"]     { --module-accent: var(--color-warning-500);  --module-accent-soft: var(--color-warning-50); }
+[data-accent="success"]     { --module-accent: var(--color-success-500);  --module-accent-soft: var(--color-success-50); }
+[data-accent="danger"]      { --module-accent: var(--color-danger-500);   --module-accent-soft: var(--color-danger-50); }
+[data-accent="accent"]      { --module-accent: var(--color-accent-500);   --module-accent-soft: var(--color-accent-50); }
+[data-accent="teal"]        { --module-accent: var(--color-teal-500);     --module-accent-soft: var(--color-teal-50); }
+[data-accent="neutral"]     { --module-accent: var(--color-neutral-400);  --module-accent-soft: var(--color-neutral-100); }
+
+/* Proužek pod topbarem — identita modulu na první pohled, bez jediného zásahu
+   do šablon stránek. Vlevo plná barva, doprava se vytrácí, ať to není pruh
+   přes celou obrazovku, ale akcent. */
+main[data-accent] {
+  position: relative;
+}
+main[data-accent]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(to right, var(--module-accent), transparent 55%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Aktivní záložka podtržená barvou modulu místo univerzálního indiga.
+   Barvu textu necháváme být — u jantarového nebo červeného accentu by na
+   světlém podkladu spadl kontrast pod čitelnou mez. */
+main[data-accent] :where(button, a).border-b-2:not(.border-transparent) {
+  border-bottom-color: var(--module-accent);
+}
+
 /* ═══════════════════════ ZÁLOŽKY ═══════════════════════
  * Podstránky (Banka, Účetní nastavení, Sklad, Profil…) používají shodný vzor
  * `border-b-2` + `border-primary-600` na aktivní, `border-transparent` na
@@ -702,11 +749,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     text-transform: uppercase;
     color: var(--color-neutral-500);
   }
+  /* Linka začíná barvou modulu a vytrácí se — drobnost, ale díky ní sekční
+     štítky na Přehledu nejsou v každé agendě stejně šedé. */
   .rule-label::after {
     content: "";
     flex: 1;
     height: 1px;
-    background: linear-gradient(to right, var(--color-neutral-200), transparent);
+    background: linear-gradient(
+      to right,
+      color-mix(in oklab, var(--module-accent, var(--color-neutral-300)) 55%, transparent),
+      transparent
+    );
   }
 
   /*

@@ -699,6 +699,27 @@ function onResetNavOrder(): void {
   if (confirm(t('common.nav_reset_order_confirm'))) nav.reset()
 }
 
+/**
+ * Accent sekce, ve které uživatel právě je (Prodej = primary, Nákup = warning,
+ * Peníze = success, Daně = danger, Sklad = accent…).
+ *
+ * Why: barvy modulů dosud žily jen v menu — tečka u nadpisu sekce a levá lišta
+ * u položek. Jakmile jsi klikl do obsahu, byla aplikace zase jen indigová a
+ * nebylo poznat, ve které agendě jsi. Accent posíláme přes `data-accent` na
+ * <main>, kde ho styles/main.css převede na `--module-accent` a obarví jím
+ * proužek pod topbarem, aktivní záložku a linky sekcí.
+ *
+ * Fallback 'primary' platí pro stránky mimo menu (profil, 404, nastavení).
+ */
+const activeSectionAccent = computed<string>(() => {
+  for (const section of orderedNav.value) {
+    if (section.items.some(item => !item.external && isActive(item))) {
+      return section.accent ?? 'primary'
+    }
+  }
+  return 'primary'
+})
+
 /** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => {
   if (auth.isDemo) return [
@@ -1479,7 +1500,7 @@ onBeforeUnmount(() => {
 
       <!-- ── HLAVNÍ OBSAH ── -->
       <div class="flex-1 min-w-0 flex flex-col">
-        <main class="flex-1 px-5 sm:px-8 py-6 w-full">
+        <main class="flex-1 px-5 sm:px-8 py-6 w-full" :data-accent="activeSectionAccent">
           <div v-if="auth.isDemo" class="mb-5 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800">
             {{ t('demo.banner') }}
           </div>
