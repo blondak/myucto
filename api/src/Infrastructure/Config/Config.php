@@ -250,6 +250,7 @@ final class Config
                     'fio' => \MyInvoice\Service\Bank\EmailNotice\Parser\FioBankEmailNoticeParser::class,
                     'creditas' => \MyInvoice\Service\Bank\EmailNotice\Parser\CreditasBankEmailNoticeParser::class,
                     'moneta' => \MyInvoice\Service\Bank\EmailNotice\Parser\MonetaBankEmailNoticeParser::class,
+                    'airbank' => \MyInvoice\Service\Bank\EmailNotice\Parser\AirBankBankEmailNoticeParser::class,
                 ],
             ],
         ];

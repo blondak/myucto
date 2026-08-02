@@ -102,7 +102,7 @@ Provider říká, jak poznat e-mail dané banky a jak z něj vytěžit platební
 
 Typy providerů:
 
-- **Systémový provider** — dodaný aplikací, např. Raiffeisenbank, UniCredit Bank, ČSOB, Česká spořitelna, Fio banka, Banka CREDITAS nebo MONETA Money Bank.
+- **Systémový provider** — dodaný aplikací, např. Raiffeisenbank, UniCredit Bank, ČSOB, Česká spořitelna, Fio banka, Banka CREDITAS, MONETA Money Bank nebo Air Bank.
 - **Regex provider** — vlastní provider dodavatele, konfigurovaný v UI.
 
 Systémový provider se přímo needituje (je společný pro všechny). Když ho chceš
@@ -116,6 +116,13 @@ o příchozí nebo odchozí platbě; u starší či odlišné šablony použije 
 údaj znaménko částky. U odchozí úhrady je vlastním účtem pole **Z účtu** a
 protiúčtem pole **Na účet**; u příchozí úhrady je to opačně. Díky tomu se odchozí
 avízo mapuje na účet, ze kterého byla platba skutečně odepsána.
+
+U Air Bank se avíza zapínají v internetovém bankovnictví pod **Účty a karty →
+Možnosti → Info o dění na účtu** (odesílatel `info@airbank.cz`, předměty
+„Zvýšení/Snížení zůstatku“). Nastavení v IB není úplně intuitivní — praktický
+postup je např. v návodu FAPI
+[Nastavení zasílání e-mailů o příchozích platbách z Air Bank](https://napoveda.fapi.cz/article/40-nastaveni-zasilani-e-mailu-o-prichozich-platbach-z-air-bank)
+(místo FAPI adresy uveď mailbox napojený v MyÚčtu).
 
 Detekce e-mailu i vytěžení polí pracují **tolerantně k diakritice**: pokud avízo
 dorazí v jiném kódování nebo s rozbitou diakritikou (typicky u přeposlaných
