@@ -4722,6 +4722,8 @@
     "filters": "Filtry",
     "filter_remove": "Zrušit filtr {name}",
     "filter_clear_all": "Zrušit vše",
+    "bulk_selected": "Vybráno: {n}",
+    "bulk_clear": "Zrušit výběr",
     "export": "Export",
     "preview": "Náhled",
     "view": "Zobrazit",

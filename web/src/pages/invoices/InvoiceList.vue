@@ -16,6 +16,7 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -729,6 +730,21 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('invoice.subtitle_grouping') }}</p>
       </div>
       <div class="flex items-center gap-2 flex-wrap justify-end">
+        <RouterLink
+          v-if="auth.canWrite('invoices.create') || auth.isDemo"
+          to="/invoices/new"
+          :class="btnFilled('primary')"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('invoice.new') }}
+        </RouterLink>
+      </div>
+    </div>
+
+    <!-- Hromadné akce jedou v plovoucí liště u spodní hrany: uživatel zaškrtává
+         řádky dole v tabulce, kdežto v hlavičce byly akce mimo zorné pole a
+         navíc při každém výběru odsouvaly tlačítko „Nová faktura". -->
+    <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
         <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
           @click="openBulkPdfExport"
           :disabled="bulkBusy"
@@ -778,16 +794,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_post', { n: postableSelected.length }) }}
         </button>
-        <RouterLink
-          v-if="auth.canWrite('invoices.create') || auth.isDemo"
-          to="/invoices/new"
-          :class="btnFilled('primary')"
-        >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-          {{ t('invoice.new') }}
-        </RouterLink>
-      </div>
-    </div>
+    </BulkActionBar>
 
     <!-- Filtry -->
     <FilterBar
