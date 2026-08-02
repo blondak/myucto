@@ -180,6 +180,27 @@
     "group_invoices": "Vydané faktury",
     "group_purchase": "Přijaté faktury"
   },
+  "command": {
+    "title": "Paleta příkazů",
+    "placeholder": "Co chceš udělat? Piš akci, stránku, klienta nebo číslo faktury…",
+    "group_actions": "Akce",
+    "action_hint": "vytvořit nový záznam",
+    "kw_create": "nová nový nové nového vytvořit vystavit založit přidat zapsat",
+    "hint_move": "pohyb",
+    "hint_open": "otevřít",
+    "tip_palette": "Ctrl+K otevře paletu příkazů — napiš, co chceš udělat.",
+    "tip_search": "Alt+Q skočí do hledání v menu, klientech i fakturách.",
+    "tip_filters": "Aktivní filtry se ukazují jako chipy — klik na křížek je zruší.",
+    "tip_columns": "Sloupce a hustotu tabulky si nastavíš vpravo nad seznamem.",
+    "tip_saved_filters": "Často používaný filtr si ulož a příště ho vyvoláš jedním klikem.",
+    "tip_theme": "Tmavý režim přepneš měsíčkem v patičce.",
+    "tip_menu_layout": "Menu umíš přepnout mezi horním a postranním — ikona v patičce.",
+    "tip_menu_drag": "Položky i celé sekce menu si přetáhneš do vlastního pořadí.",
+    "tip_quick_new": "Tlačítko + v liště zakládá doklady bez proklikávání menu.",
+    "tip_row_click": "Klik na řádek otevře doklad, prostřední tlačítko v novém panelu.",
+    "tip_next": "Další tip",
+    "tip_dismiss": "Už tipy nezobrazovat"
+  },
   "document_requests": {
     "title": "Vyžádané doklady",
     "subtitle": "Chybějící doklady vyžádané od klienta přes portál.",

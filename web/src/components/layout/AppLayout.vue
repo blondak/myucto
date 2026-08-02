@@ -11,6 +11,8 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useNavOrder } from '@/composables/useNavOrder'
 import SupplierSwitcher from './SupplierSwitcher.vue'
 import GlobalSearch from './GlobalSearch.vue'
+import CommandPalette from './CommandPalette.vue'
+import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
@@ -711,6 +713,9 @@ function onResetNavOrder(): void {
  *
  * Fallback 'primary' platí pro stránky mimo menu (profil, 404, nastavení).
  */
+/** Paleta příkazů — otevírá ji i tlačítko v patičce, nejen zkratka. */
+const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
+
 const activeSectionAccent = computed<string>(() => {
   for (const section of orderedNav.value) {
     if (section.items.some(item => !item.external && isActive(item))) {
@@ -892,6 +897,22 @@ function onGlobalShortcut(event: KeyboardEvent): void {
 /** Ploché položky menu pro globální search (našeptávač skáče přímo na body menu). */
 const flatNavItems = computed(() =>
   navSections.value.flatMap(s => s.items.map(it => ({ to: it.to, label: it.label, icon: it.icon, external: it.external })))
+)
+
+/**
+ * Totéž pro paletu příkazů, ale s kontextem sekce: název jde pod položku jako
+ * popisek („Vydané faktury" / Prodej) a accent barví ikonu, takže se výsledky
+ * dají rozeznat podle barev, ne jen čtením.
+ */
+const paletteNavItems = computed(() =>
+  navSections.value.flatMap(s => s.items.map(it => ({
+    to: it.to,
+    label: it.label,
+    icon: it.icon,
+    external: it.external,
+    section: s.title ?? '',
+    accent: s.accent ?? 'primary',
+  })))
 )
 
 const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
@@ -1500,6 +1521,10 @@ onBeforeUnmount(() => {
 
       <!-- ── HLAVNÍ OBSAH ── -->
       <div class="flex-1 min-w-0 flex flex-col">
+        <!-- Paleta příkazů (Ctrl/⌘+K) — sama si registruje zkratku i teleport,
+             stačí ji mít v layoutu jednou. -->
+        <CommandPalette ref="paletteRef" :nav-items="paletteNavItems" :quick-actions="quickActions" />
+
         <main class="flex-1 px-5 sm:px-8 py-6 w-full" :data-accent="activeSectionAccent">
           <div v-if="auth.isDemo" class="mb-5 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800">
             {{ t('demo.banner') }}
@@ -1522,18 +1547,40 @@ onBeforeUnmount(() => {
              působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
         <footer class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
           <div class="hidden lg:grid h-11 grid-cols-[minmax(14rem,1fr)_auto_minmax(23rem,1fr)] items-center gap-4 px-3">
-            <div class="w-full max-w-sm">
-              <GlobalSearch
-                ref="desktopSearchRef"
-                :menu-items="flatNavItems"
-                placement="above"
-                compact
-                :shortcut="searchShortcutLabel"
-              />
+            <div class="flex w-full max-w-lg items-center gap-2">
+              <div class="min-w-0 flex-1">
+                <GlobalSearch
+                  ref="desktopSearchRef"
+                  :menu-items="flatNavItems"
+                  placement="above"
+                  compact
+                  :shortcut="searchShortcutLabel"
+                />
+              </div>
+              <!-- Viditelné tlačítko palety. Klávesová zkratka sama o sobě je
+                   neobjevitelná — kdo ji nezná, nedozví se o ní. Tohle je ta
+                   jediná spolehlivá cesta: prvek na místě, kam uživatel kouká,
+                   když chce něco najít nebo založit. -->
+              <button
+                type="button"
+                class="cursor-pointer hidden xl:inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-neutral-200 px-2 text-[11px] leading-none text-neutral-500 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+                :title="t('command.title')"
+                @click="paletteRef?.show()"
+              >
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3" />
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                </svg>
+                <kbd class="font-sans">Ctrl+K</kbd>
+              </button>
             </div>
 
-            <div class="flex min-w-0 justify-center">
+            <!-- Tip stojí vedle přepínače firem, ne místo něj: uživatel s víc
+                 firmami by se jinak k tipům nikdy nedostal. Na užších obrazovkách
+                 ustoupí, tam má přednost přepínač. -->
+            <div class="flex min-w-0 items-center justify-center gap-3">
               <SupplierSwitcher v-if="topNavigation && supplierStore.hasMultiple" placement="above" compact />
+              <FooterTip class="hidden 2xl:flex" />
             </div>
 
             <div class="flex min-w-0 items-center justify-end gap-1.5 text-[11px] leading-none text-neutral-500">

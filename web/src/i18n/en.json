@@ -180,6 +180,27 @@
     "group_invoices": "Issued invoices",
     "group_purchase": "Received invoices"
   },
+  "command": {
+    "title": "Command palette",
+    "placeholder": "What do you want to do? Type an action, page, client or invoice number…",
+    "group_actions": "Actions",
+    "action_hint": "create a new record",
+    "kw_create": "new create add issue start record",
+    "hint_move": "move",
+    "hint_open": "open",
+    "tip_palette": "Ctrl+K opens the command palette — just type what you want to do.",
+    "tip_search": "Alt+Q jumps to search across menu, clients and invoices.",
+    "tip_filters": "Active filters show up as chips — click the cross to clear one.",
+    "tip_columns": "Columns and table density are configurable above every list.",
+    "tip_saved_filters": "Save a filter you use often and recall it with one click.",
+    "tip_theme": "Toggle dark mode with the moon icon in the footer.",
+    "tip_menu_layout": "Switch the menu between top and side — icon in the footer.",
+    "tip_menu_drag": "Menu items and whole sections can be dragged into your own order.",
+    "tip_quick_new": "The + button in the bar creates documents without menu clicks.",
+    "tip_row_click": "Click a row to open it, middle-click opens it in a new tab.",
+    "tip_next": "Next tip",
+    "tip_dismiss": "Stop showing tips"
+  },
   "document_requests": {
     "title": "Document requests",
     "subtitle": "Missing documents requested from the client via the portal.",

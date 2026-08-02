@@ -2102,7 +2102,9 @@ async function deleteDraft() {
               <th class="px-3 py-2 text-left font-medium w-8"></th>
               <th class="px-3 py-2 text-left font-medium">{{ t('invoice.items_table.description') }}</th>
               <th class="px-3 py-2 text-right font-medium w-20">{{ t('invoice.items_table.qty') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-16">{{ t('invoice.items_table.unit') }}</th>
+              <!-- w-20: do 64 px se select s vlastní šipkou nevejde tak, aby byla
+                   vidět vybraná jednotka. -->
+              <th class="px-3 py-2 text-left font-medium w-20">{{ t('invoice.items_table.unit') }}</th>
               <th class="px-3 py-2 text-right font-medium w-32">{{ unitPriceHeaderLabel }}</th>
               <th v-if="supplierIsVatPayer" class="px-3 py-2 text-center font-medium w-24">{{ t('invoice.totals.vat') }}</th>
               <th class="px-3 py-2 text-right font-medium w-32">{{ supplierIsVatPayer ? t('invoice.items_table.total_incl_vat') : nonPayerTotalLabel }}</th>
