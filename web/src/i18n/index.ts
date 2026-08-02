@@ -36,7 +36,9 @@ export const i18n = createI18n({
    */
   missing(_locale, key) {
     if (!key.includes('.')) return
-    void ensureAllNamespaces()
+    // Bez `catch` by selhané dotažení skončilo jako unhandled rejection uvnitř
+    // renderu — hlučné a k ničemu, chybějící klíč stejně spadne na fallback.
+    ensureAllNamespaces().catch(() => {})
   },
 })
 
@@ -114,15 +116,27 @@ export function namespacesForRoute(routeName: string | null | undefined): readon
 }
 
 /**
- * Načte VŠECHNY prostory. Volá se ze záchranné brzdy `missing` výše; opakované
- * volání je levné, protože už načtené prostory se přeskočí.
+ * Načte VŠECHNY prostory pro aktuální jazyk.
+ *
+ * Volá se ze záchranné brzdy `missing` výše, tedy potenciálně při KAŽDÉM
+ * vykreslení klíče, který chybí i po dotažení všeho (skutečná díra v překladu).
+ * Proto se za daný jazyk provede jen jednou — jinak by každý takový řádek
+ * v seznamu vyrobil promise navíc.
  */
-let allPending: Promise<void> | null = null
+const allLoaded = new Map<Locale, Promise<void>>()
 export function ensureAllNamespaces(): Promise<void> {
-  if (!allPending) {
-    allPending = ensureNamespaces(namespaceMap.lazy).finally(() => { allPending = null })
+  const locale = i18n.global.locale.value as Locale
+  let pending = allLoaded.get(locale)
+  if (!pending) {
+    // Selhání se nesmí zapamatovat jako „hotovo" — po výpadku sítě musí jít
+    // zkusit znovu.
+    pending = ensureNamespaces(namespaceMap.lazy).catch((e) => {
+      allLoaded.delete(locale)
+      throw e
+    })
+    allLoaded.set(locale, pending)
   }
-  return allPending
+  return pending
 }
 
 /**
