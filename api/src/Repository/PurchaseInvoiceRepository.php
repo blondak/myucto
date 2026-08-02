@@ -1164,7 +1164,16 @@ final class PurchaseInvoiceRepository
                        pi.payment_method, pi.payment_method_source,
                        pi.payment_account_source, pi.payment_account_checked_at, pi.payment_ordered_at,
                        cur.code AS currency, cur.symbol AS currency_symbol,
-                       c.company_name AS vendor_company_name, c.dic AS vendor_dic, c.ic AS vendor_ic
+                       c.company_name AS vendor_company_name, c.dic AS vendor_dic, c.ic AS vendor_ic,
+                       -- Zápis, jehož zdrojem je tenhle doklad — otevírá náhled dokladu
+                       -- bez odskoku ze stránky. Poddotaz, ne JOIN: k dokladu může být
+                       -- víc zápisů (oprava, doúčtování) a JOIN by řádek zduplikoval.
+                       (SELECT je.id FROM journal_entries je
+                         WHERE je.supplier_id = pi.supplier_id
+                           AND je.source_type = 'purchase_invoice'
+                           AND je.source_id = pi.id
+                           AND je.posted_at IS NOT NULL
+                         ORDER BY je.id ASC LIMIT 1) AS journal_entry_id
                   FROM purchase_invoices pi
                   JOIN clients c     ON c.id   = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
@@ -1185,6 +1194,7 @@ final class PurchaseInvoiceRepository
             $r['amount_to_pay']  = (float) $r['amount_to_pay'];
             $r['rounding']       = (float) ($r['rounding'] ?? 0);
             $r['has_pdf']        = (bool) $r['has_pdf'];
+            $r['journal_entry_id'] = $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null;
         }
         return $rows;
     }

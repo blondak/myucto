@@ -214,6 +214,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices-payment-orders": [
+      "accounting",
       "payment_method",
       "payment_order",
       "purchase_invoice"

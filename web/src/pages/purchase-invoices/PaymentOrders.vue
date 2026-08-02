@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -23,10 +23,12 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 
 const payerAccounts = ref<PayerAccount[]>([])
@@ -376,9 +378,31 @@ async function toggleQr(c: PaymentCandidate) {
   }
 }
 
+/**
+ * Náhled dokladu v drawer — stejný jako v deníku, aby účetní při skládání
+ * příkazu neztrácel rozpracovaný výběr odskokem na detail.
+ *
+ * Drawer je klíčovaný ID ZÁPISU, ne dokladu (viz JournalSourceAction: brání to
+ * IDOR přes podstrčené source_id), takže bez zaúčtování ho otevřít nelze —
+ * u nezaúčtovaných dokladů a v daňové evidenci zůstává původní odskok na detail.
+ */
+const sourceDrawerEntryId = ref<number | null>(null)
+
 function openDetail(c: PaymentCandidate) {
-  // Detail přijaté faktury v novém okně.
+  if (c.journal_entry_id) {
+    sourceDrawerEntryId.value = c.journal_entry_id
+    return
+  }
   window.open(`/purchase-invoices/${c.id}`, '_blank')
+}
+
+/**
+ * „Zobrazit v deníku" z draweru. Deník je jinde než tahle stránka, takže odskok
+ * je tu na místě — na rozdíl od náhledu, kvůli kterému by se ztratil výběr.
+ */
+function focusInJournal(entryId: number) {
+  sourceDrawerEntryId.value = null
+  void router.push({ name: 'accounting-journal', query: { entry_id: String(entryId) } })
 }
 
 const verifyingId = ref<number | null>(null)
@@ -1042,5 +1066,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
       </div>
     </section>
+
+    <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
+      @close="sourceDrawerEntryId = null" @focus-entry="focusInJournal" />
   </div>
 </template>

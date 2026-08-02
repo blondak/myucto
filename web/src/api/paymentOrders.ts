@@ -56,6 +56,11 @@ export interface PaymentCandidate {
   /** Má platný IBAN (mod-97) → lze zařadit do SEPA (pain.001.001.03) exportu. */
   sepa_eligible: boolean
   account_verified: PaymentAccountVerified
+  /**
+   * Účetní zápis dokladu — otevírá náhled bez odskoku ze stránky.
+   * `null` u nezaúčtovaných dokladů a v daňové evidenci, kde deník není.
+   */
+  journal_entry_id: number | null
 }
 
 export interface VerifyAccountResponse {

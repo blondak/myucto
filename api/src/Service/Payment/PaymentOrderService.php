@@ -98,6 +98,9 @@ final class PaymentOrderService
                 'payment_method_source'  => PaymentMethods::normalizeSource($r['payment_method_source'] ?? null),
                 'has_account'            => $hasCz || $hasIban,
                 'has_pdf'                => (bool) ($r['has_pdf'] ?? false),
+                // Otevírá náhled dokladu v drawer; null u nezaúčtovaných dokladů
+                // a v daňové evidenci, kde deník neexistuje — tam se jde na detail.
+                'journal_entry_id'       => $r['journal_entry_id'] ?? null,
                 'abo_eligible'           => $hasCz && strtoupper((string) $r['currency']) === 'CZK',
                 'sepa_eligible'          => $hasIban && $this->ibanValidator->isValid((string) $payee['iban']),
                 'can_verify'             => $this->canVerify((string) ($r['vendor_dic'] ?? '')),
