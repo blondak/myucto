@@ -17,10 +17,15 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * GET /api/public/approval/{token}
  *
  * Veřejný (bez auth) endpoint — vrací data potřebná pro schvalovací stránku.
- * Token je v invoices.approval_token; po decize je nullován, takže expired/rozhodnutý
- * link vrátí 404.
  *
- * Returns: { invoice: {minimal}, work_report, supplier_name, captcha_site_key }
+ * Token je v invoices.approval_token a po rozhodnutí se nuluje, aby odkaz nešel
+ * použít podruhé. Zůstane po něm ale SHA-256 v `approval_receipt_hash` (migrace
+ * 1185), takže endpoint vrátí 200 se `state` = approved|rejected a stránka může
+ * poděkovat místo červeného „Odkaz není platný" — schvalovatel se do e-mailu
+ * běžně vrátí zkontrolovat, co odklikl, a varování u úspěšného schválení vypadá
+ * jako porucha. Rozhodnout se přes hash nedá; decide hledá podle `approval_token`.
+ *
+ * Returns: { state, invoice: {minimal}, work_report, supplier_name, captcha_site_key }
  */
 final class PublicApprovalGetAction
 {
@@ -39,7 +44,32 @@ final class PublicApprovalGetAction
         }
 
         $invoice = $this->repo->findByApprovalToken($token);
-        if ($invoice === null || $invoice['approval_status'] !== 'requested') {
+
+        // Zkonzumovaný odkaz — token je pryč, ale jeho hash zůstal. Držitel
+        // odkazu je ten, kdo rozhodl, takže vlastní rozhodnutí (i důvod, který
+        // sám napsal) mu smíme ukázat zpátky.
+        if ($invoice === null) {
+            $decided = $this->repo->findByApprovalReceipt($token);
+            $status = (string) ($decided['approval_status'] ?? '');
+            if ($decided !== null && ($status === 'approved' || $status === 'rejected')) {
+                return Json::ok($response, [
+                    'state'            => $status,
+                    'supplier_name'    => $this->resolveSupplierName($decided),
+                    'invoice'          => [
+                        'varsymbol' => $decided['varsymbol'],
+                        'language'  => $decided['language'],
+                    ],
+                    'decided_at'       => $decided['approval_decided_at'] ?? null,
+                    'rejection_reason' => $status === 'rejected'
+                        ? ($decided['approval_rejection_reason'] ?? null)
+                        : null,
+                ]);
+            }
+            return Json::error($response, 'token_invalid_or_expired',
+                'Tento odkaz byl již použit nebo není platný.', 404);
+        }
+
+        if ((string) ($invoice['approval_status'] ?? '') !== 'requested') {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz byl již použit nebo není platný.', 404);
         }
@@ -49,26 +79,7 @@ final class PublicApprovalGetAction
             return Json::error($response, 'no_work_report', 'Faktura nemá výkaz práce.', 404);
         }
 
-        // Vrátíme jen omezený set polí — public endpoint, žádné citlivé údaje
-        $supplierName = '';
-        if (!empty($invoice['supplier_snapshot'])) {
-            $snap = is_string($invoice['supplier_snapshot'])
-                ? json_decode($invoice['supplier_snapshot'], true)
-                : $invoice['supplier_snapshot'];
-            if (is_array($snap)) {
-                $supplierName = (string) ($snap['display_name'] ?: ($snap['company_name'] ?? ''));
-            }
-        }
-        if ($supplierName === '') {
-            $sid = (int) ($invoice['supplier_id'] ?? 0);
-            if ($sid > 0) {
-                $stmt = $this->db->pdo()->prepare(
-                    'SELECT COALESCE(display_name, company_name) FROM supplier WHERE id = ?'
-                );
-                $stmt->execute([$sid]);
-                $supplierName = (string) ($stmt->fetchColumn() ?: '');
-            }
-        }
+        $supplierName = $this->resolveSupplierName($invoice);
 
         $publicInvoice = [
             'id'                  => $invoice['id'],
@@ -84,11 +95,33 @@ final class PublicApprovalGetAction
         ];
 
         return Json::ok($response, [
+            'state'            => 'requested',
             'invoice'          => $publicInvoice,
             'work_report'      => $workReport,
             'supplier_name'    => $supplierName,
             'captcha_site_key' => (string) $this->config->get('captcha.site_key', ''),
             'captcha_provider' => (string) $this->config->get('captcha.provider', 'none'),
         ]);
+    }
+
+    /** Jen omezený set polí — public endpoint, žádné citlivé údaje. */
+    private function resolveSupplierName(array $invoice): string
+    {
+        if (!empty($invoice['supplier_snapshot'])) {
+            $snap = is_string($invoice['supplier_snapshot'])
+                ? json_decode($invoice['supplier_snapshot'], true)
+                : $invoice['supplier_snapshot'];
+            if (is_array($snap)) {
+                $name = (string) ($snap['display_name'] ?: ($snap['company_name'] ?? ''));
+                if ($name !== '') return $name;
+            }
+        }
+        $sid = (int) ($invoice['supplier_id'] ?? 0);
+        if ($sid <= 0) return '';
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(display_name, company_name) FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([$sid]);
+        return (string) ($stmt->fetchColumn() ?: '');
     }
 }

@@ -65,11 +65,26 @@ export interface PublicApprovalInvoice {
 }
 
 export interface PublicApprovalData {
+  /** `requested` = ke schválení; jinak už rozhodnuto a stránka jen shrne výsledek. */
+  state: 'requested' | 'approved' | 'rejected'
   invoice: PublicApprovalInvoice
   work_report: PublicApprovalWorkReport
   supplier_name: string
   captcha_site_key: string
   captcha_provider: 'turnstile' | 'none' | string
+}
+
+/**
+ * Odpověď na už rozhodnutý odkaz. Endpoint vrací 200, ne 404 — schvalovatel si
+ * odkaz z e-mailu běžně otevře podruhé a chybová hláška by vypadala jako porucha.
+ * Výkaz ani captcha se v téhle větvi neposílají, proto samostatný typ.
+ */
+export interface PublicApprovalDecided {
+  state: 'approved' | 'rejected'
+  supplier_name: string
+  invoice: Pick<PublicApprovalInvoice, 'varsymbol' | 'language'>
+  decided_at: string | null
+  rejection_reason: string | null
 }
 
 export interface DecidePayload {
@@ -89,7 +104,7 @@ export interface DecideResult {
 
 export const approvalApi = {
   get: (token: string) =>
-    publicApi.get<PublicApprovalData>(`/approval/${token}`).then(r => r.data),
+    publicApi.get<PublicApprovalData | PublicApprovalDecided>(`/approval/${token}`).then(r => r.data),
 
   decide: (token: string, payload: DecidePayload) =>
     publicApi.post<DecideResult>(`/approval/${token}/decide`, payload).then(r => r.data),

@@ -1709,6 +1709,10 @@ final class InvoiceRepository
     /**
      * Uloží rozhodnutí (approved/rejected). $decidedBy = email klienta (z public formu)
      * nebo email aktuálního uživatele (z admin „Změnit stav"). Token zneplatněn.
+     *
+     * Token se zároveň překlopí do `approval_receipt_hash`, aby si držitel odkazu
+     * mohl otevřít read-only stvrzenku (viz migrace 1185). Z hashe se token
+     * nesestaví, takže rozhodnout znovu nejde.
      */
     public function setApprovalDecision(int $invoiceId, string $newStatus, ?string $decidedBy, ?string $rejectionReason): void
     {
@@ -1718,6 +1722,10 @@ final class InvoiceRepository
         $this->db->pdo()->prepare(
             'UPDATE invoices
                 SET approval_status = ?,
+                    approval_receipt_hash = CASE
+                        WHEN approval_token IS NULL THEN approval_receipt_hash
+                        ELSE SHA2(approval_token, 256)
+                    END,
                     approval_token = NULL,
                     approval_decided_at = NOW(),
                     approval_decided_by_email = ?,
@@ -1743,6 +1751,7 @@ final class InvoiceRepository
         $stmt = $this->db->pdo()->prepare(
             "UPDATE invoices
                 SET approval_status = ?,
+                    approval_receipt_hash = SHA2(approval_token, 256),
                     approval_token = NULL,
                     approval_decided_at = NOW(),
                     approval_decided_by_email = ?,
@@ -1764,6 +1773,7 @@ final class InvoiceRepository
             'UPDATE invoices
                 SET approval_status = "none",
                     approval_token = NULL,
+                    approval_receipt_hash = NULL,
                     approval_token_expires_at = NULL,
                     approval_requested_at = NULL,
                     approval_decided_at = NULL,
@@ -1785,6 +1795,30 @@ final class InvoiceRepository
             'SELECT id FROM invoices
               WHERE approval_token = ?
                 AND (approval_token_expires_at IS NULL OR approval_token_expires_at > NOW())'
+        );
+        $stmt->execute([$token]);
+        $id = $stmt->fetchColumn();
+        if ($id === false) return null;
+        return $this->find((int) $id);
+    }
+
+    /**
+     * Najde fakturu podle už ZKONZUMOVANÉHO approval tokenu (viz migrace 1185).
+     *
+     * Slouží jen ke stvrzence — rozhodnout se přes tuhle cestu nedá, protože
+     * `decideIfRequested` hledá podle `approval_token`, který je po rozhodnutí
+     * NULL. Expirace se tu záměrně neuplatňuje: rozhodnutí je konečné a shrnutí
+     * dává smysl i po vypršení původní lhůty na odpověď.
+     *
+     * Rozhodnutí starší než migrace hash nemají — u nich se vrátí null a odkaz
+     * dopadne jako dosud.
+     */
+    public function findByApprovalReceipt(string $token): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM invoices
+              WHERE approval_receipt_hash IS NOT NULL
+                AND approval_receipt_hash = SHA2(?, 256)'
         );
         $stmt->execute([$token]);
         $id = $stmt->fetchColumn();

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { approvalApi, type PublicApprovalData } from '@/api/approval'
+import { approvalApi, type PublicApprovalData, type PublicApprovalDecided } from '@/api/approval'
 import { useTurnstile } from '@/composables/useTurnstile'
 
 const route = useRoute()
@@ -20,6 +20,8 @@ const comment = ref('')         // volitelný pro approve
 const submitting = ref(false)
 const submitError = ref('')
 const result = ref<{ decision: 'approved' | 'rejected'; message: string } | null>(null)
+/** Vyplněné, když stránku otevřel schvalovatel znovu — rozhodnutí padlo dřív, ne teď. */
+const decided = ref<PublicApprovalDecided | null>(null)
 
 // Captcha
 const turnstile = useTurnstile()
@@ -27,7 +29,7 @@ const turnstileEl = ref<HTMLElement | null>(null)
 const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 
 const wrHasDates = computed(() => !!data.value?.work_report.items.some(i => !!i.work_date))
-const lang = computed(() => data.value?.invoice.language || 'cs')
+const lang = computed(() => data.value?.invoice.language || decided.value?.invoice.language || 'cs')
 
 function fmtMoney(n: number, currency: string): string {
   const decimals = currency === 'JPY' ? 0 : 2
@@ -53,7 +55,14 @@ function tt(cs: string, en: string): string {
 
 onMounted(async () => {
   try {
-    data.value = await approvalApi.get(token.value)
+    const payload = await approvalApi.get(token.value)
+    // Rozhodnutý výkaz nemá `work_report` ani captchu — nesmí se dostat do `data`,
+    // jinak by šablona sáhla na chybějící pole.
+    if (payload.state === 'approved' || payload.state === 'rejected') {
+      decided.value = payload as PublicApprovalDecided
+    } else {
+      data.value = payload as PublicApprovalData
+    }
     if (lang.value === 'en') localStorage.setItem('locale', 'en')
     else localStorage.setItem('locale', 'cs')
     document.title = tt('Schválení výkazu — MyÚčto.cz', 'Approve work report — MyÚčto.cz')
@@ -151,6 +160,40 @@ async function submit(decision: 'approve' | 'reject') {
           <p class="text-neutral-600 text-sm">{{ loadError }}</p>
           <p class="text-xs text-neutral-500 mt-4">
             {{ tt('Pokud máte dotaz, kontaktujte odesílatele emailu.', 'If you have a question, please contact the sender.') }}
+          </p>
+        </div>
+
+        <!-- Odkaz otevřený znovu po rozhodnutí. Dřív sem spadla červená hláška
+             „Odkaz není platný", což u schvalovatele, kterému všechno vyšlo,
+             vypadá jako porucha systému. Rekapitulace vlastního rozhodnutí je
+             jediná informace, kterou v tu chvíli potřebuje. -->
+        <div v-else-if="decided" class="bg-surface border rounded-xl p-8 text-center shadow-sm"
+          :class="decided.state === 'approved' ? 'border-success-500/40' : 'border-warning-500/40'">
+          <div class="text-5xl mb-3">{{ decided.state === 'approved' ? '✓' : '✕' }}</div>
+          <h1 class="text-2xl font-semibold mb-3"
+            :class="decided.state === 'approved' ? 'text-success-600' : 'text-warning-600'">
+            {{ decided.state === 'approved'
+                ? tt('Děkujeme, výkaz je schválený', 'Thank you, the work report is approved')
+                : tt('Výkaz byl zamítnutý', 'The work report was rejected') }}
+          </h1>
+          <p class="text-neutral-700">
+            <template v-if="decided.state === 'approved'">
+              {{ tt('Vaše schválení jsme zaznamenali, další krok od vás nepotřebujeme.',
+                    'We have recorded your approval — nothing further is needed from you.') }}
+            </template>
+            <template v-else>
+              {{ tt('Zamítnutí jsme zaznamenali a dodavatele jsme informovali.',
+                    'We have recorded the rejection and informed the supplier.') }}
+            </template>
+          </p>
+          <p v-if="decided.rejection_reason" class="text-sm text-neutral-600 mt-4 bg-neutral-50 rounded-lg p-3 text-left">
+            <span class="text-neutral-500">{{ tt('Uvedený důvod', 'Stated reason') }}:</span>
+            {{ decided.rejection_reason }}
+          </p>
+          <p class="text-xs text-neutral-500 mt-4">
+            <span v-if="decided.invoice.varsymbol">{{ tt('Výkaz', 'Report') }} {{ decided.invoice.varsymbol }}</span>
+            <span v-if="decided.decided_at"> · {{ fmtDate(decided.decided_at) }}</span>
+            <span v-if="decided.supplier_name"> · {{ decided.supplier_name }}</span>
           </p>
         </div>
 
