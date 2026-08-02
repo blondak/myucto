@@ -203,6 +203,19 @@ foreach ($pending as $file) {
 
 echo "Hotovo.\n";
 
+// Zahoď sdílenou cache introspekce schématu (hasTable/hasColumn). Ta drží odpovědi
+// mezi requesty a migrace je právě mohla změnit — bez invalidace by aplikace až do
+// vypršení TTL tvrdila, že nový sloupec neexistuje, a tiše by běžela bez feature,
+// kterou migrace přinesla. Provádí se i když nebyly žádné pending migrace: cesta je
+// levná a stav po `migrate.php` má být vždy konzistentní.
+$__schemaCachePath = \MyInvoice\Infrastructure\Database\SchemaCache::pathFor(
+    $config->dataDir() ?? $rootDir,
+    (string) $config->get('db.name', ''),
+);
+if (\MyInvoice\Infrastructure\Database\SchemaCache::invalidate($__schemaCachePath)) {
+    echo "Cache schématu zneplatněna.\n";
+}
+
 // Auto-backfill po migracích — detekuje stale data a spouští příslušné skripty
 // s --apply. Skip pokud user dal --no-backfills (CI / read-only deploy).
 if (!in_array('--no-backfills', $argv, true)) {

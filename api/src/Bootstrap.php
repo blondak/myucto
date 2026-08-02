@@ -389,22 +389,29 @@ final class Bootstrap
         // Cílový order běhu (outside → inside):
         //   IpAllowlist → FirstRunLock → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
+        //
+        // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
+        // přidá přes addDeferred() a z kontejneru je vytáhne až ve chvíli, kdy k nim
+        // request skutečně sestoupí. Předávat `$container->get(...)` znamenalo postavit
+        // všech 14 (i s jejich stromy závislostí) na KAŽDÝ request — naměřeno +7,2 ms
+        // a +79 načtených tříd, i když request skončil na 401 hned v první vrstvě.
+        // Pořadí zůstává beze změny; líné je jen vytvoření instance.
         $app->addBodyParsingMiddleware();                            // innermost
         $app->addRoutingMiddleware();
-        $app->add($container->get(WebAuthnBodyLimitMiddleware::class)); // limit raw WebAuthn credential před JSON parsingem
-        $app->add($container->get(CsrfMiddleware::class));           // potřebuje session z Auth (bearer skip)
-        $app->add($container->get(RateLimitMiddleware::class));      // chrání forgot/setup/login/ARES + per-user/per-token limity
-        $app->add($container->get(ApiScopeMiddleware::class));       // bearer-only: enforce read / read_write scope
-        $app->add($container->get(PermissionMiddleware::class));     // jemnozrnná route permission kontrola
-        $app->add($container->get(SupplierScopeMiddleware::class));  // multi-supplier scope (X-Supplier-Id / token's supplier_id)
-        $app->add($container->get(DemoReadOnlyMiddleware::class));   // demo: globální zákaz business mutací
-        $app->add($container->get(LicenseMiddleware::class));        // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
-        $app->add($container->get(RequireMfaMiddleware::class));     // assurance + povinný MFA setup (bearer skip)
-        $app->add($container->get(SessionLockMiddleware::class));    // autoritativní idle/manual lock browser session
-        $app->add($container->get(ApiRequestLogMiddleware::class));  // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
-        $app->add($container->get(AuthMiddleware::class));           // načte session nebo bearer token
-        $app->add($container->get(FirstRunLockMiddleware::class));   // 423 pokud users prázdná
-        $app->add($container->get(IpAllowlistMiddleware::class));    // outermost user mw
+        $app->add(WebAuthnBodyLimitMiddleware::class);               // limit raw WebAuthn credential před JSON parsingem
+        $app->add(CsrfMiddleware::class);                            // potřebuje session z Auth (bearer skip)
+        $app->add(RateLimitMiddleware::class);                       // chrání forgot/setup/login/ARES + per-user/per-token limity
+        $app->add(ApiScopeMiddleware::class);                        // bearer-only: enforce read / read_write scope
+        $app->add(PermissionMiddleware::class);                      // jemnozrnná route permission kontrola
+        $app->add(SupplierScopeMiddleware::class);                   // multi-supplier scope (X-Supplier-Id / token's supplier_id)
+        $app->add(DemoReadOnlyMiddleware::class);                    // demo: globální zákaz business mutací
+        $app->add(LicenseMiddleware::class);                         // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
+        $app->add(RequireMfaMiddleware::class);                      // assurance + povinný MFA setup (bearer skip)
+        $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session
+        $app->add(ApiRequestLogMiddleware::class);                   // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
+        $app->add(AuthMiddleware::class);                            // načte session nebo bearer token
+        $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
+        $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním
 
         $displayErrors = (bool) $config->get('app.debug', false);

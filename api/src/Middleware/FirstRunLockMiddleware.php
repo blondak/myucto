@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Config\InstallStateCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -64,11 +65,21 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
             return $this->needsSetupCache;
         }
 
+        // Značka na disku zkratuje dotaz do DB. Platí JEN pro „setup hotový" —
+        // opačný stav se nikdy necachuje, jinak by instalace po vytvoření admina
+        // zůstala zamčená. Viz InstallStateCache.
+        if (InstallStateCache::isSetupComplete()) {
+            return $this->needsSetupCache = false;
+        }
+
         try {
             $count = (int) $this->db->pdo()
                 ->query('SELECT COUNT(*) FROM users WHERE is_active = 1')
                 ->fetchColumn();
             $this->needsSetupCache = $count === 0;
+            if ($count > 0) {
+                InstallStateCache::markSetupComplete();
+            }
         } catch (\PDOException $e) {
             // Rozlišujeme „tabulka users neexistuje" (= fresh Docker install bez `migrate.php`,
             // schema chybí) od ostatních DB chyb (connection refused, auth fail, timeout).

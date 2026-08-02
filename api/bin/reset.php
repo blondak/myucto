@@ -297,6 +297,22 @@ foreach ($dirs as $d) {
     }
 }
 
+// Značka „setup hotový" a cache schématu. Bez smazání značky by po resetu, který
+// vymazal `users`, FirstRunLock dál tvrdil, že instalace je inicializovaná, a
+// uživatel by místo setup wizardu viděl login, do kterého se nemá čím přihlásit.
+// S --keep-users-supplier účty zůstávají → značka platí dál a sahat na ni nesmíme.
+if (!$dryRun) {
+    if (!$keepUsersSupplier && \MyInvoice\Infrastructure\Config\InstallStateCache::invalidate()) {
+        echo "\n[reset] Značka „setup hotový\" zrušena.\n";
+    }
+    \MyInvoice\Infrastructure\Database\SchemaCache::invalidate(
+        \MyInvoice\Infrastructure\Database\SchemaCache::pathFor(
+            $config->dataDir() ?? $rootDir,
+            (string) $config->get('db.name', ''),
+        ),
+    );
+}
+
 // Zruš setup-time MFA přepínače v cfg.local.php (jinak by stará hodnota přežila nový setup).
 // S --keep-users-supplier účet zůstává → NEsahej na auth policy (nesnižuj bezpečnost).
 if (!$keepUsersSupplier && !$dryRun) {

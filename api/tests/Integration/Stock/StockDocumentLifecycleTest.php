@@ -407,9 +407,15 @@ final class StockDocumentLifecycleTest extends StockTestCase
         // Nesdílená zóna: testovací běh jinak recykluje jedno PDO přes všechny Connection,
         // takže by obě „strany" race seděly v téže DB session a kontrakt napříč spojeními
         // by se vůbec neměřil. Assert pod tím to hlídá.
-        $container2 = Connection::withoutSharedTestConnection(
-            static fn () => Bootstrap::buildApp()->getContainer()
-        );
+        // Connection MUSÍ vzniknout uvnitř zóny — rozhodnutí „smím sdílet PDO?" padá
+        // v jeho konstruktoru. Od chvíle, kdy se middleware resolvují líně (deferred),
+        // by ho samotné buildApp() nevytvořilo a konstrukce by spadla až za zónu.
+        $container2 = Connection::withoutSharedTestConnection(static function () {
+            $c = Bootstrap::buildApp()->getContainer();
+            $c->get(Connection::class);
+
+            return $c;
+        });
         /** @var Connection $db2 */
         $db2 = $container2->get(Connection::class);
         self::assertNotSame($this->db->pdo(), $db2->pdo(), 'test vyžaduje dvě nezávislá DB spojení.');

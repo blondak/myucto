@@ -60,10 +60,20 @@ final class PostingClosingConcurrencyTest extends TestCase
             // PDO přes všechny Connection a obě „strany" souběhu by seděly v téže DB
             // session — zámek by se sám sobě nikdy nepostavil do cesty a test by
             // serializaci jen předstíral.
+            //
+            // ⚠️ Connection MUSÍ vzniknout UVNITŘ zóny. Rozhodnutí „smím sdílet PDO?"
+            // padá v jeho konstruktoru, ne až při prvním dotazu. Dřív to vycházelo
+            // samo, protože buildApp() eagerně instancoval middleware a ty si
+            // Connection vytáhly; od chvíle, kdy se middleware resolvují líně
+            // (deferred), by se konstrukce odložila až za zónu a kontejner B by
+            // dostal sdílené spojení — test by souběh jen předstíral.
             $containerA = Bootstrap::buildApp()->getContainer();
-            $containerB = Connection::withoutSharedTestConnection(
-                static fn () => Bootstrap::buildApp()->getContainer()
-            );
+            $containerB = Connection::withoutSharedTestConnection(static function () {
+                $c = Bootstrap::buildApp()->getContainer();
+                $c->get(Connection::class);
+
+                return $c;
+            });
             $this->dbA       = $containerA->get(Connection::class);
             $this->dbB       = $containerB->get(Connection::class);
             $this->periodsA  = $containerA->get(AccountingPeriodRepository::class);

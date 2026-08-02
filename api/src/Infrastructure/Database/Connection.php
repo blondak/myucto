@@ -49,6 +49,11 @@ final class Connection
     private array $schemaCache = [];
     private readonly bool $sharingAllowed;
 
+    /** Sdílená (mezi-requestová) cache introspekce schématu — viz sharedSchemaCache(). */
+    private ?SchemaCache $sharedSchema = null;
+    private bool $sharedSchemaResolved = false;
+    private bool $schemaFlushRegistered = false;
+
     public function __construct(private readonly Config $config, ?LoggerInterface $logger = null)
     {
         $this->logger = $logger ?? new NullLogger();
@@ -202,6 +207,10 @@ final class Connection
         if (array_key_exists($key, $this->schemaCache)) {
             return $this->schemaCache[$key];
         }
+        $shared = $this->sharedSchemaCache()?->get($key);
+        if ($shared !== null) {
+            return $this->schemaCache[$key] = $shared;
+        }
 
         $pdo = $this->pdo();
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
@@ -217,7 +226,8 @@ final class Connection
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
         );
         $stmt->execute([$table, $column]);
-        return $this->schemaCache[$key] = $stmt->fetchColumn() !== false;
+
+        return $this->rememberSchema($key, $stmt->fetchColumn() !== false);
     }
 
     public function hasTable(string $table): bool
@@ -228,6 +238,10 @@ final class Connection
         $key = "table:{$table}";
         if (array_key_exists($key, $this->schemaCache)) {
             return $this->schemaCache[$key];
+        }
+        $shared = $this->sharedSchemaCache()?->get($key);
+        if ($shared !== null) {
+            return $this->schemaCache[$key] = $shared;
         }
 
         $pdo = $this->pdo();
@@ -240,7 +254,69 @@ final class Connection
             );
         }
         $stmt->execute([$table]);
-        return $this->schemaCache[$key] = $stmt->fetchColumn() !== false;
+
+        return $this->rememberSchema($key, $stmt->fetchColumn() !== false);
+    }
+
+    /**
+     * Zapíše výsledek introspekce do obou vrstev cache (request + sdílená).
+     */
+    private function rememberSchema(string $key, bool $value): bool
+    {
+        $this->schemaCache[$key] = $value;
+        $shared = $this->sharedSchemaCache();
+        if ($shared !== null) {
+            $shared->put($key, $value);
+            // Zápis na disk až na konci requestu — první request po invalidaci
+            // objeví několik klíčů za sebou a nemá smysl kvůli každému přepisovat soubor.
+            if (!$this->schemaFlushRegistered) {
+                $this->schemaFlushRegistered = true;
+                register_shutdown_function(static fn () => $shared->flush());
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * Sdílená cache introspekce, nebo null když je persistence vypnutá.
+     *
+     * Vypnutá je záměrně:
+     *   - pod PHPUnitem — integrační testy vytvářejí a ruší tabulky za běhu, takže
+     *     cache přeživší mezi běhy by je rozbila zákeřným způsobem (schéma „existuje",
+     *     ale reálně už ne),
+     *   - přes `MYINVOICE_SCHEMA_CACHE=0` — únikový východ pro ladění,
+     *   - když není kam psát (chybí data dir) nebo neznáme jméno databáze.
+     */
+    private function sharedSchemaCache(): ?SchemaCache
+    {
+        if ($this->sharedSchemaResolved) {
+            return $this->sharedSchema;
+        }
+        $this->sharedSchemaResolved = true;
+
+        if (defined('PHPUNIT_COMPOSER_INSTALL')) {
+            return $this->sharedSchema = null;
+        }
+        $flag = getenv('MYINVOICE_SCHEMA_CACHE');
+        if ($flag !== false && trim((string) $flag) === '0') {
+            return $this->sharedSchema = null;
+        }
+
+        $database = (string) $this->config->get('db.name', '');
+        $path = SchemaCache::pathFor(
+            $this->config->dataDir() ?? \MyInvoice\Bootstrap::rootDir(),
+            $database,
+        );
+        if ($path === null) {
+            return $this->sharedSchema = null;
+        }
+
+        return $this->sharedSchema = new SchemaCache(
+            $path,
+            $database,
+            (int) $this->config->get('cache.schema_ttl', 300),
+        );
     }
 
     public function ping(): bool
