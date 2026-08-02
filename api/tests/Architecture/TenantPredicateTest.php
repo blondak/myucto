@@ -383,6 +383,12 @@ final class TenantPredicateTest extends TestCase
         'LedgerInvariantService.php::ledgerIsEmpty' => 'invariant nad deníkem celé instance (viz docblock služby)',
         'LedgerInvariantService.php::i25AccumulatedNotAboveInputPrice' => 'invariant nad veškerým majetkem instance',
         'ActivityLogHashChain.php::verify' => 'hash chain auditního logu je jeden pro celou instanci',
+        // Vrací POUZE bool „existuje někde práce?", žádná data nepřecházejí mezi
+        // tenanty. Protějšek AiWorker::run(), který stejně tak jede přes všechny
+        // dodavatele s opt-inem — cron nemá uživatelský kontext, na který by se
+        // dal predikát navěsit. Zúžit ho na jednoho dodavatele by bránu rozbilo:
+        // přestala by pouštět práci ostatním.
+        'CronPreflight.php::hasAiWork' => 'instance-wide brána cronu, vrací jen bool',
 
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',

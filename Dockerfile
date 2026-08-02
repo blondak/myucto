@@ -77,7 +77,21 @@ RUN { \
         echo 'opcache.memory_consumption = 128'; \
         echo 'opcache.max_accelerated_files = 20000'; \
         echo 'opcache.validate_timestamps = 0'; \
+        echo 'opcache.enable_cli = 1'; \
+        echo 'opcache.file_cache = /var/cache/opcache'; \
     } > /usr/local/etc/php/conf.d/myucto.ini
+
+# Opcache file cache — sdílený zkompilovaný bytecode mezi CLI procesy. Bez něj
+# každý běh api/bin/cron-*.php znovu parsuje a kompiluje ~200 souborů (CLI má
+# vlastní SHM, která zaniká s procesem), a cron jich při vyšší frekvenci pouští
+# desítky za hodinu. `validate_timestamps=0` výše dělá cache bezpečnou: kód se
+# v image nemění, takže se nikdy nemusí revalidovat.
+#
+# Vlastníka NASTAVUJEME AŽ NA KONCI buildu (viz níže) — build-time `php tools/*`
+# běží jako root a naplnil by cache root-owned soubory, do kterých by www-data
+# za běhu nemohl zapisovat. Zároveň je to vítaný side effect: cache je v image
+# předehřátá o soubory, které si build sáhl.
+RUN mkdir -p /var/cache/opcache
 
 # Apache: doc root → /var/www/html, allow .htaccess, dynamický port přes ${PORT}
 # (Apache 2.4 expanduje ${PORT} z env při parsingu konfigurace — funguje
@@ -110,6 +124,10 @@ RUN cp docker/cron-run.sh /usr/local/bin/myucto-cron-run \
  && chmod 0755 /usr/local/bin/myucto-cron-run \
  && php tools/generateDockerCrontab.php > /etc/cron.d/myucto \
  && chmod 0644 /etc/cron.d/myucto
+
+# Poslední build-time `php` proběhl výše → teď smí opcache file cache přebrat
+# www-data (viz komentář u opcache.file_cache).
+RUN chown -R www-data:www-data /var/cache/opcache
 
 # Stub cfg.php — image je samostatný a `/var/www/html` může běžet jako read-only.
 # Veškerou konfiguraci lze předat přes ENV (viz api/src/Infrastructure/Config/Config.php).

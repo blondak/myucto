@@ -251,6 +251,8 @@ export const adminApi = {
     api.get<CronJobsResponse>('/admin/cron-jobs', { signal }).then(r => r.data),
   runCronJob: (script: string) =>
     api.post<{ script: string; started: boolean }>(`/admin/cron-jobs/${encodeURIComponent(script)}/run`).then(r => r.data),
+  setCronScheduleMode: (mode: CronScheduleMode) =>
+    api.put<SetCronScheduleModeResponse>('/admin/cron-jobs/schedule-mode', { mode }).then(r => r.data),
 
   // Ukázková (sample) data — stav + odebrání (issue #162)
   sampleDataStatus: () =>
@@ -293,7 +295,41 @@ export interface CronJob {
   last_ok_started_at: string | null
   last_ok_finished_at: string | null
   age_sec_since_ok: number | null
+  /** Běhy, které něco udělaly nebo selhaly — prázdné ticky se do historie nezapisují. */
   counts_24h: { ok: number; error: number; total: number }
+  /** Poslední tick jakéhokoli výsledku (i prázdný) — důkaz, že cron žije. */
+  last_tick_at?: string | null
+  /** Poslední tick, který reálně něco udělal. */
+  last_work_at?: string | null
+  /** Kolikrát se úloha probudila a neměla co dělat. */
+  noop_ticks?: number
+  /** Je to sám plánovač (režim dispatcher)? */
+  is_dispatcher?: boolean
+  /** Má ji admin registrovat do crontabu sám? V režimu dispatcher ne. */
+  scheduled_directly?: boolean
+}
+
+/**
+ * individual — 20 samostatných položek v crontabu / Task Scheduleru (default)
+ * dispatcher — jediná položka `cron-dispatch` každou minutu, která spouští zbytek
+ */
+export type CronScheduleMode = 'individual' | 'dispatcher'
+
+export interface CronScheduleContext {
+  mode: CronScheduleMode
+  modes: CronScheduleMode[]
+  dispatcher_script: string
+  individual_count: number
+  /** Přepnutí režimu samo nic nepřeplánuje — crontab se musí vygenerovat znovu. */
+  requires_replan: boolean
+}
+
+export interface SetCronScheduleModeResponse {
+  mode: CronScheduleMode
+  previous_mode: CronScheduleMode
+  changed: boolean
+  requires_replan: boolean
+  next_step: string
 }
 
 /** Skutečné cesty běžícího nasazení — návod na plánování úloh se z nich sestaví. */
@@ -312,6 +348,7 @@ export interface CronJobsResponse {
   jobs: CronJob[]
   server_time: string
   install?: CronInstallContext
+  schedule?: CronScheduleContext
 }
 
 export interface ApprovalListMeta {

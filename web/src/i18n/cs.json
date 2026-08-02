@@ -7881,7 +7881,16 @@
     "run_now": "Spustit nyní",
     "run_now_confirm": "Opravdu spustit skript {script} nyní? Poběží na pozadí a výsledek se objeví v tabulce po dokončení.",
     "run_now_started": "Skript {script} byl spuštěn na pozadí.",
-    "run_now_failed": "Spuštění skriptu {script} se nezdařilo."
+    "run_now_failed": "Spuštění skriptu {script} se nezdařilo.",
+    "mode_title": "Režim plánování",
+    "mode_subtitle": "Určuje, kdo úlohy spouští. Na tom, co jednotlivé úlohy dělají, se nic nemění — mění se jen počet položek, které musí být naplánované.",
+    "mode_individual": "Jednotlivé úlohy",
+    "mode_dispatcher": "Jeden dispatcher",
+    "mode_individual_desc": "Každá úloha je samostatná položka v crontabu / Task Scheduleru ({count} položek). Průhledné a laditelné po jedné úloze — výpadek jedné se ostatních nedotkne.",
+    "mode_dispatcher_desc": "Naplánovaná je jediná položka ({script}, každou minutu), která si sama spočítá, co je na řadě, přeskočí úlohy bez práce a zbytek spustí jako samostatné procesy. Místo {count} položek stačí jedna — cenou je, že její výpadek zastaví všechny úlohy.",
+    "mode_confirm": "Přepnout režim plánování na „{mode}“? Samotné přepnutí plán nezmění — crontab / Task Scheduler bude potřeba vygenerovat znovu (v Dockeru restartem kontejneru).",
+    "mode_saved": "Režim plánování přepnut na „{mode}“.",
+    "mode_failed": "Přepnutí režimu plánování se nezdařilo."
   },
   "export": {
     "title": "Export vydaných faktur",

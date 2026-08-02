@@ -20,7 +20,7 @@ $config  = Config::load($rootDir);
 $conn    = new Connection($config);
 $run     = CronRun::start($conn->pdo(), 'cron-bank-email-notices');
 
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $scanner = $container->get(BankEmailNoticeScanner::class);
 
 $scanAll = (bool) $config->get('app.scan_all_suppliers', false);

@@ -26,11 +26,16 @@ final class CronCatalog
      *   weekdays_only:bool,
      *   critical:bool,
      *   requires_config?:string,
-     *   requires_ai_opt_in?:bool
+     *   requires_ai_opt_in?:bool,
+     *   dispatcher_only?:bool
      * }>
      *
      * `requires_config` (volitelné) = cfg klíč adresáře, bez kterého úloha nemá
      * co dělat (scan vypnutý). UI ji pak skryje, dokud není nastaven (CronJobsAction).
+     *
+     * `dispatcher_only` (volitelné) = položka existuje jen v režimu
+     * {@see CronScheduleMode::DISPATCHER}. V režimu INDIVIDUAL se neplánuje
+     * (jinak by běžela souběžně s jednotlivými úlohami a spouštěla je dvakrát).
      */
     public static function all(): array
     {
@@ -225,7 +230,40 @@ final class CronCatalog
                 'weekdays_only' => false,
                 'critical' => false,
             ],
+            [
+                // Plánovač v režimu CronScheduleMode::DISPATCHER — jediná položka,
+                // která si každou minutu spočítá, které úlohy z tohohle katalogu
+                // jsou na řadě, a spustí jen je. V režimu INDIVIDUAL se NEplánuje
+                // (viz `dispatcher_only`), jinak by úlohy běžely dvakrát.
+                //
+                // `critical` = true: když přestane běžet tenhle, přestane běžet
+                // úplně všechno, a to je jediná úloha v katalogu, o které to platí.
+                'script' => self::DISPATCHER_SCRIPT,
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => true,
+                'dispatcher_only' => true,
+            ],
         ];
+    }
+
+    /** Skript plánovače — vyčleněný, ať se název nemusí opisovat. */
+    public const DISPATCHER_SCRIPT = 'cron-dispatch';
+
+    /**
+     * Úlohy, které dispatcher spouští (tj. celý katalog kromě sebe sama).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function dispatchable(): array
+    {
+        return array_values(array_filter(
+            self::all(),
+            static fn (array $job): bool => ($job['dispatcher_only'] ?? false) !== true,
+        ));
     }
 
     /**

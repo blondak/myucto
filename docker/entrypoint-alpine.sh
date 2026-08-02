@@ -47,6 +47,22 @@ if [ "${MYINVOICE_ENABLE_CRON:-1}" != "0" ]; then
   export -p > /etc/myucto-cron.env
   chmod 0640 /etc/myucto-cron.env
   chown root:www-data /etc/myucto-cron.env 2>/dev/null || true
+
+  # Přegeneruj crontab podle skutečné konfigurace instalace (parity s Debian
+  # entrypointem — viz komentář tam). Temp + mv, ať cronie nikdy nečte půlku
+  # souboru; při selhání zůstává build-time verze z image.
+  if php /var/www/html/tools/generateDockerCrontab.php --runtime > /tmp/myucto-crontab.new 2>/tmp/myucto-crontab.err \
+     && [ -s /tmp/myucto-crontab.new ]; then
+    mv /tmp/myucto-crontab.new /etc/cron.d/myucto
+    chown root:root /etc/cron.d/myucto
+    chmod 0644 /etc/cron.d/myucto
+    echo "[entrypoint] crontab přegenerován podle konfigurace ($(grep -c myucto-cron-run /etc/cron.d/myucto) úloh)"
+  else
+    echo "[entrypoint] VAROVÁNÍ: crontab se nepodařilo přegenerovat, používám verzi z image" >&2
+    { [ -s /tmp/myucto-crontab.err ] && cat /tmp/myucto-crontab.err >&2; } || true
+  fi
+  rm -f /tmp/myucto-crontab.new /tmp/myucto-crontab.err
+
   # Selhání cronu nesmí shodit kontejner (web poběží dál). cronie crond daemonizuje sám.
   if crond; then
     echo "[entrypoint] vestavěný cron spuštěn (logy v \${MYINVOICE_DATA_DIR}/log/cron)"

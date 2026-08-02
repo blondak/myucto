@@ -47,12 +47,7 @@ foreach (array_slice($argv, 1) as $arg) {
 
 $cooldown = max(0, $cooldown);
 
-$app = Bootstrap::buildApp();
-$container = $app->getContainer();
-if ($container === null) {
-    fwrite(STDERR, "Container not available.\n");
-    exit(1);
-}
+$container = Bootstrap::buildContainer();
 
 /** @var \MyInvoice\Infrastructure\Database\Connection $conn */
 $conn = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);

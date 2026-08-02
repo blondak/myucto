@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { adminApi, type CronJob, type CronJobHealth, type CronInstallContext } from '@/api/admin'
+import { adminApi, type CronJob, type CronJobHealth, type CronInstallContext, type CronScheduleContext, type CronScheduleMode } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
@@ -11,10 +11,20 @@ const toast = useToast()
 
 const jobs = ref<CronJob[]>([])
 const install = ref<CronInstallContext | null>(null)
+const schedule = ref<CronScheduleContext | null>(null)
 const serverTime = ref<string>('')
 const loading = ref(false)
 const expanded = ref<Record<string, boolean>>({})
 const running = ref<Record<string, boolean>>({})
+
+// Poslední pokyn po přepnutí režimu — drží se, dokud si ho admin nezavře.
+// Přepnutí samo nic nepřeplánuje, takže tenhle text je jediné, co ho dovede
+// k tomu, aby plán skutečně změnil.
+const modeNotice = ref<string | null>(null)
+const switchingMode = ref(false)
+
+const scheduleMode = computed<CronScheduleMode>(() => schedule.value?.mode ?? 'individual')
+const isDispatcherMode = computed(() => scheduleMode.value === 'dispatcher')
 
 async function load(signal?: AbortSignal) {
   loading.value = true
@@ -22,9 +32,27 @@ async function load(signal?: AbortSignal) {
     const r = await adminApi.cronJobs(signal)
     jobs.value = r.jobs
     install.value = r.install ?? null
+    schedule.value = r.schedule ?? null
     serverTime.value = r.server_time
   } finally {
     loading.value = false
+  }
+}
+
+async function switchMode(mode: CronScheduleMode) {
+  if (switchingMode.value || mode === scheduleMode.value) return
+  if (!window.confirm(t('cron_jobs.mode_confirm', { mode: t(`cron_jobs.mode_${mode}`) }))) return
+
+  switchingMode.value = true
+  try {
+    const r = await adminApi.setCronScheduleMode(mode)
+    modeNotice.value = r.next_step
+    toast.success(t('cron_jobs.mode_saved', { mode: t(`cron_jobs.mode_${r.mode}`) }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('cron_jobs.mode_failed'))
+  } finally {
+    switchingMode.value = false
   }
 }
 
@@ -180,20 +208,28 @@ const setupCommands = computed<string>(() => {
   if (!install.value || jobs.value.length === 0) return ''
   const dir = setupCmdDir.value
 
+  // V režimu dispatcheru se registruje JEN plánovač. Vypisovat i jednotlivé
+  // úlohy by přímo navádělo k tomu je zaregistrovat taky — a pak by běžely
+  // dvakrát (duplicitní faktury z pravidelné fakturace, dvojí zaúčtování mezd).
+  const toSchedule = jobs.value.filter(j => j.scheduled_directly !== false)
+
   if (platform.value === 'windows') {
     // Jednořádkově — `^` (pokračovací znak cmd.exe) by se v PowerShellu rozbil,
     // a admin si příkaz stejně kopíruje po jednom.
-    return jobs.value.map(j =>
+    return toSchedule.map(j =>
       `schtasks /create /tn "${taskName(j.script)}" /tr "${dir}\\${j.script}.cmd" ${j.windows_schtasks} /ru SYSTEM`
     ).join('\n')
   }
 
   if (platform.value === 'docker') {
     return [
-      '# Cron je součástí image a generuje se z katalogu při buildu —',
-      '# ručně se nic neplánuje, jen se ověřuje:',
+      '# Cron je součástí image; plán se generuje z katalogu při startu kontejneru',
+      '# podle nastaveného režimu — ručně se nic neplánuje, jen se ověřuje:',
       'docker compose exec app cat /etc/cron.d/myucto',
       `docker compose exec app ls -l ${setupLogDir.value}`,
+      '',
+      '# Po přepnutí režimu plánování stačí restart (plán se vygeneruje znovu):',
+      'docker compose restart app',
       '',
       '# Po změně frekvence v CronCatalog.php se image musí přebuildit:',
       'docker compose build app && docker compose up -d app',
@@ -202,7 +238,7 @@ const setupCommands = computed<string>(() => {
 
   return [
     '# crontab -e  (uživatel s právem zápisu do log/ a storage/)',
-    ...jobs.value.map(j => `${j.linux_cron}\t${dir}/${j.script}.sh`),
+    ...toSchedule.map(j => `${j.linux_cron}\t${dir}/${j.script}.sh`),
   ].join('\n')
 })
 
@@ -230,6 +266,49 @@ async function copySetup() {
           </template>
         </i18n-t>
       </p>
+    </div>
+
+    <!-- Režim plánování -->
+    <div v-if="schedule" class="mb-4 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div class="min-w-0">
+          <h2 class="text-sm font-semibold text-neutral-900">{{ t('cron_jobs.mode_title') }}</h2>
+          <p class="text-xs text-neutral-500 mt-0.5 max-w-2xl">{{ t('cron_jobs.mode_subtitle') }}</p>
+        </div>
+        <div class="flex gap-2 shrink-0" role="radiogroup" :aria-label="t('cron_jobs.mode_title')">
+          <button
+            v-for="m in schedule.modes"
+            :key="m"
+            type="button"
+            role="radio"
+            :aria-checked="scheduleMode === m"
+            :disabled="switchingMode"
+            class="px-3 py-1.5 text-xs font-medium rounded border transition-colors disabled:opacity-50"
+            :class="scheduleMode === m
+              ? 'bg-primary-600 border-primary-600 text-white'
+              : 'bg-surface border-neutral-300 text-neutral-700 hover:bg-neutral-50'"
+            @click="switchMode(m)"
+          >
+            {{ t(`cron_jobs.mode_${m}`) }}
+          </button>
+        </div>
+      </div>
+
+      <p class="text-xs text-neutral-600 mt-3">
+        {{ isDispatcherMode
+          ? t('cron_jobs.mode_dispatcher_desc', { script: schedule.dispatcher_script, count: schedule.individual_count })
+          : t('cron_jobs.mode_individual_desc', { count: schedule.individual_count }) }}
+      </p>
+
+      <!-- Zápis do DB sám nic nepřeplánuje — bez tohohle upozornění by admin
+           přepnul režim a divil se, že se nic nezměnilo. -->
+      <div v-if="modeNotice" class="mt-3 flex items-start gap-2 rounded border border-warning-300 bg-warning-50 px-3 py-2">
+        <span class="text-warning-600 shrink-0 text-sm leading-5">⚠</span>
+        <p class="text-xs text-warning-800 flex-1">{{ modeNotice }}</p>
+        <button type="button" class="text-xs text-warning-700 hover:underline shrink-0" @click="modeNotice = null">
+          {{ t('common.close') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="loading && !jobs.length" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>

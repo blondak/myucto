@@ -39,6 +39,7 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `license-status.{cmd,sh}` | Výpis aktuálního stavu licence (E4) — stav, tarif, počty, platnost, maskovaný klíč |
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
+| `cron-dispatch.{cmd,sh}` | **Plánovač** pro režim „jeden dispatcher" (Systém → Plánované úlohy). Jediná položka běžící každou minutu, která spustí právě ty úlohy, které jsou na řadě a mají co dělat. V default režimu „jednotlivé úlohy" se neplánuje (`--dry-run`, `--at="RRRR-MM-DD HH:MM"`) |
 
 Všechny tři backup ZIPy (DB, PDF, Dokumenty) lze volitelně šifrovat heslem
 `cron.backup.password` v `cfg.php` (AES-256). Rozbalení pak vyžaduje 7-Zip /
@@ -88,6 +89,7 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-payroll-post` | 1× měsíčně, 1. den | 04:00 (`0 4 1 * *`) |
 | `cron-license-renew` | 1× denně | 05:00 |
 | `cron-version-check` | 1× denně | 06:00 |
+| `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
 
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
 v admin/activity-log (každý cron sám zapíše záznam `cron.<nazev>`).
@@ -115,6 +117,10 @@ schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto PayrollPost"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-post.cmd"             /sc monthly /d 1 /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
+
+REM Režim "jeden dispatcher" — MÍSTO všech úloh výše zaregistruj jen tuhle jednu.
+REM Nikdy obojí najednou: úlohy by běžely dvakrát.
+REM schtasks /create /tn "MyUcto Dispatch" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-dispatch.cmd" /sc minute /mo 1 /ru SYSTEM
 ```
 
 > 💡 **Update watcher** (samostatný proces, ne plánovaná úloha) — kontroluje
@@ -167,6 +173,26 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 ```
 
 `*.sh` skripty musí být spustitelné: `chmod +x cmd/*.sh`.
+
+#### Alternativa: režim „jeden dispatcher"
+
+Přepneš-li v **Systém → Plánované úlohy** režim plánování na „jeden dispatcher",
+nahradí se **všechny řádky výše** jediným:
+
+```cron
+# m  h  dom mon dow  command
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-dispatch.sh
+```
+
+Dispatcher si každou minutu sám spočítá, které úlohy jsou na řadě, přeskočí ty,
+které u téhle instalace nemají co dělat, a zbytek spustí jako samostatné procesy
+— izolace mezi úlohami tím zůstává stejná jako u jednotlivých položek.
+
+> ⚠️ **Nikdy obojí najednou.** Běží-li dispatcher vedle jednotlivých položek,
+> spustí se každá úloha dvakrát. U `cron-generate-recurring-invoices` nebo
+> `cron-payroll-post` to znamená doklady navíc. Dispatcher se proti tomu brání
+> dvěma pojistkami (kontroluje nastavený režim a nárokuje si minutu v
+> `cron_dispatch_claims`), ale spoléhat se na ně jako na jedinou obranu nemá smysl.
 
 > 💡 **Update watcher** (samostatný proces, ne crontab job) — sleduje flag
 > soubor `storage/upgrade-requested.json` a aplikuje upgrade spuštěný

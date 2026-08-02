@@ -7881,7 +7881,16 @@
     "run_now": "Run now",
     "run_now_confirm": "Really run script {script} now? It will run in the background and the result will appear in the table when it finishes.",
     "run_now_started": "Script {script} has been started in the background.",
-    "run_now_failed": "Failed to start script {script}."
+    "run_now_failed": "Failed to start script {script}.",
+    "mode_title": "Scheduling mode",
+    "mode_subtitle": "Controls who launches the jobs. What the individual jobs do does not change — only how many entries have to be scheduled.",
+    "mode_individual": "Individual jobs",
+    "mode_dispatcher": "Single dispatcher",
+    "mode_individual_desc": "Every job is its own crontab / Task Scheduler entry ({count} entries). Transparent and debuggable one job at a time — a failure of one does not affect the others.",
+    "mode_dispatcher_desc": "A single entry is scheduled ({script}, every minute) that works out what is due, skips jobs with nothing to do and launches the rest as separate processes. One entry instead of {count} — the trade-off is that its failure stops every job.",
+    "mode_confirm": "Switch scheduling mode to “{mode}”? Switching alone does not change the schedule — the crontab / Task Scheduler has to be regenerated (restart the container on Docker).",
+    "mode_saved": "Scheduling mode switched to “{mode}”.",
+    "mode_failed": "Failed to switch scheduling mode."
   },
   "export": {
     "title": "Issued invoices export",

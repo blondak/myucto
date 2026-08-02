@@ -31,7 +31,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Update\VersionService;
 
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $conn = $container->get(Connection::class);
 
 $run = CronRun::start($conn->pdo(), 'cron-version-check');

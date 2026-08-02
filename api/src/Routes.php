@@ -873,6 +873,8 @@ final class Routes
         $app->get    ('/api/admin/smtp-log-analysis/status', [\MyInvoice\Action\Admin\InvoiceSmtpLogAction::class, 'status']);
         $app->get    ('/api/admin/invoices/{id:[0-9]+}/smtp-log', [\MyInvoice\Action\Admin\InvoiceSmtpLogAction::class, 'forInvoice']);
         $app->get    ('/api/admin/cron-jobs',       CronJobsAction::class);
+        // PUT, ne POST — nekoliduje s /{script}/run níže a je idempotentní.
+        $app->put    ('/api/admin/cron-jobs/schedule-mode', \MyInvoice\Action\Admin\SetCronScheduleModeAction::class);
         $app->post   ('/api/admin/cron-jobs/{script:cron-[a-z0-9-]+}/run', RunCronJobAction::class);
         $app->get    ('/api/admin/invoices-zip',    InvoicesZipAction::class);  // legacy — drží se kvůli historickým bookmark URL
         $app->get    ('/api/admin/export',          ExportAction::class);       // generic export (?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM nebo period=quarterly)

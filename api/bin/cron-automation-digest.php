@@ -18,7 +18,7 @@ foreach (array_slice($argv, 1) as $arg) {
     fwrite(STDERR, "Unknown arg: {$arg}\n"); exit(1);
 }
 
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 if ($container === null) { fwrite(STDERR, "Container not available.\n"); exit(1); }
 $pdo = $container->get(Connection::class)->pdo();
 $run = CronRun::start($pdo, 'cron-automation-digest');

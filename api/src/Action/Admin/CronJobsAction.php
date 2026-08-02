@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Cron\CronCatalog;
+use MyInvoice\Service\Cron\CronJobGate;
+use MyInvoice\Service\Cron\CronScheduleMode;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -36,31 +38,25 @@ final class CronJobsAction
 
         $pdo = $this->db->pdo();
         $catalog = CronCatalog::all();
+        $gate = new CronJobGate($this->config, $pdo);
+        $mode = CronScheduleMode::current($pdo);
 
-        // Načti pro každý katalogový skript poslední běh + poslední úspěšný běh.
-        // Jeden subquery na skript je o.k. (max 8 položek, indexované).
-        $sql = "
-            SELECT cr.script,
-                   cr.id           AS last_id,
-                   cr.started_at   AS last_started_at,
-                   cr.finished_at  AS last_finished_at,
-                   cr.status       AS last_status,
-                   cr.duration_ms  AS last_duration_ms,
-                   cr.exit_code    AS last_exit_code,
-                   cr.host         AS last_host,
-                   cr.message      AS last_message,
-                   cr.report       AS last_report,
-                   ok.started_at   AS last_ok_started_at,
-                   ok.finished_at  AS last_ok_finished_at
-              FROM (SELECT script, MAX(id) AS max_id FROM cron_runs WHERE script = ? GROUP BY script) latest
-              JOIN cron_runs cr ON cr.id = latest.max_id
-         LEFT JOIN (SELECT script, MAX(id) AS ok_id FROM cron_runs WHERE script = ? AND status = 'ok' GROUP BY script) lok
-                ON lok.script = cr.script
-         LEFT JOIN cron_runs ok ON ok.id = lok.ok_id
-        ";
-        $stmt = $pdo->prepare($sql);
+        // Poslední stav se od migrace 1183 čte z cron_heartbeat — jeden řádek na
+        // skript, přepisovaný při každém ticku. cron_runs už obsahuje jen běhy,
+        // které něco udělaly, takže by z něj „kdy naposledy cron žil" nešlo zjistit
+        // (úloha může korektně měsíc nemít co dělat a pořád být zdravá).
+        $stmt = $pdo->prepare(
+            "SELECT last_tick_at, last_started_at, last_finished_at, last_status,
+                    last_duration_ms, last_exit_code, last_host, last_message,
+                    last_report, last_ok_at, last_work_at, noop_ticks
+               FROM cron_heartbeat
+              WHERE script = ?"
+        );
 
-        // Také spočítej za posledních 24h pro každý skript
+        // Počty za 24h zůstávají nad cron_runs, ale mají teď ostřejší význam:
+        // „kolikrát úloha za den reálně něco udělala nebo selhala", ne „kolikrát
+        // se spustila". Prázdné ticky se do historie nezapisují — jejich souhrn
+        // nese `noop_ticks` z heartbeatu.
         $countStmt = $pdo->prepare(
             "SELECT
                 SUM(status = 'ok')    AS ok_24h,
@@ -77,17 +73,19 @@ final class CronJobsAction
             // Podmíněné úlohy (bank scan, scan inbox) skryj, dokud není nastaven
             // jejich adresář v cfg — bez něj scan jen tiše skipuje, takže nemá smysl
             // je v přehledu hlásit jako "nikdy neběžela".
-            if (!$this->jobConfigured($job)) {
+            if (!$gate->isVisibleInUi($job, $mode)) {
                 continue;
             }
             $script = (string) $job['script'];
-            $stmt->execute([$script, $script]);
+            $stmt->execute([$script]);
             $last = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
 
             $countStmt->execute([$script]);
             $counts = $countStmt->fetch(\PDO::FETCH_ASSOC) ?: ['ok_24h' => 0, 'err_24h' => 0, 'total_24h' => 0];
 
-            $lastOkAt = $last !== false && $last !== null ? ($last['last_ok_started_at'] ?? null) : null;
+            // Prázdný tick ('noop') je pro účely zdraví úspěch — cron žije a
+            // korektně zjistil, že nemá co dělat. Proto se do last_ok_at počítá.
+            $lastOkAt = $last['last_ok_at'] ?? null;
             $maxAgeSec = (int) $job['max_age_hours'] * 3600;
             $health = 'never_ran';
             $ageSec = null;
@@ -122,13 +120,24 @@ final class CronJobsAction
                 'last_message'        => $last['last_message']       ?? null,
                 'last_report'         => $report,
                 'last_ok_started_at'  => $lastOkAt,
-                'last_ok_finished_at' => $last['last_ok_finished_at'] ?? null,
+                'last_ok_finished_at' => $lastOkAt,
                 'age_sec_since_ok'    => $ageSec,
                 'counts_24h'          => [
                     'ok'    => (int) ($counts['ok_24h']  ?? 0),
                     'error' => (int) ($counts['err_24h'] ?? 0),
                     'total' => (int) ($counts['total_24h'] ?? 0),
                 ],
+                // Nové od migrace 1183 — odlišuje „cron žije" od „cron pracuje".
+                'last_tick_at'        => $last['last_tick_at']  ?? null,
+                'last_work_at'        => $last['last_work_at']  ?? null,
+                'noop_ticks'          => $last !== null ? (int) ($last['noop_ticks'] ?? 0) : 0,
+                // Je to sám plánovač?
+                'is_dispatcher'       => ($job['dispatcher_only'] ?? false) === true,
+                // Má ji admin registrovat do crontabu/Task Scheduleru sám? V režimu
+                // dispatcheru NE — spouští ji dispatcher, a návod s `linux_cron`
+                // by sváděl k tomu ji zaregistrovat znovu (a spustit dvakrát).
+                'scheduled_directly'  => $mode === CronScheduleMode::INDIVIDUAL
+                    || ($job['dispatcher_only'] ?? false) === true,
             ];
         }
 
@@ -137,7 +146,31 @@ final class CronJobsAction
             'jobs'        => $rows,
             'server_time' => date('c'),
             'install'     => $this->installContext(),
+            'schedule'    => $this->scheduleContext($pdo),
         ]);
+    }
+
+    /**
+     * Podklady pro přepínač režimu plánování.
+     *
+     * `dispatcher_script` a `individual_count` jdou ven proto, aby si UI mohlo
+     * poskládat konkrétní návod („zaregistruj tuhle jednu úlohu místo těch 18")
+     * bez toho, aby duplikovalo katalog.
+     *
+     * @return array{mode:string,modes:list<string>,dispatcher_script:string,individual_count:int,requires_replan:bool}
+     */
+    private function scheduleContext(\PDO $pdo): array
+    {
+        return [
+            'mode'              => CronScheduleMode::current($pdo),
+            'modes'             => CronScheduleMode::all(),
+            'dispatcher_script' => CronCatalog::DISPATCHER_SCRIPT,
+            'individual_count'  => count(CronCatalog::dispatchable()),
+            // Zápis do DB sám nic nepřeplánuje — crontab / Task Scheduler se musí
+            // přegenerovat (v Dockeru restartem kontejneru). UI na to musí upozornit,
+            // jinak admin přepne režim a diví se, že se nic nestalo.
+            'requires_replan'   => true,
+        ];
     }
 
     /**
@@ -197,26 +230,4 @@ final class CronJobsAction
         return $binary;
     }
 
-    /**
-     * Úloha s `requires_config` je "konfigurovaná" jen když je cfg klíč nastaven
-     * na existující adresář (stejná podmínka jako cron skript, který scan jinak
-     * tiše přeskočí). Úlohy bez `requires_config` jsou vždy konfigurované.
-     *
-     * @param array<string,mixed> $job
-     */
-    private function jobConfigured(array $job): bool
-    {
-        if (($job['requires_ai_opt_in'] ?? false) === true) {
-            $enabled = $this->db->pdo()->query('SELECT 1 FROM supplier WHERE ai_assist_enabled=1 LIMIT 1');
-            if ($enabled === false || $enabled->fetchColumn() === false) {
-                return false;
-            }
-        }
-        $key = $job['requires_config'] ?? null;
-        if ($key === null) {
-            return true;
-        }
-        $path = trim((string) $this->config->get((string) $key, ''));
-        return $path !== '' && is_dir($path);
-    }
 }

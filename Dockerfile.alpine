@@ -70,7 +70,14 @@ RUN { \
         echo 'opcache.memory_consumption = 128'; \
         echo 'opcache.max_accelerated_files = 20000'; \
         echo 'opcache.validate_timestamps = 0'; \
+        echo 'opcache.enable_cli = 1'; \
+        echo 'opcache.file_cache = /var/cache/opcache'; \
     } > /usr/local/etc/php/conf.d/myucto.ini
+
+# Viz Dockerfile (Debian) — file cache drží zkompilovaný bytecode mezi CLI
+# procesy, takže cron nekompiluje ~200 souborů při každém běhu. Vlastníka
+# přebírá www-data až po posledním build-time `php` (níže).
+RUN mkdir -p /var/cache/opcache
 
 # nginx + php-fpm pool config (CRLF-safe — repo je na Windows).
 COPY docker/nginx.conf /etc/nginx/nginx.conf
@@ -96,6 +103,9 @@ RUN cp docker/cron-run.sh /usr/local/bin/myucto-cron-run \
  && chmod 0755 /usr/local/bin/myucto-cron-run \
  && php tools/generateDockerCrontab.php > /etc/cron.d/myucto \
  && chmod 0644 /etc/cron.d/myucto
+
+# Poslední build-time `php` proběhl výše → opcache file cache přebírá www-data.
+RUN chown -R www-data:www-data /var/cache/opcache
 
 # Stub cfg.php — image je samostatný, konfigurace přes ENV nebo namountovaný cfg.php.
 RUN echo '<?php return [];' > cfg.php && chown www-data:www-data cfg.php

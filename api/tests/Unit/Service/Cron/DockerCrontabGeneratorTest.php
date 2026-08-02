@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Cron;
 
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Cron\CronCatalog;
+use MyInvoice\Service\Cron\CronJobGate;
+use MyInvoice\Service\Cron\CronScheduleMode;
 use MyInvoice\Service\Cron\DockerCrontabGenerator;
 use PHPUnit\Framework\TestCase;
 
@@ -17,8 +20,10 @@ final class DockerCrontabGeneratorTest extends TestCase
 {
     public function testCrontabCoversEveryCatalogJob(): void
     {
+        // `dispatchable()` = katalog bez položky dispatcheru. Ta se v default
+        // režimu neplánuje schválně — spouštěla by tytéž úlohy podruhé.
         $crontab = DockerCrontabGenerator::generate();
-        foreach (CronCatalog::all() as $job) {
+        foreach (CronCatalog::dispatchable() as $job) {
             $expected = sprintf(
                 '%s www-data %s api/bin/%s.php',
                 $job['linux_cron'],
@@ -44,7 +49,108 @@ final class DockerCrontabGeneratorTest extends TestCase
             explode("\n", $crontab),
             static fn (string $l): bool => str_contains($l, DockerCrontabGenerator::WRAPPER),
         );
-        self::assertCount(count(CronCatalog::all()), $jobLines);
+        self::assertCount(count(CronCatalog::dispatchable()), $jobLines);
+    }
+
+    /**
+     * Nejdůležitější invariant celé dvojrežimovosti: v default režimu se
+     * dispatcher NEPLÁNUJE. Kdyby se tam dostal, běžel by vedle jednotlivých
+     * položek a spouštěl je podruhé — u generování pravidelných faktur nebo
+     * zaúčtování mezd to znamená duplicitní doklady.
+     */
+    public function testIndividualModeNeverSchedulesTheDispatcher(): void
+    {
+        foreach ([DockerCrontabGenerator::generate(), DockerCrontabGenerator::generate(new CronJobGate(new Config([]), null))] as $crontab) {
+            self::assertStringNotContainsString('api/bin/' . CronCatalog::DISPATCHER_SCRIPT . '.php', $crontab);
+        }
+    }
+
+    /**
+     * A zrcadlově: v režimu dispatcheru se neplánuje NIC jiného než on.
+     */
+    public function testDispatcherModeSchedulesOnlyTheDispatcher(): void
+    {
+        $crontab = DockerCrontabGenerator::generate(null, CronScheduleMode::DISPATCHER);
+
+        $jobLines = array_values(array_filter(
+            explode("\n", $crontab),
+            static fn (string $l): bool => str_contains($l, DockerCrontabGenerator::WRAPPER),
+        ));
+        self::assertCount(1, $jobLines, 'Režim dispatcheru musí mít právě jednu položku.');
+        self::assertStringContainsString('api/bin/' . CronCatalog::DISPATCHER_SCRIPT . '.php', $jobLines[0]);
+        self::assertStringStartsWith('* * * * *', $jobLines[0]);
+
+        foreach (CronCatalog::dispatchable() as $job) {
+            self::assertStringNotContainsString('api/bin/' . $job['script'] . '.php', $crontab);
+        }
+    }
+
+    /**
+     * Brána nesmí dispatcher vyhodit ani u instalace bez jakékoli konfigurace —
+     * jinak by po přepnutí režimu neběželo vůbec nic.
+     */
+    public function testDispatcherSurvivesGateWithEmptyConfig(): void
+    {
+        $crontab = DockerCrontabGenerator::generate(
+            new CronJobGate(new Config([]), null),
+            CronScheduleMode::DISPATCHER,
+        );
+        self::assertStringContainsString('api/bin/' . CronCatalog::DISPATCHER_SCRIPT . '.php', $crontab);
+    }
+
+    /**
+     * Bez brány (build-time) musí projít celý katalog — image nesmí přijít
+     * o úlohu jen proto, že runtime konfigurace při buildu neexistuje.
+     */
+    public function testGeneratorWithoutGateKeepsFullCatalog(): void
+    {
+        self::assertSame(DockerCrontabGenerator::generate(), DockerCrontabGenerator::generate(null));
+    }
+
+    public function testGateDropsJobsWithUnconfiguredDirectory(): void
+    {
+        // Prázdný config → žádná z `requires_config` úloh nemá nastavený adresář.
+        $gate = new CronJobGate(new Config([]), null);
+        $crontab = DockerCrontabGenerator::generate($gate);
+
+        $conditional = array_filter(CronCatalog::dispatchable(), static fn (array $j): bool => isset($j['requires_config']));
+        self::assertNotEmpty($conditional, 'Test ztrácí smysl, pokud katalog nemá podmíněné úlohy.');
+
+        foreach ($conditional as $job) {
+            self::assertStringNotContainsString(
+                'api/bin/' . $job['script'] . '.php',
+                $crontab,
+                "Úloha {$job['script']} bez nastaveného {$job['requires_config']} se nemá plánovat.",
+            );
+        }
+
+        // Nepodmíněné úlohy naopak musí zůstat.
+        foreach (CronCatalog::dispatchable() as $job) {
+            if (isset($job['requires_config'])) {
+                continue;
+            }
+            self::assertStringContainsString('api/bin/' . $job['script'] . '.php', $crontab);
+        }
+    }
+
+    /**
+     * Brána crontabu se NESMÍ ptát na opt-in AI. Ten se přepíná v UI za běhu,
+     * zatímco crontab se generuje jen při startu kontejneru — zapnutí AI by se
+     * projevilo až po restartu, tiše a bez jakéhokoli signálu. Dynamické podmínky
+     * patří do CronPreflight uvnitř skriptu.
+     */
+    public function testGateSchedulesAiJobsRegardlessOfOptIn(): void
+    {
+        $gate = new CronJobGate(new Config([]), null);
+        $crontab = DockerCrontabGenerator::generate($gate);
+        self::assertStringContainsString('api/bin/cron-ai-worker.php', $crontab);
+    }
+
+    public function testGatedCrontabStaysWellFormed(): void
+    {
+        $crontab = DockerCrontabGenerator::generate(new CronJobGate(new Config([]), null));
+        self::assertStringEndsWith("\n", $crontab);
+        self::assertStringContainsString('CRON_TZ=Europe/Prague', $crontab);
     }
 
     public function testAiJobsUseCanonicalCronEntrypointsAndExpectedSchedules(): void

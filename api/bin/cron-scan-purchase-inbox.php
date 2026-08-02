@@ -91,7 +91,7 @@ if ($cronUserId === 0) {
     }
 }
 
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $scanner   = $container->get(PurchaseInvoiceInboxScanner::class);
 
 $started      = microtime(true);

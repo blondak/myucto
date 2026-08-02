@@ -5,9 +5,11 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ai\AiWorker;
+use MyInvoice\Service\Cron\CronPreflight;
 use MyInvoice\Service\Cron\CronRun;
 
 function aiWorkerArg(array $argv, string $name): ?string
@@ -41,7 +43,22 @@ if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
 }
 
 try {
-    $container = Bootstrap::buildApp()->getContainer();
+    // Preflight PŘED stavbou kontejneru — prázdná fronta je u běžného tenanta
+    // naprostá většina z ticků po deseti minutách. `--dry-run` bránu obchází,
+    // protože jeho smysl je právě nahlédnout do fronty (i prázdné).
+    if (!$dryRun) {
+        $lightPdo = (new Connection(Config::load(Bootstrap::rootDir())))->pdo();
+        if (!CronPreflight::hasAiWork($lightPdo)) {
+            $stats = ['processed' => 0, 'done' => 0, 'skipped' => 0, 'failed' => 0, 'gate' => 'empty_queue'];
+            if (defined('MYINVOICE_CRON_SCRIPT')) {
+                CronRun::start($lightPdo, (string) MYINVOICE_CRON_SCRIPT)->finish('ok', $stats);
+            }
+            echo json_encode($stats, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+            return;
+        }
+    }
+
+    $container = Bootstrap::buildContainer();
     $run = defined('MYINVOICE_CRON_SCRIPT')
         ? CronRun::start($container->get(Connection::class)->pdo(), (string) MYINVOICE_CRON_SCRIPT)
         : null;

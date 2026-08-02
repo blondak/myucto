@@ -46,8 +46,20 @@ final class Bootstrap
         return dirname(__DIR__, 2);
     }
 
-    /** @return App<ContainerInterface|null> */
-    public static function buildApp(): App
+    /**
+     * Postaví JEN DI kontejner — bez rout a bez middleware.
+     *
+     * Tohle je vstupní bod pro CLI (api/bin/cron-*.php, workery, backfilly).
+     * `buildApp()` registruje 586 rout a instancuje 14 middleware, což je pro
+     * skript spouštěný z cronu čistá režie: rozdíl je ~220 vs ~100 načtených
+     * souborů na jeden běh. Při frekvenci „každou minutu" × počet tenantů to
+     * přestává být kosmetika.
+     *
+     * Definice služeb jsou tady, ne v buildApp(), aby obě cesty (web i CLI)
+     * dostaly bit po bitu stejný kontejner — jinak by se konfigurace časem
+     * rozešla a chyba by se projevila jen v jedné z nich.
+     */
+    public static function buildContainer(): ContainerInterface
     {
         $rootDir = self::rootDir();
         $config  = Config::load($rootDir);
@@ -358,7 +370,15 @@ final class Bootstrap
             ]),
         ]);
 
-        $container = $builder->build();
+        return $builder->build();
+    }
+
+    /** @return App<ContainerInterface|null> */
+    public static function buildApp(): App
+    {
+        $container = self::buildContainer();
+        $config    = $container->get(Config::class);
+
         AppFactory::setContainer($container);
 
         $app = AppFactory::create();

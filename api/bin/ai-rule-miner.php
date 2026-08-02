@@ -26,7 +26,7 @@ if (($supplier !== null && $supplierId <= 0) || $days <= 0) {
     exit(2);
 }
 
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $run = defined('MYINVOICE_CRON_SCRIPT')
     ? CronRun::start($container->get(Connection::class)->pdo(), (string) MYINVOICE_CRON_SCRIPT)
     : null;

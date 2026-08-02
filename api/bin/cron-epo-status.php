@@ -9,7 +9,9 @@ if (PHP_SAPI !== 'cli') {
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Cron\CronPreflight;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Epo\EpoDirectSubmissionService;
 use MyInvoice\Service\License\CommercialFeatureAccess;
@@ -24,12 +26,18 @@ foreach (array_slice($argv, 1) as $arg) {
     exit(1);
 }
 
-$app = Bootstrap::buildApp();
-$container = $app->getContainer();
-if ($container === null) {
-    fwrite(STDERR, "Container not available.\n");
-    exit(1);
+// Preflight PŘED stavbou kontejneru. Tenhle skript běží každou minutu, ale
+// u typického tenanta nemá 99 % ticků co pollovat — a bez brány by každý z nich
+// postavil celý DI kontejner jen aby zjistil, že fronta je prázdná.
+$lightPdo = (new Connection(Config::load(Bootstrap::rootDir())))->pdo();
+if (!CronPreflight::hasEpoWork($lightPdo)) {
+    $result = ['polled' => 0, 'updated' => 0, 'errors' => 0, 'skipped' => 'no_pollable_attempts'];
+    CronRun::start($lightPdo, 'cron-epo-status')->finish('ok', $result);
+    echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+    exit(0);
 }
+
+$container = Bootstrap::buildContainer();
 
 /** @var Connection $connection */
 $connection = $container->get(Connection::class);

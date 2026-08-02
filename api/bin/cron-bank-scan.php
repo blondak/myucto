@@ -36,7 +36,7 @@ if ($scanRoot === '' || !is_dir($scanRoot)) {
 // Přes DI container — StatementMatcher má injektovaný PaymentThanksMailer (#127),
 // takže auto-import GPC pošle děkovný e-mail za úhradu stejně jako ostatní cesty.
 // (Dřív se zde StatementMatcher konstruoval ručně a navíc bez FinalFromProformaCreator.)
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $scanner   = $container->get(StatementScanner::class);
 
 $started = microtime(true);
