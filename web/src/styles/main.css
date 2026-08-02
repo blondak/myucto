@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./fonts.css";
+@import "./print.css";
 
 /* Dark mode řízený třídou .dark na <html> (nastavuje composable useTheme přes VueUse).
    :where() drží specificitu na 0, aby utility nebyly přebity. */

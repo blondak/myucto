@@ -1,0 +1,261 @@
+/* ═══════════════════════ TISK ═══════════════════════
+ * Appka nemá žádnou zvláštní tiskovou sestavu — uživatel dá Ctrl+P na
+ * aktuální stránku (seznam faktur, deník, výpis z banky, report...) a čeká
+ * čitelný výstup na papír, ne tmavou lištu chrome a oříznuté tabulky. Cílíme
+ * proto obecně na libovolnou stránku appky, ne na konkrétní modul — vychází
+ * z AppLayout.vue (chrome) a main.css (design tokeny, skin tabulek/odznaků).
+ *
+ * Import řeší volající, tenhle soubor sám o sobě nic neaplikuje mimo
+ * @media print.
+ */
+
+@media print {
+  /* ─── Vynutit světlý motiv bez ohledu na .dark / .nav-inverted ───
+   * Why: appka jde vytisknout přímo z tmavého režimu a topbar/menu jsou tmavé
+   * i v light módu (viz .nav-inverted v main.css) — tiskárna ale kreslí černým
+   * inkoustem na bílý papír, takže "bílý text na tmavém pozadí" buď vyjde jako
+   * skoro prázdná stránka, nebo spotřebuje cartridge na pozadí. Přepisujeme
+   * STEJNÉ proměnné, které nastavuje .dark / .nav-inverted, takže se light
+   * paleta vrátí bez ohledu na to, v jakém režimu byla stránka na obrazovce.
+   */
+  :root,
+  .dark,
+  .nav-inverted,
+  .dark .nav-inverted {
+    color-scheme: light;
+    --color-surface: #fff;
+    --color-surface-raised: #fff;
+    --color-neutral-50:  #fff;
+    --color-neutral-100: #fff;
+    --color-neutral-200: #bbb;
+    --color-neutral-300: #999;
+    --color-neutral-400: #777;
+    --color-neutral-500: #555;
+    --color-neutral-600: #333;
+    --color-neutral-700: #222;
+    --color-neutral-800: #111;
+    --color-neutral-900: #000;
+
+    /* Pastelové "-50/-100" podklady (karty, banery, tinty odznaků a řádků) na
+       bílou — sytější -500/-600/-700 necháváme beze změny, ty nesou sémantiku
+       stavů (viz níže) jako rámeček/text, jen jejich plošná výplň na papíře
+       nemá smysl a jen by špinila tiskárnu. */
+    --color-primary-50:  #fff;
+    --color-primary-100: #fff;
+    --color-success-50:  #fff;
+    --color-warning-50:  #fff;
+    --color-warning-100: #fff;
+    --color-danger-50:   #fff;
+    --color-accent-50:   #fff;
+    --color-accent-100:  #fff;
+    --color-teal-50:     #fff;
+
+    /* main.css: "Přebití tokenů propíše změnu do všech existujících shadow-*
+       utilit" — stejný mechanismus tady zhasne VŠECHNY stíny (karty, tlačítka,
+       modály) jedním místem. Na papíře je stín jen šedá šmouha bez zdroje
+       světla, co by ji vysvětlilo. */
+    --shadow-2xs: none;
+    --shadow-xs:  none;
+    --shadow-sm:  none;
+    --shadow-md:  none;
+    --shadow-lg:  none;
+    --shadow-xl:  none;
+    --shadow-2xl: none;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: var(--color-neutral-900);
+    /* main.css dává html/body `overflow-x: clip`, aby se stránka nerozhoupala
+       o pixely navíc od širokých tabulek na obrazovce — v tisku scroll
+       neexistuje a clip by jen usekl obsah přesahující do stran. */
+    overflow: visible !important;
+  }
+
+  /* Atmosférické vrstvy (radiální nádech pod hlavičkou + filmové zrno) jsou
+     čistě dekorativní a `position: fixed` — bez zásahu by se u vícestránkového
+     dokumentu mohly znovu vykreslit na každé tištěné stránce. */
+  body::before,
+  body::after {
+    display: none !important;
+  }
+
+  /* ─── Chrome appky ───
+   * Topbar, postranní menu a patička nesou ovládání (hledání, přepínač firmy,
+   * uživatelské menu, motiv/jazyk) — na papíře nefunguje nic z toho a jen by
+   * ukrajovaly místo shora, zboku i zdola na každé stránce výtisku. */
+  header.nav-inverted,
+  aside.nav-inverted,
+  footer.nav-inverted {
+    display: none !important;
+  }
+
+  /* ─── Sticky/fixed pozicování ───
+   * Sticky se v appce zapíná ad-hoc Tailwind utilitou na desítkách míst (topbar,
+   * menu, patička, měsíční rozdělovníky v seznamech). V tisku scroll neexistuje;
+   * sticky prvek by si podržel místo, které ve stránkovaném layoutu nedává smysl.
+   *
+   * Cílíme na konkrétní utility, NE plošně na `*`: `position: static` na všem by
+   * zrušilo i `relative` kontejnery a absolutně pozicovaný obsah (overlaye,
+   * našeptávače) by se vysypal do textu místo aby zůstal, kde patří. */
+  .sticky,
+  .fixed,
+  .table-sticky-first thead th:first-child,
+  .table-sticky-first tbody td:first-child {
+    position: static !important;
+  }
+
+  /* ─── Plná šířka obsahu ───
+   * main má padding pro odstup od tmavé navigace (ta je pryč) a řada stránek
+   * (reporty, editory, detaily) si nese vlastní `max-w-*` kontejner kvůli
+   * čitelnosti na širokém monitoru — na papíře je to jen ztracený prostor.
+   * `:not(table *)` vyjímá max-w uvnitř tabulek: tam řídí zalomení dlouhého
+   * textu ve sloupci (např. `max-w-xs truncate`), ne šířku stránky. */
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+  [class*="max-w-"]:not(table *) {
+    max-width: none !important;
+  }
+
+  /* ─── Ovládací prvky ───
+   * Tlačítka a formulářové prvky (filtry, hromadné akce, řádkové akce jako
+   * Upravit/Smazat) nemají v tisku obsluhu. `active:translate-y-px` je otisk
+   * sdílené sady tlačítek z buttonStyles.ts (BTN_BASE) — nese ji naprostá
+   * většina akcí v appce, ať je to <button>, nebo RouterLink stylizovaný jako
+   * tlačítko (btnFilled/btnOutline), takže chytá i odkazové "akce". */
+  button,
+  [class*="active:translate-y-px"] {
+    display: none !important;
+  }
+
+  /* Formulářová pole se NESKRÝVAJÍ — na vytištěném detailu nebo editoru je
+     hodnota v poli to jediné podstatné; skrytím by zůstaly jen popisky. Jen jim
+     sundáme rámeček a podklad, ať vypadají jako běžný text. Checkboxy si vzhled
+     nechávají, jinak by z nich zbylo prázdné místo bez informace. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--color-neutral-900) !important;
+    padding-left: 0 !important;
+    appearance: none;
+  }
+
+  /* Zaškrtávátka v tabulce slouží k hromadným akcím, ne k údajům — na papíře
+     jsou to jen prázdné čtverečky ukrajující sloupec. (Ve formulářích zůstávají,
+     tam nesou hodnotu — viz pravidlo výš.) */
+  table input[type="checkbox"] {
+    display: none !important;
+  }
+
+  /* Barevný proužek modulu pod topbarem je čistě orientační prvek obrazovky. */
+  main[data-accent]::before {
+    display: none !important;
+  }
+
+  /* Lišty filtrů. Značkujeme je atributem `data-print-hide` (FilterBar.vue),
+     protože chytat komponentu podle řetězce utilit v `class` je křehké — stačí
+     přeskládat třídy a selektor přestane platit. */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Animace nabíhání seznamu/karet při prvním vykreslení (.stagger-in,
+     .rise-in z main.css) — v tisku je stránka vždy "hotová", žádná animace
+     neběží, ale bez zrušení by řádek mohl zůstat zamrzlý v počátečním
+     `opacity: 0` stavu z klíčového snímku `from`. */
+  .stagger-in > tr,
+  .rise-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* Mikro-bar podílu částky v buňce (.amount-cell z main.css) je dekorativní
+     vrstva POD textem — na černobílé tiskárně jen zašpiní podklad bez
+     informační hodnoty (číslo samo je tabular-nums a čitelné i bez baru). */
+  .amount-cell::before {
+    display: none !important;
+  }
+
+  /* ─── Stavy musí zůstat čitelné i bez barvy ───
+   * Řádek "po splatnosti" (useFormat.ts: rowClass → .row-flagged) je na
+   * obrazovce jen jemný inset stín na první buňce — inset box-shadow je na
+   * papíře (a hlavně na černobílé tiskárně) nespolehlivý a snadno zmizí úplně.
+   * Nahrazujeme skutečným rámečkem, ten se vytiskne vždy. */
+  tr.row-flagged > :where(td, th):first-child {
+    box-shadow: none !important;
+    border-left: 3px solid var(--color-danger-600) !important;
+  }
+  /* Stejný důvod u "hlasitých" odznaků (upomenuto/částečně uhrazeno/
+     přeplaceno, main.css: .badge-loud) — jejich barva je jen tenký inset
+     prstenec (--badge-ring), na papíře ho nahrazujeme skutečným rámečkem v
+     téže sémantické barvě, jen v plné sytosti místo 30% mixu (ten by na
+     papíře skoro nebyl vidět). */
+  .badge-loud {
+    box-shadow: none !important;
+    border: 1px solid var(--badge-ring, var(--color-neutral-400)) !important;
+  }
+  .badge-reminded { --badge-ring: var(--color-warning-600); }
+  .badge-partial  { --badge-ring: var(--color-amber-600); }
+  .badge-overpaid { --badge-ring: var(--color-purple-700); }
+
+  /* ─── Tabulky ───
+   * main.css dává přes 250 tabulkám sdílenou kostru (skin hlavičky, hairline,
+   * tabular-nums) — tiskové chování (opakovat hlavičku, nerozbíjet řádek přes
+   * stránku) patří sem, na obrazovku nemá vliv. */
+  table:not(.table-plain) {
+    border-collapse: collapse;
+    width: 100% !important;
+  }
+  table:not(.table-plain) thead {
+    display: table-header-group; /* hlavička se zopakuje na každé nové stránce */
+  }
+  table:not(.table-plain) tfoot {
+    display: table-footer-group; /* součtový řádek se nesmí utrhnout od zbytku tabulky na jinou stránku */
+  }
+  table:not(.table-plain) tr {
+    break-inside: avoid; /* řádek (a jeho případný více-řádkový obsah) se nesmí přeříznout mezi dvě stránky */
+  }
+  /* main.css kreslí hairline mezi řádky přes `border-top` na `tr + tr` — tady
+     jen doplňujeme viditelnou barvu, protože --color-neutral-200 je výš
+     přepsané na výrazně tmavší #bbb (light UI hodnota by na papíře splývala
+     s bílou). */
+  table:not(.table-plain) > tbody > tr > td,
+  table:not(.table-plain) > tbody > tr > th {
+    border-bottom: 1px solid var(--color-neutral-200);
+  }
+
+  /* ─── Odkazy ───
+   * Interní odkazy (RouterLink → relativní `/cesta`) nemá smysl vypisovat —
+   * bez domény je URL na papíře k ničemu. Jen odkazy MIMO appku (manuál,
+   * e-mail, položka nav s `external: true`) dostanou URL za text, ať se dá i
+   * z výtisku dohledat, kam mířily. `href^="#"` vyjímá odkazy sloužící jen
+   * jako JS hook (např. rozbalovací menu), tam by výpis "(#)" byl matoucí. */
+  a[href]:not([href^="/"]):not([href^="#"])::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    font-weight: 400;
+    color: var(--color-neutral-600);
+  }
+
+  /* ─── Wrappery kolem tabulek ───
+   * Široké seznamy jsou zabalené v `overflow-x-auto` (vodorovný scroll na
+   * tabletu) nebo `overflow-hidden/clip` kvůli zaobleným rohům karty kolem —
+   * v tisku není kam scrollovat a ořez by usekl pravé sloupce širší tabulky. */
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-auto,
+  .overflow-hidden,
+  .overflow-clip {
+    overflow: visible !important;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+}

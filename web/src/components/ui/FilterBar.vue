@@ -41,7 +41,9 @@ const open = ref(false)
 </script>
 
 <template>
-  <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 p-3">
+  <!-- data-print-hide: filtry na papíře nemají obsluhu, tisková šablona je podle
+       tohohle atributu skryje (viz styles/print.css). -->
+  <div data-print-hide class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 p-3">
     <div class="flex flex-wrap items-center gap-2">
       <slot name="primary" />
 
