@@ -13,24 +13,78 @@ final class PayrollRunRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    /** @return list<array<string,mixed>> */
+    public function list(int $supplierId, ?string $periodStart = null): array
+    {
+        $sql = 'SELECT run.*,
+                       revision.id AS revision_id,
+                       revision.revision_no,
+                       revision.status AS revision_status,
+                       revision.result_snapshot_json,
+                       revision.calculated_by,
+                       revision.reviewed_by,
+                       revision.approved_by
+                  FROM payroll_runs run
+             LEFT JOIN payroll_run_revisions revision
+                    ON revision.supplier_id = run.supplier_id
+                   AND revision.run_id = run.id
+                   AND revision.revision_no = run.current_revision_no
+                 WHERE run.supplier_id = ?';
+        $params = [$supplierId];
+        if ($periodStart !== null) {
+            $sql .= ' AND run.period_start = ?';
+            $params[] = $periodStart;
+        }
+        $sql .= ' ORDER BY run.period_start DESC, run.office_scope_id, run.id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $items = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $run = self::castRun($row);
+            $run['revision_id'] = $row['revision_id'] === null
+                ? null
+                : (int) $row['revision_id'];
+            $run['revision_no'] = $row['revision_no'] === null
+                ? null
+                : (int) $row['revision_no'];
+            $run['revision_status'] = $row['revision_status'];
+            $run['result_snapshot'] = $row['result_snapshot_json'] === null
+                ? null
+                : json_decode(
+                    (string) $row['result_snapshot_json'],
+                    true,
+                    flags: JSON_THROW_ON_ERROR,
+                );
+            foreach (['calculated_by', 'reviewed_by', 'approved_by'] as $field) {
+                $run[$field] = $row[$field] === null ? null : (int) $row[$field];
+            }
+            unset($run['result_snapshot_json']);
+            $items[] = $run;
+        }
+        return $items;
+    }
+
     /** @return array<string,mixed> */
     public function createOrGet(
         int $supplierId,
         string $periodStart,
+        string $paymentDate,
         ?int $officeId,
         ?int $actorUserId,
     ): array {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'INSERT INTO payroll_runs
-                (supplier_id, office_id, period_start, created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?)
+                (supplier_id, office_id, period_start, payment_date,
+                 created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
         );
         $stmt->execute([
             $supplierId,
             $officeId,
             $periodStart,
+            $paymentDate,
             $actorUserId,
             $actorUserId,
         ]);
@@ -46,6 +100,11 @@ final class PayrollRunRepository
         }
         $run = $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Mzdový běh se nepodařilo načíst.');
+        if ((string) $run['payment_date'] !== $paymentDate) {
+            throw new \DomainException(
+                'Mzdový běh pro období už existuje s jiným datem výplaty.',
+            );
+        }
         if ($stmt->rowCount() === 1) {
             $this->insertEvent(
                 $supplierId,
@@ -56,7 +115,11 @@ final class PayrollRunRepository
                 'draft',
                 $actorUserId,
                 null,
-                ['period_start' => $periodStart, 'office_id' => $officeId],
+                [
+                    'period_start' => $periodStart,
+                    'payment_date' => $paymentDate,
+                    'office_id' => $officeId,
+                ],
             );
         }
         return $run;
@@ -203,6 +266,57 @@ final class PayrollRunRepository
             'blockers' => (int) ($row['blockers'] ?? 0),
             'unresolved_overrides' => (int) ($row['unresolved_overrides'] ?? 0),
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     */
+    public function replaceEnforcementValidations(
+        int $supplierId,
+        int $revisionId,
+        array $result,
+    ): void {
+        $delete = $this->db->pdo()->prepare(
+            'DELETE FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code = "enforcement_manual_review"'
+        );
+        $delete->execute([$supplierId, $revisionId]);
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_validations
+                (supplier_id, revision_id, severity, code, entity_type,
+                 entity_id, message, remediation_path, requires_override)
+             VALUES (?, ?, "blocker", "enforcement_manual_review", "employee",
+                     ?, ?, "/payroll/enforcement", 0)'
+        );
+        foreach ($result['people'] ?? [] as $person) {
+            if (!is_array($person) || array_is_list($person)) {
+                throw new \UnexpectedValueException('Výsledek osoby není platný.');
+            }
+            $enforcement = $person['enforcement'] ?? null;
+            $enforcementResult = is_array($enforcement)
+                ? ($enforcement['result'] ?? null)
+                : null;
+            if (!is_array($enforcementResult)
+                || ($enforcementResult['status'] ?? null) !== 'manual_review'
+            ) {
+                continue;
+            }
+            $issues = $enforcementResult['issues'] ?? [];
+            $message = 'Exekuční srážka vyžaduje doplnění nebo kontrolu podkladů.';
+            if (is_array($issues) && $issues !== []) {
+                $message .= ' ' . implode(', ', array_filter(
+                    $issues,
+                    static fn (mixed $issue): bool => is_string($issue),
+                ));
+            }
+            $insert->execute([
+                $supplierId,
+                $revisionId,
+                (int) ($person['employee_id'] ?? 0),
+                mb_substr($message, 0, 500),
+            ]);
+        }
     }
 
     /** @return array<string,mixed>|null */
@@ -623,6 +737,7 @@ final class PayrollRunRepository
                     flags: JSON_THROW_ON_ERROR,
                 );
         }
+        unset($row['idempotency_key_hash']);
         return $row;
     }
 }

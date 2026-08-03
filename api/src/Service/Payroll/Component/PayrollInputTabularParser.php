@@ -73,7 +73,7 @@ final class PayrollInputTabularParser
         }
         $delimiter = substr_count($first, ';') >= substr_count($first, ',') ? ';' : ',';
         rewind($stream);
-        $rawHeader = fgetcsv($stream, 0, $delimiter);
+        $rawHeader = fgetcsv($stream, 0, $delimiter, escape: '');
         if ($rawHeader === false) {
             fclose($stream);
             throw new \InvalidArgumentException('CSV nemá platnou hlavičku.');
@@ -87,7 +87,7 @@ final class PayrollInputTabularParser
         $rows = [];
         $errors = [];
         $line = 1;
-        while (($values = fgetcsv($stream, 0, $delimiter)) !== false) {
+        while (($values = fgetcsv($stream, 0, $delimiter, escape: '')) !== false) {
             ++$line;
             if ($values === [null] || $values === ['']) {
                 continue;

@@ -281,7 +281,7 @@ final class PayrollTimeCsvImportService
         }
         $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
         rewind($stream);
-        $header = fgetcsv($stream, 0, $delimiter);
+        $header = fgetcsv($stream, 0, $delimiter, escape: '');
         if ($header === false) {
             fclose($stream);
             throw new \InvalidArgumentException('CSV nemá platnou hlavičku.');
@@ -304,7 +304,7 @@ final class PayrollTimeCsvImportService
         $rows = [];
         $rowErrors = [];
         $line = 1;
-        while (($values = fgetcsv($stream, 0, $delimiter)) !== false) {
+        while (($values = fgetcsv($stream, 0, $delimiter, escape: '')) !== false) {
             ++$line;
             if ($values === [null] || $values === ['']) {
                 continue;

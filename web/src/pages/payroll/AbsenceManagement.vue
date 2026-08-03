@@ -319,13 +319,15 @@ onMounted(async () => {
       </div>
     </section>
 
-    <nav class="flex flex-wrap gap-2" :aria-label="t('payroll_absence.tabs.label')">
+    <nav class="mb-5 flex flex-wrap gap-1 border-b border-neutral-200" :aria-label="t('payroll_absence.tabs.label')">
       <button
         v-for="name in (['absences', 'averages', 'leave'] as const)"
         :key="name"
         type="button"
-        class="rounded-lg px-4 py-2 text-sm font-medium"
-        :class="tab === name ? 'bg-payroll-600 text-white' : 'border border-neutral-200 bg-surface text-neutral-700'"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="tab === name
+          ? 'border-payroll-600 text-payroll-600'
+          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
         @click="tab = name"
       >
         {{ t(`payroll_absence.tabs.${name}`) }}

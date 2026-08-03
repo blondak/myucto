@@ -10,7 +10,7 @@ import {
   type PayrollRelationType,
 } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
-import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
 import { todayIso } from './employmentLifecycleUi'
@@ -204,7 +204,7 @@ onMounted(load)
                     <div v-else-if="details[person.id]" class="space-y-3">
                       <div class="flex flex-wrap items-center justify-between gap-2">
                         <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
-                        <button v-if="auth.canWrite('payroll.employment.write')" :class="btnOutline('accent')" @click="startCreate(person.id)">
+                        <button v-if="auth.canWrite('payroll.employment.write')" :class="btnFilled('primary')" @click="startCreate(person.id)">
                           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
                           {{ t('payroll.people.add_employment') }}
                         </button>
@@ -217,7 +217,7 @@ onMounted(load)
                         <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
                         <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-3">
                           <button type="button" :class="btnOutline('neutral')" @click="creatingForId = null">{{ t('common.cancel') }}</button>
-                          <button type="submit" :class="btnOutline('accent')" :disabled="savingNew">{{ t('common.save') }}</button>
+                          <button type="submit" :class="btnFilled('primary')" :disabled="savingNew">{{ t('common.save') }}</button>
                         </div>
                       </form>
                       <EmploymentCard v-for="employment in details[person.id].employments" :key="employment.id" :employment="employment" :can-write="auth.canWrite('payroll.employment.write')" @updated="updateEmployment(person.id, $event)" />
@@ -252,7 +252,7 @@ onMounted(load)
               <div v-if="loadingDetailId === person.id" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
               <div v-else-if="details[person.id]" class="space-y-3">
                 <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
-                <button v-if="auth.canWrite('payroll.employment.write')" :class="btnOutline('accent')" @click="startCreate(person.id)">
+                <button v-if="auth.canWrite('payroll.employment.write')" :class="btnFilled('primary')" @click="startCreate(person.id)">
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
                   {{ t('payroll.people.add_employment') }}
                 </button>
@@ -261,7 +261,7 @@ onMounted(load)
                   <label class="block text-xs text-neutral-600">{{ t('payroll.people.relation_type') }}<select v-model="newEmployment.relation_type" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="type in relationTypes" :key="type" :value="type">{{ relationLabel(type) }}</option></select></label>
                   <label class="block text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                   <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
-                  <div class="flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="creatingForId = null">{{ t('common.cancel') }}</button><button type="submit" :class="btnOutline('accent')" :disabled="savingNew">{{ t('common.save') }}</button></div>
+                  <div class="flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="creatingForId = null">{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="savingNew">{{ t('common.save') }}</button></div>
                 </form>
                 <EmploymentCard v-for="employment in details[person.id].employments" :key="employment.id" :employment="employment" :can-write="auth.canWrite('payroll.employment.write')" @updated="updateEmployment(person.id, $event)" />
               </div>

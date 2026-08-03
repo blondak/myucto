@@ -722,6 +722,73 @@ export interface PayrollDocumentList {
   items: PayrollDocument[]
 }
 
+export type PayrollRunStatus =
+  | 'draft'
+  | 'inputs_locked'
+  | 'calculated'
+  | 'reviewed'
+  | 'approved'
+  | 'posted'
+  | 'payment_ready'
+  | 'paid'
+  | 'closed'
+  | 'correction_pending'
+  | 'reopened'
+  | 'cancelled'
+
+export type PayrollRunCommand =
+  | 'lock_inputs'
+  | 'calculate'
+  | 'review'
+  | 'approve'
+  | 'request_correction'
+  | 'reopen'
+  | 'cancel'
+  | 'close'
+
+export interface PayrollRunValidation {
+  id: number
+  severity: 'blocker' | 'warning' | 'info'
+  code: string
+  entity_type: string
+  entity_id: number | null
+  message: string
+  remediation_path: string | null
+  requires_override: boolean
+}
+
+export interface PayrollRun {
+  id: number
+  supplier_id: number
+  office_id: number | null
+  period_start: string
+  payment_date: string
+  status: PayrollRunStatus
+  current_revision_no: number
+  row_version: number
+  revision_id: number | null
+  revision_no: number | null
+  revision_status: string | null
+  result_snapshot: {
+    totals?: {
+      cash_payable_minor?: number
+      enforcement_withheld_minor?: number
+      payable_after_enforcement_minor?: number
+    }
+  } | null
+  available_commands: PayrollRunCommand[]
+  validations: PayrollRunValidation[]
+}
+
+export interface PayrollRunCommandResponse {
+  command: PayrollRunCommand
+  from_status: PayrollRunStatus
+  to_status: PayrollRunStatus
+  run: PayrollRun
+  revision: Record<string, unknown> | null
+  idempotent_replay: boolean
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -783,6 +850,28 @@ export const payrollApi = {
     api.post<PayrollDocument>(
       `/payroll/runs/${runId}/revisions/${revisionId}/documents/monthly-bundle`,
       {},
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  runs: (period?: string) =>
+    api.get<{ runs: PayrollRun[] }>('/payroll/runs', {
+      params: period ? { period } : undefined,
+    }).then(response => response.data.runs),
+  createRun: (payload: {
+    period_start: string
+    payment_date: string
+    office_id: number | null
+  }) =>
+    api.post<{ run: PayrollRun }>('/payroll/runs', payload)
+      .then(response => response.data.run),
+  commandRun: (
+    runId: number,
+    command: PayrollRunCommand,
+    payload: { row_version: number; reason?: string },
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollRunCommandResponse>(
+      `/payroll/runs/${runId}/commands/${command}`,
+      payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
   downloadDocument: async (payrollDocument: PayrollDocument): Promise<void> => {

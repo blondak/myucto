@@ -19,6 +19,7 @@ final class PayrollRunCommandService
         private readonly PayrollRunRepository $runs,
         private readonly PayrollRunSnapshotBuilder $snapshotBuilder,
         private readonly PayrollRunCalculator $calculator,
+        private readonly PayrollRunGarnishmentProcessor $garnishments,
         private readonly PayrollRunWorkflow $workflow,
         private readonly PayrollPeriodOwnershipService $ownership,
     ) {}
@@ -27,11 +28,13 @@ final class PayrollRunCommandService
     public function createRun(
         int $supplierId,
         string $periodStart,
+        string $paymentDate,
         ?int $officeId,
         int $actorUserId,
     ): array {
         $this->assertActor($actorUserId);
         $period = $this->period($periodStart);
+        $this->paymentDate($paymentDate, $period);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -42,6 +45,7 @@ final class PayrollRunCommandService
             $run = $this->runs->createOrGet(
                 $supplierId,
                 $periodStart,
+                $paymentDate,
                 $officeId,
                 $actorUserId,
             );
@@ -280,6 +284,7 @@ final class PayrollRunCommandService
                 $snapshot = $this->snapshotBuilder->build(
                     $supplierId,
                     (string) $run['period_start'],
+                    (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
                 );
             }
@@ -347,6 +352,15 @@ final class PayrollRunCommandService
                 $calculation = $this->calculator->calculate(
                     $revision['input_snapshot'],
                 );
+                $calculation = $this->garnishments->calculate(
+                    $revision['input_snapshot'],
+                    $calculation,
+                );
+                $this->runs->replaceEnforcementValidations(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $calculation,
+                );
                 $this->runs->saveCalculation(
                     $supplierId,
                     (int) $revision['id'],
@@ -390,6 +404,14 @@ final class PayrollRunCommandService
                 if ($revision === null) {
                     throw new \DomainException('Mzdový běh nemá revizi.');
                 }
+                if (!is_array($revision['result_snapshot'] ?? null)) {
+                    throw new \DomainException('Mzdový běh nemá uložený výsledek.');
+                }
+                $this->garnishments->storeApproved(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $revision['result_snapshot'],
+                );
                 $this->runs->markRevisionApproved(
                     $supplierId,
                     (int) $revision['id'],
@@ -545,6 +567,24 @@ final class PayrollRunCommandService
             );
         }
         return $period;
+    }
+
+    private function paymentDate(
+        string $paymentDate,
+        \DateTimeImmutable $period,
+    ): \DateTimeImmutable {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $paymentDate);
+        if ($date === false || $date->format('Y-m-d') !== $paymentDate) {
+            throw new \InvalidArgumentException(
+                'Datum výplaty musí být platné datum ve formátu YYYY-MM-DD.',
+            );
+        }
+        if ($date < $period) {
+            throw new \InvalidArgumentException(
+                'Datum výplaty nesmí předcházet mzdovému období.',
+            );
+        }
+        return $date;
     }
 
     private function assertActor(int $actorUserId): void

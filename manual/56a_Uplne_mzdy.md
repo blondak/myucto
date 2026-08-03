@@ -7,10 +7,12 @@ o personální profil a více pracovních vztahů. Nevytváří druhý seznam li
 nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
-> V této fázi je v novém modulu dostupná aktivace, nastavení zaměstnavatele
-> a mzdových účtáren, přehled podporovaného rozsahu, osobní karty a řízený
-> životní cyklus pracovních vztahů. Výpočet úplné mzdy, uživatelské výplatní
-> dokumenty a elektronická podání zatím nejsou určeny k ostrému použití.
+> V novém modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
+> účtáren, osobní karty, pracovní vztahy, vstupy, absence, evidence srážek,
+> řízený mzdový běh a archiv výstupů. Zákonné výpočty sociálního a zdravotního
+> pojištění, daně a čisté mzdy ale ještě nejsou jako celek zapojené do ostrého
+> běhu. Úplné mzdy, dávková tvorba všech dokumentů a elektronická podání proto
+> zatím nejsou určeny k ostrému použití.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](56_Mzdy.md).
 
 ## 56a.1 Zapnutí pro firmu
@@ -154,7 +156,35 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
-## 56a.9 Absence, dovolená a DPN
+## 56a.9 Mzdové složky a vstupy
+
+V **Mzdy → Mzdové složky a vstupy** jsou běžnými záložkami oddělené:
+
+- katalog mzdových složek;
+- pravidelné předpisy;
+- jednorázové měsíční vstupy;
+- CSV/XLSX import s povinným náhledem před uložením.
+
+Výchozí složky používají české kódy bez diakritiky, aby byly bezpečné i pro
+CSV a jiné strojové zpracování. Patří mezi ně například `MZDA_MESICNI`,
+`MZDA_HODINOVA`, `ODMENA`, `NAHRADA_MZDY`, `NEPENEZNI_PRIJEM`,
+`PRISPEVEK_STRAVOVANI` a `CESTOVNI_NAHRADA`. Stejné kódy používej také ve
+sloupci `component_code` importovaného souboru. U nové vlastní složky zadej
+nejprve název; kód se z něj automaticky vytvoří bez diakritiky. Dokud jej ručně
+neupravíš, sleduje změny názvu. Po uložení už kód ani začátek platnosti změnit
+nelze; další účinnost se zakládá jako nová verze.
+
+Každá složka samostatně určuje dopad do daně, sociálního a zdravotního
+pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
+účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
+změna katalogu proto nepřepíše již zpracované období.
+
+Pravidelný předpis má vlastní interval platnosti a lze jej zadat pevnou částkou
+nebo procentem. Jednorázový vstup se nejprve zkontroluje a potom samostatně
+schválí. Import odmítá nebezpečné sešity, vzorce a duplicitní řádky a před
+zápisem vždy ukáže výsledek náhledu.
+
+## 56a.10 Absence, dovolená a DPN
 
 V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
 
@@ -188,7 +218,61 @@ a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
 > selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
 > aktuálně dostupné pouze pro legislativní ruleset roku 2026.
 
-## 56a.10 Dokumenty a měsíční balíček
+## 56a.11 Mzdové běhy
+
+V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
+zadává také skutečné datum výplaty; podle něj se vybírají účinná pravidla
+srážek. Jeden běh prochází řízenými kroky **Uzamknout vstupy → Vypočítat →
+Zkontrolovat → Schválit**. Výpočet a kontrolu musí provést různí uživatelé a
+schválení vyžaduje samostatné oprávnění.
+
+Uzamknutí vytvoří neměnný snapshot zaměstnanců, vztahů, složek, data výplaty
+a měsíčních podkladů srážek. Pozdější změna živé karty už rozpracovanou revizi
+nepřepíše. Oprava schváleného měsíce vytváří novou revizi; původní zůstává
+dohledatelná.
+
+Výpočet odděluje hotovost zahrnutou do exekučního základu od částek, které se
+nesrážejí, například správně klasifikovaných cestovních náhrad. Vypočtená
+srážka sníží částku k výplatě, ale neměnný výsledek a ledger
+**sraženo / deponováno** vzniknou až společně se schválením. Neúplné důkazy,
+více plátců bez ověřeného rozdělení nebo jiný stav vyžadující posouzení
+schválení zablokují.
+
+> [!WARNING]
+> Obrazovka mzdových běhů nyní slouží k ověření workflow a návaznosti srážek.
+> Dokud do ní není zapojen úplný výsledek pojistného, daně a čisté mzdy,
+> nepoužívej její částku k výplatě ani schválení jako ostrou mzdu.
+
+## 56a.12 Srážky, exekuce a oddlužení
+
+V **Mzdy → Srážky a exekuce** založíš zaměstnanci zákonnou srážku, exekuci
+nebo dohodu o srážkách. Případ začíná ve stavu **Přijato — čeká na ověření**.
+Nejdříve doplň pohledávky, jejich kategorii, den pořadí a potvrď ověření
+právního titulu, doručení a přednosti. Aktivace srážení vyžaduje počáteční
+rozhodnutí z agendy **Dokumenty**. Do ověření příjemce aplikace částky jen
+deponuje. Odesílání musí uživatel povolit samostatnou akcí a doložit
+odpovídajícím rozhodnutím. Aplikace ověří firmu i oprávnění uživatele k
+dokumentu, uloží jeho otisk a dokument od té chvíle chrání jako právní důkaz.
+Také odklad, obnovení deponování či odesílání a zastavení vyžadují vybraný
+dokument; u odkladu a zastavení je navíc povinný důvod.
+
+Výpočet používá celé haléře a uchovává neměnný měsíční vstup, použitou verzi
+pravidel, mezikroky zaokrouhlení, přidělení částek pohledávkám a pohyby
+**sraženo / deponováno**. Budoucí platební krok přidá samostatný pohyb
+**odesláno**, aby výpočet nemohl předstírat skutečnou úhradu. Kontroluje zejména nezabavitelnou částku,
+třetiny, plně zabavitelný zbytek, pořadí přednostních pohledávek, běžné a dlužné
+výživné, více exekučních příkazů, více plátců, oddlužení a paušální náhradu
+nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
+označí pro ruční kontrolu.
+
+Číslo řízení, bankovní účet příjemce ani právní dokument se do polí případu
+nepřepisují. Patří do zabezpečených dokumentů; agenda srážek pracuje pouze
+s interním identifikátorem a ověřenými skutečnostmi. Odklad a zastavení vyžadují
+ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevřít.
+Označení případu za uhrazený se zpřístupní až po zavedení skutečné platby
+a nulovém zůstatku; na této obrazovce se zatím nenabízí.
+
+## 56a.13 Dokumenty a měsíční balíček
 
 V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
 uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
@@ -208,7 +292,7 @@ revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsl
 > pásek, mzdových listů a potvrzení ještě není zapojená, takže prázdný nebo
 > neúplný balíček neznamená, že jsou všechny povinné výstupy hotové.
 
-## 56a.11 Oprávnění a citlivé údaje
+## 56a.14 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
@@ -217,13 +301,17 @@ Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyž
 `payroll.employment.write`; bez něj je detail pouze pro čtení.
 Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvořit
 měsíční balíček.
+Agenda srážek má samostatné oprávnění `payroll.enforcement`; právo pro běžné
+mzdy ani původní Mzdovou rekapitulaci samo o sobě přístup k těmto údajům
+nedává. Změna měsíčního insolvenčního režimu vyžaduje také
+`payroll.insolvency` a právní přechod s dokumentem oprávnění `documents`.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.12 Vztah k Mzdové rekapitulaci
+## 56a.15 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

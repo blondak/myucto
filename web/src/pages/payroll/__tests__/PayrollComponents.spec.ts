@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   canWrite: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  slugify: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -42,6 +43,10 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+}))
+
+vi.mock('@/api/slug', () => ({
+  slugify: m.slugify,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -145,6 +150,7 @@ describe('PayrollComponents', () => {
       replayed: false,
       rows: [],
     })
+    m.slugify.mockResolvedValue('ceska-odmena')
   })
 
   it('renders matching desktop tables and mobile cards from one API contract', async () => {
@@ -211,6 +217,35 @@ describe('PayrollComponents', () => {
 
     expect(wrapper.find('[data-testid="payroll-import-file"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="payroll-import-apply"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('creates the code from the name until the user edits it manually', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    const catalogTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')
+    await catalogTab!.trigger('click')
+    const addButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.catalog.add')
+    await addButton!.trigger('click')
+
+    vi.useFakeTimers()
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Česká odměna')
+    await vi.advanceTimersByTimeAsync(301)
+    await flushPromises()
+
+    expect(m.slugify).toHaveBeenCalledWith('Česká odměna')
+    const codeInput = wrapper.get('[data-testid="payroll-component-code"]')
+    expect((codeInput.element as HTMLInputElement).value).toBe('CESKA-ODMENA')
+
+    await codeInput.setValue('VLASTNI_KOD')
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Jiný název')
+    await vi.advanceTimersByTimeAsync(301)
+    await flushPromises()
+
+    expect((codeInput.element as HTMLInputElement).value).toBe('VLASTNI_KOD')
+    vi.useRealTimers()
     wrapper.unmount()
   })
 })

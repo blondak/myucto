@@ -279,7 +279,7 @@ onMounted(loadAccounts)
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.health_accounts.title') }}</h2>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.hint') }}</p>
       </div>
-      <button v-if="canWrite && !showCreate" type="button" :class="btnOutline('primary')" @click="openCreate">
+      <button v-if="canWrite && !showCreate" type="button" :class="btnFilled('primary')" @click="openCreate">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path :d="ICONS.plus" />
         </svg>
@@ -432,7 +432,7 @@ onMounted(loadAccounts)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="button" :class="btnFilled('success')" :disabled="saving" @click="createAccount">
+          <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="createAccount">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
             {{ saving ? t('common.saving') : t('payroll.employer.health_accounts.create') }}
           </button>
@@ -493,7 +493,7 @@ onMounted(loadAccounts)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="button" :class="btnFilled('success')" :disabled="saving || conflictId === editingId" @click="updateAccount">
+          <button type="button" :class="btnFilled('primary')" :disabled="saving || conflictId === editingId" @click="updateAccount">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
             {{ saving ? t('common.saving') : t('common.save') }}
           </button>

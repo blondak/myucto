@@ -116,6 +116,26 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
+                ),
+            \MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentSnapshotWriter::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
+                ),
+            \MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentPort::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Garnishment\RepositoryPayrollGarnishmentPort::class,
+                ),
+            \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder(
+                    $c->get(Connection::class),
+                    null,
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class,
+                    ),
+                ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (

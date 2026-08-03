@@ -442,7 +442,7 @@ onMounted(load)
             <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.offices_title') }}</h2>
             <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.employer.offices_hint') }}</p>
           </div>
-          <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addOffice">
+          <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addOffice">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.plus" />
             </svg>
@@ -452,7 +452,7 @@ onMounted(load)
 
         <div v-if="formOffices.length === 0" class="rounded-lg border border-dashed border-neutral-300 px-4 py-8 text-center">
           <p class="text-sm text-neutral-500">{{ t('payroll.employer.offices_empty') }}</p>
-          <button v-if="canWrite" type="button" :class="`${btnOutline('primary')} mt-4`" @click="addOffice">
+          <button v-if="canWrite" type="button" :class="`${btnFilled('primary')} mt-4`" @click="addOffice">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
             {{ t('payroll.employer.add_first_office') }}
           </button>

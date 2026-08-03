@@ -121,6 +121,10 @@ describe('AbsenceManagement', () => {
     expect(wrapper.text()).toContain('payroll_absence.tabs.absences')
     expect(wrapper.text()).toContain('payroll_absence.tabs.averages')
     expect(wrapper.text()).toContain('payroll_absence.tabs.leave')
+    const activeTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll_absence.tabs.absences')
+    expect(activeTab!.classes()).toContain('border-payroll-600')
+    expect(activeTab!.classes()).not.toContain('bg-payroll-600')
     wrapper.unmount()
   })
 

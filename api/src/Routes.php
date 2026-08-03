@@ -68,6 +68,7 @@ use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
@@ -76,6 +77,7 @@ use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
+use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
@@ -591,6 +593,31 @@ final class Routes
             $g->get('/components', [PayrollComponentsAction::class, 'list']);
             $g->post('/components', [PayrollComponentsAction::class, 'create']);
             $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
+            $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
+            $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
+            $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/claims', [PayrollEnforcementAction::class, 'addClaim']);
+            $g->put('/enforcement/cases/{id:[0-9]+}/evidence', [PayrollEnforcementAction::class, 'updateEvidence']);
+            $g->post(
+                '/enforcement/cases/{id:[0-9]+}/commands/{command:[a-z_]+}',
+                [PayrollEnforcementAction::class, 'transition'],
+            );
+            $g->put(
+                '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'saveMonthEvidence'],
+            );
+            $g->get(
+                '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'monthEvidence'],
+            );
+            $g->post(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants',
+                [PayrollEnforcementAction::class, 'addDependant'],
+            );
+            $g->get(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants',
+                [PayrollEnforcementAction::class, 'dependants'],
+            );
             $g->get('/inputs', [PayrollInputsAction::class, 'list']);
             $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);
             $g->post('/inputs', [PayrollInputsAction::class, 'create']);
@@ -602,6 +629,12 @@ final class Routes
             $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
+            $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->post('/runs', [PayrollRunsAction::class, 'create']);
+            $g->post(
+                '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
+                [PayrollRunsAction::class, 'command'],
+            );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->post(
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',

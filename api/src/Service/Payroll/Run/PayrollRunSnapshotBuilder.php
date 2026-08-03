@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -15,11 +16,13 @@ final class PayrollRunSnapshotBuilder
     public function __construct(
         private readonly Connection $db,
         private readonly ?PayrollRulesetProvider $rulesets = null,
+        private readonly ?EnforcementCaseSource $enforcement = null,
     ) {}
 
     public function build(
         int $supplierId,
         string $periodStart,
+        string $paymentDate,
         ?int $officeId = null,
     ): PayrollRunInputSnapshot {
         if ($supplierId <= 0) {
@@ -36,6 +39,15 @@ final class PayrollRunSnapshotBuilder
         }
         if ($officeId !== null && $officeId <= 0) {
             throw new \InvalidArgumentException('Mzdová účtárna není platná.');
+        }
+        $payment = \DateTimeImmutable::createFromFormat('!Y-m-d', $paymentDate);
+        if ($payment === false
+            || $payment->format('Y-m-d') !== $paymentDate
+            || $payment < $period
+        ) {
+            throw new \InvalidArgumentException(
+                'Datum výplaty mzdového běhu není platné.',
+            );
         }
         $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
         $provider = $this->rulesets ?? CzechPayrollRulesets2026::provider();
@@ -127,6 +139,14 @@ final class PayrollRunSnapshotBuilder
                     'profile_status' => (string) $row['profile_status'],
                     'is_active' => (bool) $row['employee_active'],
                 ],
+                'enforcement_evidence' => $this->enforcement === null
+                    ? null
+                    : $this->enforcement->evidenceFor(
+                        $supplierId,
+                        $employeeId,
+                        $period->format('Y-m'),
+                        $paymentDate,
+                    )->toCanonicalArray(),
                 'employments' => [],
             ];
             $people[$employeeId]['employments'][] = [
@@ -181,6 +201,7 @@ final class PayrollRunSnapshotBuilder
             'supplier_id' => $supplierId,
             'period_start' => $periodStart,
             'period_end' => $periodEnd,
+            'payment_date' => $paymentDate,
             'office_id' => $officeId,
             'ruleset_manifest' => $manifest,
             'people' => array_values($people),

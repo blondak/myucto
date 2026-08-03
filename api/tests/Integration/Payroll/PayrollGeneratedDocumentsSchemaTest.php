@@ -69,8 +69,9 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         try {
             $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
             $pdo->prepare(
-                'INSERT INTO payroll_runs (supplier_id, period_start)
-                 VALUES (?, "2099-12-01")'
+                'INSERT INTO payroll_runs
+                    (supplier_id, period_start, payment_date)
+                 VALUES (?, "2099-12-01", "2099-12-31")'
             )->execute([$supplierId]);
             $runId = (int) $pdo->lastInsertId();
             $pdo->prepare(
@@ -167,9 +168,10 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
             $runs = [];
             foreach (['2099-10-01', '2099-11-01'] as $index => $periodStart) {
                 $pdo->prepare(
-                    'INSERT INTO payroll_runs (supplier_id, period_start)
-                     VALUES (?, ?)'
-                )->execute([$supplierId, $periodStart]);
+                    'INSERT INTO payroll_runs
+                        (supplier_id, period_start, payment_date)
+                     VALUES (?, ?, LAST_DAY(?))'
+                )->execute([$supplierId, $periodStart, $periodStart]);
                 $runId = (int) $pdo->lastInsertId();
                 $pdo->prepare(
                     'INSERT INTO payroll_run_revisions
@@ -261,8 +263,9 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         try {
             $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
             $pdo->prepare(
-                'INSERT INTO payroll_runs (supplier_id, period_start)
-                 VALUES (?, "2099-09-01")'
+                'INSERT INTO payroll_runs
+                    (supplier_id, period_start, payment_date)
+                 VALUES (?, "2099-09-01", "2099-09-30")'
             )->execute([$supplierId]);
             $runId = (int) $pdo->lastInsertId();
             $pdo->prepare(

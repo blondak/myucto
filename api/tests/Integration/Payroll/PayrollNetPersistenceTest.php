@@ -302,8 +302,8 @@ final class PayrollNetPersistenceTest extends TestCase
     private function createRevision(PDO $pdo, int $supplierId): int
     {
         $pdo->prepare(
-            'INSERT INTO payroll_runs (supplier_id, period_start)
-             VALUES (?, "2026-06-01")'
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date)
+             VALUES (?, "2026-06-01", "2026-06-30")'
         )->execute([$supplierId]);
         $runId = (int) $pdo->lastInsertId();
         $pdo->prepare(

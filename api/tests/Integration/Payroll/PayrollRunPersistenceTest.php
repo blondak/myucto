@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -16,6 +21,8 @@ use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 #[Group('integration')]
 final class PayrollRunPersistenceTest extends TestCase
@@ -23,6 +30,7 @@ final class PayrollRunPersistenceTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private PayrollRunsAction $action;
     private PayrollRunCommandService $service;
     private PayrollRunRepository $runs;
     private int $supplierId;
@@ -37,15 +45,18 @@ final class PayrollRunPersistenceTest extends TestCase
     {
         $container = Bootstrap::buildContainer();
         $db = $container->get(Connection::class);
+        $action = $container->get(PayrollRunsAction::class);
         $service = $container->get(PayrollRunCommandService::class);
         $runs = $container->get(PayrollRunRepository::class);
         if (!$db instanceof Connection
+            || !$action instanceof PayrollRunsAction
             || !$service instanceof PayrollRunCommandService
             || !$runs instanceof PayrollRunRepository
         ) {
             throw new \RuntimeException('Služby mzdového běhu nejsou dostupné.');
         }
         $this->db = $db;
+        $this->action = $action;
         $this->service = $service;
         $this->runs = $runs;
         foreach ([
@@ -83,7 +94,99 @@ final class PayrollRunPersistenceTest extends TestCase
             )->execute([$supplierId, $this->actors[0]]);
         }
         [$this->employeeId, $this->employmentId] = $this->employment();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_person_month_evidence
+                (supplier_id, employee_id, period_start,
+                 claim_register_evidence_complete,
+                 dependants_evidence_complete, spouse_evidence_complete,
+                 pension_evidence, updated_by)
+             VALUES (?, ?, "2026-06-01", 1, 1, 1, "none", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->actors[0],
+        ]);
         $this->inputId = $this->approvedInput(120_000, 'BASE', 'manual');
+    }
+
+    public function testSessionApiCreatesListsAndLocksRunIdempotently(): void
+    {
+        $role = new EffectiveRole(
+            90,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            [
+                'payroll' => AccessLevel::READ->value,
+                'payroll.inputs.write' => AccessLevel::WRITE->value,
+                'payroll.calculate' => AccessLevel::WRITE->value,
+                'payroll.review' => AccessLevel::WRITE->value,
+                'payroll.approve' => AccessLevel::WRITE->value,
+                'payroll.reopen' => AccessLevel::WRITE->value,
+            ],
+        );
+        $createdResponse = $this->action->create(
+            $this->apiRequest('POST', '/api/payroll/runs', $role)
+                ->withParsedBody([
+                    'period_start' => '2026-06-01',
+                    'payment_date' => '2026-07-15',
+                ]),
+            new Response(),
+        );
+        self::assertSame(201, $createdResponse->getStatusCode());
+        $created = $this->json($createdResponse)['run'];
+        self::assertSame('2026-07-15', $created['payment_date']);
+        self::assertSame('draft', $created['status']);
+
+        $listResponse = $this->action->list(
+            $this->apiRequest('GET', '/api/payroll/runs?period=2026-06', $role)
+                ->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        );
+        self::assertSame(200, $listResponse->getStatusCode());
+        $runs = $this->json($listResponse)['runs'];
+        self::assertCount(1, $runs);
+        self::assertSame('2026-07-15', $runs[0]['payment_date']);
+        self::assertContains('lock_inputs', $runs[0]['available_commands']);
+
+        $request = $this->apiRequest(
+            'POST',
+            "/api/payroll/runs/{$created['id']}/commands/lock_inputs",
+            $role,
+        )->withHeader('Idempotency-Key', 'api-lock-synthetic-run')
+            ->withParsedBody(['row_version' => $created['row_version']]);
+        $lockedResponse = $this->action->command(
+            $request,
+            new Response(),
+            ['id' => (string) $created['id'], 'command' => 'lock_inputs'],
+        );
+        self::assertSame(200, $lockedResponse->getStatusCode());
+        $locked = $this->json($lockedResponse);
+        self::assertSame('inputs_locked', $locked['run']['status']);
+        self::assertFalse($locked['idempotent_replay']);
+
+        $replayResponse = $this->action->command(
+            $request,
+            new Response(),
+            ['id' => (string) $created['id'], 'command' => 'lock_inputs'],
+        );
+        self::assertSame(200, $replayResponse->getStatusCode());
+        self::assertTrue($this->json($replayResponse)['idempotent_replay']);
+
+        $bearerResponse = $this->action->list(
+            $this->apiRequest(
+                'GET',
+                '/api/payroll/runs',
+                $role,
+                'bearer',
+            ),
+            new Response(),
+        );
+        self::assertSame(403, $bearerResponse->getStatusCode());
+        self::assertSame(
+            'session_required',
+            $this->json($bearerResponse)['error']['code'],
+        );
     }
 
     protected function tearDown(): void
@@ -94,6 +197,18 @@ final class PayrollRunPersistenceTest extends TestCase
         if (isset($this->db)) {
             $this->db->close();
         }
+    }
+
+    public function testPaymentDateIsRequiredAtDatabaseBoundary(): void
+    {
+        $this->db->pdo()->exec('SET SESSION check_constraint_checks = 1');
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date)
+             VALUES (?, "2032-01-01", NULL)'
+        );
+
+        $this->expectException(PDOException::class);
+        $stmt->execute([$this->supplierId]);
     }
 
     public function testSnapshotRemainsStableAndFourEyeWorkflowIsAudited(): void
@@ -183,6 +298,142 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             (int) $approved->revision['id'],
         ]);
+    }
+
+    public function testApprovedRunPersistsFrozenEnforcementAndReducesPayable(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_inputs SET amount_minor = 4000000
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->inputId]);
+        $this->approvedInput(
+            1_000_000,
+            'CESTOVNI_NAHRADA',
+            'manual',
+            'excluded',
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status,
+                 effective_from, evidence_complete, recipient_verified,
+                 created_by, updated_by)
+             VALUES (?, ?, "synthetic-runtime-case", "enforcement",
+                     "withhold_and_hold", "2026-05-01", 1, 1, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $caseId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, enforcement_order_key,
+                 legal_basis, category, outstanding_minor_units,
+                 priority_date, order_issued_on, legal_title_verified,
+                 order_or_notice_delivered, priority_classification_verified,
+                 agreement_verified, due_monetary_claim_verified)
+             VALUES (?, ?, "synthetic-runtime-claim", "synthetic-runtime-order",
+                     "statutory", "non_priority", 10000000,
+                     "2026-05-01", "2026-04-30", 1, 1, 1, 0, 1)'
+        )->execute([$this->supplierId, $caseId]);
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'runtime-enforcement-lock',
+            $this->actors[0],
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_enforcement_claims
+                SET outstanding_minor_units = 0
+              WHERE supplier_id = ? AND case_id = ?'
+        )->execute([$this->supplierId, $caseId]);
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'runtime-enforcement-calculate',
+            $this->actors[0],
+        );
+        $person = $calculated->revision['result_snapshot']['people'][0];
+        $enforcement = $person['enforcement']['result'];
+        $enforcementInput = $person['enforcement']['input'];
+        self::assertSame('supported', $enforcement['status']);
+        self::assertSame(
+            4_000_000,
+            $enforcementInput['income']['garnishable_minor_units'],
+        );
+        self::assertSame(
+            1_000_000,
+            $enforcementInput['income']['excluded_minor_units'],
+        );
+        self::assertGreaterThan(0, $enforcement['total_withheld_minor_units']);
+        self::assertSame(
+            5_000_000 - $enforcement['total_withheld_minor_units'],
+            $person['payable_after_enforcement_minor'],
+        );
+        self::assertSame(
+            0,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_enforcement_month_results
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $calculated->revision['id']],
+            ),
+        );
+
+        $reviewed = $this->service->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'runtime-enforcement-review',
+            $this->actors[1],
+        );
+        $approved = $this->service->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'runtime-enforcement-approve',
+            $this->actors[2],
+        );
+        self::assertSame('approved', $approved->run['status']);
+        self::assertSame(
+            1,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_enforcement_month_results
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $approved->revision['id']],
+            ),
+        );
+        self::assertSame(
+            $enforcement['total_withheld_minor_units'],
+            (int) $this->scalar(
+                'SELECT COALESCE(SUM(amount_minor_units), 0)
+                   FROM payroll_enforcement_ledger
+                  WHERE supplier_id = ?
+                    AND entry_kind IN ("withheld", "employer_fee")',
+                [$this->supplierId],
+            ),
+        );
+
+        $replay = $this->service->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'runtime-enforcement-approve',
+            $this->actors[2],
+        );
+        self::assertTrue($replay->idempotentReplay);
+        self::assertSame(
+            1,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_enforcement_month_results
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $approved->revision['id']],
+            ),
+        );
     }
 
     public function testIdempotentReplayTenantIsolationAndOptimisticConflict(): void
@@ -465,6 +716,7 @@ final class PayrollRunPersistenceTest extends TestCase
         return $this->service->createRun(
             $this->supplierId,
             '2026-06-01',
+            '2026-07-15',
             null,
             $this->actors[0],
         );
@@ -558,6 +810,7 @@ final class PayrollRunPersistenceTest extends TestCase
         int $amountMinor,
         string $code,
         string $sourceKind,
+        string $enforcementTreatment = 'included',
     ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -568,9 +821,14 @@ final class PayrollRunPersistenceTest extends TestCase
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
                  accounting_debit_code, accounting_credit_code, valid_from)
              VALUES (?, ?, ?, "base_wage", "monetary", "regular", "included",
-                     "included", "included", "included", "included", "included",
+                     "included", "included", "included", ?, "included",
                      "included", "521", "331", "2026-01-01")'
-        )->execute([$this->supplierId, $code, "Synthetic {$code}"]);
+        )->execute([
+            $this->supplierId,
+            $code,
+            "Synthetic {$code}",
+            $enforcementTreatment,
+        ]);
         $componentId = (int) $pdo->lastInsertId();
         $snapshot = [
             'code' => $code,
@@ -582,7 +840,7 @@ final class PayrollRunPersistenceTest extends TestCase
             'social_treatment' => 'included',
             'health_treatment' => 'included',
             'average_earning_treatment' => 'included',
-            'enforcement_treatment' => 'included',
+            'enforcement_treatment' => $enforcementTreatment,
             'jmhz_treatment' => 'included',
             'statistics_treatment' => 'included',
             'accounting_debit_code' => '521',
@@ -620,5 +878,34 @@ final class PayrollRunPersistenceTest extends TestCase
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchColumn();
+    }
+
+    private function apiRequest(
+        string $method,
+        string $uri,
+        EffectiveRole $role,
+        string $authMethod = 'session',
+    ): \Psr\Http\Message\ServerRequestInterface {
+        return (new ServerRequestFactory())
+            ->createServerRequest($method, $uri)
+            ->withAttribute(
+                SupplierScopeMiddleware::ATTR_CURRENT_ID,
+                $this->supplierId,
+            )
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => $this->actors[0],
+                'role' => 'readonly',
+            ])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $authMethod)
+            ->withAttribute('auth.effective_role', $role);
+    }
+
+    /** @return array<string,mixed> */
+    private function json(Response $response): array
+    {
+        $response->getBody()->rewind();
+        $decoded = json_decode((string) $response->getBody(), true);
+        self::assertIsArray($decoded);
+        return $decoded;
     }
 }

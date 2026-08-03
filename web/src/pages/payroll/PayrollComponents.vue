@@ -24,6 +24,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import {
   canApplyPayrollImport,
   formatPayrollMinor,
@@ -604,13 +605,18 @@ onMounted(load)
       </div>
     </header>
 
-    <nav class="flex flex-wrap gap-2" :aria-label="t('payroll.components.tabs.label')">
+    <nav
+      class="mb-5 flex flex-wrap gap-1 border-b border-neutral-200"
+      :aria-label="t('payroll.components.tabs.label')"
+    >
       <button
         v-for="tab in (['catalog', 'recurring', 'inputs', 'import'] as Tab[])"
         :key="tab"
         type="button"
-        class="h-9 whitespace-nowrap rounded-md border px-3 text-sm font-medium transition-colors"
-        :class="activeTab === tab ? 'border-payroll-500 bg-payroll-50 text-payroll-700' : 'border-neutral-200 bg-surface text-neutral-600 hover:bg-neutral-50'"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="activeTab === tab
+          ? 'border-payroll-600 text-payroll-600'
+          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
         @click="activeTab = tab"
       >
         {{ t(`payroll.components.tabs.${tab}`) }}
@@ -643,8 +649,21 @@ onMounted(load)
             </button>
           </div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.code') }}</span><input v-model="componentForm.code" :disabled="!!editingComponent" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase disabled:bg-neutral-100"></label>
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.name') }}</span><input v-model="componentForm.name" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
+            <CodeNameFields
+              :code="componentForm.code"
+              :name="componentForm.name"
+              :code-label="t('payroll.components.fields.code')"
+              :name-label="t('payroll.components.fields.name')"
+              :editing="!!editingComponent"
+              :code-disabled="!!editingComponent"
+              :code-maxlength="64"
+              :name-maxlength="255"
+              name-container-class="sm:col-span-2"
+              code-testid="payroll-component-code"
+              name-testid="payroll-component-name"
+              @update:code="componentForm.code = $event.toUpperCase()"
+              @update:name="componentForm.name = $event"
+            />
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.kind') }}</span><select v-model="componentForm.component_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in componentKinds" :key="kind" :value="kind">{{ t(`payroll.components.kind.${kind}`) }}</option></select></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><select v-model="componentForm.value_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in valueKinds" :key="kind" :value="kind">{{ t(`payroll.components.value_kind.${kind}`) }}</option></select></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.frequency') }}</span><select v-model="componentForm.frequency_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in frequencies" :key="kind" :value="kind">{{ t(`payroll.components.frequency.${kind}`) }}</option></select></label>

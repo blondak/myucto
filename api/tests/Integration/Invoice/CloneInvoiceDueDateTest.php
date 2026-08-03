@@ -52,10 +52,12 @@ final class CloneInvoiceDueDateTest extends TestCase
         // ne z „prvního v tabulce" — jinak by se test zbytečně skipoval, když faktury
         // patří jinému dodavateli.
         $row = $pdo->query(
-            "SELECT id, supplier_id FROM invoices
-              WHERE project_id IS NULL
-                AND invoice_type = 'invoice' AND status NOT IN ('cancelled')
-              ORDER BY id DESC LIMIT 1"
+            "SELECT i.id, i.supplier_id
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
+              WHERE i.project_id IS NULL
+                AND i.invoice_type = 'invoice' AND i.status NOT IN ('cancelled')
+              ORDER BY i.id DESC LIMIT 1"
         )->fetch(PDO::FETCH_ASSOC) ?: [];
         $this->sourceId = (int) ($row['id'] ?? 0);
         $this->supplierId = (int) ($row['supplier_id'] ?? 0);

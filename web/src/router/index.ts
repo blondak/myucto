@@ -95,10 +95,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
       { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/runs', name: 'payroll-runs', component: () => import('@/pages/payroll/PayrollRuns.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
@@ -391,10 +393,12 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
   'payroll-dashboard': ['payroll'],
+  'payroll-runs': ['payroll'],
   'payroll-people': ['payroll'],
   'payroll-components': ['payroll'],
   'payroll-time': ['payroll'],
   'payroll-absences': ['payroll'],
+  'payroll-enforcement': ['payroll.enforcement'],
   'payroll-documents': ['payroll.documents'],
   'payroll-settings': ['payroll.settings'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],

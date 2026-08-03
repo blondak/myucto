@@ -241,6 +241,44 @@ final class PayrollComponentsInputsApiTest extends TestCase
         self::assertSame(100_000, $snapshot['annual_limit_minor']);
     }
 
+    public function testDefaultComponentCodesAreCzech(): void
+    {
+        $response = $this->components->list(
+            $this->request('GET', '/api/payroll/components')
+                ->withQueryParams(['effective_on' => '2026-06-01']),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $components = $this->json($response)['components'] ?? null;
+        self::assertIsArray($components);
+        $codes = array_column($components, 'code');
+        sort($codes);
+
+        self::assertSame([
+            'CESTOVNI_NAHRADA',
+            'DOPLATEK_MZDY',
+            'MZDA_HODINOVA',
+            'MZDA_MESICNI',
+            'MZDA_UKOLOVA',
+            'NAHRADA_KONKURENCNI_DOLOZKA',
+            'NAHRADA_MZDY',
+            'NEPENEZNI_PRIJEM',
+            'ODMENA',
+            'ODSTUPNE',
+            'PREMIE_PRIPLATKY',
+            'PRISPEVEK_DLOUHODOBA_PECE',
+            'PRISPEVEK_PENZE_ZIVOTNI',
+            'PRISPEVEK_RIZIKOVE_SPORENI',
+            'PRISPEVEK_STRAVOVANI',
+            'PROVIZE',
+            'REKREACE_VOLNY_CAS',
+            'SOUKROME_VOZIDLO',
+            'VZDELAVANI',
+            'ZDRAVOTNI_BENEFIT',
+        ], $codes);
+    }
+
     public function testDedupeTenantIsolationOptimisticLockAndSessionOnly(): void
     {
         $component = $this->createComponent($this->componentPayload(

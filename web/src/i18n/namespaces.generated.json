@@ -268,6 +268,9 @@
     "payroll-dashboard": [
       "payroll"
     ],
+    "payroll-runs": [
+      "payroll"
+    ],
     "payroll-people": [
       "payroll"
     ],
@@ -279,6 +282,9 @@
     ],
     "payroll-absences": [
       "payroll_absence"
+    ],
+    "payroll-enforcement": [
+      "payroll"
     ],
     "payroll-documents": [
       "payroll"

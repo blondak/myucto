@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-03-v3';
+    public const VERSION = '2026-08-03-v4';
     private const SUPPORTED_YEARS = [2024, 2025, 2026];
 
     public function supportsYear(int $year): bool
@@ -48,6 +48,7 @@ final class SupportMatrix
                 ['key' => 'average_earnings', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'leave_ledger', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'dpn_compensation', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
+                ['key' => 'enforcement_deductions', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-14'],
                 ['key' => 'payroll_runs', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-09'],
                 ['key' => 'payslips', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-16'],
                 ['key' => 'automatic_posting', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-18'],
