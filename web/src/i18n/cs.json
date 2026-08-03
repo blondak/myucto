@@ -418,6 +418,7 @@
     "payroll_overview": "Přehled mezd",
     "payroll_people": "Zaměstnanci",
     "payroll_time": "Docházka a směny",
+    "payroll_absences": "Absence a dovolená",
     "payroll_settings": "Nastavení mezd",
     "settings": "Nastavení",
     "branding": "Branding",
@@ -985,6 +986,10 @@
       "activation": "Aktivace pro firmu",
       "persons": "Osobní karty",
       "employments": "Pracovní vztahy",
+      "absences": "Absence",
+      "average_earnings": "Průměrný výdělek",
+      "leave_ledger": "Ledger dovolené",
+      "dpn_compensation": "Náhrada při DPN",
       "payroll_runs": "Měsíční mzdové běhy",
       "payslips": "Výplatní pásky a dokumenty",
       "automatic_posting": "Automatické zaúčtování",
@@ -10703,6 +10708,129 @@
       "unit_price": "Cena/MJ",
       "total_open": "Celkem otevřeno",
       "footer_note": "Náhled ukazuje rozpracované výkazy, které dosud nebyly vyfakturovány. Údaje se průběžně aktualizují."
+    }
+  },
+  "payroll_absence": {
+    "title": "Absence, dovolená a DPN",
+    "subtitle": "Evidence nepřítomností, snapshoty průměrného výdělku a auditovatelný ledger dovolené.",
+    "manual_review": "Vyžaduje ruční kontrolu",
+    "review_notice": "Výsledky jsou pracovní podklad. Před schválením ověřte rozhodné období, započitatelné doby, publikované směny a zákonné podmínky konkrétního zaměstnance.",
+    "employment": "Pracovní vztah",
+    "from": "Od",
+    "to": "Do",
+    "period": "Období",
+    "note": "Poznámka",
+    "select": "Vyberte…",
+    "tabs": {
+      "label": "Agendy nepřítomností",
+      "absences": "Absence",
+      "averages": "Průměrný výdělek",
+      "leave": "Dovolená"
+    },
+    "types": {
+      "vacation": "Dovolená",
+      "dpn": "Dočasná pracovní neschopnost",
+      "quarantine": "Karanténa",
+      "ocr": "Ošetřovné",
+      "long_term_care": "Dlouhodobé ošetřovné",
+      "ppm": "Peněžitá pomoc v mateřství",
+      "paternity": "Otcovská",
+      "parental": "Rodičovská",
+      "unpaid_leave": "Neplacené volno",
+      "employee_obstacle": "Překážka na straně zaměstnance",
+      "employer_obstacle": "Překážka na straně zaměstnavatele",
+      "other": "Jiná absence"
+    },
+    "status": {
+      "requested": "Ke schválení",
+      "approved": "Schváleno",
+      "rejected": "Zamítnuto",
+      "cancelled": "Zrušeno"
+    },
+    "actions": {
+      "approve": "Schválit",
+      "reject": "Zamítnout",
+      "cancel": "Zrušit"
+    },
+    "absences": {
+      "new": "Nová absence",
+      "list": "Evidované absence",
+      "empty": "Ve zvoleném období nejsou žádné absence.",
+      "type": "Druh absence",
+      "average": "Schválený průměr za hodinu",
+      "partial_first": "První den (minuty)",
+      "partial_last": "Poslední den (minuty)",
+      "create": "Založit absenci",
+      "cancel_confirm": "Opravdu zrušit absenci? U dovolené vznikne dohledatelná reverzní položka.",
+      "correction_pending": "Navazující mzdový běh vyžaduje kontrolu opravy."
+    },
+    "dpn": {
+      "insurance": "Potvrzena účast na nemocenském pojištění",
+      "no_conflict": "Vyloučen souběh s dávkou, která náhradu nepřipouští",
+      "first_day_worked": "První plánovaná směna byla celá odpracována"
+    },
+    "averages": {
+      "new": "Nový snapshot průměrného výdělku",
+      "year": "Rok použití",
+      "quarter": "Čtvrtletí",
+      "decisive_from": "Rozhodné období od",
+      "decisive_to": "Rozhodné období do",
+      "gross_minor": "Započitatelná mzda (haléře)",
+      "allocated_minor": "Poměrná část delších odměn (haléře)",
+      "worked_minutes": "Odpracované minuty",
+      "worked_days": "Odpracované dny",
+      "probable_minor": "Pravděpodobný hodinový výdělek (haléře)",
+      "rationale": "Odůvodnění pravděpodobného výdělku",
+      "create": "Vypočítat snapshot"
+    },
+    "average_source": {
+      "actual": "Skutečný",
+      "probable": "Pravděpodobný"
+    },
+    "average_status": {
+      "manual_review": "Čeká na ruční kontrolu",
+      "approved": "Schválený snapshot",
+      "superseded": "Nahrazen novější revizí"
+    },
+    "leave": {
+      "balance": "Zůstatek dovolené (h:mm)",
+      "year": "Rok",
+      "entitlement": "Výpočet nároku",
+      "weekly_minutes": "Týdenní pracovní doba (minuty)",
+      "weeks": "Výměra dovolené (týdny)",
+      "duration_days": "Nepřetržité trvání (dny)",
+      "worked_equivalent": "Započitatelná doba (minuty)",
+      "rationale": "Ruční posouzení započitatelných dob",
+      "calculate": "Spočítat a zapsat nárok",
+      "manual_entry": "Ruční položka ledgeru",
+      "entry_type": "Typ položky",
+      "effective_date": "Datum účinnosti",
+      "minutes_delta": "Změna v minutách",
+      "reason": "Důvod",
+      "add": "Přidat položku",
+      "ledger": "Historie dovolené",
+      "types": {
+        "entitlement": "Nárok",
+        "carryover": "Převod",
+        "taken": "Čerpání",
+        "adjustment": "Oprava",
+        "shortening": "Krácení",
+        "overdrawn": "Přečerpání",
+        "payout": "Proplacení",
+        "reversal": "Reverze"
+      }
+    },
+    "messages": {
+      "load_failed": "Data absencí se nepodařilo načíst.",
+      "save_failed": "Změnu se nepodařilo uložit.",
+      "absence_created": "Absence byla založena.",
+      "approved": "Absence byla schválena.",
+      "rejected": "Absence byla zamítnuta.",
+      "cancelled": "Absence byla zrušena.",
+      "average_created": "Snapshot průměru byl vypočten.",
+      "average_approved": "Snapshot průměru byl schválen.",
+      "entitlement_created": "Nárok byl zapsán do ledgeru.",
+      "entry_created": "Položka ledgeru byla přidána."
     }
   }
 }

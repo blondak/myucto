@@ -418,6 +418,7 @@
     "payroll_overview": "Payroll overview",
     "payroll_people": "Employees",
     "payroll_time": "Time and shifts",
+    "payroll_absences": "Absence and leave",
     "payroll_settings": "Payroll settings",
     "settings": "Settings",
     "branding": "Branding",
@@ -985,6 +986,10 @@
       "activation": "Company activation",
       "persons": "Employee records",
       "employments": "Employment relationships",
+      "absences": "Absences",
+      "average_earnings": "Average earning",
+      "leave_ledger": "Leave ledger",
+      "dpn_compensation": "Sickness compensation",
       "payroll_runs": "Monthly payroll runs",
       "payslips": "Payslips and documents",
       "automatic_posting": "Automatic accounting posting",
@@ -10703,6 +10708,70 @@
       "unit_price": "Unit price",
       "total_open": "Total open",
       "footer_note": "The preview shows work in progress that has not been invoiced yet. The data updates continuously."
+    }
+  },
+  "payroll_absence": {
+    "title": "Absence, leave and sickness",
+    "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
+    "manual_review": "Manual review required",
+    "review_notice": "Results are working papers. Before approval, verify the decisive period, qualifying time, published shifts and statutory conditions for the employee.",
+    "employment": "Employment",
+    "from": "From",
+    "to": "To",
+    "period": "Period",
+    "note": "Note",
+    "select": "Select…",
+    "tabs": {"label": "Absence records", "absences": "Absences", "averages": "Average earning", "leave": "Leave"},
+    "types": {
+      "vacation": "Annual leave", "dpn": "Temporary incapacity for work", "quarantine": "Quarantine",
+      "ocr": "Care allowance", "long_term_care": "Long-term care", "ppm": "Maternity benefit",
+      "paternity": "Paternity leave", "parental": "Parental leave", "unpaid_leave": "Unpaid leave",
+      "employee_obstacle": "Employee-side obstacle", "employer_obstacle": "Employer-side obstacle", "other": "Other absence"
+    },
+    "status": {"requested": "Pending", "approved": "Approved", "rejected": "Rejected", "cancelled": "Cancelled"},
+    "actions": {"approve": "Approve", "reject": "Reject", "cancel": "Cancel"},
+    "absences": {
+      "new": "New absence", "list": "Recorded absences", "empty": "No absences in the selected period.",
+      "type": "Absence type", "average": "Approved hourly average", "partial_first": "First day (minutes)",
+      "partial_last": "Last day (minutes)", "create": "Create absence",
+      "cancel_confirm": "Cancel this absence? Annual leave creates a traceable reversing entry.",
+      "correction_pending": "The related payroll run requires correction review."
+    },
+    "dpn": {
+      "insurance": "Sickness insurance participation confirmed",
+      "no_conflict": "No conflicting statutory benefit",
+      "first_day_worked": "The first scheduled shift was fully worked"
+    },
+    "averages": {
+      "new": "New average earning snapshot", "year": "Application year", "quarter": "Quarter",
+      "decisive_from": "Decisive period from", "decisive_to": "Decisive period to",
+      "gross_minor": "Qualifying earnings (minor units)", "allocated_minor": "Allocated long-term remuneration (minor units)",
+      "worked_minutes": "Minutes worked", "worked_days": "Days worked",
+      "probable_minor": "Probable hourly earning (minor units)", "rationale": "Probable earning rationale",
+      "create": "Calculate snapshot"
+    },
+    "average_source": {"actual": "Actual", "probable": "Probable"},
+    "average_status": {
+      "manual_review": "Pending manual review", "approved": "Approved snapshot", "superseded": "Superseded by a newer revision"
+    },
+    "leave": {
+      "balance": "Leave balance (h:mm)", "year": "Year", "entitlement": "Entitlement calculation",
+      "weekly_minutes": "Weekly hours (minutes)", "weeks": "Leave allowance (weeks)",
+      "duration_days": "Continuous duration (days)", "worked_equivalent": "Qualifying time (minutes)",
+      "rationale": "Manual assessment of qualifying time", "calculate": "Calculate and post entitlement",
+      "manual_entry": "Manual ledger entry", "entry_type": "Entry type", "effective_date": "Effective date",
+      "minutes_delta": "Change in minutes", "reason": "Reason", "add": "Add entry", "ledger": "Leave history",
+      "types": {
+        "entitlement": "Entitlement", "carryover": "Carry-over", "taken": "Taken", "adjustment": "Adjustment",
+        "shortening": "Reduction", "overdrawn": "Overdrawn", "payout": "Payout", "reversal": "Reversal"
+      }
+    },
+    "messages": {
+      "load_failed": "Absence data could not be loaded.", "save_failed": "The change could not be saved.",
+      "absence_created": "Absence created.", "approved": "Absence approved.", "rejected": "Absence rejected.",
+      "cancelled": "Absence cancelled.", "average_created": "Average snapshot calculated.",
+      "average_approved": "Average snapshot approved.", "entitlement_created": "Entitlement posted to the ledger.",
+      "entry_created": "Ledger entry added."
     }
   }
 }

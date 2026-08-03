@@ -152,7 +152,41 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
-## 56a.9 Oprávnění a citlivé údaje
+## 56a.9 Absence, dovolená a DPN
+
+V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
+
+- absence se schvalovacím stavem a kontrolou překryvu;
+- čtvrtletní snapshot průměrného nebo pravděpodobného hodinového výdělku;
+- hodinový ledger dovolené, ve kterém oprava vytváří novou položku a nemaže historii.
+
+Nejprve vyber pracovní vztah a založ snapshot průměrného výdělku. Skutečný
+průměr používá započitatelnou mzdu a odpracované minuty v rozhodném období.
+Při méně než 21 odpracovaných dnech je povinný pravděpodobný hodinový výdělek
+a jeho odůvodnění. Snapshot musí projít ruční kontrolou a schválením; teprve
+potom jej lze připojit k absenci s náhradou.
+
+Nárok dovolené se vede v minutách. U DPP a DPČ výpočet používá zákonnou
+fiktivní týdenní pracovní dobu 20 hodin. Započitatelné a náhradní doby,
+změny úvazku, krácení a další právní okolnosti před uložením vždy ověř.
+Schválení čerpání zapíše zápornou položku podle publikovaných směn. Zrušení
+schváleného čerpání ji nemaže, ale vytvoří kladnou reverzi a označí absenci
+pro kontrolu případné opravy mzdy.
+
+Náhrada při DPN se počítá pouze z publikovaných směn v prvních 14 kalendářních
+dnech. Před schválením potvrď účast na nemocenském pojištění a vyloučení
+souběžné dávky. Pokud zaměstnanec první plánovanou směnu celou odpracoval,
+označ tuto skutečnost; čtrnáctidenní okno pak začíná následujícím dnem.
+Výsledek uchovává použitý průměr, redukční hranice, pravidla, zaokrouhlení
+a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
+
+> [!WARNING]
+> Agenda je označena **Vyžaduje ruční kontrolu**. Bez schváleného průměru,
+> publikovaného rozvrhu nebo potvrzených zákonných podmínek výpočet bezpečně
+> selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
+> aktuálně dostupné pouze pro legislativní ruleset roku 2026.
+
+## 56a.10 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
@@ -165,7 +199,7 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.10 Vztah k Mzdové rekapitulaci
+## 56a.11 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

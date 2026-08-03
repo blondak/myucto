@@ -64,6 +64,7 @@ use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
+use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
@@ -623,6 +624,17 @@ final class Routes
             $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
             $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);
             $g->put('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'update']);
+            $g->get('/time/context', [PayrollAbsenceAction::class, 'context']);
+            $g->get('/time/absences', [PayrollAbsenceAction::class, 'list']);
+            $g->post('/time/absences', [PayrollAbsenceAction::class, 'create']);
+            $g->post('/time/absences/{id:[0-9]+}/decision', [PayrollAbsenceAction::class, 'decision']);
+            $g->post('/time/absences/{id:[0-9]+}/cancel', [PayrollAbsenceAction::class, 'cancel']);
+            $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
+            $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
+            $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
+            $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
+            $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
+            $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
         });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.

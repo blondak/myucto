@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = 'bd09da6135f297af3356d32c043943043a82f04c68def65a670dfc97adcfe504';
+    private const EXPECTED_MANIFEST_SHA256 = '345fff051975d1be5bf2eac60bff2d92130e21c5260a05a5e4ee987a3349aed1';
 
     public function testCanonicalManifestIsByteStable(): void
     {

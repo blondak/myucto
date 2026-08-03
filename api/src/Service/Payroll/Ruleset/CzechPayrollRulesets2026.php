@@ -136,12 +136,19 @@ final class CzechPayrollRulesets2026
             'cz-payroll-2026.compensation-averages.v1',
             PayrollRulesetDomain::CompensationAverages,
             PayrollRulesetCapability::ManualReview,
-            [self::socialSecurity()],
+            [self::socialSecurity(), self::labourCode()],
             [
                 'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
-                'wage_compensation.reduction_boundaries' => PayrollRuleValue::manualReview(
-                    'Hourly reduction boundaries and absence-specific methods need a dedicated sourced fixture.',
+                'wage_compensation.compensation_rate' => PayrollRuleValue::rate('0.60'),
+                'wage_compensation.hourly_boundary_1_minor' => PayrollRuleValue::moneyMinor(28_578),
+                'wage_compensation.hourly_boundary_2_minor' => PayrollRuleValue::moneyMinor(42_858),
+                'wage_compensation.hourly_boundary_3_minor' => PayrollRuleValue::moneyMinor(85_698),
+                'wage_compensation.manual_review' => PayrollRuleValue::manualReview(
+                    'Eligibility, published-shift completeness, benefit conflicts and partial-shift breaks require payroll review.',
                 ),
+                'wage_compensation.reduction_band_1_rate' => PayrollRuleValue::rate('0.90'),
+                'wage_compensation.reduction_band_2_rate' => PayrollRuleValue::rate('0.60'),
+                'wage_compensation.reduction_band_3_rate' => PayrollRuleValue::rate('0.30'),
             ],
             $technicalReview,
         );
@@ -311,6 +318,16 @@ final class CzechPayrollRulesets2026
             'e-sbirka-civil-procedure',
             'e-Sbírka: občanský soudní řád č. 99/1963 Sb.',
             'https://www.e-sbirka.cz/sb/1963/99',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function labourCode(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-labour-code-current',
+            'MPSV: zákoník práce č. 262/2006 Sb., § 192 a § 351 až 362',
+            'https://ppropo.mpsv.cz/zakon_262_2006',
             self::RETRIEVED_ON,
         );
     }
