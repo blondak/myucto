@@ -19,8 +19,8 @@ final class SyntheticPayslipFixture
         int $taxBonusMinorUnits = 50_000,
     ): PayslipDocumentData {
         $netMinorUnits = 4_790_000
-            - 340_090
-            - 215_550
+            - 340_100
+            - 215_600
             - $healthMinimumTopUpMinorUnits
             - $taxAfterCreditsMinorUnits
             - 8_000
@@ -39,8 +39,8 @@ final class SyntheticPayslipFixture
                 new PayslipLine('Korekce minulého období', -10_000),
             ],
             grossMinorUnits: 4_790_000,
-            employeeSocialMinorUnits: 340_090,
-            employeeHealthMinorUnits: 215_550,
+            employeeSocialMinorUnits: 340_100,
+            employeeHealthMinorUnits: 215_600,
             healthMinimumTopUpMinorUnits: $healthMinimumTopUpMinorUnits,
             taxBaseMinorUnits: 4_790_000,
             taxBeforeCreditsMinorUnits: $taxBeforeCreditsMinorUnits,
@@ -55,7 +55,7 @@ final class SyntheticPayslipFixture
             ],
             roundingAdjustmentMinorUnits: 0,
             netMinorUnits: $netMinorUnits,
-            employerSocialMinorUnits: 1_187_920,
+            employerSocialMinorUnits: 1_188_000,
             employerHealthMinorUnits: 431_100,
             grossExpenseAccount: '521',
             grossLiabilityAccount: '331',

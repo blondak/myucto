@@ -53,7 +53,7 @@ final class PayslipPdfRendererTest extends TestCase
         self::assertSame(4_790_000, $source->grossMinorUnits);
         self::assertSame(-2_000, $source->otherDeductionLines[1]->amountMinorUnits);
         self::assertSame(8_000, $source->totalOtherDeductionsMinorUnits());
-        self::assertSame(4_276_360, $source->netMinorUnits);
+        self::assertSame(4_276_300, $source->netMinorUnits);
     }
 
     public function testHealthMinimumTopUpReducesNetPayExplicitly(): void
@@ -61,8 +61,8 @@ final class PayslipPdfRendererTest extends TestCase
         $source = SyntheticPayslipFixture::document(healthMinimumTopUpMinorUnits: 12_300);
 
         self::assertSame(12_300, $source->healthMinimumTopUpMinorUnits);
-        self::assertSame(4_264_060, $source->netMinorUnits);
-        self::assertSame(575_940, $source->totalEmployeeDeductionsMinorUnits());
+        self::assertSame(4_264_000, $source->netMinorUnits);
+        self::assertSame(576_000, $source->totalEmployeeDeductionsMinorUnits());
     }
 
     public function testRejectsTaxBonusTogetherWithPositiveTax(): void
