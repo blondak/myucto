@@ -20,11 +20,12 @@ final class PayrollPeopleRepository
     {
         $stmt = $this->peopleQuery();
         $stmt->execute([$supplierId, $supplierId]);
+        $people = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $people[] = $this->castPerson($this->normalizeRow($row));
+        }
 
-        return array_map(
-            fn (array $row): array => $this->castPerson($row),
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        );
+        return $people;
     }
 
     /** @return array<string,mixed>|null */
@@ -37,7 +38,7 @@ final class PayrollPeopleRepository
             return null;
         }
 
-        $person = $this->castPerson($row);
+        $person = $this->castPerson($this->normalizeRow($row));
         $employments = $this->db->pdo()->prepare(
             'SELECT id, code, relation_type, status, start_date, end_date,
                     is_legacy_projection, monthly_gross_minor, row_version
@@ -46,10 +47,10 @@ final class PayrollPeopleRepository
               ORDER BY is_legacy_projection DESC, start_date ASC, id ASC'
         );
         $employments->execute([$supplierId, $employeeId]);
-        $person['employments'] = array_map(
-            fn (array $employment): array => $this->castEmployment($employment),
-            $employments->fetchAll(PDO::FETCH_ASSOC),
-        );
+        $person['employments'] = [];
+        foreach ($employments->fetchAll(PDO::FETCH_ASSOC) as $employment) {
+            $person['employments'][] = $this->castEmployment($this->normalizeRow($employment));
+        }
 
         return $person;
     }
@@ -90,48 +91,133 @@ final class PayrollPeopleRepository
         return $this->db->pdo()->prepare($sql);
     }
 
-    /** @param array<string,mixed> $row @return array<string,mixed> */
+    /**
+     * @param array<string,string|int|bool|null> $row
+     * @return array<string,mixed>
+     */
     private function castPerson(array $row): array
     {
         $profileStatus = $row['profile_status'] === null
             ? 'missing'
-            : (string) $row['profile_status'];
-        $employmentCount = (int) $row['employment_count'];
+            : $this->stringValue($row, 'profile_status');
+        $employmentCount = $this->intValue($row, 'employment_count');
         $relationTypes = $row['relation_types'] === ''
             ? []
-            : explode(',', (string) $row['relation_types']);
+            : explode(',', $this->stringValue($row, 'relation_types'));
 
         return [
-            'id' => (int) $row['id'],
-            'full_name' => (string) $row['full_name'],
-            'is_active' => (bool) $row['is_active'],
+            'id' => $this->intValue($row, 'id'),
+            'full_name' => $this->stringValue($row, 'full_name'),
+            'is_active' => $this->boolValue($row, 'is_active'),
             'profile_status' => $profileStatus,
-            'legacy_taxpayer_type' => (string) $row['legacy_taxpayer_type'],
-            'legacy_employment_type' => (string) $row['legacy_employment_type'],
+            'legacy_taxpayer_type' => $this->stringValue($row, 'legacy_taxpayer_type'),
+            'legacy_employment_type' => $this->stringValue($row, 'legacy_employment_type'),
             'employment_count' => $employmentCount,
             'relation_types' => $relationTypes,
             'needs_setup' => $profileStatus !== 'ready' || $employmentCount === 0,
         ];
     }
 
-    /** @param array<string,mixed> $row @return array<string,mixed> */
+    /**
+     * @param array<string,string|int|bool|null> $row
+     * @return array<string,mixed>
+     */
     private function castEmployment(array $row): array
     {
-        $relationType = (string) $row['relation_type'];
+        $relationType = $this->stringValue($row, 'relation_type');
 
         return [
-            'id' => (int) $row['id'],
-            'code' => (string) $row['code'],
+            'id' => $this->intValue($row, 'id'),
+            'code' => $this->stringValue($row, 'code'),
             'relation_type' => $relationType,
-            'status' => (string) $row['status'],
-            'start_date' => $row['start_date'] === null ? null : (string) $row['start_date'],
-            'end_date' => $row['end_date'] === null ? null : (string) $row['end_date'],
-            'is_legacy_projection' => (bool) $row['is_legacy_projection'],
+            'status' => $this->stringValue($row, 'status'),
+            'start_date' => $this->nullableStringValue($row, 'start_date'),
+            'end_date' => $this->nullableStringValue($row, 'end_date'),
+            'is_legacy_projection' => $this->boolValue($row, 'is_legacy_projection'),
             'monthly_gross_minor' => $row['monthly_gross_minor'] === null
                 ? null
-                : (int) $row['monthly_gross_minor'],
-            'row_version' => (int) $row['row_version'],
+                : $this->intValue($row, 'monthly_gross_minor'),
+            'row_version' => $this->intValue($row, 'row_version'),
             'accounting' => ($this->accounting)($relationType),
         ];
+    }
+
+    /** @return array<string,string|int|bool|null> */
+    private function normalizeRow(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new \UnexpectedValueException('Databáze vrátila neplatný řádek zaměstnance.');
+        }
+
+        $row = [];
+        foreach ($value as $key => $cell) {
+            if (!is_string($key)
+                || (!is_string($cell) && !is_int($cell) && !is_bool($cell) && $cell !== null)
+            ) {
+                throw new \UnexpectedValueException('Databáze vrátila neplatnou hodnotu zaměstnance.');
+            }
+            $row[$key] = $cell;
+        }
+
+        return $row;
+    }
+
+    /** @param array<string,string|int|bool|null> $row */
+    private function stringValue(array $row, string $key): string
+    {
+        $value = $row[$key] ?? null;
+        if (is_string($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_bool($value)) {
+            return (string) (int) $value;
+        }
+
+        throw new \UnexpectedValueException("Databázové pole {$key} není řetězec.");
+    }
+
+    /** @param array<string,string|int|bool|null> $row */
+    private function nullableStringValue(array $row, string $key): ?string
+    {
+        return ($row[$key] ?? null) === null
+            ? null
+            : $this->stringValue($row, $key);
+    }
+
+    /** @param array<string,string|int|bool|null> $row */
+    private function intValue(array $row, string $key): int
+    {
+        $value = $row[$key] ?? null;
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_bool($value)) {
+            return $value ? 1 : 0;
+        }
+        if (is_string($value)) {
+            $validated = filter_var($value, FILTER_VALIDATE_INT);
+            if (is_int($validated)) {
+                return $validated;
+            }
+        }
+
+        throw new \UnexpectedValueException("Databázové pole {$key} není celé číslo.");
+    }
+
+    /** @param array<string,string|int|bool|null> $row */
+    private function boolValue(array $row, string $key): bool
+    {
+        $value = $row[$key] ?? null;
+        if (is_bool($value)) {
+            return $value;
+        }
+        if ($value === 0 || $value === '0') {
+            return false;
+        }
+        if ($value === 1 || $value === '1') {
+            return true;
+        }
+
+        throw new \UnexpectedValueException("Databázové pole {$key} není boolean.");
     }
 }

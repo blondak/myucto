@@ -24,13 +24,13 @@ final class PayrollPeopleAction
     public function list(Request $request, Response $response): Response
     {
         if (!$this->requireSession($request, $response, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
         if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
 
         return Json::ok($response, [
@@ -42,13 +42,13 @@ final class PayrollPeopleAction
     public function detail(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireSession($request, $response, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
         if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
-            return $error;
+            return $this->guardFailure($error);
         }
 
         $person = $this->people->findForTenant(
@@ -78,5 +78,14 @@ final class PayrollPeopleAction
         }
         $error = null;
         return true;
+    }
+
+    private function guardFailure(?Response $error): Response
+    {
+        if ($error === null) {
+            throw new \LogicException('Payroll guard selhal bez chybové odpovědi.');
+        }
+
+        return $error;
     }
 }
