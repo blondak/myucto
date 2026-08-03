@@ -67,6 +67,7 @@ use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
+use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
@@ -601,6 +602,19 @@ final class Routes
             $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
+            $g->get('/documents', [PayrollDocumentAction::class, 'list']);
+            $g->post(
+                '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
+                [PayrollDocumentAction::class, 'generateBundle'],
+            );
+            $g->post(
+                '/documents/{documentId:[0-9]+}/download-grant',
+                [PayrollDocumentAction::class, 'grant'],
+            );
+            $g->get(
+                '/documents/{documentId:[0-9]+}/download',
+                [PayrollDocumentAction::class, 'download'],
+            );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);

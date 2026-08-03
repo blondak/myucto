@@ -188,20 +188,42 @@ a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
 > selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
 > aktuálně dostupné pouze pro legislativní ruleset roku 2026.
 
-## 56a.10 Oprávnění a citlivé údaje
+## 56a.10 Dokumenty a měsíční balíček
+
+V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
+uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
+číslo revize, čas vytvoření a velikost. Na telefonu se tabulka mění na karty.
+
+Stažení nejprve získá krátkodobé jednorázové oprávnění a potom soubor předá
+prohlížeči. Původní dokument se při opravě nikdy nepřepisuje. Nový výstup má
+vlastní revizi a původní zůstává dohledatelný.
+
+Pro každou poslední schválenou revizi období lze vytvořit měsíční ZIP. Obsahuje
+právě ty dokumenty, které už byly k revizi archivovány, a strojově čitelný
+manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
+revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
+
+> [!WARNING]
+> Centrum dokumentů je zatím určeno k ruční kontrole. Dávková tvorba všech
+> pásek, mzdových listů a potvrzení ještě není zapojená, takže prázdný nebo
+> neúplný balíček neznamená, že jsou všechny povinné výstupy hotové.
+
+## 56a.11 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
 jen z přihlášené webové relace, ne přes běžný bearer token.
 Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyžadují
 `payroll.employment.write`; bez něj je detail pouze pro čtení.
+Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvořit
+měsíční balíček.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.11 Vztah k Mzdové rekapitulaci
+## 56a.12 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

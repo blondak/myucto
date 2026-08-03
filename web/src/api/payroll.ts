@@ -679,6 +679,49 @@ export interface PayrollInstitutionAccountUpdatePayload {
   verified_on: string
 }
 
+export type PayrollDocumentKind =
+  | 'payslip'
+  | 'payroll_sheet'
+  | 'taxable_income_certificate'
+  | 'employment_certificate'
+  | 'average_earnings_certificate'
+  | 'monthly_bundle'
+
+export interface PayrollDocument {
+  id: number
+  run_id: number
+  revision_id: number
+  revision_no?: number
+  revision_status?: 'approved' | 'superseded'
+  office_id?: number | null
+  office_name?: string | null
+  employee_id: number | null
+  employee_name?: string | null
+  document_kind: PayrollDocumentKind
+  document_revision_no?: number
+  supersedes_document_id?: number | null
+  file_sha256: string
+  size_bytes: number
+  mime_type: 'application/pdf' | 'application/zip'
+  suggested_filename: string
+  created_at: string
+}
+
+export interface PayrollDocumentRevision {
+  run_id: number
+  revision_id: number
+  revision_no: number
+  status: 'approved' | 'superseded'
+  office_id: number | null
+  office_name: string | null
+}
+
+export interface PayrollDocumentList {
+  period: string
+  revisions: PayrollDocumentRevision[]
+  items: PayrollDocument[]
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -733,6 +776,38 @@ export const payrollApi = {
   updateInstitutionAccount: (id: number, payload: PayrollInstitutionAccountUpdatePayload) =>
     api.put<{ account: PayrollInstitutionAccount }>(`/payroll/settings/institution-accounts/${id}`, payload)
       .then(response => response.data.account),
+  listDocuments: (period: string) =>
+    api.get<PayrollDocumentList>('/payroll/documents', { params: { period } })
+      .then(response => response.data),
+  generateMonthlyBundle: (runId: number, revisionId: number, idempotencyKey: string) =>
+    api.post<PayrollDocument>(
+      `/payroll/runs/${runId}/revisions/${revisionId}/documents/monthly-bundle`,
+      {},
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  downloadDocument: async (payrollDocument: PayrollDocument): Promise<void> => {
+    const grant = await api.post<{ token: string; expires_at: string }>(
+      `/payroll/documents/${payrollDocument.id}/download-grant`,
+    ).then(response => response.data)
+    const response = await api.get<Blob>(
+      `/payroll/documents/${payrollDocument.id}/download`,
+      {
+        responseType: 'blob',
+        headers: { 'X-Payroll-Download-Token': grant.token },
+      },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = payrollDocument.suggested_filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   timeMonth: (period: string, incomplete = false) =>
     api.get<PayrollTimeOverview>('/payroll/time/month', { params: { period, incomplete: incomplete ? 1 : 0 } })
       .then(response => response.data),

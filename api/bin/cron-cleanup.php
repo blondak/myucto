@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 /**
  * Denní cleanup — login_attempts (>24h), expirované a staré odvolané sessions,
- * použité password_resets, login_otps + trusted_devices, WebAuthn flow/proofy
- * a log files >90 dní.
+ * použité password_resets, login_otps + trusted_devices, WebAuthn flow/proofy,
+ * expirované jednorázové granty a log files >90 dní.
  *
  * POZN: PDF se NEMAŽE. Aktivní cache může pominout (renderer ji znovu vytvoří),
  * ale archivovaná historie (storage/invoices/sup-N/_archive) obsahuje verze
@@ -83,6 +83,14 @@ $report['trusted_devices'] = (int) $n;
 $n = $pdo->exec("DELETE FROM api_request_log WHERE ts < NOW() - INTERVAL 90 DAY");
 $report['api_request_log'] = (int) $n;
 
+// 3e) Jednorázové mzdové download granty — audit stažení zůstává v activity_log.
+$n = $pdo->exec(
+    'DELETE FROM payroll_document_download_grants
+      WHERE expires_at < NOW() - INTERVAL 1 DAY
+         OR used_at < NOW() - INTERVAL 1 DAY'
+);
+$report['payroll_download_grants'] = (int) $n;
+
 // 4) ARES/VIES cache — starší 30 dní
 $n = $pdo->exec("DELETE FROM ares_cache WHERE fetched_at < NOW() - INTERVAL 30 DAY");
 $report['ares_cache'] = (int) $n;
@@ -113,6 +121,9 @@ $stmt = $pdo->query(
         AND status IN ('completed', 'failed', 'cancelled')
         AND COALESCE(finished_at, created_at) < NOW() - INTERVAL 7 DAY"
 );
+if ($stmt === false) {
+    throw new RuntimeException('Monthly export cleanup query failed.');
+}
 $exportRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $exportFilesDeleted = 0;
 $exportIds = [];

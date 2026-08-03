@@ -280,6 +280,9 @@
     "payroll-absences": [
       "payroll_absence"
     ],
+    "payroll-documents": [
+      "payroll"
+    ],
     "payroll-settings": [
       "payroll"
     ],
