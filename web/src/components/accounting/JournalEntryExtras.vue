@@ -196,8 +196,12 @@ onMounted(loadAttachments)
 
 <template>
   <div class="mt-3 space-y-4">
-    <!-- ── description (§35) ── -->
-    <div class="border-t border-neutral-200 pt-3">
+    <!-- ── description (§35) ──
+         Jen tam, kde se dá editovat. U zápisu řízeného zdrojovým dokladem je
+         popis read-only a řádek deníku ho ukazuje ve sloupci POPIS o kus výš,
+         takže blok jen zopakoval hlavičku a přidal poznámku, že se edituje
+         jinde. -->
+    <div v-if="canEditDescription" class="border-t border-neutral-200 pt-3">
       <div class="flex items-start gap-2">
         <div class="min-w-0 flex-1">
           <div class="text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.description') }}</div>
