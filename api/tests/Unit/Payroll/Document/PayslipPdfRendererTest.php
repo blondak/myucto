@@ -71,10 +71,19 @@ final class PayslipPdfRendererTest extends TestCase
         $this->expectExceptionMessage('mutually exclusive');
 
         SyntheticPayslipFixture::document(
-            taxCreditsMinorUnits: 0,
+            taxNonRefundableCreditsMinorUnits: 0,
+            taxChildCreditMinorUnits: 0,
             taxAfterCreditsMinorUnits: 718_500,
             taxBonusMinorUnits: 50_000,
         );
+    }
+
+    public function testRejectsTaxBonusThatDoesNotFollowFromCredits(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Tax bonus does not match');
+
+        SyntheticPayslipFixture::document(taxBonusMinorUnits: 90_000);
     }
 
     public function testRejectsACompromisedNetAmount(): void
@@ -97,7 +106,8 @@ final class PayslipPdfRendererTest extends TestCase
             healthMinimumTopUpMinorUnits: 0,
             taxBaseMinorUnits: 100_000,
             taxBeforeCreditsMinorUnits: 15_000,
-            taxCreditsMinorUnits: 0,
+            taxNonRefundableCreditsMinorUnits: 0,
+            taxChildCreditMinorUnits: 0,
             taxAfterCreditsMinorUnits: 15_000,
             taxBonusMinorUnits: 0,
             otherDeductionLines: [new PayslipLine('Syntetická srážka', 1_000)],

@@ -12,7 +12,8 @@ final class SyntheticPayslipFixture
     public static function document(
         int $healthMinimumTopUpMinorUnits = 0,
         int $taxBeforeCreditsMinorUnits = 718_500,
-        int $taxCreditsMinorUnits = 768_500,
+        int $taxNonRefundableCreditsMinorUnits = 257_000,
+        int $taxChildCreditMinorUnits = 511_500,
         int $taxAfterCreditsMinorUnits = 0,
         int $taxBonusMinorUnits = 50_000,
     ): PayslipDocumentData {
@@ -42,7 +43,8 @@ final class SyntheticPayslipFixture
             healthMinimumTopUpMinorUnits: $healthMinimumTopUpMinorUnits,
             taxBaseMinorUnits: 4_790_000,
             taxBeforeCreditsMinorUnits: $taxBeforeCreditsMinorUnits,
-            taxCreditsMinorUnits: $taxCreditsMinorUnits,
+            taxNonRefundableCreditsMinorUnits: $taxNonRefundableCreditsMinorUnits,
+            taxChildCreditMinorUnits: $taxChildCreditMinorUnits,
             taxAfterCreditsMinorUnits: $taxAfterCreditsMinorUnits,
             taxBonusMinorUnits: $taxBonusMinorUnits,
             otherDeductionLines: [

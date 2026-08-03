@@ -28,7 +28,8 @@ final readonly class PayslipDocumentData
         public int $healthMinimumTopUpMinorUnits,
         public int $taxBaseMinorUnits,
         public int $taxBeforeCreditsMinorUnits,
-        public int $taxCreditsMinorUnits,
+        public int $taxNonRefundableCreditsMinorUnits,
+        public int $taxChildCreditMinorUnits,
         public int $taxAfterCreditsMinorUnits,
         public int $taxBonusMinorUnits,
         public array $otherDeductionLines,
@@ -74,7 +75,8 @@ final readonly class PayslipDocumentData
             $healthMinimumTopUpMinorUnits,
             $taxBaseMinorUnits,
             $taxBeforeCreditsMinorUnits,
-            $taxCreditsMinorUnits,
+            $taxNonRefundableCreditsMinorUnits,
+            $taxChildCreditMinorUnits,
             $taxAfterCreditsMinorUnits,
             $taxBonusMinorUnits,
             $netMinorUnits,
@@ -98,12 +100,22 @@ final readonly class PayslipDocumentData
             throw new \InvalidArgumentException('The aggregate of other deductions must not be negative.');
         }
 
-        if ($taxAfterCreditsMinorUnits !== max(0, $taxBeforeCreditsMinorUnits - $taxCreditsMinorUnits)) {
+        if ($taxBonusMinorUnits > 0 && $taxAfterCreditsMinorUnits > 0) {
+            throw new \InvalidArgumentException('Tax bonus and positive tax after credits are mutually exclusive.');
+        }
+
+        $taxAfterNonRefundableCredits = max(
+            0,
+            $taxBeforeCreditsMinorUnits - $taxNonRefundableCreditsMinorUnits,
+        );
+        $expectedTaxAfterCredits = max(0, $taxAfterNonRefundableCredits - $taxChildCreditMinorUnits);
+        if ($taxAfterCreditsMinorUnits !== $expectedTaxAfterCredits) {
             throw new \InvalidArgumentException('Tax after credits does not match the tax breakdown.');
         }
 
-        if ($taxBonusMinorUnits > 0 && $taxAfterCreditsMinorUnits > 0) {
-            throw new \InvalidArgumentException('Tax bonus and positive tax after credits are mutually exclusive.');
+        $expectedTaxBonus = max(0, $taxChildCreditMinorUnits - $taxAfterNonRefundableCredits);
+        if ($taxBonusMinorUnits !== $expectedTaxBonus) {
+            throw new \InvalidArgumentException('Tax bonus does not match the refundable child credit breakdown.');
         }
 
         $expectedNet = $this->sumExactly([
@@ -180,7 +192,8 @@ final readonly class PayslipDocumentData
      *   health_minimum_top_up_minor_units:int,
      *   tax_base_minor_units:int,
      *   tax_before_credits_minor_units:int,
-     *   tax_credits_minor_units:int,
+     *   tax_non_refundable_credits_minor_units:int,
+     *   tax_child_credit_minor_units:int,
      *   tax_after_credits_minor_units:int,
      *   tax_bonus_minor_units:int,
      *   other_deduction_lines:list<array{label:string,amount_minor_units:int}>,
@@ -220,7 +233,8 @@ final readonly class PayslipDocumentData
             'health_minimum_top_up_minor_units' => $this->healthMinimumTopUpMinorUnits,
             'tax_base_minor_units' => $this->taxBaseMinorUnits,
             'tax_before_credits_minor_units' => $this->taxBeforeCreditsMinorUnits,
-            'tax_credits_minor_units' => $this->taxCreditsMinorUnits,
+            'tax_non_refundable_credits_minor_units' => $this->taxNonRefundableCreditsMinorUnits,
+            'tax_child_credit_minor_units' => $this->taxChildCreditMinorUnits,
             'tax_after_credits_minor_units' => $this->taxAfterCreditsMinorUnits,
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
             'other_deduction_lines' => array_map(

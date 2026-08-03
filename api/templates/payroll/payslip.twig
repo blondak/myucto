@@ -150,8 +150,12 @@
                         <td class="amount">{{ tax_before_credits_minor_units|minor_money }} {{ currency }}</td>
                     </tr>
                     <tr class="credit">
-                        <td>Uplatněné slevy</td>
-                        <td class="amount">-{{ tax_credits_minor_units|minor_money }} {{ currency }}</td>
+                        <td>Slevy na dani</td>
+                        <td class="amount">-{{ tax_non_refundable_credits_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="credit">
+                        <td>Zvýhodnění na děti</td>
+                        <td class="amount">-{{ tax_child_credit_minor_units|minor_money }} {{ currency }}</td>
                     </tr>
                     <tr>
                         <td>Daň po slevách</td>
