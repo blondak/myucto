@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -134,7 +134,37 @@ async function load(reset = true) {
     loadingMore.value = false
   }
 }
-onMounted(() => load(true))
+onMounted(() => { void load(true).then(highlightLinkedTx) })
+
+/*
+ * Přechod na JINÝ výpis přes odkaz „Druhá noha" mění jen parametr routy, takže
+ * vue-router komponentu recykluje a `onMounted` se znovu nespustí. Bez tohohle
+ * watcheru se přepsala URL, ale obsah zůstal ze starého výpisu — klik vypadal,
+ * že nedělá vůbec nic.
+ */
+watch(() => route.params.id, (id, previous) => {
+  if (id === previous) return
+  statement.value = null
+  load(true).then(highlightLinkedTx)
+})
+
+/**
+ * `?tx=` z odkazu „Druhá noha" — doskroluje na protějšek a probleskne ho.
+ * Bez toho uživatel přistál na výpisu, kde nešlo poznat, který ze čtyř řádků
+ * je ten hledaný, a proklik vypadal k ničemu.
+ */
+async function highlightLinkedTx(): Promise<void> {
+  const id = Number(route.query.tx)
+  if (!Number.isInteger(id) || id <= 0) return
+  await nextTick()
+  const row = document.querySelector<HTMLElement>(`[data-tx-id="${id}"]`)
+  if (!row) return
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  row.classList.add('row-flash')
+  // Třídu je nutné sundat, jinak by se animace nespustila při druhém příchodu
+  // na tentýž řádek (CSS animace se přehraje jen při nasazení třídy).
+  setTimeout(() => row.classList.remove('row-flash'), 2000)
+}
 
 // Změna filtru stavu spárování → reset na 1. stránku (server-side filtr).
 watch([statusFilter, postingFilter], () => {

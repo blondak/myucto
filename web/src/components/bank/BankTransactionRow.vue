@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
@@ -73,6 +73,17 @@ function statusLabel(s: string): string {
   const key = `bank.match_status.${s}`
   const label = t(key)
   return label === key ? s : label
+}
+
+/**
+ * Odkaz na druhou nohu vlastního převodu.
+ *
+ * Míří na konkrétní pohyb, ne jen na výpis: všechny převody mezi dvěma účty
+ * končí na tomtéž výpisu, takže bez `tx` uživatel přistál na stránce, kde nebylo
+ * poznat, který z řádků je protějšek — a proklik působil, že nedělá nic.
+ */
+function pairLink(pair: { statement_id: number; tx_id: number }): RouteLocationRaw {
+  return { path: `/bank/${pair.statement_id}`, query: { tx: String(pair.tx_id) } }
 }
 
 function transferProvenance(tx: BankTransaction): AutomationProvenance {
@@ -158,7 +169,7 @@ function candidateReject() {
 
 <template>
   <template v-if="layout === 'desktop'">
-    <tr :class="{ 'opacity-50': tx.match_status === 'ignored' }">
+    <tr :data-tx-id="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
       <td class="px-3 py-2 text-xs">
         {{ formatDate(tx.posted_at) }}
         <RouterLink v-if="showStatementLink" :to="`/bank/${tx.statement_id}?posting_status=unposted`"
@@ -223,7 +234,7 @@ function candidateReject() {
         </span>
         <div v-if="isDoubleEntry && tx.posting?.transfer" class="mt-1 flex flex-col items-center gap-0.5">
           <WhyChip :provenance="transferProvenance(tx)" :title="transferTooltip(tx)" />
-          <RouterLink v-if="tx.posting.transfer.pair" :to="`/bank/${tx.posting.transfer.pair.statement_id}`"
+          <RouterLink v-if="tx.posting.transfer.pair" :to="pairLink(tx.posting.transfer.pair)"
             class="text-[11px] text-primary-600 hover:underline whitespace-nowrap">
             {{ t('bank.transfer.pair_link', { date: formatDate(tx.posting.transfer.pair.posted_at) }) }}
           </RouterLink>
@@ -275,7 +286,7 @@ function candidateReject() {
         <WhyChip v-if="isDoubleEntry && tx.posting?.transfer"
           :provenance="transferProvenance(tx)" :title="transferTooltip(tx)" />
         <RouterLink v-if="isDoubleEntry && tx.posting?.transfer?.pair"
-          :to="`/bank/${tx.posting.transfer.pair.statement_id}`"
+          :to="pairLink(tx.posting.transfer.pair)"
           class="text-[11px] text-primary-600 hover:underline whitespace-nowrap">
           {{ t('bank.transfer.pair_link', { date: formatDate(tx.posting.transfer.pair.posted_at) }) }}
         </RouterLink>
