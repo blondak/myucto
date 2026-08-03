@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockTake, type Warehouse } from '@/api/stock'
@@ -28,6 +28,19 @@ async function loadList() {
 }
 
 const createOpen = ref(false)
+
+/**
+ * Escape zavírá dialog nové inventury. Ten je psaný ručně (ne sdílený Modal.vue,
+ * který Escape umí), takže z něj šlo ven jen křížkem nebo Zrušit.
+ */
+function onCreateEscape(e: KeyboardEvent) {
+  if (e.key === 'Escape' && createOpen.value) {
+    e.stopPropagation()
+    createOpen.value = false
+  }
+}
+onMounted(() => document.addEventListener('keydown', onCreateEscape))
+onBeforeUnmount(() => document.removeEventListener('keydown', onCreateEscape))
 const createForm = reactive({
   warehouse_id: null as number | null,
   take_date: new Date().toISOString().slice(0, 10),

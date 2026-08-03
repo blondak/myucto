@@ -91,7 +91,23 @@ final class BankPostingRulesFlowTest extends BankPostingTestCase
             'debit_account_code' => '221', 'credit_account_code' => '311', // saldokonto na ne-bankovní straně
         ]);
         self::assertSame(422, $res['status']);
-        self::assertSame('rule_account_forbidden', $res['body']['error']['code'] ?? null);
+        self::assertSame('rule_saldo_forbidden', $res['body']['error']['code'] ?? null);
+    }
+
+    /**
+     * Špatná bankovní strana má vlastní kód, ne sdílený se saldokontem. Dokud
+     * sdílely jeden, dostal uživatel u nebankovního účtu na bankovní straně
+     * hlášku o párování faktur — a neměl podle čeho pravidlo opravit.
+     */
+    public function testCreateRuleWithNonBankSideRejectedWithOwnCode(): void
+    {
+        $action = $this->container->get(BankPostingRuleAction::class);
+        $res = $this->callAction($action, 'create', 'POST', 'accountant', [
+            'name' => 'Špatná strana', 'direction' => 'incoming', 'counterparty_account' => '12345',
+            'debit_account_code' => '518', 'credit_account_code' => '602', // na MD chybí 221
+        ]);
+        self::assertSame(422, $res['status']);
+        self::assertSame('rule_bank_side_required', $res['body']['error']['code'] ?? null);
     }
 
     public function testGenericUpdateCannotBypassPromotionWorkflow(): void

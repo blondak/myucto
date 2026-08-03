@@ -6300,7 +6300,8 @@
       "err_refund_not_credit_note": "Platba je navázaná na fakturu, vratka patří na dobropis.",
       "err_error": "Zaúčtování se nezdařilo.",
       "err_generic": "Zaúčtování se nezdařilo.",
-      "dashboard_card": "Banka: {count} plateb čeká na zaúčtování"
+      "dashboard_card": "Banka: {count} plateb čeká na zaúčtování",
+      "err_rule_bank_side": "Bankovní strana pravidla musí být účet 221 — u příchozí platby na MD, u odchozí na D."
     },
     "idoklad_source_badge": "iDoklad",
     "idoklad_source_hint": "Měsíční souhrn bankovních pohybů importovaných z iDokladu (ne nahraný výpis). GPC/PDF výpis z banky má přednost.",

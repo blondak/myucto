@@ -163,11 +163,11 @@ final class BankRuleTemplateAdminAction
         $bank = $data['direction'] === 'incoming' ? $debit : $credit;
         $counter = $data['direction'] === 'incoming' ? $credit : $debit;
         if (!str_starts_with($bank, '221')) {
-            throw new PostingException('rule_account_forbidden', 'Bankovní strana předkontace musí používat účet 221.', 422);
+            throw new PostingException('rule_bank_side_required', 'Bankovní strana předkontace musí používat účet 221.', 422);
         }
         foreach (self::SALDO_BLACKLIST as $prefix) {
             if (str_starts_with($counter, $prefix)) {
-                throw new PostingException('rule_account_forbidden', 'Šablona nesmí používat saldokontní protiúčet.', 422);
+                throw new PostingException('rule_saldo_forbidden', 'Šablona nesmí používat saldokontní protiúčet.', 422);
             }
         }
     }

@@ -2657,14 +2657,14 @@ final class BankPostingService
     {
         foreach (self::SALDO_BLACKLIST as $prefix) {
             if (str_starts_with($debit, $prefix) || str_starts_with($credit, $prefix)) {
-                throw new PostingException('rule_account_forbidden',
+                throw new PostingException('rule_saldo_forbidden',
                     'Platby faktur se párují, ne účtují pravidlem.');
             }
         }
         // Bankovní pohyb vždy hýbe bankou: incoming = MD 221x, outgoing = D 221x.
         $bank = $amount > 0 ? $debit : $credit;
         if (!str_starts_with($bank, '221')) {
-            throw new PostingException('rule_account_forbidden',
+            throw new PostingException('rule_bank_side_required',
                 'Bankovní strana zápisu musí být účet 221.');
         }
     }

@@ -189,7 +189,7 @@ final class TaxRemittanceFlowTest extends BankPostingTestCase
             $this->service->approveSuggestion($this->supplierId, (int) $suggestion['id'], $this->meta());
             self::fail('Saldokontní kontace detektoru nesmí projít schválením.');
         } catch (PostingException $e) {
-            self::assertSame('rule_account_forbidden', $e->errorCode);
+            self::assertSame('rule_saldo_forbidden', $e->errorCode);
         }
     }
 }

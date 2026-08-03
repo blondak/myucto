@@ -229,6 +229,10 @@ const ERROR_KEYS: Record<string, string> = {
   unknown_account:        'bank.posting.err_account_not_found',
   foreign_currency:       'bank.posting.err_foreign_currency',
   transaction_ignored:    'bank.posting.err_ignored',
+  // Dva různé důvody, dva různé kódy: dokud sdílely jeden, hlásila se u
+  // špatné bankovní strany hláška o saldokontu a uživatel neměl co opravit.
+  rule_bank_side_required: 'bank.posting.err_rule_bank_side',
+  rule_saldo_forbidden:   'bank.posting.err_rule_account_forbidden',
   rule_account_forbidden: 'bank.posting.err_rule_account_forbidden',
   fx_rule_account_forbidden: 'bank.posting.err_fx_rule_account_forbidden',
   rule_criteria_missing:  'bank.posting.err_rule_criteria',

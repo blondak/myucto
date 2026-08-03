@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{ entityType: EntityType; entityId: number }>()
 
@@ -80,12 +81,15 @@ onMounted(load)
         {{ t('documents.panel_title') }}
         <span v-if="docs.length" class="text-xs text-neutral-400">({{ docs.length }})</span>
       </h3>
+      <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
+           v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
       <button
         v-if="auth.canWrite('documents.move')"
         type="button"
-        class="text-xs px-2 py-1 rounded border border-neutral-200 text-neutral-600 hover:bg-neutral-50"
+        :class="btnOutline('neutral')"
         @click="toggleAttach"
       >
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
         {{ t('documents.panel_attach') }}
       </button>
     </div>

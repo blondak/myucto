@@ -456,13 +456,13 @@ final class BankPostingRuleAction
         // R6: bankovní strana musí být 221* dle směru.
         $bankSide = $direction === 'incoming' ? $debit : $credit;
         if (!str_starts_with($bankSide, '221')) {
-            throw $this->err('rule_account_forbidden', 'Bankovní strana musí být účet 221 dle směru platby.');
+            throw $this->err('rule_bank_side_required', 'Bankovní strana musí být účet 221 dle směru platby.');
         }
         // H2: ne-bankovní strana nesmí být saldokontní.
         $nonBank = $direction === 'incoming' ? $credit : $debit;
         foreach (self::SALDO_BLACKLIST as $prefix) {
             if (str_starts_with($nonBank, $prefix)) {
-                throw $this->err('rule_account_forbidden', 'Platby faktur se párují, ne účtují pravidlem.');
+                throw $this->err('rule_saldo_forbidden', 'Platby faktur se párují, ne účtují pravidlem.');
             }
         }
     }
