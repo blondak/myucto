@@ -984,8 +984,10 @@
     "features": {
       "module_shell": "Module shell and dashboard",
       "activation": "Company activation",
+      "employer_settings": "Employer settings",
       "persons": "Employee records",
       "employments": "Employment relationships",
+      "time_attendance": "Attendance, calendars and shifts",
       "absences": "Absences",
       "average_earnings": "Average earning",
       "leave_ledger": "Leave ledger",

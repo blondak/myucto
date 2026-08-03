@@ -18,9 +18,20 @@ final class SupportMatrixTest extends TestCase
         $features = array_column($matrix['features'], null, 'key');
         self::assertTrue($features['module_shell']['available']);
         self::assertTrue($features['activation']['available']);
+        self::assertTrue($features['employer_settings']['available']);
+        self::assertTrue($features['persons']['available']);
+        self::assertTrue($features['employments']['available']);
+        self::assertTrue($features['time_attendance']['available']);
         self::assertFalse($features['payroll_runs']['available']);
         self::assertSame('supported', $features['payroll_runs']['status']);
         self::assertSame('not_supported', $features['direct_submission']['status']);
+
+        $employmentTypes = array_column($matrix['employment_types'], null, 'key');
+        self::assertTrue($employmentTypes['hpp']['available']);
+        self::assertTrue($employmentTypes['dpp']['available']);
+        self::assertTrue($employmentTypes['dpc']['available']);
+        self::assertTrue($employmentTypes['statutory_body']['available']);
+        self::assertFalse($employmentTypes['foreign_regime']['available']);
     }
 
     public function testEveryCapabilityHasKnownStatusAndEpic(): void

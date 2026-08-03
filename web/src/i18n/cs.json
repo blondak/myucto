@@ -984,8 +984,10 @@
     "features": {
       "module_shell": "Kostra a dashboard modulu",
       "activation": "Aktivace pro firmu",
+      "employer_settings": "Nastavení zaměstnavatele",
       "persons": "Osobní karty",
       "employments": "Pracovní vztahy",
+      "time_attendance": "Docházka, kalendáře a směny",
       "absences": "Absence",
       "average_earnings": "Průměrný výdělek",
       "leave_ledger": "Ledger dovolené",

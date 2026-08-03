@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-03-v2';
+    public const VERSION = '2026-08-03-v3';
     private const SUPPORTED_YEARS = [2024, 2025, 2026];
 
     public function supportsYear(int $year): bool
@@ -31,17 +31,19 @@ final class SupportMatrix
             'version' => self::VERSION,
             'supported_years' => self::SUPPORTED_YEARS,
             'employment_types' => [
-                ['key' => 'hpp', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-05'],
-                ['key' => 'dpp', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-05'],
-                ['key' => 'dpc', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-05'],
-                ['key' => 'statutory_body', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-05'],
+                ['key' => 'hpp', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
+                ['key' => 'dpp', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
+                ['key' => 'dpc', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
+                ['key' => 'statutory_body', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
                 ['key' => 'foreign_regime', 'status' => 'manual_review', 'available' => false, 'min_epic' => 'MZ-10'],
             ],
             'features' => [
                 ['key' => 'module_shell', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-00'],
                 ['key' => 'activation', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-00'],
-                ['key' => 'persons', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-04'],
-                ['key' => 'employments', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-05'],
+                ['key' => 'employer_settings', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-03'],
+                ['key' => 'persons', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-04'],
+                ['key' => 'employments', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
+                ['key' => 'time_attendance', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-06'],
                 ['key' => 'absences', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'average_earnings', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'leave_ledger', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
