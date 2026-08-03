@@ -20,7 +20,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
-import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm, btnIconSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
@@ -422,7 +422,12 @@ onMounted(load)
         :title="t('accounting.small_assets.empty')"
         :cta="canWrite ? t('accounting.small_assets.new') : undefined"
         @action="openNew" />
-      <div v-else class="overflow-x-auto">
+      <!-- Desktop tabulka + mobilní karty pod jedním `v-else`: samostatný
+           `v-else` na druhém bloku by se neměl čeho chytit, řetěz už spotřeboval
+           EmptyState. Devět sloupců se na telefon nevejde a za okrajem zůstávala
+           cena i stav. -->
+      <template v-else>
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500">
             <tr>
@@ -498,6 +503,70 @@ onMounted(load)
           </tfoot>
         </table>
       </div>
+
+      <!-- Mobil: karty. Akce jsou ikonové v jednom pruhu, stejně jako u banky
+           a plánu odpisů — pět textových tlačítek by kartu roztrhalo. -->
+      <div class="md:hidden divide-y divide-neutral-100">
+        <div v-for="card in items" :key="`m-${card.id}`" class="p-3 space-y-2">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-medium truncate">{{ card.name }}</div>
+              <div v-if="card.inventory_number" class="text-xs text-neutral-400 font-mono">{{ card.inventory_number }}</div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(card.price) }}</div>
+              <span class="inline-block px-2 py-0.5 rounded-full text-xs whitespace-nowrap mt-0.5" :class="STATUS_BADGE[card.status]">
+                {{ statusLabel(card.status) }}
+              </span>
+            </div>
+          </div>
+
+          <div class="text-xs text-neutral-500 space-y-0.5">
+            <div>{{ formatDate(card.acquisition_date) }} · {{ card.vendor_client_name || card.vendor_name || '—' }}</div>
+            <div v-if="card.location || card.responsible_person">
+              {{ card.location || '—' }}<span v-if="card.responsible_person"> · {{ card.responsible_person }}</span>
+            </div>
+            <div>
+              <RouterLink v-if="card.purchase_invoice_id"
+                :to="{ name: 'purchase-invoice-detail', params: { id: card.purchase_invoice_id } }"
+                class="text-primary-600 hover:underline">
+                {{ card.document_ref || t('accounting.small_assets.source_invoice') }}
+              </RouterLink>
+              <span v-else-if="card.cash_document_id">{{ card.document_ref || t('accounting.small_assets.source_cash') }}</span>
+              <span v-else class="text-neutral-400">{{ card.document_ref || t('accounting.small_assets.source_manual') }}</span>
+            </div>
+            <div v-if="card.status === 'sold' && card.sale_invoice_id">
+              <RouterLink :to="{ name: 'invoice-detail', params: { id: card.sale_invoice_id } }" class="text-primary-600 hover:underline">
+                {{ t('accounting.small_assets.sale_invoice_link') }}<span v-if="card.sold_at"> · {{ formatDate(card.sold_at) }}</span>
+              </RouterLink>
+            </div>
+          </div>
+
+          <div v-if="canWrite" class="flex items-center justify-end gap-1.5 pt-1">
+            <button @click="openEdit(card)" :class="btnIconSm('neutral')" :title="t('common.edit')" :aria-label="t('common.edit')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+            </button>
+            <button v-if="card.status === 'in_use'" @click="openSell(card)" :class="btnIconSm('primary')" :title="t('accounting.small_assets.sell')" :aria-label="t('accounting.small_assets.sell')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+            </button>
+            <button v-if="card.status === 'in_use'" @click="openDispose(card)" :class="btnIconSm('warning')" :title="t('accounting.small_assets.dispose')" :aria-label="t('accounting.small_assets.dispose')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" /></svg>
+            </button>
+            <button v-else @click="restoreCard(card)" :class="btnIconSm('success')" :title="t('accounting.small_assets.restore')" :aria-label="t('accounting.small_assets.restore')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+            </button>
+            <button @click="removeCard(card)" :class="btnIconSm('danger')" :title="t('common.delete')" :aria-label="t('common.delete')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="p-3 flex items-center justify-between text-sm font-medium border-t border-neutral-200">
+          <span>{{ t('accounting.small_assets.page_total') }}</span>
+          <span class="font-mono whitespace-nowrap">{{ formatMoney(pageTotal) }}</span>
+        </div>
+      </div>
+      </template>
 
       <div v-if="totalPages > 1" class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-neutral-100">
         <span class="text-xs text-neutral-500">{{ t('accounting.small_assets.count', { total }) }}</span>
