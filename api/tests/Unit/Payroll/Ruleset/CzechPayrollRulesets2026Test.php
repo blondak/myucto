@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = '212628957811415c951d28276a4b27927eb1d4eb23a608be4f9e07db36e1e509';
+    private const EXPECTED_MANIFEST_SHA256 = 'bd09da6135f297af3356d32c043943043a82f04c68def65a670dfc97adcfe504';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -84,6 +84,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'advance.rounding.base_above_100_czk' => ['text', 'ceil-to-100-czk'],
                 'advance.rounding.base_up_to_100_czk' => ['text', 'ceil-to-1-czk'],
                 'advance.rounding.result' => ['text', 'ceil-to-1-czk'],
+                'bonus.minimum_amount.monthly' => ['money_minor', 5_000],
                 'bonus.minimum_income.monthly' => ['money_minor', 1_120_000],
                 'bonus.minimum_income.yearly' => ['money_minor', 13_440_000],
                 'credit.child.first.monthly' => ['money_minor', 126_700],

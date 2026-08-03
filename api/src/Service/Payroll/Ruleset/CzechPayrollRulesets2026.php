@@ -47,6 +47,7 @@ final class CzechPayrollRulesets2026
                 'advance.rounding.base_above_100_czk' => PayrollRuleValue::text('ceil-to-100-czk'),
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
+                'bonus.minimum_amount.monthly' => PayrollRuleValue::moneyMinor(5_000),
                 'bonus.minimum_income.monthly' => PayrollRuleValue::moneyMinor(1_120_000),
                 'bonus.minimum_income.yearly' => PayrollRuleValue::moneyMinor(13_440_000),
                 'credit.child.first.monthly' => PayrollRuleValue::moneyMinor(126_700),
