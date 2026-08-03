@@ -416,6 +416,7 @@
     "section_taxes": "Daně",
     "section_payroll": "Mzdy",
     "payroll_overview": "Přehled mezd",
+    "payroll_people": "Zaměstnanci",
     "settings": "Nastavení",
     "branding": "Branding",
     "supplier_current": "Dodavatel",
@@ -565,6 +566,41 @@
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
     "load_failed": "Mzdový modul se nepodařilo načíst.",
+    "people": {
+      "title": "Zaměstnanci",
+      "subtitle": "Přehled osob a jejich pracovních vztahů pro nový mzdový modul.",
+      "shared_recap_hint": "Jde o stejné zaměstnance jako ve Mzdové rekapitulaci — nevzniká žádný druhý seznam.",
+      "load_failed": "Seznam zaměstnanců se nepodařilo načíst.",
+      "detail_load_failed": "Detail pracovních vztahů se nepodařilo načíst.",
+      "empty_title": "Zatím tu nejsou žádní zaměstnanci",
+      "empty_description": "Jakmile budou ve mzdové agendě dostupné osoby, zobrazí se zde jejich pracovní vztahy.",
+      "columns": {
+        "person": "Zaměstnanec",
+        "status": "Stav",
+        "relations": "Pracovní vztahy",
+        "count": "Počet vztahů",
+        "detail": "Detail"
+      },
+      "status": {
+        "active": "Aktivní",
+        "inactive": "Neaktivní"
+      },
+      "needs_setup": "Vyžaduje doplnění",
+      "show_detail": "Zobrazit vztahy",
+      "hide_detail": "Skrýt vztahy",
+      "detail_hint": "Pouze informační přehled — úpravy budou doplněny v další fázi.",
+      "legacy_projection": "Převzato z původní agendy",
+      "start_date": "Od",
+      "end_date": "Do",
+      "accounting": "Předkontace mezd / pojistného",
+      "relations": {
+        "employment": "Pracovní poměr (mimo výkon funkce)",
+        "dpp": "Dohoda o provedení práce",
+        "dpc": "Dohoda o pracovní činnosti",
+        "partner_dependent": "Příjem společníka",
+        "statutory_body": "Odměna za výkon funkce"
+      }
+    },
     "status": {
       "disabled": "Neaktivní",
       "setup": "Probíhá nastavení",

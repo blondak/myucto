@@ -267,6 +267,9 @@
     "payroll-dashboard": [
       "payroll"
     ],
+    "payroll-people": [
+      "payroll"
+    ],
     "accounting-accounts": [
       "accounting",
       "codebookTransfer",

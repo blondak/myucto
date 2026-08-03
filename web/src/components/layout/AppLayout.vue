@@ -381,6 +381,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'payroll',
       items: [
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey },
       ],
     } as NavSection] : []),
   ]

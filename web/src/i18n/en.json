@@ -416,6 +416,7 @@
     "section_taxes": "Taxes",
     "section_payroll": "Payroll",
     "payroll_overview": "Payroll overview",
+    "payroll_people": "Employees",
     "settings": "Settings",
     "branding": "Branding",
     "supplier_current": "Supplier",
@@ -565,6 +566,41 @@
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
     "load_failed": "The payroll module could not be loaded.",
+    "people": {
+      "title": "Employees",
+      "subtitle": "An overview of people and their employment relationships in the new payroll module.",
+      "shared_recap_hint": "These are the same employees as in Payroll recap — this does not create a second list.",
+      "load_failed": "The employee list could not be loaded.",
+      "detail_load_failed": "The employment-relationship detail could not be loaded.",
+      "empty_title": "There are no employees yet",
+      "empty_description": "People will appear here with their employment relationships as soon as they are available in payroll.",
+      "columns": {
+        "person": "Employee",
+        "status": "Status",
+        "relations": "Employment relationships",
+        "count": "Relationship count",
+        "detail": "Detail"
+      },
+      "status": {
+        "active": "Active",
+        "inactive": "Inactive"
+      },
+      "needs_setup": "Setup required",
+      "show_detail": "Show relationships",
+      "hide_detail": "Hide relationships",
+      "detail_hint": "Informational overview only — editing will be added in a later phase.",
+      "legacy_projection": "Imported from the legacy agenda",
+      "start_date": "From",
+      "end_date": "To",
+      "accounting": "Payroll / insurance posting",
+      "relations": {
+        "employment": "Employment (outside statutory office)",
+        "dpp": "Agreement to perform work",
+        "dpc": "Agreement to complete a job",
+        "partner_dependent": "Partner's income",
+        "statutory_body": "Statutory-office remuneration"
+      }
+    },
     "status": {
       "disabled": "Inactive",
       "setup": "Setup in progress",
