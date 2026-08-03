@@ -180,7 +180,10 @@ jobs:
           node-version: '24'
       - uses: pnpm/action-setup@v6
         with:
-          version: 11.13.0
+          # 11.13.0 je upstreamem označená jako rozbité vydání (`@pnpm/exe` bez
+          # binárky) a action-setup ji odmítne nainstalovat — bundle job pak spadne
+          # dřív, než se vůbec začne stavět. Držet na poslední funkční verzi.
+          version: 11.18.0
 
       - name: Composer install (production)
         working-directory: api
