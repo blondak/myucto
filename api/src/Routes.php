@@ -65,8 +65,10 @@ use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
+use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
+use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -582,6 +584,14 @@ final class Routes
         // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
         $app->group('/api/payroll', function ($g) {
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
+            $g->get('/components', [PayrollComponentsAction::class, 'list']);
+            $g->post('/components', [PayrollComponentsAction::class, 'create']);
+            $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
+            $g->get('/inputs', [PayrollInputsAction::class, 'list']);
+            $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);
+            $g->post('/inputs', [PayrollInputsAction::class, 'create']);
+            $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
+            $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
