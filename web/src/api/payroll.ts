@@ -79,6 +79,69 @@ export interface PayrollPersonResponse {
   person: PayrollPerson
 }
 
+export interface PayrollEmployerAccounts {
+  employment_gross_debit: string
+  employment_gross_credit: string
+  partner_gross_debit: string
+  partner_gross_credit: string
+  statutory_gross_debit: string
+  statutory_gross_credit: string
+  employer_insurance_debit: string
+  social_insurance_credit: string
+  health_insurance_credit: string
+  income_tax_credit: string
+  other_deductions_credit: string
+}
+
+export interface PayrollOffice {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  row_version: number
+}
+
+export interface PayrollEmployerSettings {
+  supplier_id: number
+  row_version: number
+  employer_registration_number: string | null
+  social_security_office_code: string | null
+  health_insurance_payer_number: string | null
+  default_health_insurer_code: string | null
+  payroll_contact_name: string | null
+  payroll_contact_email: string | null
+  payroll_contact_phone: string | null
+  default_office_code: string | null
+  accounts: PayrollEmployerAccounts
+  offices: PayrollOffice[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PayrollEmployerSettingsResponse {
+  settings: PayrollEmployerSettings
+}
+
+export interface PayrollOfficePayload {
+  code: string
+  name: string
+  is_active: boolean
+}
+
+export interface PayrollEmployerSettingsPayload {
+  row_version: number
+  default_office_code: string
+  employer_registration_number: string | null
+  social_security_office_code: string | null
+  health_insurance_payer_number: string | null
+  default_health_insurer_code: string | null
+  payroll_contact_name: string | null
+  payroll_contact_email: string | null
+  payroll_contact_phone: string | null
+  accounts: PayrollEmployerAccounts
+  offices: PayrollOfficePayload[]
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -90,4 +153,8 @@ export const payrollApi = {
     api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
   person: (id: number) =>
     api.get<PayrollPersonResponse>(`/payroll/people/${id}`).then(response => response.data.person),
+  employerSettings: () =>
+    api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
+  saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
+    api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
 }
