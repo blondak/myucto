@@ -8,6 +8,10 @@ do deníku a uložit měsíční podklad pro mzdový list. Není plnohodnotným 
 systémem. V demo režimu je položka menu skrytá, protože sdílená ukázková data
 nemají představovat konkrétního poplatníka.
 
+Samostatná sekce **Mzdy** tuto agendu nenahrazuje ani nelicencuje. Používá stejné
+karty zaměstnanců a postupně je rozšiřuje o více pracovních vztahů; aktuální stav
+popisuje kapitola [Úplné mzdy — aktivace a zaměstnanci](56a_Uplne_mzdy.md).
+
 ## 56.1 Kdy modul použít
 
 Použij jej pro jednoduchou mzdu jednoho zaměstnance nebo odměnu
