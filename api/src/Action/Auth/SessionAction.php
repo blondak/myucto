@@ -374,7 +374,12 @@ final class SessionAction
                 'id' => $context['user_id'],
                 'email' => (string) ($context['user']['email'] ?? ''),
                 'name' => (string) ($context['user']['name'] ?? ''),
-                'role' => (string) ($context['user']['role'] ?? 'readonly'),
+                // Stejný tvar jako /api/auth/me. Klient tenhle objekt při zamčené
+                // session ukládá do auth storu jako plnohodnotného uživatele
+                // (stores/auth.ts), takže `role` musí být souhrn role, ne string —
+                // jinak `isClientRole` i `isSuperadmin` tiše propadnou na false.
+                'role' => (array) ($context['user']['role_summary'] ?? []),
+                'is_superadmin' => (bool) ($context['user']['is_superadmin'] ?? false),
                 'locale' => (string) ($context['user']['locale'] ?? 'cs'),
                 'totp_enabled' => (bool) ($context['user']['totp_enabled'] ?? false),
             ],

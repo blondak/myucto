@@ -488,6 +488,60 @@ function denyFallback(toName: unknown, auth: ReturnType<typeof useAuthStore>) {
   return toName === target ? true : { name: target }
 }
 
+/**
+ * Pojistka proti zacyklení `/` ↔ `/login`.
+ *
+ * Guard i `/login` čtou `auth.isAuthenticated`, takže samy o sobě smyčku neudělají.
+ * Vyrobí ji ale nekonzistentní odpověď serveru: když `/api/auth/me` vrací střídavě
+ * 200 a 401 (cizí service worker na recyklovaném originu jako `localhost:8080`,
+ * cachující proxy), guard nás pošle na `/login`, ten se úspěšně obnoví a pošle nás
+ * zpátky — donekonečna. V nainstalované PWA je to nejhorší: okno nemá adresní řádek,
+ * takže se z toho nedá vyklikat ani ručně přejít jinam.
+ *
+ * `sessionStorage` (ne modulová proměnná) proto, že část těch odrazů jde přes tvrdý
+ * `window.location` redirect z api/client.ts, který by JS stav zahodil.
+ */
+const BOUNCE_KEY = 'myucto.login_bounces'
+const BOUNCE_WINDOW_MS = 10_000
+const BOUNCE_LIMIT = 3
+
+function readBounces(): number[] {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(BOUNCE_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter((t): t is number => typeof t === 'number') : []
+  } catch {
+    return []
+  }
+}
+
+function recentBounces(): number[] {
+  const now = Date.now()
+  return readBounces().filter((t) => now - t < BOUNCE_WINDOW_MS)
+}
+
+function recordLoginBounce(): void {
+  const recent = recentBounces()
+  recent.push(Date.now())
+  try {
+    sessionStorage.setItem(BOUNCE_KEY, JSON.stringify(recent))
+  } catch {
+    // Private mode / zaplněné úložiště — pojistka je nice-to-have, ne blokující.
+  }
+}
+
+/** `/login` se podle tohohle rozhodne, že se NEMÁ automaticky vracet na `/`. */
+export function loginRedirectLoopDetected(): boolean {
+  return recentBounces().length >= BOUNCE_LIMIT
+}
+
+export function clearLoginBounces(): void {
+  try {
+    sessionStorage.removeItem(BOUNCE_KEY)
+  } catch {
+    // viz výše
+  }
+}
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
@@ -511,7 +565,10 @@ router.beforeEach(async (to) => {
     // Rozhoduje stav storu, ne návratová hodnota: refresh() při síťovém výpadku
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
-    if (!auth.isAuthenticated) return { name: 'login' }
+    if (!auth.isAuthenticated) {
+      recordLoginBounce()
+      return { name: 'login' }
+    }
   }
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)

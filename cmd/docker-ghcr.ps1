@@ -12,12 +12,27 @@
 [CmdletBinding()]
 param()
 
+# Skript vyzaduje PowerShell 7. Ve Windows PowerShellu 5.1 (povodni powershell.exe,
+# porad vychozi na Win 11) se lisi zapis souboru bez BOM a chybi cast syntaxe, takze
+# by tise vznikla rozbita konfigurace. Radeji skoncime hned a s jasnou hlaskou.
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host ""
+    Write-Host "  Tento skript vyzaduje PowerShell 7 nebo novejsi." -ForegroundColor Red
+    Write-Host "  Bezi ve Windows PowerShellu $($PSVersionTable.PSVersion) (powershell.exe)." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Instalace:  winget install --id Microsoft.PowerShell -e"
+    Write-Host "  Pak spust znovu pres 'pwsh' (ne 'powershell'):"
+    Write-Host "      pwsh -File `"$PSCommandPath`"" -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
 # Invoke-WebRequest / curl.exe na Windows zobrazuje progress bar, ktery v
 # pollovacim loopu dramaticky zpomaluje kazde volani (i nekolik sekund navic).
 $ProgressPreference = 'SilentlyContinue'
 
-# Detekce PROJECT_ROOT — skript se pouszti dvema zpusoby (stejne jako .sh):
+# Detekce PROJECT_ROOT - skript se pouszti dvema zpusoby (stejne jako .sh):
 #   a) standalone install (curl 3 souboru do jedne slozky): script vedle compose file
 #   b) z klonu repa: script v `cmd/`, compose file o uroven vys
 if (Test-Path (Join-Path $PSScriptRoot 'docker-compose.production.yml')) {
@@ -44,6 +59,15 @@ function Invoke-Compose {
     & docker compose -f $ComposeFile @args
 }
 
+# Zapise soubor jako UTF-8 BEZ BOM. `Set-Content -Encoding UTF8` pise BOM ve
+# Windows PowerShellu 5.1; BOM pred '<?php' v cfg.docker.php se vypise na vystup
+# jeste pred hlavickami a znemozni odeslani session cookie (= prihlaseni projde,
+# ale aplikace pak uzivatele posila zpatky na /login).
+function Write-Utf8NoBom([string]$Path, [string]$Content) {
+    $full = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path (Get-Location).Path $Path }
+    [System.IO.File]::WriteAllText($full, $Content, (New-Object System.Text.UTF8Encoding $false))
+}
+
 function Get-ComposeProjectName([string]$root) {
     if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
     return ((Split-Path -Leaf $root).ToLower() -replace '[^a-z0-9_-]', '')
@@ -59,7 +83,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         if ($parts[3] -notmatch ":$Port->") { continue }
         $name = $parts[0]; $image = $parts[1]; $proj = $parts[2]
         if (($proj -eq $OurProject) -or ($name -match 'myucto') -or ($image -match 'myucto')) {
-            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) — OK."
+            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) - OK."
             return $false
         }
         Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
@@ -72,7 +96,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
         $pname = if ($proc) { $proc.ProcessName } else { "PID $($conn.OwningProcess)" }
         if ($pname -match 'docker|vpnkit|wslrelay|com\.docker') {
-            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni — stale endpoint. 'up --force-recreate app' ho uvolni."
+            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni - stale endpoint. 'up --force-recreate app' ho uvolni."
             return $false
         }
         Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
@@ -104,7 +128,7 @@ function Set-EnvValue([string]$Key, [string]$Value) {
         if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ }
     }
     if (-not $hit) { $out += "$Key=$Value" }
-    Set-Content .env -Value $out -Encoding UTF8
+    Write-Utf8NoBom '.env' (($out -join "`n") + "`n")
     $script:envVars[$Key] = $Value
 }
 
@@ -135,7 +159,7 @@ if (-not (Test-Path .env)) {
     Write-Host "==> Generating .env with random DB passwords..."
     $rootPass = New-RandomToken 24
     $userPass = New-RandomToken 24
-    @"
+    $envContent = @"
 # MyUcto.cz - Docker compose env (gitignored)
 APP_PORT=8080
 DB_PORT=3307
@@ -143,7 +167,8 @@ DB_NAME=myucto
 DB_USER=myucto
 DB_ROOT_PASSWORD=$rootPass
 DB_PASSWORD=$userPass
-"@ | Set-Content -Encoding UTF8 -NoNewline .env
+"@
+    Write-Utf8NoBom '.env' $envContent
     Write-Host "    .env written (passwords randomised)"
 } else {
     Write-Host "==> .env already exists (skipping)"
@@ -172,7 +197,10 @@ if (-not (Test-Path cfg.docker.php)) {
     $cfg = $cfg -replace "'url'    => 'https://dev\.example\.com',", "'url'    => '$appUrl',"
     $cfg = $cfg -replace "'cookie_name'   => '__Host-myinvoice_session',", "'cookie_name'   => 'myinvoice_session',"
     $cfg = $cfg -replace "'cookie_secure' => true,", "'cookie_secure' => false,"
-    Set-Content -Encoding UTF8 -NoNewline cfg.docker.php -Value $cfg
+    # Cookie duveryhodneho zarizeni ma stejny __Host- prefix, ktery prohlizec pres
+    # plain HTTP zahodi. Bez tehle nahrady prestane fungovat MFA "zapamatovat si".
+    $cfg = $cfg -replace "'trusted_cookie_name'     => '__Host-myinvoice_td',", "'trusted_cookie_name'     => 'myinvoice_td',"
+    Write-Utf8NoBom 'cfg.docker.php' $cfg
     Write-Host "    cfg.docker.php written"
     Write-Host ""
     Write-Host "    !!  Edit cfg.docker.php to fill in SMTP, Cloudflare Turnstile, IP allowlist  !!" -ForegroundColor Yellow
@@ -194,22 +222,22 @@ $appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
 if ($appPort -le 0) { $appPort = 8080 }
 Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort..."
 if (Test-ForeignPortHolder $appPort $ourProject 'APP_PORT') {
-    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) - uvolni ho nebo zmen APP_PORT v .env a spust znovu."
 }
 
 # --- 3c. pre-flight: hostovy port databaze -------------------------------
 # Db se mapuje na loopback jen kvuli pripojeni klientem zvenci. Souzeni MyInvoice
 # a MyUcta na jednom stroji je bezny scenar (prevod dat), takze kolize na 3307 je
 # ocekavatelna a nema kvuli ni instalace padat: port jen posuneme a zapiseme do
-# .env, aby volba prezila dalsi spusteni. Aplikace na nem nezavisi — uvnitr site
-# si sahá na 'db:3306'.
+# .env, aby volba prezila dalsi spusteni. Aplikace na nem nezavisi - uvnitr site
+# si saha na 'db:3306'.
 $dbPort = 0; [void][int]::TryParse(("" + $envVars.DB_PORT), [ref]$dbPort)
 if ($dbPort -le 0) { $dbPort = 3307 }
 Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort..."
 if (Test-ForeignPortHolder $dbPort $ourProject 'DB_PORT') {
     $free = Find-FreePort ($dbPort + 1) $ourProject 'DB_PORT'
     if ($free -le 0) {
-        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny — uvolni port nebo zmen DB_PORT v .env rucne."
+        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny - uvolni port nebo zmen DB_PORT v .env rucne."
     }
     Write-Host "    Prepinam DB_PORT $dbPort -> $free a zapisuji do .env." -ForegroundColor Yellow
     Set-EnvValue 'DB_PORT' "$free"
@@ -228,7 +256,7 @@ $ready = $false
 for ($i = 1; $i -le 45; $i++) {
     $json = Invoke-Compose ps --format json db 2>$null
     if ($json -match '"Health":"healthy"') { $ready = $true; Write-Host "    DB ready."; break }
-    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' — cekam dal (attempt $i/45)..." }
+    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' - cekam dal (attempt $i/45)..." }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
@@ -248,8 +276,12 @@ if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
 # Pouzivame curl.exe (shipped s Windows 10/11 v C:\Windows\System32\curl.exe),
 # protoze Invoke-WebRequest se na Windows v polling loopu chova nepredvidatelne
 # (pomale, error handling jine nez curl, navic catch{} skryval diagnostiku).
-# Zarovnano s docker-ghcr.sh — stejna sematika `curl -fsS` (200 = ok, jinak fail).
-$curl = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
+# Zarovnano s docker-ghcr.sh - stejna sematika `curl -fsS` (200 = ok, jinak fail).
+# Zamerne bez null-conditional operatoru (`?.`) - ten je az v PS7 a ve Windows
+# PowerShellu 5.1 je to chyba parseru celeho souboru, tzn. skript by se nespustil
+# vubec a kontrola verze vyse by se nikdy nevypsala.
+$curlCmd = Get-Command curl.exe -ErrorAction SilentlyContinue
+$curl = if ($curlCmd) { $curlCmd.Source } else { $null }
 if (-not $curl) { $curl = 'C:\Windows\System32\curl.exe' }
 if (-not (Test-Path $curl)) {
     Write-Error "curl.exe nenalezen (potreba na Win 10/11+). Updatuj OS nebo doinstaluj curl."
