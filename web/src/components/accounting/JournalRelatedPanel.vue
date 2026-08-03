@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatMoney } from '@/composables/useFormat'
-import { accountingApi, type JournalRelatedItem } from '@/api/accounting'
+import { accountingApi, type JournalRelatedItem, type JournalLine } from '@/api/accounting'
+import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import type { PermissionKey } from '@/security/permissions'
 
 /**
@@ -59,7 +60,31 @@ async function load(id: number) {
   }
 }
 
-watch(() => props.entryId, id => { if (id > 0) load(id) }, { immediate: true })
+/**
+ * Rozpad protějšku na účty, klíčovaný jeho `entry_id`.
+ *
+ * Účetní u vazby doklad ↔ úhrada nejčastěji ověřuje právě to, JAK je protějšek
+ * zaúčtovaný — dosud kvůli tomu musel odskočit do deníku. Endpoint `related`
+ * řádky nevrací, tak se dotáhnou zvlášť; protějšků bývá jeden nebo dva, takže
+ * je to jeden dva dotazy navíc, a selhání se tiše přejde — panel je doplněk,
+ * ne nosná informace.
+ */
+const relatedLines = ref<Record<number, JournalLine[]>>({})
+
+async function loadRelatedLines(): Promise<void> {
+  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null)
+  await Promise.all(ids.map(async (id) => {
+    if (relatedLines.value[id]) return
+    try {
+      const detail = await accountingApi.getEntry(id)
+      relatedLines.value = { ...relatedLines.value, [id]: detail.lines }
+    } catch { /* protějšek zůstane bez rozpadu */ }
+  }))
+}
+
+watch(() => props.entryId, id => {
+  if (id > 0) void load(id).then(loadRelatedLines)
+}, { immediate: true })
 
 function typeLabel(type: string): string {
   const key = `accounting.journal.source.${type}`
@@ -109,7 +134,8 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
 
     <ul v-else class="divide-y divide-neutral-200 rounded-lg border border-neutral-200">
       <li v-for="it in items" :key="`${it.source_type}:${it.source_id}`"
-          class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-3 py-2.5 text-sm">
+          class="px-3 py-2.5 text-sm">
+      <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span class="rounded px-1.5 py-0.5 text-xs font-medium"
@@ -167,6 +193,13 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
             {{ t('accounting.journal.related.open_document') }}
           </RouterLink>
         </div>
+      </div>
+
+      <!-- Jak je protějšek zaúčtovaný. Přesně tohle účetní u vazby doklad ↔
+           úhrada ověřuje nejčastěji a dosud kvůli tomu musel odskočit do deníku.
+           Tatáž komponenta jako u prohlíženého zápisu, jen kompaktní. -->
+      <JournalLinesTable v-if="it.entry_id !== null && relatedLines[it.entry_id]?.length"
+        class="mt-2" dense :lines="relatedLines[it.entry_id]!" />
       </li>
 
       <li v-if="truncated" class="bg-neutral-50 px-3 py-1.5 text-xs text-neutral-500">

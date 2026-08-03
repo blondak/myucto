@@ -25,6 +25,7 @@ import WhyPanel from '@/components/automation/WhyPanel.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
+import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -308,13 +309,6 @@ async function toggleExpand(entry: JournalEntry) {
     detailLoading.value = false
   }
 }
-
-const detailTotal = computed(() => {
-  if (!detail.value) return 0
-  return detail.value.lines
-    .filter(l => l.side === 'debit')
-    .reduce((sum, l) => sum + l.amount, 0)
-})
 
 // ── Drawer se zdrojovým dokladem ───────────────────────────────────────────
 // Akordeon (řádky, historie, přílohy, poznámky) zůstává; drawer je navíc a visí
@@ -635,7 +629,15 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <template v-for="e in entries" :key="e.id">
-              <tr class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-60': e.reversed_by }" @click="toggleExpand(e)">
+              <!-- Rozbalený zápis je podbarvený i s hlavičkou a nese levou lištu
+                   v akcentu: detail je vysoký přes celou obrazovku a bez toho se
+                   při odrolování ztratí, na kterém řádku vlastně pracuju. -->
+              <tr class="cursor-pointer" :class="[
+                    e.reversed_by ? 'opacity-60' : '',
+                    expandedId === e.id
+                      ? 'bg-primary-50/60 border-l-2 border-primary-500'
+                      : 'hover:bg-neutral-50',
+                  ]" @click="toggleExpand(e)">
                 <td class="px-3 py-2 text-neutral-400">
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === e.id }">▸</span>
                 </td>
@@ -693,50 +695,13 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
               </tr>
               <!-- Detail (rozbalený) -->
               <tr v-if="expandedId === e.id">
-                <td :colspan="visibleColCount" class="px-3 py-3 bg-neutral-50">
+                <td :colspan="visibleColCount"
+                  class="px-3 py-3 bg-primary-50/60 border-l-2 border-primary-500">
                   <div v-if="detailLoading" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
                   <div v-else-if="detail">
-                    <table class="w-full text-sm mb-3">
-                      <thead class="text-xs text-neutral-500 uppercase tracking-wide">
-                        <tr>
-                          <th class="px-2 py-1 text-left font-medium">{{ t('accounting.journal.account') }}</th>
-                          <th class="px-2 py-1 text-left font-medium">{{ t('accounting.journal.cost_center') }}</th>
-                          <th class="px-2 py-1 text-right font-medium w-32">{{ t('accounting.journal.side.debit') }}</th>
-                          <th class="px-2 py-1 text-right font-medium w-32">{{ t('accounting.journal.side.credit') }}</th>
-                        </tr>
-                      </thead>
-                      <tbody class="divide-y divide-neutral-200">
-                        <tr v-for="l in detail.lines" :key="l.id">
-                          <td class="px-2 py-1">
-                            <span class="font-mono">{{ l.account_code }}</span>
-                            <span class="text-neutral-600 ml-1">{{ l.account_name }}</span>
-                          </td>
-                          <td class="px-2 py-1 text-neutral-500 text-xs">{{ l.cost_center || '—' }}</td>
-                          <td class="px-2 py-1 text-right font-mono">
-                            <template v-if="l.side === 'debit'">
-                              {{ formatMoney(l.amount) }}
-                              <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400">
-                                {{ formatMoney(l.amount_foreign, l.currency_code) }}
-                              </div>
-                            </template>
-                          </td>
-                          <td class="px-2 py-1 text-right font-mono">
-                            <template v-if="l.side === 'credit'">
-                              {{ formatMoney(l.amount) }}
-                              <div v-if="l.amount_foreign != null && l.currency_code" class="text-xs text-neutral-400">
-                                {{ formatMoney(l.amount_foreign, l.currency_code) }}
-                              </div>
-                            </template>
-                          </td>
-                        </tr>
-                      </tbody>
-                      <tfoot>
-                        <tr class="border-t-2 border-neutral-300 font-semibold">
-                          <td class="px-2 py-1" colspan="2">{{ t('accounting.journal.total') }}</td>
-                          <td class="px-2 py-1 text-right font-mono" colspan="2">{{ formatMoney(detailTotal) }}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
+                    <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
+                         u protějšku, aby je účetní poznal jako stejnou věc. -->
+                    <JournalLinesTable class="mb-3" :lines="detail.lines" />
                     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
                          je to první, co účetní po rozpadu na účty hledá. Dřív byl až
                          pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->
