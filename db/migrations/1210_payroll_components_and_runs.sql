@@ -116,14 +116,14 @@ CREATE TABLE IF NOT EXISTS payroll_input_import_rows (
   id                   BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   supplier_id          INT UNSIGNED NOT NULL,
   import_id            BIGINT UNSIGNED NOT NULL,
-  row_number           INT UNSIGNED NOT NULL,
+  source_row_number    INT UNSIGNED NOT NULL,
   external_id          VARCHAR(190) NULL,
   status               ENUM('valid','error','accepted') NOT NULL,
   normalized_payload   LONGTEXT NOT NULL CHECK (JSON_VALID(normalized_payload)),
   errors_json          LONGTEXT NOT NULL CHECK (JSON_VALID(errors_json)),
   created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  UNIQUE KEY uq_payroll_input_import_row (supplier_id, import_id, row_number),
+  UNIQUE KEY uq_payroll_input_import_row (supplier_id, import_id, source_row_number),
   CONSTRAINT fk_payroll_input_import_row_parent
     FOREIGN KEY (supplier_id, import_id)
     REFERENCES payroll_input_imports (supplier_id, id) ON DELETE CASCADE
@@ -419,9 +419,9 @@ CREATE TABLE IF NOT EXISTS payroll_run_validations (
   CONSTRAINT chk_payroll_run_validation_override CHECK (
     requires_override IN (0, 1)
     AND (
-      (overridden_at IS NULL AND overridden_by IS NULL AND override_reason IS NULL)
+      (overridden_at IS NULL AND override_reason IS NULL)
       OR
-      (overridden_at IS NOT NULL AND overridden_by IS NOT NULL AND override_reason IS NOT NULL)
+      (overridden_at IS NOT NULL AND override_reason IS NOT NULL)
     )
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
