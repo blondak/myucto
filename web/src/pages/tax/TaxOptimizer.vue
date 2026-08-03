@@ -17,6 +17,10 @@ const analysis = ref<TaxAnalysis | null>(null)
 const year = ref<number>(new Date().getFullYear())
 const lastMonthOpen = ref(false)
 
+/** Čistý příjem může být i záporný — barva musí následovat znaménko. */
+const netIncomeClass = computed(() =>
+  Number(analysis.value?.last_month?.net_income ?? 0) < 0 ? 'text-danger-600' : 'text-success-700')
+
 const profile = reactive<TaxProfile>({
   activity_rate: 60, use_actual_expenses: false, actual_expenses: 0,
   flat_tax_band: 'none', is_secondary: false, spouse_credit: false,
@@ -260,7 +264,10 @@ async function save() {
               <div class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                 {{ t('tax.last_month_title', { month: formatMonth(analysis.last_month.ym) }) }}
               </div>
-              <div class="text-2xl font-bold font-mono text-success-700 mt-1">{{ formatMoney(analysis.last_month.net_income, 'CZK') }}</div>
+              <!-- Zelená natvrdo tvrdila „vyděláno" i u záporného čistého příjmu
+                   (měsíc s vyššími náklady než příjmy). Barva musí následovat
+                   znaménko, jinak ztrácí význam. -->
+              <div class="text-2xl font-bold font-mono mt-1" :class="netIncomeClass">{{ formatMoney(analysis.last_month.net_income, 'CZK') }}</div>
             </div>
             <span class="text-neutral-400 transition-transform shrink-0" :class="lastMonthOpen ? 'rotate-180' : ''">▾</span>
           </button>
@@ -273,7 +280,7 @@ async function save() {
                 <tr class="border-b border-neutral-100"><td class="py-1.5 text-neutral-600">{{ t('tax.last_month_tax') }}</td><td class="py-1.5 text-right font-medium font-mono">{{ formatMoney(analysis.last_month.income_tax, 'CZK') }}</td></tr>
                 <tr class="border-b border-neutral-100"><td class="py-1.5 text-neutral-600">{{ t('tax.last_month_social') }}</td><td class="py-1.5 text-right font-medium font-mono">{{ formatMoney(analysis.last_month.social, 'CZK') }}</td></tr>
                 <tr class="border-b border-neutral-100"><td class="py-1.5 text-neutral-600">{{ t('tax.last_month_health') }}</td><td class="py-1.5 text-right font-medium font-mono">{{ formatMoney(analysis.last_month.health, 'CZK') }}</td></tr>
-                <tr><td class="pt-2 font-bold text-success-700">{{ t('tax.last_month_net') }}</td><td class="pt-2 text-right font-bold font-mono text-success-700">{{ formatMoney(analysis.last_month.net_income, 'CZK') }}</td></tr>
+                <tr><td class="pt-2 font-bold" :class="netIncomeClass">{{ t('tax.last_month_net') }}</td><td class="pt-2 text-right font-bold font-mono" :class="netIncomeClass">{{ formatMoney(analysis.last_month.net_income, 'CZK') }}</td></tr>
               </tbody>
             </table>
             <p class="mt-2 text-[11px] text-neutral-400">{{ t('tax.last_month_hint') }}</p>
