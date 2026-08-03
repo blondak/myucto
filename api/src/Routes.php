@@ -65,6 +65,7 @@ use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
@@ -583,6 +584,10 @@ final class Routes
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);
+            $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
+            $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);
+            $g->put('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'update']);
         });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
