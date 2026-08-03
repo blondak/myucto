@@ -51,12 +51,35 @@ final class PayrollEmployerPaymentIdentifierMigrationTest extends TestCase
         self::assertStringNotContainsString('UPDATE supplier', $sql);
     }
 
+    public function testSsotCleanupRemovesCanonicalDuplicatesFromCompanySettings(): void
+    {
+        $sql = $this->migration(
+            '1221_payroll_employer_identifier_ssot.sql',
+        );
+
+        self::assertStringContainsString('SET supplier.cssz_vsdp = NULL', $sql);
+        self::assertStringContainsString('SET supplier.cssz_ossz_code = NULL', $sql);
+        self::assertStringContainsString(
+            'SET supplier.health_insurance_number = NULL',
+            $sql,
+        );
+        self::assertSame(
+            3,
+            substr_count($sql, 'WHERE supplier.taxpayer_type = \'po\''),
+        );
+        self::assertSame(
+            3,
+            substr_count($sql, 'AND EXISTS ('),
+            'Smazat se smí jen hodnota, která už má shodný kanonický mzdový záznam.',
+        );
+    }
+
     private function migration(string $file): string
     {
         $path = dirname(__DIR__, 4) . '/db/migrations/' . $file;
         $sql = file_get_contents($path);
         self::assertIsString($sql);
 
-        return $sql;
+        return str_replace("\r\n", "\n", $sql);
     }
 }

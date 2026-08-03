@@ -406,7 +406,7 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         self::assertFalse($mismatch->autoAllowed);
     }
 
-    public function testLegalPersonLegacyEmployerIdentifierIsManualMigrationFallback(): void
+    public function testLegalPersonPersonalIdentifierIsNotEmployerFallback(): void
     {
         $this->db->pdo()->prepare(
             'DELETE FROM payroll_employer_settings WHERE supplier_id = ?'
@@ -419,20 +419,43 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         )->execute([$this->supplierId]);
         $this->db->pdo()->prepare(
             "UPDATE supplier
-                SET payroll_enabled = 1, taxpayer_type = 'po', cssz_vsdp = '87654321'
+                SET payroll_enabled = 1,
+                    taxpayer_type = 'po',
+                    cssz_vsdp = '87654321',
+                    health_insurance_number = '555666777'
               WHERE id = ?"
         )->execute([$this->supplierId]);
 
-        $legacy = $this->detector->detect(
+        $resolver = $this->container->get(PayrollPaymentIdentifierResolver::class);
+        $social = $resolver->matchEmployerRemittance(
             $this->supplierId,
-            $this->tx(account: '21012-7928311', vs: '87654321'),
+            '87654321',
+            self::YEAR . '-06-15',
+            '21012-7928311',
+            '0710',
+        );
+        $health = $resolver->matchEmployerRemittance(
+            $this->supplierId,
+            '555666777',
+            self::YEAR . '-06-15',
+            '1111006311',
+            '0710',
         );
 
-        self::assertNotNull($legacy);
-        self::assertSame(OperationType::REMITTANCE_SOCIAL_EMPLOYER, $legacy->operationType);
-        self::assertSame(0.70, $legacy->confidence);
-        self::assertSame('remittance_unclassified', $legacy->note);
-        self::assertFalse($legacy->autoAllowed);
+        self::assertNull(
+            $social,
+            'Osobní identifikátor z obecných údajů firmy nesmí být zdrojem mzdového párování.',
+        );
+        self::assertNull($health);
+        self::assertNull($resolver->defaultForOperation(
+            $this->supplierId,
+            OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+        ));
+        self::assertNull($resolver->defaultForOperation(
+            $this->supplierId,
+            OperationType::REMITTANCE_HEALTH_EMPLOYER,
+            self::YEAR . '-06-15',
+        ));
     }
 
     public function testScheduleHasPriorityAndAbsoluteHundredCrownTolerance(): void

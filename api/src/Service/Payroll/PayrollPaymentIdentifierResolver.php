@@ -32,25 +32,16 @@ final class PayrollPaymentIdentifierResolver
             return null;
         }
         if (!$this->payrollSchemaAvailable()) {
-            return $this->legacyDefault($supplierId, $operationType);
+            return null;
         }
 
-        $resolved = match ($operationType) {
+        return match ($operationType) {
             OperationType::REMITTANCE_SOCIAL_EMPLOYER =>
                 $this->defaultSocial($supplierId),
             OperationType::REMITTANCE_HEALTH_EMPLOYER =>
                 $this->defaultHealth($supplierId, $date),
             default => null,
         };
-
-        if ($resolved !== null) {
-            return $resolved;
-        }
-        if ($this->canonicalIdentifierExists($supplierId, $operationType)) {
-            return null;
-        }
-
-        return $this->legacyDefault($supplierId, $operationType);
     }
 
     /**
@@ -80,7 +71,7 @@ final class PayrollPaymentIdentifierResolver
             return null;
         }
         if (!$this->payrollSchemaAvailable()) {
-            return $this->legacyMatch($supplierId, $vs);
+            return null;
         }
 
         $accountHashes = $this->accountHashes(
@@ -155,7 +146,7 @@ final class PayrollPaymentIdentifierResolver
             ];
         }
 
-        return $this->legacyMatch($supplierId, $vs);
+        return null;
     }
 
     /** @return array{value:string,source:string}|null */
@@ -336,122 +327,6 @@ final class PayrollPaymentIdentifierResolver
             }
         }
         return array_values(array_unique($result));
-    }
-
-    /** @return array{value:string,source:string}|null */
-    private function legacyDefault(int $supplierId, string $operationType): ?array
-    {
-        if (!in_array($operationType, [
-            OperationType::REMITTANCE_SOCIAL_EMPLOYER,
-            OperationType::REMITTANCE_HEALTH_EMPLOYER,
-        ], true)) {
-            return null;
-        }
-        $supplier = $this->legacySupplier($supplierId);
-        if ($supplier === null || $supplier['taxpayer_type'] !== 'po') {
-            return null;
-        }
-        $column = $operationType === OperationType::REMITTANCE_SOCIAL_EMPLOYER
-            ? 'cssz_vsdp'
-            : 'health_insurance_number';
-        $value = VariableSymbolNormalizer::forPayment((string) $supplier[$column]);
-        return $value === ''
-            ? null
-            : ['value' => $value, 'source' => 'legacy_supplier_migration'];
-    }
-
-    /**
-     * @return array{
-     *   operation_type:string,
-     *   source:string,
-     *   account_match:bool,
-     *   variable_symbol_match:bool,
-     *   legacy_fallback:bool,
-     *   ambiguous:bool
-     * }|null
-     */
-    private function legacyMatch(int $supplierId, string $variableSymbol): ?array
-    {
-        $supplier = $this->legacySupplier($supplierId);
-        if ($supplier === null || $supplier['taxpayer_type'] !== 'po') {
-            return null;
-        }
-
-        $candidates = [
-            OperationType::REMITTANCE_SOCIAL_EMPLOYER =>
-                VariableSymbolNormalizer::forMatching((string) $supplier['cssz_vsdp']),
-            OperationType::REMITTANCE_HEALTH_EMPLOYER =>
-                VariableSymbolNormalizer::forMatching(
-                    (string) $supplier['health_insurance_number']
-                ),
-        ];
-        foreach ($candidates as $operationType => $candidate) {
-            if ($candidate === '' || !hash_equals($candidate, $variableSymbol)) {
-                continue;
-            }
-            if ($this->canonicalIdentifierExists($supplierId, $operationType)) {
-                return null;
-            }
-            return [
-                'operation_type' => $operationType,
-                'source' => 'legacy_supplier_migration',
-                'account_match' => false,
-                'variable_symbol_match' => true,
-                'legacy_fallback' => true,
-                'ambiguous' => false,
-            ];
-        }
-
-        return null;
-    }
-
-    private function canonicalIdentifierExists(int $supplierId, string $operationType): bool
-    {
-        if (!$this->payrollSchemaAvailable()) {
-            return false;
-        }
-        if ($operationType === OperationType::REMITTANCE_SOCIAL_EMPLOYER) {
-            return $this->socialSymbols($supplierId) !== [];
-        }
-        if ($operationType !== OperationType::REMITTANCE_HEALTH_EMPLOYER) {
-            return false;
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1
-               FROM payroll_institution_accounts account
-               JOIN payroll_institutions institution
-                 ON institution.supplier_id = account.supplier_id
-                AND institution.id = account.institution_id
-              WHERE account.supplier_id = ?
-                AND institution.institution_type = ?
-                AND account.variable_symbol IS NOT NULL
-              LIMIT 1'
-        );
-        $stmt->execute([$supplierId, InstitutionAccountType::HEALTH_INSURER->value]);
-        return $stmt->fetchColumn() !== false;
-    }
-
-    /** @return array{taxpayer_type:string,cssz_vsdp:?string,health_insurance_number:?string}|null */
-    private function legacySupplier(int $supplierId): ?array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT taxpayer_type, cssz_vsdp, health_insurance_number
-               FROM supplier
-              WHERE id = ?'
-        );
-        $stmt->execute([$supplierId]);
-        $value = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($value === false) {
-            return null;
-        }
-        $row = self::databaseRow($value);
-        return [
-            'taxpayer_type' =>
-                self::nullableString($row, 'taxpayer_type') ?? 'fo',
-            'cssz_vsdp' => self::nullableString($row, 'cssz_vsdp'),
-            'health_insurance_number' =>
-                self::nullableString($row, 'health_insurance_number'),
-        ];
     }
 
     /** @return list<string> */

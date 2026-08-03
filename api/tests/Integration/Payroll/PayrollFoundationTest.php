@@ -323,6 +323,30 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame(0, (int) $stored->fetchColumn());
     }
 
+    public function testLegalPersonCannotStoreEmployerIdentifiersInCompanySettings(): void
+    {
+        $request = $this->request('PUT', 'admin')->withParsedBody([
+            'taxpayer_type' => 'po',
+            'cssz_vsdp' => '87654321',
+            'cssz_ossz_code' => '110',
+            'health_insurance_number' => '555666777',
+        ]);
+        $response = $this->settingsAction->updateSupplier($request, new Response());
+
+        self::assertSame(200, $response->getStatusCode());
+        $stored = $this->db->pdo()->prepare(
+            'SELECT cssz_vsdp, cssz_ossz_code, health_insurance_number
+               FROM supplier
+              WHERE id = ?'
+        );
+        $stored->execute([$this->supplierId]);
+        self::assertSame([
+            'cssz_vsdp' => null,
+            'cssz_ossz_code' => null,
+            'health_insurance_number' => null,
+        ], $stored->fetch(\PDO::FETCH_ASSOC));
+    }
+
     public function testOnlyPayrollSettingsRoleCanActivateModule(): void
     {
         $payload = [

@@ -58,9 +58,11 @@ pojišťovny a měny se nesmějí překrývat.
 
 Osobní variabilní symbol ČSSZ a číslo pojištěnce OSVČ v obecném nastavení firmy
 zůstávají určena pro vlastní odvody fyzické osoby. Platby zaměstnavatele je
-nepřebírají. Automatické návrhy a rozpoznání bankovních plateb používají aktivní
-mzdovou účtárnu a účet pojišťovny platný k datu platby; nejednoznačný nebo
-historický údaj zůstane k ručnímu posouzení.
+nepřebírají. U právnické osoby se tato osobní pole v obecném nastavení
+nezobrazují; identifikátory zaměstnavatele se ukládají jen v mzdovém nastavení.
+Automatické návrhy a rozpoznání bankovních plateb používají aktivní mzdovou
+účtárnu a účet pojišťovny platný k datu platby; nejednoznačný nebo historický
+údaj zůstane k ručnímu posouzení.
 
 Na stejné stránce se nastavují výchozí účty automatického zaúčtování. Samostatně
 se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odměna za

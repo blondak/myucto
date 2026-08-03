@@ -639,6 +639,28 @@ final class SettingsAction
                 $body[$f] = null;
             }
         }
+        $personalInsuranceFields = [
+            'cssz_vsdp',
+            'cssz_ossz_code',
+            'health_insurance_number',
+        ];
+        if (array_key_exists('taxpayer_type', $body)
+            || array_intersect_key($body, array_flip($personalInsuranceFields)) !== []
+        ) {
+            $effectiveTaxpayerType = $body['taxpayer_type'] ?? null;
+            if ($effectiveTaxpayerType === null) {
+                $stmt = $this->db->pdo()->prepare(
+                    'SELECT taxpayer_type FROM supplier WHERE id = ?'
+                );
+                $stmt->execute([$id]);
+                $effectiveTaxpayerType = $stmt->fetchColumn();
+            }
+            if ($effectiveTaxpayerType === 'po') {
+                foreach ($personalInsuranceFields as $field) {
+                    $body[$field] = null;
+                }
+            }
+        }
         // Validace email_accent_color — musí být hex (#RRGGBB)
         if (array_key_exists('email_accent_color', $body)) {
             $v = trim((string) ($body['email_accent_color'] ?? ''));

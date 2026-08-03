@@ -1228,21 +1228,26 @@ function vatCollisionLabel(c: VatStatusCollision): string {
               <input v-model="supplier.workplace_code" type="text" maxlength="8"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_vsdp') }}</label>
-              <input v-model="supplier.cssz_vsdp" type="text" maxlength="20"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_ossz_code') }}</label>
-              <input v-model="supplier.cssz_ossz_code" type="text" maxlength="3" inputmode="numeric"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.health_insurance_number') }}</label>
-              <input v-model="supplier.health_insurance_number" type="text" maxlength="20"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            </div>
+            <template v-if="supplier.taxpayer_type !== 'po'">
+              <div>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_vsdp') }}</label>
+                <input v-model="supplier.cssz_vsdp" type="text" maxlength="20"
+                  class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_ossz_code') }}</label>
+                <input v-model="supplier.cssz_ossz_code" type="text" maxlength="3" inputmode="numeric"
+                  class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.health_insurance_number') }}</label>
+                <input v-model="supplier.health_insurance_number" type="text" maxlength="20"
+                  class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              </div>
+            </template>
+            <p v-else class="md:col-span-2 rounded-md border border-payroll-500/30 bg-payroll-50 px-3 py-2 text-xs text-neutral-600">
+              {{ t('settings.payroll_employer_identifiers_hint') }}
+            </p>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cz_nace_code') }}</label>
               <!-- Našeptávač nad číselníkem ČINNOSTI: nabízí jen kódy platné k dnešku.

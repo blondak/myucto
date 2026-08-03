@@ -7974,6 +7974,7 @@
     "cssz_vsdp": "Variabilní symbol OSVČ (ČSSZ)",
     "cssz_ossz_code": "Kód OSSZ (okres)",
     "health_insurance_number": "Číslo pojištěnce ZP",
+    "payroll_employer_identifiers_hint": "Identifikátory odvodů zaměstnavatele se spravují výhradně v Mzdy → Nastavení zaměstnavatele: VS ČSSZ u mzdové účtárny a VS zdravotní pojišťovny u jejího účtu.",
     "cz_nace_code": "CZ-NACE klasifikace",
     "cz_nace_hint": "Kód z číselníku ČINNOSTI (např. 62.09.00). Piš číslo nebo název činnosti.",
     "data_box_id": "ID datové schránky",
