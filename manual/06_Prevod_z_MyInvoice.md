@@ -24,6 +24,16 @@ sám, ve správném pořadí.
 loga ani jiné soubory. Potřebné soubory přenes samostatně se zachováním jejich
 relativních cest a přístupových práv.
 
+> [!CAUTION]
+> **`app.pepper` a `app.secret_encryption_key` v cílovém `cfg.php` musí být
+> shodné se zdrojovou instalací MyInvoice.** Nikoli nově vygenerované.
+> Pepper vstupuje do `password_hash`, `secret_encryption_key` šifruje TOTP
+> secrety přes AES-256-GCM. S novými hodnotami převod i všechny migrace
+> proběhnou bez jediné chybové hlášky, ale přenesená hesla nejdou ověřit
+> a TOTP secrety dešifrovat — chyba se projeví až tím, že se nikdo nepřihlásí.
+> Je-li `secret_encryption_key` ve zdroji prázdný, nech ho prázdný i v cíli
+> (odvozuje se HKDF z pepperu).
+
 ## 6.2 Proč to nejde jedním `migrate.php`
 
 MyÚčto přidává vlastní migrace `1000+`. Některé z nich nejen vytvářejí tabulky,
@@ -120,6 +130,21 @@ Vědomé pokračování se ztrátou uvedených dat: `--allow-missing`.
 | `--stream` | vynutit proudovou kopii i pro zdroj na témže serveru |
 | `--batch=N` | velikost dávky při proudové kopii (výchozí 2000 řádků) |
 
+> [!WARNING]
+> `--no-truncate` **není opatrnější varianta běžného převodu.** Používej ho jen
+> tehdy, když cíl obsahuje vlastní data, která musí zůstat zachovaná. Nad
+> čerstvě založenou databází vede k opaku: `migrate.php` už naplnil číselníky
+> (`countries`, `units`, `vat_rates`, `vat_classifications`,
+> `bank_email_notice_providers` …) výchozími řádky a import ze zdroje je vloží
+> znovu se stejnými ID:
+>
+> ```
+> Integrity constraint violation: 1062 Duplicate entry
+> ```
+>
+> Řešení je vytvořit cílovou databázi znovu prázdnou a převod zopakovat bez
+> tohoto přepínače.
+
 ## 6.5 Převod v Dockeru
 
 Když zdroj a cíl nejsou na témže databázovém serveru, zadej zdroj jako URL.
@@ -144,6 +169,43 @@ cmd/docker-migrate-from-myinvoice.sh --source-container myinvoice-db-1 \
 ```
 
 Zdrojový stack zůstává beze změny; zapisuje se pouze do cílové databáze MyÚčta.
+
+#### Kolize DNS aliasu `db` mezi dvěma Compose stacky
+
+Jakmile je `app` kontejner MyÚčta připojený současně do sítě staré instalace
+MyInvoice, existují v dosahu **dva různé hostname `db`** — Docker dává každé
+service automatický síťový alias podle jejího jména a obě instalace mají
+databázi pojmenovanou `db`. Embedded DNS pak může `db` přeložit na databázi
+druhého stacku a aplikace se hlásí do cizí databáze.
+
+Příznak je zavádějící, protože vypadá jako špatné heslo:
+
+```
+Access denied for user 'myucto'@'172.18.0.4' (using password: YES)
+```
+
+V `cfg.docker.php` proto po dobu převodu neuváděj `db`, ale **jméno kontejneru**,
+které je napříč Dockerem jedinečné:
+
+```php
+'db' => [
+    'host' => 'myucto-db-1',
+],
+```
+
+Totéž platí pro zdroj v migračním URL — `mysql://root:tajne@myinvoice-db-1:3306/myinvoice`.
+
+#### Po změně `cfg.docker.php` nestačí `restart`
+
+Produkční image má z výkonových důvodů `opcache.validate_timestamps=0`, takže
+PHP nekontroluje časová razítka souborů a drží zkompilovanou verzi configu
+v paměti. `docker compose restart app` proces PHP-FPM uvnitř kontejneru
+zachová, takže aplikace dál běží nad **starým** `cfg.php` a úprava se zdánlivě
+neprojeví. Kontejner je potřeba vytvořit znovu:
+
+```powershell
+docker compose up -d --force-recreate app
+```
 
 ### MyInvoice na hostiteli, MyÚčto v Dockeru
 
