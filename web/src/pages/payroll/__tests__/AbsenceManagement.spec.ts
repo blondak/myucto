@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   averages: vi.fn(),
   leaveLedger: vi.fn(),
   decide: vi.fn(),
+  createAbsence: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -19,7 +20,7 @@ vi.mock('@/api/payrollAbsences', () => ({
     averages: m.averages,
     leaveLedger: m.leaveLedger,
     decide: m.decide,
-    createAbsence: vi.fn(),
+    createAbsence: m.createAbsence,
     cancel: vi.fn(),
     createAverage: vi.fn(),
     approveAverage: vi.fn(),
@@ -125,6 +126,37 @@ describe('AbsenceManagement', () => {
       .find(button => button.text() === 'payroll_absence.tabs.absences')
     expect(activeTab!.classes()).toContain('border-payroll-600')
     expect(activeTab!.classes()).not.toContain('bg-payroll-600')
+    wrapper.unmount()
+  })
+
+  it('uses searchable selectors and visibly bordered controls in forms', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.findAll('[role="combobox"]').length).toBeGreaterThan(0)
+    const averagesTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll_absence.tabs.averages')
+    await averagesTab!.trigger('click')
+
+    const formInputs = wrapper.findAll('input[type="number"], input[type="date"], input[type="text"]')
+    expect(formInputs.length).toBeGreaterThan(0)
+    for (const input of formInputs) {
+      expect(input.classes()).toContain('border-neutral-300')
+      expect(input.classes()).toContain('bg-surface')
+    }
+    wrapper.unmount()
+  })
+
+  it('does not submit an absence requiring an approved average without one', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    const create = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.absences.create'))
+    expect(create!.attributes('disabled')).toBeDefined()
+    await create!.trigger('click')
+
+    expect(m.createAbsence).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

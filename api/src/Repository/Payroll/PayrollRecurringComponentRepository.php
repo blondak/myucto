@@ -252,7 +252,14 @@ final class PayrollRecurringComponentRepository
                 AND recurring.is_active = 1
                 AND recurring.valid_from <= ?
                 AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
-                AND COALESCE(employment.actual_start_date, employment.start_date) <= ?
+                AND COALESCE(
+                      employment.actual_start_date,
+                      employment.start_date,
+                      CASE WHEN employment.is_legacy_projection = 1
+                           THEN "1900-01-01"
+                           ELSE NULL
+                      END
+                    ) <= ?
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)
               ORDER BY recurring.id
               FOR UPDATE'
@@ -372,7 +379,14 @@ final class PayrollRecurringComponentRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT component.valid_from, component.valid_to,
-                    COALESCE(employment.actual_start_date, employment.start_date)
+                    COALESCE(
+                      employment.actual_start_date,
+                      employment.start_date,
+                      CASE WHEN employment.is_legacy_projection = 1
+                           THEN "1900-01-01"
+                           ELSE NULL
+                      END
+                    )
                       AS employment_start,
                     employment.end_date AS employment_end
                FROM payroll_employments employment
@@ -399,8 +413,13 @@ final class PayrollRecurringComponentRepository
         $componentTo = $component['valid_to'] === null
             ? null
             : PayrollTimeValue::string($component['valid_to'], 'component.valid_to');
+        if (($component['employment_start'] ?? null) === null) {
+            throw new \InvalidArgumentException(
+                'Pracovní vztah nemá zadané datum nástupu.'
+            );
+        }
         $employmentStart = PayrollTimeValue::string(
-            $component['employment_start'] ?? null,
+            $component['employment_start'],
             'employment.start',
         );
         $employmentEnd = $component['employment_end'] === null

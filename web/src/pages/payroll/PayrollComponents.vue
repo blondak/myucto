@@ -23,6 +23,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import {
@@ -95,6 +96,8 @@ const inputPreviewFingerprint = ref<string | null>(null)
 const importName = ref('')
 const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
+const importFileInput = ref<HTMLInputElement | null>(null)
+const importDragging = ref(false)
 const importPreview = ref<PayrollInputImportPreview | null>(null)
 const importPreviewFingerprint = ref<string | null>(null)
 const importResult = ref<PayrollInputImportResult | null>(null)
@@ -249,7 +252,7 @@ async function load() {
     recurring.value = recurringItems
     inputs.value = periodInputs
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.load_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
     loading.value = false
   }
@@ -262,7 +265,7 @@ async function reloadPeriod() {
   try {
     inputs.value = await payrollApi.inputs(period.value)
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.load_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
     loading.value = false
   }
@@ -349,7 +352,7 @@ async function saveComponent() {
     componentEditorOpen.value = false
     toast.success(t('payroll.components.catalog.saved'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.save_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
   } finally {
     saving.value = false
   }
@@ -424,7 +427,7 @@ async function saveRecurring() {
     recurringEditorOpen.value = false
     toast.success(t('payroll.components.recurring.saved'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.save_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
   } finally {
     saving.value = false
   }
@@ -442,7 +445,7 @@ async function materializeRecurring() {
     inputs.value = await payrollApi.inputs(period.value)
     activeTab.value = 'inputs'
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.recurring.materialize_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.recurring.materialize_failed')))
   } finally {
     saving.value = false
   }
@@ -480,7 +483,7 @@ async function previewManualInput() {
     inputPreview.value = await payrollApi.previewInput(manualInputPayload.value)
     inputPreviewFingerprint.value = manualInputFingerprint.value
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.inputs.preview_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.inputs.preview_failed')))
   } finally {
     saving.value = false
   }
@@ -499,7 +502,7 @@ async function saveInput() {
     inputEditorOpen.value = false
     toast.success(t('payroll.components.inputs.saved'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.save_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
   } finally {
     saving.value = false
   }
@@ -512,7 +515,7 @@ async function approveInput(input: PayrollInput) {
     inputs.value = await payrollApi.inputs(period.value)
     toast.success(t('payroll.components.inputs.approved'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.inputs.approve_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.inputs.approve_failed')))
   } finally {
     saving.value = false
   }
@@ -522,6 +525,12 @@ function resetImport() {
   importPreview.value = null
   importPreviewFingerprint.value = null
   importResult.value = null
+}
+
+function clearImportSelection() {
+  importName.value = ''
+  importContent.value = ''
+  resetImport()
 }
 
 async function fileAsBase64(file: File): Promise<string> {
@@ -537,18 +546,42 @@ async function fileAsBase64(file: File): Promise<string> {
   })
 }
 
-async function chooseImport(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
+async function loadImportFile(file: File) {
+  const fileName = file.name.toLowerCase()
+  if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx')) {
+    clearImportSelection()
+    toast.error(t('payroll.components.import.unsupported_file'))
+    return
+  }
+  if (file.size > 5_000_000) {
+    clearImportSelection()
+    toast.error(t('payroll.components.import.file_too_large'))
+    return
+  }
+
   importName.value = file.name
-  importFormat.value = file.name.toLowerCase().endsWith('.xlsx') ? 'xlsx' : 'csv'
+  importFormat.value = fileName.endsWith('.xlsx') ? 'xlsx' : 'csv'
+  importContent.value = ''
+  resetImport()
   try {
     importContent.value = await fileAsBase64(file)
-    resetImport()
   } catch {
-    importContent.value = ''
     toast.error(t('payroll.components.import.read_failed'))
   }
+}
+
+async function chooseImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  await loadImportFile(file)
+  input.value = ''
+}
+
+async function dropImport(event: DragEvent) {
+  importDragging.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) await loadImportFile(file)
 }
 
 async function previewImport() {
@@ -559,7 +592,7 @@ async function previewImport() {
     importPreviewFingerprint.value = fingerprint
     importResult.value = null
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.import.preview_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.import.preview_failed')))
   } finally {
     saving.value = false
   }
@@ -573,7 +606,7 @@ async function applyImport() {
     toast.success(t('payroll.components.import.applied', importResult.value))
     inputs.value = await payrollApi.inputs(period.value)
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.components.import.apply_failed'))
+    toast.error(apiErrorMessage(error, t('payroll.components.import.apply_failed')))
   } finally {
     saving.value = false
   }
@@ -763,10 +796,31 @@ onMounted(load)
       <section v-if="activeTab === 'import'" class="space-y-4">
         <div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.import.title') }}</h2><p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.components.import.hint') }}</p></div>
         <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
-          <div v-if="canWrite" class="flex flex-wrap items-center gap-3">
-            <input data-testid="payroll-import-file" type="file" accept=".csv,.xlsx" class="max-w-full text-sm" @change="chooseImport">
+          <div v-if="canWrite" class="space-y-4">
+            <div
+              data-testid="payroll-import-dropzone"
+              role="button"
+              tabindex="0"
+              class="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-5 py-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-payroll-500/30"
+              :class="importDragging ? 'border-payroll-500 bg-payroll-50' : 'border-neutral-300 bg-neutral-50 hover:border-payroll-400 hover:bg-payroll-50/50'"
+              @click="importFileInput?.click()"
+              @keydown.enter.prevent="importFileInput?.click()"
+              @keydown.space.prevent="importFileInput?.click()"
+              @dragenter.prevent="importDragging = true"
+              @dragover.prevent="importDragging = true"
+              @dragleave.prevent="importDragging = false"
+              @drop.prevent="dropImport"
+            >
+              <input ref="importFileInput" data-testid="payroll-import-file" type="file" accept=".csv,.xlsx" class="sr-only" @change="chooseImport">
+              <svg class="h-7 w-7 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
+              <p class="mt-2 font-medium text-neutral-900">{{ t(importDragging ? 'payroll.components.import.drop_active' : 'payroll.components.import.drop_hint') }}</p>
+              <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.components.import.file_limit') }}</p>
+              <p v-if="importName" data-testid="payroll-import-selected" :title="importName" class="mt-3 rounded-full bg-payroll-100 px-3 py-1 text-xs font-medium text-payroll-700">{{ t('payroll.components.import.selected_file', { name: importName }) }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
             <button :class="btnOutline('neutral')" :disabled="saving || !importContent" @click="previewImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.import.preview') }}</button>
             <button data-testid="payroll-import-apply" :class="btnFilled('primary')" :disabled="saving || !importCanApply" @click="applyImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>{{ t('payroll.components.import.apply') }}</button>
+            </div>
           </div>
           <p class="mt-3 text-xs text-neutral-500">{{ t('payroll.components.import.columns_hint') }}</p>
           <div v-if="importPreview" class="mt-4 space-y-4">

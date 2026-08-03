@@ -220,6 +220,40 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('accepts a supported file dropped into the import zone', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    const importTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.import')
+    await importTab!.trigger('click')
+
+    const file = new File([
+      'employment_id;component_code;amount_minor\n12;SYN_BONUS;25000',
+    ], 'synthetic.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await wrapper.get('[data-testid="payroll-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [file] },
+    })
+
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-testid="payroll-import-selected"]').attributes('title')).toBe('synthetic.xlsx')
+      const previewButton = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.components.import.preview')
+      expect(previewButton!.attributes('disabled')).toBeUndefined()
+    })
+
+    const unsupported = new File(['unsupported'], 'synthetic.txt', { type: 'text/plain' })
+    await wrapper.get('[data-testid="payroll-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [unsupported] },
+    })
+    expect(wrapper.find('[data-testid="payroll-import-selected"]').exists()).toBe(false)
+    const previewButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.import.preview')
+    expect(previewButton!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('creates the code from the name until the user edits it manually', async () => {
     const wrapper = mount(PayrollComponents)
     await flushPromises()

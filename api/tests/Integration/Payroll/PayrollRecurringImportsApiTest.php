@@ -218,6 +218,54 @@ final class PayrollRecurringImportsApiTest extends TestCase
         self::assertSame(0, $afterEndBody['replayed_count']);
     }
 
+    public function testRecurringComponentCanBeCreatedForLegacyEmploymentWithoutStartDate(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = NULL, actual_start_date = NULL,
+                    is_legacy_projection = 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $created = $this->recurring->create(
+            $this->request('POST', '/api/payroll/recurring-components')
+                ->withParsedBody($this->recurringPayload()),
+            new Response(),
+        );
+
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+
+        $materialized = $this->recurring->materialize(
+            $this->request('POST', '/api/payroll/recurring-components/materialize')
+                ->withParsedBody(['period' => '2026-06']),
+            new Response(),
+        );
+        $result = PayrollTimeValue::row(
+            $this->json($materialized)['materialization'] ?? null,
+            'materialization',
+        );
+        self::assertSame(1, $result['created_count']);
+    }
+
+    public function testRecurringComponentRejectsOrdinaryEmploymentWithoutStartDate(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = NULL, actual_start_date = NULL,
+                    is_legacy_projection = 0
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $created = $this->recurring->create(
+            $this->request('POST', '/api/payroll/recurring-components')
+                ->withParsedBody($this->recurringPayload()),
+            new Response(),
+        );
+
+        self::assertSame(422, $created->getStatusCode(), (string) $created->getBody());
+        self::assertSame('validation_failed', $this->errorCode($created));
+    }
+
     public function testCsvDryRunPartialApplyDedupeAndTenantIsolation(): void
     {
         $csv = implode("\n", [
