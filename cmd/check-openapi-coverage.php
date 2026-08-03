@@ -15,6 +15,8 @@ declare(strict_types=1);
  *   - /api/auth/setup*, /api/auth/login, /logout, /forgot, /reset, /change-password,
  *     /totp/*, /me — UI/wizard scope, integrace přes bearer je neřeší
  *   - /api/public/approval/* — pro koncové zákazníky, ne pro integrace
+ *   - /api/payroll/* — interní session-only mzdová agenda; veřejné API je až
+ *     explicitně kurátorovaný read-only subset pod /api/v1/*
  *   - /api/openapi.yaml, /api/docs, /api/health, /api/version — self-reference / triviální
  *   - mutace na /api/settings/*, /api/suppliers (POST/PUT/DELETE) a /api/admin/update/*
  *   - /api/maintenance/* (sample data, admin), /api/settings/{pdf-signing,signing,
@@ -127,6 +129,7 @@ $skipPrefixes = [
     '/api/auth/change-password',
     '/api/auth/totp/',
     '/api/auth/tokens',            // session-only, nelze volat bearer-em
+    '/api/payroll/',               // interní session-only mzdový bounded context
     '/api/settings/email-branding/', // admin UI tooling (logo upload, preview)
     '/api/maintenance/',           // správa sample dat, admin-only (RoleMiddleware)
     '/api/settings/pdf-signing',   // admin konfigurace el. podpisu (certifikáty)

@@ -60,6 +60,9 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/bank-statements/7/match-suggestions', 'bank', AccessLevel::READ],
             ['POST', '/api/bank-match-suggestions/7/accept', 'bank.match', AccessLevel::WRITE],
             ['POST', '/api/bank-match-suggestions/7/reject', 'bank.match', AccessLevel::WRITE],
+            ['GET', '/api/payroll/capabilities', 'payroll', AccessLevel::READ],
+            ['GET', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::READ],
+            ['PUT', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::WRITE],
         ];
         foreach ($cases as [$method, $path, $key, $level]) {
             $match = $map->match($method, $path);

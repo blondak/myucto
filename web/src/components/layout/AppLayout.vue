@@ -106,7 +106,7 @@ interface NavSection {
   /** Hlavička sekce; pokud chybí, položky jsou bez visual grouping */
   title?: string
   /** Color accent pro vertikální pruh + text. Tailwind utility class group. */
-  accent?: 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal'
+  accent?: 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal' | 'payroll'
   items: NavItem[]
 }
 
@@ -128,6 +128,7 @@ const ACCENT_DOT: Record<NonNullable<NavSection['accent']>, string> = {
   neutral: 'bg-neutral-400',
   accent:  'bg-accent-500',
   teal:    'bg-teal-500',
+  payroll: 'bg-payroll-500',
 }
 
 /** Accent → levá lišta rámující položky sekce. Tlumená na 40 %, ať nekřičí. */
@@ -140,6 +141,7 @@ const ACCENT_RAIL: Record<NonNullable<NavSection['accent']>, string> = {
   neutral: 'border-neutral-400/40',
   accent:  'border-accent-500/40',
   teal:    'border-teal-500/40',
+  payroll: 'border-payroll-500/40',
 }
 
 /** Outline icon paths — Heroicons style, stroke 2, viewBox 24, currentColor */
@@ -253,6 +255,7 @@ const navSections = computed<NavSection[]>(() => {
   // zůstávají. Undefined = zapnuto (starší /auth/me bez pole), aby chybějící migrace
   // uživateli nesebrala účetnictví.
   const accountingEnabled = supplierStore.currentSupplier?.accounting_enabled !== false
+  const payrollEnabled = supplierStore.currentSupplier?.payroll_enabled !== false
   // Účetnictví (Epic F1) — sekce se zobrazí jen firmám v režimu podvojného účetnictví.
   const isDoubleEntry = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   // Daňová evidence (Epic DE) — zrcadlo isDoubleEntry; sekce jen pro režim daňové evidence.
@@ -372,6 +375,14 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
       ],
     },
+    ...(payrollEnabled ? [{
+      key: 'payroll',
+      title: t('nav.section_payroll'),
+      accent: 'payroll',
+      items: [
+        { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
+      ],
+    } as NavSection] : []),
   ]
 
   if (auth.hasCommercialFeatures && isDoubleEntry) {
@@ -544,7 +555,7 @@ const navSections = computed<NavSection[]>(() => {
  * vlastní přetažení uživatele pořád vyhrává a neuvedené klíče se řadí podle tohoto.
  */
 function accountantFirst(sections: NavSection[]): NavSection[] {
-  const first = ['taxes', 'accounting', 'accounting_tools', 'tax_evidence']
+  const first = ['taxes', 'payroll', 'accounting', 'accounting_tools', 'tax_evidence']
   const rank = (s: NavSection) => {
     const i = first.indexOf(s.key)
     return i === -1 ? first.length : i
@@ -570,6 +581,7 @@ function navPermission(item: NavItem): PermissionKey | null {
   if (path.startsWith('/accounting/assets')) return 'assets'
   if (path.startsWith('/accounting')) return 'accounting'
   if (path.startsWith('/tax-evidence')) return 'tax_evidence'
+  if (path.startsWith('/payroll')) return 'payroll'
   if (path.startsWith('/reports') || path === '/tax') return 'reports'
   if (path.startsWith('/stock')) return 'stock'
   if (path.startsWith('/eshop')) return 'eshop'

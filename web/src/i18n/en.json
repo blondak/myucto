@@ -414,6 +414,8 @@
     "bank": "Bank",
     "system": "System",
     "section_taxes": "Taxes",
+    "section_payroll": "Payroll",
+    "payroll_overview": "Payroll overview",
     "settings": "Settings",
     "branding": "Branding",
     "supplier_current": "Supplier",
@@ -558,6 +560,63 @@
     "reports_oss": "OSS return",
     "section_finance": "Finance",
     "mcp_server": "MCP server"
+  },
+  "payroll": {
+    "title": "Payroll",
+    "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
+    "load_failed": "The payroll module could not be loaded.",
+    "status": {
+      "disabled": "Inactive",
+      "setup": "Setup in progress",
+      "active": "Active",
+      "suspended": "Suspended"
+    },
+    "activation": {
+      "title": "Enable payroll",
+      "description": "Choose the first month the company will process in the new payroll module. Earlier periods may remain in the legacy Payroll recap, but one month cannot be processed by both paths.",
+      "start_period": "First payroll period",
+      "enable": "Start setup",
+      "enabled": "The payroll module has been enabled.",
+      "disable": "Cancel payroll setup",
+      "disable_confirm": "Cancel payroll setup? No payroll data will be deleted.",
+      "disabled": "Payroll setup has been cancelled.",
+      "failed": "The payroll activation could not be saved.",
+      "conflict": "Another user changed the settings. The current state has been reloaded."
+    },
+    "dashboard": {
+      "start_period": "Starting period",
+      "supported_years": "Supported years",
+      "available_features": "Available features",
+      "matrix_version": "Support matrix version"
+    },
+    "capabilities": {
+      "title": "Module scope",
+      "description": "The matrix separates target-supported scenarios from features that are already safe to use.",
+      "feature": "Feature",
+      "status": "Product status",
+      "availability": "Availability",
+      "epic": "Minimum EPIC",
+      "available": "Available",
+      "planned": "Planned",
+      "planned_hint": "Features marked as planned cannot yet be used in a production payroll run."
+    },
+    "support_status": {
+      "supported": "Supported",
+      "manual_review": "Manual review required",
+      "not_supported": "Not supported"
+    },
+    "features": {
+      "module_shell": "Module shell and dashboard",
+      "activation": "Company activation",
+      "persons": "Employee records",
+      "employments": "Employment relationships",
+      "payroll_runs": "Monthly payroll runs",
+      "payslips": "Payslips and documents",
+      "automatic_posting": "Automatic accounting posting",
+      "jmhz_export": "JMHZ export",
+      "health_insurer_export": "Health insurer submissions",
+      "direct_submission": "Direct electronic submission"
+    }
   },
   "keyboard_shortcuts": {
     "title": "Keyboard shortcuts",
@@ -7302,8 +7361,14 @@
     "accounting_enabled": {
       "title": "Keep accounting records",
       "label": "Keep accounting records",
-      "hint": "Enables the journal, general ledger, statements, assets, payroll and year-end closing. Turning it off hides them from the menu — invoicing, VAT returns, control statements and stock keep working. It has no effect on licensing: every company and user is licensed regardless of this setting.",
+      "hint": "Enables the journal, general ledger, statements, assets and year-end closing. Turning it off hides them from the menu — invoicing, payroll, VAT returns, control statements and stock keep working. It has no effect on licensing: every company and user is licensed regardless of this setting.",
       "off_note": "The accounting sections disappear from the menu once saved. Nothing is deleted — turning it back on restores everything including history."
+    },
+    "payroll_enabled": {
+      "title": "Run payroll",
+      "label": "Run payroll",
+      "hint": "Enables the standalone payroll module for this company in either accounting mode. It is enabled by default and is not currently tied to licensing.",
+      "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again."
     },
     "accounting_mode": "Accounting mode",
     "accounting_mode_tax_evidence": "Tax evidence (daňová evidence)",

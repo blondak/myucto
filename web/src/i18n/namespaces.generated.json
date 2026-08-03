@@ -57,6 +57,7 @@
     "monthly_report",
     "payment_method",
     "payment_order",
+    "payroll",
     "permissions",
     "portal",
     "portfolio",
@@ -262,6 +263,9 @@
     ],
     "document-requests": [
       "document_requests"
+    ],
+    "payroll-dashboard": [
+      "payroll"
     ],
     "accounting-accounts": [
       "accounting",

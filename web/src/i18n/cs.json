@@ -414,6 +414,8 @@
     "bank": "Banka",
     "system": "Systém",
     "section_taxes": "Daně",
+    "section_payroll": "Mzdy",
+    "payroll_overview": "Přehled mezd",
     "settings": "Nastavení",
     "branding": "Branding",
     "supplier_current": "Dodavatel",
@@ -558,6 +560,63 @@
     "reports_oss": "OSS přiznání",
     "section_finance": "Finance",
     "mcp_server": "MCP server"
+  },
+  "payroll": {
+    "title": "Mzdy",
+    "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
+    "load_failed": "Mzdový modul se nepodařilo načíst.",
+    "status": {
+      "disabled": "Neaktivní",
+      "setup": "Probíhá nastavení",
+      "active": "Aktivní",
+      "suspended": "Pozastavený"
+    },
+    "activation": {
+      "title": "Aktivovat mzdovou agendu",
+      "description": "Zvol první měsíc, od kterého bude firma používat nový mzdový modul. Starší období mohou zůstat v původní Mzdové rekapitulaci; jeden měsíc ale nelze zpracovat oběma cestami.",
+      "start_period": "První mzdové období",
+      "enable": "Zahájit nastavení",
+      "enabled": "Mzdový modul byl aktivován.",
+      "disable": "Zrušit zahájení nastavení",
+      "disable_confirm": "Opravdu zrušit zahájení nastavení mezd? Mzdová data se nesmažou.",
+      "disabled": "Zahájení nastavení mezd bylo zrušeno.",
+      "failed": "Aktivaci mzdového modulu se nepodařilo uložit.",
+      "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav."
+    },
+    "dashboard": {
+      "start_period": "Počáteční období",
+      "supported_years": "Podporované roky",
+      "available_features": "Dostupné funkce",
+      "matrix_version": "Verze support matrix"
+    },
+    "capabilities": {
+      "title": "Rozsah modulu",
+      "description": "Matice odděluje cílově podporované scénáře od funkcí, které už jsou bezpečně dostupné.",
+      "feature": "Funkce",
+      "status": "Produktový stav",
+      "availability": "Dostupnost",
+      "epic": "Minimální EPIC",
+      "available": "Dostupné",
+      "planned": "Připravuje se",
+      "planned_hint": "Funkce označené jako připravované zatím nelze použít v ostrém mzdovém běhu."
+    },
+    "support_status": {
+      "supported": "Podporováno",
+      "manual_review": "Vyžaduje ruční kontrolu",
+      "not_supported": "Nepodporováno"
+    },
+    "features": {
+      "module_shell": "Kostra a dashboard modulu",
+      "activation": "Aktivace pro firmu",
+      "persons": "Osobní karty",
+      "employments": "Pracovní vztahy",
+      "payroll_runs": "Měsíční mzdové běhy",
+      "payslips": "Výplatní pásky a dokumenty",
+      "automatic_posting": "Automatické zaúčtování",
+      "jmhz_export": "JMHZ export",
+      "health_insurer_export": "Podání zdravotním pojišťovnám",
+      "direct_submission": "Přímé elektronické podání"
+    }
   },
   "keyboard_shortcuts": {
     "title": "Klávesové zkratky",
@@ -7302,8 +7361,14 @@
     "accounting_enabled": {
       "title": "Vést účetnictví",
       "label": "Vést účetnictví",
-      "hint": "Zpřístupní účetní deník, hlavní knihu, výkazy, majetek, mzdy a uzávěrku. Vypnuté je z menu schová — fakturace, DPH přiznání, kontrolní hlášení i sklad fungují dál. Na licenci to nemá vliv: licencují se všechny firmy i uživatelé bez ohledu na toto nastavení.",
+      "hint": "Zpřístupní účetní deník, hlavní knihu, výkazy, majetek a uzávěrku. Vypnuté je z menu schová — fakturace, mzdy, DPH přiznání, kontrolní hlášení i sklad fungují dál. Na licenci to nemá vliv: licencují se všechny firmy i uživatelé bez ohledu na toto nastavení.",
       "off_note": "Účetní sekce zmizí z menu po uložení. Data se nemažou — po zapnutí se vrátí i s historií."
+    },
+    "payroll_enabled": {
+      "title": "Vést mzdy",
+      "label": "Vést mzdy",
+      "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Nastavení je ve výchozím stavu zapnuté a nyní není vázané na licenci.",
+      "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná."
     },
     "accounting_mode": "Režim účetnictví",
     "accounting_mode_tax_evidence": "Daňová evidence",

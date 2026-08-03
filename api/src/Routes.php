@@ -62,6 +62,8 @@ use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
+use MyInvoice\Action\Payroll\PayrollActivationAction;
+use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
 use MyInvoice\Action\Settings\SupplierInvoiceCounterAction;
@@ -569,6 +571,13 @@ final class Routes
         $app->get    ('/api/public/work-report/{token:[a-f0-9]{32,128}}',              PublicWorkReportGetAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/request-code', PublicWorkReportRequestCodeAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/verify',       PublicWorkReportVerifyAction::class);
+
+        // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
+        $app->group('/api/payroll', function ($g) {
+            $g->get('/capabilities', PayrollCapabilitiesAction::class);
+            $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
+            $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
+        });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
         // Vše tenant-scoped (ATTR_CURRENT_ID). Zápisy = účetní|admin, GET = readonly+;

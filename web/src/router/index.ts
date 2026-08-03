@@ -15,6 +15,7 @@ declare module 'vue-router' {
     requiresTaxEvidence?: boolean
     requiresCashMode?: boolean
     requiresStock?: boolean
+    requiresPayroll?: boolean
     commercialOnly?: boolean
     requiresNoStock?: boolean
     requiresOss?: boolean
@@ -92,6 +93,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'documents/:id(\\d+)',    name: 'document-detail',  component: () => import('@/pages/documents/DocumentDetail.vue') },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — účetní pohled.
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
+      // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
+      { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
       { path: 'accounting/accounts',      name: 'accounting-accounts',      component: () => import('@/pages/accounting/ChartOfAccounts.vue'), meta: { requiresDoubleEntry: true } },
       // Předkontace, Kurzový režim, Repo sazba, Archiv účetnictví a Hromadný export
@@ -381,6 +384,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
+  'payroll-dashboard': ['payroll'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
   'accounting-document-completeness': ['accounting'],
@@ -603,6 +607,11 @@ router.beforeEach(async (to) => {
   // Nav sekci gatuje AppLayout; tady tvrdě blokujeme i přímý přístup přes URL.
   const requiresStock = to.matched.some((r) => r.meta.requiresStock)
   if (requiresStock && !useSupplierStore().currentSupplier?.stock_enabled) {
+    return { name: 'home' }
+  }
+
+  const requiresPayroll = to.matched.some((r) => r.meta.requiresPayroll)
+  if (requiresPayroll && useSupplierStore().currentSupplier?.payroll_enabled === false) {
     return { name: 'home' }
   }
 

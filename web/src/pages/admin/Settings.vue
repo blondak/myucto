@@ -40,6 +40,7 @@ function syncSupplierStore(s: Supplier) {
     payment_thanks_default_checked: s.payment_thanks_default_checked,
     stock_enabled: s.stock_enabled ?? false,
     accounting_enabled: s.accounting_enabled ?? true,
+    payroll_enabled: s.payroll_enabled ?? true,
   })
 }
 
@@ -395,6 +396,8 @@ async function saveSupplier() {
       accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
       // „Vést účetnictví" (1179) — opt-out účetní nadstavby v menu; na licenci bez vlivu.
       accounting_enabled: supplier.value.accounting_enabled ?? true,
+      // „Vést mzdy" (1187) — výchozí zapnuto; samostatná licence se zatím neřeší.
+      payroll_enabled: supplier.value.payroll_enabled ?? true,
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,
@@ -945,6 +948,20 @@ function vatCollisionLabel(c: VatStatusCollision): string {
         </label>
         <p v-if="supplier.accounting_enabled === false" class="text-xs text-warning-600 mt-2">
           {{ t('settings.accounting_enabled.off_note') }}
+        </p>
+      </section>
+
+      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.payroll_enabled.title') }}</h2>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input v-model="supplier.payroll_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
+          <span>
+            <span class="font-medium">{{ t('settings.payroll_enabled.label') }}</span>
+            <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.payroll_enabled.hint') }}</p>
+          </span>
+        </label>
+        <p v-if="supplier.payroll_enabled === false" class="text-xs text-warning-600 mt-2">
+          {{ t('settings.payroll_enabled.off_note') }}
         </p>
       </section>
 

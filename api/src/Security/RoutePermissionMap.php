@@ -113,6 +113,13 @@ final class RoutePermissionMap
         ['GET', '#^/api/bank-ai-suggestion-availability$#', 'bank.post', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-ai-suggestion-availability$#', 'accounting', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/unpost$#', 'bank.unpost', AccessLevel::WRITE],
+
+        ['GET', '#^/api/payroll/capabilities$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
+        ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll(/|$)#', 'payroll', AccessLevel::READ],
+        ['*', '#^/api/payroll(/|$)#', 'payroll', AccessLevel::WRITE],
+
         ['GET', '#^/api/accounting/bank-posting-(rules|suggestions|unposted)(/|$)#', 'bank.rules', AccessLevel::READ],
         ['*', '#^/api/accounting/bank-posting-(rules|suggestions|unposted)(/|$)#', 'bank.rules', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/(bank-rule-templates|auto-posting-policy)(/|$)#', 'bank.rules', AccessLevel::READ],
