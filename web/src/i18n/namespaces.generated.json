@@ -58,6 +58,7 @@
     "payment_method",
     "payment_order",
     "payroll",
+    "payroll_absence",
     "permissions",
     "portal",
     "portfolio",
@@ -268,6 +269,15 @@
       "payroll"
     ],
     "payroll-people": [
+      "payroll"
+    ],
+    "payroll-time": [
+      "payroll"
+    ],
+    "payroll-absences": [
+      "payroll_absence"
+    ],
+    "payroll-settings": [
       "payroll"
     ],
     "accounting-accounts": [
@@ -693,6 +703,7 @@
       "payment_method",
       "payment_order",
       "payroll",
+      "payroll_absence",
       "permissions",
       "portal",
       "portfolio",
