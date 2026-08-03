@@ -417,6 +417,7 @@
     "section_payroll": "Payroll",
     "payroll_overview": "Payroll overview",
     "payroll_people": "Employees",
+    "payroll_time": "Time and shifts",
     "payroll_settings": "Payroll settings",
     "settings": "Settings",
     "branding": "Branding",
@@ -567,6 +568,90 @@
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
     "load_failed": "The payroll module could not be loaded.",
+    "time": {
+      "title": "Time and shifts",
+      "subtitle": "Historical working-time fund, published schedule and audited actual time for every employment.",
+      "period": "Period",
+      "incomplete_only": "Incomplete only",
+      "reload": "Reload",
+      "add": "Add time",
+      "load_failed": "Time data could not be loaded.",
+      "saved": "The time record was saved.",
+      "save_failed": "The time record could not be saved.",
+      "empty": "There are no employments for the selected period",
+      "empty_hint": "Change the period or disable the incomplete filter.",
+      "approve": "Approve month",
+      "approved": "Time data was approved and locked.",
+      "approve_failed": "The month could not be approved.",
+      "reopen": "Reopen",
+      "reopen_reason": "Enter the reason for correcting the approved month:",
+      "reopened": "The month was reopened with an audit trail.",
+      "reopen_failed": "The month could not be reopened.",
+      "bulk": {
+        "approve": "Approve selected ({count})",
+        "approved": "Approved employments: {count}.",
+        "failed": "Employments that could not be approved: {count}. Reload the data and review row errors.",
+        "select_all": "Select all open employments on the visible page",
+        "select": "Select employment: {name}"
+      },
+      "columns": {
+        "employee": "Employee / employment",
+        "fund": "Fund",
+        "plan": "Plan",
+        "actual": "Actual",
+        "difference": "Difference",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "status": {
+        "open": "Open",
+        "incomplete": "Incomplete",
+        "approved": "Approved"
+      },
+      "category": {
+        "regular": "Regular work",
+        "overtime": "Overtime",
+        "night": "Night work",
+        "weekend": "Weekend work",
+        "holiday": "Public holiday work",
+        "difficult_environment": "Difficult environment"
+      },
+      "editor": {
+        "title": "New schedule or actual time",
+        "employment": "Employment",
+        "type": "Record type",
+        "actual": "Actual worked time",
+        "shift": "Planned shift",
+        "category": "Time category",
+        "timezone": "Time zone",
+        "starts": "Starts",
+        "ends": "Ends",
+        "break": "Break (min)",
+        "standby": "Standby (min)",
+        "remote": "Remote work",
+        "publish": "Publish to employee"
+      },
+      "calendar": {
+        "default_name": "Regular working week",
+        "create": "Create calendar",
+        "new_version": "New calendar version",
+        "saved": "The historical work-calendar version was saved.",
+        "failed": "The calendar could not be saved."
+      },
+      "import": {
+        "button": "Import",
+        "title": "Import time data",
+        "hint": "CSV: employment_code, optional employment_id, starts_at, ends_at, timezone, category, break_minutes and unique external_id. Preview does not write anything.",
+        "preview": "Validate",
+        "apply": "Import valid rows",
+        "summary": "Rows {total_rows}, valid {accepted_rows}, rejected {rejected_rows}, duplicates {duplicate_rows}.",
+        "row_error": "Row {row}: {message}",
+        "xlsx_manual": "XLSX is not automatically supported. Convert it to CSV and run preview again.",
+        "preview_failed": "The import preview could not be created.",
+        "saved": "The time import was processed.",
+        "failed": "The time import could not be processed."
+      }
+    },
     "people": {
       "title": "Employees",
       "subtitle": "An overview of people and their employment relationships in the new payroll module.",

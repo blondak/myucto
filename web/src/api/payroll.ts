@@ -79,6 +79,136 @@ export interface PayrollPersonResponse {
   person: PayrollPerson
 }
 
+export type PayrollTimeCategory =
+  | 'regular'
+  | 'overtime'
+  | 'night'
+  | 'weekend'
+  | 'holiday'
+  | 'difficult_environment'
+
+export interface PayrollTimeMonthState {
+  id: number | null
+  employment_id: number
+  period_start: string
+  status: 'open' | 'approved'
+  revision_no: number
+  row_version: number
+  approved_at: string | null
+  reopened_at: string | null
+  reopen_reason: string | null
+}
+
+export interface PayrollCalendarDay {
+  date: string
+  weekday: number
+  is_weekend: boolean
+  is_holiday: boolean
+  day_kind: 'workday' | 'non_working' | 'holiday'
+  planned_minutes: number
+  holiday_code: string | null
+  holiday_name: string | null
+}
+
+export interface PayrollWorkCalendar {
+  id: number
+  employment_id: number
+  name: string
+  timezone_name: string
+  schedule_type: 'regular' | 'irregular' | 'shift'
+  week_pattern: Record<string, number>
+  weekly_minutes: number
+  valid_from: string
+  valid_to: string | null
+  row_version: number
+  fund_minutes: number
+  days: PayrollCalendarDay[]
+}
+
+export interface PayrollShift {
+  id: number
+  employment_id: number
+  calendar_id: number | null
+  series_key: string
+  revision_no: number
+  starts_at: string
+  ends_at: string
+  timezone_name: string
+  break_minutes: number
+  net_minutes: number
+  remote_work: boolean
+  standby_minutes: number
+  status: 'draft' | 'published'
+  row_version: number
+}
+
+export interface PayrollTimeEntry {
+  id: number
+  employment_id: number
+  series_key: string
+  revision_no: number
+  category: PayrollTimeCategory
+  starts_at: string
+  ends_at: string
+  timezone_name: string
+  break_minutes: number
+  net_minutes: number
+  source_kind: 'manual' | 'import' | 'schedule'
+  status: 'draft' | 'approved'
+  row_version: number
+}
+
+export interface PayrollTimeOverviewItem {
+  employment: {
+    id: number
+    employee_id: number
+    code: string
+    relation_type: PayrollRelationType
+    status: string
+    start_date: string | null
+    end_date: string | null
+    full_name: string
+  }
+  calendar: PayrollWorkCalendar | null
+  month: PayrollTimeMonthState
+  summary: {
+    fund_minutes: number
+    planned_minutes: number
+    actual_minutes: number
+    difference_minutes: number
+    category_minutes: Record<PayrollTimeCategory, number>
+    incomplete: boolean
+  }
+  shifts: PayrollShift[]
+  entries: PayrollTimeEntry[]
+}
+
+export interface PayrollTimeOverview {
+  period: string
+  incomplete_only: boolean
+  items: PayrollTimeOverviewItem[]
+}
+
+export interface PayrollTimeImportError {
+  row_number: number
+  error_code: string
+  field_name: string | null
+  error_message: string
+}
+
+export interface PayrollTimeImportPreview {
+  format: 'csv' | 'xlsx'
+  supported: boolean
+  status: 'preview' | 'manual_review'
+  period: string
+  original_name: string
+  total_rows: number
+  accepted_rows: number
+  rejected_rows: number
+  duplicate_rows: number
+  errors: PayrollTimeImportError[]
+}
+
 export interface PayrollEmployerAccounts {
   employment_gross_debit: string
   employment_gross_credit: string
@@ -245,4 +375,28 @@ export const payrollApi = {
   updateInstitutionAccount: (id: number, payload: PayrollInstitutionAccountUpdatePayload) =>
     api.put<{ account: PayrollInstitutionAccount }>(`/payroll/settings/institution-accounts/${id}`, payload)
       .then(response => response.data.account),
+  timeMonth: (period: string, incomplete = false) =>
+    api.get<PayrollTimeOverview>('/payroll/time/month', { params: { period, incomplete: incomplete ? 1 : 0 } })
+      .then(response => response.data),
+  saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
+    api.put<{ calendar: PayrollWorkCalendar }>(`/payroll/time/calendars/${employmentId}`, payload)
+      .then(response => response.data.calendar),
+  saveShift: (payload: Record<string, unknown>) =>
+    api.post<{ shift: PayrollShift; month: PayrollTimeMonthState }>('/payroll/time/shifts', payload)
+      .then(response => response.data),
+  saveTimeEntry: (payload: Record<string, unknown>) =>
+    api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
+      .then(response => response.data),
+  previewTimeImport: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
+    api.post<{ preview: PayrollTimeImportPreview }>('/payroll/time/imports/preview', payload)
+      .then(response => response.data.preview),
+  importTime: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
+    api.post<{ import: Record<string, unknown> }>('/payroll/time/imports', payload)
+      .then(response => response.data.import),
+  approveTimeMonth: (period: string, payload: { employment_id: number; row_version: number }) =>
+    api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/approve`, payload)
+      .then(response => response.data.month),
+  reopenTimeMonth: (period: string, payload: { employment_id: number; row_version: number; reason: string }) =>
+    api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/reopen`, payload)
+      .then(response => response.data.month),
 }

@@ -382,6 +382,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey },
       ],
     } as NavSection] : []),

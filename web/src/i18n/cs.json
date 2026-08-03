@@ -417,6 +417,7 @@
     "section_payroll": "Mzdy",
     "payroll_overview": "Přehled mezd",
     "payroll_people": "Zaměstnanci",
+    "payroll_time": "Docházka a směny",
     "payroll_settings": "Nastavení mezd",
     "settings": "Nastavení",
     "branding": "Branding",
@@ -567,6 +568,90 @@
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
     "load_failed": "Mzdový modul se nepodařilo načíst.",
+    "time": {
+      "title": "Docházka a směny",
+      "subtitle": "Historický pracovní fond, publikovaný plán a auditovaná skutečnost pro každý pracovní vztah.",
+      "period": "Období",
+      "incomplete_only": "Jen neúplné",
+      "reload": "Obnovit",
+      "add": "Přidat čas",
+      "load_failed": "Docházku se nepodařilo načíst.",
+      "saved": "Časový záznam byl uložen.",
+      "save_failed": "Časový záznam se nepodařilo uložit.",
+      "empty": "Pro zvolené období nejsou žádné pracovní vztahy",
+      "empty_hint": "Změňte období nebo vypněte filtr neúplnosti.",
+      "approve": "Schválit měsíc",
+      "approved": "Docházka byla schválena a uzamčena.",
+      "approve_failed": "Měsíc se nepodařilo schválit.",
+      "reopen": "Znovu otevřít",
+      "reopen_reason": "Uveďte důvod opravy schváleného měsíce:",
+      "reopened": "Měsíc byl auditovaně znovu otevřen.",
+      "reopen_failed": "Měsíc se nepodařilo znovu otevřít.",
+      "bulk": {
+        "approve": "Schválit vybrané ({count})",
+        "approved": "Schválené vztahy: {count}.",
+        "failed": "Nepodařilo se schválit vztahy: {count}. Obnovte data a zkontrolujte řádkové chyby.",
+        "select_all": "Vybrat všechny otevřené vztahy na zobrazené stránce",
+        "select": "Vybrat vztah: {name}"
+      },
+      "columns": {
+        "employee": "Zaměstnanec / vztah",
+        "fund": "Fond",
+        "plan": "Plán",
+        "actual": "Skutečnost",
+        "difference": "Rozdíl",
+        "status": "Stav",
+        "actions": "Akce"
+      },
+      "status": {
+        "open": "Otevřený",
+        "incomplete": "Neúplný",
+        "approved": "Schválený"
+      },
+      "category": {
+        "regular": "Běžná práce",
+        "overtime": "Přesčas",
+        "night": "Noční práce",
+        "weekend": "Práce o víkendu",
+        "holiday": "Práce ve svátek",
+        "difficult_environment": "Ztížené prostředí"
+      },
+      "editor": {
+        "title": "Nový plán nebo skutečnost",
+        "employment": "Pracovní vztah",
+        "type": "Druh záznamu",
+        "actual": "Skutečně odpracovaný čas",
+        "shift": "Plánovaná směna",
+        "category": "Kategorie času",
+        "timezone": "Časové pásmo",
+        "starts": "Začátek",
+        "ends": "Konec",
+        "break": "Přestávka (min)",
+        "standby": "Pohotovost (min)",
+        "remote": "Práce na dálku",
+        "publish": "Publikovat zaměstnanci"
+      },
+      "calendar": {
+        "default_name": "Pravidelný pracovní týden",
+        "create": "Založit kalendář",
+        "new_version": "Nová verze kalendáře",
+        "saved": "Historická verze pracovního kalendáře byla uložena.",
+        "failed": "Kalendář se nepodařilo uložit."
+      },
+      "import": {
+        "button": "Import",
+        "title": "Import docházky",
+        "hint": "CSV: employment_code, volitelně employment_id, starts_at, ends_at, timezone, category, break_minutes a jedinečné external_id. Náhled nic nezapisuje.",
+        "preview": "Zkontrolovat",
+        "apply": "Importovat platné řádky",
+        "summary": "Řádků {total_rows}, platných {accepted_rows}, chybných {rejected_rows}, duplicit {duplicate_rows}.",
+        "row_error": "Řádek {row}: {message}",
+        "xlsx_manual": "XLSX není automaticky podporován. Převeďte jej do CSV a spusťte znovu náhled.",
+        "preview_failed": "Náhled importu se nepodařilo vytvořit.",
+        "saved": "Import docházky byl zpracován.",
+        "failed": "Import docházky se nepodařilo zpracovat."
+      }
+    },
     "people": {
       "title": "Zaměstnanci",
       "subtitle": "Přehled osob a jejich pracovních vztahů pro nový mzdový modul.",
