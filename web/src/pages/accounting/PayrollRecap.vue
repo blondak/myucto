@@ -369,7 +369,7 @@ const breakdownRows = computed(() => {
     }] : []),
     {
       key: 'advance_tax',
-      // Popisek nesmí tvrdit „15 %", když část základu jde 23 % (§38ha).
+      // Popisek nesmí tvrdit „15 %", když část základu jde 23 % (§38h odst. 2).
       label: b.tax_high_base > 0
         ? t('accounting.payroll.row.advance_tax_progressive')
         : t('accounting.payroll.row.advance_tax'),

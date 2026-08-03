@@ -104,7 +104,7 @@ final class TaxConstantsAction
                 return "Chybí nebo není číslo: {$k}";
             }
         }
-        // Měsíční hranice §38ha — přibyla později než ostatní skaláry, proto stejně
+        // Měsíční hranice §38h odst. 2 — přibyla později než ostatní skaláry, proto stejně
         // jako payroll.advance_tax_high jen volitelně (chybějící doplní merge).
         if (isset($d['advance_tax_high_threshold'])
             && (!is_numeric($d['advance_tax_high_threshold']) || (float) $d['advance_tax_high_threshold'] < 0)
@@ -136,7 +136,7 @@ final class TaxConstantsAction
                     return "payroll.{$k} musí být sazba v rozsahu 0–1.";
                 }
             }
-            // Progresivní sazba (§38ha) přibyla později — starší FE ji neposílá
+            // Progresivní sazba (§38h odst. 2) přibyla později — starší FE ji neposílá
             // a merge ji doplní z defaultů, proto validujeme jen když dorazí.
             if (isset($d['payroll']['advance_tax_high'])) {
                 $high = $d['payroll']['advance_tax_high'];

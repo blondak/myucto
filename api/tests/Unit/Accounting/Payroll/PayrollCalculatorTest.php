@@ -263,17 +263,17 @@ final class PayrollCalculatorTest extends TestCase
         self::assertSame(14, $b['advance_tax']);
     }
 
-    // ── Progresivní sazba (§38ha ZDP) ───────────────────────────────────────
+    // ── Progresivní sazba (§38h odst. 2 ZDP) ─────────────────────────────────
 
-    /** Hranice 2026 = 4× průměrné mzdy = 48× ročního stropu SP / 12 — musí sedět. */
+    /** Měsíční hranice = 3× průměrná mzda = roční strop SP (48×) / 16. */
     public function testHighRateThresholdMatchesSocialMaxBase(): void
     {
         foreach ([2024, 2025, 2026] as $year) {
             $c = TaxConstants::forYear($year);
             self::assertSame(
-                intdiv((int) $c['social_max_base'], 12),
+                intdiv((int) $c['social_max_base'], 16),
                 (int) $c['advance_tax_high_threshold'],
-                "hranice §38ha {$year} = social_max_base / 12"
+                "hranice §38h odst. 2 pro {$year} = social_max_base / 16"
             );
         }
     }
@@ -282,25 +282,25 @@ final class PayrollCalculatorTest extends TestCase
     public function testBelowHighThresholdUsesLowRateOnly(): void
     {
         $c = TaxConstants::forYear(2026);
-        $b = PayrollCalculator::compute(195800.0, $c);
+        $b = PayrollCalculator::compute(146900.0, $c);
 
-        self::assertSame(195800, $b['tax_base']);
+        self::assertSame(146900, $b['tax_base']);
         self::assertSame(0, $b['tax_high_base']);
-        self::assertSame(29370, $b['advance_tax'], '15 % z 195 800');
+        self::assertSame(22035, $b['advance_tax'], '15 % z 146 900');
     }
 
     /**
-     * Těsně nad hranicí je rozdíl proti plochým 15 % malý (331 Kč u hrubé 200 000),
+     * Těsně nad hranicí je rozdíl proti plochým 15 % malý (248 Kč u hrubé 150 000),
      * takže by se chybějící progrese dala snadno přehlédnout — hlídáno explicitně.
      */
     public function testJustAboveHighThresholdDiffersFromFlatRate(): void
     {
         $c = TaxConstants::forYear(2026);
-        $b = PayrollCalculator::compute(200000.0, $c);
+        $b = PayrollCalculator::compute(150000.0, $c);
 
-        self::assertSame(4132, $b['tax_high_base'], '200 000 − 195 868');
-        self::assertSame(30331, $b['advance_tax']);
-        self::assertSame(331, $b['advance_tax'] - 30000, 'o 331 Kč víc než plochých 15 %');
+        self::assertSame(3099, $b['tax_high_base'], '150 000 − 146 901');
+        self::assertSame(22748, $b['advance_tax']);
+        self::assertSame(248, $b['advance_tax'] - 22500, 'o 248 Kč víc než plochých 15 %');
     }
 
     /** Nad hranicí se 23 % daní JEN část nad ní, ne celý základ. */
@@ -309,11 +309,11 @@ final class PayrollCalculatorTest extends TestCase
         $c = TaxConstants::forYear(2026);
         $b = PayrollCalculator::compute(250000.0, $c);
 
-        self::assertSame(195868, $b['tax_high_threshold'], '4 × 48 967');
+        self::assertSame(146901, $b['tax_high_threshold'], '3 × 48 967');
         self::assertSame(250000, $b['tax_base']);
-        self::assertSame(54132, $b['tax_high_base'], '250 000 − 195 868');
-        // 15 % × 195 868 = 29 380,20 + 23 % × 54 132 = 12 450,36 → 41 830,56 → 41 831
-        self::assertSame(41831, $b['advance_tax']);
+        self::assertSame(103099, $b['tax_high_base'], '250 000 − 146 901');
+        // 15 % × 146 901 = 22 035,15 + 23 % × 103 099 = 23 712,77 → 45 747,92 → 45 748
+        self::assertSame(45748, $b['advance_tax']);
         self::assertNotSame(
             (int) ceil(250000 * 0.23),
             $b['advance_tax'],
@@ -322,23 +322,23 @@ final class PayrollCalculatorTest extends TestCase
     }
 
     /**
-     * Hranice §38ha (195 868) není násobek stovky, takže o progresi rozhoduje až
-     * ZAOKROUHLENÝ základ (§38h odst. 1): 195 800 je ještě celý v 15 %, kdežto
-     * hrubá 195 868 se zaokrouhlí na 195 900 a 32 Kč spadne do 23 %.
+     * Hranice §38h odst. 2 (146 901) není násobek stovky, takže o progresi rozhoduje
+     * až ZAOKROUHLENÝ základ (§38h odst. 1): 146 900 je ještě celý v 15 %, kdežto
+     * hrubá 146 901 se zaokrouhlí na 147 000 a 99 Kč spadne do 23 %.
      */
     public function testHighRateAppliesToRoundedBaseNotGross(): void
     {
         $c = TaxConstants::forYear(2026);
 
-        $under = PayrollCalculator::compute(195800.0, $c);
-        self::assertSame(195800, $under['tax_base']);
+        $under = PayrollCalculator::compute(146900.0, $c);
+        self::assertSame(146900, $under['tax_base']);
         self::assertSame(0, $under['tax_high_base']);
 
-        $over = PayrollCalculator::compute(195868.0, $c);
-        self::assertSame(195900, $over['tax_base'], 'zaokrouhlení nahoru přes hranici');
-        self::assertSame(32, $over['tax_high_base'], '195 900 − 195 868');
-        // 15 % × 195 868 = 29 380,20 + 23 % × 32 = 7,36 → 29 387,56 → 29 388
-        self::assertSame(29388, $over['advance_tax']);
+        $over = PayrollCalculator::compute(146901.0, $c);
+        self::assertSame(147000, $over['tax_base'], 'zaokrouhlení nahoru přes hranici');
+        self::assertSame(99, $over['tax_high_base'], '147 000 − 146 901');
+        // 15 % × 146 901 = 22 035,15 + 23 % × 99 = 22,77 → 22 057,92 → 22 058
+        self::assertSame(22058, $over['advance_tax']);
     }
 
     /** Bez hranice v konstantách se počítá jednou sazbou — starší roky beze změny. */

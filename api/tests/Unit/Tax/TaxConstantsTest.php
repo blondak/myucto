@@ -54,6 +54,7 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(200940, $c['pausal_annual']['band2']);  // 12× 16 745 — beze změny
         self::assertSame(325668, $c['pausal_annual']['band3']);  // 12× 27 139 — beze změny
         self::assertSame(1762812, $c['tax_high_threshold']);     // 36× prům. mzda 48 967
+        self::assertSame(146901, $c['advance_tax_high_threshold']); // 3× prům. mzda 48 967
         self::assertSame(0.50, $c['health_assessment_pct']);
         self::assertSame(235044, $c['social_min_base_main']);    // 40 % × 48 967 × 12
         self::assertSame(64644, $c['social_min_base_secondary']);
