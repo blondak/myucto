@@ -27,7 +27,6 @@ final class PayrollEmployerSettingsRepository
     private const STRING_COLUMNS = [
         'employer_registration_number',
         'social_security_office_code',
-        'health_insurance_payer_number',
         'default_health_insurer_code',
         'payroll_contact_name',
         'payroll_contact_email',
@@ -45,7 +44,6 @@ final class PayrollEmployerSettingsRepository
                     office.code AS default_office_code,
                     settings.employer_registration_number,
                     settings.social_security_office_code,
-                    settings.health_insurance_payer_number,
                     settings.default_health_insurer_code,
                     settings.payroll_contact_name,
                     settings.payroll_contact_email,
@@ -67,7 +65,6 @@ final class PayrollEmployerSettingsRepository
                 'default_office_code' => null,
                 'employer_registration_number' => null,
                 'social_security_office_code' => null,
-                'health_insurance_payer_number' => null,
                 'default_health_insurer_code' => null,
                 'payroll_contact_name' => null,
                 'payroll_contact_email' => null,
@@ -104,13 +101,18 @@ final class PayrollEmployerSettingsRepository
      *   default_office_code:string,
      *   employer_registration_number:?string,
      *   social_security_office_code:?string,
-     *   health_insurance_payer_number:?string,
      *   default_health_insurer_code:?string,
      *   payroll_contact_name:?string,
      *   payroll_contact_email:?string,
      *   payroll_contact_phone:?string,
      *   accounts:array<string,string>,
-     *   offices:list<array{code:string,name:string,is_active:bool}>
+     *   offices:list<array{
+     *     code:string,
+     *     name:string,
+     *     social_security_variable_symbol:?string,
+     *     social_security_variable_symbol_provided:bool,
+     *     is_active:bool
+     *   }>
      * } $data
      * @return array<string,mixed>
      */
@@ -165,11 +167,21 @@ final class PayrollEmployerSettingsRepository
         return $this->get($supplierId);
     }
 
-    /** @return list<array{id:int,code:string,name:string,is_active:bool,row_version:int}> */
+    /**
+     * @return list<array{
+     *   id:int,
+     *   code:string,
+     *   name:string,
+     *   social_security_variable_symbol:?string,
+     *   is_active:bool,
+     *   row_version:int
+     * }>
+     */
     private function offices(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, code, name, is_active, row_version
+            'SELECT id, code, name, social_security_variable_symbol,
+                    is_active, row_version
                FROM payroll_offices
               WHERE supplier_id = ?
               ORDER BY is_active DESC, code ASC'
@@ -181,6 +193,10 @@ final class PayrollEmployerSettingsRepository
                 'id' => (int) $row['id'],
                 'code' => (string) $row['code'],
                 'name' => (string) $row['name'],
+                'social_security_variable_symbol' =>
+                    $row['social_security_variable_symbol'] === null
+                        ? null
+                        : (string) $row['social_security_variable_symbol'],
                 'is_active' => (bool) $row['is_active'],
                 'row_version' => (int) $row['row_version'],
             ],
@@ -189,7 +205,13 @@ final class PayrollEmployerSettingsRepository
     }
 
     /**
-     * @param list<array{code:string,name:string,is_active:bool}> $offices
+     * @param list<array{
+     *   code:string,
+     *   name:string,
+     *   social_security_variable_symbol:?string,
+     *   social_security_variable_symbol_provided:bool,
+     *   is_active:bool
+     * }> $offices
      * @return array<string,int>
      */
     private function saveOffices(int $supplierId, array $offices): array
@@ -209,10 +231,14 @@ final class PayrollEmployerSettingsRepository
         }
 
         $upsert = $pdo->prepare(
-            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
-             VALUES (?, ?, ?, ?)
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol, is_active)
+             VALUES (?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
+                social_security_variable_symbol =
+                    IF(?, VALUES(social_security_variable_symbol),
+                        social_security_variable_symbol),
                 is_active = VALUES(is_active),
                 row_version = row_version + 1'
         );
@@ -221,7 +247,9 @@ final class PayrollEmployerSettingsRepository
                 $supplierId,
                 $office['code'],
                 $office['name'],
+                $office['social_security_variable_symbol'],
                 (int) $office['is_active'],
+                (int) $office['social_security_variable_symbol_provided'],
             ]);
         }
 

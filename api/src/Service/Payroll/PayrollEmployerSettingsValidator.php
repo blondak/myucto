@@ -11,7 +11,6 @@ final class PayrollEmployerSettingsValidator
     private const OPTIONAL_FIELDS = [
         'employer_registration_number' => 32,
         'social_security_office_code' => 16,
-        'health_insurance_payer_number' => 32,
         'default_health_insurer_code' => 8,
         'payroll_contact_name' => 190,
         'payroll_contact_email' => 190,
@@ -26,13 +25,18 @@ final class PayrollEmployerSettingsValidator
      *   default_office_code:string,
      *   employer_registration_number:?string,
      *   social_security_office_code:?string,
-     *   health_insurance_payer_number:?string,
      *   default_health_insurer_code:?string,
      *   payroll_contact_name:?string,
      *   payroll_contact_email:?string,
      *   payroll_contact_phone:?string,
      *   accounts:array<string,string>,
-     *   offices:list<array{code:string,name:string,is_active:bool}>
+     *   offices:list<array{
+     *     code:string,
+     *     name:string,
+     *     social_security_variable_symbol:?string,
+     *     social_security_variable_symbol_provided:bool,
+     *     is_active:bool
+     *   }>
      * }
      */
     public function validate(int $supplierId, array $input): array
@@ -64,7 +68,15 @@ final class PayrollEmployerSettingsValidator
         return $normalized;
     }
 
-    /** @return list<array{code:string,name:string,is_active:bool}> */
+    /**
+     * @return list<array{
+     *   code:string,
+     *   name:string,
+     *   social_security_variable_symbol:?string,
+     *   social_security_variable_symbol_provided:bool,
+     *   is_active:bool
+     * }>
+     */
     private function offices(mixed $value): array
     {
         if (!is_array($value) || $value === []) {
@@ -92,11 +104,29 @@ final class PayrollEmployerSettingsValidator
             if (isset($seen[$code])) {
                 throw new \InvalidArgumentException('Kódy mzdových účtáren se nesmí opakovat.');
             }
+            $socialVariableSymbolProvided = array_key_exists(
+                'social_security_variable_symbol',
+                $office,
+            );
+            $socialVariableSymbol = trim(
+                (string) ($office['social_security_variable_symbol'] ?? '')
+            );
+            if ($socialVariableSymbol !== ''
+                && preg_match('/^[0-9]{1,10}$/', $socialVariableSymbol) !== 1
+            ) {
+                throw new \InvalidArgumentException(
+                    'VS ČSSZ mzdové účtárny musí obsahovat nejvýše 10 číslic.'
+                );
+            }
             $seen[$code] = true;
             $hasActive = $hasActive || $office['is_active'];
             $offices[] = [
                 'code' => $code,
                 'name' => $name,
+                'social_security_variable_symbol' =>
+                    $socialVariableSymbol === '' ? null : $socialVariableSymbol,
+                'social_security_variable_symbol_provided' =>
+                    $socialVariableSymbolProvided,
                 'is_active' => $office['is_active'],
             ];
         }

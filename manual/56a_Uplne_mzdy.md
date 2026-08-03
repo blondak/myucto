@@ -44,7 +44,23 @@ nahradit nejbližším rokem nebo odhadem.
 V **Mzdy → Nastavení zaměstnavatele** se evidují registrační a kontaktní údaje
 pro mzdovou agendu. Firma může mít více mzdových účtáren, ale právě jedna
 aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní kód,
-název, kontakty a volitelné registrační údaje.
+název a vlastní variabilní symbol pro platby sociálního pojištění. Pole
+**Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
+variabilním symbolem platby.
+
+V části **Účty zdravotních pojišťoven** se pro každou pojišťovnu eviduje
+zaměstnavatelský variabilní symbol společně s účtem, měnou a obdobím platnosti.
+Ulož také druh ověřovacího zdroje, jeho referenci a datum ověření. V seznamu se
+bankovní účet zobrazuje jen maskovaně. Změnu samotného účtu nebo začátku
+platnosti založ jako nový historický záznam; u existujícího záznamu lze bezpečně
+upravit název, platební symboly, konec platnosti a údaje o ověření. Období stejné
+pojišťovny a měny se nesmějí překrývat.
+
+Osobní variabilní symbol ČSSZ a číslo pojištěnce OSVČ v obecném nastavení firmy
+zůstávají určena pro vlastní odvody fyzické osoby. Platby zaměstnavatele je
+nepřebírají. Automatické návrhy a rozpoznání bankovních plateb používají aktivní
+mzdovou účtárnu a účet pojišťovny platný k datu platby; nejednoznačný nebo
+historický údaj zůstane k ručnímu posouzení.
 
 Na stejné stránce se nastavují výchozí účty automatického zaúčtování. Samostatně
 se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odměna za

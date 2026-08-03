@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import {
   PAYROLL_ACCOUNT_TYPES,
   normalizedPayrollAccountCode,
@@ -70,7 +71,6 @@ const form = reactive<EmployerSettingsForm>({
   default_office_code: '',
   employer_registration_number: null,
   social_security_office_code: null,
-  health_insurance_payer_number: null,
   default_health_insurer_code: null,
   payroll_contact_name: null,
   payroll_contact_email: null,
@@ -86,7 +86,9 @@ const duplicateOfficeCodes = computed(() => new Set(
   officeCodes.value.filter((code, index, all) => code !== '' && all.indexOf(code) !== index),
 ))
 const hasInvalidOffice = computed(() => formOffices.value.some((_office, index) =>
-  officeCodeError(index) !== null || officeNameError(index) !== null,
+  officeCodeError(index) !== null
+  || officeNameError(index) !== null
+  || officeSocialSecurityVariableSymbolError(index) !== null,
 ))
 const defaultOfficeValid = computed(() =>
   activeOffices.value.some(office => office.code.trim().toUpperCase() === form.default_office_code),
@@ -127,7 +129,6 @@ function fillForm(value: PayrollEmployerSettings) {
   form.default_office_code = value.default_office_code ?? ''
   form.employer_registration_number = value.employer_registration_number
   form.social_security_office_code = value.social_security_office_code
-  form.health_insurance_payer_number = value.health_insurance_payer_number
   form.default_health_insurer_code = value.default_health_insurer_code
   form.payroll_contact_name = value.payroll_contact_name
   form.payroll_contact_email = value.payroll_contact_email
@@ -168,7 +169,6 @@ async function save() {
       default_office_code: form.default_office_code,
       employer_registration_number: nullable(form.employer_registration_number),
       social_security_office_code: nullable(form.social_security_office_code),
-      health_insurance_payer_number: nullable(form.health_insurance_payer_number),
       default_health_insurer_code: nullable(form.default_health_insurer_code),
       payroll_contact_name: nullable(form.payroll_contact_name),
       payroll_contact_email: nullable(form.payroll_contact_email),
@@ -177,6 +177,7 @@ async function save() {
       offices: formOffices.value.map(office => ({
         code: office.code.trim().toUpperCase(),
         name: office.name.trim(),
+        social_security_variable_symbol: nullable(office.social_security_variable_symbol),
         is_active: office.is_active,
       })),
     })
@@ -202,6 +203,7 @@ function addOffice() {
     id: 0,
     code: '',
     name: '',
+    social_security_variable_symbol: null,
     is_active: true,
     row_version: 0,
     is_new: true,
@@ -250,6 +252,14 @@ function officeCodeError(index: number): string | null {
 function officeNameError(index: number): string | null {
   const name = formOffices.value[index]?.name.trim() ?? ''
   return name === '' || name.length > 190 ? t('payroll.employer.validation.office_name') : null
+}
+
+function officeSocialSecurityVariableSymbolError(index: number): string | null {
+  const value = formOffices.value[index]?.social_security_variable_symbol?.trim() ?? ''
+  if (value === '') return null
+  return /^\d{1,10}$/.test(value)
+    ? null
+    : t('payroll.employer.validation.social_security_variable_symbol')
 }
 
 function accountLabel(key: string): string {
@@ -387,11 +397,6 @@ onMounted(load)
           </label>
 
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_insurance_payer_number') }}</span>
-            <input v-model="form.health_insurance_payer_number" type="text" maxlength="32" autocomplete="off" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-          </label>
-
-          <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_health_insurer_code') }}</span>
             <input v-model="form.default_health_insurer_code" type="text" maxlength="8" autocomplete="off" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
           </label>
@@ -454,11 +459,12 @@ onMounted(load)
         </div>
 
         <div v-else class="hidden overflow-x-auto md:block">
-          <table class="min-w-[860px] divide-y divide-neutral-200 text-sm">
+          <table class="min-w-[1040px] divide-y divide-neutral-200 text-sm">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_name') }}</th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_social_security_variable_symbol') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_status') }}</th>
                 <th class="w-10 px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
               </tr>
@@ -472,6 +478,10 @@ onMounted(load)
                 <td class="px-3 py-3 align-top">
                   <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-9 min-w-64 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
                   <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
+                </td>
+                <td class="px-3 py-3 align-top">
+                  <input v-model="office.social_security_variable_symbol" data-office-social-vs type="text" inputmode="numeric" maxlength="10" autocomplete="off" :disabled="!canWrite" :aria-invalid="showValidation && officeSocialSecurityVariableSymbolError(index) !== null" class="h-9 w-40 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                  <span v-if="showValidation && officeSocialSecurityVariableSymbolError(index)" class="mt-1 block max-w-52 text-xs text-danger-600">{{ officeSocialSecurityVariableSymbolError(index) }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
                   <label class="inline-flex min-h-9 cursor-pointer items-center gap-2">
@@ -510,6 +520,11 @@ onMounted(load)
                 <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
                 <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
               </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>
+                <input v-model="office.social_security_variable_symbol" data-office-social-vs type="text" inputmode="numeric" maxlength="10" autocomplete="off" :disabled="!canWrite" :aria-invalid="showValidation && officeSocialSecurityVariableSymbolError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                <span v-if="showValidation && officeSocialSecurityVariableSymbolError(index)" class="mt-1 block text-xs text-danger-600">{{ officeSocialSecurityVariableSymbolError(index) }}</span>
+              </label>
               <label class="inline-flex min-h-10 cursor-pointer items-center gap-2">
                 <input v-model="office.is_active" type="checkbox" :disabled="!canWrite" class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500" @change="updateOfficeActivity(index)">
                 <span class="text-sm text-neutral-700">{{ t('payroll.employer.office_active') }}</span>
@@ -518,6 +533,8 @@ onMounted(load)
           </article>
         </div>
       </section>
+
+      <HealthInsurerAccounts :can-write="canWrite" />
 
       <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <div class="mb-5">

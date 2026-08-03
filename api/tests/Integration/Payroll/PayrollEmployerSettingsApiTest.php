@@ -121,6 +121,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         self::assertSame(1, $saved['row_version']);
         self::assertSame('PLZEN', $saved['default_office_code']);
         self::assertSame('P12345678', $saved['employer_registration_number']);
+        self::assertArrayNotHasKey('health_insurance_payer_number', $saved);
         self::assertCount(1, $saved['offices']);
 
         $updatedPayload = $this->payload('BRNO', 'Brněnská účtárna');
@@ -151,6 +152,30 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         );
         $count->execute([$this->otherSupplierId]);
         self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testOfficeSocialVariableSymbolIsValidatedAndPreservedWhenOmitted(): void
+    {
+        $payload = $this->payload('MAIN', 'Mzdová účtárna');
+        $payload['offices'][0]['social_security_variable_symbol'] = '0012345678';
+        $created = $this->put($this->supplierId, $payload);
+        self::assertSame(200, $created->getStatusCode());
+        $office = $this->json($created)['settings']['offices'][0];
+        self::assertSame('0012345678', $office['social_security_variable_symbol']);
+
+        $withoutNewField = $this->payload('MAIN', 'Přejmenovaná účtárna');
+        $withoutNewField['row_version'] = 1;
+        $updated = $this->put($this->supplierId, $withoutNewField);
+        self::assertSame(200, $updated->getStatusCode());
+        $office = $this->json($updated)['settings']['offices'][0];
+        self::assertSame('0012345678', $office['social_security_variable_symbol']);
+
+        $invalid = $this->payload('MAIN', 'Mzdová účtárna');
+        $invalid['row_version'] = 2;
+        $invalid['offices'][0]['social_security_variable_symbol'] = 'VS-123';
+        $rejected = $this->put($this->supplierId, $invalid);
+        self::assertSame(422, $rejected->getStatusCode());
+        self::assertSame('validation_failed', $this->json($rejected)['error']['code']);
     }
 
     public function testCompositeForeignKeyRejectsOfficeFromAnotherTenant(): void
@@ -290,7 +315,6 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'default_office_code' => $officeCode,
             'employer_registration_number' => 'P12345678',
             'social_security_office_code' => 'P',
-            'health_insurance_payer_number' => '76543210',
             'default_health_insurer_code' => '111',
             'payroll_contact_name' => 'Testovací účetní',
             'payroll_contact_email' => 'mzdy@example.invalid',

@@ -10,6 +10,9 @@ const m = vi.hoisted(() => ({
   employerSettings: vi.fn(),
   saveEmployerSettings: vi.fn(),
   accountOptions: vi.fn(),
+  institutionAccounts: vi.fn(),
+  createInstitutionAccount: vi.fn(),
+  updateInstitutionAccount: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -19,6 +22,9 @@ vi.mock('@/api/payroll', () => ({
     employerSettings: m.employerSettings,
     saveEmployerSettings: m.saveEmployerSettings,
     accountOptions: m.accountOptions,
+    institutionAccounts: m.institutionAccounts,
+    createInstitutionAccount: m.createInstitutionAccount,
+    updateInstitutionAccount: m.updateInstitutionAccount,
   },
 }))
 
@@ -85,7 +91,6 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
     row_version: 3,
     employer_registration_number: '12345678',
     social_security_office_code: 'P',
-    health_insurance_payer_number: '87654321',
     default_health_insurer_code: '111',
     payroll_contact_name: 'Testovací účetní',
     payroll_contact_email: 'payroll@example.test',
@@ -96,6 +101,7 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
       id: 1,
       code: 'MAIN',
       name: 'Hlavní účtárna',
+      social_security_variable_symbol: '0012345678',
       is_active: true,
       row_version: 1,
     }],
@@ -107,6 +113,7 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
 async function mountPage(value = settings()) {
   m.employerSettings.mockResolvedValue(value)
   m.accountOptions.mockResolvedValue(chartAccounts())
+  m.institutionAccounts.mockResolvedValue([])
   m.saveEmployerSettings.mockResolvedValue(value)
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()
@@ -184,6 +191,42 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(inputs[0].attributes('aria-controls')).toBeTruthy()
     expect(inputs[1].attributes('aria-controls')).toBeTruthy()
     expect(inputs[0].attributes('aria-controls')).not.toBe(inputs[1].attributes('aria-controls'))
+
+    wrapper.unmount()
+  })
+
+  it('zachová validní ČSSZ VS u mzdové účtárny v payloadu', async () => {
+    const wrapper = await mountPage()
+    const inputs = wrapper.findAll('[data-office-social-vs]')
+    expect(inputs).toHaveLength(2)
+    expect((inputs[0].element as HTMLInputElement).value).toBe('0012345678')
+
+    await inputs[0].setValue('0000000042')
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].offices[0]).toMatchObject({
+      code: 'MAIN',
+      social_security_variable_symbol: '0000000042',
+    })
+    expect(m.saveEmployerSettings.mock.calls[0][0]).not.toHaveProperty('health_insurance_payer_number')
+
+    wrapper.unmount()
+  })
+
+  it('neodešle nečíselný ČSSZ VS účtárny', async () => {
+    const wrapper = await mountPage()
+    const input = wrapper.findAll('[data-office-social-vs]')[0]
+    await input.setValue('VS-42')
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+
+    expect(m.saveEmployerSettings).not.toHaveBeenCalled()
+    expect(input.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.text()).toContain('payroll.employer.validation.social_security_variable_symbol')
 
     wrapper.unmount()
   })

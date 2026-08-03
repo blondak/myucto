@@ -107,6 +107,7 @@ export interface PayrollOffice {
   id: number
   code: string
   name: string
+  social_security_variable_symbol: string | null
   is_active: boolean
   row_version: number
 }
@@ -116,7 +117,6 @@ export interface PayrollEmployerSettings {
   row_version: number
   employer_registration_number: string | null
   social_security_office_code: string | null
-  health_insurance_payer_number: string | null
   default_health_insurer_code: string | null
   payroll_contact_name: string | null
   payroll_contact_email: string | null
@@ -135,6 +135,7 @@ export interface PayrollEmployerSettingsResponse {
 export interface PayrollOfficePayload {
   code: string
   name: string
+  social_security_variable_symbol: string | null
   is_active: boolean
 }
 
@@ -143,13 +144,77 @@ export interface PayrollEmployerSettingsPayload {
   default_office_code: string
   employer_registration_number: string | null
   social_security_office_code: string | null
-  health_insurance_payer_number: string | null
   default_health_insurer_code: string | null
   payroll_contact_name: string | null
   payroll_contact_email: string | null
   payroll_contact_phone: string | null
   accounts: PayrollEmployerAccounts
   offices: PayrollOfficePayload[]
+}
+
+export type PayrollInstitutionType =
+  | 'social_security'
+  | 'tax_office'
+  | 'health_insurer'
+  | 'statutory_insurance'
+  | 'other_recipient'
+
+export type PayrollInstitutionAccountSource =
+  | 'official_registry'
+  | 'official_document'
+  | 'institution_notice'
+  | 'user_verified'
+  | 'imported'
+
+export interface PayrollInstitutionAccount {
+  id: number
+  supplier_id: number
+  institution_id: number
+  institution_type: PayrollInstitutionType
+  institution_code: string
+  institution_name: string
+  bank_account_masked: string
+  currency_code: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_from: string
+  valid_to: string | null
+  source_kind: PayrollInstitutionAccountSource
+  source_reference: string
+  verified_on: string
+  verified_by: number | null
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollInstitutionAccountCreatePayload {
+  institution_type: PayrollInstitutionType
+  institution_code: string
+  institution_name: string
+  bank_account: string
+  currency_code: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_from: string
+  valid_to: string | null
+  source_kind: PayrollInstitutionAccountSource
+  source_reference: string
+  verified_on: string
+}
+
+export interface PayrollInstitutionAccountUpdatePayload {
+  row_version: number
+  institution_name: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_to: string | null
+  source_kind: PayrollInstitutionAccountSource
+  source_reference: string
+  verified_on: string
 }
 
 export const payrollApi = {
@@ -170,4 +235,14 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  institutionAccounts: (effectiveOn?: string) =>
+    api.get<{ accounts: PayrollInstitutionAccount[] }>('/payroll/settings/institution-accounts', {
+      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
+    }).then(response => response.data.accounts),
+  createInstitutionAccount: (payload: PayrollInstitutionAccountCreatePayload) =>
+    api.post<{ account: PayrollInstitutionAccount }>('/payroll/settings/institution-accounts', payload)
+      .then(response => response.data.account),
+  updateInstitutionAccount: (id: number, payload: PayrollInstitutionAccountUpdatePayload) =>
+    api.put<{ account: PayrollInstitutionAccount }>(`/payroll/settings/institution-accounts/${id}`, payload)
+      .then(response => response.data.account),
 }
