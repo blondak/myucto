@@ -63,6 +63,7 @@ use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
+use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
@@ -582,6 +583,7 @@ final class Routes
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
+            $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
             $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);

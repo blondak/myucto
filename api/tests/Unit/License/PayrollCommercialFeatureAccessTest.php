@@ -13,6 +13,7 @@ final class PayrollCommercialFeatureAccessTest extends TestCase
     {
         self::assertFalse(CommercialFeatureAccess::restrictsApiPath('/api/payroll/capabilities'));
         self::assertFalse(CommercialFeatureAccess::restrictsApiPath('/api/payroll/settings/activation'));
+        self::assertFalse(CommercialFeatureAccess::restrictsApiPath('/api/payroll/settings/account-options'));
         self::assertTrue(CommercialFeatureAccess::restrictsApiPath('/api/accounting/payroll/preview'));
     }
 }

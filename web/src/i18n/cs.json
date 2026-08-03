@@ -645,6 +645,13 @@
       "accounting_relation": "Mzdová položka",
       "debit": "Má dáti",
       "credit": "Dal",
+      "account_placeholder": "Vyberte účet",
+      "account_no_results": "Žádný odpovídající aktivní účet",
+      "account_aria_label": "{item} — {side}",
+      "account_type": {
+        "expense": "nákladový účet",
+        "liability": "závazkový účet"
+      },
       "accounting": {
         "employment_gross": "Mzda zaměstnance mimo výkon funkce",
         "partner_gross": "Závislý příjem společníka",
@@ -663,7 +670,11 @@
         "office_code_duplicate": "Kódy mzdových účtáren se nesmí opakovat.",
         "office_name": "Zadejte název mzdové účtárny.",
         "email": "Zadejte platnou e-mailovou adresu.",
-        "accounts": "Všechny účty musí mít platný kód účtu."
+        "accounts": "Vyberte existující aktivní účty správného typu.",
+        "account_invalid_format": "Kód účtu nemá platný formát.",
+        "account_not_found": "Účet není v účtové osnově.",
+        "account_inactive": "Účet je neaktivní.",
+        "account_wrong_type": "Vyberte {type}."
       },
       "read_only": "Nastavení máš pouze pro čtení. K úpravě je potřeba oprávnění Nastavení mezd.",
       "discard": "Zahodit změny"

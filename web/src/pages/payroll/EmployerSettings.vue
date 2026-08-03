@@ -4,6 +4,7 @@ import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollAccountOption,
   type PayrollEmployerAccounts,
   type PayrollEmployerSettings,
   type PayrollEmployerSettingsPayload,
@@ -11,6 +12,15 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import {
+  PAYROLL_ACCOUNT_TYPES,
+  normalizedPayrollAccountCode,
+  payrollAccount,
+  payrollAccountError,
+  payrollAccountOptions,
+  type PayrollAccountKey,
+} from './payrollEmployerAccounts'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -20,8 +30,9 @@ const saving = ref(false)
 const loadFailed = ref(false)
 const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
+const chartAccounts = ref<PayrollAccountOption[]>([])
 
-type AccountKey = keyof PayrollEmployerAccounts
+type AccountKey = PayrollAccountKey
 type FormOffice = PayrollEmployerSettings['offices'][number] & { is_new?: boolean }
 type EmployerSettingsForm = Omit<PayrollEmployerSettingsPayload, 'offices'>
 
@@ -85,7 +96,8 @@ const emailValid = computed(() => {
   return email === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 })
 const accountsValid = computed(() =>
-  Object.values(form.accounts).every(code => /^[0-9]{3}[.A-Z0-9]{0,7}$/.test(code.trim().toUpperCase())),
+  (Object.keys(form.accounts) as AccountKey[])
+    .every(key => payrollAccountError(chartAccounts.value, key, form.accounts[key]) === null),
 )
 const officesValid = computed(() =>
   formOffices.value.length > 0
@@ -105,7 +117,7 @@ function nullable(value: string | null): string | null {
 function normalizedAccounts(): PayrollEmployerAccounts {
   const accounts = { ...form.accounts }
   for (const key of Object.keys(accounts) as AccountKey[]) {
-    accounts[key] = accounts[key].trim().toUpperCase()
+    accounts[key] = normalizedPayrollAccountCode(accounts[key])
   }
   return accounts
 }
@@ -129,7 +141,11 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    const value = await payrollApi.employerSettings()
+    const [value, accounts] = await Promise.all([
+      payrollApi.employerSettings(),
+      payrollApi.accountOptions(),
+    ])
+    chartAccounts.value = accounts
     settings.value = value
     fillForm(value)
     conflict.value = false
@@ -240,8 +256,45 @@ function accountLabel(key: string): string {
   return t(`payroll.employer.accounting.${key}`)
 }
 
+function accountAriaLabel(rowKey: string, side: 'debit' | 'credit'): string {
+  return t('payroll.employer.account_aria_label', {
+    item: accountLabel(rowKey),
+    side: t(`payroll.employer.${side}`),
+  })
+}
+
 function accountValid(key: AccountKey): boolean {
-  return /^[0-9]{3}[.A-Z0-9]{0,7}$/.test(form.accounts[key].trim().toUpperCase())
+  return payrollAccountError(chartAccounts.value, key, form.accounts[key]) === null
+}
+
+function accountOptions(key: AccountKey) {
+  return payrollAccountOptions(chartAccounts.value, key)
+}
+
+function selectedAccountOption(key: AccountKey) {
+  const code = normalizedPayrollAccountCode(form.accounts[key])
+  if (code === '') return null
+  const account = payrollAccount(chartAccounts.value, code)
+  return {
+    value: code,
+    label: code,
+    secondary: account?.name,
+  }
+}
+
+function setAccount(key: AccountKey, code: string | number | null) {
+  form.accounts[key] = code === null ? '' : normalizedPayrollAccountCode(String(code))
+}
+
+function accountHelp(key: AccountKey): string {
+  const error = payrollAccountError(chartAccounts.value, key, form.accounts[key])
+  if (error === 'wrong_type') {
+    return t('payroll.employer.validation.account_wrong_type', {
+      type: t(`payroll.employer.account_type.${PAYROLL_ACCOUNT_TYPES[key]}`),
+    })
+  }
+  if (error !== null) return t(`payroll.employer.validation.account_${error}`)
+  return payrollAccount(chartAccounts.value, form.accounts[key])?.name ?? ''
 }
 
 onMounted(load)
@@ -401,7 +454,7 @@ onMounted(load)
         </div>
 
         <div v-else class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
+          <table class="min-w-[860px] divide-y divide-neutral-200 text-sm">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}</th>
@@ -485,11 +538,49 @@ onMounted(load)
               <tr v-for="row in accountRows" :key="row.key">
                 <th class="px-3 py-3 text-left font-medium text-neutral-900">{{ accountLabel(row.key) }}</th>
                 <td class="px-3 py-3">
-                  <input v-if="row.debit" v-model="form.accounts[row.debit]" type="text" required maxlength="10" :disabled="!canWrite" :aria-invalid="showValidation && !accountValid(row.debit)" :class="{ 'border-danger-500': showValidation && !accountValid(row.debit) }" class="h-9 w-32 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                  <div v-if="row.debit" :data-account-key="row.debit" class="min-w-56 max-w-80">
+                    <SearchableSelect
+                      :model-value="form.accounts[row.debit]"
+                      :options="accountOptions(row.debit)"
+                      :selected-option="selectedAccountOption(row.debit)"
+                      :placeholder="t('payroll.employer.account_placeholder')"
+                      :no-results-label="t('payroll.employer.account_no_results')"
+                      :clearable="false"
+                      :disabled="!canWrite"
+                      :invalid="!accountValid(row.debit)"
+                      :aria-label="accountAriaLabel(row.key, 'debit')"
+                      accent="payroll"
+                      input-class="font-mono uppercase"
+                      teleport
+                      @update:model-value="setAccount(row.debit, $event)"
+                    />
+                    <p class="mt-1 truncate text-xs" :class="accountValid(row.debit) ? 'text-neutral-500' : 'text-danger-600'">
+                      {{ accountHelp(row.debit) }}
+                    </p>
+                  </div>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="px-3 py-3">
-                  <input v-if="row.credit" v-model="form.accounts[row.credit]" type="text" required maxlength="10" :disabled="!canWrite" :aria-invalid="showValidation && !accountValid(row.credit)" :class="{ 'border-danger-500': showValidation && !accountValid(row.credit) }" class="h-9 w-32 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                  <div v-if="row.credit" :data-account-key="row.credit" class="min-w-56 max-w-80">
+                    <SearchableSelect
+                      :model-value="form.accounts[row.credit]"
+                      :options="accountOptions(row.credit)"
+                      :selected-option="selectedAccountOption(row.credit)"
+                      :placeholder="t('payroll.employer.account_placeholder')"
+                      :no-results-label="t('payroll.employer.account_no_results')"
+                      :clearable="false"
+                      :disabled="!canWrite"
+                      :invalid="!accountValid(row.credit)"
+                      :aria-label="accountAriaLabel(row.key, 'credit')"
+                      accent="payroll"
+                      input-class="font-mono uppercase"
+                      teleport
+                      @update:model-value="setAccount(row.credit, $event)"
+                    />
+                    <p class="mt-1 truncate text-xs" :class="accountValid(row.credit) ? 'text-neutral-500' : 'text-danger-600'">
+                      {{ accountHelp(row.credit) }}
+                    </p>
+                  </div>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
               </tr>
@@ -500,15 +591,47 @@ onMounted(load)
         <div class="grid grid-cols-1 gap-3 md:hidden">
           <article v-for="row in accountRows" :key="row.key" class="rounded-lg border border-neutral-200 p-4">
             <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}</h3>
-            <div class="mt-3 grid grid-cols-2 gap-3">
-              <label v-if="row.debit" class="block">
+            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div v-if="row.debit" :data-account-key="row.debit" class="min-w-0">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.debit') }}</span>
-                <input v-model="form.accounts[row.debit]" type="text" required maxlength="10" :disabled="!canWrite" :aria-invalid="showValidation && !accountValid(row.debit)" :class="{ 'border-danger-500': showValidation && !accountValid(row.debit) }" class="h-10 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-              </label>
-              <label v-if="row.credit" class="block">
+                <SearchableSelect
+                  :model-value="form.accounts[row.debit]"
+                  :options="accountOptions(row.debit)"
+                  :selected-option="selectedAccountOption(row.debit)"
+                  :placeholder="t('payroll.employer.account_placeholder')"
+                  :no-results-label="t('payroll.employer.account_no_results')"
+                  :clearable="false"
+                  :disabled="!canWrite"
+                  :invalid="!accountValid(row.debit)"
+                  :aria-label="accountAriaLabel(row.key, 'debit')"
+                  accent="payroll"
+                  input-class="font-mono uppercase"
+                  @update:model-value="setAccount(row.debit, $event)"
+                />
+                <p class="mt-1 truncate text-xs" :class="accountValid(row.debit) ? 'text-neutral-500' : 'text-danger-600'">
+                  {{ accountHelp(row.debit) }}
+                </p>
+              </div>
+              <div v-if="row.credit" :data-account-key="row.credit" class="min-w-0">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.credit') }}</span>
-                <input v-model="form.accounts[row.credit]" type="text" required maxlength="10" :disabled="!canWrite" :aria-invalid="showValidation && !accountValid(row.credit)" :class="{ 'border-danger-500': showValidation && !accountValid(row.credit) }" class="h-10 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-              </label>
+                <SearchableSelect
+                  :model-value="form.accounts[row.credit]"
+                  :options="accountOptions(row.credit)"
+                  :selected-option="selectedAccountOption(row.credit)"
+                  :placeholder="t('payroll.employer.account_placeholder')"
+                  :no-results-label="t('payroll.employer.account_no_results')"
+                  :clearable="false"
+                  :disabled="!canWrite"
+                  :invalid="!accountValid(row.credit)"
+                  :aria-label="accountAriaLabel(row.key, 'credit')"
+                  accent="payroll"
+                  input-class="font-mono uppercase"
+                  @update:model-value="setAccount(row.credit, $event)"
+                />
+                <p class="mt-1 truncate text-xs" :class="accountValid(row.credit) ? 'text-neutral-500' : 'text-danger-600'">
+                  {{ accountHelp(row.credit) }}
+                </p>
+              </div>
             </div>
           </article>
         </div>

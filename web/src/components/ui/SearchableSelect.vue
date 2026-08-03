@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, useId } from 'vue'
 
 type Option = { value: T; label: string; secondary?: string }
 
@@ -18,6 +18,10 @@ const props = withDefaults(defineProps<{
   loadingLabel?: string
   /** Vybraná položka pro zobrazení labelu, i když není v options (edit / po hledání). */
   selectedOption?: Option | null
+  invalid?: boolean
+  accent?: 'primary' | 'payroll'
+  inputClass?: string
+  ariaLabel?: string
   /**
    * Nabídku vykreslit do <body> s position:fixed. Nutné uvnitř kontejneru s overflow
    * (např. tabulka položek faktury s overflow-x-auto), který by absolutně polohovaný
@@ -34,6 +38,10 @@ const props = withDefaults(defineProps<{
   loading: false,
   loadingLabel: 'Hledám…',
   selectedOption: null,
+  invalid: false,
+  accent: 'primary',
+  inputClass: '',
+  ariaLabel: undefined,
   teleport: false,
 })
 
@@ -48,6 +56,15 @@ const listbox = ref<HTMLDivElement | null>(null)
 const open = ref(false)
 const query = ref('')
 const highlightIdx = ref(0)
+const listboxId = `searchable-select-${useId()}`
+const activeOptionId = computed(() =>
+  open.value && filtered.value[highlightIdx.value]
+    ? `${listboxId}-option-${highlightIdx.value}`
+    : undefined,
+)
+const focusClass = computed(() => props.accent === 'payroll'
+  ? 'focus:ring-payroll-500/20 focus:border-payroll-500'
+  : 'focus:ring-primary-500/20 focus:border-primary-500')
 
 // Vybraná položka: v remote režimu může být mimo aktuální options (edit / po hledání),
 // proto preferujeme selectedOption dodaný rodičem.
@@ -135,18 +152,29 @@ function onKey(e: KeyboardEvent) {
       e.preventDefault()
       selectOption(filtered.value[highlightIdx.value])
     }
+  } else if (e.key === 'Home' && open.value && filtered.value.length > 0) {
+    e.preventDefault()
+    highlightIdx.value = 0
+    scrollHighlightIntoView()
+  } else if (e.key === 'End' && open.value && filtered.value.length > 0) {
+    e.preventDefault()
+    highlightIdx.value = filtered.value.length - 1
+    scrollHighlightIntoView()
   } else if (e.key === 'Escape') {
     open.value = false
     // resetuj query na vybraný label, kdyby uživatel měnil text bez výběru
     query.value = selected.value?.label ?? ''
     input.value?.blur()
+  } else if (e.key === 'Tab') {
+    open.value = false
+    query.value = selected.value?.label ?? ''
   }
 }
 
 function scrollHighlightIntoView() {
   nextTick(() => {
     const el = listbox.value?.querySelector<HTMLElement>(`[data-idx="${highlightIdx.value}"]`)
-    el?.scrollIntoView({ block: 'nearest' })
+    if (typeof el?.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
   })
 }
 
@@ -209,15 +237,21 @@ onUnmounted(() => {
         v-model="query"
         type="text"
         role="combobox"
+        aria-autocomplete="list"
         :aria-expanded="open"
-        :aria-controls="open ? 'searchable-select-listbox' : undefined"
+        :aria-controls="open ? listboxId : undefined"
+        :aria-activedescendant="activeOptionId"
+        :aria-invalid="invalid || undefined"
+        :aria-label="ariaLabel"
         :placeholder="placeholder"
         :disabled="disabled"
         autocomplete="off"
         :class="[
           'w-full h-10 pl-3 pr-16 border border-neutral-300 rounded-md text-sm bg-surface',
-          'focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none',
+          `focus:ring-2 outline-none ${focusClass}`,
           'disabled:bg-neutral-50 disabled:text-neutral-400',
+          invalid ? 'border-danger-500' : '',
+          inputClass,
         ]"
         @focus="onFocus"
         @input="onInput"
@@ -236,7 +270,7 @@ onUnmounted(() => {
     <div
       v-if="open"
       ref="listbox"
-      id="searchable-select-listbox"
+      :id="listboxId"
       role="listbox"
       :style="teleport ? menuStyle : undefined"
       :class="[
@@ -253,6 +287,7 @@ onUnmounted(() => {
       <button
         v-for="(o, i) in filtered"
         :key="String(o.value)"
+        :id="`${listboxId}-option-${i}`"
         :data-idx="i"
         role="option"
         :aria-selected="o.value === modelValue"
@@ -261,8 +296,10 @@ onUnmounted(() => {
         @mouseenter="highlightIdx = i"
         :class="[
           'cursor-pointer w-full text-left px-3 py-2 text-sm',
-          i === highlightIdx ? 'bg-primary-50' : 'hover:bg-neutral-50',
-          o.value === modelValue ? 'font-medium text-primary-700' : 'text-neutral-900',
+          i === highlightIdx ? (accent === 'payroll' ? 'bg-payroll-50' : 'bg-primary-50') : 'hover:bg-neutral-50',
+          o.value === modelValue
+            ? (accent === 'payroll' ? 'font-medium text-payroll-600' : 'font-medium text-primary-700')
+            : 'text-neutral-900',
         ]"
       >
         <div class="truncate">{{ o.label }}</div>

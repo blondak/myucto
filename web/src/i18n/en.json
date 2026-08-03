@@ -645,6 +645,13 @@
       "accounting_relation": "Payroll item",
       "debit": "Debit",
       "credit": "Credit",
+      "account_placeholder": "Select an account",
+      "account_no_results": "No matching active account",
+      "account_aria_label": "{item} — {side}",
+      "account_type": {
+        "expense": "an expense account",
+        "liability": "a liability account"
+      },
       "accounting": {
         "employment_gross": "Employee wages outside statutory office",
         "partner_gross": "Partner's dependent income",
@@ -663,7 +670,11 @@
         "office_code_duplicate": "Payroll office codes must be unique.",
         "office_name": "Enter the payroll office name.",
         "email": "Enter a valid email address.",
-        "accounts": "All accounts must have a valid account code."
+        "accounts": "Select existing active accounts of the correct type.",
+        "account_invalid_format": "The account code has an invalid format.",
+        "account_not_found": "The account is not in the chart of accounts.",
+        "account_inactive": "The account is inactive.",
+        "account_wrong_type": "Select {type}."
       },
       "read_only": "You have read-only access. The Payroll settings permission is required to make changes.",
       "discard": "Discard changes"

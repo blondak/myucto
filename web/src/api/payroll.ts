@@ -93,6 +93,16 @@ export interface PayrollEmployerAccounts {
   other_deductions_credit: string
 }
 
+export interface PayrollAccountOption {
+  id: number
+  account_code: string
+  name: string
+  account_type: 'expense' | 'liability'
+  is_synthetic: boolean
+  parent_id: number | null
+  is_active: boolean
+}
+
 export interface PayrollOffice {
   id: number
   code: string
@@ -153,6 +163,9 @@ export const payrollApi = {
     api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
   person: (id: number) =>
     api.get<PayrollPersonResponse>(`/payroll/people/${id}`).then(response => response.data.person),
+  accountOptions: () =>
+    api.get<{ accounts: PayrollAccountOption[] }>('/payroll/settings/account-options')
+      .then(response => response.data.accounts),
   employerSettings: () =>
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
