@@ -116,6 +116,8 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll', AccessLevel::READ],
+        ['*', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/capabilities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],

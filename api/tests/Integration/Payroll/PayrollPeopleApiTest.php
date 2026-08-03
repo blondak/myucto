@@ -166,6 +166,33 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertSame('not_found', $this->json($response)['error']['code']);
     }
 
+    public function testListUsesCurrentIdentityHistoryWithoutRewritingLegacyEmployee(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, effective_from)
+             VALUES (?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'Aktuální Testovací',
+            '2000-01-01',
+        ]);
+
+        $response = $this->action->list(
+            $this->request('GET', '/api/payroll/people', 'accountant'),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('Aktuální Testovací', $this->json($response)['items'][0]['full_name']);
+        $legacy = $this->db->pdo()->prepare(
+            'SELECT full_name FROM payroll_employees WHERE supplier_id = ? AND id = ?'
+        );
+        $legacy->execute([$this->supplierId, $this->employeeId]);
+        self::assertSame('Testovací zaměstnanec', $legacy->fetchColumn());
+    }
+
     public function testListIncludesEmployeeWithoutProfileOrEmployment(): void
     {
         $this->db->pdo()->prepare(

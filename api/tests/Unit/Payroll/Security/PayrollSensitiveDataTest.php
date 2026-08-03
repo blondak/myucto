@@ -82,6 +82,60 @@ final class PayrollSensitiveDataTest extends TestCase
         );
     }
 
+    public function testContactsAreNormalizedEncryptedAndContextBound(): void
+    {
+        $email = $this->service->seal(
+            ' Jana.Testovaci@Example.Invalid ',
+            PayrollSensitiveField::CONTACT_EMAIL,
+            10,
+            21,
+        );
+        $phone = $this->service->seal(
+            '+420 111 222 333',
+            PayrollSensitiveField::CONTACT_PHONE,
+            10,
+            22,
+        );
+
+        self::assertStringStartsWith('enc:v2:', $email->ciphertext);
+        self::assertStringStartsWith('j', $email->masked);
+        self::assertStringEndsWith('@example.invalid', $email->masked);
+        self::assertStringEndsWith('2333', $phone->masked);
+        self::assertSame(
+            $email->lookupHash,
+            $this->service->lookupHash(
+                'jana.testovaci@example.invalid',
+                PayrollSensitiveField::CONTACT_EMAIL,
+                10,
+            ),
+        );
+        self::assertSame(
+            $phone->lookupHash,
+            $this->service->lookupHash(
+                '+420111222333',
+                PayrollSensitiveField::CONTACT_PHONE,
+                10,
+            ),
+        );
+        self::assertSame(
+            'Jana.Testovaci@Example.Invalid',
+            $this->service->reveal(
+                $email->ciphertext,
+                PayrollSensitiveField::CONTACT_EMAIL,
+                10,
+                21,
+            ),
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->service->reveal(
+            $email->ciphertext,
+            PayrollSensitiveField::CONTACT_PHONE,
+            10,
+            21,
+        );
+    }
+
     public function testCiphertextIsBoundToTenantEntityAndField(): void
     {
         $sealed = $this->service->seal(

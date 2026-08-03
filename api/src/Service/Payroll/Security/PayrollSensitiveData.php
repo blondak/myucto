@@ -66,13 +66,21 @@ final class PayrollSensitiveData
 
     private function normalize(string $plaintext, PayrollSensitiveField $field): string
     {
-        $value = mb_strtoupper($this->validatePlaintext($plaintext), 'UTF-8');
+        $plaintext = $this->validatePlaintext($plaintext);
+        $value = match ($field) {
+            PayrollSensitiveField::CONTACT_EMAIL =>
+                mb_strtolower($plaintext, 'UTF-8'),
+            default => mb_strtoupper($plaintext, 'UTF-8'),
+        };
         $value = match ($field) {
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
             PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER =>
                 preg_replace('/[\s\/.\-]+/u', '', $value),
             PayrollSensitiveField::BANK_ACCOUNT =>
                 preg_replace('/\s+/u', '', $value),
+            PayrollSensitiveField::CONTACT_EMAIL => $value,
+            PayrollSensitiveField::CONTACT_PHONE =>
+                preg_replace('/[\s()\/.\-]+/u', '', $value),
         };
         if (!is_string($value) || $value === '') {
             throw new \InvalidArgumentException('Citlivou hodnotu nelze normalizovat.');
@@ -150,8 +158,15 @@ final class PayrollSensitiveData
     private function maskNormalized(string $normalized, PayrollSensitiveField $field): string
     {
         $length = mb_strlen($normalized, 'UTF-8');
+        if ($field === PayrollSensitiveField::CONTACT_EMAIL) {
+            [$local, $domain] = array_pad(explode('@', $normalized, 2), 2, '');
+            return mb_substr($local, 0, 1, 'UTF-8')
+                . str_repeat('•', max(3, mb_strlen($local, 'UTF-8') - 1))
+                . ($domain === '' ? '' : '@' . $domain);
+        }
         $maximumVisible = match ($field) {
             PayrollSensitiveField::BANK_ACCOUNT => min(6, $length),
+            PayrollSensitiveField::CONTACT_PHONE => min(4, $length),
             default => min(4, $length),
         };
         $visible = min($maximumVisible, max(0, $length - 4));

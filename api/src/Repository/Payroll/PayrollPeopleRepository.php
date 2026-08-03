@@ -59,7 +59,23 @@ final class PayrollPeopleRepository
     {
         $sql = <<<'SQL'
             SELECT employee.id,
-                   employee.full_name,
+                   COALESCE(
+                       (
+                           SELECT identity_history.full_name
+                             FROM payroll_person_identity_history identity_history
+                            WHERE identity_history.supplier_id = employee.supplier_id
+                              AND identity_history.employee_id = employee.id
+                              AND identity_history.effective_from <= CURRENT_DATE
+                              AND (
+                                  identity_history.effective_to IS NULL
+                                  OR identity_history.effective_to >= CURRENT_DATE
+                              )
+                            ORDER BY identity_history.effective_from DESC,
+                                     identity_history.id DESC
+                            LIMIT 1
+                       ),
+                       employee.full_name
+                   ) AS full_name,
                    employee.is_active,
                    profile.profile_status,
                    employee.taxpayer_type AS legacy_taxpayer_type,
@@ -86,7 +102,7 @@ final class PayrollPeopleRepository
         if ($single) {
             $sql .= ' AND employee.id = ?';
         }
-        $sql .= ' ORDER BY employee.is_active DESC, employee.full_name ASC, employee.id ASC';
+        $sql .= ' ORDER BY employee.is_active DESC, full_name ASC, employee.id ASC';
 
         return $this->db->pdo()->prepare($sql);
     }

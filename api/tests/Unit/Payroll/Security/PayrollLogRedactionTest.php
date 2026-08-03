@@ -21,6 +21,10 @@ final class PayrollLogRedactionTest extends TestCase
             'employee_id' => 42,
             'profile' => [
                 'birth_number' => 'SYNTHETIC-IDENTIFIER',
+                'birth_surname' => 'SYNTHETIC-SURNAME',
+                'street_line' => 'SYNTHETIC-STREET',
+                'contact_value' => 'synthetic@example.invalid',
+                'contact_value_ciphertext' => 'enc:v2:SYNTHETIC',
                 'bank_account' => 'SYNTHETIC-ACCOUNT',
                 'diagnosis' => 'SYNTHETIC-DIAGNOSIS',
             ],
@@ -31,6 +35,10 @@ final class PayrollLogRedactionTest extends TestCase
         $profile = $redacted['profile'];
         self::assertIsArray($profile);
         self::assertSame('[REDACTED]', $profile['birth_number']);
+        self::assertSame('[REDACTED]', $profile['birth_surname']);
+        self::assertSame('[REDACTED]', $profile['street_line']);
+        self::assertSame('[REDACTED]', $profile['contact_value']);
+        self::assertSame('[REDACTED]', $profile['contact_value_ciphertext']);
         self::assertSame('[REDACTED]', $profile['bank_account']);
         self::assertSame('[REDACTED]', $profile['diagnosis']);
         self::assertSame('[REDACTED]', $redacted['monthly_gross']);
@@ -40,6 +48,8 @@ final class PayrollLogRedactionTest extends TestCase
     {
         foreach ([
             'UPDATE payroll_employees SET birth_number = ? WHERE id = ?',
+            'INSERT INTO payroll_person_addresses (street_line, supplier_id) VALUES (?, ?)',
+            'INSERT INTO payroll_person_contacts (contact_value_ciphertext, supplier_id) VALUES (?, ?)',
             'INSERT INTO payroll_person_accounts (iban_ciphertext, supplier_id) VALUES (?, ?)',
             'INSERT INTO payroll_sickness (diagnosis, employee_id) VALUES (?, ?)',
         ] as $sql) {

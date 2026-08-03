@@ -68,6 +68,7 @@ use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
+use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
 use MyInvoice\Action\Settings\SupplierInvoiceCounterAction;
@@ -581,6 +582,8 @@ final class Routes
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
+            $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
+            $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
