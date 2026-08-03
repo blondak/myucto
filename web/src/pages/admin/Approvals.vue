@@ -119,8 +119,18 @@ function daysSince(date: string | null): number | null {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <EmptyState v-else-if="filteredItems.length === 0" boxed icon="checkCircle" accent="success"
-      :title="t('approval_inbox.empty')" />
+    <!-- „Nic k vyřízení" a „filtr nic nenašel" jsou tu dva různé stavy a
+         rozezná je počet napříč všemi stavy: dokud byl text jen jeden, hlásila
+         prázdná schránka „žádné záznamy odpovídající filtru" i ve chvíli, kdy
+         žádné schvalování nikdy neproběhlo. -->
+    <EmptyState v-else-if="filteredItems.length === 0" boxed
+      :variant="counts.all === 0 ? 'empty' : 'filtered'"
+      :icon="counts.all === 0 ? 'checkCircle' : undefined"
+      :accent="counts.all === 0 ? 'success' : 'neutral'"
+      :title="counts.all === 0 ? t('approval_inbox.empty_none') : t('approval_inbox.empty_filtered')"
+      :message="counts.all === 0 ? t('approval_inbox.empty_none_hint') : undefined"
+      :cta="counts.all === 0 || statusFilter === 'all' ? undefined : t('approval_inbox.empty_show_all')"
+      @action="statusFilter = 'all'" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop: tabulka -->

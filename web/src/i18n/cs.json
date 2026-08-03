@@ -4632,7 +4632,11 @@
     "overdue_only": "Jen po 5 dnech bez reakce",
     "counts": "Vyžádán: {requested} · Schválen: {approved} · Zamítnut: {rejected} · Celkem: {total}",
     "empty": "Žádné záznamy odpovídající filtru.",
-    "days_ago": "před {n} dny"
+    "days_ago": "před {n} dny",
+    "empty_none": "Nic nečeká na schválení",
+    "empty_none_hint": "Jakmile pošlete výkaz práce zákazníkovi ke schválení, uvidíte tu jeho stav i odpověď.",
+    "empty_filtered": "Tomuto filtru neodpovídá žádný výkaz",
+    "empty_show_all": "Zobrazit vše"
   },
   "checks": {
     "doc_date": "Datum",
@@ -4644,6 +4648,17 @@
     },
     "open_list": "Otevřít v seznamu",
     "field": {
+      "111": "účet 111",
+      "131": "účet 131",
+      "314": "účet 314",
+      "324": "účet 324",
+      "381": "účet 381",
+      "382": "účet 382",
+      "383": "účet 383",
+      "384": "účet 384",
+      "385": "účet 385",
+      "388": "účet 388",
+      "389": "účet 389",
       "vat_period": "zdaňovací období",
       "prior_year_turnover": "obrat minulého roku",
       "prior_year": "minulý rok",
@@ -4663,18 +4678,7 @@
       "completed": "dokončeno",
       "unresolved_count": "nevyřešeno",
       "041": "účet 041",
-      "042": "účet 042",
-      "111": "účet 111",
-      "131": "účet 131",
-      "314": "účet 314",
-      "324": "účet 324",
-      "381": "účet 381",
-      "382": "účet 382",
-      "383": "účet 383",
-      "384": "účet 384",
-      "385": "účet 385",
-      "388": "účet 388",
-      "389": "účet 389"
+      "042": "účet 042"
     },
     "value": {
       "monthly": "měsíční",

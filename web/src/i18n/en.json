@@ -4632,7 +4632,11 @@
     "overdue_only": "Only after 5 days with no response",
     "counts": "Requested: {requested} · Approved: {approved} · Rejected: {rejected} · Total: {total}",
     "empty": "No records matching the filter.",
-    "days_ago": "{n} days ago"
+    "days_ago": "{n} days ago",
+    "empty_none": "Nothing awaits approval",
+    "empty_none_hint": "Once you send a work report to a customer for approval, its status and response will show up here.",
+    "empty_filtered": "No work report matches this filter",
+    "empty_show_all": "Show all"
   },
   "checks": {
     "doc_date": "Date",
@@ -4644,6 +4648,17 @@
     },
     "open_list": "Open in list",
     "field": {
+      "111": "account 111",
+      "131": "account 131",
+      "314": "account 314",
+      "324": "account 324",
+      "381": "account 381",
+      "382": "account 382",
+      "383": "account 383",
+      "384": "account 384",
+      "385": "account 385",
+      "388": "account 388",
+      "389": "account 389",
       "vat_period": "VAT period",
       "prior_year_turnover": "prior-year turnover",
       "prior_year": "prior year",
@@ -4663,18 +4678,7 @@
       "completed": "completed",
       "unresolved_count": "unresolved",
       "041": "account 041",
-      "042": "account 042",
-      "111": "account 111",
-      "131": "account 131",
-      "314": "account 314",
-      "324": "account 324",
-      "381": "account 381",
-      "382": "account 382",
-      "383": "account 383",
-      "384": "account 384",
-      "385": "account 385",
-      "388": "account 388",
-      "389": "account 389"
+      "042": "account 042"
     },
     "value": {
       "monthly": "monthly",
