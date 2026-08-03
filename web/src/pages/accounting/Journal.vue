@@ -16,7 +16,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import JournalEntryExtras from '@/components/accounting/JournalEntryExtras.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
@@ -647,19 +647,22 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>
                 <td v-if="tbl.isVisible('source')" class="px-3 py-2 whitespace-nowrap">
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
+                       vazby pod odkaz a sloupec pak vypadal jako dva různé údaje. -->
+                  <div class="flex items-center gap-1.5">
                     <!--
-                      Ikona zdroje otevírá náhledový drawer místo přímé navigace —
-                      účetní tak vidí doklad bez ztráty pozice v deníku. Odkaz na
+                      Tlačítko, ne obarvený text: otevírá náhledový drawer, tedy
+                      DĚLÁ něco, zatímco modrý text v tabulce slibuje navigaci.
+                      Účetní tak vidí doklad bez ztráty pozice v deníku; odkaz na
                       plný detail je uvnitř draweru. @click.stop, ať se nepřepne akordeon.
                     -->
                     <button v-if="sourceLink(e)" type="button" @click.stop="openSourceDrawer(e)"
-                      class="cursor-pointer text-primary-600 hover:text-primary-700 inline-flex items-center gap-1"
+                      :class="btnOutlineSm('primary')"
                       :title="t('accounting.journal.source_drawer.open')">
-                      {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
-                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                       </svg>
+                      {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
@@ -730,12 +733,15 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                         </tr>
                       </tfoot>
                     </table>
-                    <WhyPanel v-if="detail.automation" class="mb-3" :provenance="detail.automation" />
+                    <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
+                         je to první, co účetní po rozpadu na účty hledá. Dřív byl až
+                         pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->
+                    <JournalRelatedPanel class="mt-3 block" :entry-id="detail.id" show-preview
+                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
+                    <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
                     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
                     <JournalEntryExtras :entry="detail"
                       @description-updated="(desc, rv) => onDescriptionUpdated(detail!.id, desc, rv)" />
-                    <JournalRelatedPanel class="mt-4 block" :entry-id="detail.id" show-preview
-                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
                     <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
                     <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
                       <div class="text-xs text-neutral-500">

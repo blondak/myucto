@@ -1321,13 +1321,18 @@ export const accountingApi = {
       { description },
       rowVersion != null ? { headers: { 'If-Match': `"${rowVersion}"` } } : undefined,
     ).then(r => r.data),
+  /**
+   * Server vrací `items`, ne `attachments`. Dokud se četl neexistující klíč,
+   * spolkl ho `?? []` a seznam příloh byl VŽDY prázdný — nahrání přitom
+   * proběhlo a soubor se uložil, takže to vypadalo, že se příloha ztratila.
+   */
   listJournalAttachments: (id: number) =>
-    api.get<{ attachments: JournalAttachment[] }>(`/accounting/journal/${id}/attachments`)
-      .then(r => r.data.attachments ?? []),
+    api.get<{ items: JournalAttachment[] }>(`/accounting/journal/${id}/attachments`)
+      .then(r => r.data.items ?? []),
   uploadJournalAttachments: (id: number, files: File[], onProgress?: (pct: number) => void) => {
     const fd = new FormData()
     for (const f of files) fd.append('file[]', f, f.name)
-    return api.post<{ attachments: JournalAttachment[] }>(`/accounting/journal/${id}/attachments`, fd, {
+    return api.post<{ created: number; items: JournalAttachment[] }>(`/accounting/journal/${id}/attachments`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => { if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100)) },
     }).then(r => r.data)
