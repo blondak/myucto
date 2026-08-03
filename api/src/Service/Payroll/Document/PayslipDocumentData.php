@@ -30,6 +30,7 @@ final readonly class PayslipDocumentData
         public int $taxBeforeCreditsMinorUnits,
         public int $taxNonRefundableCreditsMinorUnits,
         public int $taxChildCreditMinorUnits,
+        public bool $taxBonusEligible,
         public int $taxAfterCreditsMinorUnits,
         public int $taxBonusMinorUnits,
         public array $otherDeductionLines,
@@ -113,7 +114,9 @@ final readonly class PayslipDocumentData
             throw new \InvalidArgumentException('Tax after credits does not match the tax breakdown.');
         }
 
-        $expectedTaxBonus = max(0, $taxChildCreditMinorUnits - $taxAfterNonRefundableCredits);
+        $expectedTaxBonus = $taxBonusEligible
+            ? max(0, $taxChildCreditMinorUnits - $taxAfterNonRefundableCredits)
+            : 0;
         if ($taxBonusMinorUnits !== $expectedTaxBonus) {
             throw new \InvalidArgumentException('Tax bonus does not match the refundable child credit breakdown.');
         }
@@ -194,6 +197,7 @@ final readonly class PayslipDocumentData
      *   tax_before_credits_minor_units:int,
      *   tax_non_refundable_credits_minor_units:int,
      *   tax_child_credit_minor_units:int,
+     *   tax_bonus_eligible:bool,
      *   tax_after_credits_minor_units:int,
      *   tax_bonus_minor_units:int,
      *   other_deduction_lines:list<array{label:string,amount_minor_units:int}>,
@@ -235,6 +239,7 @@ final readonly class PayslipDocumentData
             'tax_before_credits_minor_units' => $this->taxBeforeCreditsMinorUnits,
             'tax_non_refundable_credits_minor_units' => $this->taxNonRefundableCreditsMinorUnits,
             'tax_child_credit_minor_units' => $this->taxChildCreditMinorUnits,
+            'tax_bonus_eligible' => $this->taxBonusEligible,
             'tax_after_credits_minor_units' => $this->taxAfterCreditsMinorUnits,
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
             'other_deduction_lines' => array_map(

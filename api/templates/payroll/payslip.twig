@@ -161,6 +161,10 @@
                         <td>Daň po slevách</td>
                         <td class="amount">{{ tax_after_credits_minor_units|minor_money }} {{ currency }}</td>
                     </tr>
+                    <tr class="muted">
+                        <td>Nárok na daňový bonus</td>
+                        <td class="amount">{{ tax_bonus_eligible ? 'Ano' : 'Ne' }}</td>
+                    </tr>
                     <tr class="credit total">
                         <td>Daňový bonus</td>
                         <td class="amount">+{{ tax_bonus_minor_units|minor_money }} {{ currency }}</td>

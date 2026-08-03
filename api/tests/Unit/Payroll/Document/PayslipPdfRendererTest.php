@@ -86,6 +86,20 @@ final class PayslipPdfRendererTest extends TestCase
         SyntheticPayslipFixture::document(taxBonusMinorUnits: 90_000);
     }
 
+    public function testAcceptsZeroBonusWhenMinimumIncomeEligibilityIsNotMet(): void
+    {
+        $source = SyntheticPayslipFixture::document(
+            taxBeforeCreditsMinorUnits: 100_000,
+            taxNonRefundableCreditsMinorUnits: 0,
+            taxChildCreditMinorUnits: 150_000,
+            taxBonusEligible: false,
+            taxAfterCreditsMinorUnits: 0,
+            taxBonusMinorUnits: 0,
+        );
+
+        self::assertSame(0, $source->taxBonusMinorUnits);
+    }
+
     public function testRejectsACompromisedNetAmount(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -108,6 +122,7 @@ final class PayslipPdfRendererTest extends TestCase
             taxBeforeCreditsMinorUnits: 15_000,
             taxNonRefundableCreditsMinorUnits: 0,
             taxChildCreditMinorUnits: 0,
+            taxBonusEligible: false,
             taxAfterCreditsMinorUnits: 15_000,
             taxBonusMinorUnits: 0,
             otherDeductionLines: [new PayslipLine('Syntetická srážka', 1_000)],

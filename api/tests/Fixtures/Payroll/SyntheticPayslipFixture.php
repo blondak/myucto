@@ -14,6 +14,7 @@ final class SyntheticPayslipFixture
         int $taxBeforeCreditsMinorUnits = 718_500,
         int $taxNonRefundableCreditsMinorUnits = 257_000,
         int $taxChildCreditMinorUnits = 511_500,
+        bool $taxBonusEligible = true,
         int $taxAfterCreditsMinorUnits = 0,
         int $taxBonusMinorUnits = 50_000,
     ): PayslipDocumentData {
@@ -45,6 +46,7 @@ final class SyntheticPayslipFixture
             taxBeforeCreditsMinorUnits: $taxBeforeCreditsMinorUnits,
             taxNonRefundableCreditsMinorUnits: $taxNonRefundableCreditsMinorUnits,
             taxChildCreditMinorUnits: $taxChildCreditMinorUnits,
+            taxBonusEligible: $taxBonusEligible,
             taxAfterCreditsMinorUnits: $taxAfterCreditsMinorUnits,
             taxBonusMinorUnits: $taxBonusMinorUnits,
             otherDeductionLines: [
