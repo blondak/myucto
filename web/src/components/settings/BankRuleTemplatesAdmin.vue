@@ -186,7 +186,11 @@ function criteria(item: AdminBankRuleTemplate): string {
   <div>
     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
-        <h2 class="text-xl font-semibold">{{ t('bank_template_admin.title') }}</h2>
+        <!-- h1, ne h2: komponenta se od vyčlenění z nastavení používá jako
+             SAMOSTATNÁ stránka, takže dřív neměla vůbec nadpis první úrovně —
+             stránce chyběl display font, který ostatní tituly nesou, a čtečka
+             obrazovky začínala rovnou druhou úrovní. -->
+        <h1 class="text-2xl font-semibold">{{ t('bank_template_admin.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1">{{ t('bank_template_admin.subtitle') }}</p>
       </div>
       <button type="button" :class="btnFilled('primary')" @click="startNew">
