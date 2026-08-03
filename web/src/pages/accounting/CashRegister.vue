@@ -12,7 +12,8 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import CashRegisterManager from '@/components/cash/CashRegisterManager.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
+import CashDocumentDetail from '@/components/accounting/CashDocumentDetail.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
@@ -344,7 +345,10 @@ function onManagerChanged() { loadRegisters() }
       <EmptyState v-else-if="documents.length === 0" boxed accent="neutral" icon="doc" :title="t('cash.empty.documents')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
+        <!-- Desktop: tabulka. Na mobilu se skrývá — deset sloupců znamenalo
+             1100 px široký blok, kterým se na telefonu muselo vodorovně
+             rolovat, zatímco všechny ostatní seznamy v aplikaci tam mají karty. -->
+        <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
@@ -411,47 +415,69 @@ function onManagerChanged() { loadRegisters() }
                 <!-- Detail -->
                 <tr v-if="expandedId === d.id">
                   <td :colspan="visibleColCount" class="px-4 py-3 bg-neutral-50">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                      <div class="space-y-1">
-                        <div><span class="text-neutral-500">{{ t('cash.col.link') }}:</span> {{ purposeLabel(d.purpose) }}</div>
-                        <div v-if="d.partner_ic"><span class="text-neutral-500">{{ t('common.ic') }}:</span> {{ d.partner_ic }}</div>
-                        <div v-if="d.partner_dic"><span class="text-neutral-500">{{ t('cash.form.partner_dic') }}:</span> {{ d.partner_dic }}</div>
-                        <div v-if="d.tax_date"><span class="text-neutral-500">{{ t('cash.col.date') }} (DUZP):</span> {{ formatDate(d.tax_date) }}</div>
-                        <div v-if="d.register"><span class="text-neutral-500">{{ t('cash.register') }}:</span> {{ d.register.name }} ({{ d.register.account_code }})</div>
-                      </div>
-                      <div v-if="d.vat_mode === 'vat' && d.vat_lines.length" class="space-y-1">
-                        <div class="text-neutral-500 text-xs uppercase tracking-wide">{{ t('cash.form.vat_mode_vat') }}</div>
-                        <table class="w-full text-xs">
-                          <thead class="text-neutral-500">
-                            <tr>
-                              <th class="text-left font-medium py-0.5">{{ t('cash.form.vat_rate') }}</th>
-                              <th class="text-right font-medium py-0.5">{{ t('cash.form.vat_base') }}</th>
-                              <th class="text-right font-medium py-0.5">{{ t('cash.form.vat_amount') }}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr v-for="(l, i) in d.vat_lines" :key="i">
-                              <td class="py-0.5">{{ l.vat_rate }} %</td>
-                              <td class="py-0.5 text-right font-mono">{{ formatMoney(l.base_amount) }}</td>
-                              <td class="py-0.5 text-right font-mono">{{ formatMoney(l.vat_amount) }}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                    <!-- Proklik do deníku na zápis tohoto pokladního dokladu (§4). -->
-                    <div v-if="d.journal_entry_id" class="mt-3 pt-3 border-t border-neutral-200">
-                      <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(d.journal_entry_id) } }"
-                        class="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 hover:underline">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
-                        {{ t('common.view_in_journal') }}
-                      </RouterLink>
-                    </div>
+                    <CashDocumentDetail :doc="d" :purpose-label="purposeLabel" />
                   </td>
                 </tr>
               </template>
             </tbody>
           </table>
+        </div>
+
+        <!-- Mobil: karty. Pořadí informací sleduje, na co se u pokladního dokladu
+             kouká první — kolik a kam, pak teprve číslo a datum. -->
+        <div class="md:hidden divide-y divide-neutral-100">
+          <div v-for="d in documents" :key="`m-${d.id}`" class="p-3 space-y-2"
+            :class="{ 'opacity-60': d.status === 'reversed' }" @click="toggleExpand(d)">
+            <div class="flex items-baseline justify-between gap-2">
+              <div class="font-mono text-base font-semibold whitespace-nowrap"
+                :class="d.doc_type === 'in' ? 'text-success-600' : 'text-warning-600'">
+                {{ d.doc_type === 'in' ? '+' : '−' }}{{ formatMoney(d.total_amount) }}
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
+                  :class="d.doc_type === 'in' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
+                  {{ d.doc_type === 'in' ? t('cash.type.in_short') : t('cash.type.out_short') }}
+                </span>
+                <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
+                  :class="d.status === 'posted' ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
+                  {{ t(`cash.status.${d.status}`) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex items-baseline justify-between gap-2 text-xs text-neutral-500">
+              <span class="font-mono" :class="{ 'line-through': d.status === 'reversed' }">{{ d.doc_number || '—' }}</span>
+              <span class="font-mono">{{ formatDate(d.issue_date) }}</span>
+            </div>
+
+            <div class="text-xs">
+              <div v-if="d.partner_name" class="text-neutral-700 truncate">{{ d.partner_name }}</div>
+              <div v-if="d.description" class="text-neutral-500 truncate">{{ d.description }}</div>
+              <RouterLink v-if="linkFor(d)" :to="linkFor(d)!.to" @click.stop
+                class="font-mono text-primary-600 hover:underline">{{ linkFor(d)!.label }}</RouterLink>
+              <span v-else class="text-neutral-400">{{ purposeLabel(d.purpose) }}</span>
+            </div>
+
+            <CashDocumentDetail v-if="expandedId === d.id" :doc="d" :purpose-label="purposeLabel"
+              class="pt-2 border-t border-neutral-100" />
+
+            <div class="flex items-center justify-end gap-1.5 pt-1" @click.stop>
+              <button type="button" @click="openPdf(d)" :title="t('cash.print')" :aria-label="t('cash.print')"
+                :class="btnIconSm('neutral')">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              </button>
+              <button v-if="auth.canWrite('cash.document.write') && d.status === 'posted'" type="button"
+                @click="openReverse(d)" :title="t('cash.reverse.title')" :aria-label="t('cash.reverse.title')"
+                :class="btnIconSm('warning')">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+              </button>
+              <button v-if="auth.canWrite('cash.document.write')" type="button"
+                @click="openDelete(d)" :title="t('cash.delete.title')" :aria-label="t('cash.delete.title')"
+                :class="btnIconSm('danger')">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
