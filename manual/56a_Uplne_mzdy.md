@@ -8,8 +8,8 @@ nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
 > V této fázi je v novém modulu dostupná aktivace, nastavení zaměstnavatele
-> a mzdových účtáren, přehled podporovaného rozsahu a read-only kontrola
-> zaměstnanců a pracovních vztahů. Výpočet úplné mzdy, uživatelské výplatní
+> a mzdových účtáren, přehled podporovaného rozsahu, osobní karty a řízený
+> životní cyklus pracovních vztahů. Výpočet úplné mzdy, uživatelské výplatní
 > dokumenty a elektronická podání zatím nejsou určeny k ostrému použití.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](56_Mzdy.md).
 
@@ -93,7 +93,7 @@ pro výpočet, podání i účetnictví:
 
 | Druh vztahu | Hrubý náklad | Závazek |
 |---|---:|---:|
-| pracovní poměr mimo výkon funkce, DPP, DPČ | 521 | 331 |
+| pracovní poměr mimo výkon funkce, zaměstnání malého rozsahu, DPP, DPČ | 521 | 331 |
 | příjem společníka ze závislé činnosti | 522 | 366 |
 | odměna za výkon funkce člena orgánu | 523 | 366 |
 | pojistné hrazené zaměstnavatelem | 524 | 336 |
@@ -107,18 +107,65 @@ ostrým použitím úplných mezd zkontroluj, zda právní titul odpovídá skut
 zejména starší karta „jednatel-společník“ sama nerozliší smlouvu o výkonu funkce
 od ostatní závislé činnosti.
 
-## 56a.6 Oprávnění a citlivé údaje
+## 56a.6 Životní cyklus vztahu
+
+Nový vztah začíná jako **Plánovaný**. Stav se nemění volným přepsáním pole, ale
+jen nabízenými akcemi:
+
+`Plánovaný → Předregistrovaný → Aktivní → Přerušený → Skončený → Archivovaný`
+
+Z přerušeného vztahu se lze vrátit do aktivního stavu nebo jej ukončit.
+Plánovaný či předregistrovaný vztah lze samostatně označit jako **Nenastoupil**
+a potom archivovat. U každé akce zvolíš datum účinnosti. Přeskočení povinného
+kroku nebo návrat ze skončeného vztahu aplikace odmítne.
+
+Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
+dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
+
+## 56a.7 Historie smluvních podmínek a souběhy
+
+Tlačítko **Nová verze podmínek** založí další účinný interval. Předchozí verzi
+uzavře dnem před novou účinností; starší mzdové období proto pozdější změna
+nepřepíše. Historie drží zejména:
+
+- uzavření smlouvy, plánovaný a skutečný nástup a dobu určitou;
+- úvazek, týdenní hodiny, místo práce, pravidelné pracoviště, CZ-ISCO a druh
+  činnosti;
+- mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci,
+  daňový režim a prohlášení k dani;
+- příznak primárního pracovního vztahu a důvod změny.
+
+Jedna osoba může mít souběžně například HPP a DPP nebo samostatný pracovní poměr
+a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah označen
+jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
+identitu.
+
+## 56a.8 Checklist a časová osa
+
+Detail ukazuje povinnosti nástupu, změny a skončení. Patří sem smlouva nebo
+dohoda, registrace a změny pro zdravotní pojišťovnu a ČSSZ/JMHZ, daňové
+prohlášení, výstupní doklady, kontrola exekucí či insolvence a kontrola
+pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
+**Splněno** nebo **Netýká se**.
+
+Časová osa zachovává stavové přechody, změny checklistu i rozdíl každé smluvní
+verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
+nutné načíst aktuální verzi.
+
+## 56a.9 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
 jen z přihlášené webové relace, ne přes běžný bearer token.
+Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyžadují
+`payroll.employment.write`; bez něj je detail pouze pro čtení.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.7 Vztah k Mzdové rekapitulaci
+## 56a.10 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

@@ -66,6 +66,7 @@ use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -583,6 +584,16 @@ final class Routes
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
+            $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
+            $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
+            $g->post(
+                '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
+                [PayrollEmploymentAction::class, 'transition'],
+            );
+            $g->put(
+                '/employments/{id:[0-9]+}/checklist/{item_key:[a-z0-9_]+}',
+                [PayrollEmploymentAction::class, 'checklist'],
+            );
             $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
             $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);

@@ -21,6 +21,7 @@ final class PayrollEmploymentAccountingClassifierTest extends TestCase
         ];
 
         yield 'employment' => ['employment', $employeeAccounts];
+        yield 'small-scale employment' => ['small_scale_employment', $employeeAccounts];
         yield 'dpp' => ['dpp', $employeeAccounts];
         yield 'dpc' => ['dpc', $employeeAccounts];
         yield 'partner dependent activity' => ['partner_dependent', [

@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use PDO;
 
 final class PayrollPeopleRepository
 {
     public function __construct(
         private readonly Connection $db,
-        private readonly PayrollEmploymentAccountingClassifier $accounting,
+        private readonly PayrollEmploymentRepository $employments,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -39,18 +38,7 @@ final class PayrollPeopleRepository
         }
 
         $person = $this->castPerson($this->normalizeRow($row));
-        $employments = $this->db->pdo()->prepare(
-            'SELECT id, code, relation_type, status, start_date, end_date,
-                    is_legacy_projection, monthly_gross_minor, row_version
-               FROM payroll_employments
-              WHERE supplier_id = ? AND employee_id = ?
-              ORDER BY is_legacy_projection DESC, start_date ASC, id ASC'
-        );
-        $employments->execute([$supplierId, $employeeId]);
-        $person['employments'] = [];
-        foreach ($employments->fetchAll(PDO::FETCH_ASSOC) as $employment) {
-            $person['employments'][] = $this->castEmployment($this->normalizeRow($employment));
-        }
+        $person['employments'] = $this->employments->listForEmployee($supplierId, $employeeId);
 
         return $person;
     }
@@ -134,30 +122,6 @@ final class PayrollPeopleRepository
         ];
     }
 
-    /**
-     * @param array<string,string|int|bool|null> $row
-     * @return array<string,mixed>
-     */
-    private function castEmployment(array $row): array
-    {
-        $relationType = $this->stringValue($row, 'relation_type');
-
-        return [
-            'id' => $this->intValue($row, 'id'),
-            'code' => $this->stringValue($row, 'code'),
-            'relation_type' => $relationType,
-            'status' => $this->stringValue($row, 'status'),
-            'start_date' => $this->nullableStringValue($row, 'start_date'),
-            'end_date' => $this->nullableStringValue($row, 'end_date'),
-            'is_legacy_projection' => $this->boolValue($row, 'is_legacy_projection'),
-            'monthly_gross_minor' => $row['monthly_gross_minor'] === null
-                ? null
-                : $this->intValue($row, 'monthly_gross_minor'),
-            'row_version' => $this->intValue($row, 'row_version'),
-            'accounting' => ($this->accounting)($relationType),
-        ];
-    }
-
     /** @return array<string,string|int|bool|null> */
     private function normalizeRow(mixed $value): array
     {
@@ -190,14 +154,6 @@ final class PayrollPeopleRepository
         }
 
         throw new \UnexpectedValueException("Databázové pole {$key} není řetězec.");
-    }
-
-    /** @param array<string,string|int|bool|null> $row */
-    private function nullableStringValue(array $row, string $key): ?string
-    {
-        return ($row[$key] ?? null) === null
-            ? null
-            : $this->stringValue($row, $key);
     }
 
     /** @param array<string,string|int|bool|null> $row */

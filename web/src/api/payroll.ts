@@ -33,7 +33,11 @@ export interface PayrollCapabilitiesResponse {
   support_matrix: PayrollSupportMatrix
 }
 
-export type PayrollRelationType = 'employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
+export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
+export type PayrollEmploymentStatus = 'planned' | 'preregistered' | 'active' | 'suspended' | 'ended' | 'archived' | 'no_show'
+export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded' | 'foreign'
+export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
+export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
 
 export interface PayrollPersonListItem {
   id: number
@@ -56,15 +60,89 @@ export interface PayrollEmploymentAccounting {
 
 export interface PayrollEmployment {
   id: number
+  employee_id: number
+  office_id: number | null
+  office_code: string | null
+  office_name: string | null
   code: string
   relation_type: PayrollRelationType
-  status: string
+  status: PayrollEmploymentStatus
+  is_primary: boolean
   start_date: string | null
+  actual_start_date: string | null
   end_date: string | null
+  archived_at: string | null
   is_legacy_projection: boolean
   monthly_gross_minor: number | null
   row_version: number
+  allowed_transitions: PayrollEmploymentStatus[]
   accounting: PayrollEmploymentAccounting
+  terms: PayrollEmploymentTerms[]
+  checklist: PayrollEmploymentChecklistItem[]
+  timeline: PayrollEmploymentEvent[]
+}
+
+export interface PayrollEmploymentTerms {
+  id: number
+  office_id: number | null
+  office_code: string | null
+  effective_from: string
+  effective_to: string | null
+  contract_signed_on: string | null
+  planned_start_on: string
+  actual_start_on: string | null
+  fixed_term_end_on: string | null
+  weekly_hours: string | null
+  workload_basis_points: number
+  work_place: string | null
+  regular_workplace: string | null
+  cz_isco_code: string | null
+  activity_code: string | null
+  social_insurance_participation: PayrollInsuranceParticipation
+  health_insurance_participation: PayrollInsuranceParticipation
+  tax_regime: PayrollTaxRegime
+  foreign_legislation_country_code: string | null
+  a1_certificate_until: string | null
+  risky_work: boolean
+  tax_declaration_signed: boolean
+  is_primary: boolean
+  change_reason: string | null
+  row_version: number
+  created_at: string
+}
+
+export interface PayrollEmploymentChecklistItem {
+  id: number
+  phase: 'onboarding' | 'change' | 'offboarding'
+  item_key: string
+  status: PayrollChecklistStatus
+  due_date: string | null
+  completed_at: string | null
+  note: string | null
+  row_version: number
+}
+
+export interface PayrollEmploymentEvent {
+  id: number
+  event_type: 'created' | 'terms_changed' | 'status_changed' | 'checklist_changed'
+  from_status: PayrollEmploymentStatus | null
+  to_status: PayrollEmploymentStatus | null
+  effective_on: string
+  note: string | null
+  diff: Record<string, { from: unknown; to: unknown }> | null
+  created_at: string
+}
+
+export type PayrollEmploymentTermsPayload = Omit<
+  PayrollEmploymentTerms,
+  'id' | 'office_code' | 'effective_to' | 'row_version' | 'created_at'
+>
+
+export interface PayrollEmploymentCreatePayload {
+  code: string
+  relation_type: PayrollRelationType
+  monthly_gross_minor: number | null
+  terms: PayrollEmploymentTermsPayload
 }
 
 export interface PayrollPerson extends PayrollPersonListItem {
@@ -358,6 +436,32 @@ export const payrollApi = {
     api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
   person: (id: number) =>
     api.get<PayrollPersonResponse>(`/payroll/people/${id}`).then(response => response.data.person),
+  createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
+    api.post<{ employment: PayrollEmployment }>(`/payroll/people/${personId}/employments`, payload)
+      .then(response => response.data.employment),
+  addEmploymentTerms: (employmentId: number, rowVersion: number, payload: PayrollEmploymentTermsPayload) =>
+    api.put<{ employment: PayrollEmployment }>(`/payroll/employments/${employmentId}/terms`, {
+      row_version: rowVersion,
+      ...payload,
+    }).then(response => response.data.employment),
+  transitionEmployment: (
+    employmentId: number,
+    target: PayrollEmploymentStatus,
+    payload: { row_version: number; effective_on: string; note?: string | null },
+  ) =>
+    api.post<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/transitions/${target}`,
+      payload,
+    ).then(response => response.data.employment),
+  updateEmploymentChecklist: (
+    employmentId: number,
+    itemKey: string,
+    payload: { row_version: number; status: PayrollChecklistStatus; note?: string | null },
+  ) =>
+    api.put<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/checklist/${itemKey}`,
+      payload,
+    ).then(response => response.data.employment),
   accountOptions: () =>
     api.get<{ accounts: PayrollAccountOption[] }>('/payroll/settings/account-options')
       .then(response => response.data.accounts),

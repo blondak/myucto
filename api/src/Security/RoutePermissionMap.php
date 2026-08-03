@@ -118,6 +118,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll.person.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/time/(shifts|entries|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],

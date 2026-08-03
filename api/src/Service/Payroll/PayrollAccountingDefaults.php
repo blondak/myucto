@@ -34,7 +34,7 @@ final class PayrollAccountingDefaults
     public static function forRelation(string $relationType): array
     {
         [$grossDebit, $grossCredit] = match ($relationType) {
-            'employment', 'dpp', 'dpc' => [
+            'employment', 'small_scale_employment', 'dpp', 'dpc' => [
                 self::ACCOUNTS['employment_gross_debit']['code'],
                 self::ACCOUNTS['employment_gross_credit']['code'],
             ],
