@@ -7,6 +7,7 @@ import { formatMoney } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -188,9 +189,7 @@ onMounted(loadPreview)
         </table>
       </div>
 
-      <div v-else class="bg-surface border border-dashed border-neutral-300 rounded-md p-6 text-center text-sm text-neutral-500">
-        {{ t('reports.shv.no_data') }}
-      </div>
+      <EmptyState v-else boxed accent="neutral" icon="box" :title="t('reports.shv.no_data')" />
 
       <!-- Tip -->
       <div class="bg-primary-50 border border-primary-200 rounded-md p-3 text-sm text-primary-700">

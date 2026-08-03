@@ -11,6 +11,7 @@ import {
   plainTextPreview,
   type CsvPreview,
 } from './textPreview'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{
   document: Pick<DocItem, 'id' | 'doc_type' | 'original_name' | 'mime_type' | 'size_bytes'>
@@ -122,7 +123,7 @@ watch(() => props.document.id, load, { immediate: true })
           </tr>
         </tbody>
       </table>
-      <p v-else class="p-6 text-center text-sm text-neutral-400">{{ t('documents.text_preview.empty') }}</p>
+      <EmptyState v-else dense accent="neutral" icon="doc" :title="t('documents.text_preview.empty')" />
     </div>
 
     <div v-else class="max-h-[72vh] overflow-auto bg-neutral-900 dark:bg-neutral-100">
@@ -132,7 +133,7 @@ watch(() => props.document.id, load, { immediate: true })
           <code class="block pl-4 pr-6 whitespace-pre" :class="kind === 'xml' ? xmlLineClass(line) : 'text-neutral-100 dark:text-neutral-900'">{{ line || ' ' }}</code>
         </li>
       </ol>
-      <p v-else class="p-6 text-center text-sm text-neutral-400">{{ t('documents.text_preview.empty') }}</p>
+      <EmptyState v-else dense accent="neutral" icon="doc" :title="t('documents.text_preview.empty')" />
     </div>
   </div>
 </template>

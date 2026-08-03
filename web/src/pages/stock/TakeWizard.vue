@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -182,7 +183,11 @@ const STATUS_BADGE: Record<string, string> = {
       </div>
 
       <div v-if="listLoading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-      <div v-else-if="takes.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.takes.empty') }}</div>
+      <EmptyState v-else-if="takes.length === 0" boxed icon="clipboardCheck"
+        :title="t('stock.takes.empty_title')"
+        :message="t('stock.takes.empty_hint')"
+        :cta="auth.canWrite('stock.take') ? t('stock.takes.new') : undefined"
+        @action="createOpen = true" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

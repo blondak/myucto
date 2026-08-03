@@ -5,6 +5,7 @@ import { archiveApi, type ArchiveItem } from '@/api/closing'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -94,9 +95,9 @@ function formatBytes(bytes: number): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('accounting.closing.archive.empty') }}
-    </div>
+    <EmptyState v-else-if="items.length === 0" boxed icon="archive"
+      :title="t('accounting.closing.archive.empty')"
+      :cta="t('accounting.closing.archive.create')" @action="createArchive" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

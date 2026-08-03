@@ -10,6 +10,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -177,9 +178,7 @@ onMounted(load)
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!report || report.items.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('accounting.account_statement.empty') }}
-    </div>
+    <EmptyState v-else-if="!report || report.items.length === 0" boxed accent="neutral" icon="doc" :title="t('accounting.account_statement.empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

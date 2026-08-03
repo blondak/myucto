@@ -829,6 +829,8 @@
     "warehouses": {
       "title": "Sklady",
       "subtitle": "Číselník skladů a jejich aktuální hodnota",
+      "empty_title": "Zatím žádné sklady",
+      "empty_hint": "Bez skladu nelze pořídit příjemku ani výdejku — začněte hlavním skladem, další přidáte kdykoliv později.",
       "new": "Nový sklad",
       "edit": "Upravit sklad",
       "col_code": "Kód",
@@ -857,6 +859,8 @@
     "items": {
       "title": "Skladové karty",
       "subtitle": "Materiál, zboží a výrobky evidované na skladě",
+      "empty_title": "Zatím žádné skladové karty",
+      "empty_hint": "Skladová karta drží zboží, materiál nebo výrobek — teprve od ní se odvíjejí příjemky, výdejky i ocenění zásob.",
       "new": "Nová skladová karta",
       "new_title": "Nová skladová karta",
       "edit_title": "Upravit skladovou kartu",
@@ -914,11 +918,14 @@
       "col_balance": "Bilance",
       "opening_balance": "Počáteční stav",
       "empty_movements": "Zatím žádné pohyby.",
+      "empty_movements_hint": "První pohyb vznikne příjemkou, výdejkou nebo převodkou s touto skladovou kartou.",
       "load_more": "Načíst další"
     },
     "documents": {
       "title": "Skladové doklady",
       "subtitle": "Příjemky, výdejky a převodky",
+      "empty_title": "Zatím žádné skladové doklady",
+      "empty_hint": "Příjemkou zboží naskladníte, výdejkou vydáte a převodkou přesunete mezi sklady.",
       "tab_all": "Vše",
       "tab_receipts": "Příjemky",
       "tab_issues": "Výdejky",
@@ -986,6 +993,8 @@
       "subtitle": "Fyzická inventarizace skladových zásob",
       "new": "Nová inventura",
       "empty": "Zatím žádná inventura.",
+      "empty_title": "Zatím žádná inventura",
+      "empty_hint": "Inventurou porovnáte fyzicky spočítané zásoby s evidencí; rozdíly pak systém navrhne zaúčtovat.",
       "step_setup": "Založení",
       "step_counting": "Sčítání",
       "step_recap": "Rekapitulace",
@@ -1022,6 +1031,8 @@
     },
     "reports": {
       "title": "Skladové sestavy",
+      "empty_title": "Sestava nemá co zobrazit",
+      "empty_hint": "K vybranému datu a skladu není evidovaná žádná zásoba. Zkuste jiné datum nebo jiný sklad.",
       "tab_status": "Stav zásob k datu",
       "tab_valuation": "Ocenění k datu",
       "filter_date": "Datum",
@@ -1093,6 +1104,8 @@
     "manufacturers": {
       "title": "Výrobci",
       "subtitle": "Správa výrobců zboží",
+      "empty_title": "Zatím žádní výrobci",
+      "empty_hint": "Výrobce přiřadíte skladové kartě; e-shop pak podle něj umí zboží filtrovat i řadit.",
       "new": "Nový výrobce",
       "edit": "Upravit výrobce",
       "delete_confirm": "Opravdu smazat výrobce '{name}'?",
@@ -1114,6 +1127,8 @@
     "tags": {
       "title": "Tagy",
       "subtitle": "Správa e-shopových štítků/tagů",
+      "empty_title": "Zatím žádné tagy",
+      "empty_hint": "Tagem označíte zboží napříč kategoriemi — třeba Akce nebo Novinka — a e-shop z něj sestaví samostatný výpis.",
       "new": "Nový tag",
       "edit": "Upravit tag",
       "delete_confirm": "Opravdu smazat tag '{name}'?",
@@ -1130,6 +1145,8 @@
     "fee_types": {
       "title": "Poplatky",
       "subtitle": "Správa poplatků (např. recyklační poplatky PHE)",
+      "empty_title": "Zatím žádné poplatky",
+      "empty_hint": "Poplatek (například recyklační PHE) se připočte k ceně zboží a na faktuře se vykáže samostatným řádkem.",
       "new": "Nový poplatek",
       "edit": "Upravit poplatek",
       "delete_confirm": "Opravdu smazat poplatek '{name}'?",
@@ -1147,6 +1164,8 @@
     "attributes": {
       "title": "Atributy",
       "subtitle": "Parametry a vlastnosti zboží",
+      "empty_title": "Zatím žádné atributy",
+      "empty_hint": "Atribut nese vlastnost zboží (barva, velikost, materiál) a e-shop podle něj umí filtrovat.",
       "new": "Nový atribut",
       "edit": "Upravit atribut",
       "delete_confirm": "Opravdu smazat atribut '{name}'?",
@@ -1176,11 +1195,15 @@
       "option_field_order": "Pořadí volby",
       "option_col_code": "Kód",
       "option_col_label": "Hodnota",
-      "option_col_order": "Pořadí"
+      "option_col_order": "Pořadí",
+      "options_empty": "Atribut zatím nemá žádné hodnoty",
+      "options_empty_hint": "Přidejte volby ve formuláři níže — u výběrových atributů si z nich zákazník vybírá."
     },
     "categories": {
       "title": "Kategorie",
       "subtitle": "Kategorie e-shopového katalogu",
+      "empty_title": "Zatím žádné kategorie",
+      "empty_hint": "Kategorie tvoří strom, ve kterém e-shop nabízí zboží zákazníkům. Začněte hlavní kategorií, podřazené doplníte později.",
       "new": "Nová kategorie",
       "edit": "Upravit kategorii",
       "delete_confirm": "Opravdu smazat kategorii '{name}'?",
@@ -1298,6 +1321,8 @@
     "import": {
       "title": "Import zboží",
       "subtitle": "Hromadné založení a aktualizace skladových karet z XLSX nebo CSV.",
+      "empty_title": "Soubor nepřinesl žádné řádky",
+      "empty_hint": "Zkontrolujte, že list obsahuje hlavičku se sloupci a alespoň jeden datový řádek.",
       "reset": "Nový import",
       "drop_hint": "Přetáhni soubor sem nebo klikni pro výběr (XLSX nebo CSV, max 2 MB)",
       "dry_run": "Jen náhled (dry-run) — nic se neuloží",
@@ -4680,6 +4705,12 @@
     "entry": "zápis"
   },
   "common": {
+    "empty_state": {
+      "title": "Zatím tu nic není",
+      "filtered_title": "Filtru neodpovídá žádný záznam",
+      "filtered_message": "Záznamy tu možná jsou, jen je schoval filtr. Zkuste jiné období, jiný hledaný výraz, nebo filtr zrušte.",
+      "clear_filters": "Zrušit filtr"
+    },
     "no_items": "Žádné položky.",
     "pagination_range": "{from}–{to} z {total}",
     "view_all": "Zobrazit vše",
@@ -4896,6 +4927,8 @@
     "clear_date_filter": "✕ Zrušit datum",
     "sent_at": "Odesláno: {date}",
     "no_data": "Žádné faktury.",
+    "empty_title": "Zatím žádné vystavené faktury",
+    "empty_hint": "Vystavená faktura se rovnou promítne do DPH, do deníku i do přehledu pohledávek.",
     "empty_client": "Zatím tu nejsou žádné faktury. Vystavte svou první.",
     "summary_count": "Celkem {n} faktur ({m} měsíců)",
     "draft_id_short": "koncept #{id}",
@@ -5776,6 +5809,8 @@
     "show_archived": "Zobrazit archivované",
     "delete_warning": "Smazat klienta \"{name}\"? Akce je nevratná.\n\nFunguje jen pokud klient nemá žádné faktury ani zakázky — jinak ho použij Archivovat.",
     "no_data": "Žádní klienti.",
+    "empty_title": "Zatím žádní klienti",
+    "empty_hint": "Klient je protistrana na faktuře — bez něj nejde vystavit doklad. Údaje umí systém dotáhnout z ARESu podle IČO.",
     "archive_confirm": "Archivovat klienta?",
     "delete_failed": "Smazání selhalo",
     "revenue_by_month": "Obrat po měsících",
@@ -5843,6 +5878,8 @@
     "due": "Splatnost",
     "number": "Číslo",
     "no_data": "Žádné zakázky.",
+    "empty_title": "Zatím žádné zakázky",
+    "empty_hint": "Zakázka sdruží faktury, náklady a výnosy jedné práce, takže je vidět, kolik na ní zbylo.",
     "edit_project": "Upravit zakázku",
     "new_invoice": "Vystavit fakturu",
     "edit_client": "Upravit klienta",
@@ -6427,6 +6464,7 @@
       "non_admin": "Požádejte prosím správce, aby vytvořil dodavatele v Nastavení → Číselníky → Dodavatelé."
     },
     "welcome": "Vítej v MyÚčto.cz!",
+    "empty_hint": "Přehled se naplní, jakmile budou v systému data. Začni prvním klientem a vystav mu fakturu — čísla, grafy i daňové sestavy se dopočítají samy.",
     "subtitle_year": "Přehled hospodaření za rok {year}",
     "tax_net_title": "Daně {year}",
     "tax_net_projected": "odhad roku",

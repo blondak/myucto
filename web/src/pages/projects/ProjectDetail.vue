@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import SendWorkReportLinkModal from '@/components/modals/SendWorkReportLinkModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -288,9 +289,7 @@ const projectActions = computed<ActionItem[]>(() => {
         </RouterLink>
       </div>
       <div v-if="invoicesLoading" class="p-8 text-center text-neutral-500 text-sm">{{ t('common.loading') }}</div>
-      <div v-else-if="!invoices.length" class="p-8 text-center text-neutral-500 text-sm">
-        {{ t('common.no_data') }}
-      </div>
+      <EmptyState v-else-if="!invoices.length" dense accent="neutral" icon="doc" :title="t('common.no_data')" />
       <!-- Desktop: tabulka -->
       <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">

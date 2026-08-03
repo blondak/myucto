@@ -9,6 +9,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -388,7 +389,7 @@ async function saveLock() {
         </div>
       </div>
     </template>
-    <div v-else class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.monthly_check.empty') }}</div>
+    <EmptyState v-else boxed accent="neutral" icon="clipboardCheck" :title="t('accounting.monthly_check.empty')" />
 
     <!-- Dialog zámku k datu -->
     <div v-if="lockDialog.open" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" @click.self="lockDialog.open = false">

@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -333,7 +334,7 @@ const sourceBadge: Record<string, string> = {
     </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="total === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_fuelings') }}</div>
+    <EmptyState v-else-if="total === 0" icon="coin" :title="t('logbook.no_fuelings')" dense boxed />
 
     <template v-else>
       <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.fuelings_summary', { count: total, amount: fmtMoney(totalAmount, 'CZK') }) }}</div>
@@ -574,7 +575,7 @@ const sourceBadge: Record<string, string> = {
         </div>
 
         <div v-if="invLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('common.loading') }}</div>
-        <div v-else-if="invoices.length === 0" class="text-center text-neutral-500 py-8 text-sm">{{ t('logbook.no_fuel_invoices') }}</div>
+        <EmptyState v-else-if="invoices.length === 0" icon="doc" :title="t('logbook.no_fuel_invoices')" dense />
 
         <div v-else class="divide-y divide-neutral-100 border border-neutral-200 rounded-md">
           <div v-for="inv in invoices" :key="inv.id">
@@ -625,7 +626,7 @@ const sourceBadge: Record<string, string> = {
                   </tr>
                 </tbody>
               </table>
-              <div v-else class="text-xs text-neutral-500 py-2">{{ t('logbook.no_items') }}</div>
+              <EmptyState v-else icon="inbox" :title="t('logbook.no_items')" dense />
               <div class="mt-2 text-right">
                 <a :href="`/purchase-invoices/${inv.id}`" target="_blank" rel="noopener"
                   class="text-xs text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1">

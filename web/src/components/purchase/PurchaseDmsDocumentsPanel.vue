@@ -13,6 +13,7 @@ import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
 import { documentsApi, type DocItem } from '@/api/documents'
 import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ invoiceId: number }>()
 
@@ -98,7 +99,7 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="text-sm text-neutral-400">{{ t('common.loading') }}</div>
-    <p v-else-if="docs.length === 0" class="text-sm text-neutral-400">{{ t('documents.dms_panel.empty') }}</p>
+    <EmptyState v-else-if="docs.length === 0" dense accent="neutral" icon="link" :title="t('documents.dms_panel.empty')" />
     <ul v-else class="space-y-1">
       <li v-for="d in docs" :key="d.id" class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-neutral-50 group">
         <span :class="['shrink-0 w-8 h-8 flex items-center justify-center rounded text-[9px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>

@@ -13,6 +13,7 @@ import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -1118,9 +1119,7 @@ function vatCollisionLabel(c: VatStatusCollision): string {
                         </button>
                       </td>
                     </tr>
-                    <tr v-if="vatHistory.length === 0">
-                      <td colspan="4" class="py-2 text-center text-neutral-400 text-xs">{{ t('settings.vat_status.empty') }}</td>
-                    </tr>
+                    <EmptyState v-if="vatHistory.length === 0" dense icon="clipboardCheck" :colspan="4" :title="t('settings.vat_status.empty')" />
                   </tbody>
                 </table>
               </div>

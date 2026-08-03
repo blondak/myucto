@@ -17,6 +17,7 @@ import SendWorkReportLinkModal from '@/components/modals/SendWorkReportLinkModal
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { formatAccountNumber } from '@/utils/bankAccount'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -580,7 +581,7 @@ const clientActions = computed<ActionItem[]>(() => {
           </button>
         </div>
       </div>
-      <div v-else class="text-sm text-neutral-500 mb-4">{{ t('client.bank_accounts.empty') }}</div>
+      <EmptyState v-else dense accent="neutral" icon="coin" class="mb-4" :title="t('client.bank_accounts.empty')" />
 
       <form v-if="auth.canWrite('clients')" class="flex flex-wrap items-end gap-2" @submit.prevent="addBankAccount">
         <label class="min-w-64 flex-1">
@@ -725,9 +726,7 @@ const clientActions = computed<ActionItem[]>(() => {
           {{ t('client.new_project') }}
         </RouterLink>
       </div>
-      <div v-if="!client.projects?.length" class="p-8 text-center text-neutral-500 text-sm">
-        {{ t('client.no_projects') }}
-      </div>
+      <EmptyState v-if="!client.projects?.length" dense accent="neutral" icon="folderOpen" :title="t('client.no_projects')" />
       <!-- Desktop: tabulka -->
       <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
@@ -806,9 +805,7 @@ const clientActions = computed<ActionItem[]>(() => {
         </RouterLink>
       </div>
       <div v-if="invoicesLoading" class="p-8 text-center text-neutral-500 text-sm">{{ t('common.loading') }}</div>
-      <div v-else-if="!invoices.length" class="p-8 text-center text-neutral-500 text-sm">
-        {{ t('common.no_data') }}
-      </div>
+      <EmptyState v-else-if="!invoices.length" dense accent="neutral" icon="doc" :title="t('common.no_data')" />
       <!-- Desktop: tabulka -->
       <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
@@ -903,9 +900,7 @@ const clientActions = computed<ActionItem[]>(() => {
         </RouterLink>
       </div>
       <div v-if="purchaseInvoicesLoading" class="p-8 text-center text-neutral-500 text-sm">{{ t('common.loading') }}</div>
-      <div v-else-if="!purchaseInvoices.length" class="p-8 text-center text-neutral-500 text-sm">
-        {{ t('common.no_data') }}
-      </div>
+      <EmptyState v-else-if="!purchaseInvoices.length" dense accent="neutral" icon="doc" :title="t('common.no_data')" />
       <div v-else class="overflow-x-auto"><table class="w-full text-sm">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
           <tr>
@@ -952,9 +947,7 @@ const clientActions = computed<ActionItem[]>(() => {
         </RouterLink>
       </div>
 
-      <div v-if="recurringTemplates.length === 0" class="px-5 py-6 text-sm text-neutral-500 text-center">
-        {{ t('recurring.empty') }}
-      </div>
+      <EmptyState v-if="recurringTemplates.length === 0" dense accent="neutral" icon="cycle" :title="t('recurring.empty')" />
 
       <!-- Desktop -->
       <div v-else class="hidden md:block overflow-x-auto">

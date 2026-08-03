@@ -10,6 +10,7 @@ import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import { bankPostingApi, type UnpostedBankTransaction } from '@/api/bankPosting'
 import { bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // scope='all' → záložka „Všechny pohyby": tatáž tabulka, ale i zaúčtované pohyby, napříč účty.
 const props = withDefaults(defineProps<{ scope?: 'unposted' | 'all' }>(), { scope: 'unposted' })
@@ -124,9 +125,9 @@ watch(page, load)
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ search || year || accountFilter ? t('bank.posting.no_match') : t('bank.posting.unposted_empty') }}
-    </div>
+    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter)" boxed variant="filtered"
+      :title="t('bank.posting.no_match')" />
+    <EmptyState v-else-if="items.length === 0" boxed icon="checkCircle" accent="success" :title="t('bank.posting.unposted_empty')" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm">

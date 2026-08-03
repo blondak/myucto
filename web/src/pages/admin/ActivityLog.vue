@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type ActivityLogEntry } from '@/api/admin'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 
@@ -92,9 +93,7 @@ function goPage(delta: number) {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!entries.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center text-neutral-500">
-      {{ t('activity_log.no_records') }}
-    </div>
+    <EmptyState v-else-if="!entries.length" boxed icon="doc" accent="neutral" :title="t('activity_log.no_records')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop: tabulka -->

@@ -7,6 +7,7 @@ import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 /**
  * Modal správy pokladen (§6.4). CRUD nad cash_registers; analytika 211 z osnovy,
@@ -144,7 +145,7 @@ async function remove(r: CashRegister) {
       <div class="p-5 space-y-5">
         <!-- Seznam pokladen -->
         <div v-if="loading" class="text-center text-neutral-500 py-6 text-sm">{{ t('common.loading') }}</div>
-        <div v-else-if="registers.length === 0" class="text-center text-neutral-500 py-6 text-sm">{{ t('cash.register_empty') }}</div>
+        <EmptyState v-else-if="registers.length === 0" dense accent="neutral" icon="coin" :title="t('cash.register_empty')" />
         <div v-else class="overflow-x-auto border border-neutral-200 rounded-lg">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

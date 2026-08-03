@@ -12,6 +12,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -291,9 +292,7 @@ function historyPeriodLabel(item: MonthlyReportSendHistoryItem): string {
       <div v-if="historyLoading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 text-sm text-neutral-500">
         {{ t('common.loading') }}
       </div>
-      <div v-else-if="!history.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 text-sm text-neutral-500">
-        {{ t('monthly_report.history_empty') }}
-      </div>
+      <EmptyState v-else-if="!history.length" boxed accent="neutral" icon="send" :title="t('monthly_report.history_empty')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">

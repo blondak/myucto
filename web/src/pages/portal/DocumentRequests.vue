@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -72,9 +73,7 @@ function isOverdue(item: DocumentRequest): boolean {
   <div class="max-w-4xl space-y-5">
     <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
 
-    <div v-else-if="noCompany" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center">
-      <p class="text-sm font-medium text-neutral-700">{{ t('portal.no_company') }}</p>
-    </div>
+    <EmptyState v-else-if="noCompany" boxed accent="neutral" icon="lock" :title="t('portal.no_company')" />
 
     <div v-else-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
       {{ error }}
@@ -86,9 +85,7 @@ function isOverdue(item: DocumentRequest): boolean {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('portal.document_requests.subtitle') }}</p>
       </div>
 
-      <div v-if="open.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center">
-        <p class="text-sm text-neutral-500">{{ t('portal.document_requests.empty') }}</p>
-      </div>
+      <EmptyState v-if="open.length === 0" boxed accent="success" icon="checkCircle" :title="t('portal.document_requests.empty')" />
 
       <div v-else class="space-y-3">
         <div v-for="item in open" :key="item.id"

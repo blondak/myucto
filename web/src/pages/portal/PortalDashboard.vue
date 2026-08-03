@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney, formatDate, formatMonth } from '@/composables/useFormat'
 import PortalMonthlyChart from '@/components/charts/PortalMonthlyChart.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -102,14 +103,7 @@ const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
     <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
 
     <!-- 403 / bez membershipu — žádný retry spam -->
-    <div v-else-if="noCompany" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center">
-      <div class="mx-auto w-12 h-12 rounded-full bg-neutral-100 flex items-center justify-center mb-3">
-        <svg class="w-6 h-6 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1" />
-        </svg>
-      </div>
-      <p class="text-sm font-medium text-neutral-700">{{ t('portal.no_company') }}</p>
-    </div>
+    <EmptyState v-else-if="noCompany" boxed accent="neutral" icon="lock" :title="t('portal.no_company')" />
 
     <div v-else-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
       {{ error }}
@@ -137,10 +131,7 @@ const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
       </RouterLink>
 
       <!-- ═══ Empty state (nová firma bez dat) ═══ -->
-      <div v-if="isEmpty" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center">
-        <p class="text-sm font-medium text-neutral-700">{{ t('portal.empty_title') }}</p>
-        <p class="text-xs text-neutral-500 mt-1">{{ t('portal.empty_text') }}</p>
-      </div>
+      <EmptyState v-if="isEmpty" boxed icon="chart" :title="t('portal.empty_title')" :message="t('portal.empty_text')" />
 
       <template v-else>
         <!-- ═══ KPI karty (5 období, per měna) + měsíční graf ═══ -->
@@ -281,7 +272,7 @@ const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
           </div>
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
             <h3 class="text-sm font-medium text-neutral-700 mb-2">{{ t('portal.deadlines_title') }}</h3>
-            <p v-if="vatDeadlines.length === 0" class="text-sm text-neutral-400">{{ t('portal.deadlines_none') }}</p>
+            <EmptyState v-if="vatDeadlines.length === 0" dense icon="bell" :title="t('portal.deadlines_none')" />
             <ul v-else class="space-y-2">
               <li v-for="d in vatDeadlines" :key="d.type + d.title"
                 class="flex flex-col gap-0.5 rounded-md border px-3 py-2 text-sm"

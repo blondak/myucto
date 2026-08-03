@@ -12,9 +12,10 @@ import { crmApi, type CrmKpi, type CrmOverview, type CrmMonthlyRow, type TopClie
   type ReminderEffectiveness, type PaymentTimeHistogram, type CrmYearlyRow } from '@/api/crm'
 import { formatDate, formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -444,15 +445,10 @@ onMounted(loadAll)
       {{ t('common.loading') }}…
     </div>
 
-    <div v-else-if="!overview || overview.currencies.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center">
-      <p class="text-neutral-600 mb-2">{{ t('crm.no_data') }}</p>
-      <p class="text-sm text-neutral-500 mb-4">{{ t('crm.no_data_hint') }}</p>
-      <button v-if="auth.canWrite('dashboard.portfolio')" type="button" @click="recompute" :disabled="recomputing"
-        :class="btnFilled('primary')">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
-        {{ t('crm.recompute_now') }}
-      </button>
-    </div>
+    <EmptyState v-else-if="!overview || overview.currencies.length === 0"
+      icon="chart" :title="t('crm.no_data')" :message="t('crm.no_data_hint')"
+      :cta="auth.canWrite('dashboard.portfolio') ? t('crm.recompute_now') : undefined"
+      ctaIcon="cycle" boxed @action="recompute" />
 
     <div v-else class="space-y-4">
       <!-- Akce pro tebe se přesunuly na Přehled (Dashboard) — viz ActionItemsWidget. -->
@@ -706,9 +702,7 @@ onMounted(loadAll)
             </span>
           </div>
         </header>
-        <div v-if="monthlyDisplay.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('crm.no_chart_data') }}
-        </div>
+        <EmptyState v-if="monthlyDisplay.length === 0" icon="chart" :title="t('crm.no_chart_data')" dense />
         <div v-else class="p-4 space-y-2">
           <div v-for="m in monthlyDisplay" :key="m.period + m.currency" class="grid grid-cols-[60px_1fr_120px] gap-2 items-center text-xs">
             <div class="text-neutral-600 font-medium">{{ formatMonthLabel(m.period) }}</div>
@@ -739,9 +733,7 @@ onMounted(loadAll)
               {{ t('crm.top_clients') }} <span class="normal-case font-normal text-[10px] text-neutral-400">({{ periodChip }})</span>
             </h3>
           </header>
-          <div v-if="topClients.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-            {{ t('crm.no_data') }}
-          </div>
+          <EmptyState v-if="topClients.length === 0" icon="user" :title="t('crm.no_data')" dense />
           <table v-else class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="c in topClients" :key="c.client_id" class="hover:bg-neutral-50">
@@ -770,9 +762,7 @@ onMounted(loadAll)
               {{ t('crm.top_vendors') }} <span class="normal-case font-normal text-[10px] text-neutral-400">({{ periodChip }})</span>
             </h3>
           </header>
-          <div v-if="topVendors.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-            {{ t('crm.no_data_vendors') }}
-          </div>
+          <EmptyState v-if="topVendors.length === 0" icon="user" :title="t('crm.no_data_vendors')" dense />
           <table v-else class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="v in topVendors" :key="v.vendor_id" class="hover:bg-neutral-50">
@@ -813,9 +803,7 @@ onMounted(loadAll)
               </RouterLink>
             </div>
           </header>
-          <div v-if="agingForCurrency.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-            {{ t('crm.aging.no_open') }}
-          </div>
+          <EmptyState v-if="agingForCurrency.length === 0" icon="coin" :title="t('crm.aging.no_open')" dense />
           <div v-else class="p-4 space-y-2">
             <div v-for="b in agingForCurrency" :key="b.bucket" class="grid grid-cols-[100px_1fr_120px] gap-2 items-center text-xs">
               <div class="text-neutral-700 font-medium">{{ t('crm.aging.bucket.' + b.bucket) }}</div>
@@ -847,9 +835,7 @@ onMounted(loadAll)
               </RouterLink>
             </div>
           </header>
-          <div v-if="agingPayForCurrency.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-            {{ t('crm.aging.no_pay') }}
-          </div>
+          <EmptyState v-if="agingPayForCurrency.length === 0" icon="coin" :title="t('crm.aging.no_pay')" dense />
           <div v-else class="p-4 space-y-2">
             <div v-for="b in agingPayForCurrency" :key="b.bucket" class="grid grid-cols-[100px_1fr_120px] gap-2 items-center text-xs">
               <div class="text-neutral-700 font-medium">{{ t('crm.aging.bucket.' + b.bucket) }}</div>
@@ -1001,9 +987,7 @@ onMounted(loadAll)
               {{ t('crm.expense_breakdown.title') }} <span class="normal-case font-normal text-[10px] text-neutral-400">({{ periodChip }})</span>
             </h3>
           </header>
-          <div v-if="expenses.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-            {{ t('crm.expense_breakdown.empty') }}
-          </div>
+          <EmptyState v-if="expenses.length === 0" icon="coin" :title="t('crm.expense_breakdown.empty')" dense />
           <table v-else class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="e in expenses" :key="(e.category_id ?? 0) + '-' + (e.code ?? '')" class="hover:bg-neutral-50">
@@ -1037,9 +1021,7 @@ onMounted(loadAll)
               {{ t('crm.churn.title') }}
             </h3>
           </header>
-          <div v-if="churn.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-            {{ t('crm.churn.empty') }}
-          </div>
+          <EmptyState v-if="churn.length === 0" icon="user" :title="t('crm.churn.empty')" dense />
           <table v-else class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="c in churn" :key="c.client_id + c.currency" class="hover:bg-neutral-50">
@@ -1262,9 +1244,7 @@ onMounted(loadAll)
               ⚠️ {{ t('crm.late_risk.title') }}
             </h3>
           </header>
-          <div v-if="lateRisk.length === 0" class="p-6 text-center text-sm text-neutral-400">
-            {{ t('crm.late_risk.no_data') }}
-          </div>
+          <EmptyState v-if="lateRisk.length === 0" icon="bell" :title="t('crm.late_risk.no_data')" dense />
           <table v-else class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
@@ -1306,9 +1286,7 @@ onMounted(loadAll)
               {{ t('crm.payment_time.median') }}: <span class="font-mono font-medium">{{ formatNumber(paymentHist.median_days, { maximumFractionDigits: 1 }) }} {{ t('crm.payment_time.days') }}</span>
             </div>
           </header>
-          <div v-if="!paymentHist || paymentHist.total_invoices === 0" class="p-6 text-center text-sm text-neutral-400">
-            {{ t('crm.payment_time.no_data') }}
-          </div>
+          <EmptyState v-if="!paymentHist || paymentHist.total_invoices === 0" icon="chart" :title="t('crm.payment_time.no_data')" dense />
           <div v-else class="p-4 space-y-2">
             <div v-for="b in paymentHist.buckets" :key="b.label" class="text-xs">
               <div class="flex justify-between mb-1">

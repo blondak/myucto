@@ -5,6 +5,7 @@ import { useToast } from '@/composables/useToast'
 import { logbookApi, type Car, type CarPayload, type FuelType } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -108,7 +109,7 @@ function fuelLabel(f: FuelType | null): string {
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="cars.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_cars') }}</div>
+    <EmptyState v-else-if="cars.length === 0" icon="box" :title="t('logbook.no_cars')" dense boxed />
 
     <template v-else>
       <!-- Desktop -->

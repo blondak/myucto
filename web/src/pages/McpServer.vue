@@ -10,6 +10,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { tokensApi, type ApiToken, type ApiLogEntry } from '@/api/tokens'
 import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
@@ -842,11 +843,14 @@ npm install</pre>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!loading && entries.length === 0">
-              <td colspan="8" class="text-center text-neutral-500 py-8">
-                {{ hasFilter ? 'Žádné záznamy odpovídající filtru.' : 'Zatím žádné volání API.' }}
-              </td>
-            </tr>
+            <!-- Texty natvrdo česky ze stejného důvodu jako zbytek stránky (viz docblock). -->
+            <EmptyState v-if="!loading && entries.length === 0 && hasFilter" dense :colspan="8" variant="filtered"
+              title="Žádné záznamy neodpovídají filtru"
+              message="Zkuste jiné období, jiný token nebo filtr zrušte."
+              cta="Zrušit filtr" @action="resetFilter" />
+            <EmptyState v-else-if="!loading && entries.length === 0" dense :colspan="8" accent="neutral" icon="link"
+              title="Zatím žádné volání API"
+              message="Jakmile se přes MCP server ozve první klient, objeví se tu záznam o každém volání." />
             <tr v-for="e in entries" :key="e.id" class="border-t border-neutral-200 align-top">
               <td class="px-3 py-2 text-neutral-500 whitespace-nowrap font-mono text-xs">{{ fmtTime(e.ts) }}</td>
               <td class="px-3 py-2 text-neutral-600">{{ e.token_name || '—' }}</td>

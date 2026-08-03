@@ -8,6 +8,7 @@ import { useRowLink } from '@/composables/useRowLink'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -184,13 +185,10 @@ function gotoDetail(id: number, e?: MouseEvent) {
     </div>
 
     <div v-if="loading" class="text-center py-12 text-neutral-400">…</div>
-    <div v-else-if="filtered.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-8 text-center shadow-sm">
-      <p class="text-neutral-500 mb-4">{{ t('recurring.empty') }}</p>
-      <button v-if="auth.canWrite('recurring.create')" @click="gotoNew" :class="btnFilled('primary')">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-        {{ t('recurring.create_first') }}
-      </button>
-    </div>
+    <EmptyState v-else-if="filtered.length === 0" boxed icon="cycle"
+      :title="t('recurring.empty')"
+      :cta="auth.canWrite('recurring.create') ? t('recurring.create_first') : undefined"
+      @action="gotoNew" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop: tabulka -->

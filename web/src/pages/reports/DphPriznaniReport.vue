@@ -8,6 +8,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -510,9 +511,8 @@ onMounted(loadAll)
         <header class="px-5 py-3 border-b border-neutral-200 bg-neutral-50">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ t('reports.dph.output_section') }}</h3>
         </header>
-        <div v-if="outputLines.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('reports.dph.no_output_lines') }}
-        </div>
+        <EmptyState v-if="outputLines.length === 0" dense accent="neutral" icon="doc"
+          :title="t('reports.dph.no_output_lines')" />
         <table v-else class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
@@ -538,9 +538,8 @@ onMounted(loadAll)
         <header class="px-5 py-3 border-b border-neutral-200 bg-neutral-50">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ t('reports.dph.input_section') }}</h3>
         </header>
-        <div v-if="inputLines.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('reports.dph.no_input_lines') }}
-        </div>
+        <EmptyState v-if="inputLines.length === 0" dense accent="neutral" icon="doc"
+          :title="t('reports.dph.no_input_lines')" />
         <table v-else class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>

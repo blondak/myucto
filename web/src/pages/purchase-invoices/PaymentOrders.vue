@@ -654,8 +654,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     </div>
 
     <div v-else>
-      <div v-if="candidateGroups.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 text-sm text-neutral-500">
-        {{ t('payment_order.empty') }}
+      <div v-if="candidateGroups.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <EmptyState dense accent="neutral" :title="t('payment_order.empty')" />
       </div>
       <template v-for="grp in candidateGroups" :key="grp.key">
       <!-- Skupinová hlavička: CZK (platba přes ABO) vs ostatní měny (CSV/PDF) -->
@@ -1002,8 +1002,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
       <div v-if="historyLoading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <TableSkeleton :rows="3" :cols="5" />
       </div>
-      <div v-else-if="!history.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 text-sm text-neutral-500">
-        {{ t('payment_order.history_empty') }}
+      <div v-else-if="!history.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <EmptyState dense accent="neutral" icon="archive" :title="t('payment_order.history_empty')" />
       </div>
       <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
         <div class="overflow-x-auto">

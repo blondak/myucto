@@ -11,6 +11,7 @@ import EntityLinkPicker from '@/components/documents/EntityLinkPicker.vue'
 import TagInput from '@/components/documents/TagInput.vue'
 import DocumentFilesPanel from '@/components/documents/DocumentFilesPanel.vue'
 import TextDocumentPreview from '@/components/documents/TextDocumentPreview.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const route = useRoute()
@@ -300,7 +301,7 @@ onMounted(load)
               </button>
             </li>
           </ul>
-          <p v-else class="text-sm text-neutral-400">{{ t('documents.no_links') }}</p>
+          <EmptyState v-else dense icon="link" :title="t('documents.no_links')" />
           <div v-if="auth.canWrite('documents.move')">
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.add_link') }}</label>
             <EntityLinkPicker @select="onLink" />

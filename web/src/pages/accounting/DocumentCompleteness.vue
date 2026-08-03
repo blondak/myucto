@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { documentCompletenessApi, type DocumentCompletenessResult, type Direction } from '@/api/documentCompleteness'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -71,9 +72,7 @@ function bucketLabel(bucket: string): string {
           </span>
         </div>
 
-        <div v-if="data.bank_without_document.items.length === 0" class="text-center text-neutral-500 py-8 text-sm">
-          {{ t('documentCompleteness.bank_empty') }}
-        </div>
+        <EmptyState v-if="data.bank_without_document.items.length === 0" boxed accent="success" icon="checkCircle" :title="t('documentCompleteness.bank_empty')" />
         <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
@@ -121,9 +120,7 @@ function bucketLabel(bucket: string): string {
       <h2 class="text-lg font-medium mb-1">{{ t('documentCompleteness.overdue_title') }}</h2>
       <p class="text-xs text-neutral-400 mb-3">{{ t('documentCompleteness.overdue_note') }}</p>
 
-      <div v-if="data.documents_overdue_unpaid.items.length === 0" class="text-center text-neutral-500 py-8 text-sm">
-        {{ t('documentCompleteness.overdue_empty') }}
-      </div>
+      <EmptyState v-if="data.documents_overdue_unpaid.items.length === 0" boxed accent="success" icon="checkCircle" :title="t('documentCompleteness.overdue_empty')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

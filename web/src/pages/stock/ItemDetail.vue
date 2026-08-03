@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -151,7 +152,9 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         <div class="px-5 py-3 border-b border-neutral-200">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.item_detail.tab_movements') }}</h3>
         </div>
-        <div v-if="movements.length === 0 && !movLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('stock.item_detail.empty_movements') }}</div>
+        <EmptyState v-if="movements.length === 0 && !movLoading" dense accent="neutral" icon="swap"
+          :title="t('stock.item_detail.empty_movements')"
+          :message="t('stock.item_detail.empty_movements_hint')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

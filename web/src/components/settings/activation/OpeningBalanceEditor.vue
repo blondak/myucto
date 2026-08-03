@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { OpeningBalanceRow } from '@/api/activation'
 import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ modelValue: OpeningBalanceRow[] }>()
 const emit = defineEmits<{ 'update:modelValue': [OpeningBalanceRow[]] }>()
@@ -50,7 +51,7 @@ const money = (value: number) => new Intl.NumberFormat('cs-CZ', { minimumFractio
             <td class="px-3 py-2"><input v-model.trim="row.note" class="h-9 w-full rounded-md border border-neutral-300 px-2" /></td>
             <td class="px-2 py-2"><button type="button" :class="btnOutlineSm('danger')" :title="t('common.delete')" @click="removeRow(pageOffset + index)"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg></button></td>
           </tr>
-          <tr v-if="rows.length === 0"><td colspan="5" class="px-4 py-8 text-center text-neutral-400">{{ t('activation.opening_empty') }}</td></tr>
+          <EmptyState v-if="rows.length === 0" :colspan="5" dense accent="neutral" icon="coin" :title="t('activation.opening_empty')" />
         </tbody>
       </table>
       <PaginationBar embedded :page="page" :per-page="perPage" :total="rows.length" @update:page="page = $event" />

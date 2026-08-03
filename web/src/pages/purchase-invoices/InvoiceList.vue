@@ -159,6 +159,13 @@ function clearAllFilters() {
   for (const chip of filterChips.value) clearFilter(chip.key)
 }
 
+// Chipy hledání nenesou, takže se ruší zvlášť — jinak by tlačítko v prázdném
+// stavu po hledání zdánlivě nic neudělalo.
+function clearFiltersAndSearch() {
+  clearAllFilters()
+  search.value = ''
+}
+
 /**
  * Šířka mikro-baru za částkou = podíl na nejvyšším dokladu TÉŽE měny v měsíci.
  * Stejná logika jako u vydaných faktur (viz .amount-cell v styles/main.css) —
@@ -892,10 +899,11 @@ async function bulkSetKind() {
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState
-        :title="search || statusFilter || kindFilter
-          ? t('purchase_invoice.empty_filtered')
-          : (auth.isClientRole ? t('purchase_invoice.empty_client') : t('purchase_invoice.empty'))"
+      <EmptyState v-if="search || statusFilter || kindFilter" variant="filtered"
+        :title="t('purchase_invoice.empty_filtered')"
+        :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
+      <EmptyState v-else icon="inbox"
+        :title="auth.isClientRole ? t('purchase_invoice.empty_client') : t('purchase_invoice.empty')"
         :cta="auth.canWrite('purchase_invoices.create') || auth.isDemo ? t('purchase_invoice.new') : undefined"
         to="/purchase-invoices/new" />
     </div>

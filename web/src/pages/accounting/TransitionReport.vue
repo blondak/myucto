@@ -12,6 +12,7 @@ import { taxEvidenceApi, type TransitionReport, type TransitionDirection } from 
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -152,9 +153,7 @@ onMounted(load)
           <h2 class="text-sm font-semibold">{{ t('accounting.transition.receivables_title') }}</h2>
           <span class="text-sm font-mono font-semibold">{{ fmtMoney(report.totals.receivables_czk) }} Kč</span>
         </div>
-        <div v-if="report.receivables.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-          {{ t('accounting.transition.no_rows') }}
-        </div>
+        <EmptyState v-if="report.receivables.length === 0" dense accent="neutral" icon="doc" :title="t('accounting.transition.no_rows')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">
@@ -187,9 +186,7 @@ onMounted(load)
           <h2 class="text-sm font-semibold">{{ t('accounting.transition.payables_title') }}</h2>
           <span class="text-sm font-mono font-semibold">{{ fmtMoney(report.totals.payables_czk) }} Kč</span>
         </div>
-        <div v-if="report.payables.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-          {{ t('accounting.transition.no_rows') }}
-        </div>
+        <EmptyState v-if="report.payables.length === 0" dense accent="neutral" icon="doc" :title="t('accounting.transition.no_rows')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">

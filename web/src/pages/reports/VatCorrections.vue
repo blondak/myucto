@@ -26,6 +26,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -215,9 +216,7 @@ onMounted(() => {
               @click="show43 = true">{{ t('reports.vatCorrections.s43.add') }}</button>
 
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div v-if="s43Rows.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('reports.vatCorrections.s43.empty') }}
-        </div>
+        <EmptyState v-if="s43Rows.length === 0" accent="neutral" icon="edit" :title="t('reports.vatCorrections.s43.empty')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">
@@ -267,9 +266,7 @@ onMounted(() => {
               @click="show79 = true">{{ t('reports.vatCorrections.s79.add') }}</button>
 
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div v-if="!s79 || s79.rows.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('reports.vatCorrections.s79.empty') }}
-        </div>
+        <EmptyState v-if="!s79 || s79.rows.length === 0" accent="neutral" icon="archive" :title="t('reports.vatCorrections.s79.empty')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">

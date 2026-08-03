@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { safeExternalUrl } from '@/utils/safeUrl'
 
@@ -138,13 +139,11 @@ async function remove(m: Manufacturer) {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="manufacturers.length === 0" class="text-center py-12">
-      <p class="text-neutral-500 text-sm mb-3">{{ t('common.no_items') }}</p>
-      <button v-if="auth.canWrite('eshop.write')" @click="openCreate" :class="btnFilled('primary')">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-        {{ t('eshop.manufacturers.new') }}
-      </button>
-    </div>
+    <EmptyState v-else-if="manufacturers.length === 0" boxed icon="factory"
+      :title="t('eshop.manufacturers.empty_title')"
+      :message="t('eshop.manufacturers.empty_hint')"
+      :cta="auth.canWrite('eshop.write') ? t('eshop.manufacturers.new') : undefined"
+      @action="openCreate" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

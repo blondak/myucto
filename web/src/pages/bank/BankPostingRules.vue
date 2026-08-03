@@ -14,6 +14,7 @@ import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import RuleTemplatesModal from '@/components/bank/RuleTemplatesModal.vue'
 import RuleHistoryModal from '@/components/bank/RuleHistoryModal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const emit = defineEmits<{ 'counts-changed': [] }>()
 
@@ -181,9 +182,7 @@ function amountRange(r: BankPostingRule): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="rules.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('bank.posting.rules_empty') }}
-    </div>
+    <EmptyState v-else-if="rules.length === 0" boxed icon="cycle" :title="t('bank.posting.rules_empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->

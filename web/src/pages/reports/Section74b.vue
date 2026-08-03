@@ -7,6 +7,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -162,10 +163,7 @@ onMounted(loadPreview)
       </div>
 
       <!-- Prázdný stav -->
-      <div v-if="!hasRows"
-        class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-500">
-        {{ t('reports.s74b.no_data') }}
-      </div>
+      <EmptyState v-if="!hasRows" boxed accent="neutral" icon="coin" :title="t('reports.s74b.no_data')" />
 
       <template v-else>
         <!-- Tabulka řádků -->

@@ -5,6 +5,7 @@ import { documentRequestsApi, type DocumentRequest, type DocumentRequestStatus }
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -163,7 +164,7 @@ function isOverdue(item: DocumentRequest): boolean {
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('document_requests.empty') }}</div>
+    <EmptyState v-else-if="items.length === 0" boxed icon="doc" :title="t('document_requests.empty')" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

@@ -26,6 +26,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -699,7 +700,8 @@ function onImgError(e: Event) {
             </button>
           </div>
 
-          <p v-if="i18nRows.length === 0" class="text-sm text-neutral-500">{{ t('eshop.languages.empty') }}</p>
+          <EmptyState v-if="i18nRows.length === 0" dense accent="neutral" icon="doc"
+            :title="t('eshop.languages.empty')" />
 
           <div v-for="row in i18nRows" :key="row.locale" class="border border-neutral-200 rounded-md p-4 space-y-3">
             <div class="flex items-center justify-between">
@@ -775,7 +777,8 @@ function onImgError(e: Event) {
       <!-- ═══════════ TAB: PARAMETRY ═══════════ -->
       <div v-if="isEdit" v-show="tab === 'parameters'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
-          <p v-if="attributes.filter(a => !a.archived).length === 0" class="text-sm text-neutral-500">{{ t('eshop.parameters.empty') }}</p>
+          <EmptyState v-if="attributes.filter(a => !a.archived).length === 0" dense accent="neutral" icon="tag"
+            :title="t('eshop.parameters.empty')" />
           <div v-for="a in attributes.filter(a => !a.archived)" :key="a.id" class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
             <label class="text-sm font-medium text-neutral-700 pt-2">
               {{ a.name }}<span v-if="a.unit" class="text-neutral-400 font-normal"> ({{ a.unit }})</span>
@@ -830,7 +833,8 @@ function onImgError(e: Event) {
             </button>
           </div>
 
-          <p v-if="prices.length === 0" class="text-sm text-neutral-500">{{ t('eshop.prices.empty') }}</p>
+          <EmptyState v-if="prices.length === 0" dense accent="neutral" icon="coin"
+            :title="t('eshop.prices.empty')" />
 
           <div v-else class="overflow-x-auto scrollbar-slim">
             <table class="w-full text-sm border-collapse">
@@ -897,8 +901,12 @@ function onImgError(e: Event) {
             {{ t('eshop.vendors.add') }}
           </button>
 
-          <p v-if="vendorClients.length === 0" class="text-sm text-neutral-500">{{ t('eshop.vendors.no_vendor_clients') }}</p>
-          <p v-else-if="vendors.length === 0" class="text-sm text-neutral-500">{{ t('eshop.vendors.empty') }}</p>
+          <!-- Bez dodavatelů v číselníku kontaktů nejde na kartu žádného navázat —
+               proto odkaz do kontaktů, ne nabídka „přidej dodavatele" tady. -->
+          <EmptyState v-if="vendorClients.length === 0" dense accent="neutral" icon="user"
+            :title="t('eshop.vendors.no_vendor_clients')" />
+          <EmptyState v-else-if="vendors.length === 0" dense accent="neutral" icon="user"
+            :title="t('eshop.vendors.empty')" />
 
           <div v-for="(v, idx) in vendors" :key="v.id ?? `new-${idx}`" class="border border-neutral-200 rounded-md p-4 space-y-3">
             <div class="flex items-start justify-between gap-3">
@@ -960,7 +968,8 @@ function onImgError(e: Event) {
             </button>
           </div>
 
-          <p v-if="media.length === 0" class="text-sm text-neutral-500">{{ t('eshop.attachments.empty') }}</p>
+          <EmptyState v-if="media.length === 0" dense accent="neutral" icon="folderOpen"
+            :title="t('eshop.attachments.empty')" />
 
           <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             <div v-for="(m, idx) in media" :key="m.id" class="border border-neutral-200 rounded-lg overflow-hidden flex flex-col">

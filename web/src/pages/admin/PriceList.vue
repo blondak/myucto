@@ -6,6 +6,7 @@ import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { codebooksApi, type Currency } from '@/api/codebooks'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -105,12 +106,8 @@ onMounted(async () => {
     </div>
 
     <div v-if="loading" class="py-12 text-center text-neutral-400">…</div>
-    <div v-else-if="items.length === 0" class="border border-dashed border-neutral-300 bg-surface p-8 text-center shadow-sm rounded-lg">
-      <p class="mb-4 text-neutral-500">{{ t('price_list.empty') }}</p>
-      <button type="button" class="cursor-pointer inline-flex items-center justify-center h-10 px-4 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md" @click="createItem">
-        {{ t('price_list.new') }}
-      </button>
-    </div>
+    <EmptyState v-else-if="items.length === 0" boxed icon="tag" :title="t('price_list.empty')"
+      :cta="t('price_list.new')" @action="createItem" />
 
     <section v-else class="w-full overflow-hidden border border-neutral-200 bg-surface shadow-sm rounded-lg">
       <div class="hidden overflow-x-auto md:block">

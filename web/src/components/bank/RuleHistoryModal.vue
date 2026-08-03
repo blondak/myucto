@@ -5,6 +5,7 @@ import { bankPostingApi, type BankPostingRule, type RuleHistory } from '@/api/ba
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ rule: BankPostingRule }>()
 const emit = defineEmits<{ close: [] }>()
@@ -59,7 +60,7 @@ function eventText(event: RuleHistory['events'][number]): string {
             <div class="text-xs text-neutral-500">{{ formatDate(event.created_at) }} · {{ event.created_by_name || t('automation.rules.system') }}</div>
           </div>
         </div>
-        <p v-else class="text-sm text-neutral-500">{{ t('automation.rules.history_empty') }}</p>
+        <EmptyState v-else dense accent="neutral" icon="cycle" :title="t('automation.rules.history_empty')" />
       </section>
 
       <section v-if="history.corrections.length || history.total === 0">
@@ -69,7 +70,7 @@ function eventText(event: RuleHistory['events'][number]): string {
           <tbody class="divide-y divide-neutral-100"><tr v-for="item in history.corrections" :key="item.id"><td class="p-2">{{ formatDate(item.created_at) }}</td><td class="p-2 font-mono">{{ item.suggested || '—' }} → {{ item.final || '—' }}</td><td class="p-2 text-right">{{ item.amount == null ? '—' : formatMoney(item.amount, 'CZK') }}</td><td class="p-2">{{ item.created_by_name || t('automation.rules.system') }}</td></tr></tbody></table>
         </div>
         <div class="space-y-2 sm:hidden"><div v-for="item in history.corrections" :key="`m-${item.id}`" class="rounded border border-neutral-200 p-3 text-sm"><div class="font-mono">{{ item.suggested || '—' }} → {{ item.final || '—' }}</div><div class="mt-1 text-xs text-neutral-500">{{ formatDate(item.created_at) }} · {{ item.created_by_name || t('automation.rules.system') }}</div></div></div>
-        <p v-if="!history.corrections.length" class="text-sm text-neutral-500">{{ t('automation.rules.corrections_empty') }}</p>
+        <EmptyState v-if="!history.corrections.length" dense accent="neutral" icon="clipboardCheck" :title="t('automation.rules.corrections_empty')" />
       </section>
       <PaginationBar :page="page" :per-page="history.per_page" :total="history.total" @update:page="page = $event" />
     </div>

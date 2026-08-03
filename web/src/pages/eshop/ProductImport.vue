@@ -5,6 +5,7 @@ import { eshopApi, type ProductImportReport, type ProductImportRow } from '@/api
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -218,9 +219,9 @@ const COLUMNS = ['sku', 'nazev', 'jednotka', 'ean', 'cena', 'vyrobce', 'skladem'
                   <span v-if="!changeEntries(r).length && !r.message" class="text-neutral-400">—</span>
                 </td>
               </tr>
-              <tr v-if="rows.length === 0">
-                <td colspan="4" class="py-4 px-3 text-center text-neutral-400">{{ t('common.no_data') }}</td>
-              </tr>
+              <EmptyState v-if="rows.length === 0" dense :colspan="4" accent="neutral" icon="upload"
+                :title="t('eshop.import.empty_title')"
+                :message="t('eshop.import.empty_hint')" />
             </tbody>
           </table>
         </div>

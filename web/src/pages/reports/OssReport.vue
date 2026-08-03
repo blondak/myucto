@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { reportsApi, type OssPreview } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 
@@ -143,9 +144,7 @@ onMounted(loadPreview)
         </ul>
       </div>
 
-      <div v-if="!hasRows" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-500">
-        {{ t('reports.oss.no_data') }}
-      </div>
+      <EmptyState v-if="!hasRows" boxed accent="neutral" icon="doc" :title="t('reports.oss.no_data')" />
 
       <div v-for="country in preview.countries" :key="country.country" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <header class="px-5 py-3 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between gap-3">

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { codebookTransferApi, type CodebookKind, type ImportReport, type ImportRow } from '@/api/codebookTransfer'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ modelValue: boolean; kind: CodebookKind; title: string }>()
 const emit = defineEmits<{ 'update:modelValue': [v: boolean]; imported: [] }>()
@@ -214,9 +215,7 @@ function fmt(v: unknown): string {
                     <span v-if="!changeEntries(r).length && !r.message" class="text-neutral-400">—</span>
                   </td>
                 </tr>
-                <tr v-if="rows.length === 0">
-                  <td colspan="4" class="py-4 px-3 text-center text-neutral-400">{{ t('common.no_data') }}</td>
-                </tr>
+                <EmptyState v-if="rows.length === 0" :colspan="4" dense accent="neutral" icon="doc" :title="t('common.no_data')" />
               </tbody>
             </table>
           </div>

@@ -12,6 +12,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -102,6 +103,13 @@ const tbl = useTablePrefs('receivables_payables', COLUMNS)
 
 const hasData = computed(() => receivableRows.value.length > 0 || payableRows.value.length > 0)
 
+// Sloupce si uživatel skrývá přes ColumnPicker, takže colspan prázdného řádku
+// nesmí být konstanta — s natvrdo zadanou šestkou by řádek přerostl tabulku.
+// BUCKETY se skrývají přes v-show (zůstávají v DOM), proto se počítají vždy.
+const visibleColumnCount = computed(() =>
+  (tbl.isVisible('currency') ? 1 : 0) + BUCKETS.length + (tbl.isVisible('total') ? 1 : 0),
+)
+
 onMounted(load)
 </script>
 
@@ -157,9 +165,8 @@ onMounted(load)
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!report || !hasData" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('tax_evidence.receivables_payables.empty') }}
-    </div>
+    <EmptyState v-else-if="!report || !hasData"
+      icon="coin" :title="t('tax_evidence.receivables_payables.empty')" boxed />
 
     <template v-else>
       <!-- Pohledávky -->
@@ -181,9 +188,8 @@ onMounted(load)
                   <td v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" class="px-3 py-2 text-right font-mono">{{ row.cells[b] ? formatMoney(row.cells[b]) : '—' }}</td>
                   <td v-if="tbl.isVisible('total')" class="px-3 py-2 text-right font-mono font-semibold">{{ formatMoney(row.total) }}</td>
                 </tr>
-                <tr v-if="receivableRows.length === 0">
-                  <td class="px-3 py-3 text-neutral-400 text-center" :colspan="6">{{ t('tax_evidence.receivables_payables.empty') }}</td>
-                </tr>
+                <EmptyState v-if="receivableRows.length === 0"
+                  icon="coin" :title="t('tax_evidence.receivables_payables.empty')" :colspan="visibleColumnCount" dense />
               </tbody>
             </table>
           </div>
@@ -212,9 +218,8 @@ onMounted(load)
                   <td v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" class="px-3 py-2 text-right font-mono">{{ row.cells[b] ? formatMoney(row.cells[b]) : '—' }}</td>
                   <td v-if="tbl.isVisible('total')" class="px-3 py-2 text-right font-mono font-semibold">{{ formatMoney(row.total) }}</td>
                 </tr>
-                <tr v-if="payableRows.length === 0">
-                  <td class="px-3 py-3 text-neutral-400 text-center" :colspan="6">{{ t('tax_evidence.receivables_payables.empty') }}</td>
-                </tr>
+                <EmptyState v-if="payableRows.length === 0"
+                  icon="coin" :title="t('tax_evidence.receivables_payables.empty')" :colspan="visibleColumnCount" dense />
               </tbody>
             </table>
           </div>

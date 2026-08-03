@@ -14,6 +14,7 @@ import { docTypeBadge, formatBytes } from '@/components/documents/docFormat'
 import TagInput from '@/components/documents/TagInput.vue'
 import { ICONS, BTN_BASE, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -724,7 +725,7 @@ onMounted(() => {
           {{ t('documents.trash_empty') }}
         </button>
       </div>
-      <p v-if="!trashDocs.length && !trashFolders.length" class="text-sm text-neutral-400">{{ t('documents.trash_is_empty') }}</p>
+      <EmptyState v-if="!trashDocs.length && !trashFolders.length" icon="trash" :title="t('documents.trash_is_empty')" />
       <ul class="space-y-1">
         <li v-for="f in trashFolders" :key="'tf' + f.id" class="flex items-center gap-3 px-3 py-2 bg-surface border border-neutral-200 rounded-lg">
           <svg class="w-5 h-5 text-warning-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
@@ -752,7 +753,7 @@ onMounted(() => {
 
     <!-- ═══════════ SEARCH RESULTS ═══════════ -->
     <div v-else-if="searchActive">
-      <p v-if="!searching && searchResults.length === 0" class="text-sm text-neutral-400">{{ t('documents.search_no_results') }}</p>
+      <EmptyState v-if="!searching && searchResults.length === 0" variant="filtered" :title="t('documents.search_no_results')" />
       <ul class="space-y-1">
         <li v-for="d in searchResults" :key="d.id" class="flex items-center gap-3 px-3 py-2 bg-surface border border-neutral-200 rounded-lg hover:border-primary-300 cursor-pointer" @click="openDoc(d)">
           <span :class="['shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
@@ -849,10 +850,13 @@ onMounted(() => {
         </div>
 
         <!-- empty -->
-        <div v-if="!folders.length && !documents.length" class="text-center py-16 border-2 border-dashed border-neutral-200 rounded-lg">
-          <p class="text-sm text-neutral-400">{{ t('documents.empty_folder') }}</p>
-          <p v-if="auth.canWrite('documents')" class="text-xs text-neutral-300 mt-1">{{ t('documents.drop_here') }}</p>
-        </div>
+        <EmptyState
+          v-if="!folders.length && !documents.length"
+          boxed
+          icon="folderOpen"
+          :title="t('documents.empty_folder')"
+          :message="auth.canWrite('documents') ? t('documents.drop_here') : undefined"
+        />
 
         <!-- documents: grid -->
         <div v-else-if="documents.length && view === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">

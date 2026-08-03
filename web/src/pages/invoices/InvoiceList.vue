@@ -143,6 +143,14 @@ function clearAllFilters() {
   for (const chip of filterChips.value) clearFilter(chip.key)
 }
 
+// Prázdný seznam po filtrování je jiný stav než prázdná agenda — nabídka
+// „vystav první fakturu" by tu lhala, faktury existují, jen je schoval filtr.
+const hasActiveFilters = computed(() => activeFilterCount.value > 0 || !!search.value)
+function clearFiltersAndSearch() {
+  clearAllFilters()
+  search.value = ''
+}
+
 /**
  * Ploché pořadí řádků napříč měsíčními skupinami — klávesnice se pohybuje po
  * seznamu tak, jak ho uživatel vidí, ne po skupinách.
@@ -1025,8 +1033,11 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState
-        :title="auth.isClientRole ? t('invoice.empty_client') : t('invoice.no_data')"
+      <EmptyState v-if="hasActiveFilters" variant="filtered"
+        :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
+      <EmptyState v-else icon="doc"
+        :title="auth.isClientRole ? t('invoice.empty_client') : t('invoice.empty_title')"
+        :message="auth.isClientRole ? undefined : t('invoice.empty_hint')"
         :cta="auth.canWrite('invoices.create') || auth.isDemo ? t('invoice.issue_first') : undefined"
         to="/invoices/new" />
     </div>

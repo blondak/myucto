@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { reportsApi, type CnbRateAuditResult, type CnbRateAuditItem } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 
@@ -116,10 +117,8 @@ onMounted(load)
         </div>
 
         <!-- Bez nálezů -->
-        <div v-if="items.length === 0"
-          class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-500">
-          {{ t('reports.cnb_audit.no_data') }}
-        </div>
+        <EmptyState v-if="items.length === 0" boxed accent="neutral" icon="checkCircle"
+          :title="t('reports.cnb_audit.no_data')" />
 
         <!-- Tabulka nálezů -->
         <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">

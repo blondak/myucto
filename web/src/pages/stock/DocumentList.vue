@@ -14,6 +14,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -56,6 +57,10 @@ const activeFilterCount = computed(() => {
   if (filters.status) n++
   return n
 })
+
+// Pro prázdný stav rozhoduje i hledání a záložka typu dokladu — obojí je důvod,
+// proč seznam nic nevrátil, i když se do `activeFilterCount` schválně nepočítá.
+const hasActiveFilters = computed(() => activeFilterCount.value > 0 || !!filters.q || !!filters.doc_type)
 
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
@@ -240,7 +245,14 @@ watch(() => route.query.type, (v) => {
     </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="documents.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.documents.empty') }}</div>
+    <!-- Zvolená záložka typu dokladu taky zužuje výběr, ale `resetFilters` ji
+         nemaže (řídí ji URL) — proto se v tom případě tlačítko nenabízí. -->
+    <EmptyState v-else-if="documents.length === 0 && hasActiveFilters" boxed variant="filtered"
+      :cta="activeFilterCount > 0 || filters.q ? t('common.empty_state.clear_filters') : undefined"
+      @action="resetFilters" />
+    <EmptyState v-else-if="documents.length === 0" boxed icon="stock_documents"
+      :title="t('stock.documents.empty_title')"
+      :message="t('stock.documents.empty_hint')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

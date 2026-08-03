@@ -17,6 +17,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import JournalEntryExtras from '@/components/accounting/JournalEntryExtras.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
@@ -608,7 +609,12 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="entries.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.journal.empty') }}</div>
+    <EmptyState v-else-if="entries.length === 0" boxed
+      :variant="hasActiveFilters() ? 'filtered' : 'empty'"
+      :icon="hasActiveFilters() ? 'search' : 'doc'"
+      :title="t('accounting.journal.empty')"
+      :cta="hasActiveFilters() ? t('accounting.journal.reset_filters') : undefined"
+      @action="resetFilters" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

@@ -30,6 +30,7 @@ import {
   btnOutlineSm,
 } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 defineProps<{ embedded?: boolean }>()
 
@@ -1132,9 +1133,7 @@ onMounted(async () => {
       {{ t('common.loading') }}…
     </div>
     <div v-else-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-600 rounded-lg p-4 text-sm">{{ error }}</div>
-    <div v-else-if="filtered.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-10 text-center text-sm text-neutral-500">
-      {{ t('reports.submissions.empty') }}
-    </div>
+    <EmptyState v-else-if="filtered.length === 0" boxed accent="neutral" icon="doc" :title="t('reports.submissions.empty')" />
 
     <template v-else>
       <div class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">

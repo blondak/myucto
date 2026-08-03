@@ -13,6 +13,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka „Bankovní výpisy" uvnitř BankPage.vue
 // (hlavičku stránky dodává obálka, tady zůstávají jen akční tlačítka).
@@ -514,14 +515,10 @@ async function onFileSelected(e: Event) {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!statements.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center text-neutral-500">
-      <template v-if="filtersActive">
-        {{ t('bank.no_data_filtered') }}
-        <button type="button" @click="resetFilters"
-          class="cursor-pointer ml-1 text-primary-600 hover:text-primary-700 underline">{{ t('bank.show_all') }}</button>
-      </template>
-      <template v-else>{{ t('bank.no_data') }}</template>
-    </div>
+    <EmptyState v-else-if="!statements.length && filtersActive" boxed variant="filtered"
+      :title="t('bank.no_data_filtered')" :cta="t('common.empty_state.clear_filters')" @action="resetFilters" />
+
+    <EmptyState v-else-if="!statements.length" boxed icon="doc" :title="t('bank.no_data')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop: tabulka -->

@@ -8,6 +8,7 @@ import { useHotkey } from '@/composables/useHotkey'
 import CodebookImportDialog from '@/components/accounting/CodebookImportDialog.vue'
 import { codebookTransferApi } from '@/api/codebookTransfer'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -118,7 +119,7 @@ function accountName(code: string | null): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="rules.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.posting_rules.empty') }}</div>
+    <EmptyState v-else-if="rules.length === 0" boxed accent="neutral" icon="swap" :title="t('accounting.posting_rules.empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->

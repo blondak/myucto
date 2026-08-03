@@ -7,6 +7,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -329,9 +330,7 @@ onMounted(load)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="!loading && list.length === 0">
-            <td colspan="9" class="text-center text-neutral-500 py-8">{{ t('api_tokens.empty') }}</td>
-          </tr>
+          <EmptyState v-if="!loading && list.length === 0" :colspan="9" icon="link" :title="t('api_tokens.empty')"/>
           <tr v-for="tk in list" :key="tk.id" class="border-t border-neutral-200">
             <td class="px-3 py-2 font-medium">{{ tk.name }}</td>
             <td class="px-3 py-2 font-mono text-xs text-neutral-600">{{ tk.prefix }}…</td>
@@ -389,9 +388,7 @@ onMounted(load)
           {{ t('api_tokens.ip_intro') }}
         </div>
 
-        <div v-if="ipRules.length === 0" class="text-sm text-neutral-500 py-3">
-          {{ t('api_tokens.ip_empty') }}
-        </div>
+        <EmptyState v-if="ipRules.length === 0" dense icon="lock" accent="neutral" :title="t('api_tokens.ip_empty')"/>
         <ul v-else class="divide-y divide-neutral-200 border border-neutral-200 rounded-md mb-3">
           <li v-for="r in ipRules" :key="r.id" class="flex items-center justify-between gap-3 px-3 py-2">
             <div class="min-w-0">

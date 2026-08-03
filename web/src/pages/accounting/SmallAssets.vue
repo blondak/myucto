@@ -21,6 +21,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -417,9 +418,10 @@ onMounted(load)
     <!-- Seznam -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-      <div v-else-if="items.length === 0" class="p-8 text-center text-sm text-neutral-500">
-        {{ t('accounting.small_assets.empty') }}
-      </div>
+      <EmptyState v-else-if="items.length === 0" icon="box"
+        :title="t('accounting.small_assets.empty')"
+        :cta="canWrite ? t('accounting.small_assets.new') : undefined"
+        @action="openNew" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500">

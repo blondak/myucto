@@ -16,6 +16,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -179,9 +180,7 @@ onMounted(load)
         <h2 class="text-sm font-semibold mb-1">{{ t('reports.vatCoefficient.final_title') }}</h2>
         <p class="text-xs text-neutral-500 mb-3">{{ t('reports.vatCoefficient.final_hint') }}</p>
 
-        <div v-if="status.final_percent === null" class="text-sm text-neutral-500">
-          {{ t('reports.vatCoefficient.not_settled') }}
-        </div>
+        <EmptyState v-if="status.final_percent === null" dense accent="neutral" icon="chart" :title="t('reports.vatCoefficient.not_settled')" />
         <table v-else class="text-sm">
           <tbody>
             <tr>

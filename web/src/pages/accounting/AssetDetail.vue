@@ -16,6 +16,7 @@ import { formatDate, formatMoney, formatMonth } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -532,7 +533,7 @@ const yearOptions = computed(() => {
             </button>
           </div>
         </div>
-        <div v-if="planRows.length === 0" class="text-center text-neutral-500 py-8 text-sm">{{ t('accounting.assets.plan.empty') }}</div>
+        <EmptyState v-if="planRows.length === 0" dense accent="neutral" icon="chart" :title="t('accounting.assets.plan.empty')" />
         <div v-else class="overflow-x-auto mt-2">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

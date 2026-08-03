@@ -25,6 +25,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { stockApi, type StockItemSearchResult, type Warehouse } from '@/api/stock'
@@ -2230,20 +2231,16 @@ async function deleteDraft() {
               </td>
             </tr>
             </template>
-            <tr v-if="form.items.length === 0">
-              <td :colspan="supplierIsVatPayer ? 8 : 7" class="px-4 py-6 text-center text-neutral-400 text-sm">
-                {{ t('invoice.no_items') }} <button type="button" @click="addItem" class="text-primary-600 hover:underline">{{ t('invoice.add_first') }}</button>
-              </td>
-            </tr>
+            <EmptyState v-if="form.items.length === 0" :colspan="supplierIsVatPayer ? 8 : 7" dense icon="doc"
+              :title="t('invoice.no_items')" :cta="t('invoice.add_first')" @action="addItem" />
           </tbody>
         </table>
         </div>
 
         <!-- Mobile: stack karet (každé pole na vlastním řádku, čitelné inputy) -->
         <div class="md:hidden divide-y divide-neutral-200">
-          <div v-if="form.items.length === 0" class="px-4 py-6 text-center text-neutral-400 text-sm">
-            {{ t('invoice.no_items') }} <button type="button" @click="addItem" class="text-primary-600 hover:underline">{{ t('invoice.add_first') }}</button>
-          </div>
+          <EmptyState v-if="form.items.length === 0" dense icon="doc"
+            :title="t('invoice.no_items')" :cta="t('invoice.add_first')" @action="addItem" />
           <div v-for="(item, i) in form.items" :key="`m-${i}`" :class="['p-3 space-y-2', itemHasBothNegative(item) ? 'bg-danger-50' : '']">
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>

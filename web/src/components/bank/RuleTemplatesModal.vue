@@ -6,6 +6,7 @@ import { autoPostingApi, type BankRuleTemplate } from '@/api/autoPosting'
 import type { BankPostingRule } from '@/api/bankPosting'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const emit = defineEmits<{ applied: [BankPostingRule]; close: [] }>()
 const { t } = useI18n()
@@ -93,7 +94,7 @@ async function applyTemplate(template: BankRuleTemplate) {
 
       <div class="overflow-y-auto p-4 sm:p-5">
         <div v-if="loading" class="text-center text-neutral-500 py-10 text-sm">{{ t('common.loading') }}</div>
-        <div v-else-if="!hasTemplates" class="text-center text-neutral-500 py-10 text-sm">{{ t('bank.templates.empty') }}</div>
+        <EmptyState v-else-if="!hasTemplates" dense accent="neutral" icon="copy" :title="t('bank.templates.empty')" />
         <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <article v-for="template in templates" :key="template.template_key"
             class="border border-neutral-200 rounded-lg p-4 flex flex-col gap-3 bg-surface">

@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -609,7 +610,7 @@ async function submitTransfer(force = false) {
         <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.manual.template.load_hint') }}</p>
 
         <div v-if="loadingTemplates" class="text-center text-neutral-500 py-6 text-sm">{{ t('common.loading') }}</div>
-        <div v-else-if="templates.length === 0" class="text-center text-neutral-500 py-6 text-sm">{{ t('accounting.manual.template.empty') }}</div>
+        <EmptyState v-else-if="templates.length === 0" dense accent="neutral" icon="doc" :title="t('accounting.manual.template.empty')" />
         <div v-else class="space-y-3">
           <div class="border border-neutral-200 rounded-md divide-y divide-neutral-100 max-h-64 overflow-y-auto">
             <label v-for="tpl in templates" :key="tpl.id"

@@ -55,6 +55,15 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // a vrací meta.role_counts pro tab badge. Frontend žádný client-side filter neaplikuje.
 const filteredItems = computed(() => items.value)
 
+// Role (Klienti/Dodavatelé) se nepočítá — tu volí záložka, ne filtr.
+const hasActiveFilters = computed(() => !!search.value || showArchived.value || categoryFilter.value !== null)
+function clearFiltersAndSearch() {
+  search.value = ''
+  showArchived.value = false
+  categoryFilter.value = null
+  load()
+}
+
 const roleCounts = ref<{ all: number; customers: number; vendors: number }>({
   all: 0, customers: 0, vendors: 0,
 })
@@ -246,8 +255,13 @@ function formatPaymentDue(c: Client): string {
 
       <TableSkeleton v-if="loading" :rows="6" :cols="6" />
 
-      <EmptyState v-else-if="!items.length"
-        :title="t('client.no_data')"
+      <!-- Hledání/archiv/kategorie jsou jiný důvod prázdna než prázdná agenda —
+           tam nabízíme zrušit filtr, ne zakládat prvního klienta. -->
+      <EmptyState v-else-if="!items.length && hasActiveFilters" variant="filtered"
+        :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
+      <EmptyState v-else-if="!items.length" icon="user"
+        :title="t('client.empty_title')"
+        :message="t('client.empty_hint')"
         :cta="auth.canWrite('clients.create') || auth.isDemo ? t('client.create_first') : undefined"
         :to="roleFilter === 'vendors' ? '/clients/new?role=vendor' : '/clients/new'" />
 

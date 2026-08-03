@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
 import { projectsApi, type ProjectStats } from '@/api/projects'
 import { formatMoney, formatNumber } from '@/composables/useFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
 import TopClientsPieChart from '@/components/charts/TopClientsPieChart.vue'
@@ -209,9 +210,7 @@ const hasAnyData = computed(() =>
       {{ error }}
     </div>
 
-    <div v-else-if="!hasAnyData" class="bg-surface border border-neutral-200 rounded-lg p-8 text-center">
-      <p class="text-neutral-500">{{ t('stats.no_data') }}</p>
-    </div>
+    <EmptyState v-else-if="!hasAnyData" boxed icon="chart" accent="neutral" :title="t('stats.no_data')"/>
 
     <div v-else-if="summary && summary.kpi" class="space-y-6">
       <!-- Plovoucí 12měsíční obrat — KPI tiles per měna -->

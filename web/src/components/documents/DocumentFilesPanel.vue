@@ -11,6 +11,7 @@ import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocumentFile } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ documentId: number }>()
 
@@ -134,7 +135,7 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="text-xs text-neutral-400">{{ t('common.loading') }}</div>
-    <p v-else-if="files.length === 0" class="text-xs text-neutral-400">{{ t('documents.files.empty') }}</p>
+    <EmptyState v-else-if="files.length === 0" dense accent="neutral" icon="doc" :title="t('documents.files.empty')" />
     <ul v-else class="space-y-1">
       <li v-for="(f, i) in sorted" :key="f.id" class="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-neutral-50 group">
         <span :class="['shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(f.doc_type ?? 'other').class]">{{ docTypeBadge(f.doc_type ?? 'other').label }}</span>

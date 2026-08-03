@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { projectsApi, type Project } from '@/api/projects'
@@ -23,6 +23,15 @@ const status = ref<'' | 'active' | 'paused' | 'closed'>('active')
 const clientId = ref<number | ''>('')
 const sort = ref<'name' | 'revenue' | 'last_activity' | 'client'>('name')
 const clients = ref<Client[]>([])
+
+// `status` má výchozí hodnotu 'active' — filtrem je až odchylka od ní, jinak by
+// prázdný seznam u nové firmy hlásil „filtr nic nenašel".
+const hasActiveFilters = computed(() => status.value !== 'active' || clientId.value !== '')
+function clearFiltersAndSearch() {
+  status.value = 'active'
+  clientId.value = ''
+  load()
+}
 
 async function load(reset = true) {
   if (reset) {
@@ -113,7 +122,11 @@ watch([status, clientId, sort], () => load(true))
 
       <TableSkeleton v-if="loading" :rows="6" :cols="5" />
 
-      <EmptyState v-else-if="!items.length" :title="t('project.no_data')" />
+      <EmptyState v-else-if="!items.length && hasActiveFilters" variant="filtered"
+        :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
+      <EmptyState v-else-if="!items.length" icon="folderOpen"
+        :title="t('project.empty_title')"
+        :message="t('project.empty_hint')" />
 
       <!-- Desktop: tabulka -->
       <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first">

@@ -18,6 +18,7 @@ import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -790,7 +791,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
         </label>
 
         <div v-if="signingProfilesLoading" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
-        <div v-else-if="signingProfiles.length === 0" class="text-xs text-neutral-500 py-2">{{ t('settings.signing_profiles_empty') }}</div>
+        <EmptyState v-else-if="signingProfiles.length === 0" dense icon="lock" :title="t('settings.signing_profiles_empty')" />
         <div v-else class="overflow-x-auto border-y border-neutral-100">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
@@ -1048,9 +1049,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-if="outputTypes.length === 0">
-                  <td colspan="3" class="px-3 py-6 text-center text-neutral-500">{{ t('common.no_data') }}</td>
-                </tr>
+                <EmptyState v-if="outputTypes.length === 0" dense icon="doc" :colspan="3" :title="t('common.no_data')" />
                 <tr v-for="outputType in outputTypes" :key="outputType" class="align-top">
                   <td class="px-3 py-2">
                     <div class="flex flex-wrap items-center gap-2">

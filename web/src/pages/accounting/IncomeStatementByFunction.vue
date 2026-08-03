@@ -25,6 +25,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useAuthStore } from '@/stores/auth'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -220,9 +221,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="(functionMap?.rows.length ?? 0) === 0" class="p-6 text-center text-neutral-500 text-sm">
-        {{ t('accounting.statements.byFunction.map_empty') }}
-      </div>
+      <EmptyState v-if="(functionMap?.rows.length ?? 0) === 0" dense accent="neutral" icon="tag" :title="t('accounting.statements.byFunction.map_empty')" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500">

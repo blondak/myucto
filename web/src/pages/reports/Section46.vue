@@ -16,6 +16,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -216,11 +217,10 @@ onMounted(() => { loadCandidates(); loadRestorations() })
         <p class="text-xs text-neutral-500 mt-0.5">{{ t('reports.s46.candidates_hint') }}</p>
       </div>
       <div v-if="loading" class="p-8 text-center text-neutral-400">{{ t('common.loading') }}…</div>
-      <div v-else-if="visibleCandidates.length === 0" class="p-8 text-center text-neutral-500 text-sm">
-        {{ candidates.length > 0
+      <EmptyState v-else-if="visibleCandidates.length === 0" accent="neutral" icon="coin"
+        :title="candidates.length > 0
           ? t('reports.s46.no_candidates_filtered', { count: candidates.length, days: minOverdueDays })
-          : t('reports.s46.no_candidates') }}
-      </div>
+          : t('reports.s46.no_candidates')" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500">
@@ -303,9 +303,8 @@ onMounted(() => { loadCandidates(); loadRestorations() })
         </div>
       </div>
       <div v-if="loadingRest" class="p-6 text-center text-neutral-400">{{ t('common.loading') }}…</div>
-      <div v-else-if="!restorations || restorations.rows.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-        {{ t('reports.s46.no_restorations') }}
-      </div>
+      <EmptyState v-else-if="!restorations || restorations.rows.length === 0" dense accent="neutral" icon="cycle"
+        :title="t('reports.s46.no_restorations')" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500">

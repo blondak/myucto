@@ -11,6 +11,7 @@ import { portfolioApi, type PortfolioCompany } from '@/api/portfolio'
 import { useSupplierStore } from '@/stores/supplier'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -89,9 +90,7 @@ function periodBadgeClass(status: string): string {
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg p-8 text-center text-sm text-neutral-400">{{ t('common.loading') }}…</div>
     <div v-else-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm">{{ error }}</div>
-    <div v-else-if="companies.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-8 text-center text-sm text-neutral-500">
-      {{ t('portfolio.empty') }}
-    </div>
+    <EmptyState v-else-if="companies.length === 0" boxed icon="chart" :title="t('portfolio.empty')" />
 
     <template v-else>
       <!-- Desktop tabulka -->

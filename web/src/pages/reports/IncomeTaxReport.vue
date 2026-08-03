@@ -10,6 +10,7 @@ import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useAuthStore } from '@/stores/auth'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth } from '@/api/tax'
 import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } from '@/api/taxEvidence'
 
@@ -787,7 +788,8 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               <span class="text-sm font-semibold">{{ t('taxReturn.tax_losses_title') }}</span>
               <span class="text-xs text-neutral-500">{{ t('taxReturn.tax_losses_carry', { n: taxLosses.carry_years }) }}</span>
             </div>
-            <p v-if="!taxLosses.losses.length" class="text-sm text-neutral-500">{{ t('taxReturn.tax_losses_empty') }}</p>
+            <EmptyState v-if="!taxLosses.losses.length" dense accent="neutral" icon="archive"
+              :title="t('taxReturn.tax_losses_empty')" />
             <div v-else class="overflow-x-auto">
               <table class="w-full text-sm">
                 <thead>
@@ -1358,7 +1360,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </tbody>
             </table>
           </div>
-          <div v-else class="text-sm text-neutral-400">{{ t('taxReturn.advances_empty') }}</div>
+          <EmptyState v-else dense accent="neutral" icon="coin" :title="t('taxReturn.advances_empty')" />
         </div>
 
         <!-- ── #46 — rozhodnutí FÚ o zálohách (§174) + předpis placení záloh NAPŘÍČ ROKY (jen daň §38a, PO) ── -->
@@ -1430,7 +1432,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </tbody>
             </table>
           </div>
-          <div v-else class="text-sm text-neutral-400 mb-5">{{ t('taxReturn.overrides_empty') }}</div>
+          <EmptyState v-else dense accent="neutral" icon="doc" class="mb-5" :title="t('taxReturn.overrides_empty')" />
 
           <!-- Předpis placení záloh napříč roky (stav auto-párováním #46) -->
           <h4 class="text-sm font-semibold mb-1">{{ t('taxReturn.overrides_schedule_title') }}</h4>
@@ -1461,7 +1463,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               </tbody>
             </table>
           </div>
-          <div v-else class="text-sm text-neutral-400">{{ t('taxReturn.advances_empty') }}</div>
+          <EmptyState v-else dense accent="neutral" icon="coin" :title="t('taxReturn.advances_empty')" />
         </div>
       </section>
     </template>

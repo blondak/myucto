@@ -5,6 +5,7 @@ import { accountingApi, type RepoRate } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -103,7 +104,7 @@ onMounted(load)
           </div>
         </div>
 
-        <div v-if="rates.length === 0" class="text-sm text-neutral-500 py-4 text-center">{{ t('accounting.repo_rates.no_rates') }}</div>
+        <EmptyState v-if="rates.length === 0" dense accent="neutral" icon="chart" :title="t('accounting.repo_rates.no_rates')" />
         <table v-else class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>

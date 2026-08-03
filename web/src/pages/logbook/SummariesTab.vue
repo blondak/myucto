@@ -7,6 +7,7 @@ import { logbookApi, type LogbookSummary } from '@/api/logbook'
 import MonthlyKmChart from '@/components/charts/MonthlyKmChart.vue'
 import CumulativeKmChart from '@/components/charts/CumulativeKmChart.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -69,7 +70,7 @@ function liters(n: number): string { return n.toLocaleString('cs-CZ', { maximumF
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="!data || data.vehicles.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_summary') }}</div>
+    <EmptyState v-else-if="!data || data.vehicles.length === 0" icon="chart" :title="t('logbook.no_summary')" dense boxed />
 
     <template v-else>
       <p class="text-sm text-neutral-500 mb-3">{{ t('logbook.summary_hint', { year: data.year }) }}</p>

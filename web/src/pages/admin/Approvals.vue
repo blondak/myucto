@@ -6,6 +6,7 @@ import { adminApi, type ApprovalInboxItem } from '@/api/admin'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -118,10 +119,8 @@ function daysSince(date: string | null): number | null {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="filteredItems.length === 0"
-      class="bg-surface border border-neutral-200 rounded-lg p-12 text-center text-sm text-neutral-500">
-      {{ t('approval_inbox.empty') }}
-    </div>
+    <EmptyState v-else-if="filteredItems.length === 0" boxed icon="checkCircle" accent="success"
+      :title="t('approval_inbox.empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop: tabulka -->

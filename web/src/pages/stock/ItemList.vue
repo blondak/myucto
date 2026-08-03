@@ -12,6 +12,7 @@ import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
@@ -57,6 +58,10 @@ const activeFilterCount = computed(() => {
   if (!filters.active) n++
   return n
 })
+
+// Hledání se do `activeFilterCount` schválně nepočítá (viz výše), pro prázdný
+// stav ale rozhoduje stejně — i ono může být důvod, proč seznam nic nevrátil.
+const hasActiveFilters = computed(() => activeFilterCount.value > 0 || !!filters.q)
 
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
@@ -281,7 +286,15 @@ onMounted(async () => {
     </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.items.empty') }}</div>
+    <!-- Prázdný seznam po filtrování není prázdný modul — nabízet tu „založ kartu"
+         by uživatele svedlo na scestí, správná cesta ven je zrušit filtr. -->
+    <EmptyState v-else-if="items.length === 0 && hasActiveFilters" boxed variant="filtered"
+      :cta="t('common.empty_state.clear_filters')" @action="resetFilters" />
+    <EmptyState v-else-if="items.length === 0" boxed icon="stock_items"
+      :title="t('stock.items.empty_title')"
+      :message="t('stock.items.empty_hint')"
+      :cta="auth.canWrite('stock') ? t('stock.items.new') : undefined"
+      to="/stock/items/new" />
 
     <!-- Desktop -->
     <div v-else class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

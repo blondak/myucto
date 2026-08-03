@@ -17,6 +17,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -249,9 +250,7 @@ onMounted(async () => {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!report || report.accounts.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('accounting.general_ledger.empty') }}
-    </div>
+    <EmptyState v-else-if="!report || report.accounts.length === 0" boxed accent="neutral" icon="chart" :title="t('accounting.general_ledger.empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

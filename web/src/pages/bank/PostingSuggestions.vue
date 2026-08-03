@@ -16,6 +16,7 @@ import {
 } from '@/api/bankPosting'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import {
@@ -309,9 +310,7 @@ function resolveLink(it: PostingSuggestion) {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ emptyText() }}
-    </div>
+    <EmptyState v-else-if="items.length === 0" boxed icon="clipboardCheck" accent="success" :title="emptyText()" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->

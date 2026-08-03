@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { accountingApi, type JournalNote } from '@/api/accounting'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 /**
  * Poznámky k účetnímu zápisu (1:N).
@@ -151,7 +152,7 @@ function metaLine(n: JournalNote): string {
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 
       <template v-else>
-        <p v-if="!notes.length" class="text-sm text-neutral-500">{{ t('accounting.journal.notes.empty') }}</p>
+        <EmptyState v-if="!notes.length" dense accent="neutral" icon="doc" :title="t('accounting.journal.notes.empty')" />
 
         <ul v-else class="space-y-2">
           <li v-for="n in notes" :key="n.id"

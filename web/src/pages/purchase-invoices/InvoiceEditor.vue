@@ -40,6 +40,7 @@ import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -1525,9 +1526,8 @@ function fieldErr(key: string): string | null {
             {{ t('purchase_invoice.items.add') }}
           </button>
         </header>
-        <div v-if="form.items.length === 0" class="text-sm text-neutral-500 py-8 text-center">
-          {{ t('purchase_invoice.items.empty') }}
-        </div>
+        <EmptyState v-if="form.items.length === 0" dense icon="doc"
+          :title="t('purchase_invoice.items.empty')" :cta="t('purchase_invoice.items.add')" @action="addItem()" />
         <!-- Desktop: tabulka -->
         <div v-else class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm border-collapse">

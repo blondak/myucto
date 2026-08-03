@@ -5,6 +5,7 @@ import { stockApi, type StockStatusReport, type StockValuationReport, type Wareh
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -111,7 +112,10 @@ onMounted(async () => {
 
     <!-- Stav zásob -->
     <template v-else-if="tab === 'status'">
-      <div v-if="statusRows.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.reports.empty') }}</div>
+      <!-- Sestava bez řádků není chyba, jen zvolené datum/sklad nic nemá —
+           proto tichý neutrální tón a rada, co změnit, ne zakládací akce. -->
+      <EmptyState v-if="statusRows.length === 0" boxed accent="neutral" icon="warehouse"
+        :title="t('stock.reports.empty_title')" :message="t('stock.reports.empty_hint')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -148,7 +152,8 @@ onMounted(async () => {
 
     <!-- Ocenění -->
     <template v-else>
-      <div v-if="valuationRows.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('stock.reports.empty') }}</div>
+      <EmptyState v-if="valuationRows.length === 0" boxed accent="neutral" icon="coin"
+        :title="t('stock.reports.empty_title')" :message="t('stock.reports.empty_hint')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">

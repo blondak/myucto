@@ -10,6 +10,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -315,9 +316,9 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
       </template>
     </FilterBar>
 
-    <div v-if="cars.length === 0 && !loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_cars_hint') }}</div>
+    <EmptyState v-if="cars.length === 0 && !loading" icon="box" :title="t('logbook.no_cars_hint')" dense boxed />
     <div v-else-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="total === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_trips') }}</div>
+    <EmptyState v-else-if="total === 0" icon="cycle" :title="t('logbook.no_trips')" dense boxed />
 
     <template v-else>
       <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.trips_summary', { count: total, km: fmtKm(totalKm) }) }}</div>

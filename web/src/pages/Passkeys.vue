@@ -6,6 +6,7 @@ import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey 
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import RecoveryCodes from '@/components/security/RecoveryCodes.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -244,7 +245,7 @@ onMounted(() => {
         <template v-else>{{ t('passkeys.revoke_hint_passkey') }}</template>
       </p>
 
-      <p v-if="list.length === 0" class="text-sm text-neutral-500 text-center py-8">{{ t('passkeys.empty') }}</p>
+      <EmptyState v-if="list.length === 0" icon="lock" :title="t('passkeys.empty')"/>
     </div>
 
     <!-- Poslední cesta zpátky, když faktor zmizí i s telefonem. Patří sem, ne do

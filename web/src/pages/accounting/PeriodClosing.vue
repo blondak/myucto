@@ -29,6 +29,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -795,7 +796,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
               </tbody>
             </table>
           </div>
-          <div v-else class="text-sm text-neutral-500">{{ t('accounting.closing.precheck_empty') }}</div>
+          <EmptyState v-else dense accent="neutral" icon="clipboardCheck" :title="t('accounting.closing.precheck_empty')" />
         </template>
 
         <!-- 2) Odpisy -->
@@ -873,7 +874,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                   </tbody>
                 </table>
               </div>
-              <div v-else class="text-sm text-neutral-500">{{ t('accounting.closing.fx.no_open_items') }}</div>
+              <EmptyState v-else dense accent="neutral" icon="swap" :title="t('accounting.closing.fx.no_open_items')" />
 
               <!-- Banka / valutová pokladna -->
               <div>
@@ -979,7 +980,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                   </tbody>
                 </table>
               </div>
-              <p v-else-if="estimatesSuggest" class="text-sm text-neutral-500">{{ t('accounting.closing.estimates.none') }}</p>
+              <EmptyState v-else-if="estimatesSuggest" dense accent="neutral" icon="cycle" :title="t('accounting.closing.estimates.none')" />
             </div>
 
             <!-- Asistent -->
@@ -1066,7 +1067,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     </tbody>
                   </table>
                 </div>
-                <p v-else class="text-sm text-neutral-500">{{ t('accounting.closing.small_asset.no_cards') }}</p>
+                <EmptyState v-else dense accent="neutral" icon="box" :title="t('accounting.closing.small_asset.no_cards')" />
                 <div class="text-sm space-y-1">
                   <div class="flex justify-between"><span>{{ t('accounting.closing.small_asset.total_deferred') }}</span><span class="font-mono font-medium">{{ formatMoney(saAccrualPreview.total) }}</span></div>
                   <div class="flex justify-between text-neutral-500"><span>{{ t('accounting.closing.small_asset.cards_total') }}</span><span class="font-mono">{{ formatMoney(saAccrualPreview.cards_total) }}</span></div>
@@ -1116,7 +1117,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     </tbody>
                   </table>
                 </div>
-                <p v-else class="text-sm text-neutral-500">{{ t('accounting.closing.prepaid_expense.no_items') }}</p>
+                <EmptyState v-else dense accent="neutral" icon="doc" :title="t('accounting.closing.prepaid_expense.no_items')" />
                 <div class="text-sm space-y-1">
                   <div class="flex justify-between"><span>{{ t('accounting.closing.prepaid_expense.total_deferred') }}</span><span class="font-mono font-medium">{{ formatMoney(peAccrualPreview.total) }}</span></div>
                 </div>
@@ -1238,7 +1239,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                 </tfoot>
               </table>
             </div>
-            <div v-else-if="provisionsPreview" class="text-sm text-neutral-500">{{ t('accounting.closing.provisions.none') }}</div>
+            <EmptyState v-else-if="provisionsPreview" dense accent="neutral" icon="coin" :title="t('accounting.closing.provisions.none')" />
 
             <div class="flex flex-wrap gap-2 border-t border-neutral-200 pt-3">
               <button v-if="isClosing" @click="runProvisions" :disabled="busy" :class="btnFilled('primary')">
@@ -1402,7 +1403,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                 </div>
               </div>
             </template>
-            <div v-else class="text-sm text-neutral-500">{{ t('accounting.closing.stock.no_data') }}</div>
+            <EmptyState v-else dense accent="neutral" icon="warehouse" :title="t('accounting.closing.stock.no_data')" />
 
             <!-- Akce (manuální — žádné auto-run) -->
             <div class="flex flex-wrap gap-2 border-t border-neutral-200 pt-3">

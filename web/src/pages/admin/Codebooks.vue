@@ -14,6 +14,7 @@ import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { formatMonth } from '@/composables/useFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -894,9 +895,7 @@ watch(tab, (newTab) => {
         </button>
       </div>
 
-      <div v-if="expenseCategories.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-8 text-center text-sm text-neutral-500">
-        {{ t('expense_categories.empty') }}
-      </div>
+      <EmptyState v-if="expenseCategories.length === 0" boxed icon="tag" :title="t('expense_categories.empty')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <table class="w-full text-sm">
@@ -946,9 +945,7 @@ watch(tab, (newTab) => {
         </button>
       </div>
 
-      <div v-if="revenueCategories.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-8 text-center text-sm text-neutral-500">
-        {{ t('revenue_categories.empty') }}
-      </div>
+      <EmptyState v-if="revenueCategories.length === 0" boxed icon="coin" :title="t('revenue_categories.empty')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <table class="w-full text-sm">
@@ -992,9 +989,7 @@ watch(tab, (newTab) => {
         </button>
       </div>
 
-      <div v-if="vatClassifications.length === 0" class="bg-surface border border-dashed border-neutral-300 rounded-lg p-8 text-center text-sm text-neutral-500">
-        {{ t('vat_classifications.empty') }}
-      </div>
+      <EmptyState v-if="vatClassifications.length === 0" boxed icon="clipboardCheck" :title="t('vat_classifications.empty')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <table class="w-full text-sm">

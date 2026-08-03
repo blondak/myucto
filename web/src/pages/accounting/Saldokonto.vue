@@ -12,6 +12,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -153,9 +154,7 @@ onMounted(async () => {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!report || report.accounts.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('accounting.saldo.empty') }}
-    </div>
+    <EmptyState v-else-if="!report || report.accounts.length === 0" boxed accent="neutral" icon="coin" :title="t('accounting.saldo.empty')" />
 
     <div v-else class="space-y-6">
       <div v-for="b in report.accounts" :key="b.account.id"
@@ -188,9 +187,7 @@ onMounted(async () => {
           {{ t('accounting.saldo.difference_hint') }}
         </div>
 
-        <div v-if="b.partners.length === 0" class="px-4 py-6 text-center text-neutral-500 text-sm">
-          {{ t('accounting.saldo.no_open_items') }}
-        </div>
+        <EmptyState v-if="b.partners.length === 0" dense accent="success" icon="checkCircle" :title="t('accounting.saldo.no_open_items')" />
 
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">

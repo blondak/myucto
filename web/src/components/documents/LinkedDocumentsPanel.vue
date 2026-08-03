@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ entityType: EntityType; entityId: number }>()
 
@@ -113,7 +114,7 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="text-sm text-neutral-400">…</div>
-    <div v-else-if="docs.length === 0" class="text-sm text-neutral-400">{{ t('documents.panel_empty') }}</div>
+    <EmptyState v-else-if="docs.length === 0" dense accent="neutral" icon="link" :title="t('documents.panel_empty')" />
     <ul v-else class="space-y-1">
       <li
         v-for="d in docs"

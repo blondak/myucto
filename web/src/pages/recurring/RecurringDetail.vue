@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -341,7 +342,7 @@ const recurringActions = computed<ActionItem[]>(() => {
         <div class="px-5 py-3 border-b border-neutral-200">
           <h3 class="font-semibold">{{ t('recurring.items') }}</h3>
         </div>
-        <div v-if="!tpl.items?.length" class="px-5 py-6 text-sm text-neutral-500 text-center">{{ t('recurring.items_required') }}</div>
+        <EmptyState v-if="!tpl.items?.length" dense icon="doc" :title="t('recurring.items_required')" />
         <table v-else class="w-full text-sm">
           <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
             <tr>
@@ -405,9 +406,7 @@ const recurringActions = computed<ActionItem[]>(() => {
           </h3>
         </div>
 
-        <div v-if="invoices.length === 0" class="px-5 py-8 text-sm text-neutral-500 text-center">
-          {{ t('recurring.empty') }}
-        </div>
+        <EmptyState v-if="invoices.length === 0" dense icon="doc" :title="t('recurring.empty')" />
 
         <!-- Desktop -->
         <div v-else class="hidden md:block overflow-x-auto">

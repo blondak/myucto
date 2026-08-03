@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 defineProps<{ embedded?: boolean }>()
 
@@ -188,9 +189,10 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
 
     <div v-if="error" class="mb-4 rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-600">{{ error }}</div>
     <div v-if="loading" class="py-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-    <div v-else-if="templates.length === 0" class="bg-surface border border-neutral-200 rounded-lg p-8 text-center text-sm text-neutral-500">
-      {{ t('accounting.manual.template.empty') }}
-    </div>
+    <EmptyState v-else-if="templates.length === 0" boxed icon="doc"
+      :title="t('accounting.manual.template.empty')"
+      :cta="auth.canWrite('accounting.templates') ? t('accounting.templates.new') : undefined"
+      @action="startNew" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-neutral-50 text-neutral-600">

@@ -9,6 +9,7 @@ import { useHotkey } from '@/composables/useHotkey'
 import CodebookImportDialog from '@/components/accounting/CodebookImportDialog.vue'
 import { codebookTransferApi } from '@/api/codebookTransfer'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -157,7 +158,10 @@ function sideLabel(side: string | null): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="accounts.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.accounts.empty') }}</div>
+    <EmptyState v-else-if="accounts.length === 0" boxed icon="doc"
+      :title="t('accounting.accounts.empty')"
+      :cta="canCreateAccount ? t('accounting.accounts.new') : undefined"
+      @action="openCreate" />
 
     <div v-else class="space-y-5">
       <div v-for="g in groups" :key="g.key" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

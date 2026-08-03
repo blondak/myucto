@@ -17,6 +17,7 @@ import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -231,7 +232,10 @@ function statusBadge(status: string): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="periods.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.periods.empty') }}</div>
+    <EmptyState v-else-if="periods.length === 0" boxed icon="clipboardCheck"
+      :title="t('accounting.periods.empty')"
+      :cta="auth.canWrite('accounting.periods.manage') ? t('accounting.periods.new') : undefined"
+      @action="openCreate" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->
@@ -394,7 +398,7 @@ function statusBadge(status: string): string {
         <h3 class="text-lg font-semibold mb-3">{{ t('accounting.closing.series.title') }}</h3>
         <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.closing.series.hint') }}</p>
         <div v-if="seriesLoading" class="text-sm text-neutral-500 py-4">{{ t('common.loading') }}</div>
-        <div v-else-if="!series.length" class="text-sm text-neutral-500 py-4">{{ t('accounting.closing.series.empty') }}</div>
+        <EmptyState v-else-if="!series.length" dense accent="neutral" icon="tag" :title="t('accounting.closing.series.empty')" />
         <table v-else class="w-full text-sm mb-4">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>

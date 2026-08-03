@@ -11,6 +11,7 @@ import { bankPostingApi, type SupplierBankAccount, type BankAccountKind } from '
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -114,9 +115,7 @@ onMounted(load)
       {{ t('common.loading') }}…
     </div>
 
-    <div v-else-if="accounts.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-500 text-sm">
-      {{ t('bank.analytics.empty') }}
-    </div>
+    <EmptyState v-else-if="accounts.length === 0" boxed icon="coin" :title="t('bank.analytics.empty')" />
 
     <template v-else>
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

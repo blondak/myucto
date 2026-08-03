@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -193,8 +194,8 @@ onMounted(loadList)
         </div>
       </div>
 
-      <p v-if="form.partner_id && open && open.receivables.length === 0 && open.payables.length === 0"
-        class="text-sm text-neutral-500 py-4 text-center">{{ t('accounting.offsets.no_open') }}</p>
+      <EmptyState v-if="form.partner_id && open && open.receivables.length === 0 && open.payables.length === 0"
+        dense accent="success" icon="checkCircle" :title="t('accounting.offsets.no_open')" />
 
       <div v-if="open && (open.receivables.length || open.payables.length)" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Pohledávky (FV) -->
@@ -276,7 +277,9 @@ onMounted(loadList)
 
     <!-- Historie -->
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="agreements.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.offsets.empty') }}</div>
+    <EmptyState v-else-if="agreements.length === 0" boxed icon="swap"
+      :title="t('accounting.offsets.empty')"
+      :cta="t('accounting.offsets.new')" @action="startBuild" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

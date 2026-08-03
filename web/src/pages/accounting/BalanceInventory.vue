@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -282,9 +283,7 @@ onMounted(async () => {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="!report || report.rows.length === 0" class="text-center text-neutral-500 py-12 text-sm">
-      {{ t('accounting.balance_inventory.empty') }}
-    </div>
+    <EmptyState v-else-if="!report || report.rows.length === 0" boxed accent="neutral" icon="clipboardCheck" :title="t('accounting.balance_inventory.empty')" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

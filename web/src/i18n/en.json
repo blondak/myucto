@@ -829,6 +829,8 @@
     "warehouses": {
       "title": "Warehouses",
       "subtitle": "Warehouse register and current value",
+      "empty_title": "No warehouses yet",
+      "empty_hint": "Without a warehouse you cannot record a receipt or an issue — start with a main warehouse, add more any time later.",
       "new": "New warehouse",
       "edit": "Edit warehouse",
       "col_code": "Code",
@@ -857,6 +859,8 @@
     "items": {
       "title": "Stock items",
       "subtitle": "Material, goods and products tracked in stock",
+      "empty_title": "No stock items yet",
+      "empty_hint": "A stock item holds goods, material or a product — receipts, issues and stock valuation all build on it.",
       "new": "New stock item",
       "new_title": "New stock item",
       "edit_title": "Edit stock item",
@@ -914,11 +918,14 @@
       "col_balance": "Balance",
       "opening_balance": "Opening balance",
       "empty_movements": "No movements yet.",
+      "empty_movements_hint": "The first movement appears with a receipt, an issue note or a transfer using this stock card.",
       "load_more": "Load more"
     },
     "documents": {
       "title": "Stock documents",
       "subtitle": "Goods receipts, issues and transfers",
+      "empty_title": "No stock documents yet",
+      "empty_hint": "A receipt brings goods in, an issue note takes them out and a transfer moves them between warehouses.",
       "tab_all": "All",
       "tab_receipts": "Receipts",
       "tab_issues": "Issues",
@@ -986,6 +993,8 @@
       "subtitle": "Physical stock inventory counts",
       "new": "New stock take",
       "empty": "No stock take yet.",
+      "empty_title": "No stock take yet",
+      "empty_hint": "A stock take compares the physically counted quantities against the records; the system then proposes postings for the differences.",
       "step_setup": "Setup",
       "step_counting": "Counting",
       "step_recap": "Recap",
@@ -1022,6 +1031,8 @@
     },
     "reports": {
       "title": "Stock reports",
+      "empty_title": "The report has nothing to show",
+      "empty_hint": "No stock is recorded for the selected date and warehouse. Try another date or another warehouse.",
       "tab_status": "Stock status as of date",
       "tab_valuation": "Valuation as of date",
       "filter_date": "Date",
@@ -1093,6 +1104,8 @@
     "manufacturers": {
       "title": "Manufacturers",
       "subtitle": "Manage goods manufacturers",
+      "empty_title": "No manufacturers yet",
+      "empty_hint": "Assign a manufacturer to a stock card; the e-shop can then filter and sort goods by it.",
       "new": "New Manufacturer",
       "edit": "Edit Manufacturer",
       "delete_confirm": "Really delete manufacturer '{name}'?",
@@ -1114,6 +1127,8 @@
     "tags": {
       "title": "Tags",
       "subtitle": "Manage e-shop tags/labels",
+      "empty_title": "No tags yet",
+      "empty_hint": "A tag marks goods across categories — Sale or New, for instance — and the e-shop builds a listing from it.",
       "new": "New Tag",
       "edit": "Edit Tag",
       "delete_confirm": "Really delete tag '{name}'?",
@@ -1130,6 +1145,8 @@
     "fee_types": {
       "title": "Fee Types",
       "subtitle": "Manage e-shop fees",
+      "empty_title": "No fee types yet",
+      "empty_hint": "A fee (a recycling fee, for example) is added to the price of the goods and shown as a separate invoice line.",
       "new": "New Fee Type",
       "edit": "Edit Fee Type",
       "delete_confirm": "Really delete fee type '{name}'?",
@@ -1147,6 +1164,8 @@
     "attributes": {
       "title": "Attributes",
       "subtitle": "Goods parameters and characteristics",
+      "empty_title": "No attributes yet",
+      "empty_hint": "An attribute carries a property of the goods (colour, size, material) and the e-shop can filter by it.",
       "new": "New Attribute",
       "edit": "Edit Attribute",
       "delete_confirm": "Really delete attribute '{name}'?",
@@ -1176,11 +1195,15 @@
       "option_field_order": "Option Order",
       "option_col_code": "Code",
       "option_col_label": "Value",
-      "option_col_order": "Order"
+      "option_col_order": "Order",
+      "options_empty": "This attribute has no values yet",
+      "options_empty_hint": "Add options in the form below — for choice attributes the customer picks from them."
     },
     "categories": {
       "title": "Categories",
       "subtitle": "E-shop catalog categories",
+      "empty_title": "No categories yet",
+      "empty_hint": "Categories form the tree the e-shop offers goods in. Start with a top-level category; sub-categories can come later.",
       "new": "New Category",
       "edit": "Edit Category",
       "delete_confirm": "Really delete category '{name}'?",
@@ -1298,6 +1321,8 @@
     "import": {
       "title": "Product import",
       "subtitle": "Bulk create and update stock cards from XLSX or CSV.",
+      "empty_title": "The file produced no rows",
+      "empty_hint": "Check that the sheet has a header row with column names and at least one data row.",
       "reset": "New import",
       "drop_hint": "Drop a file here or click to choose (XLSX or CSV, max 2 MB)",
       "dry_run": "Preview only (dry-run) — nothing is saved",
@@ -4680,6 +4705,12 @@
     "entry": "entry"
   },
   "common": {
+    "empty_state": {
+      "title": "Nothing here yet",
+      "filtered_title": "No record matches the filter",
+      "filtered_message": "There may well be records — the filter is just hiding them. Try another period, another search term, or clear the filter.",
+      "clear_filters": "Clear filter"
+    },
     "no_items": "No items.",
     "pagination_range": "{from}–{to} of {total}",
     "view_all": "View all",
@@ -4896,6 +4927,8 @@
     "clear_date_filter": "✕ Clear dates",
     "sent_at": "Sent: {date}",
     "no_data": "No invoices.",
+    "empty_title": "No issued invoices yet",
+    "empty_hint": "An issued invoice feeds straight into VAT, the journal and the receivables overview.",
     "empty_client": "No invoices yet. Issue your first one.",
     "summary_count": "Total {n} invoices ({m} months)",
     "draft_id_short": "draft #{id}",
@@ -5776,6 +5809,8 @@
     "show_archived": "Show archived",
     "delete_warning": "Delete client \"{name}\"? This cannot be undone.\n\nOnly works if the client has no invoices or projects — otherwise use Archive.",
     "no_data": "No clients.",
+    "empty_title": "No clients yet",
+    "empty_hint": "A client is the counterparty on an invoice — you cannot issue a document without one. Details can be pulled from the business register by company ID.",
     "archive_confirm": "Archive client?",
     "delete_failed": "Delete failed",
     "revenue_by_month": "Revenue by month",
@@ -5843,6 +5878,8 @@
     "due": "Due (days)",
     "number": "Number",
     "no_data": "No projects.",
+    "empty_title": "No projects yet",
+    "empty_hint": "A project groups the invoices, costs and revenue of one job so you can see what is left on it.",
     "edit_project": "Edit project",
     "new_invoice": "New invoice",
     "edit_client": "Edit client",
@@ -6427,6 +6464,7 @@
       "non_admin": "Please ask your administrator to create a supplier in Settings → Codebooks → Suppliers."
     },
     "welcome": "Welcome to MyÚčto.cz!",
+    "empty_hint": "The dashboard fills up as soon as there is data. Start with your first client and issue an invoice — the figures, charts and tax reports follow on their own.",
     "subtitle_year": "Business overview for {year}",
     "tax_net_title": "Taxes {year}",
     "tax_net_projected": "year estimate",

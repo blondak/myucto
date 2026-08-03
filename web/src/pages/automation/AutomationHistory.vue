@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { automationApi, type AutomationHistoryItem } from '@/api/automation'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 const props = defineProps<{ suppliers: number[] }>()
 const { t } = useI18n()
 const items = ref<AutomationHistoryItem[]>([])
@@ -73,7 +74,7 @@ watch(page, load)
           <div class="mt-1 font-mono text-sm text-neutral-600">{{ item.debit_account_code }}/{{ item.credit_account_code }}</div>
         </div>
       </article>
-      <p v-if="!items.length" class="p-8 text-center text-neutral-500">{{ t('automation.history_empty') }}</p>
+      <EmptyState v-if="!items.length" icon="archive" accent="neutral" :title="t('automation.history_empty')"/>
     </div>
     <PaginationBar embedded :page="page" :per-page="perPage" :total="total" @update:page="page = $event" />
   </div>

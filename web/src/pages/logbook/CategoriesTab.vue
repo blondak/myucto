@@ -5,6 +5,7 @@ import { useToast } from '@/composables/useToast'
 import { logbookApi, type TripCategory, type TripCategoryPayload } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -81,7 +82,7 @@ async function removeCategory(c: TripCategory) {
     <p class="text-sm text-neutral-500 mb-3">{{ t('logbook.categories_hint') }}</p>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <div v-else-if="categories.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('logbook.no_categories') }}</div>
+    <EmptyState v-else-if="categories.length === 0" icon="tag" :title="t('logbook.no_categories')" dense boxed />
 
     <template v-else>
       <!-- Desktop -->

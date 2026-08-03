@@ -15,6 +15,7 @@ import TaxAdvancesWidget from '@/components/dashboard/TaxAdvancesWidget.vue'
 import TaxCalendarWidget from '@/components/dashboard/TaxCalendarWidget.vue'
 import ActionItemsWidget from '@/components/dashboard/ActionItemsWidget.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -164,18 +165,14 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       {{ error }}
     </div>
 
-    <div v-else-if="!hasAnyData" class="bg-surface border border-neutral-200 rounded-lg p-8 text-center">
-      <h2 class="text-lg font-semibold mb-2">{{ t('dashboard.welcome') }}</h2>
-      <p class="text-neutral-500 mb-6">{{ t('common.no_data') }}</p>
-      <div class="flex justify-center gap-3">
-        <RouterLink v-if="auth.canWrite('dashboard')" to="/clients/new" class="px-4 h-10 inline-flex items-center bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
-          {{ t('client.new') }}
-        </RouterLink>
-        <RouterLink v-if="auth.canWrite('dashboard')" to="/invoices/new" class="px-4 h-10 inline-flex items-center border border-neutral-300 text-neutral-700 hover:bg-neutral-50 text-sm font-medium rounded-md">
-          {{ t('invoice.new') }}
-        </RouterLink>
-      </div>
-    </div>
+    <EmptyState v-else-if="!hasAnyData" boxed icon="chart"
+      :title="t('dashboard.welcome')"
+      :message="t('dashboard.empty_hint')"
+      :cta="auth.canWrite('dashboard') ? t('client.new') : undefined"
+      to="/clients/new"
+      :secondary="auth.canWrite('dashboard') ? t('invoice.new') : undefined"
+      secondary-to="/invoices/new"
+      secondary-icon="doc" />
 
     <div v-else-if="summary && summary.kpi" class="space-y-6">
       <!-- Přehled byl jediná stránka v aplikaci bez H1 — začínal rovnou widgetem,

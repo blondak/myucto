@@ -16,6 +16,7 @@ import { codebookTransferApi } from '@/api/codebookTransfer'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -279,7 +280,10 @@ async function runBook() {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="items.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('accounting.assets.empty') }}</div>
+    <EmptyState v-else-if="items.length === 0" boxed icon="box"
+      :title="t('accounting.assets.empty')"
+      :cta="auth.canWrite('assets.write') ? t('accounting.assets.new') : undefined"
+      to="/accounting/assets/new" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
@@ -350,7 +354,7 @@ async function runBook() {
     <Modal v-if="showCandidates" :title="t('accounting.assets.candidates.title')" widthClass="max-w-4xl" @close="showCandidates = false">
       <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.assets.candidates.hint') }}</p>
       <div v-if="candidatesLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('common.loading') }}</div>
-      <div v-else-if="candidates.length === 0" class="text-center text-neutral-500 py-8 text-sm">{{ t('accounting.assets.candidates.empty') }}</div>
+      <EmptyState v-else-if="candidates.length === 0" dense accent="neutral" icon="doc" :title="t('accounting.assets.candidates.empty')" />
       <table v-else class="w-full text-sm">
         <thead class="text-xs text-neutral-500 uppercase tracking-wide">
           <tr>

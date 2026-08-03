@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type BrandingProfile, type EmailProfile, type Supplier } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -213,7 +214,7 @@ onMounted(() => { if (props.enabled) load() })
         </div>
       </article>
     </div>
-    <p v-else class="text-sm text-neutral-500 mt-4">{{ t('settings.branding_profiles.empty') }}</p>
+    <EmptyState v-else dense accent="neutral" icon="colorSwatch" :title="t('settings.branding_profiles.empty')" />
 
     <div v-if="editing" class="mt-4 border-t border-neutral-200 pt-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

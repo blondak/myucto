@@ -21,6 +21,7 @@ import { useChartColors } from '@/composables/useTheme'
 import BalanceTrendChart from '@/components/charts/BalanceTrendChart.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložky uvnitř BankPage.vue (Finance → Bankovní účty);
 // hlavičku a lištu záložek pak dodává obálka, aktivní tab řídí přes ?tab=.
@@ -778,11 +779,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-if="currencies.length === 0">
-                <td colspan="8" class="px-3 py-4 text-sm text-neutral-500">
-                  {{ t('bank_accounts.currencies_empty') }}
-                </td>
-              </tr>
+              <EmptyState v-if="currencies.length === 0" dense icon="coin" :colspan="8" :title="t('bank_accounts.currencies_empty')" />
               <tr v-for="c in currencies" :key="c.id">
                 <td class="px-3 py-2 font-mono">{{ c.code }} <span class="text-xs text-neutral-500">{{ c.symbol }}</span></td>
                 <td class="px-3 py-2">{{ c.label }}</td>
@@ -811,7 +808,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
 
         <!-- Mobile: karty -->
         <div class="md:hidden divide-y divide-neutral-100">
-          <div v-if="currencies.length === 0" class="px-4 py-4 text-sm text-neutral-500">{{ t('bank_accounts.currencies_empty') }}</div>
+          <EmptyState v-if="currencies.length === 0" dense icon="coin" :title="t('bank_accounts.currencies_empty')" />
           <div v-for="c in currencies" :key="`m-${c.id}`" class="p-3 space-y-1.5">
             <div class="flex items-baseline gap-2 min-w-0">
               <span class="font-mono font-semibold">{{ c.code }}</span>
@@ -863,9 +860,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.balances_subtitle') }}</p>
             </header>
 
-            <div v-if="balances.accounts.length === 0" class="px-5 py-4 text-sm text-neutral-500">
-              {{ t('bank_accounts.balances_empty') }}
-            </div>
+            <EmptyState v-if="balances.accounts.length === 0" dense icon="chart" :title="t('bank_accounts.balances_empty')" />
 
             <template v-else>
               <!-- Desktop: tabulka -->
@@ -1021,11 +1016,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-if="mappings.length === 0">
-                <td colspan="5" class="px-3 py-4 text-sm text-neutral-500">
-                  {{ t('bank_accounts.mappings_empty') }}
-                </td>
-              </tr>
+              <EmptyState v-if="mappings.length === 0" dense icon="link" :colspan="5" :title="t('bank_accounts.mappings_empty')" />
               <tr v-for="mapping in mappings" :key="mapping.currency_id">
                 <td class="px-3 py-2">
                   <div class="font-medium">{{ mapping.label }}</div>
@@ -1097,9 +1088,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-if="imapAccounts.length === 0">
-                <td colspan="7" class="px-3 py-4 text-sm text-neutral-500">{{ t('bank_accounts.imap_empty') }}</td>
-              </tr>
+              <EmptyState v-if="imapAccounts.length === 0" dense icon="inbox" :colspan="7" :title="t('bank_accounts.imap_empty')" />
               <tr v-for="account in imapAccounts" :key="account.id ?? account.name">
                 <td class="px-3 py-2">
                   <div class="font-medium">{{ account.name }}</div>
@@ -1279,9 +1268,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-if="providers.length === 0">
-                <td colspan="6" class="px-3 py-4 text-sm text-neutral-500">{{ t('bank_accounts.providers_empty') }}</td>
-              </tr>
+              <EmptyState v-if="providers.length === 0" dense icon="doc" :colspan="6" :title="t('bank_accounts.providers_empty')" />
               <tr v-for="p in providers" :key="p.provider_ref">
                 <td class="px-3 py-2">
                   <div class="font-medium">{{ p.name }}</div>

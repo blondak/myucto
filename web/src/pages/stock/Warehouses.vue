@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -112,13 +113,11 @@ async function remove(w: Warehouse) {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <div v-else-if="warehouses.length === 0" class="text-center py-12">
-      <p class="text-neutral-500 text-sm mb-3">{{ t('stock.warehouses.empty') }}</p>
-      <button v-if="auth.canWrite('stock.items.write')" @click="openCreate" :class="btnFilled('primary')">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-        {{ t('stock.warehouses.new') }}
-      </button>
-    </div>
+    <EmptyState v-else-if="warehouses.length === 0" boxed icon="stock_warehouses"
+      :title="t('stock.warehouses.empty_title')"
+      :message="t('stock.warehouses.empty_hint')"
+      :cta="auth.canWrite('stock.items.write') ? t('stock.warehouses.new') : undefined"
+      @action="openCreate" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">

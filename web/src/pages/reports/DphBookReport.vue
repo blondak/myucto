@@ -6,6 +6,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -127,10 +128,8 @@ onMounted(loadPreview)
       </div>
 
       <!-- No data -->
-      <div v-if="preview.sections.length === 0"
-        class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-500">
-        {{ t('reports.dph_book.no_data') }}
-      </div>
+      <EmptyState v-if="preview.sections.length === 0" boxed accent="neutral" icon="doc"
+        :title="t('reports.dph_book.no_data')" />
 
       <!-- Sections -->
       <div v-for="section in preview.sections" :key="section.key"

@@ -22,6 +22,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -226,9 +227,7 @@ onMounted(load)
           </div>
           <div class="text-sm font-mono font-semibold">{{ fmtMoney(overview.total) }}</div>
         </div>
-        <div v-if="!hasTransactions" class="p-8 text-center text-neutral-500 text-sm">
-          {{ t('reports.relatedParties.no_transactions') }}
-        </div>
+        <EmptyState v-if="!hasTransactions" accent="neutral" icon="coin" :title="t('reports.relatedParties.no_transactions')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">
@@ -270,9 +269,7 @@ onMounted(load)
           <h2 class="text-sm font-semibold">{{ t('reports.relatedParties.adjustments_title') }}</h2>
           <p class="text-xs text-neutral-500 mt-0.5">{{ t('reports.relatedParties.adjustments_hint') }}</p>
         </div>
-        <div v-if="adjustments.rows.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-          {{ t('reports.relatedParties.no_adjustments') }}
-        </div>
+        <EmptyState v-if="adjustments.rows.length === 0" dense accent="neutral" icon="clipboardCheck" :title="t('reports.relatedParties.no_adjustments')" />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500">

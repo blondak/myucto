@@ -13,6 +13,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import CashRegisterManager from '@/components/cash/CashRegisterManager.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -292,13 +293,10 @@ function onManagerChanged() { loadRegisters() }
     </div>
 
     <!-- Bez pokladny -->
-    <div v-if="!loading && registers.length === 0" class="text-center py-12">
-      <p class="text-neutral-500 text-sm mb-3">{{ t('cash.empty.registers') }}</p>
-      <button v-if="auth.canWrite('cash.document.write')" @click="managerOpen = true" :class="btnFilled('primary')">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-        {{ t('cash.register_create') }}
-      </button>
-    </div>
+    <EmptyState v-if="!loading && registers.length === 0" boxed accent="neutral" icon="coin"
+      :title="t('cash.empty.registers')"
+      :cta="auth.canWrite('cash.document.write') ? t('cash.register_create') : undefined"
+      @action="managerOpen = true" />
 
     <template v-else>
       <!-- Filtry -->
@@ -343,7 +341,7 @@ function onManagerChanged() { loadRegisters() }
 
       <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-      <div v-else-if="documents.length === 0" class="text-center text-neutral-500 py-12 text-sm">{{ t('cash.empty.documents') }}</div>
+      <EmptyState v-else-if="documents.length === 0" boxed accent="neutral" icon="doc" :title="t('cash.empty.documents')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">

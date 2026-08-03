@@ -20,6 +20,7 @@ import { accountingApi, type AccountingPeriod, type Section18Statements } from '
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 
@@ -245,9 +246,7 @@ onMounted(async () => {
           </div>
           <p class="text-xs text-neutral-500">{{ t('accounting.section18.equity_hint') }}</p>
 
-          <div v-if="equity.rows.length === 0" class="text-sm text-neutral-500">
-            {{ t('accounting.section18.equity_empty') }}
-          </div>
+          <EmptyState v-if="equity.rows.length === 0" dense accent="neutral" icon="chart" :title="t('accounting.section18.equity_empty')" />
           <div v-else class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>

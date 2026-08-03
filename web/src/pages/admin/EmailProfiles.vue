@@ -10,6 +10,7 @@ import {
 } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -1015,7 +1016,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
 
     <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-      <div v-else-if="profiles.length === 0" class="text-sm text-neutral-500">{{ t('settings.email_profiles_empty') }}</div>
+      <EmptyState v-else-if="profiles.length === 0" dense icon="send" :title="t('settings.email_profiles_empty')" />
       <div v-else class="overflow-x-auto border-y border-neutral-100">
         <table class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">

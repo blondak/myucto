@@ -134,6 +134,9 @@ export const ICONS = {
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
   colorSwatch:      'M12 21a9 9 0 1 0-9-9c0 1.488 1.053 2.734 2.455 3.03l.22.047a2.122 2.122 0 0 1 1.705 1.705l.047.22A3.076 3.076 0 0 0 12 21zm-3.5-12a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0zm5-2a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0zm4 5a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0z',
   lock:             'M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zM8 11V7a4 4 0 1 1 8 0v4',
+  // Prázdné stavy (EmptyState): `search` = filtr nic nenašel, `funnel` = filtr obecně.
+  search:           'M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z',
+  funnel:           'M4 4h16l-6.4 7.5v5.9l-3.2 1.9v-7.8L4 4z',
 } as const
 
 export type ActionIcon = keyof typeof ICONS

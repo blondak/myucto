@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type SmtpLogAnalysis } from '@/api/admin'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 
@@ -204,9 +205,8 @@ function toggleStatus(s: string) {
 
       <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-      <div v-else-if="!data.events.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-12 text-center text-neutral-500">
-        {{ t('smtp_logs.no_records') }}
-      </div>
+      <EmptyState v-else-if="!data.events.length" boxed variant="filtered" icon="search" accent="neutral"
+        :title="t('smtp_logs.no_records')" />
 
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <!-- Desktop tabulka -->

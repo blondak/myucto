@@ -13,6 +13,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -160,9 +161,7 @@ onMounted(load)
         <div class="px-4 py-2 bg-neutral-50 border-b border-neutral-200">
           <h2 class="text-sm font-semibold">{{ t('accounting.retention.periods_title') }}</h2>
         </div>
-        <div v-if="periods.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-          {{ t('accounting.retention.no_periods') }}
-        </div>
+        <EmptyState v-if="periods.length === 0" dense accent="neutral" icon="archive" :title="t('accounting.retention.no_periods')" />
         <table v-else class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500">
             <tr>
@@ -223,9 +222,7 @@ onMounted(load)
             {{ t('accounting.retention.show_released') }}
           </label>
         </div>
-        <div v-if="holds.length === 0" class="p-6 text-center text-neutral-500 text-sm">
-          {{ t('accounting.retention.no_holds') }}
-        </div>
+        <EmptyState v-if="holds.length === 0" dense accent="neutral" icon="lock" :title="t('accounting.retention.no_holds')" />
         <table v-else class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500">
             <tr>
