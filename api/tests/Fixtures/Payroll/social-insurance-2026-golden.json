@@ -1,0 +1,61 @@
+{
+    "ruleset_id": "test.cz-payroll-2026.social-insurance.v1.active",
+    "status": "calculated",
+    "participating_base": 5990000,
+    "capped_base": 5990000,
+    "employee_contribution": 113900,
+    "employer_before_discount": 1485600,
+    "part_time_discount_base": 4790000,
+    "part_time_discount": 239500,
+    "employer_contribution": 1246100,
+    "people": [
+        {
+            "person_id": "person-a",
+            "capped_base": 4790000,
+            "employee_before_discount": 340100,
+            "working_pensioner_discount": 311400,
+            "employee_contribution": 28700,
+            "relationships": [
+                {
+                    "id": "hpp-a",
+                    "participation": "participates",
+                    "group_income": 4790000,
+                    "threshold": 450000,
+                    "reasons": [
+                        "regular_relationship_agreed_income_threshold_met"
+                    ],
+                    "capped_base": 4790000
+                }
+            ]
+        },
+        {
+            "person_id": "person-b",
+            "capped_base": 1200000,
+            "employee_before_discount": 85200,
+            "working_pensioner_discount": 0,
+            "employee_contribution": 85200,
+            "relationships": [
+                {
+                    "id": "dpp-b1",
+                    "participation": "participates",
+                    "group_income": 1200000,
+                    "threshold": 1200000,
+                    "reasons": [
+                        "dpp_group_threshold_met"
+                    ],
+                    "capped_base": 600000
+                },
+                {
+                    "id": "dpp-b2",
+                    "participation": "participates",
+                    "group_income": 1200000,
+                    "threshold": 1200000,
+                    "reasons": [
+                        "dpp_group_threshold_met"
+                    ],
+                    "capped_base": 600000
+                }
+            ]
+        }
+    ]
+}
