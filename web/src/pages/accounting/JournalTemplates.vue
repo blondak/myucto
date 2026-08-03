@@ -200,7 +200,9 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
             <th class="px-4 py-3 text-left font-medium">{{ t('accounting.manual.template.name') }}</th>
             <th class="px-4 py-3 text-left font-medium">{{ t('accounting.manual.description') }}</th>
             <th class="px-4 py-3 text-right font-medium">{{ t('accounting.templates.lines_count') }}</th>
-            <th class="px-4 py-3 text-right font-medium">{{ t('common.actions') }}</th>
+            <!-- Sloupec akcí si musí říct o šířku, jinak ji celou spolyká Popis
+                 a tři tlačítka se zalomí na dva řádky i na širokém monitoru. -->
+            <th class="px-4 py-3 text-right font-medium w-80">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">

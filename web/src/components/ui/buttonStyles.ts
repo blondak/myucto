@@ -80,6 +80,23 @@ export function btnOutlineSm(variant: ActionVariant = 'neutral'): string {
   return `${BTN_SM_BASE} ${OUTLINE[variant]}`
 }
 
+/*
+ * Varianta pro dvouslovné popisky v úzkém sloupci sestavy. `BTN_SM_BASE` má
+ * pevnou výšku a `whitespace-nowrap`, takže buď roztáhne sloupec, nebo (když
+ * si ad-hoc tlačítko nowrap odpustí) text přeteče mimo tlačítko a vypadá
+ * zmáčknutě. Tady se text zalomit SMÍ: výška je jen minimální, řádkování těsné
+ * a odsazení nahoře a dole větší, aby dva řádky drtily pohromadě jako celek.
+ */
+export const BTN_SM_WRAP_BASE =
+  'cursor-pointer px-2.5 py-1.5 min-h-7 text-xs font-medium leading-tight rounded-md ' +
+  'inline-flex items-center justify-center gap-1 text-center ' +
+  'transition-all duration-150 active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'disabled:active:translate-y-0 disabled:shadow-none'
+
+export function btnFilledSmWrap(variant: ActionVariant = 'primary'): string {
+  return `${BTN_SM_WRAP_BASE} ${FILLED[variant]}`
+}
+
 // Čtvercová ikona bez popisku pro akce ve sloupci tabulky. Textová varianta
 // (`btnOutlineSm`) je v úzkém sloupci širší než zbytek řádku a akce se zalomí
 // pod sebe — řádek pak přeroste ostatní. Popisek nese `title`/`aria-label`,

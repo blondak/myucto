@@ -12,6 +12,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { reportsApi, type S46Row, type S46LegalGround, type S46RestorationsPreview } from '@/api/reports'
+import { btnFilledSmWrap } from '@/components/ui/buttonStyles'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -269,7 +270,7 @@ onMounted(() => { loadCandidates(); loadRestorations() })
               </td>
               <td class="px-2 py-1.5 text-right">
                 <button v-if="canFinalize && row.delta > 0" type="button"
-                        class="cursor-pointer px-2.5 h-7 text-[11px] bg-warning-500 hover:bg-warning-600 text-white font-medium rounded-md"
+                        :class="btnFilledSmWrap('warning')"
                         @click="openForm(row)">
                   {{ t('reports.s46.record_correction') }}
                 </button>

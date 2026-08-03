@@ -12,7 +12,6 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
-import EmptyState from '@/components/ui/EmptyState.vue'
 
 /**
  * Mzdová rekapitulace (Fáze F) — měsíc + typ poplatníka + hrubá mzda → rozpad → zaúčtování.
@@ -673,12 +672,11 @@ const remittanceRows = computed(() => {
         </button>
       </div>
 
+      <!-- Bez prázdného stavu: panel má vlastní hlavičku s popisem i tlačítkem
+           „Nový zaměstnanec" pár desítek pixelů nad sebou, takže stav jen
+           potřetí opakoval totéž a tlačítko zdvojoval. -->
       <div v-if="employeesLoading" class="p-6 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-      <EmptyState v-else-if="employees.length === 0" dense icon="user"
-        :title="t('accounting.payroll.employees.empty')"
-        :cta="canWrite ? t('accounting.payroll.employees.new') : undefined"
-        @action="openNewEmployee" />
-      <div v-else class="border border-neutral-200 rounded-md overflow-x-auto">
+      <div v-else-if="employees.length > 0" class="border border-neutral-200 rounded-md overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500">
             <tr>

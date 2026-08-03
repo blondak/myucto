@@ -19,7 +19,6 @@ import {
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import JournalEntryHistory from '@/components/accounting/JournalEntryHistory.vue'
 import JournalEntryNotes from '@/components/accounting/JournalEntryNotes.vue'
-import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ entry: JournalEntryDetail }>()
 const emit = defineEmits<{ (e: 'description-updated', description: string, rowVersion: number): void }>()
@@ -242,9 +241,11 @@ onMounted(loadAttachments)
         </div>
       </div>
 
+      <!-- Prázdný stav tu ZÁMĚRNĚ není. U drtivé většiny zápisů žádná příloha
+           není, takže by to byl nejnápadnější prvek panelu — a hlásil by totéž,
+           co o řádek výš říká přetahovací zóna. Prázdno mluví samo. -->
       <div v-if="loadingAtt" class="text-xs text-neutral-400 py-2">{{ t('common.loading') }}</div>
-      <EmptyState v-else-if="attachments.length === 0" dense accent="neutral" icon="doc" :title="t('accounting.journal.att_empty')" />
-      <ul v-else class="space-y-1">
+      <ul v-else-if="attachments.length > 0" class="space-y-1">
         <li v-for="a in attachments" :key="a.id" class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-neutral-100 group">
           <svg class="w-4 h-4 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           <div class="min-w-0 flex-1">

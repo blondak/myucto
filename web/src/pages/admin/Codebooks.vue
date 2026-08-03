@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, reactive, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type VatRate, type Country, type Unit } from '@/api/settings'
@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -357,6 +357,27 @@ const vatClsOpen = ref(false)
 const vatClsEditMode = ref<'create' | 'edit'>('create')
 const vatClsSlug = useAutoSlug((s) => { vatClsDraft.code = s }, { maxLen: 8 })
 
+/**
+ * Escape zavírá dialogy číselníků.
+ *
+ * Dialogy jsou tu ručně psané (ne sdílený Modal.vue, který Escape umí), takže
+ * jediný způsob, jak je zavřít, bylo trefit křížek nebo Zrušit — z formuláře
+ * uprostřed obrazovky to působí jako past. Přepisovat všech šest na Modal.vue
+ * by přestavělo jejich strukturu a riskovalo vizuální regrese, tak jen chybějící
+ * chování doplňujeme.
+ */
+const codebookDialogs = [vatOpen, countryOpen, unitOpen, expenseOpen, revenueOpen, vatClsOpen]
+
+function onDialogEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  const open = codebookDialogs.find(d => d.value)
+  if (!open) return
+  e.stopPropagation()
+  open.value = false
+}
+onMounted(() => document.addEventListener('keydown', onDialogEscape))
+onBeforeUnmount(() => document.removeEventListener('keydown', onDialogEscape))
+
 async function loadVatClassifications() {
   vatClassifications.value = await vatClassificationsApi.list(undefined, true)
 }
@@ -696,13 +717,15 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-center"><span v-if="v.is_default" class="text-primary-600">✓</span></td>
               <td class="px-3 py-2 text-center"><span v-if="v.is_reverse_charge" class="text-warning-600">⇄</span></td>
               <td class="px-3 py-2 text-xs text-neutral-500">{{ v.valid_from }}<span v-if="v.valid_to"> – {{ v.valid_to }}</span></td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editVat(v)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('common.edit') }}</button>
-                <button @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
-                  class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                  :title="(v.items_count ?? 0) > 0 ? t('codebooks.in_use_vat', { n: v.items_count }) : t('common.delete')">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editVat(v)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
+                    :class="btnOutlineSm('danger')"
+                    :title="(v.items_count ?? 0) > 0 ? t('codebooks.in_use_vat', { n: v.items_count }) : t('common.delete')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -773,13 +796,15 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2">{{ c.name_cs }}</td>
               <td class="px-3 py-2 text-neutral-500">{{ c.name_en }}</td>
               <td class="px-3 py-2 text-center"><span v-if="c.is_eu" class="text-primary-600">EU</span></td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editCountry(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('common.edit') }}</button>
-                <button @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
-                  class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                  :title="(c.uses_count ?? 0) > 0 ? t('codebooks.in_use_country', { n: c.uses_count }) : t('common.delete')">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editCountry(c)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
+                    :class="btnOutlineSm('danger')"
+                    :title="(c.uses_count ?? 0) > 0 ? t('codebooks.in_use_country', { n: c.uses_count }) : t('common.delete')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -845,13 +870,15 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-neutral-500">{{ u.label_en }}</td>
               <td class="px-3 py-2 text-center"><span v-if="u.is_default" class="text-primary-600">✓</span></td>
               <td class="px-3 py-2 text-center font-mono text-xs">{{ u.display_order }}</td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editUnit(u)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('common.edit') }}</button>
-                <button @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
-                  class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                  :title="(u.items_count ?? 0) > 0 ? t('codebooks.in_use_unit', { n: u.items_count }) : t('common.delete')">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editUnit(u)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
+                    :class="btnOutlineSm('danger')"
+                    :title="(u.items_count ?? 0) > 0 ? t('codebooks.in_use_unit', { n: u.items_count }) : t('common.delete')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -921,13 +948,15 @@ watch(tab, (newTab) => {
                 </span>
               </td>
               <td class="px-3 py-2 text-right font-mono text-xs text-neutral-600">{{ c.purchases_count || 0 }}</td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editExpense(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">
-                  {{ t('common.edit') }}
-                </button>
-                <button @click="removeExpense(c)" class="cursor-pointer text-danger-500 hover:text-danger-600">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editExpense(c)" :class="btnOutlineSm('primary')">
+                    {{ t('common.edit') }}
+                  </button>
+                  <button @click="removeExpense(c)" :class="btnOutlineSm('danger')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -965,13 +994,15 @@ watch(tab, (newTab) => {
                 <span v-if="c.archived" class="ml-2 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('revenue_categories.archived') }}</span>
               </td>
               <td class="px-3 py-2 text-right font-mono text-xs text-neutral-600">{{ c.invoices_count || 0 }}</td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editRevenue(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">
-                  {{ t('common.edit') }}
-                </button>
-                <button @click="removeRevenue(c)" class="cursor-pointer text-danger-500 hover:text-danger-600">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editRevenue(c)" :class="btnOutlineSm('primary')">
+                    {{ t('common.edit') }}
+                  </button>
+                  <button @click="removeRevenue(c)" :class="btnOutlineSm('danger')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1023,17 +1054,19 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-center font-mono text-xs">{{ c.dphdp3_line ?? '—' }}</td>
               <td class="px-3 py-2 text-center font-mono text-xs">{{ c.kh_section ?? '—' }}</td>
               <td class="px-3 py-2 text-right font-mono text-xs">{{ c.vat_rate !== null ? c.vat_rate.toFixed(0) + '%' : '—' }}</td>
-              <td class="px-3 py-2 text-right text-xs">
-                <button @click="editVatCls(c)" :disabled="c.supplier_id === null"
-                  :title="c.supplier_id === null ? t('vat_classifications.global_readonly') : t('common.edit')"
-                  class="cursor-pointer text-primary-600 hover:text-primary-700 disabled:opacity-30 disabled:cursor-not-allowed mr-3">
-                  {{ t('common.edit') }}
-                </button>
-                <button @click="removeVatCls(c)" :disabled="c.supplier_id === null"
-                  :title="c.supplier_id === null ? t('vat_classifications.global_readonly') : t('common.delete')"
-                  class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed">
-                  {{ t('common.delete') }}
-                </button>
+              <td class="px-3 py-2 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button @click="editVatCls(c)" :disabled="c.supplier_id === null"
+                    :title="c.supplier_id === null ? t('vat_classifications.global_readonly') : t('common.edit')"
+                    :class="btnOutlineSm('primary')">
+                    {{ t('common.edit') }}
+                  </button>
+                  <button @click="removeVatCls(c)" :disabled="c.supplier_id === null"
+                    :title="c.supplier_id === null ? t('vat_classifications.global_readonly') : t('common.delete')"
+                    :class="btnOutlineSm('danger')">
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1320,18 +1353,20 @@ watch(tab, (newTab) => {
           {{ expenseDraft.id ? t('expense_categories.edit_title') : t('expense_categories.new_title') }}
         </h3>
         <div class="space-y-3">
+          <!-- Název je první: kód se z něj generuje slugifikací, takže začínat
+               kódem znamenalo vyplnit pole, které si systém stejně přepíše. -->
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('expense_categories.label') }} *</label>
+            <input v-model="expenseDraft.label" type="text" maxlength="100" placeholder="Hosting a domény"
+              @input="expenseSlug.fromName(($event.target as HTMLInputElement).value)"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('expense_categories.code') }} *</label>
             <input v-model="expenseDraft.code" type="text" maxlength="20" placeholder="hosting"
               @input="expenseSlug.markManual(($event.target as HTMLInputElement).value)"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('expense_categories.code_hint') }}</p>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('expense_categories.label') }} *</label>
-            <input v-model="expenseDraft.label" type="text" maxlength="100" placeholder="Hosting a domény"
-              @input="expenseSlug.fromName(($event.target as HTMLInputElement).value)"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('expense_categories.fixed_or_var') }}</label>
@@ -1368,18 +1403,19 @@ watch(tab, (newTab) => {
           {{ revenueDraft.id ? t('revenue_categories.edit_title') : t('revenue_categories.new_title') }}
         </h3>
         <div class="space-y-3">
+          <!-- Název první, kód se z něj slugifikuje — viz kategorie nákladů. -->
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.label') }} *</label>
+            <input v-model="revenueDraft.label" type="text" maxlength="100" placeholder="Konzultace a poradenství"
+              @input="revenueSlug.fromName(($event.target as HTMLInputElement).value)"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.code') }} *</label>
             <input v-model="revenueDraft.code" type="text" maxlength="20" placeholder="konzultace"
               @input="revenueSlug.markManual(($event.target as HTMLInputElement).value)"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('revenue_categories.code_hint') }}</p>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.label') }} *</label>
-            <input v-model="revenueDraft.label" type="text" maxlength="100" placeholder="Konzultace a poradenství"
-              @input="revenueSlug.fromName(($event.target as HTMLInputElement).value)"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.display_order') }}</label>

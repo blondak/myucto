@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
-import EmptyState from '@/components/ui/EmptyState.vue'
 
 const props = defineProps<{ entityType: EntityType; entityId: number }>()
 
@@ -113,9 +112,11 @@ onMounted(load)
       </ul>
     </div>
 
+    <!-- Bez prázdného stavu: připojený dokument je výjimka, ne pravidlo, takže
+         by hlášení „nic tu není" bylo na většině dokladů největší prvek panelu.
+         Tlačítko „Připojit dokument" v hlavičce říká všechno potřebné. -->
     <div v-if="loading" class="text-sm text-neutral-400">…</div>
-    <EmptyState v-else-if="docs.length === 0" dense accent="neutral" icon="link" :title="t('documents.panel_empty')" />
-    <ul v-else class="space-y-1">
+    <ul v-else-if="docs.length > 0" class="space-y-1">
       <li
         v-for="d in docs"
         :key="d.id"

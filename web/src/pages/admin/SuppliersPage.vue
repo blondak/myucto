@@ -7,7 +7,7 @@ import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -233,15 +233,22 @@ function switchSupplier(id: number) {
                 </td>
                 <td class="px-3 py-2 text-right font-mono">{{ s.clients_count }}</td>
                 <td class="px-3 py-2 text-right font-mono">{{ s.invoices_count }}</td>
-                <td class="px-3 py-2 text-right text-xs">
-                  <button v-if="s.id !== supplierStore.currentSupplierId" @click="switchSupplier(s.id)"
-                    class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">
-                    {{ t('supplier.switch') }}
-                  </button>
-                  <button @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || suppliers.length <= 1"
-                    class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed">
-                    {{ t('common.delete') }}
-                  </button>
+                <!-- Tlačítka, ne holé odkazy: obojí tu MĚNÍ stav (přepnutí firmy,
+                     smazání), takže mají vypadat jako akce — a `whitespace-nowrap`
+                     drží dvojici na jednom řádku. -->
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <div class="flex items-center justify-end gap-1.5">
+                    <button v-if="s.id !== supplierStore.currentSupplierId" @click="switchSupplier(s.id)"
+                      :class="btnOutlineSm('primary')">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+                      {{ t('supplier.switch') }}
+                    </button>
+                    <button @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || suppliers.length <= 1"
+                      :class="btnOutlineSm('danger')">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                      {{ t('common.delete') }}
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
