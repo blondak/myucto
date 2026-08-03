@@ -61,6 +61,8 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/bank-match-suggestions/7/accept', 'bank.match', AccessLevel::WRITE],
             ['POST', '/api/bank-match-suggestions/7/reject', 'bank.match', AccessLevel::WRITE],
             ['GET', '/api/payroll/capabilities', 'payroll', AccessLevel::READ],
+            ['GET', '/api/payroll/people', 'payroll', AccessLevel::READ],
+            ['GET', '/api/payroll/people/42', 'payroll', AccessLevel::READ],
             ['GET', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::READ],
             ['PUT', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::WRITE],
         ];

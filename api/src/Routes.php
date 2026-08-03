@@ -64,6 +64,7 @@ use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
+use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
 use MyInvoice\Action\Settings\SupplierInvoiceCounterAction;
@@ -575,6 +576,8 @@ final class Routes
         // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
         $app->group('/api/payroll', function ($g) {
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
+            $g->get('/people', [PayrollPeopleAction::class, 'list']);
+            $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
         });

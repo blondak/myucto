@@ -114,6 +114,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-ai-suggestion-availability$#', 'accounting', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/unpost$#', 'bank.unpost', AccessLevel::WRITE],
 
+        ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/capabilities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
