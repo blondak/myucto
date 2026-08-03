@@ -635,7 +635,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
               <tr class="cursor-pointer" :class="[
                     e.reversed_by ? 'opacity-60' : '',
                     expandedId === e.id
-                      ? 'bg-primary-50/60 border-l-2 border-primary-500'
+                      ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : 'hover:bg-neutral-50',
                   ]" @click="toggleExpand(e)">
                 <td class="px-3 py-2 text-neutral-400">
@@ -696,7 +696,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
               <!-- Detail (rozbalený) -->
               <tr v-if="expandedId === e.id">
                 <td :colspan="visibleColCount"
-                  class="px-3 py-3 bg-primary-50/60 border-l-2 border-primary-500">
+                  class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
                   <div v-if="detailLoading" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
                   <div v-else-if="detail">
                     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
