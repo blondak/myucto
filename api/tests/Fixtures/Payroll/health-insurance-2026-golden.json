@@ -1,0 +1,31 @@
+{
+  "ordinary_minimum": {
+    "assessment_base_minor_units": 1000000,
+    "effective_minimum_minor_units": 2240000,
+    "employee_contribution_minor_units": 212400,
+    "employer_contribution_minor_units": 90000,
+    "total_contribution_minor_units": 302400
+  },
+  "proportional_start": {
+    "assessment_base_minor_units": 500000,
+    "employment_calendar_days": 16,
+    "effective_minimum_minor_units": 1156130,
+    "employee_contribution_minor_units": 111100,
+    "employer_contribution_minor_units": 45000,
+    "total_contribution_minor_units": 156100
+  },
+  "separate_agreement_groups": {
+    "assessment_base_minor_units": 1200000,
+    "employee_contribution_minor_units": 54000,
+    "employer_contribution_minor_units": 108000,
+    "total_contribution_minor_units": 162000
+  },
+  "multiple_employers": {
+    "assessment_base_minor_units": 500000,
+    "other_employer_assessment_base_minor_units": 1000000,
+    "combined_assessment_base_minor_units": 1500000,
+    "employee_contribution_minor_units": 122400,
+    "employer_contribution_minor_units": 45000,
+    "total_contribution_minor_units": 167400
+  }
+}
