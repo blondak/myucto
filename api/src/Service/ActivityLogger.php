@@ -24,6 +24,11 @@ class ActivityLogger
         'flow_token', 'step_up_token', 'challenge', 'credential', 'rawid',
         'raw_id', 'signature', 'authenticator_data', 'client_data_json',
         'attestation_object', 'public_key',
+        'birth_number', 'personal_identifier', 'national_id', 'foreign_tax_identifier',
+        'bank_account', 'account_number', 'iban', 'diagnosis', 'medical_code',
+        'enforcement_case_number', 'insolvency_case_number', 'ciphertext',
+        'personal_identifier_ciphertext', 'foreign_tax_id_ciphertext',
+        'bank_account_ciphertext', 'monthly_gross', 'gross_minor', 'net_minor',
     ];
 
     public function __construct(

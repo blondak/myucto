@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/REGZELDOPL/2025" targetNamespace="http://schemas.cssz.cz/REGZELDOPL/2025"
+  xmlns:t="http://schemas.cssz.cz/baseTypes/v2" xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.2">
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd"/>
+  <xs:element name="REGZELDOPL" type="regzeldoplType"/>
+  <xs:complexType name="regzeldoplType">
+    <xs:sequence>
+      <xs:element name="VENDOR" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string"/>
+          <xs:attribute name="productVersion" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SENDER" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string"/>
+          <xs:attribute name="ISDSreport" type="xs:string"/>
+          <xs:attribute name="VerzeProtokolu" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="formular">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="hlavicka" type="hlavickaType"/>
+            <xs:element name="zamestnavatel" type="zamestnavatelType"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="version" type="xs:string"/>
+    <xs:attribute name="partialAccept" type="xs:string"/>
+  </xs:complexType>
+  <xs:complexType name="hlavickaType">
+    <xs:sequence>
+      <xs:element name="kodPracovisteCSSZ">
+        <xs:annotation>
+          <xs:documentation>Místně příslušná OSSZ/PSSZ/MSSZ Brno</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:integer">
+            <xs:minInclusive value="100"/>
+            <xs:maxInclusive value="999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="kodFU">
+        <xs:annotation>
+          <xs:documentation>Finančnímu úřadu / Specializovanému finančnímu úřadu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:integer">
+            <xs:minInclusive value="2000"/>
+            <xs:maxInclusive value="7000"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="kodPracovisteFU" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Územní pracoviště Finančního úřadu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:integer">
+            <xs:minInclusive value="2000"/>
+            <xs:maxInclusive value="7000"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="zamestnavatelType">
+    <xs:sequence>
+      <xs:element name="vs">
+        <xs:annotation>
+          <xs:documentation>Variabilní symbol zaměstnavatele</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="t:simpleNNType">
+            <xs:length value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="vcp" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Vlastní číslo plátce</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="t:simpleNType">
+            <xs:minInclusive value="100000000"/>
+            <xs:maxInclusive value="999999999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="datovaSchranka" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>ID datové schránky pro notifikace</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="t:simpleA_NType">
+            <xs:length value="7"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="doplnInformace">
+        <xs:annotation>
+          <xs:documentation>Doplňující informace</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="socialniPodnik" type="xs:boolean">
+              <xs:annotation>
+                <xs:documentation>Integrační sociální  podnik</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="agenturaPrace" type="xs:boolean">
+              <xs:annotation>
+                <xs:documentation>Agentura práce</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="chranenyTrh" type="xs:boolean">
+              <xs:annotation>
+                <xs:documentation>Zaměstnavatel uznaný na chráněném trhu práce podle ustanovení § 78 zákona o zaměstnanosti</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>
+
