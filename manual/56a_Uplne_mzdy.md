@@ -1,4 +1,4 @@
-# 56a. Úplné mzdy — aktivace a zaměstnanci
+# 56a. Úplné mzdy — aktivace, zaměstnavatel a zaměstnanci
 
 **Cesta: `Mzdy`**
 
@@ -7,9 +7,10 @@ o personální profil a více pracovních vztahů. Nevytváří druhý seznam li
 nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
-> V této fázi je v novém modulu dostupná aktivace, přehled podporovaného rozsahu
-> a read-only kontrola zaměstnanců a pracovních vztahů. Výpočet úplné mzdy,
-> výplatní dokumenty a elektronická podání zatím nejsou určeny k ostrému použití.
+> V této fázi je v novém modulu dostupná aktivace, nastavení zaměstnavatele
+> a mzdových účtáren, přehled podporovaného rozsahu a read-only kontrola
+> zaměstnanců a pracovních vztahů. Výpočet úplné mzdy, uživatelské výplatní
+> dokumenty a elektronická podání zatím nejsou určeny k ostrému použití.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](56_Mzdy.md).
 
 ## 56a.1 Zapnutí pro firmu
@@ -38,7 +39,22 @@ Přehled mezd ukazuje podporované roky a schopnosti modulu. Stav má tento výz
 Označení na přehledu je bezpečnostní hranice. Modul nesmí chybějící pravidlo
 nahradit nejbližším rokem nebo odhadem.
 
-## 56a.3 Společný seznam zaměstnanců
+## 56a.3 Nastavení zaměstnavatele
+
+V **Mzdy → Nastavení zaměstnavatele** se evidují registrační a kontaktní údaje
+pro mzdovou agendu. Firma může mít více mzdových účtáren, ale právě jedna
+aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní kód,
+název, kontakty a volitelné registrační údaje.
+
+Na stejné stránce se nastavují výchozí účty automatického zaúčtování. Samostatně
+se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odměna za
+výkon funkce člena orgánu. Dále se vybírají účty pojistného, daně a ostatních
+srážek. Nabídka obsahuje jen aktivní účty vhodného typu z účtového rozvrhu firmy.
+
+Změny se ukládají s kontrolou souběžné editace. Pokud mezitím nastavení změnil
+jiný uživatel, aplikace načte aktuální data a vyžádá nové potvrzení změn.
+
+## 56a.4 Společný seznam zaměstnanců
 
 V **Mzdy → Zaměstnanci** se zobrazují stejné karty jako ve spodní části Mzdové
 rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto týká
@@ -54,7 +70,7 @@ Seznam ukazuje:
 Tlačítkem **Zobrazit vztahy** rozbalíš detail. Na telefonu se seznam automaticky
 mění z tabulky na karty.
 
-## 56a.4 Pracovní vztah a předkontace
+## 56a.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
 pro výpočet, podání i účetnictví:
@@ -75,18 +91,18 @@ ostrým použitím úplných mezd zkontroluj, zda právní titul odpovídá skut
 zejména starší karta „jednatel-společník“ sama nerozliší smlouvu o výkonu funkce
 od ostatní závislé činnosti.
 
-## 56a.5 Oprávnění a citlivé údaje
+## 56a.6 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
-vyžaduje `payroll.settings`. API nového modulu je dostupné jen z přihlášené
-webové relace, ne přes běžný bearer token.
+a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
+jen z přihlášené webové relace, ne přes běžný bearer token.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.6 Vztah k Mzdové rekapitulaci
+## 56a.7 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční
