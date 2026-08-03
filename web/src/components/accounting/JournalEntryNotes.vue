@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { accountingApi, type JournalNote } from '@/api/accounting'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
-import EmptyState from '@/components/ui/EmptyState.vue'
 
 /**
  * Poznámky k účetnímu zápisu (1:N).
  *
- * Načítá se LAZY až po rozbalení sekce (vzor JournalEntryHistory) — rozbalení
- * řádku deníku už dělá tři requesty, čtvrtý blokující by ho zbytečně zpomalil.
+ * Načte se hned po rozbalení řádku, ale NEBLOKUJÍCÍ a bez spinneru — sekce se
+ * sama otevře, jen když nějaká poznámka existuje. Původní čistě líné načítání
+ * (vzor JournalEntryHistory) šetřilo čtvrtý request, ale schovávalo existující
+ * poznámky za klik: uživatel je nemohl objevit, aniž by na sekci zkusil sáhnout,
+ * a u zápisu bez poznámek to bylo zbytečné klikání naprázdno.
  *
  * Na rozdíl od `description` (§35) jdou poznámky psát u KAŽDÉHO zápisu včetně
  * těch generovaných ze zdrojového dokladu, kde je popis read-only — v tom je
@@ -42,6 +44,15 @@ async function toggle() {
   open.value = !open.value
   if (open.value && !loaded.value) await reload(true)
 }
+
+/**
+ * Tiché prohlédnutí při mountu. Bez spinneru a bez otevření — sekce se rozbalí
+ * jen tehdy, když je co ukázat; jinak zůstane sbalená a uživatele nic neruší.
+ */
+onMounted(async () => {
+  await reload()
+  if (notes.value.length > 0) open.value = true
+})
 
 async function reload(withSpinner = false) {
   if (withSpinner) loading.value = true
@@ -152,9 +163,10 @@ function metaLine(n: JournalNote): string {
       <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 
       <template v-else>
-        <EmptyState v-if="!notes.length" dense accent="neutral" icon="doc" :title="t('accounting.journal.notes.empty')" />
-
-        <ul v-else class="space-y-2">
+        <!-- Bez prázdného stavu: pole pro novou poznámku je hned pod seznamem,
+             takže „zatím žádné poznámky" jen odsouvalo to jediné, co tu jde
+             udělat. Poznámka je u zápisu výjimka, ne pravidlo. -->
+        <ul v-if="notes.length" class="space-y-2">
           <li v-for="n in notes" :key="n.id"
             class="group rounded-md border border-neutral-200 px-3 py-2"
             :class="n.pinned ? 'bg-warning-50 border-warning-200' : 'bg-surface'">
@@ -198,19 +210,23 @@ function metaLine(n: JournalNote): string {
           </li>
         </ul>
 
-        <div v-if="canWrite" class="mt-3">
-          <textarea v-model="draft" rows="2" :maxlength="MAX_LENGTH"
+        <!-- Pole, tlačítko i přepínač na jednom řádku: poznámka bývá jedna věta,
+             takže dvouřádkový textarea přes celou šířku a akce až pod ním zabraly
+             tři pásy výšky na jeden krátký vstup. `items-start` drží tlačítko
+             zarovnané s prvním řádkem, když textarea povyroste. -->
+        <div v-if="canWrite" class="mt-3 flex items-start gap-2">
+          <textarea v-model="draft" rows="1" :maxlength="MAX_LENGTH"
             :placeholder="t('accounting.journal.notes.placeholder')"
-            class="w-full rounded-md border border-neutral-300 px-2 py-1 text-sm"></textarea>
-          <div class="mt-2 flex items-center gap-3">
-            <button type="button" :class="btnFilled('primary')" :disabled="saving || !draft.trim()" @click="addNote">
-              {{ saving ? '…' : t('accounting.journal.notes.add') }}
-            </button>
-            <label class="inline-flex cursor-pointer items-center gap-1.5 text-xs text-neutral-500">
-              <input v-model="draftPinned" type="checkbox" class="rounded border-neutral-300" />
-              {{ t('accounting.journal.notes.pin') }}
-            </label>
-          </div>
+            class="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm"></textarea>
+          <!-- Přepínač před tlačítkem: rozhoduje o TOM, co tlačítko udělá, takže
+               patří do cesty k němu, ne za něj. Tlačítko končí úplně vpravo. -->
+          <label class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 text-xs text-neutral-500 whitespace-nowrap">
+            <input v-model="draftPinned" type="checkbox" class="rounded border-neutral-300" />
+            {{ t('accounting.journal.notes.pin') }}
+          </label>
+          <button type="button" :class="btnFilled('primary')" :disabled="saving || !draft.trim()" @click="addNote">
+            {{ saving ? '…' : t('accounting.journal.notes.add') }}
+          </button>
         </div>
       </template>
     </div>

@@ -656,11 +656,15 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                       Účetní tak vidí doklad bez ztráty pozice v deníku; odkaz na
                       plný detail je uvnitř draweru. @click.stop, ať se nepřepne akordeon.
                     -->
+                    <!-- Ikona oka, ne „otevřít v novém": tlačítko dělá totéž co
+                         „Náhled" v panelu Souvisí — otevře náhledový drawer, ne
+                         navigaci pryč. Stejná akce má vypadat stejně. -->
                     <button v-if="sourceLink(e)" type="button" @click.stop="openSourceDrawer(e)"
                       :class="btnOutlineSm('primary')"
                       :title="t('accounting.journal.source_drawer.open')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
                       {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
                     </button>

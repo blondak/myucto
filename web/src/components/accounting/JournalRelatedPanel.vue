@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
@@ -140,7 +141,7 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
           </span>
           <template v-else>
             <button v-if="showPreview" type="button" @click="emit('preview', it.entry_id!)"
-                    class="cursor-pointer inline-flex items-center gap-1 rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50 whitespace-nowrap">
+                    :class="btnOutlineSm('primary')">
               <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round"
                       d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
@@ -148,7 +149,7 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
               {{ t('accounting.journal.related.preview') }}
             </button>
             <RouterLink :to="entryRoute(it.entry_id!)" @click="onEntryClick($event, it.entry_id!)"
-                        class="inline-flex items-center gap-1 rounded border border-primary-500/40 px-2 py-1 text-xs text-primary-700 hover:bg-primary-50 whitespace-nowrap">
+                        :class="btnOutlineSm('neutral')">
               <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round"
                       d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.247m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.247" />
@@ -158,7 +159,7 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
           </template>
           <RouterLink v-if="canOpenDocument(it)"
                       :to="{ name: it.route!.name, params: it.route!.params, query: it.route!.query }"
-                      class="inline-flex items-center gap-1 rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50 whitespace-nowrap">
+                      :class="btnOutlineSm('neutral')">
             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round"
                     d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14" />

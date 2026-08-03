@@ -160,6 +160,30 @@ async function saveAttDescription(a: JournalAttachment) {
   }
 }
 
+/**
+ * Náhled dává smysl jen u toho, co prohlížeč sám vykreslí. `mime_type` je
+ * u starších příloh null, tak se dopadá na příponu — bez toho by účtenka
+ * nahraná dřív zůstala bez miniatury.
+ */
+function extOf(a: JournalAttachment): string {
+  return (a.original_name || a.filename).split('.').pop()?.toLowerCase() ?? ''
+}
+function isImage(a: JournalAttachment): boolean {
+  return (a.mime_type ?? '').startsWith('image/')
+    || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(extOf(a))
+}
+function isPdf(a: JournalAttachment): boolean {
+  return (a.mime_type ?? '') === 'application/pdf' || extOf(a) === 'pdf'
+}
+function previewable(a: JournalAttachment): boolean {
+  return isImage(a) || isPdf(a)
+}
+
+/** Náhled otevírá nová karta — vlastní lightbox by k tomuhle nic nepřidal. */
+function openPreview(a: JournalAttachment): void {
+  window.open(accountingApi.journalAttachmentDownloadUrl(props.entry.id, a.id), '_blank', 'noopener')
+}
+
 function fmtBytes(n: number | null): string {
   if (!n) return ''
   if (n < 1024) return `${n} B`
@@ -247,7 +271,16 @@ onMounted(loadAttachments)
       <div v-if="loadingAtt" class="text-xs text-neutral-400 py-2">{{ t('common.loading') }}</div>
       <ul v-else-if="attachments.length > 0" class="space-y-1">
         <li v-for="a in attachments" :key="a.id" class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-neutral-100 group">
-          <svg class="w-4 h-4 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+          <!-- U obrázku miniatura místo obecné ikony dokumentu: účetní pozná
+               účtenku od faktury na první pohled, aniž by cokoli otvíral.
+               U PDF miniatura není, tam alespoň odliší ikona. -->
+          <button v-if="previewable(a)" type="button" class="shrink-0 cursor-pointer"
+            :title="t('accounting.journal.att_preview')" @click="openPreview(a)">
+            <img v-if="isImage(a)" :src="accountingApi.journalAttachmentDownloadUrl(entry.id, a.id)" alt=""
+              class="w-9 h-9 rounded border border-neutral-200 bg-surface object-cover" />
+            <span v-else class="w-9 h-9 rounded border border-neutral-200 bg-danger-50 text-danger-600 text-[10px] font-semibold inline-flex items-center justify-center">PDF</span>
+          </button>
+          <svg v-else class="w-4 h-4 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           <div class="min-w-0 flex-1">
             <div class="text-sm text-neutral-700 truncate">{{ a.original_name || a.filename }}</div>
             <template v-if="editingAttId === a.id">

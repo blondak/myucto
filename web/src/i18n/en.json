@@ -1729,7 +1729,8 @@
         "unknown_user": "unknown user",
         "created": "Entry created.",
         "no_changes": "The entry has not been modified since it was created."
-      }
+      },
+      "att_preview": "Open preview"
     },
     "manual": {
       "title": "Manual journal entry",

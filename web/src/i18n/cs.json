@@ -1729,7 +1729,8 @@
         "unknown_user": "neznámý uživatel",
         "created": "Vznik zápisu.",
         "no_changes": "Zápis nebyl od vzniku upraven."
-      }
+      },
+      "att_preview": "Otevřít náhled"
     },
     "manual": {
       "title": "Ruční účetní zápis",
