@@ -31,6 +31,11 @@ const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 const wrHasDates = computed(() => !!data.value?.work_report.items.some(i => !!i.work_date))
 const lang = computed(() => data.value?.invoice.language || decided.value?.invoice.language || 'cs')
 
+const EMPTY_BRANDING = { display_name: null, accent_color: null, logo_url: null }
+const branding = computed(() => data.value?.branding || decided.value?.branding || EMPTY_BRANDING)
+/** Iniciála dodavatele místo našeho „M", dokud logo chybí. */
+const brandInitial = computed(() => branding.value.display_name?.trim().charAt(0).toUpperCase() || 'M')
+
 function fmtMoney(n: number, currency: string): string {
   const decimals = currency === 'JPY' ? 0 : 2
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
@@ -134,12 +139,21 @@ async function submit(decision: 'approve' | 'reject') {
 
 <template>
   <div class="min-h-screen bg-neutral-50 flex flex-col">
-    <!-- Hlavička -->
+    <!-- Hlavička. Schvalovatel je zákazník dodavatele, ne náš — v e-mailu viděl
+         logo dodavatele a stránka na to musí navazovat, jinak odkaz působí
+         podvrženě. Na MyÚčto.cz spadne jen dodavatel bez zapnutého brandingu. -->
     <header class="bg-surface border-b border-neutral-200 px-4 py-3">
       <div class="max-w-2xl mx-auto flex items-center gap-3">
-        <div class="w-8 h-8 bg-primary-600 rounded-md flex items-center justify-center text-white font-bold">M</div>
-        <div class="text-sm">
-          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+        <img v-if="branding.logo_url" :src="branding.logo_url" alt=""
+          class="h-8 max-w-[10rem] object-contain object-left" />
+        <div v-else class="w-8 h-8 rounded-md flex items-center justify-center text-white font-bold shrink-0"
+          :style="branding.accent_color ? { backgroundColor: branding.accent_color } : undefined"
+          :class="branding.accent_color ? '' : 'bg-primary-600'">
+          {{ brandInitial }}
+        </div>
+        <div class="text-sm min-w-0">
+          <div v-if="branding.display_name" class="font-semibold truncate">{{ branding.display_name }}</div>
+          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ tt('Schválení výkazu práce', 'Work report approval') }}</div>
         </div>
       </div>
@@ -384,8 +398,12 @@ async function submit(decision: 'approve' | 'reject') {
       </div>
     </main>
 
+    <!-- V patičce zůstáváme podepsaní i pod cizím brandingem — schvalovatel má
+         vědět, čí systém mu odkaz poslal, a je to i signál, že jde o skutečnou
+         službu, ne o podvodný odkaz. -->
     <footer class="border-t border-neutral-200 bg-surface px-4 py-3 text-center text-xs text-neutral-500">
-      MyÚčto.cz · {{ tt('Automatizovaný systém schvalování', 'Automated approval system') }}
+      <template v-if="branding.display_name">{{ branding.display_name }} · </template>
+      {{ tt('Automatizovaný systém schvalování', 'Automated approval system') }} MyÚčto.cz
     </footer>
   </div>
 </template>

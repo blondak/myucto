@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
+use MyInvoice\Service\Mail\SafeLogoPath;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -55,6 +56,7 @@ final class PublicApprovalGetAction
                 return Json::ok($response, [
                     'state'            => $status,
                     'supplier_name'    => $this->resolveSupplierName($decided),
+                    'branding'         => $this->branding($decided, $token),
                     'invoice'          => [
                         'varsymbol' => $decided['varsymbol'],
                         'language'  => $decided['language'],
@@ -99,9 +101,51 @@ final class PublicApprovalGetAction
             'invoice'          => $publicInvoice,
             'work_report'      => $workReport,
             'supplier_name'    => $supplierName,
+            'branding'         => $this->branding($invoice, $token),
             'captcha_site_key' => (string) $this->config->get('captcha.site_key', ''),
             'captcha_provider' => (string) $this->config->get('captcha.provider', 'none'),
         ]);
+    }
+
+    /**
+     * Branding pro hlavičku stránky. Schvalovatel je zákazník dodavatele, ne náš —
+     * viděl v e-mailu logo dodavatele a stránka, kam ho odkaz pustí, mu musí
+     * odpovídat; hlavička „MyÚčto.cz — Fakturační systém" působí jako podvržený
+     * odkaz. Stejný přepínač jako u e-mailu: `email_branding_enabled`.
+     *
+     * Logo se nevrací jako cesta, ale jako URL vázaná na TOKEN — cesta v úložišti
+     * by prozradila strukturu a šla by zkoušet pro cizí firmy.
+     *
+     * @return array{display_name: ?string, accent_color: ?string, logo_url: ?string}
+     */
+    private function branding(array $invoice, string $token): array
+    {
+        $supplierId = (int) ($invoice['supplier_id'] ?? 0);
+        if ($supplierId <= 0) {
+            return ['display_name' => null, 'accent_color' => null, 'logo_url' => null];
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(display_name, company_name) AS name, tagline,
+                    email_branding_enabled, email_accent_color, logo_path
+               FROM supplier WHERE id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false || empty($row['email_branding_enabled'])) {
+            return ['display_name' => null, 'accent_color' => null, 'logo_url' => null];
+        }
+
+        $hasLogo = SafeLogoPath::resolve(
+            $row['logo_path'] !== null ? (string) $row['logo_path'] : null,
+            $supplierId,
+        ) !== null;
+
+        return [
+            'display_name' => $row['name'] !== null ? (string) $row['name'] : null,
+            'accent_color' => $row['email_accent_color'] !== null ? (string) $row['email_accent_color'] : null,
+            'logo_url'     => $hasLogo ? '/api/public/approval/' . $token . '/logo' : null,
+        ];
     }
 
     /** Jen omezený set polí — public endpoint, žádné citlivé údaje. */

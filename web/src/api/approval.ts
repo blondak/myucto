@@ -64,9 +64,21 @@ export interface PublicApprovalInvoice {
   requested_at: string | null
 }
 
+/**
+ * Branding dodavatele pro hlavičku veřejné stránky. Prázdný (samá null), když
+ * dodavatel branding nemá zapnutý — pak se ukáže neutrální hlavička MyÚčto.cz.
+ */
+export interface PublicApprovalBranding {
+  display_name: string | null
+  accent_color: string | null
+  /** URL vázaná na token, ne cesta v úložišti. */
+  logo_url: string | null
+}
+
 export interface PublicApprovalData {
   /** `requested` = ke schválení; jinak už rozhodnuto a stránka jen shrne výsledek. */
   state: 'requested' | 'approved' | 'rejected'
+  branding: PublicApprovalBranding
   invoice: PublicApprovalInvoice
   work_report: PublicApprovalWorkReport
   supplier_name: string
@@ -82,6 +94,7 @@ export interface PublicApprovalData {
 export interface PublicApprovalDecided {
   state: 'approved' | 'rejected'
   supplier_name: string
+  branding: PublicApprovalBranding
   invoice: Pick<PublicApprovalInvoice, 'varsymbol' | 'language'>
   decided_at: string | null
   rejection_reason: string | null

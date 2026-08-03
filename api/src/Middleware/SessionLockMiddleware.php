@@ -54,6 +54,7 @@ final class SessionLockMiddleware implements MiddlewareInterface
     private const PUBLIC_PATH_PATTERNS = [
         'GET' => [
             '#^/api/public/approval/[a-f0-9]{32,128}$#D',
+            '#^/api/public/approval/[a-f0-9]{32,128}/logo$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}/pdf$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}/attachment/[0-9]+$#D',

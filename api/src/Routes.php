@@ -22,6 +22,7 @@ use MyInvoice\Action\Admin\BankRuleTemplateAdminAction;
 use MyInvoice\Action\Admin\EmailTemplateAction;
 use MyInvoice\Action\Approval\PublicApprovalDecideAction;
 use MyInvoice\Action\Approval\PublicApprovalGetAction;
+use MyInvoice\Action\Approval\PublicApprovalLogoAction;
 use MyInvoice\Action\Approval\RequestApprovalAction;
 use MyInvoice\Action\Approval\RequestApprovalTestAction;
 use MyInvoice\Action\Approval\UpdateApprovalStatusAction;
@@ -556,6 +557,7 @@ final class Routes
 
         // Public schvalovací endpointy (bez auth, jen token)
         $app->get    ('/api/public/approval/{token:[a-f0-9]{32,128}}',          PublicApprovalGetAction::class);
+        $app->get    ('/api/public/approval/{token:[a-f0-9]{32,128}}/logo',     PublicApprovalLogoAction::class);
         $app->post   ('/api/public/approval/{token:[a-f0-9]{32,128}}/decide',   PublicApprovalDecideAction::class);
 
         // Web faktura — veřejný náhled + PDF + přílohy (bez auth, jen token)
