@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollInputApprovalException;
 use MyInvoice\Repository\Payroll\PayrollInputConflictException;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -148,10 +149,10 @@ final class PayrollInputsAction
                 $version,
                 $this->userId($request),
             );
-        } catch (\DomainException $e) {
+        } catch (PayrollInputApprovalException $e) {
             return Json::error(
                 $response,
-                'input_requires_manual_review',
+                $e->errorCode,
                 $e->getMessage(),
                 409,
             );

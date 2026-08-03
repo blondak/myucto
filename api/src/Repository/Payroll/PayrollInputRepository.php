@@ -89,7 +89,7 @@ final class PayrollInputRepository
      */
     public function create(int $supplierId, array $data, ?int $userId): array
     {
-        $this->assertReferences($supplierId, $data);
+        $this->assertValidReferences($supplierId, $data);
         try {
             $stmt = $this->db->pdo()->prepare(
                 'INSERT INTO payroll_inputs
@@ -135,7 +135,7 @@ final class PayrollInputRepository
         array $data,
         int $expectedVersion,
     ): ?array {
-        $this->assertReferences($supplierId, $data);
+        $this->assertValidReferences($supplierId, $data);
         $current = $this->find($supplierId, $id);
         if ($current === null) {
             return null;
@@ -263,13 +263,23 @@ final class PayrollInputRepository
                 $row['input_status'] ?? null,
                 'input_status',
             ) !== 'draft') {
-                throw new \DomainException('Schválit lze jen rozpracovaný mzdový vstup.');
+                throw new PayrollInputApprovalException(
+                    'input_state_conflict',
+                    'Schválit lze jen rozpracovaný mzdový vstup.',
+                );
             }
 
             $definition = $this->definitionFactory->fromArray($row);
-            $definition->impact(new \MyInvoice\Service\Payroll\Calculation\Money(
-                PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
-            ));
+            try {
+                $definition->impact(new \MyInvoice\Service\Payroll\Calculation\Money(
+                    PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
+                ));
+            } catch (\DomainException $e) {
+                throw new PayrollInputApprovalException(
+                    'input_requires_manual_review',
+                    $e->getMessage(),
+                );
+            }
             if ($definition->annualLimitMinor !== null) {
                 $this->lockEmployee(
                     $pdo,
@@ -295,8 +305,9 @@ final class PayrollInputRepository
                 )
                     > $definition->annualLimitMinor
                 ) {
-                    throw new \DomainException(
-                        'Schválením by byl překročen roční limit benefitu.'
+                    throw new PayrollInputApprovalException(
+                        'benefit_limit_exceeded',
+                        'Schválením by byl překročen roční limit benefitu.',
                     );
                 }
             }
@@ -396,7 +407,7 @@ final class PayrollInputRepository
     }
 
     /** @param array<string,mixed> $data */
-    private function assertReferences(int $supplierId, array $data): void
+    public function assertValidReferences(int $supplierId, array $data): void
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT 1

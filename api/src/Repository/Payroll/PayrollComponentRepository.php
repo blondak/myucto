@@ -132,9 +132,7 @@ final class PayrollComponentRepository
                 $pdo->commit();
             }
         } catch (PDOException $e) {
-            if ($ownsTransaction && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            $this->rollbackOwned($pdo, $ownsTransaction);
             if ((string) $e->getCode() === '23000') {
                 throw new \InvalidArgumentException(
                     'Tato verze mzdové složky už existuje nebo překrývá jinou platnost.',
@@ -143,9 +141,7 @@ final class PayrollComponentRepository
             }
             throw $e;
         } catch (\Throwable $e) {
-            if ($ownsTransaction && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            $this->rollbackOwned($pdo, $ownsTransaction);
             throw $e;
         }
 
@@ -325,6 +321,13 @@ final class PayrollComponentRepository
             throw new \DomainException(
                 'Použitou mzdovou složku nelze měnit; založte novou účinnou verzi.'
             );
+        }
+    }
+
+    private function rollbackOwned(PDO $pdo, bool $ownsTransaction): void
+    {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
         }
     }
 

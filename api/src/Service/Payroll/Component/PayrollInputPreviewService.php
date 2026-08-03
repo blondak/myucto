@@ -20,6 +20,7 @@ final class PayrollInputPreviewService
     /**
      * @param array{
      *   employee_id:int,
+     *   employment_id:int,
      *   component_id:int,
      *   period_start:string,
      *   amount_minor:int
@@ -28,6 +29,7 @@ final class PayrollInputPreviewService
      */
     public function preview(int $supplierId, array $input): array
     {
+        $this->inputs->assertValidReferences($supplierId, $input);
         $component = $this->components->find(
             $supplierId,
             $input['component_id'],
