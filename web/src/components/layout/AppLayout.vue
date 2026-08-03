@@ -1511,12 +1511,9 @@ onBeforeUnmount(() => {
               class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
             >{{ t('nav.logout') }}</button>
           </div>
-          <RouterLink
-            v-if="!auth.isDemo"
-            to="/profile/password?tab=shortcuts"
-            class="block text-center text-xs text-neutral-500 hover:text-primary-700 hover:underline"
-            @click="mobileOpen = false"
-          >{{ t('keyboard_shortcuts.title') }}</RouterLink>
+          <!-- Klávesové zkratky tu byly, ale na dotykovém zařízení je není čím
+               vyvolat — odkaz jen zabíral místo na dně zásuvky. Na desktopu
+               zůstávají v uživatelském menu. -->
         </div>
       </aside>
 
