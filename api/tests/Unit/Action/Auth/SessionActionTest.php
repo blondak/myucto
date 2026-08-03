@@ -65,7 +65,18 @@ final class SessionActionTest extends TestCase
             ->createServerRequest('GET', '/api/auth/session/status')
             ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(AuthMiddleware::ATTR_TOKEN, str_repeat('a', 64))
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 17, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 17,
+                'role' => 'admin',
+                'role_summary' => [
+                    'id' => 3,
+                    'name' => 'Administrátor',
+                    'type' => 'internal',
+                    'is_active' => true,
+                    'system_key' => 'admin',
+                ],
+                'is_superadmin' => false,
+            ])
             ->withAttribute(AuthMiddleware::ATTR_SESSION, [
                 'csrf_token' => str_repeat('b', 64),
                 'assurance_level' => 'strong',
@@ -86,7 +97,16 @@ final class SessionActionTest extends TestCase
                 'id' => 17,
                 'email' => '',
                 'name' => '',
-                'role' => 'admin',
+                // Souhrn role, ne string — klient si tenhle objekt při zamčené
+                // session ukládá jako plnohodnotného uživatele (viz SessionAction).
+                'role' => [
+                    'id' => 3,
+                    'name' => 'Administrátor',
+                    'type' => 'internal',
+                    'is_active' => true,
+                    'system_key' => 'admin',
+                ],
+                'is_superadmin' => false,
                 'locale' => 'cs',
                 'totp_enabled' => false,
             ],

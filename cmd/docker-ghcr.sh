@@ -109,6 +109,7 @@ if [[ ! -f cfg.docker.php ]]; then
       -e "s|'url'    => 'https://dev.example.com',|'url'    => '${APP_URL}',|" \
       -e "s|'cookie_name'   => '__Host-myinvoice_session',|'cookie_name'   => 'myinvoice_session',|" \
       -e "s|'cookie_secure' => true,|'cookie_secure' => false,|" \
+      -e "s|'trusted_cookie_name'     => '__Host-myinvoice_td',|'trusted_cookie_name'     => 'myinvoice_td',|" \
       cfg.docker.php
   rm -f cfg.docker.php.bak
   echo "    cfg.docker.php written"

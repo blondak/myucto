@@ -9,11 +9,24 @@
 #      (GHCR pull, dale pouziva `-f docker-compose.production.yml`).
 #   2. Pokud bezi stack z `docker-compose.yml` a je `.git/` + `build:` blok
 #      -> source mode (git pull + local build).
-#   3. Fallback bez bezicího stacku - podle existujicich souboru.
+#   3. Fallback bez beziciho stacku - podle existujicich souboru.
 #
-# Idempotent — safe to re-run. Volumes (DB data) persist; backup is your responsibility.
+# Idempotent - safe to re-run. Volumes (DB data) persist; backup is your responsibility.
 [CmdletBinding()]
 param()
+
+# Skript vyzaduje PowerShell 7 - stejne jako docker-install.ps1 / docker-ghcr.ps1.
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host ""
+    Write-Host "  Tento skript vyzaduje PowerShell 7 nebo novejsi." -ForegroundColor Red
+    Write-Host "  Bezi ve Windows PowerShellu $($PSVersionTable.PSVersion) (powershell.exe)." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Instalace:  winget install --id Microsoft.PowerShell -e"
+    Write-Host "  Pak spust znovu pres 'pwsh' (ne 'powershell'):"
+    Write-Host "      pwsh -File `"$PSCommandPath`"" -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
+}
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -55,7 +68,9 @@ function Set-EnvValue([string]$Key, [string]$Value) {
     $hit = $false
     $out = $lines | ForEach-Object { if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ } }
     if (-not $hit) { $out += "$Key=$Value" }
-    Set-Content .env -Value $out -Encoding UTF8
+    # UTF-8 bez BOM (Set-Content -Encoding UTF8 pise BOM v PS 5.1).
+    $envPath = Join-Path (Get-Location).Path '.env'
+    [System.IO.File]::WriteAllText($envPath, (($out -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
     $script:envVars[$Key] = $Value
 }
 # Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner nebo proces.
@@ -68,7 +83,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         if ($parts[3] -notmatch ":$Port->") { continue }
         $name = $parts[0]; $image = $parts[1]; $proj = $parts[2]
         if (($proj -eq $OurProject) -or ($name -match 'myucto') -or ($image -match 'myucto')) {
-            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) — OK."
+            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) - OK."
             return $false
         }
         Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
@@ -81,7 +96,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
         $pname = if ($proc) { $proc.ProcessName } else { "PID $($conn.OwningProcess)" }
         if ($pname -match 'docker|vpnkit|wslrelay|com\.docker') {
-            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni — stale endpoint. 'up --force-recreate app' ho uvolni."
+            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni - stale endpoint. 'up --force-recreate app' ho uvolni."
             return $false
         }
         Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
@@ -210,22 +225,22 @@ if ($hasOld -and (-not $hasNew)) {
 $ourProject = Get-ComposeProjectName $ProjectRoot
 $appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
 if ($appPort -le 0) { $appPort = 8080 }
-Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort…"
+Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort..."
 if (Test-ForeignPortHolder $appPort $ourProject 'APP_PORT') {
-    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) - uvolni ho nebo zmen APP_PORT v .env a spust znovu."
 }
 
 # Port databaze: kdyz ho behem odstavky sebral cizi kontejner, `up` by spadl na
 # 'port already allocated'. Mapovani je jen loopback konvence pro DB klienta,
-# aplikace uvnitr site sahá na 'db:3306' — port proto radeji posuneme, nez aby
+# aplikace uvnitr site saha na 'db:3306' - port proto radeji posuneme, nez aby
 # update selhal. Zmena jde do .env, takze prezije dalsi spusteni.
 $dbPort = 0; [void][int]::TryParse(("" + $envVars.DB_PORT), [ref]$dbPort)
 if ($dbPort -le 0) { $dbPort = 3307 }
-Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort…"
+Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort..."
 if (Test-ForeignPortHolder $dbPort $ourProject 'DB_PORT') {
     $free = Find-FreePort ($dbPort + 1)
     if ($free -le 0) {
-        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny — uvolni port nebo zmen DB_PORT v .env rucne."
+        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny - uvolni port nebo zmen DB_PORT v .env rucne."
     }
     Write-Host "    Prepinam DB_PORT $dbPort -> $free a zapisuji do .env." -ForegroundColor Yellow
     Set-EnvValue 'DB_PORT' "$free"
@@ -245,7 +260,7 @@ $ready = $false
 for ($i = 1; $i -le 45; $i++) {
     $json = & docker compose @composeArgs ps --format json db 2>$null
     if ($json -match '"Health":"healthy"') { $ready = $true; Write-Host "    DB ready."; break }
-    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' — cekam dal (attempt $i/45)…" }
+    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' - cekam dal (attempt $i/45)..." }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
@@ -259,7 +274,11 @@ Write-Host "==> Restarting app..."
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
 
 # --- 3b. wait for app (+ auto-recovery pri chybejici siti) ---------------
-$curl = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
+# Zamerne bez null-conditional operatoru (`?.`) - ten je az v PS7 a ve Windows
+# PowerShellu 5.1 je to chyba parseru celeho souboru, tzn. skript by se nespustil
+# vubec a kontrola verze vyse by se nikdy nevypsala.
+$curlCmd = Get-Command curl.exe -ErrorAction SilentlyContinue
+$curl = if ($curlCmd) { $curlCmd.Source } else { $null }
 if (-not $curl) { $curl = 'C:\Windows\System32\curl.exe' }
 if (-not (Test-Path $curl)) {
     Write-Error "curl.exe nenalezen (potreba na Win 10/11+). Updatuj OS nebo doinstaluj curl."
@@ -283,7 +302,7 @@ for ($i = 1; $i -le 90; $i++) {
             Start-Sleep -Seconds 3
             continue
         }
-        elseif ($logs -match 'Migration attempt') { Write-Host "    …migrace bezi (attempt $i/90)" }
+        elseif ($logs -match 'Migration attempt') { Write-Host "    ...migrace bezi (attempt $i/90)" }
     }
     Start-Sleep -Seconds 2
 }

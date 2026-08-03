@@ -2,6 +2,7 @@
 import { ref, computed, markRaw, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { clearLoginBounces, loginRedirectLoopDetected } from '@/router'
 
 const { t } = useI18n()
 import AppShell from '@/components/layout/AppShell.vue'
@@ -89,8 +90,20 @@ onMounted(async () => {
   // Stale session detection: pokud uživatel přijde na /login s platnou cookie,
   // hodíme ho rovnou kam patří (`/` nebo `/setup-totp`). Bez toho by submit
   // formuláře probíhal v rozjetém stavu a UX by byl matoucí.
-  const stillAuthed = await auth.refresh()
-  if (stillAuthed) {
+  //
+  // Když nás sem guard v krátkém sledu odrazil několikrát, je server nekonzistentní
+  // (typicky cizí service worker cachující /api/) a další automatický návrat na `/`
+  // by smyčku jen protočil. Zůstaneme na formuláři a řekneme proč — v nainstalované
+  // PWA je to jediná cesta ven, okno tam nemá adresní řádek.
+  if (loginRedirectLoopDetected()) {
+    error.value = t('auth.redirect_loop_detected')
+    return
+  }
+  // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
+  // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
+  // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
+  await auth.refresh()
+  if (auth.isAuthenticated) {
     router.replace((auth.mustSetupMfa || auth.mustSetupTotp) ? '/setup-mfa' : '/')
     return
   }
@@ -142,6 +155,8 @@ async function submit() {
       recoveryCode: recoveryCode.value || undefined,
       rememberDevice: rememberDevice.value,
     })
+    // Ruční přihlášení uspělo — počítadlo odrazů už nemá co hlídat.
+    clearLoginBounces()
     router.push(auth.isClientRole ? '/portal' : '/')
   } catch (e: any) {
     const code = e?.response?.data?.error?.code

@@ -14,6 +14,21 @@
 [CmdletBinding()]
 param([switch]$Build)
 
+# Skript vyzaduje PowerShell 7. Ve Windows PowerShellu 5.1 (povodni powershell.exe,
+# porad vychozi na Win 11) se lisi zapis souboru bez BOM a chybi cast syntaxe, takze
+# by tise vznikla rozbita konfigurace. Radeji skoncime hned a s jasnou hlaskou.
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host ""
+    Write-Host "  Tento skript vyzaduje PowerShell 7 nebo novejsi." -ForegroundColor Red
+    Write-Host "  Bezi ve Windows PowerShellu $($PSVersionTable.PSVersion) (powershell.exe)." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Instalace:  winget install --id Microsoft.PowerShell -e"
+    Write-Host "  Pak spust znovu pres 'pwsh' (ne 'powershell'):"
+    Write-Host "      pwsh -File `"$PSCommandPath`"" -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
 # Invoke-WebRequest / curl.exe na Windows zobrazuje progress bar, ktery v
 # pollovacim loopu dramaticky zpomaluje kazde volani.
@@ -26,7 +41,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 & docker compose version > $null 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "'docker compose' (v2) plugin required — install Docker Desktop"
+    Write-Error "'docker compose' (v2) plugin required - install Docker Desktop"
 }
 
 function New-RandomToken([int]$Bytes = 24) {
@@ -40,6 +55,15 @@ function Get-ComposeProjectName([string]$root) {
     return ((Split-Path -Leaf $root).ToLower() -replace '[^a-z0-9_-]', '')
 }
 
+# Zapise soubor jako UTF-8 BEZ BOM. `Set-Content -Encoding UTF8` pise BOM ve
+# Windows PowerShellu 5.1; BOM pred '<?php' v cfg.docker.php se vypise na vystup
+# jeste pred hlavickami a znemozni odeslani session cookie (= prihlaseni projde,
+# ale aplikace pak uzivatele posila zpatky na /login).
+function Write-Utf8NoBom([string]$Path, [string]$Content) {
+    $full = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path (Get-Location).Path $Path }
+    [System.IO.File]::WriteAllText($full, $Content, (New-Object System.Text.UTF8Encoding $false))
+}
+
 # Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner nebo proces.
 # Vlastni myucto kontejner na tomtez portu je OK (up/force-recreate ho prevezme).
 function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar = 'APP_PORT') {
@@ -50,7 +74,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         if ($parts[3] -notmatch ":$Port->") { continue }
         $name = $parts[0]; $image = $parts[1]; $proj = $parts[2]
         if (($proj -eq $OurProject) -or ($name -match 'myucto') -or ($image -match 'myucto')) {
-            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) — OK."
+            Write-Host "    Port $Port drzi vlastni myucto kontejner '$name' (image $image) - OK."
             return $false
         }
         Write-Warning "Host port $Port uz drzi CIZI Docker kontejner '$name' (image $image, projekt '$proj')."
@@ -64,7 +88,7 @@ function Test-ForeignPortHolder([int]$Port, [string]$OurProject, [string]$EnvVar
         $proc  = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
         $pname = if ($proc) { $proc.ProcessName } else { "PID $($conn.OwningProcess)" }
         if ($pname -match 'docker|vpnkit|wslrelay|com\.docker') {
-            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni — stale endpoint. 'up --force-recreate app' ho uvolni."
+            Write-Host "    Port $Port drzi Docker proxy ($pname), ale zadny bezici kontejner ho nevlastni - stale endpoint. 'up --force-recreate app' ho uvolni."
             return $false
         }
         Write-Warning "Host port $Port uz posloucha proces '$pname' (PID $($conn.OwningProcess)) mimo Docker."
@@ -92,7 +116,7 @@ function Set-EnvValue([string]$Key, [string]$Value) {
     $hit = $false
     $out = $lines | ForEach-Object { if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ } }
     if (-not $hit) { $out += "$Key=$Value" }
-    Set-Content .env -Value $out -Encoding UTF8
+    Write-Utf8NoBom '.env' (($out -join "`n") + "`n")
     $script:envVars[$Key] = $Value
 }
 
@@ -101,17 +125,17 @@ function Get-AppLogTail([string[]]$ComposeArgs = @(), [int]$Lines = 40) {
 }
 
 # Rozpozna TRVALOU sitovou chybu 'app bezi, ale nema compose sit' (DNS 'db' nejde)
-# — odlisi ji od docasneho 'DB jeste nabiha' (to by byl Connection refused).
+# - odlisi ji od docasneho 'DB jeste nabiha' (to by byl Connection refused).
 function Test-AppNetworkBroken([string]$Logs) {
     return [bool]($Logs -match 'getaddrinfo (for )?db failed|getaddrinfo failed|php_network_getaddresses|Temporary failure in name resolution|Name or service not known')
 }
 
 # --- 1. .env --------------------------------------------------------------
 if (-not (Test-Path .env)) {
-    Write-Host "==> Generating .env with random DB passwords…"
+    Write-Host "==> Generating .env with random DB passwords..."
     $rootPass = New-RandomToken 24
     $userPass = New-RandomToken 24
-    @"
+    $envContent = @"
 # MyUcto.cz - Docker compose env (gitignored)
 APP_PORT=8080
 DB_PORT=3307
@@ -119,7 +143,8 @@ DB_NAME=myucto
 DB_USER=myucto
 DB_ROOT_PASSWORD=$rootPass
 DB_PASSWORD=$userPass
-"@ | Set-Content -Encoding UTF8 -NoNewline .env
+"@
+    Write-Utf8NoBom '.env' $envContent
     Write-Host "    .env written (passwords randomised)"
 } else {
     Write-Host "==> .env already exists (skipping)"
@@ -136,7 +161,7 @@ Get-Content .env | ForEach-Object {
 # and the Docker stack without one clobbering the other. compose mounts this
 # file as /var/www/html/cfg.php inside the container.
 if (-not (Test-Path cfg.docker.php)) {
-    Write-Host "==> Generating cfg.docker.php from cfg.sample.php with Docker defaults…"
+    Write-Host "==> Generating cfg.docker.php from cfg.sample.php with Docker defaults..."
     $pepper = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
     $encKey = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
     $cfg = Get-Content cfg.sample.php -Raw
@@ -154,7 +179,10 @@ if (-not (Test-Path cfg.docker.php)) {
     $cfg = $cfg -replace "'url'    => 'https://dev\.example\.com',", "'url'    => '$appUrl',"
     $cfg = $cfg -replace "'cookie_name'   => '__Host-myinvoice_session',", "'cookie_name'   => 'myinvoice_session',"
     $cfg = $cfg -replace "'cookie_secure' => true,", "'cookie_secure' => false,"
-    Set-Content -Encoding UTF8 -NoNewline cfg.docker.php -Value $cfg
+    # Cookie duveryhodneho zarizeni ma stejny __Host- prefix, ktery prohlizec pres
+    # plain HTTP zahodi. Bez tehle nahrady prestane fungovat MFA "zapamatovat si".
+    $cfg = $cfg -replace "'trusted_cookie_name'     => '__Host-myinvoice_td',", "'trusted_cookie_name'     => 'myinvoice_td',"
+    Write-Utf8NoBom 'cfg.docker.php' $cfg
     Write-Host "    cfg.docker.php written"
     Write-Host ""
     Write-Host "    !!  Edit cfg.docker.php to fill in SMTP, Cloudflare Turnstile, IP allowlist  !!" -ForegroundColor Yellow
@@ -186,7 +214,7 @@ Write-Host "==> Rezim instalace: $mode$composeHint"
 Write-Host "    (registry = GHCR pull; prebij pres -Build nebo MYINVOICE_INSTALL_MODE=registry|source)"
 
 if ($mode -eq 'registry') {
-    Write-Host "==> Pulling image from GHCR…"
+    Write-Host "==> Pulling image from GHCR..."
     & docker compose @composeArgs pull app
     if ($LASTEXITCODE -ne 0) {
         if (Test-Path Dockerfile) {
@@ -201,7 +229,7 @@ if ($mode -eq 'registry') {
 if ($mode -eq 'source') {
     & docker image inspect myucto:latest 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "==> Building image…"
+        Write-Host "==> Building image..."
         & docker compose @composeArgs build app
         if ($LASTEXITCODE -ne 0) { Write-Error "docker compose build failed" }
     }
@@ -214,22 +242,22 @@ if ($mode -eq 'source') {
 $ourProject = Get-ComposeProjectName $ProjectRoot
 $appPort = 0; [void][int]::TryParse(("" + $envVars.APP_PORT), [ref]$appPort)
 if ($appPort -le 0) { $appPort = 8080 }
-Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort…"
+Write-Host "==> Pre-flight: kontrola hostoveho portu $appPort..."
 if (Test-ForeignPortHolder $appPort $ourProject 'APP_PORT') {
-    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) — uvolni ho nebo zmen APP_PORT v .env a spust znovu."
+    Write-Error "Host port $appPort je obsazeny cizim procesem/kontejnerem (viz vyse) - uvolni ho nebo zmen APP_PORT v .env a spust znovu."
 }
 
 # Port databaze: mapuje se na loopback jen kvuli klientovi zvenci. Souzeni
 # MyInvoice a MyUcta na jednom stroji je bezny scenar (prevod dat), takze kolize
-# je ocekavatelna a nema kvuli ni instalace padat — port posuneme a zapiseme do
-# .env. Aplikace na nem nezavisi, uvnitr site sahá na 'db:3306'.
+# je ocekavatelna a nema kvuli ni instalace padat - port posuneme a zapiseme do
+# .env. Aplikace na nem nezavisi, uvnitr site saha na 'db:3306'.
 $dbPort = 0; [void][int]::TryParse(("" + $envVars.DB_PORT), [ref]$dbPort)
 if ($dbPort -le 0) { $dbPort = 3307 }
-Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort…"
+Write-Host "==> Pre-flight: kontrola hostoveho portu databaze $dbPort..."
 if (Test-ForeignPortHolder $dbPort $ourProject 'DB_PORT') {
     $free = Find-FreePort ($dbPort + 1)
     if ($free -le 0) {
-        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny — uvolni port nebo zmen DB_PORT v .env rucne."
+        Write-Error "Host port $dbPort je obsazeny a v rozsahu $($dbPort+1)..$($dbPort+40) nenasel volny - uvolni port nebo zmen DB_PORT v .env rucne."
     }
     Write-Host "    Prepinam DB_PORT $dbPort -> $free a zapisuji do .env." -ForegroundColor Yellow
     Set-EnvValue 'DB_PORT' "$free"
@@ -243,18 +271,18 @@ $forceRecreate = ($mode -eq 'source')
 
 # --- 4. up databaze --------------------------------------------------------
 # --remove-orphans: uklidi kontejnery z jineho compose souboru (napr. po
-# fallbacku registry->source) — jinak zbyle stale kontejnery drzi porty/site.
-Write-Host "==> Starting database…"
+# fallbacku registry->source) - jinak zbyle stale kontejnery drzi porty/site.
+Write-Host "==> Starting database..."
 & docker compose @composeArgs up -d --remove-orphans db
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (db) failed" }
 
 # --- 5. wait for DB health -------------------------------------------------
-Write-Host "==> Waiting for database to become healthy…"
+Write-Host "==> Waiting for database to become healthy..."
 $ready = $false
 for ($i = 1; $i -le 45; $i++) {
     $json = & docker compose @composeArgs ps --format json db 2>$null
     if ($json -match '"Health":"healthy"') { $ready = $true; Write-Host "    DB ready."; break }
-    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' — cekam dal (attempt $i/45)…" }
+    if ($json -match '"Health":"unhealthy"') { Write-Warning "DB hlasi 'unhealthy' - cekam dal (attempt $i/45)..." }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) {
@@ -263,10 +291,10 @@ if (-not $ready) {
 
 # --- 4b. up app ------------------------------------------------------------
 # App az po zdrave DB (depends_on to sice hlida, ale takhle mame jasne stage
-# hlaseni). force-recreate na source/fallback ceste — viz vyse.
+# hlaseni). force-recreate na source/fallback ceste - viz vyse.
 $appUp = @('up', '-d', '--remove-orphans')
-if ($forceRecreate) { $appUp += '--force-recreate'; Write-Host "==> Starting app (source/fallback rezim -> --force-recreate)…" }
-else                { Write-Host "==> Starting app…" }
+if ($forceRecreate) { $appUp += '--force-recreate'; Write-Host "==> Starting app (source/fallback rezim -> --force-recreate)..." }
+else                { Write-Host "==> Starting app..." }
 & docker compose @composeArgs @appUp app
 if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
 
@@ -275,13 +303,17 @@ if ($LASTEXITCODE -ne 0) { Write-Error "docker compose up (app) failed" }
 # explicitniho migrate (= race condition s entrypointem, napr. 0015 FK rename)
 # jen cekame, az app odpovi na /api/health (v ALLOWED_PATHS pro FirstRunLock ->
 # 200 i ve fresh-install stavu). Migraci muze byt hodne -> stedry timeout.
-$curl = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
+# Zamerne bez null-conditional operatoru (`?.`) - ten je az v PS7 a ve Windows
+# PowerShellu 5.1 je to chyba parseru celeho souboru, tzn. skript by se nespustil
+# vubec a kontrola verze vyse by se nikdy nevypsala.
+$curlCmd = Get-Command curl.exe -ErrorAction SilentlyContinue
+$curl = if ($curlCmd) { $curlCmd.Source } else { $null }
 if (-not $curl) { $curl = 'C:\Windows\System32\curl.exe' }
 if (-not (Test-Path $curl)) {
     Write-Error "curl.exe nenalezen (potreba na Win 10/11+). Updatuj OS nebo doinstaluj curl."
 }
 
-Write-Host "==> Waiting for app to become available (entrypoint runs migrations)…"
+Write-Host "==> Waiting for app to become available (entrypoint runs migrations)..."
 $appReady = $false
 $lastErr = ''
 $recovered = $false
@@ -301,7 +333,7 @@ for ($i = 1; $i -le 90; $i++) {
             Start-Sleep -Seconds 3
             continue
         }
-        elseif ($logs -match 'Migration attempt') { Write-Host "    …migrace bezi (attempt $i/90)" }
+        elseif ($logs -match 'Migration attempt') { Write-Host "    ...migrace bezi (attempt $i/90)" }
     }
     Start-Sleep -Seconds 2
 }

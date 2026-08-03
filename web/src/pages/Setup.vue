@@ -23,6 +23,7 @@ const skipSupplier = ref(false)
 const generateSample = ref(false)
 const sampleResult = ref<SetupSampleResult | null>(null)
 const sampleError = ref('')
+const sessionError = ref('')
 const supplier = ref({
   company_name: '',
   display_name: '',
@@ -110,7 +111,22 @@ async function lookupBank() {
 
 async function goToApp() {
   // Po setupu je backend session vytvořená (auto-login). Refresh auth store + hard reload na /.
+  // Když se ale session nechytila (typicky prohlížeč zahodil cookie — `__Host-` prefix
+  // nebo `cookie_secure` přes plain HTTP), skončil by uživatel na /login bez vysvětlení.
+  // Rozhoduje `isAuthenticated`, ne návratová hodnota refresh(): ta je false i při
+  // výpadku sítě, kdy si store známou identitu záměrně drží.
+  sessionError.value = ''
   await auth.refresh()
+  if (!auth.isAuthenticated) {
+    sessionError.value = locale.value === 'cs'
+      ? 'Účet je vytvořený, ale prohlížeč si neuložil přihlašovací cookie, takže vás aplikace hned odhlásí. '
+        + 'Nejčastější příčina: aplikace běží přes HTTP, ale v cfg.php je `session.cookie_secure => true` '
+        + 'nebo `cookie_name` s prefixem `__Host-`. Opravte konfiguraci a přihlaste se na /login.'
+      : 'Your account was created, but the browser did not store the session cookie, so the app would sign you out immediately. '
+        + 'Most likely cause: the app is served over HTTP while cfg.php has `session.cookie_secure => true` '
+        + 'or a `cookie_name` with the `__Host-` prefix. Fix the config and sign in at /login.'
+    return
+  }
   window.location.href = '/'
 }
 
@@ -511,8 +527,20 @@ async function submit() {
               {{ warning }}
             </div>
           </div>
-          <div v-else-if="sampleError" class="mb-6 inline-block bg-warning-50 border border-warning-500/40 rounded-md px-4 py-2 text-sm text-warning-600 text-left">
-            {{ sampleError }}
+          <div v-else-if="sampleError" class="mb-6 block bg-danger-50 border border-danger-500/40 rounded-md px-4 py-3 text-sm text-danger-600 text-left">
+            <div class="font-semibold mb-1">
+              {{ locale === 'cs' ? 'Ukázková data se nevygenerovala' : 'Sample data was not generated' }}
+            </div>
+            <div>{{ sampleError }}</div>
+            <div class="mt-2 text-neutral-600">
+              {{ locale === 'cs'
+                ? 'Účet i firma jsou vytvořené a můžete pokračovat — aplikace jen bude prázdná. Ukázková data lze později vygenerovat v Nastavení.'
+                : 'Your account and company were created and you can continue — the app will just be empty. Sample data can be generated later in Settings.' }}
+            </div>
+          </div>
+
+          <div v-if="sessionError" class="mb-6 block bg-danger-50 border border-danger-500/40 rounded-md px-4 py-3 text-sm text-danger-600 text-left">
+            {{ sessionError }}
           </div>
 
           <div>

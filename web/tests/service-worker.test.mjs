@@ -5,8 +5,13 @@ import { createWorker, loadWorkerSource } from './helpers/worker-harness.mjs'
 
 const source = await loadWorkerSource('service-worker.js')
 
-test('API requests always bypass caches', async () => {
-  for (const pathname of ['/api', '/api/v1/invoices']) {
+// API nesmí přes service worker projít vůbec — ani jako pass-through přes
+// `respondWith(fetch(...))`. Takový průchod totiž request přeposílá znovu ze
+// service workeru: odpovědi pak v DevTools i v logu serveru vypadají, že jdou
+// z SW cache, a odchylka v credentials/redirect semantice se projeví jako
+// náhodné 401 na /api/auth/me (a nekonečná smyčka / ↔ /login).
+test('API requests are left entirely to the browser', async () => {
+  for (const pathname of ['/api', '/api/v1/invoices', '/api/auth/me']) {
     const worker = createWorker(source)
     const result = worker.dispatchFetch({
       url: `https://invoice.test${pathname}`,
@@ -14,11 +19,10 @@ test('API requests always bypass caches', async () => {
       destination: '',
     })
 
-    assert.ok(result)
-    await result
+    assert.equal(result, undefined, `${pathname} nesmí volat respondWith`)
     assert.equal(worker.cacheOpenCount, 0)
-    assert.equal(worker.fetchCalls.length, 1)
-    assert.equal(worker.fetchCalls[0][1].cache, 'no-store')
+    assert.equal(worker.fetchCalls.length, 0)
+    assert.equal(worker.cachePutCalls.length, 0)
   }
 })
 

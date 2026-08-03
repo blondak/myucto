@@ -80,10 +80,14 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return
 
-  if (isApiRequest(url)) {
-    event.respondWith(fetch(request, { cache: 'no-store' }))
-    return
-  }
+  // API se NIKDY nesmí dostat přes service worker. Dřív tu bylo
+  // `respondWith(fetch(request, { cache: 'no-store' }))`, což je sice taky
+  // průchod na síť, ale request se přeposílá znovu z SW: v DevTools i v logu
+  // serveru pak odpovědi vypadají, že jdou ze service workeru (referer
+  // /service-worker.js), a jakákoli odchylka v credentials/redirect semantice
+  // se projeví jako náhodné 401. Bez `respondWith` request obslouží přímo
+  // prohlížeč, se všemi původními vlastnostmi.
+  if (isApiRequest(url)) return
 
   const strategy = selectStrategy(request, url)
   if (strategy) {
