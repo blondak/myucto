@@ -188,10 +188,14 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
            `flex-wrap` s min-šířkou místo grid sloupců schválně: oba widgety se
            samy skrývají (readonly uživatel, neplátce DPH) a v gridu by po tom
            skrytém zůstala prázdná půlka. Takhle zbylý widget roztáhne celou
-           šířku, protože prázdná komponenta nevytvoří flex položku. -->
+           šířku, protože prázdná komponenta nevytvoří flex položku.
+           Min-šířka smí platit až od `sm`: 26rem je 416 px, takže na mobilu
+           (374 px) karty přerostly viewport a `overflow-x: clip` na body jim
+           uřízl pravý okraj i se stavovými štítky. Pod `sm` je proto plná
+           šířka a widgety jdou pod sebe. -->
       <div class="flex flex-wrap items-start gap-4">
-        <ActionItemsWidget v-if="auth.canWrite('dashboard')" class="flex-1 min-w-[26rem]" />
-        <TaxCalendarWidget class="flex-1 min-w-[26rem]" />
+        <ActionItemsWidget v-if="auth.canWrite('dashboard')" class="flex-1 min-w-full sm:min-w-[26rem]" />
+        <TaxCalendarWidget class="flex-1 min-w-full sm:min-w-[26rem]" />
       </div>
 
       <!-- ═══ Výkazy práce — rozpracované (draft) vystavené faktury k doplnění (skryto pro readonly) ═══ -->
@@ -261,7 +265,12 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                  řezu si konkurují; číslo navíc patří do téže rodiny jako částky
                  ve všech tabulkách. -->
             <div class="text-[11px] uppercase tracking-[0.14em] font-semibold text-neutral-500 mb-2">{{ t('dashboard.revenue', { year: summary.year, currency: c.currency }) }}</div>
-            <div class="font-mono text-3xl sm:text-4xl font-semibold tracking-tight leading-[1.1] text-neutral-900 tabular-nums">{{ formatMoney(c.this_year, c.currency) }}</div>
+            <!-- Velikost přes `clamp`, ne přes breakpointy: obrat je řetězec
+                 proměnné délky s nedělitelnými mezerami, takže se nezalomí a na
+                 320px displeji pevný `text-3xl` přetekl kartu. Na běžném mobilu
+                 (390px) vyjde 29px ≈ původní `text-3xl`, od 600px strop 2,25rem
+                 = původní `text-4xl`. -->
+            <div class="font-mono text-[length:clamp(1.5rem,7.5vw,2.25rem)] font-semibold tracking-tight leading-[1.1] text-neutral-900 tabular-nums">{{ formatMoney(c.this_year, c.currency) }}</div>
             <div v-if="c.change_pct !== null" class="mt-2.5"
               :title="t('dashboard.yoy_ytd_tooltip', { year: summary.prev_year, total: formatMoney(c.prev_year, c.currency), ytd: formatMoney(c.prev_year_ytd, c.currency) })">
               <span class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-xs font-semibold tabular-nums"
@@ -504,22 +513,30 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
 
       <!-- Cash-flow forecast 30 / 60 / 90 dní — kolik se očekává inkasovat -->
       <div v-if="summary.cashflow_forecast.length" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <div class="flex items-baseline justify-between mb-4">
+        <div class="flex flex-col gap-1 mb-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('dashboard.cashflow_forecast') }}</h3>
           <span class="text-xs text-neutral-400">{{ t('dashboard.cashflow_forecast_hint') }}</span>
         </div>
-        <div class="grid grid-cols-3 gap-4">
-          <div v-for="period in ['30','60','90']" :key="`cf-${period}`" class="text-center">
-            <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 mb-1.5">{{ t('dashboard.cashflow_in_days', { n: period }) }}</div>
-            <div class="space-y-0.5">
-              <div v-for="cf in summary.cashflow_forecast" :key="`cf-${period}-${cf.currency}`"
-                class="font-mono text-lg font-semibold text-neutral-900">
-                {{ formatMoney(period === '30' ? cf.in_30 : period === '60' ? cf.in_60 : cf.in_90, cf.currency) }}
+        <!-- Tři sloupce mají smysl jen tam, kde se do nich vejde částka: `1fr`
+             je v Tailwindu `minmax(0,1fr)`, takže se na mobilu stlačily na ~87 px,
+             kdežto „711 177,50 Kč" potřebuje 140 px a nezalomí se (nedělitelné
+             mezery). Čísla si pak lezla přes sebe a přes okraj karty. Pod `sm`
+             proto řádek na řádek: popisek vlevo, částky vpravo. -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+          <div v-for="period in ['30','60','90']" :key="`cf-${period}`"
+            class="flex items-baseline justify-between gap-3 sm:block sm:text-center">
+            <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 sm:mb-1.5">{{ t('dashboard.cashflow_in_days', { n: period }) }}</div>
+            <div class="text-right sm:text-center">
+              <div class="space-y-0.5">
+                <div v-for="cf in summary.cashflow_forecast" :key="`cf-${period}-${cf.currency}`"
+                  class="font-mono text-base sm:text-lg font-semibold text-neutral-900">
+                  {{ formatMoney(period === '30' ? cf.in_30 : period === '60' ? cf.in_60 : cf.in_90, cf.currency) }}
+                </div>
               </div>
-            </div>
-            <div class="text-xs text-neutral-500 mt-1 space-y-0.5">
-              <div v-for="cf in summary.cashflow_forecast" :key="`cf-cnt-${period}-${cf.currency}`">
-                {{ period === '30' ? cf.count_30 : period === '60' ? cf.count_60 : cf.count_90 }} {{ t('dashboard.invoices_unit') }}
+              <div class="text-xs text-neutral-500 mt-1 space-y-0.5">
+                <div v-for="cf in summary.cashflow_forecast" :key="`cf-cnt-${period}-${cf.currency}`">
+                  {{ period === '30' ? cf.count_30 : period === '60' ? cf.count_60 : cf.count_90 }} {{ t('dashboard.invoices_unit') }}
+                </div>
               </div>
             </div>
           </div>
