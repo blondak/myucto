@@ -286,7 +286,10 @@ async function runBook() {
       to="/accounting/assets/new" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- Desktop: tabulka. Na mobilu se skrývá — z osmi sloupců byly vidět
+           čtyři a za okrajem zůstávaly zrovna ceny a stav, tedy to, kvůli čemu
+           se na kartu majetku kouká. -->
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
@@ -334,6 +337,50 @@ async function runBook() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobil: karty. Zůstatkové ceny jsou hlavní sdělení, proto stojí
+           v samostatném řádku a ne schované za vodorovným rolováním. -->
+      <div class="md:hidden divide-y divide-neutral-100">
+        <RouterLink v-for="a in sortedItems" :key="`m-${a.id}`"
+          :to="{ name: 'accounting-asset-detail', params: { id: a.id } }"
+          class="block p-3 space-y-2 hover:bg-neutral-50">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-medium truncate">{{ a.name }}</div>
+              <div class="font-mono text-xs text-neutral-500">{{ a.inventory_number }} · {{ a.asset_account_code }}</div>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0" :class="STATUS_BADGE[a.status]">
+              {{ t(`accounting.assets.status.${a.status}`) }}
+            </span>
+          </div>
+
+          <dl class="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <dt class="text-neutral-500">{{ t('accounting.assets.col_input_price') }}</dt>
+              <dd class="font-mono whitespace-nowrap">{{ formatMoney(increasedPrice(a)) }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('accounting.assets.col_tax_residual') }}</dt>
+              <dd class="font-mono whitespace-nowrap">
+                <template v-if="a.tax_method === 'none'">—</template>
+                <template v-else>{{ formatMoney(taxResidual(a)) }}</template>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('accounting.assets.col_acc_residual') }}</dt>
+              <dd class="font-mono whitespace-nowrap">
+                <template v-if="!a.accumulated_account_code">—</template>
+                <template v-else>{{ formatMoney(accResidual(a)) }}</template>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="text-xs text-neutral-500">
+            {{ t('accounting.assets.col_put_into_use') }}: {{ formatDate(a.put_into_use_date) }}
+            <span v-if="a.disposal_date"> · {{ t('accounting.assets.col_disposal_date') }}: {{ formatDate(a.disposal_date) }}</span>
+          </div>
+        </RouterLink>
       </div>
     </div>
 
