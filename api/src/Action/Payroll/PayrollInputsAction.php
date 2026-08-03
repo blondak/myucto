@@ -128,7 +128,12 @@ final class PayrollInputsAction
     /** @param array<string,string> $args */
     public function approve(Request $request, Response $response, array $args): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
             return $error;
         }
         $version = $this->rowVersion(
@@ -172,6 +177,7 @@ final class PayrollInputsAction
         Request $request,
         Response $response,
         AccessLevel $level,
+        ?string $permissionOverride = null,
     ): ?Response {
         if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
@@ -182,9 +188,11 @@ final class PayrollInputsAction
             );
         }
         $error = null;
-        $permission = $level === AccessLevel::READ
-            ? 'payroll'
-            : 'payroll.inputs.write';
+        $permission = $permissionOverride ?? (
+            $level === AccessLevel::READ
+                ? 'payroll'
+                : 'payroll.inputs.write'
+        );
         if (!$this->requirePermission(
             $request,
             $response,

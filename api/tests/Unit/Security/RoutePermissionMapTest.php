@@ -86,6 +86,7 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/payroll/time/imports', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/months/2026-05/approve', 'payroll.approve', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/months/2026-05/reopen', 'payroll.reopen', AccessLevel::WRITE],
+            ['POST', '/api/payroll/inputs/42/approve', 'payroll.approve', AccessLevel::WRITE],
         ];
         foreach ($cases as [$method, $path, $key, $level]) {
             $match = $map->match($method, $path);

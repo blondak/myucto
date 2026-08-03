@@ -287,6 +287,260 @@ export interface PayrollTimeImportPreview {
   errors: PayrollTimeImportError[]
 }
 
+export type PayrollComponentKind =
+  | 'base_wage'
+  | 'hourly_wage'
+  | 'task_wage'
+  | 'bonus'
+  | 'premium'
+  | 'commission'
+  | 'allowance'
+  | 'compensation'
+  | 'severance'
+  | 'competitive_clause'
+  | 'backpay'
+  | 'non_cash'
+  | 'benefit_meal'
+  | 'benefit_vehicle'
+  | 'benefit_pension'
+  | 'benefit_care'
+  | 'benefit_education'
+  | 'benefit_recreation'
+  | 'benefit_health'
+  | 'risky_savings'
+  | 'travel_reimbursement'
+  | 'other'
+
+export type PayrollComponentValueKind = 'monetary' | 'non_monetary'
+export type PayrollComponentFrequency = 'regular' | 'one_off'
+export type PayrollComponentTaxTreatment = 'included' | 'exempt' | 'withholding_candidate' | 'manual_review'
+export type PayrollComponentInclusion = 'included' | 'excluded' | 'manual_review'
+
+export interface PayrollComponent {
+  id: number
+  supplier_id: number
+  code: string
+  name: string
+  component_kind: PayrollComponentKind
+  value_kind: PayrollComponentValueKind
+  frequency_kind: PayrollComponentFrequency
+  tax_treatment: PayrollComponentTaxTreatment
+  social_treatment: PayrollComponentInclusion
+  health_treatment: PayrollComponentInclusion
+  average_earning_treatment: PayrollComponentInclusion
+  enforcement_treatment: PayrollComponentInclusion
+  jmhz_treatment: PayrollComponentInclusion
+  statistics_treatment: PayrollComponentInclusion
+  accounting_debit_code: string | null
+  accounting_credit_code: string | null
+  annual_limit_minor: number | null
+  valid_from: string
+  valid_to: string | null
+  is_active: boolean
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export type PayrollComponentPayload = Omit<
+  PayrollComponent,
+  'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
+>
+
+export type PayrollRecurringCalculationKind =
+  | 'fixed_amount'
+  | 'employment_gross_basis_points'
+  | 'manual_review'
+
+export type PayrollRecurringAllocationRule =
+  | 'full_month'
+  | 'calendar_days'
+  | 'working_days'
+  | 'hours'
+  | 'manual_review'
+
+export interface PayrollRecurringComponent {
+  id: number
+  supplier_id: number
+  employee_id: number
+  employment_id: number
+  employment_code: string
+  employee_name: string
+  component_id: number
+  component_code: string
+  component_name: string
+  calculation_kind: PayrollRecurringCalculationKind
+  amount_minor: number | null
+  rate_basis_points: number | null
+  valid_from: string
+  valid_to: string | null
+  allocation_rule: PayrollRecurringAllocationRule
+  maximum_amount_minor: number | null
+  note: string | null
+  is_active: boolean
+  row_version: number
+  created_by: number | null
+  updated_by: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollRecurringComponentPayload {
+  employment_id: number
+  component_id: number
+  calculation_kind: PayrollRecurringCalculationKind
+  amount_minor: number | null
+  rate_basis_points: number | null
+  valid_from: string
+  valid_to: string | null
+  allocation_rule: PayrollRecurringAllocationRule
+  maximum_amount_minor: number | null
+  note: string | null
+  is_active: boolean
+}
+
+export type PayrollInputSourceKind = 'manual' | 'recurring' | 'time' | 'absence' | 'import' | 'correction'
+export type PayrollInputStatus = 'draft' | 'approved' | 'locked' | 'cancelled'
+
+export interface PayrollInput {
+  id: number
+  supplier_id: number
+  employee_id: number
+  employee_name: string
+  employment_id: number
+  employment_code: string
+  relation_type: PayrollRelationType
+  component_id: number
+  component_code: string
+  component_name: string
+  component_kind: PayrollComponentKind
+  value_kind: PayrollComponentValueKind
+  period_start: string
+  source_period_start: string | null
+  amount_minor: number
+  quantity_milliunits: number | null
+  source_kind: PayrollInputSourceKind
+  external_id: string | null
+  import_id: number | null
+  recurring_component_id?: number | null
+  status: PayrollInputStatus
+  component_snapshot_json: string | null
+  row_version: number
+  created_by: number | null
+  approved_by: number | null
+  approved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollInputPayload {
+  employee_id: number
+  employment_id: number
+  component_id: number
+  period: string
+  source_period: string | null
+  amount_minor: number
+  quantity_milliunits: number | null
+  source_kind: PayrollInputSourceKind
+  external_id: string | null
+}
+
+export interface PayrollInputImpactMoney {
+  minor_units: number
+  currency: string
+}
+
+export interface PayrollInputPreview {
+  support_status: PayrollSupportStatus
+  blocker: string | null
+  component_snapshot: Record<string, unknown>
+  impact: Record<string, PayrollInputImpactMoney> | null
+  annual_limit_minor: number | null
+  annual_used_minor: number
+  annual_after_minor: number
+  annual_limit_exceeded: boolean
+}
+
+export interface PayrollRecurringMaterialization {
+  period: string
+  created_count: number
+  replayed_count: number
+  manual_review_count: number
+  created: Array<{ recurring_component_id: number; input_id: number; amount_minor: number }>
+  replayed: Array<{ recurring_component_id: number; input_id: number; amount_minor: number }>
+  manual_review: Array<{
+    recurring_component_id: number
+    employment_id: number
+    component_id: number
+    reason: string
+  }>
+}
+
+export interface PayrollInputImportIssue {
+  row_number: number
+  error_code: string
+  field_name: string | null
+  error_message: string
+}
+
+export interface PayrollInputImportPreviewRow {
+  row_number: number
+  payload: Record<string, unknown>
+  impact: PayrollInputPreview
+}
+
+export interface PayrollInputImportPreview {
+  format: 'csv' | 'xlsx'
+  source_name: string
+  period: string
+  content_hash: string
+  row_count: number
+  accepted_count: number
+  rejected_count: number
+  duplicate_count: number
+  rows: PayrollInputImportPreviewRow[]
+  errors: PayrollInputImportIssue[]
+  duplicates: PayrollInputImportIssue[]
+}
+
+export interface PayrollInputImportRow {
+  id: number
+  source_row_number: number
+  external_id: string | null
+  status: 'valid' | 'error' | 'accepted' | 'duplicate'
+  input_id: number | null
+  normalized_payload: Record<string, unknown>
+  errors: Array<{ code: string; field: string | null; message: string }>
+  created_at: string
+}
+
+export interface PayrollInputImportResult {
+  id: number
+  supplier_id: number
+  period_start: string
+  source_kind: 'csv' | 'xlsx' | 'api'
+  source_name: string
+  content_hash: string
+  status: 'preview' | 'accepted' | 'partial' | 'rejected'
+  row_count: number
+  accepted_count: number
+  rejected_count: number
+  duplicate_count: number
+  row_version: number
+  accepted_at: string | null
+  created_by: number | null
+  created_at: string
+  replayed: boolean
+  rows: PayrollInputImportRow[]
+}
+
+export interface PayrollInputImportPayload {
+  period: string
+  format: 'csv' | 'xlsx'
+  source_name: string
+  content_base64: string
+}
+
 export interface PayrollEmployerAccounts {
   employment_gross_debit: string
   employment_gross_credit: string
@@ -503,4 +757,61 @@ export const payrollApi = {
   reopenTimeMonth: (period: string, payload: { employment_id: number; row_version: number; reason: string }) =>
     api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/reopen`, payload)
       .then(response => response.data.month),
+  components: (effectiveOn?: string) =>
+    api.get<{ components: PayrollComponent[] }>('/payroll/components', {
+      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
+    }).then(response => response.data.components),
+  createComponent: (payload: PayrollComponentPayload) =>
+    api.post<{ component: PayrollComponent }>('/payroll/components', payload)
+      .then(response => response.data.component),
+  updateComponent: (id: number, rowVersion: number, payload: PayrollComponentPayload) =>
+    api.put<{ component: PayrollComponent }>(`/payroll/components/${id}`, {
+      ...payload,
+      row_version: rowVersion,
+    }).then(response => response.data.component),
+  recurringComponents: (employmentId?: number) =>
+    api.get<{ recurring_components: PayrollRecurringComponent[] }>('/payroll/recurring-components', {
+      params: employmentId ? { employment_id: employmentId } : undefined,
+    }).then(response => response.data.recurring_components),
+  createRecurringComponent: (payload: PayrollRecurringComponentPayload) =>
+    api.post<{ recurring_component: PayrollRecurringComponent }>('/payroll/recurring-components', payload)
+      .then(response => response.data.recurring_component),
+  updateRecurringComponent: (
+    id: number,
+    rowVersion: number,
+    payload: PayrollRecurringComponentPayload,
+  ) =>
+    api.put<{ recurring_component: PayrollRecurringComponent }>(`/payroll/recurring-components/${id}`, {
+      ...payload,
+      row_version: rowVersion,
+    }).then(response => response.data.recurring_component),
+  materializeRecurringComponents: (period: string) =>
+    api.post<{ materialization: PayrollRecurringMaterialization }>(
+      '/payroll/recurring-components/materialize',
+      { period },
+    ).then(response => response.data.materialization),
+  inputs: (period: string) =>
+    api.get<{ inputs: PayrollInput[] }>('/payroll/inputs', { params: { period } })
+      .then(response => response.data.inputs),
+  previewInput: (payload: PayrollInputPayload) =>
+    api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
+      .then(response => response.data.preview),
+  createInput: (payload: PayrollInputPayload) =>
+    api.post<{ input: PayrollInput }>('/payroll/inputs', payload)
+      .then(response => response.data.input),
+  updateInput: (id: number, rowVersion: number, payload: PayrollInputPayload) =>
+    api.put<{ input: PayrollInput }>(`/payroll/inputs/${id}`, {
+      ...payload,
+      row_version: rowVersion,
+    }).then(response => response.data.input),
+  approveInput: (id: number, rowVersion: number) =>
+    api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/approve`, {
+      row_version: rowVersion,
+    }).then(response => response.data.input),
+  previewInputImport: (payload: PayrollInputImportPayload) =>
+    api.post<{ preview: PayrollInputImportPreview }>('/payroll/input-imports/preview', payload)
+      .then(response => response.data.preview),
+  applyInputImport: (payload: PayrollInputImportPayload) =>
+    api.post<{ import: PayrollInputImportResult }>('/payroll/input-imports/apply', payload)
+      .then(response => response.data.import),
 }

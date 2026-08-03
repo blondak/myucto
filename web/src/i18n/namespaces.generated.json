@@ -271,6 +271,9 @@
     "payroll-people": [
       "payroll"
     ],
+    "payroll-components": [
+      "payroll"
+    ],
     "payroll-time": [
       "payroll"
     ],

@@ -11,6 +11,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use Psr\Http\Message\ResponseInterface;
@@ -293,6 +295,52 @@ final class PayrollComponentsInputsApiTest extends TestCase
         );
         self::assertSame(403, $bearer->getStatusCode());
         self::assertSame('session_required', $this->errorCode($bearer));
+    }
+
+    public function testApprovalOnlyRoleCanApproveDraftInput(): void
+    {
+        $component = $this->createComponent($this->componentPayload(
+            code: 'SYN_APPROVAL',
+            validFrom: '2026-01-01',
+            annualLimitMinor: null,
+            kind: 'bonus',
+            valueKind: 'monetary',
+        ));
+        $input = $this->createInput($this->inputPayload(
+            PayrollTimeValue::int($component['id'] ?? null, 'component_id'),
+            25_000,
+            'approval-only-1',
+        ));
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+        $request = $this->request('POST', "/api/payroll/inputs/{$inputId}/approve")
+            ->withAttribute('auth.effective_role', new EffectiveRole(
+                42,
+                'Schvalovatel mezd',
+                'staff',
+                true,
+                ['payroll.approve' => AccessLevel::WRITE->value],
+            ))
+            ->withParsedBody([
+                'row_version' => PayrollTimeValue::int(
+                    $input['row_version'] ?? null,
+                    'row_version',
+                ),
+            ]);
+
+        $response = $this->inputs->approve(
+            $request,
+            new Response(),
+            ['id' => (string) $inputId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'approved',
+            PayrollTimeValue::row(
+                $this->json($response)['input'] ?? null,
+                'approved_input',
+            )['status'],
+        );
     }
 
     /** @return array{0:int,1:int} */

@@ -96,8 +96,9 @@ const routes: RouteRecordRaw[] = [
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
       { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
-        { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
-        { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
       { path: 'accounting/accounts',      name: 'accounting-accounts',      component: () => import('@/pages/accounting/ChartOfAccounts.vue'), meta: { requiresDoubleEntry: true } },
@@ -390,8 +391,9 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'accounting-payroll': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-people': ['payroll'],
-    'payroll-time': ['payroll'],
-    'payroll-absences': ['payroll'],
+  'payroll-components': ['payroll'],
+  'payroll-time': ['payroll'],
+  'payroll-absences': ['payroll'],
   'payroll-settings': ['payroll.settings'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],

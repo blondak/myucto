@@ -129,6 +129,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/components$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/inputs$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/inputs/[0-9]+/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['*', '#^/api/payroll/inputs(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/recurring-components$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/recurring-components(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
