@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -23,10 +25,15 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST   /api/invoices/{id}/book — booked_at = NOW(), booked_by = user; jen non-draft; idempotentní
  *   DELETE /api/invoices/{id}/book — smaže booked_at; 409 'still_posted' při aktivním posted zápisu
  *
- * RBAC: kryje stávající route permission rules; v client permission rules cesty nejsou → klient 403.
+ * RBAC (defense-in-depth): PermissionMiddleware gatuje /api/invoices/{id}/book na
+ * 'accounting.journal.post' (obě metody = write); Action si totéž právo ověřuje sama.
+ * SupplierGuard::owns() je jen tenant kontrola, ne oprávnění — sám o sobě by roli
+ * s pouhým modulovým klíčem 'invoices' zaúčtování nezakázal.
  */
 final class BookInvoiceAction
 {
+    private const PERMISSION = 'accounting.journal.post';
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Connection $db,
@@ -38,6 +45,8 @@ final class BookInvoiceAction
 
     public function book(Request $request, Response $response, array $args): Response
     {
+        if ($err = $this->denied($request, $response)) return $err;
+
         $id = (int) ($args['id'] ?? 0);
         $invoice = $this->repo->find($id);
         if (!SupplierGuard::owns($request, $invoice)) {
@@ -70,6 +79,8 @@ final class BookInvoiceAction
 
     public function unbook(Request $request, Response $response, array $args): Response
     {
+        if ($err = $this->denied($request, $response)) return $err;
+
         $id = (int) ($args['id'] ?? 0);
         $invoice = $this->repo->find($id);
         if (!SupplierGuard::owns($request, $invoice)) {
@@ -105,6 +116,15 @@ final class BookInvoiceAction
         }
 
         return $this->respondWithInvoice($response, $id);
+    }
+
+    /** Dokontrola konkrétního práva (ne modulového 'invoices'). */
+    private function denied(Request $request, Response $response): ?Response
+    {
+        if (RequestAuthorization::allows($request, self::PERMISSION, AccessLevel::WRITE)) {
+            return null;
+        }
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
     }
 
     private function respondWithInvoice(Response $response, int $id): Response

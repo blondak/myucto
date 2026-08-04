@@ -75,6 +75,8 @@ final class ApiRequestLogMiddleware implements MiddlewareInterface
             'supplier_id'    => $supplierId,
             'ip'             => $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             'method'         => $request->getMethod(),
+            // Schválně SYROVÁ cesta (bez RequestPath::normalize) — do logu patří to,
+            // co klient reálně poslal, včetně percent-encodingu.
             'route'          => $request->getUri()->getPath(),
             'query'          => $request->getUri()->getQuery(),
             'status'         => $status,

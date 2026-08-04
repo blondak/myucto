@@ -82,6 +82,29 @@ final class InvoiceRepository
         return $this->hasOssItemColumns;
     }
 
+    /**
+     * Detail faktury podle PK. Vlastnictví se ověřuje v Action vrstvě
+     * (SupplierGuard::owns nad vráceným řádkem) — tady jde jen o read-back.
+     *
+     * Druhá vrstva proti BOLA (security report 2026-08, R2 b): JOINy na klienta,
+     * projekt a kategorii tržby jsou kotvené na `i.supplier_id`, takže i kdyby
+     * v řádku uvízl cizí FK (starší data, chybějící guard v nějaké Action), cizí
+     * popisky se do odpovědi nedostanou. `projects` vlastní `supplier_id` NEMÁ —
+     * scope se odvozuje přes `clients.supplier_id` (FK fk_proj_client), proto
+     * EXISTS místo prostého AND.
+     *
+     * `currencies` je schválně ve DVOU JOINech, ne v jednom scoped:
+     *   - `cur` (nescoped) dodává identitu měny — kód, symbol, počet desetinných
+     *     míst. Bez nich doklad nespočítáš ani nevykreslíš a podle BOLA sweepu
+     *     (§3) je to údaj bez citlivosti (ISO kód měny).
+     *   - `curown` (scoped na `i.supplier_id`) dodává BANKOVNÍ ÚDAJE, které na
+     *     témže řádku `currencies` leží. Ty citlivé jsou — a při rozpadlé vazbě
+     *     se vrátí NULL místo účtu cizí firmy.
+     * Kdyby byl scoped rovnou `cur`, celý doklad by při rozpadlé vazbě zmizel
+     * (404) — a testovací fixtures napříč repem legitimně staví izolovaného
+     * dodavatele nad sdílený řádek měny. Rozpad vazby má zhasnout bankovní údaje,
+     * ne celý doklad.
+     */
     public function find(int $id): ?array
     {
         $pdo = $this->db->pdo();
@@ -99,15 +122,20 @@ final class InvoiceRepository
                     p.requires_work_report_approval AS project_requires_approval,
                     cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                     cur.label AS currency_label,
-                    cur.account_number AS bank_account_number, cur.bank_code AS bank_code,
-                    cur.bank_name AS bank_name, cur.iban AS bank_iban, cur.bic AS bank_bic,
+                    curown.account_number AS bank_account_number, curown.bank_code AS bank_code,
+                    curown.bank_name AS bank_name, curown.iban AS bank_iban, curown.bic AS bank_bic,
                     rcat.label AS revenue_category_label, rcat.code AS revenue_category_code
                FROM invoices i
-               JOIN clients c ON c.id = i.client_id
+               JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
           LEFT JOIN users u ON u.id = i.created_by
           LEFT JOIN projects p ON p.id = i.project_id
+                    AND EXISTS (SELECT 1 FROM clients pc
+                                 WHERE pc.id = p.client_id AND pc.supplier_id = i.supplier_id)
                JOIN currencies cur ON cur.id = i.currency_id
+          LEFT JOIN currencies curown ON curown.id = i.currency_id
+                    AND curown.supplier_id = i.supplier_id
           LEFT JOIN revenue_categories rcat ON rcat.id = i.revenue_category_id
+                    AND rcat.supplier_id = i.supplier_id
               WHERE i.id = ?'
         );
         $stmt->execute([$id]);

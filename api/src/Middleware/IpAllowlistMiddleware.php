@@ -6,6 +6,7 @@ namespace MyInvoice\Middleware;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -43,19 +44,24 @@ final class IpAllowlistMiddleware implements MiddlewareInterface
 
         $ip = $this->ipMatcher->clientIp($request->getServerParams(), $proxies, $header);
 
+        // Rozhodovací prefixy porovnáváme na normalizované cestě (jedno rawurldecode
+        // jako router). Bez toho `/api/%61dmin/users` na str_starts_with nesedělo,
+        // IP kontrola se v režimu admin_only PŘESKOČILA a router Action stejně doručil.
+        $path = RequestPath::normalize($request->getUri()->getPath());
+
         // apply_to=mutations_only — povol GET/HEAD/OPTIONS bez kontroly
         if ($applyTo === 'mutations_only' && in_array(strtoupper($request->getMethod()), ['GET', 'HEAD', 'OPTIONS'], true)) {
             return $handler->handle($request);
         }
 
         // apply_to=admin_only — IP check jen pro /api/admin/* (path-based, nezávislé na user.role)
-        if ($applyTo === 'admin_only' && !str_starts_with($request->getUri()->getPath(), '/api/admin/')) {
+        if ($applyTo === 'admin_only' && !str_starts_with($path, '/api/admin/')) {
             return $handler->handle($request);
         }
 
         // /api/public/* — vždy povolíme (zákazníci přicházejí z libovolných IP přes
         // schvalovací email link). Anti-bot ochrana = token v URL + CAPTCHA.
-        if (str_starts_with($request->getUri()->getPath(), '/api/public/')) {
+        if (str_starts_with($path, '/api/public/')) {
             return $handler->handle($request);
         }
 
@@ -69,6 +75,7 @@ final class IpAllowlistMiddleware implements MiddlewareInterface
             'ip'      => $ip,
             'ua_hash' => substr(sha1($request->getHeaderLine('User-Agent')), 0, 12),
             'method'  => $request->getMethod(),
+            // Do logu schválně SYROVÁ cesta — chceme vidět, co klient reálně poslal.
             'path'    => $request->getUri()->getPath(),
             'mode'    => $mode,
         ], $ip, $request->getHeaderLine('User-Agent'));
@@ -81,7 +88,7 @@ final class IpAllowlistMiddleware implements MiddlewareInterface
 
         // Detekce: API klient (chce JSON) vs prohlížeč (chce HTML)
         $accept   = $request->getHeaderLine('Accept');
-        $isApi    = str_starts_with($request->getUri()->getPath(), '/api/')
+        $isApi    = str_starts_with($path, '/api/')
                  || str_contains($accept, 'application/json');
 
         if ($isApi) {

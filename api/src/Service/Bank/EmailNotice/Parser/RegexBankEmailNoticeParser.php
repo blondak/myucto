@@ -24,6 +24,13 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         return 'Regex';
     }
 
+    /**
+     * Odesílatel je jediná vrstva, která u regex provideru odděluje avízo banky od
+     * cizí zprávy — vzory předmětu/těla jsou veřejně opsatelné z faktury. Provider
+     * BEZ vyplněného whitelistu proto neprojde vůbec (`senderAllowedForwarded` je
+     * fail-closed); `NULL` sloupec se cestou přetypuje na prázdný řetězec, který
+     * má tentýž význam „nic nepustit".
+     */
     public function supports(BankEmailNoticeMessage $message, BankEmailNoticeProvider $provider): bool
     {
         if (!$this->senderAllowedForwarded($message, (string) ($provider->senderWhitelist ?? ''))) {

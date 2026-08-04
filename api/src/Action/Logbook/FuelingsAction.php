@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Logbook;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
@@ -32,6 +33,7 @@ final class FuelingsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly FuelingOdometerEstimator $odometer,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -64,6 +66,9 @@ final class FuelingsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->validate($supplierId, $body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+        if ($ref = $this->tenantRefError($supplierId, $body)) {
+            return Json::error($response, 'invalid_reference', $ref, 400);
+        }
         $body['source'] = 'manual';
         $id = $this->repo->create($supplierId, $body, $this->userId($request));
         $this->log($request, 'fueling.created', $id, $body);
@@ -80,6 +85,9 @@ final class FuelingsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->validate($supplierId, $body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+        if ($ref = $this->tenantRefError($supplierId, $body)) {
+            return Json::error($response, 'invalid_reference', $ref, 400);
+        }
         $this->repo->update($id, $supplierId, $body);
         $this->log($request, 'fueling.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));
@@ -109,6 +117,22 @@ final class FuelingsAction
             return 'Auto neexistuje.';
         }
         return null;
+    }
+
+    /**
+     * BOLA guard (security report 2026-08, R2 #6 / sweep F1) — car_id se ve validate()
+     * kontroluje odjakživa, vendor_id a source_purchase_invoice_id se zapisovaly
+     * nevázané a FuelingRepository::find() je čte přes JOIN bez tenant predikátu.
+     */
+    private function tenantRefError(int $supplierId, array $body): ?string
+    {
+        $badRefs = $this->tenantRefs->violations(
+            $supplierId,
+            $body,
+            ['vendor_id', 'source_purchase_invoice_id'],
+        );
+
+        return $badRefs !== [] ? TenantReferenceGuard::message($badRefs) : null;
     }
 
     private function intOrNull(mixed $v): ?int

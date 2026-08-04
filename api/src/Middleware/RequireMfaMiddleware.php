@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -78,7 +79,9 @@ final class RequireMfaMiddleware implements MiddlewareInterface
         $session = $request->getAttribute(AuthMiddleware::ATTR_SESSION);
         $assurance = is_array($session) ? (string) ($session['assurance_level'] ?? 'legacy') : 'legacy';
         $method = strtoupper($request->getMethod());
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — výjimky pro recovery a MFA setup
+        // musí platit přesně tam, kam router request doručí.
+        $path = RequestPath::normalize($request->getUri()->getPath());
 
         // SessionLockMiddleware běží před tímto guardem. Jeho přesné recovery
         // endpointy nesmí zastavit MFA kontrola, jinak by session nešla odemknout.

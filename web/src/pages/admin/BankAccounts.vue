@@ -192,7 +192,7 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     port: 993,
     encryption: 'ssl',
     validate_cert: true,
-    require_email_auth: false,
+    require_email_auth: true,
     allow_forwarded: false,
     forwarded_from: '',
     email_auth_serv_id: '',

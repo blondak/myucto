@@ -203,27 +203,16 @@ final class JournalTransferTest extends TestCase
     public function testManualTransferWarnsAboutExistingBankTransactionAndForceOverrides(): void
     {
         $pdo = $this->db->pdo();
-        $pdo->prepare(
-            'INSERT INTO supplier_bank_accounts
-                (supplier_id, label, account_number, bank_code, bank_code_norm, currency,
-                 account_canonical, kind, source, is_active)
-             VALUES (?, "Testovací účet", "1000000005", "0100", "0100", "CZK",
-                     "1000000005", "current", "manual", 1)'
-        )->execute([$this->supplierId]);
-        $pdo->prepare(
-            'INSERT INTO bank_statements
-                (file_name, file_hash, account_number, bank_code, currency, statement_date, imported_by)
-             VALUES ("transfer-candidate.gpc", ?, "1000000005", "0100", "CZK", ?, ?)'
-        )->execute([hash('sha256', uniqid('transfer-candidate', true)), self::YEAR . '-12-28', $this->userId]);
-        $statementId = (int) $pdo->lastInsertId();
-        $this->statementIds[] = $statementId;
-        $pdo->prepare(
-            'INSERT INTO bank_transactions
-                (statement_id, source, posted_at, amount, currency, counterparty_account,
-                 counterparty_bank, description, match_status)
-             VALUES (?, "statement", ?, -2500.00, "CZK", "2000000010", "0100", "Převod", "unmatched")'
-        )->execute([$statementId, self::YEAR . '-12-28']);
-        $txId = (int) $pdo->lastInsertId();
+        // Vlastnictví výpisu drží bank_statements.supplier_id (SEC-01 / R4), ne shoda
+        // čísla účtu — kandidáti se hledají výhradně přes BankStatementOwnershipResolver.
+        $txId = $this->bankCandidate($this->supplierId);
+
+        // Cizí firma se STEJNÝM číslem účtu i částkou: nesmí se objevit v těle 409
+        // (R4, 4.9 — dotaz dřív neměl tenant predikát a sypal přes celou instalaci).
+        $foreignSupplierId = (int) ($pdo->query(
+            'SELECT id FROM supplier WHERE id <> ' . $this->supplierId . ' ORDER BY id LIMIT 1'
+        )->fetchColumn() ?: 0);
+        $foreignTxId = $foreignSupplierId !== 0 ? $this->bankCandidate($foreignSupplierId) : 0;
 
         $payload = [
             'date_out' => self::YEAR . '-12-28',
@@ -235,13 +224,44 @@ final class JournalTransferTest extends TestCase
         $warning = $this->transfer($payload);
         self::assertSame(409, $warning['status']);
         self::assertSame('bank_transfer_candidates', $warning['body']['error']['code']);
-        self::assertSame($txId, $warning['body']['error']['data']['candidates'][0]['tx_id']);
+        $candidates = $warning['body']['error']['data']['candidates'];
+        self::assertSame($txId, $candidates[0]['tx_id']);
+
+        if ($foreignTxId !== 0) {
+            $ids = array_map(static fn (array $c): int => (int) $c['tx_id'], $candidates);
+            self::assertNotContains($foreignTxId, $ids, 'Pohyb cizí firmy nesmí prosáknout do těla 409.');
+            self::assertCount(1, $ids, 'Kandidáti jsou jen z vlastních výpisů.');
+        }
 
         $created = $this->transfer($payload + ['force' => true]);
         self::assertSame(201, $created['status']);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** Výpis dané firmy s jedním pohybem -2500 Kč; vrací id pohybu. */
+    private function bankCandidate(int $supplierId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date, imported_by)
+             VALUES (?, "transfer-candidate.gpc", ?, "1000000005", "0100", "CZK", ?, ?)'
+        )->execute([
+            $supplierId, hash('sha256', uniqid('transfer-candidate', true)),
+            self::YEAR . '-12-28', $this->userId,
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $this->statementIds[] = $statementId;
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, source, posted_at, amount, currency, counterparty_account,
+                 counterparty_bank, description, match_status)
+             VALUES (?, "statement", ?, -2500.00, "CZK", "2000000010", "0100", "Převod", "unmatched")'
+        )->execute([$statementId, self::YEAR . '-12-28']);
+
+        return (int) $pdo->lastInsertId();
+    }
 
     /**
      * @param array<string,mixed> $body

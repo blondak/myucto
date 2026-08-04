@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\I18n\Locale;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -118,6 +119,7 @@ final class AuthMiddleware implements MiddlewareInterface
                     'supplier_id'    => $tokenRow['supplier_id'],
                     'ip'             => $ip,
                     'method'         => $request->getMethod(),
+                    // Schválně SYROVÁ cesta — do logu patří to, co klient reálně poslal.
                     'route'          => $request->getUri()->getPath(),
                     'query'          => $request->getUri()->getQuery(),
                     'status'         => 403,
@@ -167,7 +169,9 @@ final class AuthMiddleware implements MiddlewareInterface
 
         // 2) Session cookie (browser SPA)
         $method     = strtoupper($request->getMethod());
-        $path       = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — SESSION_IGNORED_PATHS i detekce
+        // logoutu musí sedět na to, co router doručí.
+        $path       = RequestPath::normalize($request->getUri()->getPath());
         $cookieName = (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session');
         $cookies    = $request->getCookieParams();
         $token      = self::isAllowed($method, $path, self::SESSION_IGNORED_PATHS)

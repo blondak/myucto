@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
@@ -50,6 +51,7 @@ final class UpdateInvoiceAction
         private readonly DocumentJournalSync $journalSync,
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     /**
@@ -223,6 +225,20 @@ final class UpdateInvoiceAction
                 unset($body['varsymbol']);
             }
         }
+        // BOLA guard (security report 2026-08, R2 #1) — cizí klíče z TĚLA requestu musí
+        // patřit volajícímu. Nutně PŘED defaults->resolve(): resolve() sice vynucuje
+        // project.client_id === client_id a currency.supplier_id === client.supplier_id,
+        // ale obojí vyhodnocuje proti DODANÉMU klientovi — konzistentní cizí trojice
+        // (client + project + currency ze supplieru B) by mu prošla.
+        $badRefs = $this->tenantRefs->violations(
+            SupplierGuard::currentId($request),
+            $body,
+            ['client_id', 'project_id', 'currency_id', 'revenue_category_id'],
+        );
+        if ($badRefs !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
         try {
             $body = $this->defaults->resolve($body);
         } catch (\InvalidArgumentException $e) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -26,7 +27,9 @@ final class WebAuthnBodyLimitMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if (!in_array($request->getUri()->getPath(), self::VERIFY_PATHS, true)) {
+        // Normalizovaná cesta (jedno rawurldecode jako router) — jinak stačil jeden
+        // `%XX` a limit velikosti těla se na ceremonii vůbec neuplatnil.
+        if (!in_array(RequestPath::normalize($request->getUri()->getPath()), self::VERIFY_PATHS, true)) {
             return $handler->handle($request);
         }
 

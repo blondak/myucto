@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\License\CommercialFeatureAccess;
@@ -65,7 +66,9 @@ final class LicenseMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (jedno rawurldecode jako router) — jinak by
+        // `/api/%61ccounting/...` restrictsApiPath() minulo a licenční brána se přeskočila.
+        $path = RequestPath::normalize($request->getUri()->getPath());
         if (!CommercialFeatureAccess::restrictsApiPath($path)) {
             return $handler->handle($request);
         }

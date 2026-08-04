@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RoutePermissionMap;
@@ -37,7 +38,9 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
 
         $request = $request->withAttribute(self::ATTR_ENABLED, true);
         $method = strtoupper($request->getMethod());
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — demo výjimky i RoutePermissionMap
+        // musí matchovat totéž, co doručí router.
+        $path = RequestPath::normalize($request->getUri()->getPath());
 
         // Demo ochrana předpokládá safe-method semantiku. Každý endpoint, který by
         // při GET zapisoval, musí mít vlastní demo větev bez persistence.

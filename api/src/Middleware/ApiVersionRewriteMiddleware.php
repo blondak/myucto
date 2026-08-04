@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -30,7 +31,11 @@ final class ApiVersionRewriteMiddleware implements MiddlewareInterface
         $uri = $request->getUri();
         $path = $uri->getPath();
 
-        if (preg_match('#^/api/v1/auth/(webauthn|mfa|session)(/|$)#', $path) === 1) {
+        // Denylist se testuje na normalizované cestě: `Uri::filterPath()` percent-encoding
+        // zachovává, router ho před dispatchem dekóduje, takže `/api/v1/auth/%77ebauthn/…`
+        // by jinak 404 minulo. Přepis níže naopak zůstává nad syrovou cestou, aby se
+        // encoding předával dál beze změny a dekódovalo se právě jednou, až v cíli.
+        if (preg_match('#^/api/v1/auth/(webauthn|mfa|session)(/|$)#', RequestPath::normalize($path)) === 1) {
             return Json::error(
                 new SlimResponse(404),
                 'not_found',

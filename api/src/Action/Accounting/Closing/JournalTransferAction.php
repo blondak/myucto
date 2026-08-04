@@ -9,16 +9,15 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
-use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -51,7 +50,6 @@ final class JournalTransferAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
-        private readonly SupplierBankAccountRepository $ownAccounts,
     ) {}
 
     public function transfer(Request $request, Response $response): Response
@@ -191,30 +189,40 @@ final class JournalTransferAction
         return $d !== false && $d->format('Y-m-d') === $v;
     }
 
-    /** @return list<array{tx_id:int,statement_id:int,posted_at:string,amount:float,direction:string}> */
+    /**
+     * Bankovní pohyby, které vypadají jako už zaúčtovaný převod (varování 409).
+     *
+     * Vlastnictví výpisu rozhoduje VÝHRADNĚ {@see BankStatementOwnershipResolver}
+     * — tenant predikát je součástí SQL, takže dotaz cizí pohyby vůbec nenačte.
+     * Dřívější varianta filtrovala až v PHP podle shody čísla účtu, čili `WHERE`
+     * sypalo přes celou instalaci a to, co prošlo aproximaci, končilo v těle 409
+     * (cross-tenant únik čísel pohybů, částek a dat).
+     *
+     * @return list<array{tx_id:int,statement_id:int,posted_at:string,amount:float,direction:string}>
+     */
     private function findBankCandidates(int $supplierId, float $amount, string $dateOut, string $dateIn): array
     {
-        $accounts = $this->ownAccounts->findActive($supplierId);
-        if ($accounts === []) return [];
-
         $from = (new \DateTimeImmutable($dateOut))->modify('-3 days')->format('Y-m-d');
         $to = (new \DateTimeImmutable($dateIn))->modify('+3 days')->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
-                    bs.account_number, bs.bank_code
+            'SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
           LEFT JOIN journal_entries je ON je.supplier_id = ? AND je.source_type = "bank"
                                       AND je.source_id = bt.id AND je.reversed_by IS NULL
-              WHERE ABS(bt.amount) = ? AND bt.posted_at BETWEEN ? AND ?
+              WHERE ' . BankStatementOwnershipResolver::sql('bs') . '
+                AND ABS(bt.amount) = ? AND bt.posted_at BETWEEN ? AND ?
                 AND bt.match_status <> "ignored" AND je.id IS NULL
               ORDER BY bt.posted_at, bt.id
-              LIMIT 100'
+              LIMIT 10'
         );
-        $stmt->execute([$supplierId, $amount, $from, $to]);
+        $stmt->execute(array_merge(
+            [$supplierId],
+            BankStatementOwnershipResolver::params($supplierId),
+            [$amount, $from, $to],
+        ));
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            if (!$this->statementBelongsToAccounts($row, $accounts)) continue;
             $out[] = [
                 'tx_id' => (int) $row['id'],
                 'statement_id' => (int) $row['statement_id'],
@@ -222,24 +230,7 @@ final class JournalTransferAction
                 'amount' => (float) $row['amount'],
                 'direction' => (float) $row['amount'] < 0 ? 'out' : 'in',
             ];
-            if (count($out) >= 10) break;
         }
         return $out;
-    }
-
-    /** @param list<array<string,mixed>> $accounts */
-    private function statementBelongsToAccounts(array $row, array $accounts): bool
-    {
-        $canonical = AccountNumberNormalizer::canonical((string) $row['account_number']);
-        $bank = AccountNumberNormalizer::canonicalBankCode($row['bank_code'] !== null ? (string) $row['bank_code'] : null);
-        foreach ($accounts as $account) {
-            if ($canonical !== (string) $account['account_canonical']) continue;
-            $candidateBank = AccountNumberNormalizer::canonicalBankCode(
-                $account['bank_code'] !== null ? (string) $account['bank_code'] : null,
-                $account['iban'] !== null ? (string) $account['iban'] : null,
-            );
-            if ($bank === null || $candidateBank === null || $bank === $candidateBank) return true;
-        }
-        return false;
     }
 }

@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Logbook;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\TripRepository;
@@ -30,6 +31,7 @@ final class TripsAction
         private readonly CarRepository $cars,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -75,6 +77,9 @@ final class TripsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->prepare($supplierId, $body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+        if ($ref = $this->tenantRefError($supplierId, $body)) {
+            return Json::error($response, 'invalid_reference', $ref, 400);
+        }
 
         $id = $this->repo->create($supplierId, $body, $this->userId($request));
         $this->log($request, 'trip.created', $id, $body);
@@ -91,6 +96,9 @@ final class TripsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->prepare($supplierId, $body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+        if ($ref = $this->tenantRefError($supplierId, $body)) {
+            return Json::error($response, 'invalid_reference', $ref, 400);
+        }
 
         $this->repo->update($id, $supplierId, $body);
         $this->log($request, 'trip.updated', $id, $body);
@@ -134,6 +142,19 @@ final class TripsAction
         }
         $body['distance_km'] = $distance;
         return null;
+    }
+
+    /**
+     * BOLA guard (security report 2026-08, R2 #7 / sweep F3) — car_id se v prepare()
+     * kontroluje odjakživa, category_id se zapisovalo nevázané a TripRepository::find()
+     * ho čte zpět nescoped joinem na číselník kategorií (unikal label i příznak
+     * is_private cizí firmy).
+     */
+    private function tenantRefError(int $supplierId, array $body): ?string
+    {
+        $badRefs = $this->tenantRefs->violations($supplierId, $body, ['category_id']);
+
+        return $badRefs !== [] ? TenantReferenceGuard::message($badRefs) : null;
     }
 
     private function intOrNull(mixed $v): ?int

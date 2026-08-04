@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SessionLockService;
 use MyInvoice\Service\IpMatcher;
@@ -84,7 +85,9 @@ final class SessionLockMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
         $method = strtoupper($request->getMethod());
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — recovery výjimky musí sedět
+        // přesně na to, co router doručí.
+        $path = RequestPath::normalize($request->getUri()->getPath());
         if ($request->getAttribute(AuthMiddleware::ATTR_LOGOUT_TOMBSTONE) === true) {
             if (self::isAllowed($method, $path, self::LOCKED_ALLOWED)
                 && $path === '/api/auth/logout'

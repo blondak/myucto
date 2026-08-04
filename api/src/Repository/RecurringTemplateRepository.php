@@ -21,6 +21,19 @@ final class RecurringTemplateRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    /**
+     * Detail šablony podle PK. Vlastnictví ověřuje Action vrstva (SupplierGuard::owns).
+     *
+     * Druhá vrstva proti BOLA (security report 2026-08, R2 b) — viz komentář
+     * u InvoiceRepository::find(). `projects` nemá vlastní `supplier_id`, scope
+     * jde přes `clients.supplier_id`.
+     *
+     * `currencies` tady scoped NENÍ: šablona z něj bere jen kód a symbol měny
+     * (bankovní údaje ze stejného řádku se čtou až při generování faktury, kde
+     * je hlídá InvoiceRepository::find()). Scoped JOIN by navíc při rozpadlé
+     * vazbě šablonu odstřihl od cronu úplně — mlčky nevystavená faktura je horší
+     * porucha než zobrazený kód měny.
+     */
     public function find(int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -32,10 +45,13 @@ final class RecurringTemplateRepository
                     cur.code AS currency, cur.symbol AS currency_symbol,
                     rc.label AS revenue_category_label, rc.code AS revenue_category_code
                FROM recurring_invoice_templates t
-               JOIN clients c ON c.id = t.client_id
+               JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
           LEFT JOIN projects p ON p.id = t.project_id
+                    AND EXISTS (SELECT 1 FROM clients pc
+                                 WHERE pc.id = p.client_id AND pc.supplier_id = t.supplier_id)
                JOIN currencies cur ON cur.id = t.currency_id
           LEFT JOIN revenue_categories rc ON rc.id = t.revenue_category_id
+                    AND rc.supplier_id = t.supplier_id
               WHERE t.id = ?'
         );
         $stmt->execute([$id]);
@@ -297,6 +313,12 @@ final class RecurringTemplateRepository
      *     (1. den měsíce next_run_date <= today) → čas otevřít koncept.
      *
      * Cron pak dle draft_open_mode a datumů rozhodne open vs. issue.
+     *
+     * BOLA (security report 2026-08, R2 c): před generováním musí client_id šablony
+     * pořád patřit k jejímu supplier_id. Bez toho by cron dogeneroval faktury z už
+     * uloženého cizího FK (uloženého dřív, než Action guard existoval) a leak by
+     * pokračoval i bez dalšího requestu útočníka. Šablona s rozpadlou vazbou se
+     * z generování tiše vynechá — opravit ji lze editací v UI.
      */
     public function findDue(): array
     {
@@ -304,6 +326,7 @@ final class RecurringTemplateRepository
             "SELECT t.id
                FROM recurring_invoice_templates t
                JOIN supplier s ON s.id = t.supplier_id
+               JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
               WHERE t.status = 'active'
                 AND (t.end_date IS NULL OR t.next_run_date <= t.end_date)
                 AND s.auto_generate_recurring = 1
@@ -393,10 +416,13 @@ final class RecurringTemplateRepository
                     cur.code AS currency, cur.symbol AS currency_symbol,
                     rc.label AS revenue_category_label, rc.code AS revenue_category_code
                FROM recurring_invoice_templates t
-               JOIN clients c ON c.id = t.client_id
+               JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
           LEFT JOIN projects p ON p.id = t.project_id
+                    AND EXISTS (SELECT 1 FROM clients pc
+                                 WHERE pc.id = p.client_id AND pc.supplier_id = t.supplier_id)
                JOIN currencies cur ON cur.id = t.currency_id
           LEFT JOIN revenue_categories rc ON rc.id = t.revenue_category_id
+                    AND rc.supplier_id = t.supplier_id
               WHERE t.id IN (' . $place . ')'
         );
         $stmt->execute($ids);

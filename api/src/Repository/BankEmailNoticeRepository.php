@@ -90,7 +90,13 @@ final class BankEmailNoticeRepository
             'port' => max(1, min(65535, (int) ($body['port'] ?? 993))),
             'encryption' => in_array($body['encryption'] ?? 'ssl', ['ssl', 'tls', 'none'], true) ? (string) $body['encryption'] : 'ssl',
             'validate_cert' => array_key_exists('validate_cert', $body) ? (int) (bool) $body['validate_cert'] : 1,
-            'require_email_auth' => !empty($body['require_email_auth']) ? 1 : 0,
+            // Fail-closed default: ověření autenticity (DKIM/DMARC) je u NOVÉHO účtu
+            // ZAPNUTÉ, stejně jako DB default. Chybí-li klíč v payloadu u existujícího
+            // účtu, ponech dosavadní volbu — vypnout jde jen explicitním
+            // `require_email_auth: false` z UI, ne opomenutím pole.
+            'require_email_auth' => array_key_exists('require_email_auth', $body)
+                ? (int) (bool) $body['require_email_auth']
+                : (int) (bool) ($current['require_email_auth'] ?? 1),
             'allow_forwarded' => !empty($body['allow_forwarded']) ? 1 : 0,
             'forwarded_from' => $this->nullable($body['forwarded_from'] ?? null),
             'email_auth_serv_id' => $this->nullable($body['email_auth_serv_id'] ?? null),
@@ -154,12 +160,18 @@ final class BankEmailNoticeRepository
      */
     public function providers(int $supplierId): array
     {
+        // `enabled` u globálního provideru je efektivní hodnota: per-supplier override
+        // (viz saveProvider) přebíjí globální nastavení, ať si dodavatel umí vypnout
+        // provider, který nevlastní a nemůže editovat.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM bank_email_notice_providers
-              WHERE supplier_id IS NULL OR supplier_id = ?
-              ORDER BY supplier_id IS NULL DESC, name'
+            'SELECT p.*, o.enabled AS override_enabled
+               FROM bank_email_notice_providers p
+          LEFT JOIN bank_email_notice_provider_overrides o
+                 ON o.provider_id = p.id AND o.supplier_id = ? AND p.supplier_id IS NULL
+              WHERE p.supplier_id IS NULL OR p.supplier_id = ?
+              ORDER BY p.supplier_id IS NULL DESC, p.name'
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute([$supplierId, $supplierId]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         foreach ($rows as &$row) {
             $this->castProvider($row);
@@ -217,8 +229,18 @@ final class BankEmailNoticeRepository
 
         if ($id !== null && $id > 0) {
             $owner = $this->providerSupplierId($id);
+            if ($owner === null) {
+                // Globální provider (supplier_id IS NULL) patří všem dodavatelům, takže se
+                // jeho definice needituje. Dodavatel si ho ale MUSÍ umět vypnout pro sebe —
+                // dokud to nešlo, byl nebezpečný globální default (provider bez whitelistu
+                // odesílatele) z produktu neopravitelný pro všechny role včetně superadmina.
+                // Ukládá se per-supplier override; globální řádek zůstává nedotčený.
+                $this->assertGlobalProviderBodyUnchanged($id, $data);
+                $this->setGlobalProviderEnabled($supplierId, $id, (bool) $data['enabled']);
+                return $this->providerById($id, $supplierId);
+            }
             if ($owner !== $supplierId) {
-                throw new \RuntimeException('Globální provider nebo provider jiného dodavatele nelze upravit.');
+                throw new \RuntimeException('Provider jiného dodavatele nelze upravit.');
             }
             $data['id'] = $id;
             $stmt = $this->db->pdo()->prepare(
@@ -661,7 +683,8 @@ final class BankEmailNoticeRepository
             'port' => 993,
             'encryption' => 'ssl',
             'validate_cert' => true,
-            'require_email_auth' => false,
+            // Fail-closed default nového (dosud neuloženého) účtu — viz saveImapAccount.
+            'require_email_auth' => true,
             'allow_forwarded' => false,
             'forwarded_from' => null,
             'email_auth_serv_id' => null,
@@ -682,18 +705,78 @@ final class BankEmailNoticeRepository
     }
 
     /**
+     * @param int|null $supplierId Kontext dodavatele pro efektivní `enabled`
+     *                             globálního provideru (null = syrová globální hodnota).
      * @return array<string,mixed>
      */
-    private function providerById(int $id): array
+    private function providerById(int $id, ?int $supplierId = null): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_email_notice_providers WHERE id = ?');
-        $stmt->execute([$id]);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT p.*, o.enabled AS override_enabled
+               FROM bank_email_notice_providers p
+          LEFT JOIN bank_email_notice_provider_overrides o
+                 ON o.provider_id = p.id AND o.supplier_id = ? AND p.supplier_id IS NULL
+              WHERE p.id = ?'
+        );
+        // supplier_id 0 v `supplier` neexistuje → LEFT JOIN nikdy nenajde override.
+        $stmt->execute([$supplierId ?? 0, $id]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$row) {
             throw new \RuntimeException('Provider nenalezen.');
         }
         $this->castProvider($row);
         return $row;
+    }
+
+    /**
+     * Zapne/vypne globálního providera JEN pro daného dodavatele.
+     */
+    private function setGlobalProviderEnabled(int $supplierId, int $providerId, bool $enabled): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO bank_email_notice_provider_overrides (supplier_id, provider_id, enabled)
+                  VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)'
+        )->execute([$supplierId, $providerId, $enabled ? 1 : 0]);
+    }
+
+    /**
+     * U globálního provideru smí dodavatel přepnout jen `enabled`. Když payload mění
+     * i definici (kódy, vzory), skonči hláškou místo tichého zahození změn — na úpravu
+     * je v UI „Duplikovat", které založí vlastní editovatelnou kopii.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function assertGlobalProviderBodyUnchanged(int $id, array $data): void
+    {
+        $current = $this->providerById($id);
+        $differs = false;
+        foreach (['code', 'name'] as $key) {
+            if ((string) ($current[$key] ?? '') !== (string) ($data[$key] ?? '')) {
+                $differs = true;
+            }
+        }
+        foreach (['sender_whitelist', 'subject_pattern', 'body_pattern'] as $key) {
+            if ($this->nullable($current[$key] ?? null) !== $this->nullable($data[$key] ?? null)) {
+                $differs = true;
+            }
+        }
+        foreach (['field_patterns', 'normalizer_config'] as $key) {
+            $before = is_array($current[$key] ?? null) ? $current[$key] : [];
+            $after = json_decode((string) ($data[$key] ?? '{}'), true);
+            if (!is_array($after)) {
+                $after = [];
+            }
+            if ($before != $after) {
+                $differs = true;
+            }
+        }
+        if ($differs) {
+            throw new \RuntimeException(
+                'U globálního provideru lze přepnout jen zapnutí/vypnutí pro vlastní firmu. '
+                . 'Pro úpravu vzorů použij Duplikovat a edituj vlastní kopii.'
+            );
+        }
     }
 
     private function providerSupplierId(int $id): ?int
@@ -734,9 +817,13 @@ final class BankEmailNoticeRepository
      */
     private function castProvider(array &$row): void
     {
+        // Per-supplier override globálního provideru (viz saveProvider) přebíjí `enabled`.
+        $override = $row['override_enabled'] ?? null;
+        unset($row['override_enabled']);
         $row['id'] = (int) $row['id'];
         $row['supplier_id'] = $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null;
-        $row['enabled'] = (bool) $row['enabled'];
+        $row['enabled'] = $override !== null ? (bool) $override : (bool) $row['enabled'];
+        $row['disabled_by_supplier'] = $override !== null && !(bool) $override;
         $row['field_patterns'] = $this->decodeJson($row['field_patterns'] ?? '{}');
         $row['normalizer_config'] = $this->decodeJson($row['normalizer_config'] ?? '{}');
         $row['provider_ref'] = 'db:' . $row['id'];

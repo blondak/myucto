@@ -78,16 +78,38 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | Procházet | Ověří připojení a nabídne složky ze serveru |
 | Max. zpráv na běh | Kolik nejnovějších e-mailů cron načte při jednom běhu |
 | Zpracovat od data | Starší e-maily se ignorují i když spadnou do limitu |
+| Vyžadovat ověření autenticity | Zpracují se jen e-maily, u kterých přijímací server potvrdil DKIM/DMARC; **zapnuto** |
+| Důvěryhodné authserv-id | Volitelné připnutí serveru, jehož verdiktu se věří (např. `mx.mojedomena.cz`) |
 | Přijímat přeposlaná (FW) avíza | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je tvoje adresa, ne banka) |
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | Po úspěchu | Co udělat se zpracovanou zprávou |
+
+### Ověření autenticity e-mailu (DKIM/DMARC)
+
+Odesílatel e-mailu se dá podvrhnout, takže samotná adresa v poli *Od* nic
+negarantuje. **Vyžadovat ověření autenticity** je proto u nových účtů zapnuté:
+systém sám podpisy nepřepočítává, ale věří verdiktu, který k doručené zprávě
+připsal tvůj přijímací server do hlavičky `Authentication-Results`. Zpracuje se
+jen e-mail s `dmarc=pass`, nebo s `dkim=pass` a doménou zarovnanou na odesílatele.
+
+**Chybějící hlavička je odmítnutí, ne výjimka.** Když zprávě hlavička chybí nebo
+verdikt nesedí, avízo se nezpracuje a v přehledu zpracovaných zpráv skončí ve
+stavu `security_rejected` s uvedeným důvodem. Pokud tvůj poštovní server
+hlavičku `Authentication-Results` vůbec nepřidává, kontrolu u daného účtu vypni —
+je to ale vědomé snížení ochrany, po kterém stačí k označení faktury za zaplacenou
+jediný podvržený e-mail.
+
+Hlavičku `Authentication-Results` si umí do těla zprávy vložit kdokoli. Důvěryhodná
+je jen ta, kterou přidal tvůj server. Když jich v cestě je víc, připni v poli
+**Důvěryhodné authserv-id** název svého serveru — pak se hodnotí právě jeho řádek.
+U přeposlaných avíz platí, že přeposláním původní podpis banky zaniká, takže se
+ověření vztahuje na přeposílatele, ne na banku.
 
 Pokud do schránky chodí avíza **přeposlaná** (např. z firemní schránky na sběrnou
 adresu), zapni **Přijímat přeposlaná (FW) avíza**. U přímého avíza poznává banku
 podle odesílatele, ale přeposláním se odesílatelem stáváš ty — proto se pak banka
 hledá i z těla e-mailu. Volitelně omez **E-mail přeposílatele**, ať se zpracují
-jen avíza od tvé adresy. Přeposláním zaniká původní podpis banky (DKIM), takže
-ověření autenticity se vztahuje na přeposílatele, ne na banku.
+jen avíza od tvé adresy.
 
 Polling zprávy standardně **neoznačuje jako přečtené**. Systém si úspěšně
 zpracované e-maily pamatuje v databázi podle `Message-ID` / UID / fallback
@@ -105,11 +127,23 @@ Typy providerů:
 - **Systémový provider** — dodaný aplikací, např. Raiffeisenbank, UniCredit Bank, ČSOB, Česká spořitelna, Fio banka, Banka CREDITAS, MONETA Money Bank nebo Air Bank.
 - **Regex provider** — vlastní provider dodavatele, konfigurovaný v UI.
 
+Předpřipravený společný provider **Česká spořitelna** je nově dodávaný **vypnutý**,
+protože nemá vyplněný whitelist odesílatelů (viz *Odesílatel je povinný* níže) a
+bez něj by přijímal avízo od kohokoli. Používáš-li ho, klikni na **Duplikovat**,
+do své kopie doplň skutečnou adresu, ze které ČS avíza posílá, kopii zapni
+a přepni na ni mapování účtu.
+
 Systémový provider se přímo needituje (je společný pro všechny). Když ho chceš
 upravit, použij u něj tlačítko **Duplikovat** — vytvoří se editovatelná kopie,
 ve které si dolaď vzory a otestuj ji přes **Test parseru**. V mapování účtu pak
 přepneš účet z původního providera na svou kopii. Duplikovat lze i vlastní regex
 provider.
+
+Přepínač **Aktivní provider** u společného provideru je ale k dispozici: vypnutí
+platí **jen pro tvoji firmu** a ostatní firmy se nedotkne. Hodí se, když nechceš,
+aby se společný provider vůbec pokoušel tvoje e-maily zpracovat. Zpátky ho zapneš
+stejným přepínačem. Vzory se u společného provideru měnit nedají — pokus o to
+skončí hláškou s odkazem na **Duplikovat**.
 
 Systémový provider Raiffeisenbank rozlišuje směr převodu podle úvodního textu
 o příchozí nebo odchozí platbě; u starší či odlišné šablony použije jako záložní
@@ -134,10 +168,30 @@ U regex provideru nastavuješ:
 | Pole | Význam |
 |---|---|
 | Název / kód | Interní identifikace provideru |
-| Odesílatel | Whitelist e-mailů, např. `info@rb.cz` |
+| Odesílatel | **Povinný** whitelist odesílatelů, např. `info@rb.cz` |
 | Regex předmětu | Volitelný pattern pro subject, např. `Pohyb\s+na\s+účtě` |
 | Regex těla | Volitelný pattern, který musí být v těle e-mailu |
 | Vytěžená pole | Regexy pro VS, částku, měnu, datum, cílový účet atd. |
+
+### Odesílatel je povinný
+
+Pole **Odesílatel** vyplň vždy. Regex provider s prázdným odesílatelem
+**nezpracuje nic** — prázdná hodnota neznamená „přijmout od kohokoli". Vzory
+předmětu a těla samy o sobě nechrání: text avíza si dokáže napsat kdokoli a čísla
+účtu i variabilní symbol jsou vytištěné na každé vydané faktuře, takže bez
+whitelistu by stačil jeden podvržený e-mail do sledované schránky k označení
+faktury za zaplacenou.
+
+Whitelist může obsahovat víc položek oddělených mezerou, čárkou nebo středníkem
+a rozlišuje dva tvary:
+
+- **adresa** (`info@rb.cz`) — musí sedět přesně; funguje i tvar `Název <info@rb.cz>`,
+- **doména** (`rb.cz`) — projde libovolná adresa v této doméně i v jejích
+  subdoménách (`noreply@mail.rb.cz`), ale ne `info@rb.cz.podvod.example`.
+
+Doménový tvar použij u bank, které rozesílají avíza z několika adres. Odesílatel
+je ale jen první filtr — skutečnou ochranu dělá **Vyžadovat ověření autenticity**
+u IMAP účtu a povinné mapování cílového účtu avíza na tvůj bankovní účet.
 
 Povinná vytěžená pole:
 

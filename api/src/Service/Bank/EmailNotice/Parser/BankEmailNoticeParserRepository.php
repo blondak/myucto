@@ -116,16 +116,29 @@ final class BankEmailNoticeParserRepository
             return $this->providersCache[$cacheKey];
         }
 
-        $sql = 'SELECT * FROM bank_email_notice_providers WHERE 1 = 1';
+        // Globálního providera (supplier_id IS NULL) nelze editovat per dodavatel,
+        // ale KAŽDÝ dodavatel si ho musí umět vypnout pro sebe — jinak je nebezpečný
+        // globální default z produktu neopravitelný. Override řádek v
+        // `bank_email_notice_provider_overrides` proto přebíjí `enabled`.
+        $scoped = $supplierId !== null && $supplierId > 0;
         $params = [];
-        if ($enabledOnly) {
-            $sql .= ' AND enabled = 1';
-        }
-        if ($supplierId !== null && $supplierId > 0) {
-            $sql .= ' AND (supplier_id IS NULL OR supplier_id = ?)';
+        if ($scoped) {
+            $sql = 'SELECT p.*, o.enabled AS override_enabled
+                      FROM bank_email_notice_providers p
+                 LEFT JOIN bank_email_notice_provider_overrides o
+                        ON o.provider_id = p.id AND o.supplier_id = ? AND p.supplier_id IS NULL
+                     WHERE (p.supplier_id IS NULL OR p.supplier_id = ?)';
             $params[] = $supplierId;
+            $params[] = $supplierId;
+        } else {
+            $sql = 'SELECT p.*, NULL AS override_enabled
+                      FROM bank_email_notice_providers p
+                     WHERE 1 = 1';
         }
-        $sql .= ' ORDER BY supplier_id IS NOT NULL DESC, id ASC';
+        if ($enabledOnly) {
+            $sql .= $scoped ? ' AND COALESCE(o.enabled, p.enabled) = 1' : ' AND p.enabled = 1';
+        }
+        $sql .= ' ORDER BY p.supplier_id IS NOT NULL DESC, p.id ASC';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -133,6 +146,9 @@ final class BankEmailNoticeParserRepository
         foreach ($rows as $row) {
             $row['field_patterns'] = $this->json((string) $row['field_patterns']);
             $row['normalizer_config'] = $this->json((string) ($row['normalizer_config'] ?? '{}'));
+            if (($row['override_enabled'] ?? null) !== null) {
+                $row['enabled'] = $row['override_enabled'];
+            }
             $providers[] = $this->providerFromDatabaseRow($row);
         }
 

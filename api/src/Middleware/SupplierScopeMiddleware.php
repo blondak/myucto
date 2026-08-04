@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -42,7 +43,9 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
     {
         // Ceremonie WebAuthn, step-up MFA a zámek session se dějí mimo kontext firmy —
         // scope by je zablokoval u účtu bez membershipu, který se ale musí umět ověřit.
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — výjimky musí platit přesně tam,
+        // kam router request doručí.
+        $path = RequestPath::normalize($request->getUri()->getPath());
         if (str_starts_with($path, '/api/auth/webauthn/')
             || str_starts_with($path, '/api/auth/mfa/')
             || str_starts_with($path, '/api/auth/session/')

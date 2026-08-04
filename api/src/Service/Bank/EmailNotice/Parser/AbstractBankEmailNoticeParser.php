@@ -262,19 +262,32 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
     }
 
     /**
-     * Whitelist odesílatelů providera (mezera/čárka/středník oddělené adresy);
-     * prázdný = povolit vše. Matchuje přesnou adresu i tvar „Jméno <adresa>".
+     * Whitelist odesílatelů providera (mezera/čárka/středník oddělené položky).
+     *
+     * FAIL-CLOSED: prázdný nebo nevyplněný whitelist NEPUSTÍ NIC. Dřív znamenala
+     * nepřítomnost hodnoty „věř komukoliv", takže regex provider bez whitelistu
+     * (typicky seedovaný globální provider) přijal podvržené avízo od libovolného
+     * odesílatele — a k označení faktury za zaplacenou stačily údaje vytištěné
+     * na faktuře. Režim „nekontrolovat odesílatele" tímhle záměrně NEEXISTUJE;
+     * kdo chce providera používat, musí odesílatele vyplnit.
+     *
+     * Položka s „@" = přesná adresa (matchuje i tvar „Jméno <adresa>"), položka
+     * bez „@" = doména odesílatele včetně subdomén (stejná sémantika jako
+     * `forwarded_from` u IMAP účtu), ať jde whitelist vůbec rozumně vyplnit
+     * u bank, které rozesílají z více adres.
      */
     protected function senderAllowed(string $sender, string $whitelist): bool
     {
-        $whitelist = trim($whitelist);
-        if ($whitelist === '') {
-            return true;
+        $entries = $this->whitelistEntries($whitelist);
+        if ($entries === []) {
+            return false;
         }
-        $sender = strtolower($sender);
-        foreach (preg_split('/[\s,;]+/', strtolower($whitelist)) ?: [] as $allowed) {
-            $allowed = trim($allowed);
-            if ($allowed === '') {
+        $sender = strtolower(trim($sender));
+        foreach ($entries as $allowed) {
+            if (!str_contains($allowed, '@')) {
+                if (SenderDomain::matches($sender, $allowed)) {
+                    return true;
+                }
                 continue;
             }
             if ($sender === $allowed || str_contains($sender, '<' . $allowed . '>')) {
@@ -285,16 +298,38 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
     }
 
     /**
+     * Rozparsuje whitelist na normalizované (lowercase, neprázdné) položky.
+     *
+     * @return list<string>
+     */
+    private function whitelistEntries(string $whitelist): array
+    {
+        $entries = [];
+        foreach (preg_split('/[\s,;]+/', strtolower(trim($whitelist))) ?: [] as $entry) {
+            $entry = trim($entry);
+            if ($entry !== '') {
+                $entries[] = $entry;
+            }
+        }
+        return $entries;
+    }
+
+    /**
      * Varianta `senderAllowed` s podporou PŘEPOSLANÝCH (FW) avíz (#161) — pro Regex
      * providery (ČS i custom), které routují podle whitelistu adres místo domény banky.
      *
      * Přímé avízo: `From` sedí na whitelist → hotovo. Přeposlané avízo (opt-in
      * `allow_forwarded`) má `From` přeposílatele, proto se whitelistovaná doména
      * hledá i v těle (přeposlaná hlavička / patička), volitelně po pinu přeposílatele.
-     * Prázdný whitelist = povolit vše (i přeposlané). Routing-only, viz `senderMatchesDomain`.
+     * FAIL-CLOSED stejně jako `senderAllowed`: prázdný whitelist neprojde ani
+     * v přeposlané větvi. Routing-only, viz `senderMatchesDomain`.
      */
     protected function senderAllowedForwarded(BankEmailNoticeMessage $message, string $whitelist): bool
     {
+        $entries = $this->whitelistEntries($whitelist);
+        if ($entries === []) {
+            return false;
+        }
         if ($this->senderAllowed($message->sender, $whitelist)) {
             return true;
         }
@@ -304,15 +339,8 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         if ($message->forwardedFrom !== '' && !$this->forwarderMatches($message->sender, $message->forwardedFrom)) {
             return false;
         }
-        if (trim($whitelist) === '') {
-            return true;
-        }
         $domains = [];
-        foreach (preg_split('/[\s,;]+/', strtolower($whitelist)) ?: [] as $allowed) {
-            $allowed = trim($allowed);
-            if ($allowed === '') {
-                continue;
-            }
+        foreach ($entries as $allowed) {
             $at = strrpos($allowed, '@');
             $domain = $at !== false ? substr($allowed, $at + 1) : $allowed;
             if ($domain !== '') {

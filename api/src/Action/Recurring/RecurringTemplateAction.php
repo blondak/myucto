@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Recurring;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -48,7 +49,24 @@ final class RecurringTemplateAction
         private readonly Config $config,
         private readonly \MyInvoice\Service\Currency\CnbExchangeRateClient $cnb,
         private readonly RecurringPriceListService $priceList,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
+
+    /**
+     * BOLA guard (security report 2026-08, R2 #2 a #3) — cizí klíče z těla musí patřit
+     * supplierovi šablony. revenue_category_id má vlastní kontrolu už ve validate()
+     * (#119), tady je pro úplnost seznamu a jako jednotná chybová cesta.
+     *
+     * @return list<string>
+     */
+    private function badTenantRefs(int $supplierId, array $body): array
+    {
+        return $this->tenantRefs->violations(
+            $supplierId,
+            $body,
+            ['client_id', 'project_id', 'currency_id', 'revenue_category_id'],
+        );
+    }
 
     public function list(Request $request, Response $response): Response
     {
@@ -240,6 +258,11 @@ final class RecurringTemplateAction
         $supplierId = SupplierGuard::currentId($request);
         $body['supplier_id'] = $supplierId;
 
+        // PŘED prepareCatalogItems() — ten už s client_id/currency_id sahá do ceníku.
+        if ($badRefs = $this->badTenantRefs($supplierId, $body)) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
         // next_run_date = anchor_date pokud není explicitně zadané
         $body['next_run_date'] = $body['next_run_date'] ?? ($body['anchor_date'] ?? null);
         try {
@@ -279,6 +302,12 @@ final class RecurringTemplateAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $body['supplier_id'] = (int) $tpl['supplier_id'];
+
+        // PŘED jakoukoli prací s dodanými FK (snapshot check níž čte body['currency_id']).
+        if ($badRefs = $this->badTenantRefs((int) $tpl['supplier_id'], $body)) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
         $body['next_run_date'] = empty($tpl['last_run_date'])
             ? ($body['anchor_date'] ?? $tpl['anchor_date'])
             : $tpl['next_run_date'];

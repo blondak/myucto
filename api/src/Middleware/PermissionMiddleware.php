@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RoutePermissionMap;
@@ -39,7 +40,12 @@ final class PermissionMiddleware implements MiddlewareInterface
         $method = strtoupper($request->getMethod());
         if ($method === 'OPTIONS') return $handler->handle($request);
 
-        $route = $this->routes->match($method === 'HEAD' ? 'GET' : $method, $request->getUri()->getPath());
+        // Cestu normalizujeme stejně, jako ji dekóduje router (RequestPath) — jinak
+        // `/api/purchase-invoices/%70ayment-orders` mine konkrétní pravidlo a spadne
+        // na hrubší modulový catch-all, zatímco router doručí tutéž Action.
+        $path = RequestPath::normalize($request->getUri()->getPath());
+
+        $route = $this->routes->match($method === 'HEAD' ? 'GET' : $method, $path);
         if ($route === null) return $this->forbidden($request);
         if ($route->kind === RoutePermissionMap::PUBLIC || $route->kind === RoutePermissionMap::SELF_SERVICE) {
             return $handler->handle($request);

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
@@ -47,6 +48,7 @@ final class CreatePurchaseInvoiceAction
         private readonly Connection $db,
         private readonly AiSuggestionService $aiSuggestions,
         private readonly CnbRateDeviationChecker $rateChecker,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -61,6 +63,19 @@ final class CreatePurchaseInvoiceAction
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
+        }
+
+        // BOLA guard (security report 2026-08, R2 #5 / sweep F5) — vendor_id se váže hned
+        // níž vlastní kontrolou (potřebuje i řádek klienta kvůli markAsVendor/DIČ), zbylé
+        // tři FK z těla se dosud zapisovaly nevázané. PurchaseInvoiceValidation kontroluje
+        // jen `> 0`.
+        $badRefs = $this->tenantRefs->violations(
+            $supplierId,
+            $body,
+            ['expense_category_id', 'currency_id', 'payment_currency_id'],
+        );
+        if ($badRefs !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
         }
 
         // Vendor musí existovat a patřit tenantovi (anti-cross-tenant injection)

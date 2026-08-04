@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\Config;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -54,7 +55,9 @@ final class CsrfMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $path = $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — výjimky musí platit přesně tam,
+        // kam router request doručí, ani o cestu víc.
+        $path = RequestPath::normalize($request->getUri()->getPath());
 
         // Public schvalovací endpointy — bez Origin/CSRF (klient přijde z emailu, Origin
         // bude jiný nebo prázdný). Anti-bot ochrana = token v URL + CAPTCHA.

@@ -37,7 +37,9 @@ final class RegexBankEmailNoticeParserCsTest extends TestCase
             name: 'Regex ČS test',
             parserType: 'regex',
             enabled: true,
-            senderWhitelist: null,
+            // Whitelist odesílatele je povinný — parser je fail-closed a provider
+            // bez vyplněného odesílatele nepustí nic (viz senderAllowed).
+            senderWhitelist: 'automat@csas.cz',
             subjectPattern: null,
             bodyPattern: null,
             fieldPatterns: $this->csFieldPatterns(),
@@ -325,7 +327,7 @@ TEXT;
             name: 'Regex ČS test',
             parserType: 'regex',
             enabled: true,
-            senderWhitelist: null,
+            senderWhitelist: 'automat@csas.cz',
             subjectPattern: null,
             bodyPattern: 'Směr\s+platby', // pattern s diakritikou vs. ASCII tělo
             fieldPatterns: $this->csFieldPatterns(),

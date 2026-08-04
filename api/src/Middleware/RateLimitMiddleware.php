@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -55,7 +56,9 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $path = $this->normalizePath($request->getUri()->getPath());
+        // Normalizace cesty (jedno rawurldecode jako router) — bez ní běželo
+        // `POST /api/auth/%66orgot` úplně bez limitu; viz RequestPath.
+        $path = RequestPath::normalize($request->getUri()->getPath());
         $method = strtoupper($request->getMethod());
         $ip = $this->ipMatcher->clientIp(
             $request->getServerParams(),
@@ -125,53 +128,6 @@ final class RateLimitMiddleware implements MiddlewareInterface
         $state = $this->consumeState($key, $limit, $window);
 
         return $state['allowed'] ? null : max(1, $state['ttl']);
-    }
-
-    /**
-     * Normalizace cesty pro matchování pravidel.
-     *
-     * Tenhle middleware běží PŘED RoutingMiddleware. `Slim\Psr7\Uri::filterPath()`
-     * percent-encoding ZACHOVÁVÁ, kdežto `Slim\Routing\RouteResolver` dělá před
-     * dispatchem `rawurldecode()`. Bez normalizace tedy `POST /api/auth/%66orgot`
-     * nematchlo žádné pravidlo (a generická větev celé /api/auth/ přeskakuje),
-     * takže endpoint běžel úplně BEZ limitu — router ho přitom normálně doručil
-     * do ForgotPasswordAction. Totéž `/api/auth/%74okens`.
-     *
-     * Dekódujeme PRÁVĚ JEDNOU, stejně jako router — vícenásobné dekódování je
-     * samo o sobě zranitelnost (`%252f` by se při druhém průchodu stalo `/`
-     * a rozsekalo cestu na segmenty, které router nikdy neviděl).
-     *
-     * Navíc srovnáme vícenásobná lomítka a `.` / `..` segmenty. Router tohle
-     * nedělá, takže jsme tu striktnější než dispatcher: v nejhorším případě
-     * uplatníme limit na cestu, kterou router stejně odmítne 404 — fail-closed.
-     */
-    private function normalizePath(string $path): string
-    {
-        $decoded = rawurldecode($path);
-
-        // Null byte v cestě není nikdy legitimní; ať neuřízne porovnání.
-        $decoded = str_replace("\0", '', $decoded);
-
-        $trailingSlash = $decoded !== '/' && str_ends_with($decoded, '/');
-
-        $out = [];
-        foreach (explode('/', $decoded) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
-            }
-            if ($segment === '..') {
-                array_pop($out);
-                continue;
-            }
-            $out[] = $segment;
-        }
-
-        $normalized = '/' . implode('/', $out);
-        if ($trailingSlash && $normalized !== '/') {
-            $normalized .= '/';
-        }
-
-        return $normalized;
     }
 
     /**

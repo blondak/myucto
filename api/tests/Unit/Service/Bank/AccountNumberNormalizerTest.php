@@ -139,6 +139,31 @@ final class AccountNumberNormalizerTest extends TestCase
         yield 'empty' => [null, null, null];
     }
 
+    /**
+     * `normalize()` a `canonical()` se ZÁMĚRNĚ rozcházejí a sjednotit je NELZE.
+     *
+     * `normalize()` je čistý strip cifer — jeho výstup se persistuje
+     * (`bank_transactions.import_fingerprint`, `bank_posting_rules.counterparty_account`)
+     * a zrcadlí ho SQL v {@see \MyInvoice\Repository\BankStatementOwnershipResolver}.
+     * `canonical()` navíc odřízne kód banky za lomítkem a rozumí CZ IBANu — je to klíč
+     * vlastního účtu (`supplier_bank_accounts.account_canonical`).
+     *
+     * Kdo staví tenant guard, musí použít TUTÉŽ funkci jako strana, kterou hlídá —
+     * míchání obou je přesně díra R4. Tenhle test je pojistka, aby „zjednodušení" na
+     * jednu funkci nebylo tiché: rozbije se tady, ne až v produkčních datech.
+     */
+    public function testNormalizeAndCanonicalDivergeOnBankCodeSuffixByDesign(): void
+    {
+        self::assertSame('1234567890800', AccountNumberNormalizer::normalize('123456789/0800'));
+        self::assertSame('123456789', AccountNumberNormalizer::canonical('123456789/0800'));
+        self::assertSame('123456789', AccountNumberNormalizer::canonical('123456789'));
+        self::assertSame('123456789', AccountNumberNormalizer::normalize('123456789'));
+
+        // canonical() je u ne-CZ IBANu přísnější (null), normalize() vrátí cifry.
+        self::assertNull(AccountNumberNormalizer::canonical('DE89370400440532013000'));
+        self::assertSame('89370400440532013000', AccountNumberNormalizer::normalize('DE89370400440532013000'));
+    }
+
     public function testCanonicalBankCodePrefersExplicitCodeAndFallsBackToIban(): void
     {
         self::assertSame('0100', AccountNumberNormalizer::canonicalBankCode('100'));

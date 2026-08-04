@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\InstallStateCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -45,7 +46,9 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $key = strtoupper($request->getMethod()) . ' ' . $request->getUri()->getPath();
+        // Normalizovaná cesta (viz RequestPath) — allowlist setupu musí sedět
+        // přesně na to, co router doručí.
+        $key = strtoupper($request->getMethod()) . ' ' . RequestPath::normalize($request->getUri()->getPath());
         if (in_array($key, self::ALLOWED_PATHS, true)) {
             return $handler->handle($request);
         }

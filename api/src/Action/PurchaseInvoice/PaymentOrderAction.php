@@ -7,6 +7,8 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payment\PaymentOrderService;
@@ -23,19 +25,37 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/purchase-invoices/payment-orders/{id}                     → detail dávky (read)
  *   GET    /api/purchase-invoices/payment-orders/{id}/download?format=abo|csv|pdf → soubor (read)
  *
- * Zápisové operace (POST) blokuje PermissionMiddleware pro readonly uživatele dle metody.
+ * RBAC (defense-in-depth): PermissionMiddleware gatuje celou rodinu
+ * /purchase-invoices/payment-orders na 'purchase_invoices.payment_orders' (GET = read,
+ * ostatní metody = write). Action si totéž právo ověřuje sama, protože jinak by ji
+ * chránilo jen matchování řetězce cesty — a to je právě ta vrstva, která se s routerem
+ * dokázala rozejít. Hrubý klíč 'purchase_invoices' tu schválně NESTAČÍ, na ten se
+ * degradovaná cesta spadla.
  */
 final class PaymentOrderAction
 {
+    private const PERMISSION = 'purchase_invoices.payment_orders';
+
     public function __construct(
         private readonly PaymentOrderService $service,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
 
+    /** Dokontrola konkrétního práva (ne modulového 'purchase_invoices'). */
+    private function denied(Request $request, Response $response, AccessLevel $minimum): ?Response
+    {
+        if (RequestAuthorization::allows($request, self::PERMISSION, $minimum)) {
+            return null;
+        }
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+    }
+
     /** GET candidates + payer accounts (stránkovaně). */
     public function candidates(Request $request, Response $response): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::READ)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $q = $request->getQueryParams();
         $currency = $q['currency'] ?? null;
@@ -57,6 +77,8 @@ final class PaymentOrderAction
     /** POST — vytvoř (ulož) platební příkaz. */
     public function create(Request $request, Response $response): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0) ?: null;
@@ -90,6 +112,8 @@ final class PaymentOrderAction
     /** GET — on-demand kontrola účtu faktury proti zveřejněným účtům plátce DPH (CRPDPH). */
     public function verifyAccount(Request $request, Response $response): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::READ)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $invoiceId = (int) ($request->getQueryParams()['invoice_id'] ?? 0);
         $res = $this->service->verifyInvoiceAccount($supplierId, $invoiceId);
@@ -102,6 +126,8 @@ final class PaymentOrderAction
     /** POST — „Jen označit": zařadit vybrané faktury k úhradě bez exportu. */
     public function markOrdered(Request $request, Response $response): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0) ?: null;
@@ -125,6 +151,8 @@ final class PaymentOrderAction
     /** GET — historie dávek (stránkovaně). */
     public function history(Request $request, Response $response): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::READ)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $p = Pagination::fromQuery($request->getQueryParams(), 50);
         [$rows, $total] = $this->service->history($supplierId, $p['per_page'], $p['offset']);
@@ -134,6 +162,8 @@ final class PaymentOrderAction
     /** GET — detail dávky (vč. položek). */
     public function show(Request $request, Response $response, array $args): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::READ)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $view = $this->service->view($id, $supplierId);
@@ -146,6 +176,8 @@ final class PaymentOrderAction
     /** GET — stažení souboru (csv/pdf/abo). */
     public function download(Request $request, Response $response, array $args): Response
     {
+        if ($err = $this->denied($request, $response, AccessLevel::READ)) return $err;
+
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $format = strtolower((string) ($request->getQueryParams()['format'] ?? 'abo'));

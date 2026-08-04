@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Report;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -31,6 +32,7 @@ final class RelatedPartyAction
 {
     public function __construct(
         private readonly RelatedPartyService $service,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     /** GET transakce se spojenými osobami + cenové odchylky za období. */
@@ -87,6 +89,14 @@ final class RelatedPartyAction
         $year = (int) ($body['fiscal_year'] ?? 0);
         if ($year < 2000 || $year > 2100) {
             return Json::error($response, 'validation_failed', 'Neplatný fiscal_year.', 400);
+        }
+
+        // BOLA guard (security report 2026-08, R2 #8 / sweep F2) — client_id z těla se
+        // dosud zapisovalo bez jakékoli kontroly vlastnictví a RelatedPartyService
+        // ho čte zpět nescoped joinem na tabulku klientů (pole partner_name).
+        $badRefs = $this->tenantRefs->violations($supplierId, $body, ['client_id']);
+        if ($badRefs !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
         }
 
         try {

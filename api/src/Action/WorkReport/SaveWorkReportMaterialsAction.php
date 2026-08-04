@@ -7,6 +7,7 @@ namespace MyInvoice\Action\WorkReport;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\ProjectRepository;
@@ -43,6 +44,7 @@ final class SaveWorkReportMaterialsAction
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $pdf,
         private readonly DocumentLockService $locks,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -71,6 +73,21 @@ final class SaveWorkReportMaterialsAction
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
             ? (int) $projectIdRaw
             : null;
+
+        // BOLA guard (security report 2026-08, R2 #9 / sweep F6) — sesterský
+        // SaveWorkReportAction:88 tuhle kontrolu má (varianta MS-P1-1), tady chyběla,
+        // takže se do `work_reports.project_id` dal natrvalo zapsat projekt cizí firmy.
+        // Kontrolujeme jen hodnotu z TĚLA — fallback z už guardnuté faktury je bezpečný.
+        if (array_key_exists('project_id', $body)) {
+            $badRefs = $this->tenantRefs->violations(
+                SupplierGuard::currentId($request),
+                $body,
+                ['project_id'],
+            );
+            if ($badRefs !== []) {
+                return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+            }
+        }
 
         $materialTitle = trim((string) ($body['material_title'] ?? ''));
         if ($materialTitle === '') {

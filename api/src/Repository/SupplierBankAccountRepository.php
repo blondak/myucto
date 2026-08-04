@@ -13,7 +13,10 @@ final class SupplierBankAccountRepository
     private const COLUMNS = 'id, supplier_id, currency_id, label, account_number, bank_code, iban,
         currency, account_canonical, kind, analytic_suffix, source, is_active, created_at, updated_at';
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly BankStatementOwnershipResolver $ownership,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function listForSupplier(int $supplierId): array
@@ -74,6 +77,20 @@ final class SupplierBankAccountRepository
         return $this->cast($rows[0]);
     }
 
+    /**
+     * Zaeviduje vlastní účet, který jsme viděli na výpisu.
+     *
+     * Dvě pojistky (SEC-01 / R4 — vlastnictví se nesmí odvozovat z čísla účtu):
+     *
+     *  1. Je-li znám `currencies` řádek, kanonizuje se PROVĚŘENÁ hodnota z něj,
+     *     ne syrový řetězec z hlavičky výpisu. Hlavičku plní importovaný soubor,
+     *     takže bez tohohle si šlo pod cizí (explicitně zvolený) měnový účet
+     *     vyrobit `account_canonical` na libovolné číslo.
+     *  2. Claim guard: účet, který v `currencies` drží JINÁ firma, se
+     *     nezaevidovává. Jinak by v `supplier_bank_accounts` vznikly dva řádky
+     *     se shodným `account_canonical` u dvou tenantů — přesně ta kolize,
+     *     ze které těžilo odvozování vlastníka podle čísla účtu.
+     */
     public function registerSeen(
         int $supplierId,
         string $accountNumber,
@@ -81,10 +98,35 @@ final class SupplierBankAccountRepository
         ?string $currency,
         ?int $currencyId,
     ): void {
-        $canonical = AccountNumberNormalizer::canonical($accountNumber);
+        $verified = $currencyId !== null ? $this->verifiedAccount($supplierId, $currencyId) : null;
+        // Cizí (nebo neexistující) currency_id se do registru nepropíše — vazba by
+        // ukazovala mimo tenanta.
+        if ($verified === null) {
+            $currencyId = null;
+        }
+        $iban = null;
+        if ($verified !== null) {
+            $verifiedNumber = trim((string) ($verified['account_number'] ?? ''));
+            $iban = trim((string) ($verified['iban'] ?? '')) !== '' ? (string) $verified['iban'] : null;
+            if ($verifiedNumber !== '' || $iban !== null) {
+                $accountNumber = $verifiedNumber !== '' ? $verifiedNumber : $accountNumber;
+                $verifiedBank = trim((string) ($verified['bank_code'] ?? ''));
+                if ($verifiedBank !== '') {
+                    $bankCode = $verifiedBank;
+                }
+            }
+        }
+
+        $canonical = AccountNumberNormalizer::canonical($accountNumber, $iban);
         if ($canonical === null) {
             return;
         }
+        if ($this->ownership->accountClaimedByOtherSupplier($supplierId, $accountNumber, $iban)) {
+            return;
+        }
+        // Kód banky ZÁMĚRNĚ bez IBAN fallbacku: `bank_code_norm` se porovnává s
+        // `bank_statements.bank_code`, které import plní z téhož `currencies.bank_code`.
+        // Dopočet z IBANu by registru dal kód, jaký výpis nenese, a shoda by se rozešla.
         $bank = AccountNumberNormalizer::canonicalBankCode($bankCode);
         $this->db->pdo()->prepare(
             'INSERT INTO supplier_bank_accounts
@@ -112,6 +154,24 @@ final class SupplierBankAccountRepository
             $currency !== null ? strtoupper($currency) : null,
             $canonical,
         ]);
+    }
+
+    /**
+     * `currencies` řádek firmy — prověřený zdroj čísla účtu / IBANu pro
+     * {@see registerSeen()}. Cizí (nebo neexistující) id vrací null, takže se
+     * spadne zpátky na hodnotu od volajícího, kterou ještě prověří claim guard.
+     *
+     * @return array{account_number:?string,iban:?string,bank_code:?string}|null
+     */
+    private function verifiedAccount(int $supplierId, int $currencyId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT account_number, iban, bank_code FROM currencies WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$currencyId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
     }
 
     /** @param array{kind?:string,label?:?string,is_active?:bool,analytic_suffix?:?string} $patch */

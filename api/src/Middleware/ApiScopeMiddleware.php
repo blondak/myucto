@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\RequestPath;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -131,7 +132,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $path   = $request->getUri()->getPath();
+        // Allowlist i read-only denylist matchujeme na normalizované cestě (viz
+        // RequestPath) — obojí musí platit přesně tam, kam router request doručí.
+        $path   = RequestPath::normalize($request->getUri()->getPath());
         $method = strtoupper($request->getMethod());
 
         // 1) Path allowlist — token mimo veřejný subset → 403 (vrací se 403, ne 404,

@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
@@ -39,11 +40,26 @@ final class CreateInvoiceAction
         private readonly DocumentLockService $locks,
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
+
+        // BOLA guard (security report 2026-08, R2 #4 / sweep F4) — client_id se váže níž
+        // na :59, ale revenue_category_id/project_id/currency_id se dosud forwardovaly
+        // do createDraft() nevázané. Guard běží PŘED defaults->resolve() ze stejného
+        // důvodu jako v UpdateInvoiceAction (resolve porovnává proti DODANÉMU klientovi).
+        $badRefs = $this->tenantRefs->violations(
+            SupplierGuard::currentId($request),
+            $body,
+            ['client_id', 'project_id', 'currency_id', 'revenue_category_id'],
+        );
+        if ($badRefs !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
+
         try {
             $body = $this->defaults->resolve($body);
         } catch (\InvalidArgumentException $e) {

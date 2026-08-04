@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
 use MyInvoice\Repository\BankPostingSuggestionRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
@@ -2044,7 +2045,13 @@ final class BankPostingService
         if ($tx === null) {
             throw new PostingException('not_found', 'Transakce nenalezena.', 404);
         }
-        if (!in_array($supplierId, $this->resolveSupplierCandidates($tx), true)) {
+        // Tenant hranice: volající supplier je ZNÁMÝ (session), takže se vlastnictví
+        // NEODVOZUJE z čísla účtu. resolveSupplierCandidates() je nástroj pro opačnou
+        // úlohu (kdo je vlastník neznámé tx) a při kolizi account_canonical vrací víc
+        // firem — `in_array` pak pustil kteroukoli z nich. Rozhoduje výhradně
+        // {@see BankStatementOwnershipResolver}: bs.supplier_id, a jen u legacy výpisů
+        // bez něj jednoznačná shoda účtu (fail-closed při dvou a více kandidátech).
+        if (!$this->txOwnedBySupplier($txId, $supplierId)) {
             throw new PostingException('not_found', 'Transakce nepatří této firmě.', 404);
         }
         if ($this->supplierMode($supplierId) !== 'double_entry') {
@@ -3182,7 +3189,34 @@ final class BankPostingService
     }
 
     /**
+     * Patří transakce (přes hlavičku svého výpisu) danému supplieru?
+     *
+     * Jediná povolená kontrola tam, kde volající supplier už známe. Predikát je
+     * sdílený s ostatními bankovními cestami ({@see BankStatementOwnershipResolver}),
+     * takže „vidím výpis" a „smím z něj účtovat" nemůžou rozejít.
+     */
+    private function txOwnedBySupplier(int $txId, int $supplierId): bool
+    {
+        if ($txId <= 0 || $supplierId <= 0) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql('bs') . ' LIMIT 1'
+        );
+        $stmt->execute(array_merge([$txId], BankStatementOwnershipResolver::params($supplierId)));
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Distinktní supplier_id kandidáti pro číslo účtu výpisu (mirror StatementMatcher).
+     *
+     * POZOR: slouží VÝHRADNĚ k dohledání vlastníka transakce, jejíhož tenanta ještě
+     * neznáme (automatický hook nad importem). Nikdy to není autorizační kontrola —
+     * tam, kde supplier přichází ze session, patří {@see txOwnedBySupplier()}.
      *
      * @param array<string,mixed> $tx
      * @return list<int>
@@ -3239,14 +3273,13 @@ final class BankPostingService
         }
         $canonical = AccountNumberNormalizer::canonical($recipient);
         if ($canonical !== null) {
+            // Kód banky striktně (zrcadlo BankStatementOwnershipResolver::bankCodeMatch()):
+            // shodný, nebo prázdný na OBOU stranách. `IN ('', ?)` dělalo z neúplně
+            // vyplněného vlastního účtu wildcard, který přibíral cizí firmy do kandidátů.
             $bank = AccountNumberNormalizer::canonicalBankCode($recipientBank);
             $sql = 'SELECT supplier_id FROM supplier_bank_accounts
-                     WHERE is_active = 1 AND account_canonical = ?';
-            $params = [$canonical];
-            if ($bank !== null) {
-                $sql .= " AND bank_code_norm IN ('', ?)";
-                $params[] = $bank;
-            }
+                     WHERE is_active = 1 AND account_canonical = ? AND bank_code_norm = ?';
+            $params = [$canonical, $bank ?? ''];
             $registered = $this->db->pdo()->prepare($sql);
             $registered->execute($params);
             foreach ($registered->fetchAll(PDO::FETCH_COLUMN) as $supplierId) {

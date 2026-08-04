@@ -16,11 +16,17 @@ final class EmailAuthenticationVerifierTest extends TestCase
         $this->verifier = new EmailAuthenticationVerifier();
     }
 
-    public function testNoHeaderIsNotChecked(): void
+    /**
+     * Chybějící hlavička `Authentication-Results` je ODMÍTNUTÍ, ne přeskočení
+     * kontroly — scanner na `pass = false` avízo zahodí jako `security_rejected`.
+     * `checked = false` je jen diagnostika pro chybovou hlášku.
+     */
+    public function testMissingHeaderIsRejectedNotSkipped(): void
     {
         $r = $this->verifier->verify([], 'rb.cz');
         self::assertFalse($r['checked']);
         self::assertFalse($r['pass']);
+        self::assertSame('no_authentication_results', $r['detail']);
     }
 
     public function testDmarcPassIsAccepted(): void
