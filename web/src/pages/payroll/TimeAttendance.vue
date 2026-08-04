@@ -10,6 +10,9 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import PayrollFileDropzone, {
+  type PayrollFileRejectReason,
+} from '@/components/payroll/PayrollFileDropzone.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import {
   formatPayrollMinutes,
@@ -39,6 +42,7 @@ const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe
 const importName = ref('')
 const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
+const importFileError = ref('')
 const importPreview = ref<PayrollTimeImportPreview | null>(null)
 const selectedEmploymentIds = ref<number[]>([])
 
@@ -222,21 +226,38 @@ async function reopen(item: PayrollTimeOverviewItem) {
   }
 }
 
-async function chooseImport(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+function clearImportSelection() {
+  importName.value = ''
+  importContent.value = ''
+  importPreview.value = null
+}
+
+async function loadImportFile(file: File) {
+  importFileError.value = ''
   importName.value = file.name
   importFormat.value = file.name.toLowerCase().endsWith('.xlsx') ? 'xlsx' : 'csv'
-  if (importFormat.value === 'csv') {
-    importContent.value = await file.text()
-  } else {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    let binary = ''
-    for (const byte of bytes) binary += String.fromCharCode(byte)
-    importContent.value = btoa(binary)
-  }
+  importContent.value = ''
   importPreview.value = null
+  try {
+    if (importFormat.value === 'csv') {
+      importContent.value = await file.text()
+    } else {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      let binary = ''
+      for (const byte of bytes) binary += String.fromCharCode(byte)
+      importContent.value = btoa(binary)
+    }
+  } catch {
+    clearImportSelection()
+    importFileError.value = t('payroll.time.import.read_failed')
+    toast.error(importFileError.value)
+  }
+}
+
+function rejectImportFile(reason: PayrollFileRejectReason) {
+  clearImportSelection()
+  importFileError.value = t(`payroll.time.import.${reason}`)
+  toast.error(importFileError.value)
 }
 
 async function previewImport() {
@@ -389,16 +410,31 @@ onMounted(load)
     <section v-if="importOpen" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
       <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.import.title') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.time.import.hint') }}</p>
-      <div class="mt-4 flex flex-wrap items-center gap-3">
-        <input type="file" accept=".csv,.xlsx" class="text-sm" @change="chooseImport">
-        <button :class="btnOutline('neutral')" :disabled="saving || !importContent" @click="previewImport">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
-          {{ t('payroll.time.import.preview') }}
-        </button>
-        <button v-if="importPreview" :class="btnFilled('primary')" :disabled="saving || !importPreview.supported" @click="applyImport">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
-          {{ t('payroll.time.import.apply') }}
-        </button>
+      <div class="mt-4 space-y-4">
+        <PayrollFileDropzone
+          dropzone-test-id="payroll-time-import-dropzone"
+          input-test-id="payroll-time-import-file"
+          selected-test-id="payroll-time-import-selected"
+          :disabled="saving"
+          :selected-file-name="importName"
+          :error="importFileError"
+          :drop-hint="t('payroll.time.import.drop_hint')"
+          :drop-active-hint="t('payroll.time.import.drop_active')"
+          :file-hint="t('payroll.time.import.file_limit')"
+          :selected-text="importName ? t('payroll.time.import.selected_file', { name: importName }) : ''"
+          @selected="loadImportFile"
+          @rejected="rejectImportFile"
+        />
+        <div class="flex flex-wrap items-center gap-3">
+          <button :class="btnOutline('neutral')" :disabled="saving || !importContent" @click="previewImport">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
+            {{ t('payroll.time.import.preview') }}
+          </button>
+          <button v-if="importPreview" :class="btnFilled('primary')" :disabled="saving || !importPreview.supported" @click="applyImport">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
+            {{ t('payroll.time.import.apply') }}
+          </button>
+        </div>
       </div>
       <div v-if="importPreview" class="mt-4 rounded-lg bg-neutral-50 p-4 text-sm">
         <p>{{ t('payroll.time.import.summary', importPreview) }}</p>

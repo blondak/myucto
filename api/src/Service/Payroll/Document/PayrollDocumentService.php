@@ -26,6 +26,7 @@ final class PayrollDocumentService
         string $idempotencyKey,
         ?int $actorUserId,
         ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
     ): array {
         $rendered = $this->payslips->render($data);
         return $this->archive(
@@ -45,7 +46,36 @@ final class PayrollDocumentService
             $idempotencyKey,
             $actorUserId,
             $supersedesDocumentId,
+            $storageScope,
         );
+    }
+
+    public function beginStorageScope(): PayrollDocumentStorageScope
+    {
+        return new PayrollDocumentStorageScope();
+    }
+
+    public function commitStorageScope(PayrollDocumentStorageScope $scope): void
+    {
+        $scope->close();
+    }
+
+    public function cleanupStorageScope(
+        int $supplierId,
+        PayrollDocumentStorageScope $scope,
+    ): void {
+        try {
+            foreach ($scope->createdKeys() as $storageKey) {
+                if ($this->documents->countByStorageKey(
+                    $supplierId,
+                    $storageKey,
+                ) === 0) {
+                    $this->storage->delete($supplierId, $storageKey);
+                }
+            }
+        } finally {
+            $scope->close();
+        }
     }
 
     /** @return array<string,mixed> */
@@ -62,6 +92,7 @@ final class PayrollDocumentService
         string $idempotencyKey,
         ?int $actorUserId,
         ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
     ): array {
         if (in_array($kind, [PayrollDocumentKind::Payslip, PayrollDocumentKind::MonthlyBundle], true)) {
             throw new \InvalidArgumentException('Use the dedicated payroll document generator.');
@@ -84,6 +115,7 @@ final class PayrollDocumentService
             $idempotencyKey,
             $actorUserId,
             $supersedesDocumentId,
+            $storageScope,
         );
     }
 
@@ -238,6 +270,7 @@ final class PayrollDocumentService
         string $idempotencyKey,
         ?int $actorUserId,
         ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
     ): array {
         if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
             throw new \InvalidArgumentException('Payroll document idempotency key is invalid.');
@@ -316,7 +349,11 @@ final class PayrollDocumentService
             }
             $documentRevisionNo = (int) $previous['document_revision_no'] + 1;
         }
-        $stored = $this->storage->store($supplierId, $artifact->bytes);
+        $stored = $this->storage->store(
+            $supplierId,
+            $artifact->bytes,
+            $storageScope,
+        );
         return $this->documents->insertOrGet([
             'supplier_id' => $supplierId,
             'run_id' => $runId,

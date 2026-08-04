@@ -157,7 +157,8 @@ final class PayrollAverageEarningRepository
 
             $update = $pdo->prepare(
                 "UPDATE payroll_average_earning_snapshots
-                    SET status = 'approved', approved_by = ?, approved_at = NOW(),
+                    SET status = 'approved', support_status = 'supported',
+                        approved_by = ?, approved_at = NOW(),
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?"
             );

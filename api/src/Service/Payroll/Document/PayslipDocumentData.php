@@ -142,8 +142,13 @@ final readonly class PayslipDocumentData
             $insuranceExpenseAccount,
             $insuranceLiabilityAccount,
         ] as $account) {
-            if (preg_match('/^\d{3,10}$/D', $account) !== 1) {
-                throw new \InvalidArgumentException('Accounting codes must contain 3 to 10 digits.');
+            if (preg_match(
+                '/^[0-9]{3}[.A-Z0-9]{0,13}(?:, [0-9]{3}[.A-Z0-9]{0,13})*$/D',
+                $account,
+            ) !== 1) {
+                throw new \InvalidArgumentException(
+                    'Accounting account list has an invalid format.',
+                );
             }
         }
     }

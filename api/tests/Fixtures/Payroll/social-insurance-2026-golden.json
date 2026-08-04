@@ -20,9 +20,9 @@
                     "id": "hpp-a",
                     "participation": "participates",
                     "group_income": 4790000,
-                    "threshold": 450000,
+                    "threshold": null,
                     "reasons": [
-                        "regular_relationship_agreed_income_threshold_met"
+                        "regular_relationship"
                     ],
                     "capped_base": 4790000
                 }

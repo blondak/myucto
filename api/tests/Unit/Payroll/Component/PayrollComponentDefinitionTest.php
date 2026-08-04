@@ -65,7 +65,13 @@ final class PayrollComponentDefinitionTest extends TestCase
     {
         foreach ([
             $this->definition(tax: PayrollComponentTaxTreatment::MANUAL_REVIEW),
+            $this->definition(
+                socialParticipation: PayrollComponentInclusion::MANUAL_REVIEW,
+            ),
             $this->definition(social: PayrollComponentInclusion::MANUAL_REVIEW),
+            $this->definition(
+                healthParticipation: PayrollComponentInclusion::MANUAL_REVIEW,
+            ),
             $this->definition(jmhz: PayrollComponentInclusion::MANUAL_REVIEW),
         ] as $definition) {
             try {
@@ -75,6 +81,21 @@ final class PayrollComponentDefinitionTest extends TestCase
                 self::assertStringContainsString('ruční posouzení', $e->getMessage());
             }
         }
+    }
+
+    public function testParticipationAndAssessmentBaseClassificationsStayIndependentInSnapshot(): void
+    {
+        $snapshot = $this->definition(
+            socialParticipation: PayrollComponentInclusion::INCLUDED,
+            social: PayrollComponentInclusion::EXCLUDED,
+            healthParticipation: PayrollComponentInclusion::EXCLUDED,
+            health: PayrollComponentInclusion::INCLUDED,
+        )->snapshot();
+
+        self::assertSame('included', $snapshot['social_participation_treatment']);
+        self::assertSame('excluded', $snapshot['social_treatment']);
+        self::assertSame('excluded', $snapshot['health_participation_treatment']);
+        self::assertSame('included', $snapshot['health_treatment']);
     }
 
     public function testAnnualLimitIsAllowedOnlyForBenefit(): void
@@ -90,7 +111,9 @@ final class PayrollComponentDefinitionTest extends TestCase
         PayrollComponentKind $kind = PayrollComponentKind::BENEFIT_MEAL,
         PayrollComponentValueKind $valueKind = PayrollComponentValueKind::MONETARY,
         PayrollComponentTaxTreatment $tax = PayrollComponentTaxTreatment::INCLUDED,
+        PayrollComponentInclusion $socialParticipation = PayrollComponentInclusion::INCLUDED,
         PayrollComponentInclusion $social = PayrollComponentInclusion::INCLUDED,
+        PayrollComponentInclusion $healthParticipation = PayrollComponentInclusion::INCLUDED,
         PayrollComponentInclusion $health = PayrollComponentInclusion::INCLUDED,
         PayrollComponentInclusion $average = PayrollComponentInclusion::INCLUDED,
         PayrollComponentInclusion $enforcement = PayrollComponentInclusion::INCLUDED,
@@ -104,7 +127,9 @@ final class PayrollComponentDefinitionTest extends TestCase
             valueKind: $valueKind,
             frequency: PayrollComponentFrequency::ONE_OFF,
             taxTreatment: $tax,
+            socialParticipationTreatment: $socialParticipation,
             socialTreatment: $social,
+            healthParticipationTreatment: $healthParticipation,
             healthTreatment: $health,
             averageEarningTreatment: $average,
             enforcementTreatment: $enforcement,

@@ -325,7 +325,9 @@ export interface PayrollComponent {
   value_kind: PayrollComponentValueKind
   frequency_kind: PayrollComponentFrequency
   tax_treatment: PayrollComponentTaxTreatment
+  social_participation_treatment: PayrollComponentInclusion
   social_treatment: PayrollComponentInclusion
+  health_participation_treatment: PayrollComponentInclusion
   health_treatment: PayrollComponentInclusion
   average_earning_treatment: PayrollComponentInclusion
   enforcement_treatment: PayrollComponentInclusion
@@ -443,6 +445,74 @@ export interface PayrollInputPayload {
   quantity_milliunits: number | null
   source_kind: PayrollInputSourceKind
   external_id: string | null
+}
+
+export interface PayrollQuickInputRef {
+  id: number
+  amount_minor: number
+  quantity_milliunits: number | null
+  source_kind: PayrollInputSourceKind
+  status: PayrollInputStatus
+  row_version: number
+  source_snapshot: Record<string, unknown> | null
+}
+
+export interface PayrollQuickInputRow {
+  employee_id: number
+  employment_id: number
+  full_name: string
+  birth_number_masked: string | null
+  employment_code: string
+  relation_type: PayrollRelationType
+  base_amount_minor: number
+  base_managed_elsewhere: boolean
+  base_conflict: boolean
+  partial_month: boolean
+  base_requires_entry: boolean
+  overtime_mode: 'hours' | 'amount'
+  overtime_hours_milli: number | null
+  overtime_amount_minor: number
+  overtime_hourly_rate_minor: number | null
+  overtime_average_snapshot_id: number | null
+  overtime_average_snapshot_version: number | null
+  overtime_hours_available: boolean
+  overtime_managed_elsewhere: boolean
+  overtime_conflict: boolean
+  bonus_amount_minor: number
+  bonus_managed_elsewhere: boolean
+  bonus_conflict: boolean
+  other_amount_minor: number
+  gross_preview_minor: number
+  inputs: {
+    base: PayrollQuickInputRef | null
+    overtime: PayrollQuickInputRef | null
+    bonus: PayrollQuickInputRef | null
+  }
+  blockers: string[]
+}
+
+export interface PayrollQuickInputMonth {
+  period: string
+  items: PayrollQuickInputRow[]
+}
+
+export interface PayrollQuickInputSavePayload {
+  period: string
+  rows: Array<{
+    employment_id: number
+    base_amount_minor: number
+    overtime_mode: 'hours' | 'amount'
+    overtime_hours_milli: number | null
+    overtime_amount_minor: number | null
+    overtime_average_snapshot_id: number | null
+    overtime_average_snapshot_version: number | null
+    bonus_amount_minor: number
+    versions: {
+      base: number | null
+      overtime: number | null
+      bonus: number | null
+    }
+  }>
 }
 
 export interface PayrollInputImpactMoney {
@@ -957,6 +1027,12 @@ export const payrollApi = {
   inputs: (period: string) =>
     api.get<{ inputs: PayrollInput[] }>('/payroll/inputs', { params: { period } })
       .then(response => response.data.inputs),
+  quickInputs: (period: string) =>
+    api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', { params: { period } })
+      .then(response => response.data.month),
+  saveQuickInputs: (payload: PayrollQuickInputSavePayload) =>
+    api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload)
+      .then(response => response.data.month),
   previewInput: (payload: PayrollInputPayload) =>
     api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
       .then(response => response.data.preview),

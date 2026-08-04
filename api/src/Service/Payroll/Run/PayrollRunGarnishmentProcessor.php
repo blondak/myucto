@@ -36,6 +36,8 @@ final class PayrollRunGarnishmentProcessor
         $supplierId = self::positiveInt($snapshot, 'supplier_id');
         $period = substr(self::string($snapshot, 'period_start'), 0, 7);
         $paymentDate = self::string($snapshot, 'payment_date');
+        $requiresNetPay = ($snapshot['schema_version'] ?? null) === 'payroll-run-input.v2'
+            && isset($baseResult['statutory']);
         $evidenceByEmployee = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::row($person['employee'] ?? null, 'snapshot.employee');
@@ -53,14 +55,40 @@ final class PayrollRunGarnishmentProcessor
         foreach ($people as &$person) {
             $employeeId = self::positiveInt($person, 'employee_id');
             $totals = self::row($person['totals'] ?? null, 'result.person.totals');
-            $cashPayable = self::int($totals, 'cash_payable_minor');
-            $enforcementBase = self::int(
+            $grossCashPayable = self::int($totals, 'cash_payable_minor');
+            $grossEnforcementBase = self::int(
                 $totals,
                 'enforcement_base_minor',
             );
-            $income = $cashPayable < 0
-                || $enforcementBase < 0
-                || $enforcementBase > $cashPayable
+            $cashPayable = $grossCashPayable;
+            $enforcementBase = $grossEnforcementBase;
+            $statutoryUnavailable = false;
+            if ($requiresNetPay) {
+                $statutory = self::row(
+                    $person['statutory'] ?? null,
+                    'result.person.statutory',
+                );
+                if (($statutory['status'] ?? null) === 'calculated'
+                    && is_int($statutory['net_payable_minor_units'] ?? null)
+                ) {
+                    $excluded = $grossCashPayable - $grossEnforcementBase;
+                    $cashPayable = (int) $statutory['net_payable_minor_units'];
+                    $enforcementBase = $cashPayable - $excluded;
+                } else {
+                    $statutoryUnavailable = true;
+                }
+            }
+            $income = $statutoryUnavailable
+                ? new GarnishableIncomeResult(
+                    GarnishmentStatus::ManualReview,
+                    0,
+                    0,
+                    ['net_pay_result_missing_or_unverified'],
+                    [],
+                )
+                : ($cashPayable < 0
+                    || $enforcementBase < 0
+                    || $enforcementBase > $cashPayable
                 ? new GarnishableIncomeResult(
                     GarnishmentStatus::ManualReview,
                     0,
@@ -83,7 +111,7 @@ final class PayrollRunGarnishmentProcessor
                             $cashPayable - $enforcementBase,
                             "supplier-{$supplierId}",
                         ),
-                ])), true);
+                ])), true));
             $evidence = $evidenceByEmployee[$employeeId]
                 ?? throw new \UnexpectedValueException(
                     'Snapshot neobsahuje exekuční důkazy zaměstnance.',
@@ -128,7 +156,6 @@ final class PayrollRunGarnishmentProcessor
         $totals['enforcement_withheld_minor'] = $withheldTotal;
         $totals['payable_after_enforcement_minor'] = $payableTotal;
         $baseResult['totals'] = $totals;
-        $baseResult['schema_version'] = 'payroll-run-result.v2';
 
         return $baseResult;
     }

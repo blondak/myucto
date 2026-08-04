@@ -30,30 +30,82 @@ final class PayrollAccountingDefaults
         );
     }
 
-    /** @return array{gross_debit:string,gross_credit:string,employer_insurance_debit:string,employer_insurance_credit:string} */
-    public static function forRelation(string $relationType): array
+    /**
+     * @param array<string,mixed>|null $configuredAccounts
+     * @return array{
+     *   gross_debit:string,
+     *   gross_credit:string,
+     *   employer_insurance_debit:string,
+     *   employer_insurance_credit:string
+     * }
+     */
+    public static function forRelation(
+        string $relationType,
+        ?array $configuredAccounts = null,
+    ): array
+    {
+        $accounts = $configuredAccounts ?? self::codes();
+        $keys = self::relationAccountKeys($relationType);
+        return [
+            'gross_debit' => self::account($accounts, $keys['gross_debit']),
+            'gross_credit' => self::account($accounts, $keys['gross_credit']),
+            'employer_insurance_debit' => self::account(
+                $accounts,
+                $keys['employer_insurance_debit'],
+            ),
+            'employer_insurance_credit' => self::account(
+                $accounts,
+                $keys['employer_insurance_credit'],
+            ),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   gross_debit:string,
+     *   gross_credit:string,
+     *   employer_insurance_debit:string,
+     *   employer_insurance_credit:string
+     * }
+     */
+    public static function relationAccountKeys(string $relationType): array
     {
         [$grossDebit, $grossCredit] = match ($relationType) {
             'employment', 'small_scale_employment', 'dpp', 'dpc' => [
-                self::ACCOUNTS['employment_gross_debit']['code'],
-                self::ACCOUNTS['employment_gross_credit']['code'],
+                'employment_gross_debit',
+                'employment_gross_credit',
             ],
             'partner_dependent' => [
-                self::ACCOUNTS['partner_gross_debit']['code'],
-                self::ACCOUNTS['partner_gross_credit']['code'],
+                'partner_gross_debit',
+                'partner_gross_credit',
             ],
             'statutory_body' => [
-                self::ACCOUNTS['statutory_gross_debit']['code'],
-                self::ACCOUNTS['statutory_gross_credit']['code'],
+                'statutory_gross_debit',
+                'statutory_gross_credit',
             ],
-            default => throw new \InvalidArgumentException("Neznámý typ pracovního vztahu: {$relationType}."),
+            default => throw new \InvalidArgumentException(
+                "Neznámý typ pracovního vztahu: {$relationType}.",
+            ),
         };
 
         return [
             'gross_debit' => $grossDebit,
             'gross_credit' => $grossCredit,
-            'employer_insurance_debit' => self::ACCOUNTS['employer_insurance_debit']['code'],
-            'employer_insurance_credit' => self::ACCOUNTS['social_insurance_credit']['code'],
+            'employer_insurance_debit' => 'employer_insurance_debit',
+            'employer_insurance_credit' => 'social_insurance_credit',
         ];
+    }
+
+    /** @param array<string,mixed> $accounts */
+    private static function account(array $accounts, string $key): string
+    {
+        $account = $accounts[$key] ?? null;
+        if (!is_string($account) || trim($account) === '') {
+            throw new \InvalidArgumentException(
+                "Chybí účetní předkontace {$key}.",
+            );
+        }
+
+        return $account;
     }
 }

@@ -10,9 +10,10 @@ nemění dosavadní Mzdovou rekapitulaci.
 > V novém modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
 > účtáren, osobní karty, pracovní vztahy, vstupy, absence, evidence srážek,
 > řízený mzdový běh a archiv výstupů. Zákonné výpočty sociálního a zdravotního
-> pojištění, daně a čisté mzdy ale ještě nejsou jako celek zapojené do ostrého
-> běhu. Úplné mzdy, dávková tvorba všech dokumentů a elektronická podání proto
-> zatím nejsou určeny k ostrému použití.
+> pojištění, daně a čisté mzdy jsou napojené do neměnné revize, ale vestavěná
+> pravidla pro rok 2026 zatím nejsou odborně schválená a aktivní. Systém proto
+> výpočet bezpečně zastaví v ruční kontrole. Úplné mzdy, dávková tvorba všech
+> dokumentů a elektronická podání zatím nejsou určeny k ostrému použití.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](56_Mzdy.md).
 
 ## 56a.1 Zapnutí pro firmu
@@ -182,7 +183,29 @@ změna katalogu proto nepřepíše již zpracované období.
 Pravidelný předpis má vlastní interval platnosti a lze jej zadat pevnou částkou
 nebo procentem. Jednorázový vstup se nejprve zkontroluje a potom samostatně
 schválí. Import odmítá nebezpečné sešity, vzorce a duplicitní řádky a před
-zápisem vždy ukáže výsledek náhledu.
+zápisem vždy ukáže výsledek náhledu. Soubor můžeš vybrat kliknutím nebo jej
+přetáhnout do fialové plochy; stejný ovládací prvek používá také import
+docházky. Přijímá CSV a XLSX do 5 MB a chybu zobrazí přímo u souboru.
+
+### 56a.9.1 Rychlý měsíční vstup bez docházky
+
+V **Mzdy → Rychlý měsíční vstup** vybereš měsíc a upravíš všechny účinné
+pracovní vztahy na jedné stránce. U každého zaměstnance se zobrazí jméno,
+maskované rodné číslo, základní mzda ze vztahu, přesčas a bonus nebo odměna.
+Náhled hrubé mzdy se přepočítává okamžitě; další již existující mzdové vstupy
+jsou v něm zobrazeny samostatně.
+
+Přesčas lze zadat celkovou částkou. Zadání v hodinách je dostupné pouze tehdy,
+když má vztah pro dané čtvrtletí schválený průměrný hodinový výdělek. Systém
+pak použije tento doložený průměr a 25% příplatek; bez schváleného podkladu
+hodinovou sazbu neodhaduje a vyžádá celkovou částku.
+
+Hromadné uložení vytváří běžné vstupy složek `MZDA_MESICNI`,
+`PREMIE_PRIPLATKY` a `ODMENA`, takže nevzniká paralelní evidence mezd.
+Opakované uložení stejného měsíce nevytvoří duplicity. Rozpracované vstupy se
+mění s kontrolou jejich verze; schválený nebo uzamčený vstup formulář nikdy
+nepřepíše. Pokud základní mzdu už spravuje pravidelný či jiný měsíční vstup,
+rychlý formulář ji zobrazí pouze pro čtení.
 
 ## 56a.10 Absence, dovolená a DPN
 
@@ -238,10 +261,19 @@ srážka sníží částku k výplatě, ale neměnný výsledek a ledger
 více plátců bez ověřeného rozdělení nebo jiný stav vyžadující posouzení
 schválení zablokují.
 
+Schválení zároveň automaticky vytvoří výplatní pásku každé zpracované osoby
+a v podvojném účetnictví rozdílový mzdový deník. Použijí se předkontace
+zmrazené při uzamknutí vstupů, takže pozdější změna nastavení nezmění již
+zkontrolovanou revizi. Je-li účetní období uzamčené, datum deníku se posune na
+první otevřený den. Schválení, zákonné kumulace, účetní zápis i pásky tvoří
+jeden celek: selže-li některý krok, běh zůstane ve stavu **Zkontrolováno**
+a nevznikne částečně schválená mzda.
+
 > [!WARNING]
-> Obrazovka mzdových běhů nyní slouží k ověření workflow a návaznosti srážek.
-> Dokud do ní není zapojen úplný výsledek pojistného, daně a čisté mzdy,
-> nepoužívej její částku k výplatě ani schválení jako ostrou mzdu.
+> Produkční schválení vyžaduje odborně schválený a aktivní legislativní
+> ruleset pro příslušné období. Neaktivní nebo neúplný ruleset výpočet označí
+> pro ruční kontrolu a schválení zablokuje; aplikace chybějící zákonné údaje
+> neodhaduje.
 
 ## 56a.12 Srážky, exekuce a oddlužení
 
@@ -288,9 +320,10 @@ manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
 
 > [!WARNING]
-> Centrum dokumentů je zatím určeno k ruční kontrole. Dávková tvorba všech
-> pásek, mzdových listů a potvrzení ještě není zapojená, takže prázdný nebo
-> neúplný balíček neznamená, že jsou všechny povinné výstupy hotové.
+> Výplatní pásky vznikají automaticky při schválení. Mzdové listy, daňová
+> potvrzení, výstupní dokumenty a podací protokoly se zatím vytvářejí
+> samostatně, takže neúplný balíček neznamená, že jsou všechny povinné
+> výstupy hotové.
 
 ## 56a.14 Oprávnění a citlivé údaje
 

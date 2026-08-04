@@ -32,7 +32,10 @@ final class SocialParticipationResolver
                     'Social participation resolver expects relationship facts.',
                 );
             }
-            if ($fact->relationship->kind === SocialEmploymentKind::Dpp) {
+            if (
+                $fact->relationship->participationAggregationGroup ===
+                SocialParticipationAggregationGroup::Dpp
+            ) {
                 if (
                     $fact->issues !== []
                     || (!$this->hasAttributableMonth($fact)
@@ -47,8 +50,13 @@ final class SocialParticipationResolver
                 continue;
             }
             if (
-                $fact->relationship->agreedMonthlyIncomeMinorUnits === null
-                || $fact->relationship->agreedMonthlyIncomeMinorUnits < $smallScaleThresholdMinorUnits
+                $fact->relationship->participationAggregationGroup ===
+                SocialParticipationAggregationGroup::SmallScaleCandidate
+                && (
+                    $fact->relationship->agreedMonthlyIncomeMinorUnits === null
+                    || $fact->relationship->agreedMonthlyIncomeMinorUnits
+                        < $smallScaleThresholdMinorUnits
+                )
             ) {
                 if (
                     $fact->issues !== []
@@ -105,7 +113,10 @@ final class SocialParticipationResolver
                 continue;
             }
 
-            if ($relationship->kind === SocialEmploymentKind::Dpp) {
+            if (
+                $relationship->participationAggregationGroup ===
+                SocialParticipationAggregationGroup::Dpp
+            ) {
                 if ($dppGroupBlocked) {
                     $decisions[$relationship->relationshipId] = new SocialParticipationDecision(
                         $relationship->relationshipId,
@@ -132,17 +143,34 @@ final class SocialParticipationResolver
             }
 
             if (
-                $relationship->agreedMonthlyIncomeMinorUnits !== null
-                && $relationship->agreedMonthlyIncomeMinorUnits >= $smallScaleThresholdMinorUnits
+                $relationship->participationAggregationGroup ===
+                SocialParticipationAggregationGroup::RegularRelationship
             ) {
                 $decisions[$relationship->relationshipId] = new SocialParticipationDecision(
                     $relationship->relationshipId,
                     SocialParticipationStatus::Participates,
                     $fact->participationIncomeMinorUnits,
                     $fact->participationIncomeMinorUnits,
-                    $smallScaleThresholdMinorUnits,
-                    ['regular_relationship_agreed_income_threshold_met'],
+                    null,
+                    ['regular_relationship'],
                 );
+                continue;
+            }
+
+            if (
+                $relationship->agreedMonthlyIncomeMinorUnits !== null
+                && $relationship->agreedMonthlyIncomeMinorUnits
+                    >= $smallScaleThresholdMinorUnits
+            ) {
+                $decisions[$relationship->relationshipId] =
+                    new SocialParticipationDecision(
+                        $relationship->relationshipId,
+                        SocialParticipationStatus::Participates,
+                        $fact->participationIncomeMinorUnits,
+                        $fact->participationIncomeMinorUnits,
+                        $smallScaleThresholdMinorUnits,
+                        ['agreed_income_threshold_met'],
+                    );
                 continue;
             }
 

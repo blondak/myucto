@@ -31,7 +31,11 @@ final class PayrollRunCalculator
      */
     public function calculate(array $snapshot): array
     {
-        if (($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v1') {
+        if (!in_array(
+            $snapshot['schema_version'] ?? null,
+            ['payroll-run-input.v1', 'payroll-run-input.v2'],
+            true,
+        )) {
             throw new \InvalidArgumentException('Nepodporované schéma vstupního snapshotu.');
         }
         $people = $this->rows($snapshot['people'] ?? null, 'people');

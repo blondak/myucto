@@ -20,8 +20,14 @@ final class PayrollComponentDefinitionFactory
             taxTreatment: PayrollComponentTaxTreatment::from(
                 $this->string($row, 'tax_treatment'),
             ),
+            socialParticipationTreatment: PayrollComponentInclusion::from(
+                $this->string($row, 'social_participation_treatment'),
+            ),
             socialTreatment: PayrollComponentInclusion::from(
                 $this->string($row, 'social_treatment'),
+            ),
+            healthParticipationTreatment: PayrollComponentInclusion::from(
+                $this->string($row, 'health_participation_treatment'),
             ),
             healthTreatment: PayrollComponentInclusion::from(
                 $this->string($row, 'health_treatment'),

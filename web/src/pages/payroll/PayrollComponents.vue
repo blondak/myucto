@@ -24,6 +24,9 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
+import PayrollFileDropzone, {
+  type PayrollFileRejectReason,
+} from '@/components/payroll/PayrollFileDropzone.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import {
@@ -96,8 +99,7 @@ const inputPreviewFingerprint = ref<string | null>(null)
 const importName = ref('')
 const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
-const importFileInput = ref<HTMLInputElement | null>(null)
-const importDragging = ref(false)
+const importFileError = ref('')
 const importPreview = ref<PayrollInputImportPreview | null>(null)
 const importPreviewFingerprint = ref<string | null>(null)
 const importResult = ref<PayrollInputImportResult | null>(null)
@@ -173,7 +175,9 @@ function newComponentForm(): ComponentForm {
     value_kind: 'monetary',
     frequency_kind: 'one_off',
     tax_treatment: 'included',
+    social_participation_treatment: 'included',
     social_treatment: 'included',
+    health_participation_treatment: 'included',
     health_treatment: 'included',
     average_earning_treatment: 'included',
     enforcement_treatment: 'included',
@@ -286,7 +290,9 @@ function editComponent(component: PayrollComponent) {
     value_kind: component.value_kind,
     frequency_kind: component.frequency_kind,
     tax_treatment: component.tax_treatment,
+    social_participation_treatment: component.social_participation_treatment,
     social_treatment: component.social_treatment,
+    health_participation_treatment: component.health_participation_treatment,
     health_treatment: component.health_treatment,
     average_earning_treatment: component.average_earning_treatment,
     enforcement_treatment: component.enforcement_treatment,
@@ -320,7 +326,11 @@ function componentPayload(): PayrollComponentPayload | null {
     value_kind: componentForm.value.value_kind,
     frequency_kind: componentForm.value.frequency_kind,
     tax_treatment: componentForm.value.tax_treatment,
+    social_participation_treatment:
+      componentForm.value.social_participation_treatment,
     social_treatment: componentForm.value.social_treatment,
+    health_participation_treatment:
+      componentForm.value.health_participation_treatment,
     health_treatment: componentForm.value.health_treatment,
     average_earning_treatment: componentForm.value.average_earning_treatment,
     enforcement_treatment: componentForm.value.enforcement_treatment,
@@ -548,17 +558,7 @@ async function fileAsBase64(file: File): Promise<string> {
 
 async function loadImportFile(file: File) {
   const fileName = file.name.toLowerCase()
-  if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx')) {
-    clearImportSelection()
-    toast.error(t('payroll.components.import.unsupported_file'))
-    return
-  }
-  if (file.size > 5_000_000) {
-    clearImportSelection()
-    toast.error(t('payroll.components.import.file_too_large'))
-    return
-  }
-
+  importFileError.value = ''
   importName.value = file.name
   importFormat.value = fileName.endsWith('.xlsx') ? 'xlsx' : 'csv'
   importContent.value = ''
@@ -566,22 +566,16 @@ async function loadImportFile(file: File) {
   try {
     importContent.value = await fileAsBase64(file)
   } catch {
-    toast.error(t('payroll.components.import.read_failed'))
+    clearImportSelection()
+    importFileError.value = t('payroll.components.import.read_failed')
+    toast.error(importFileError.value)
   }
 }
 
-async function chooseImport(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  await loadImportFile(file)
-  input.value = ''
-}
-
-async function dropImport(event: DragEvent) {
-  importDragging.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file) await loadImportFile(file)
+function rejectImportFile(reason: PayrollFileRejectReason) {
+  clearImportSelection()
+  importFileError.value = t(`payroll.components.import.${reason}`)
+  toast.error(importFileError.value)
 }
 
 async function previewImport() {
@@ -701,7 +695,7 @@ onMounted(load)
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><select v-model="componentForm.value_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in valueKinds" :key="kind" :value="kind">{{ t(`payroll.components.value_kind.${kind}`) }}</option></select></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.frequency') }}</span><select v-model="componentForm.frequency_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in frequencies" :key="kind" :value="kind">{{ t(`payroll.components.frequency.${kind}`) }}</option></select></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.tax') }}</span><select v-model="componentForm.tax_treatment" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in taxTreatments" :key="item" :value="item">{{ t(`payroll.components.tax.${item}`) }}</option></select></label>
-            <label v-for="field in (['social_treatment','health_treatment','average_earning_treatment','enforcement_treatment','jmhz_treatment','statistics_treatment'] as const)" :key="field" class="block">
+            <label v-for="field in (['social_participation_treatment','social_treatment','health_participation_treatment','health_treatment','average_earning_treatment','enforcement_treatment','jmhz_treatment','statistics_treatment'] as const)" :key="field" class="block">
               <span class="mb-1 block text-xs text-neutral-600">{{ t(`payroll.components.fields.${field}`) }}</span>
               <select v-model="componentForm[field]" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in inclusionTreatments" :key="item" :value="item">{{ t(`payroll.components.inclusion.${item}`) }}</option></select>
             </label>
@@ -797,26 +791,20 @@ onMounted(load)
         <div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.import.title') }}</h2><p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.components.import.hint') }}</p></div>
         <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
           <div v-if="canWrite" class="space-y-4">
-            <div
-              data-testid="payroll-import-dropzone"
-              role="button"
-              tabindex="0"
-              class="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-5 py-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-payroll-500/30"
-              :class="importDragging ? 'border-payroll-500 bg-payroll-50' : 'border-neutral-300 bg-neutral-50 hover:border-payroll-400 hover:bg-payroll-50/50'"
-              @click="importFileInput?.click()"
-              @keydown.enter.prevent="importFileInput?.click()"
-              @keydown.space.prevent="importFileInput?.click()"
-              @dragenter.prevent="importDragging = true"
-              @dragover.prevent="importDragging = true"
-              @dragleave.prevent="importDragging = false"
-              @drop.prevent="dropImport"
-            >
-              <input ref="importFileInput" data-testid="payroll-import-file" type="file" accept=".csv,.xlsx" class="sr-only" @change="chooseImport">
-              <svg class="h-7 w-7 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
-              <p class="mt-2 font-medium text-neutral-900">{{ t(importDragging ? 'payroll.components.import.drop_active' : 'payroll.components.import.drop_hint') }}</p>
-              <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.components.import.file_limit') }}</p>
-              <p v-if="importName" data-testid="payroll-import-selected" :title="importName" class="mt-3 rounded-full bg-payroll-100 px-3 py-1 text-xs font-medium text-payroll-700">{{ t('payroll.components.import.selected_file', { name: importName }) }}</p>
-            </div>
+            <PayrollFileDropzone
+              dropzone-test-id="payroll-import-dropzone"
+              input-test-id="payroll-import-file"
+              selected-test-id="payroll-import-selected"
+              :disabled="saving"
+              :selected-file-name="importName"
+              :error="importFileError"
+              :drop-hint="t('payroll.components.import.drop_hint')"
+              :drop-active-hint="t('payroll.components.import.drop_active')"
+              :file-hint="t('payroll.components.import.file_limit')"
+              :selected-text="importName ? t('payroll.components.import.selected_file', { name: importName }) : ''"
+              @selected="loadImportFile"
+              @rejected="rejectImportFile"
+            />
             <div class="flex flex-wrap items-center gap-3">
             <button :class="btnOutline('neutral')" :disabled="saving || !importContent" @click="previewImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.import.preview') }}</button>
             <button data-testid="payroll-import-apply" :class="btnFilled('primary')" :disabled="saving || !importCanApply" @click="applyImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>{{ t('payroll.components.import.apply') }}</button>

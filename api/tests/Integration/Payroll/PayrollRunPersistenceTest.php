@@ -12,15 +12,25 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
+use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
+use MyInvoice\Service\Payroll\Run\PayrollRunCalculator;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
+use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
+use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
@@ -30,9 +40,12 @@ final class PayrollRunPersistenceTest extends TestCase
     use IsolatedSupplierTrait;
 
     private Connection $db;
+    private ContainerInterface $container;
     private PayrollRunsAction $action;
     private PayrollRunCommandService $service;
+    private PayrollRunCommandService $productionService;
     private PayrollRunRepository $runs;
+    private PayrollStatutoryAccumulatorRepository $statutoryAccumulators;
     private int $supplierId;
     private int $otherSupplierId;
     private int $employeeId;
@@ -44,21 +57,45 @@ final class PayrollRunPersistenceTest extends TestCase
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
+        $this->container = $container;
         $db = $container->get(Connection::class);
         $action = $container->get(PayrollRunsAction::class);
-        $service = $container->get(PayrollRunCommandService::class);
         $runs = $container->get(PayrollRunRepository::class);
+        $productionService = $container->get(PayrollRunCommandService::class);
+        $approvedPosting = $this->createStub(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $approvedPosting->method('post')->willReturn([]);
+        $service = new PayrollRunCommandService(
+            $db,
+            $runs,
+            $container->get(PayrollRunSnapshotBuilder::class),
+            new PayrollRunCalculationPipeline(
+                $container->get(PayrollRunCalculator::class),
+                $container->get(PayrollRunGarnishmentProcessor::class),
+            ),
+            $container->get(PayrollRunWorkflow::class),
+            $container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+        );
+        $statutoryAccumulators = $container->get(
+            PayrollStatutoryAccumulatorRepository::class,
+        );
         if (!$db instanceof Connection
             || !$action instanceof PayrollRunsAction
             || !$service instanceof PayrollRunCommandService
+            || !$productionService instanceof PayrollRunCommandService
             || !$runs instanceof PayrollRunRepository
+            || !$statutoryAccumulators instanceof PayrollStatutoryAccumulatorRepository
         ) {
             throw new \RuntimeException('Služby mzdového běhu nejsou dostupné.');
         }
         $this->db = $db;
         $this->action = $action;
         $this->service = $service;
+        $this->productionService = $productionService;
         $this->runs = $runs;
+        $this->statutoryAccumulators = $statutoryAccumulators;
         foreach ([
             'payroll_runs',
             'payroll_run_revisions',
@@ -211,8 +248,252 @@ final class PayrollRunPersistenceTest extends TestCase
         $stmt->execute([$this->supplierId]);
     }
 
+    public function testInputSnapshotFreezesStatutoryPeriodAndPersonEvidence(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, effective_from,
+                 evidence_reference)
+             VALUES (?, ?, "signed", "2026-01-01",
+                     "document:synthetic-tax-declaration")'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-statutory-evidence',
+            $this->actors[0],
+        );
+        $snapshot = $locked->revision['input_snapshot'];
+
+        self::assertSame('payroll-run-input.v2', $snapshot['schema_version']);
+        self::assertSame('2026-06-30', $snapshot['statutory_period']['tax_calculation_date']);
+        self::assertSame('2026-06-30', $snapshot['statutory_period']['social_calculation_date']);
+        self::assertSame('2026-06-30', $snapshot['statutory_period']['health_calculation_date']);
+        self::assertSame('2026-07-15', $snapshot['statutory_period']['payment_date']);
+        self::assertSame(
+            1,
+            $snapshot['people'][0]['employments'][0]['term']['row_version'],
+        );
+        self::assertSame(
+            'signed',
+            $snapshot['people'][0]['statutory_evidence']['income_tax']['declaration']['status'],
+        );
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_tax_declarations
+                SET status = "not-signed",
+                    evidence_reference = "document:synthetic-revocation"
+              WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        self::assertSame(
+            'signed',
+            $this->runs->revision(
+                $this->supplierId,
+                (int) $locked->revision['id'],
+            )['input_snapshot']['people'][0]['statutory_evidence']
+                ['income_tax']['declaration']['status'],
+        );
+    }
+
+    public function testInputSnapshotFreezesVerifiedAnnualAccumulatorStates(): void
+    {
+        $socialOpeningId = $this->statutoryAccumulators->appendOpeningBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'social_insurance',
+            ['assessment_base_minor_units' => 0],
+            'synthetic:social-opening',
+            ['verified_zero' => true],
+            'snapshot-social-opening',
+            actorUserId: $this->actors[0],
+        );
+        $this->statutoryAccumulators->appendOpeningBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'income_tax',
+            [
+                'completed_months' => 0,
+                'advance_base_minor_units' => 0,
+                'withholding_base_minor_units' => 0,
+                'advance_tax_minor_units' => 0,
+                'withholding_tax_minor_units' => 0,
+                'applied_non_refundable_credits_minor_units' => 0,
+                'applied_child_credit_minor_units' => 0,
+                'tax_bonus_minor_units' => 0,
+                'bonus_qualifying_income_minor_units' => 0,
+            ],
+            'synthetic:tax-opening',
+            ['verified_zero' => true],
+            'snapshot-tax-opening',
+            actorUserId: $this->actors[0],
+        );
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-statutory-accumulators',
+            $this->actors[0],
+        );
+        $accumulators = $locked->revision['input_snapshot']['people'][0]
+            ['statutory_accumulators'];
+
+        self::assertSame(
+            'payroll-person-statutory-accumulators.v1',
+            $accumulators['schema_version'],
+        );
+        self::assertSame('verified', $accumulators['social_insurance']['status']);
+        self::assertSame(
+            0,
+            $accumulators['social_insurance']['state']['totals']
+                ['assessment_base_minor_units'],
+        );
+        self::assertSame('verified', $accumulators['income_tax']['status']);
+        self::assertSame(
+            0,
+            $accumulators['income_tax']['state']['totals']['completed_months'],
+        );
+
+        $this->statutoryAccumulators->appendOpeningBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'social_insurance',
+            ['assessment_base_minor_units' => 100],
+            'synthetic:social-opening-correction',
+            ['verified_zero' => false],
+            'snapshot-social-opening-correction',
+            $socialOpeningId,
+            $this->actors[0],
+        );
+
+        self::assertSame(
+            0,
+            $this->runs->revision(
+                $this->supplierId,
+                (int) $locked->revision['id'],
+            )['input_snapshot']['people'][0]['statutory_accumulators']
+                ['social_insurance']['state']['totals']
+                ['assessment_base_minor_units'],
+        );
+    }
+
+    public function testInputSnapshotFreezesDeductionsAndPayoutRules(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_deduction_agreements
+                (supplier_id, employee_id, agreement_reference, title,
+                 deduction_kind, status, priority_no, requested_minor,
+                 total_limit_minor, withheld_total_minor, valid_from,
+                 created_by, updated_by)
+             VALUES (?, ?, "SYNTHETIC-MEAL", "Syntetická srážka",
+                     "meal", "active", 20, 2500, 10000, 3000,
+                     "2026-01-01", ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $agreementId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payout_rules
+                (supplier_id, employee_id, allocation_reference,
+                 destination_kind, destination_reference, allocation_kind,
+                 priority_no, is_active)
+             VALUES (?, ?, "SYNTHETIC-REMAINDER", "bank",
+                     "synthetic-account", "remainder", 100, 1)'
+        )->execute([$this->supplierId, $this->employeeId]);
+        $payoutRuleId = (int) $this->db->pdo()->lastInsertId();
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-deductions-and-payout-rules',
+            $this->actors[0],
+        );
+        $person = $locked->revision['input_snapshot']['people'][0];
+
+        self::assertSame($agreementId, $person['deduction_agreements'][0]['id']);
+        self::assertSame(3000, $person['deduction_agreements'][0]['withheld_total_minor']);
+        self::assertSame($payoutRuleId, $person['payout_rules'][0]['id']);
+        self::assertSame('remainder', $person['payout_rules'][0]['allocation_kind']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_deduction_agreements
+                SET withheld_total_minor = 4000
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $agreementId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_payout_rules SET is_active = 0
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $payoutRuleId]);
+
+        $persisted = $this->runs->revision(
+            $this->supplierId,
+            (int) $locked->revision['id'],
+        )['input_snapshot']['people'][0];
+        self::assertSame(
+            3000,
+            $persisted['deduction_agreements'][0]['withheld_total_minor'],
+        );
+        self::assertSame($payoutRuleId, $persisted['payout_rules'][0]['id']);
+    }
+
+    public function testPostTerminationInputKeepsEndedRelationshipInSnapshot(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET status = "ended", end_date = "2026-05-31"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-post-termination-income',
+            $this->actors[0],
+        );
+        $employment = $locked->revision['input_snapshot']['people'][0]
+            ['employments'][0]['employment'];
+
+        self::assertSame($this->employmentId, $employment['id']);
+        self::assertSame('2026-05-31', $employment['end_date']);
+        self::assertSame(
+            $this->inputId,
+            $locked->revision['input_snapshot']['people'][0]
+                ['employments'][0]['inputs'][0]['id'],
+        );
+    }
+
     public function testSnapshotRemainsStableAndFourEyeWorkflowIsAudited(): void
     {
+        $approvedPosting = $this->createMock(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $this->service = new PayrollRunCommandService(
+            $this->db,
+            $this->runs,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            new PayrollRunCalculationPipeline(
+                $this->container->get(PayrollRunCalculator::class),
+                $this->container->get(PayrollRunGarnishmentProcessor::class),
+            ),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+        );
         $run = $this->createRun();
         $locked = $this->service->lockInputs(
             $this->supplierId,
@@ -262,6 +543,16 @@ final class PayrollRunPersistenceTest extends TestCase
             'review-four-eyes',
             $this->actors[1],
         );
+        $approvedPosting->expects(self::once())
+            ->method('post')
+            ->with(
+                $this->supplierId,
+                (int) $reviewed->revision['id'],
+                $reviewed->revision['input_snapshot'],
+                $reviewed->revision['result_snapshot'],
+                $this->actors[2],
+            )
+            ->willReturn([]);
         $approved = $this->service->approve(
             $this->supplierId,
             (int) $run['id'],
@@ -298,6 +589,244 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             (int) $approved->revision['id'],
         ]);
+    }
+
+    public function testApprovalRollsBackWhenAutomaticPostingFails(): void
+    {
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-before-posting-failure',
+            $this->actors[0],
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'calculate-before-posting-failure',
+            $this->actors[0],
+        );
+        $reviewed = $this->service->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'review-before-posting-failure',
+            $this->actors[1],
+        );
+
+        $approvedPosting = $this->createMock(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $approvedPosting->expects(self::once())
+            ->method('post')
+            ->willThrowException(new \RuntimeException(
+                'Synthetic posting failure.',
+            ));
+        $service = new PayrollRunCommandService(
+            $this->db,
+            $this->runs,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            new PayrollRunCalculationPipeline(
+                $this->container->get(PayrollRunCalculator::class),
+                $this->container->get(PayrollRunGarnishmentProcessor::class),
+            ),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+        );
+
+        try {
+            $service->approve(
+                $this->supplierId,
+                (int) $run['id'],
+                (int) $reviewed->run['row_version'],
+                'approve-with-posting-failure',
+                $this->actors[2],
+            );
+            self::fail('Selhání automatického zaúčtování musí zrušit schválení.');
+        } catch (\RuntimeException $e) {
+            self::assertSame('Synthetic posting failure.', $e->getMessage());
+        }
+
+        $persistedRun = $this->runs->find(
+            $this->supplierId,
+            (int) $run['id'],
+        );
+        $persistedRevision = $this->runs->revision(
+            $this->supplierId,
+            (int) $reviewed->revision['id'],
+        );
+        self::assertSame('reviewed', $persistedRun['status']);
+        self::assertSame(
+            (int) $reviewed->run['row_version'],
+            (int) $persistedRun['row_version'],
+        );
+        self::assertSame('reviewed', $persistedRevision['status']);
+        self::assertNull($persistedRevision['approved_by']);
+        self::assertSame(
+            0,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_run_commands
+                  WHERE supplier_id = ? AND run_id = ?
+                    AND command_name = "approve"',
+                [$this->supplierId, $run['id']],
+            ),
+        );
+        self::assertSame(
+            0,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_run_events
+                  WHERE supplier_id = ? AND run_id = ?
+                    AND event_type = "approve"',
+                [$this->supplierId, $run['id']],
+            ),
+        );
+    }
+
+    public function testApprovalWithPayslipGenerationRejectsOuterTransaction(): void
+    {
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-before-nested-approval',
+            $this->actors[0],
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'calculate-before-nested-approval',
+            $this->actors[0],
+        );
+        $reviewed = $this->service->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'review-before-nested-approval',
+            $this->actors[1],
+        );
+
+        $approvedPosting = $this->createMock(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $approvedPosting->expects(self::never())->method('post');
+        $approvedPayslips = $this->createMock(
+            ApprovedRevisionPayslipBatchService::class,
+        );
+        $approvedPayslips->expects(self::never())->method('beginStorageScope');
+        $approvedPayslips->expects(self::never())->method('generate');
+        $approvedPayslips->expects(self::never())
+            ->method('commitStorageScope');
+        $approvedPayslips->expects(self::never())->method('cleanupStorageScope');
+        $service = new PayrollRunCommandService(
+            $this->db,
+            $this->runs,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            new PayrollRunCalculationPipeline(
+                $this->container->get(PayrollRunCalculator::class),
+                $this->container->get(PayrollRunGarnishmentProcessor::class),
+            ),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+            $approvedPayslips,
+        );
+
+        try {
+            $service->approve(
+                $this->supplierId,
+                (int) $run['id'],
+                (int) $reviewed->run['row_version'],
+                'approve-in-outer-transaction',
+                $this->actors[2],
+            );
+            self::fail(
+                'Generování výplatních pásek nesmí proběhnout v cizí transakci.',
+            );
+        } catch (\DomainException $e) {
+            self::assertStringContainsString(
+                'samostatné databázové transakci',
+                $e->getMessage(),
+            );
+        }
+
+        $persistedRun = $this->runs->find(
+            $this->supplierId,
+            (int) $run['id'],
+        );
+        $persistedRevision = $this->runs->revision(
+            $this->supplierId,
+            (int) $reviewed->revision['id'],
+        );
+        self::assertSame('reviewed', $persistedRun['status']);
+        self::assertSame(
+            (int) $reviewed->run['row_version'],
+            (int) $persistedRun['row_version'],
+        );
+        self::assertSame('reviewed', $persistedRevision['status']);
+        self::assertNull($persistedRevision['approved_by']);
+    }
+
+    public function testProductionPipelineBlocksApprovalUntilRulesetIsActive(): void
+    {
+        $run = $this->productionService->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-15',
+            null,
+            $this->actors[0],
+        );
+        $locked = $this->productionService->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'production-ruleset-lock',
+            $this->actors[0],
+        );
+        $calculated = $this->productionService->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'production-ruleset-calculate',
+            $this->actors[0],
+        );
+
+        self::assertSame(
+            'manual_review',
+            $calculated->revision['result_snapshot']['statutory']['status'],
+        );
+        self::assertContains(
+            'statutory_calculation_manual_review',
+            array_column(
+                $this->runs->validations(
+                    $this->supplierId,
+                    (int) $calculated->revision['id'],
+                ),
+                'code',
+            ),
+        );
+
+        $reviewed = $this->productionService->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'production-ruleset-review',
+            $this->actors[1],
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('blokující validace');
+        $this->productionService->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'production-ruleset-approve',
+            $this->actors[2],
+        );
     }
 
     public function testApprovedRunPersistsFrozenEnforcementAndReducesPayable(): void
@@ -816,12 +1345,15 @@ final class PayrollRunPersistenceTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_component_definitions
                 (supplier_id, code, name, component_kind, value_kind,
-                 frequency_kind, tax_treatment, social_treatment,
-                 health_treatment, average_earning_treatment,
+                 frequency_kind, tax_treatment,
+                 social_participation_treatment, social_treatment,
+                 health_participation_treatment, health_treatment,
+                 average_earning_treatment,
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
                  accounting_debit_code, accounting_credit_code, valid_from)
              VALUES (?, ?, ?, "base_wage", "monetary", "regular", "included",
-                     "included", "included", "included", ?, "included",
+                     "included", "included", "included", "included",
+                     "included", ?, "included",
                      "included", "521", "331", "2026-01-01")'
         )->execute([
             $this->supplierId,
@@ -837,7 +1369,9 @@ final class PayrollRunPersistenceTest extends TestCase
             'value_kind' => 'monetary',
             'frequency_kind' => 'regular',
             'tax_treatment' => 'included',
+            'social_participation_treatment' => 'included',
             'social_treatment' => 'included',
+            'health_participation_treatment' => 'included',
             'health_treatment' => 'included',
             'average_earning_treatment' => 'included',
             'enforcement_treatment' => $enforcementTreatment,

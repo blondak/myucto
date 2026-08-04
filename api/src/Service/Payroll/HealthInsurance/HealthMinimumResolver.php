@@ -26,7 +26,6 @@ final class HealthMinimumResolver
         $monthEnd = $monthStart->modify('last day of this month');
         $calendarDays = (int) $monthEnd->format('j');
         $activeDays = [];
-        $localParticipation = false;
 
         foreach ($facts as $fact) {
             $relationship = $fact->relationship;
@@ -36,7 +35,6 @@ final class HealthMinimumResolver
             ) {
                 continue;
             }
-            $localParticipation = true;
             $this->addIntervalDays(
                 $activeDays,
                 new DateTimeImmutable($relationship->employmentFrom),
@@ -47,6 +45,7 @@ final class HealthMinimumResolver
                 $monthEnd,
             );
         }
+        $localActiveParticipation = $activeDays !== [];
 
         $otherEmployerBase = 0;
         $issues = [];
@@ -136,7 +135,7 @@ final class HealthMinimumResolver
         $employmentDays = count($activeDays);
         $excludedDays = count($reducedDays);
         $applicableDays = max(0, $employmentDays - $excludedDays);
-        $effectiveMinimum = $localParticipation
+        $effectiveMinimum = $localActiveParticipation
             ? $this->ceilDiv(
                 $this->multiply($statutoryMonthlyMinimumMinorUnits, $applicableDays),
                 $calendarDays,
@@ -144,16 +143,29 @@ final class HealthMinimumResolver
             : 0;
         $combinedBase = $this->add($ownAssessmentBaseMinorUnits, $otherEmployerBase);
         $gap = max(0, $effectiveMinimum - $combinedBase);
+        $hasOtherEmployers = $input->otherEmployerBases !== [];
 
         if (
             $gap > 0
-            && $input->otherEmployerBases !== []
+            && $hasOtherEmployers
             && $input->selectedTopUpEmployerEvidenceReference === null
         ) {
             $issues[] = 'selected_top_up_employer_evidence_required';
         }
         if (
             $gap > 0
+            && $hasOtherEmployers
+            && $input->topUpEmployerSelection
+                === HealthMinimumTopUpEmployerSelection::Unverified
+        ) {
+            $issues[] = 'selected_top_up_employer_unverified';
+        }
+        $topUpAssignedToThisEmployer = !$hasOtherEmployers
+            || $input->topUpEmployerSelection
+                === HealthMinimumTopUpEmployerSelection::ThisEmployer;
+        if (
+            $gap > 0
+            && $topUpAssignedToThisEmployer
             && $input->topUpResponsibility === HealthMinimumTopUpResponsibility::Unverified
         ) {
             $issues[] = 'minimum_top_up_responsibility_unverified';
@@ -162,10 +174,10 @@ final class HealthMinimumResolver
             $issues[] = 'negative_assessment_base_requires_period_revision';
         }
 
-        $minimumForThisEmployer = $gap > 0
+        $minimumForThisEmployer = $gap > 0 && $topUpAssignedToThisEmployer
             ? $this->add($ownAssessmentBaseMinorUnits, $gap)
             : 0;
-        $payer = $gap === 0
+        $payer = $minimumForThisEmployer === 0
             ? null
             : match ($input->topUpResponsibility) {
                 HealthMinimumTopUpResponsibility::Employee =>

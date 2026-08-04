@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\HealthInsurance;
 
+use DateTimeImmutable;
 use MyInvoice\Service\Payroll\Calculation\MonthlyHealthInsuranceCalculator;
 use MyInvoice\Service\Payroll\Calculation\MonthlyHealthInsuranceInput;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
@@ -115,7 +116,9 @@ final class HealthInsuranceMonthCalculator
                 'employer' => 0,
                 'total' => 0,
             ];
-            $insurers[$person->insurerCode]['people']++;
+            if ($person->ppzCounted) {
+                $insurers[$person->insurerCode]['people']++;
+            }
             $insurers[$person->insurerCode]['base'] = $this->add(
                 $insurers[$person->insurerCode]['base'],
                 $person->assessmentBaseMinorUnits,
@@ -228,6 +231,11 @@ final class HealthInsuranceMonthCalculator
             $assessmentBase,
             $statutoryMinimum,
         );
+        $ppzCounted = $this->hasActiveLocalParticipatingRelationship(
+            $calculationDate,
+            $facts,
+            $decisions,
+        );
         $issues = [...$issues, ...$minimum->issues];
         $issues = array_values(array_unique($issues));
         sort($issues, SORT_STRING);
@@ -242,6 +250,7 @@ final class HealthInsuranceMonthCalculator
                 $minimum,
                 null,
                 $issues,
+                $ppzCounted,
             );
         }
 
@@ -266,6 +275,7 @@ final class HealthInsuranceMonthCalculator
             $minimum,
             $contribution,
             [],
+            $ppzCounted,
         );
     }
 
@@ -337,6 +347,7 @@ final class HealthInsuranceMonthCalculator
                 new MonthlyHealthInsuranceInput(0, false),
             ),
             $issues,
+            false,
         );
     }
 
@@ -354,6 +365,7 @@ final class HealthInsuranceMonthCalculator
         HealthMinimumAssessment $minimum,
         ?\MyInvoice\Service\Payroll\Calculation\MonthlyHealthInsuranceResult $contribution,
         array $issues,
+        bool $ppzCounted,
     ): HealthPersonMonthResult {
         $relationshipResults = array_map(
             static function (HealthRelationshipFacts $fact) use ($decisions): HealthRelationshipResult {
@@ -422,7 +434,40 @@ final class HealthInsuranceMonthCalculator
             $minimum->reductionEvidence,
             $otherEmployerEvidence,
             $issues,
+            $input->topUpEmployerSelection,
+            $ppzCounted,
         );
+    }
+
+    /**
+     * @param list<HealthRelationshipFacts> $facts
+     * @param array<string,HealthParticipationDecision> $decisions
+     */
+    private function hasActiveLocalParticipatingRelationship(
+        string $calculationDate,
+        array $facts,
+        array $decisions,
+    ): bool {
+        $monthStart = new DateTimeImmutable(substr($calculationDate, 0, 7) . '-01');
+        $monthEnd = $monthStart->modify('last day of this month');
+        foreach ($facts as $fact) {
+            $relationship = $fact->relationship;
+            if (
+                $decisions[$relationship->relationshipId]->status
+                !== HealthParticipationStatus::Participates
+            ) {
+                continue;
+            }
+            $employmentStart = new DateTimeImmutable($relationship->employmentFrom);
+            $employmentEnd = $relationship->employmentTo === null
+                ? $monthEnd
+                : new DateTimeImmutable($relationship->employmentTo);
+            if ($employmentStart <= $monthEnd && $employmentEnd >= $monthStart) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function moneyParameter(PayrollRulesetVersion $ruleset, string $key): int

@@ -15,7 +15,9 @@ final readonly class PayrollComponentDefinition
         public PayrollComponentValueKind $valueKind,
         public PayrollComponentFrequency $frequency,
         public PayrollComponentTaxTreatment $taxTreatment,
+        public PayrollComponentInclusion $socialParticipationTreatment,
         public PayrollComponentInclusion $socialTreatment,
+        public PayrollComponentInclusion $healthParticipationTreatment,
         public PayrollComponentInclusion $healthTreatment,
         public PayrollComponentInclusion $averageEarningTreatment,
         public PayrollComponentInclusion $enforcementTreatment,
@@ -89,7 +91,11 @@ final readonly class PayrollComponentDefinition
             'value_kind' => $this->valueKind->value,
             'frequency_kind' => $this->frequency->value,
             'tax_treatment' => $this->taxTreatment->value,
+            'social_participation_treatment' =>
+                $this->socialParticipationTreatment->value,
             'social_treatment' => $this->socialTreatment->value,
+            'health_participation_treatment' =>
+                $this->healthParticipationTreatment->value,
             'health_treatment' => $this->healthTreatment->value,
             'average_earning_treatment' => $this->averageEarningTreatment->value,
             'enforcement_treatment' => $this->enforcementTreatment->value,
@@ -109,7 +115,11 @@ final readonly class PayrollComponentDefinition
             );
         }
         foreach ([
+            'účasti na sociálním pojištění' =>
+                $this->socialParticipationTreatment,
             'sociálního pojištění' => $this->socialTreatment,
+            'účasti na zdravotním pojištění' =>
+                $this->healthParticipationTreatment,
             'zdravotního pojištění' => $this->healthTreatment,
             'průměrného výdělku' => $this->averageEarningTreatment,
             'srážek' => $this->enforcementTreatment,

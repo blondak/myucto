@@ -10,6 +10,7 @@ final readonly class SocialInsuranceRelationshipInput
 {
     /** @var non-empty-list<SocialAssessmentComponent> */
     public array $components;
+    public SocialParticipationAggregationGroup $participationAggregationGroup;
 
     /**
      * CorporateBody represents one insurance relationship. A partner who is also
@@ -29,6 +30,7 @@ final readonly class SocialInsuranceRelationshipInput
         public bool $agricultureDppEmployeeDiscountRequested = false,
         public ?int $annualMaximumAllocationOrder = null,
         public ?string $partTimeEmployerDiscountEvidenceReference = null,
+        ?SocialParticipationAggregationGroup $participationAggregationGroup = null,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Social insurance relationship ID is not canonical.');
@@ -74,8 +76,25 @@ final readonly class SocialInsuranceRelationshipInput
             $partTimeEmployerDiscountEvidenceReference,
             'Part-time employer discount',
         );
+        $resolvedAggregationGroup = $participationAggregationGroup ?? match ($kind) {
+            SocialEmploymentKind::Employment =>
+                SocialParticipationAggregationGroup::RegularRelationship,
+            SocialEmploymentKind::Dpp =>
+                SocialParticipationAggregationGroup::Dpp,
+            SocialEmploymentKind::Dpc, SocialEmploymentKind::CorporateBody =>
+                SocialParticipationAggregationGroup::SmallScaleCandidate,
+        };
+        if (
+            ($kind === SocialEmploymentKind::Dpp)
+            !== ($resolvedAggregationGroup === SocialParticipationAggregationGroup::Dpp)
+        ) {
+            throw new InvalidArgumentException(
+                'DPP relationship and participation aggregation group must match.',
+            );
+        }
 
         $this->components = $components;
+        $this->participationAggregationGroup = $resolvedAggregationGroup;
     }
 
     private static function assertEvidenceReference(

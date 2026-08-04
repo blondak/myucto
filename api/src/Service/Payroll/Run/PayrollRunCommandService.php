@@ -9,19 +9,27 @@ use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
+use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
 final class PayrollRunCommandService
 {
+    private const COMMAND_SAVEPOINT = 'payroll_run_command';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRunRepository $runs,
         private readonly PayrollRunSnapshotBuilder $snapshotBuilder,
-        private readonly PayrollRunCalculator $calculator,
-        private readonly PayrollRunGarnishmentProcessor $garnishments,
+        private readonly PayrollRunCalculationPipeline $calculationPipeline,
         private readonly PayrollRunWorkflow $workflow,
         private readonly PayrollPeriodOwnershipService $ownership,
+        private readonly ?PayrollApprovedRevisionPostingService
+            $approvedPosting = null,
+        private readonly ?ApprovedRevisionPayslipBatchService
+            $approvedPayslips = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -241,10 +249,13 @@ final class PayrollRunCommandService
         ]));
 
         $pdo = $this->db->pdo();
-        $ownsTransaction = !$pdo->inTransaction();
-        if ($ownsTransaction) {
+        $nestedTransaction = $pdo->inTransaction();
+        if ($nestedTransaction) {
+            $pdo->exec('SAVEPOINT ' . self::COMMAND_SAVEPOINT);
+        } else {
             $pdo->beginTransaction();
         }
+        $payslipStorageScope = null;
         try {
             $run = $this->runs->lock($supplierId, $runId);
             if ($run === null) {
@@ -260,9 +271,7 @@ final class PayrollRunCommandService
                     $requestHash,
                     $receipt,
                 );
-                if ($ownsTransaction) {
-                    $pdo->commit();
-                }
+                $this->finishCommandTransaction($pdo, $nestedTransaction);
                 return $result;
             }
 
@@ -349,14 +358,18 @@ final class PayrollRunCommandService
                 ) {
                     throw new \DomainException('Mzdový běh nemá vstupní snapshot.');
                 }
-                $calculation = $this->calculator->calculate(
+                $calculation = $this->calculationPipeline->calculate(
                     $revision['input_snapshot'],
-                );
-                $calculation = $this->garnishments->calculate(
-                    $revision['input_snapshot'],
-                    $calculation,
+                    $supplierId,
+                    (int) $revision['id'],
+                    $actorUserId,
                 );
                 $this->runs->replaceEnforcementValidations(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $calculation,
+                );
+                $this->runs->replaceStatutoryValidations(
                     $supplierId,
                     (int) $revision['id'],
                     $calculation,
@@ -404,18 +417,50 @@ final class PayrollRunCommandService
                 if ($revision === null) {
                     throw new \DomainException('Mzdový běh nemá revizi.');
                 }
-                if (!is_array($revision['result_snapshot'] ?? null)) {
-                    throw new \DomainException('Mzdový běh nemá uložený výsledek.');
+                if ($nestedTransaction && $this->approvedPayslips !== null) {
+                    throw new \DomainException(
+                        'Schválení s generováním výplatních pásek musí proběhnout v samostatné databázové transakci.',
+                    );
                 }
-                $this->garnishments->storeApproved(
+                $payslipStorageScope = $this->approvedPayslips
+                    ?->beginStorageScope();
+                $resultSnapshot = self::snapshotObject(
+                    $revision['result_snapshot'] ?? null,
+                    'výsledný',
+                );
+                $inputSnapshot = self::snapshotObject(
+                    $revision['input_snapshot'] ?? null,
+                    'vstupní',
+                );
+                $this->calculationPipeline->storeApproved(
                     $supplierId,
                     (int) $revision['id'],
-                    $revision['result_snapshot'],
+                    $resultSnapshot,
                 );
                 $this->runs->markRevisionApproved(
                     $supplierId,
                     (int) $revision['id'],
                     $actorUserId,
+                );
+                $this->calculationPipeline
+                    ->storeApprovedStatutoryAccumulators(
+                        $supplierId,
+                        (int) $revision['id'],
+                        $actorUserId,
+                    );
+                $this->approvedPosting?->post(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $inputSnapshot,
+                    $resultSnapshot,
+                    $actorUserId,
+                );
+                $this->approvedPayslips?->generate(
+                    $supplierId,
+                    $runId,
+                    (int) $revision['id'],
+                    $actorUserId,
+                    $payslipStorageScope,
                 );
                 $revision = $this->runs->revision(
                     $supplierId,
@@ -476,8 +521,11 @@ final class PayrollRunCommandService
                 $resultPayload,
                 $actorUserId,
             );
-            if ($ownsTransaction) {
-                $pdo->commit();
+            $this->finishCommandTransaction($pdo, $nestedTransaction);
+            if ($payslipStorageScope instanceof PayrollDocumentStorageScope) {
+                $this->approvedPayslips->commitStorageScope(
+                    $payslipStorageScope,
+                );
             }
             return new PayrollRunCommandResult(
                 $command,
@@ -488,7 +536,24 @@ final class PayrollRunCommandService
                 false,
             );
         } catch (\Throwable $e) {
-            $this->rollbackOwnedTransaction($pdo, $ownsTransaction);
+            $this->rollbackCommandTransaction($pdo, $nestedTransaction);
+            if (
+                $payslipStorageScope instanceof PayrollDocumentStorageScope
+                && $this->approvedPayslips
+                    instanceof ApprovedRevisionPayslipBatchService
+            ) {
+                try {
+                    $this->approvedPayslips->cleanupStorageScope(
+                        $supplierId,
+                        $payslipStorageScope,
+                    );
+                } catch (\Throwable $cleanupException) {
+                    throw new \RuntimeException(
+                        'Schválení selhalo a soubory výplatních pásek se nepodařilo uklidit.',
+                        previous: $cleanupException,
+                    );
+                }
+            }
             throw $e;
         }
     }
@@ -569,6 +634,27 @@ final class PayrollRunCommandService
         return $period;
     }
 
+    /** @return array<string,mixed> */
+    private static function snapshotObject(mixed $value, string $label): array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            throw new \DomainException(
+                "Mzdový běh nemá uložený {$label} snapshot.",
+            );
+        }
+        $result = [];
+        foreach ($value as $key => $item) {
+            if (!is_string($key)) {
+                throw new \DomainException(
+                    "Mzdový {$label}ní snapshot nemá platné klíče.",
+                );
+            }
+            $result[$key] = $item;
+        }
+
+        return $result;
+    }
+
     private function paymentDate(
         string $paymentDate,
         \DateTimeImmutable $period,
@@ -597,6 +683,29 @@ final class PayrollRunCommandService
     private function rollbackOwnedTransaction(PDO $pdo, bool $ownsTransaction): void
     {
         if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    private function finishCommandTransaction(
+        PDO $pdo,
+        bool $nestedTransaction,
+    ): void {
+        if ($nestedTransaction) {
+            $pdo->exec('RELEASE SAVEPOINT ' . self::COMMAND_SAVEPOINT);
+        } else {
+            $pdo->commit();
+        }
+    }
+
+    private function rollbackCommandTransaction(
+        PDO $pdo,
+        bool $nestedTransaction,
+    ): void {
+        if ($nestedTransaction) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::COMMAND_SAVEPOINT);
+            $pdo->exec('RELEASE SAVEPOINT ' . self::COMMAND_SAVEPOINT);
+        } elseif ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
     }

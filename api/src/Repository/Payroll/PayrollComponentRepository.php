@@ -98,13 +98,15 @@ final class PayrollComponentRepository
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_component_definitions
                     (supplier_id, code, name, component_kind, value_kind,
-                     frequency_kind, tax_treatment, social_treatment,
-                     health_treatment, average_earning_treatment,
+                     frequency_kind, tax_treatment,
+                     social_participation_treatment, social_treatment,
+                     health_participation_treatment, health_treatment,
+                     average_earning_treatment,
                      enforcement_treatment, jmhz_treatment,
                      statistics_treatment, accounting_debit_code,
                      accounting_credit_code, annual_limit_minor, valid_from,
                      valid_to, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -114,7 +116,9 @@ final class PayrollComponentRepository
                 $data['value_kind'],
                 $data['frequency_kind'],
                 $data['tax_treatment'],
+                $data['social_participation_treatment'],
                 $data['social_treatment'],
+                $data['health_participation_treatment'],
                 $data['health_treatment'],
                 $data['average_earning_treatment'],
                 $data['enforcement_treatment'],
@@ -188,8 +192,10 @@ final class PayrollComponentRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE payroll_component_definitions
                 SET code = ?, name = ?, component_kind = ?, value_kind = ?,
-                    frequency_kind = ?, tax_treatment = ?, social_treatment = ?,
-                    health_treatment = ?, average_earning_treatment = ?,
+                    frequency_kind = ?, tax_treatment = ?,
+                    social_participation_treatment = ?, social_treatment = ?,
+                    health_participation_treatment = ?, health_treatment = ?,
+                    average_earning_treatment = ?,
                     enforcement_treatment = ?, jmhz_treatment = ?,
                     statistics_treatment = ?, accounting_debit_code = ?,
                     accounting_credit_code = ?, annual_limit_minor = ?,
@@ -204,7 +210,9 @@ final class PayrollComponentRepository
             $data['value_kind'],
             $data['frequency_kind'],
             $data['tax_treatment'],
+            $data['social_participation_treatment'],
             $data['social_treatment'],
+            $data['health_participation_treatment'],
             $data['health_treatment'],
             $data['average_earning_treatment'],
             $data['enforcement_treatment'],
@@ -240,14 +248,32 @@ final class PayrollComponentRepository
         $stmt = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_component_definitions
                 (supplier_id, code, name, component_kind, value_kind,
-                 frequency_kind, tax_treatment, social_treatment,
-                 health_treatment, average_earning_treatment,
+                 frequency_kind, tax_treatment,
+                 social_participation_treatment, social_treatment,
+                 health_participation_treatment, health_treatment,
+                 average_earning_treatment,
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
                  valid_from)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "2026-01-01")'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "2026-01-01")'
         );
         foreach (self::DEFAULTS as $row) {
-            $stmt->execute([$supplierId, ...$row]);
+            $stmt->execute([
+                $supplierId,
+                $row[0],
+                $row[1],
+                $row[2],
+                $row[3],
+                $row[4],
+                $row[5],
+                $row[6],
+                $row[6],
+                $row[7],
+                $row[7],
+                $row[8],
+                $row[9],
+                $row[10],
+                $row[11],
+            ]);
         }
     }
 

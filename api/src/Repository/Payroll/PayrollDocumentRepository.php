@@ -228,6 +228,18 @@ final class PayrollDocumentRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    public function countByStorageKey(int $supplierId, string $storageKey): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_generated_documents
+              WHERE supplier_id = ? AND storage_key = ?',
+        );
+        $stmt->execute([$supplierId, $storageKey]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     /**
      * @param array<string,mixed> $record
      * @return array<string,mixed>

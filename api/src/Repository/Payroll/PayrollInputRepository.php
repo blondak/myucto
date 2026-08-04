@@ -95,8 +95,9 @@ final class PayrollInputRepository
                 'INSERT INTO payroll_inputs
                     (supplier_id, employee_id, employment_id, component_id,
                      period_start, source_period_start, amount_minor,
-                     quantity_milliunits, source_kind, external_id, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     quantity_milliunits, source_kind, external_id,
+                     source_snapshot_json, source_snapshot_hash, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -109,6 +110,8 @@ final class PayrollInputRepository
                 $data['quantity_milliunits'],
                 $data['source_kind'],
                 $data['external_id'],
+                $data['source_snapshot_json'] ?? null,
+                $data['source_snapshot_hash'] ?? null,
                 $userId,
             ]);
         } catch (PDOException $e) {
@@ -156,6 +159,7 @@ final class PayrollInputRepository
                     SET employee_id = ?, employment_id = ?, component_id = ?,
                         period_start = ?, source_period_start = ?, amount_minor = ?,
                         quantity_milliunits = ?, source_kind = ?, external_id = ?,
+                        source_snapshot_json = ?, source_snapshot_hash = ?,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?
                     AND status = "draft"'
@@ -170,6 +174,8 @@ final class PayrollInputRepository
                 $data['quantity_milliunits'],
                 $data['source_kind'],
                 $data['external_id'],
+                $data['source_snapshot_json'] ?? null,
+                $data['source_snapshot_hash'] ?? null,
                 $supplierId,
                 $id,
                 $expectedVersion,
@@ -224,7 +230,9 @@ final class PayrollInputRepository
                         component.value_kind,
                         component.frequency_kind,
                         component.tax_treatment,
+                        component.social_participation_treatment,
                         component.social_treatment,
+                        component.health_participation_treatment,
                         component.health_treatment,
                         component.average_earning_treatment,
                         component.enforcement_treatment,
@@ -476,7 +484,7 @@ final class PayrollInputRepository
                 $row[$key] = PayrollTimeValue::int($row[$key], $key);
             }
         }
-        unset($row['component_snapshot_hash']);
+        unset($row['component_snapshot_hash'], $row['source_snapshot_hash']);
         return $row;
     }
 

@@ -36,6 +36,8 @@ final readonly class HealthPersonMonthInput
             HealthMinimumTopUpResponsibility::Employee,
         public ?string $topUpResponsibilityEvidenceReference = null,
         public ?string $selectedTopUpEmployerEvidenceReference = null,
+        public HealthMinimumTopUpEmployerSelection $topUpEmployerSelection =
+            HealthMinimumTopUpEmployerSelection::Unverified,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $personId) !== 1) {
             throw new InvalidArgumentException('Health insurance person ID is not canonical.');
@@ -127,6 +129,14 @@ final readonly class HealthPersonMonthInput
         ) {
             throw new InvalidArgumentException(
                 'Selected minimum top-up employer evidence requires another employer.',
+            );
+        }
+        if (
+            $topUpEmployerSelection === HealthMinimumTopUpEmployerSelection::OtherEmployer
+            && $validatedOtherEmployers === []
+        ) {
+            throw new InvalidArgumentException(
+                'Another selected minimum top-up employer requires another employer.',
             );
         }
 

@@ -76,6 +76,7 @@ use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
+use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
@@ -623,6 +624,8 @@ final class Routes
             $g->post('/inputs', [PayrollInputsAction::class, 'create']);
             $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
+            $g->get('/quick-inputs', [PayrollQuickInputsAction::class, 'list']);
+            $g->put('/quick-inputs', [PayrollQuickInputsAction::class, 'save']);
             $g->get('/recurring-components', [PayrollRecurringComponentsAction::class, 'list']);
             $g->post('/recurring-components', [PayrollRecurringComponentsAction::class, 'create']);
             $g->post('/recurring-components/materialize', [PayrollRecurringComponentsAction::class, 'materialize']);

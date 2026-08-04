@@ -45,6 +45,9 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
         public array $minimumReductionEvidence,
         public array $otherEmployerEvidence,
         public array $issues,
+        public HealthMinimumTopUpEmployerSelection $topUpEmployerSelection =
+            HealthMinimumTopUpEmployerSelection::Unverified,
+        public bool $ppzCounted = false,
     ) {}
 
     /** @return array<string,mixed> */
@@ -74,6 +77,8 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
                 $this->topUpResponsibilityEvidenceReference,
             'selected_top_up_employer_evidence_reference' =>
                 $this->selectedTopUpEmployerEvidenceReference,
+            'top_up_employer_selection' => $this->topUpEmployerSelection->value,
+            'ppz_counted' => $this->ppzCounted,
             'standard_contribution_minor_units' => $this->standardContributionMinorUnits,
             'employee_standard_contribution_minor_units' =>
                 $this->employeeStandardContributionMinorUnits,

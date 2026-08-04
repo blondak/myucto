@@ -274,6 +274,9 @@
     "payroll-people": [
       "payroll"
     ],
+    "payroll-quick-inputs": [
+      "payroll"
+    ],
     "payroll-components": [
       "payroll"
     ],

@@ -72,7 +72,7 @@ final class PostingService
      * Sestaví a zapíše vyvážený účetní zápis. Vrací id zápisu (existující při
      * re-postu, nový jinak).
      *
-     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening' $sourceType
+     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll' $sourceType
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array{
      *     entry_date:string, document_date?:?string, document_no?:?string, description?:?string,
@@ -90,6 +90,9 @@ final class PostingService
         $entryDate = (string) ($meta['entry_date'] ?? '');
         if ($entryDate === '') {
             throw new PostingException('missing_entry_date', 'Chybí datum účetního případu (meta.entry_date).');
+        }
+        if ($sourceType === 'payroll') {
+            $this->assertPayrollPostingContext($supplierId, $sourceId);
         }
 
         // 1) překlad CODE → account_id (v rámci osnovy firmy) + kontrola vyváženosti.
@@ -141,7 +144,7 @@ final class PostingService
             // Datum <= locked_until je zamčené (podané DPH přiznání / ruční zámek). Zámek je
             // tvrdá brána bez bypassu z requestu (§35) — opravu zamčeného zápisu řeší storno
             // protizápisem do otevřeného data (viz reverse()), ne obcházení tohoto zámku.
-            $lockedUntil = $this->lockedUntil($supplierId);
+            $lockedUntil = $this->lockedUntilForUpdate($supplierId);
             if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
                 throw new PostingException(
                     'date_locked',
@@ -177,6 +180,12 @@ final class PostingService
                 : null;
 
             if ($existing !== null) {
+                if ($sourceType === 'payroll') {
+                    throw new PostingException(
+                        'payroll_rewrite_forbidden',
+                        'Zaúčtovaný mzdový předpis je neměnný; oprava patří do nové revize.',
+                    );
+                }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
                 $entryId = $this->rewriteExisting($supplierId, $existing, $header, $resolved, $allowClosing);
                 $auditPayload = [
@@ -202,6 +211,12 @@ final class PostingService
                     $raced = $this->journal->findBySourceForUpdate($supplierId, $sourceType, $sourceId);
                     if ($raced === null) {
                         throw $e;
+                    }
+                    if ($sourceType === 'payroll') {
+                        throw new PostingException(
+                            'payroll_rewrite_forbidden',
+                            'Zaúčtovaný mzdový předpis je neměnný; oprava patří do nové revize.',
+                        );
                     }
                     $raced['lines'] = $this->journal->linesForEntry((int) $raced['id'], $supplierId);
                     $entryId = $this->rewriteExisting($supplierId, $raced, $header, $resolved, $allowClosing);
@@ -258,6 +273,12 @@ final class PostingService
         $original = $this->journal->findForUpdate($entryId, $supplierId);
         if ($original === null) {
             throw new PostingException('entry_not_found', 'Účetní zápis #' . $entryId . ' neexistuje.', 404);
+        }
+        if (($original['source_type'] ?? null) === 'payroll') {
+            throw new PostingException(
+                'payroll_reversal_forbidden',
+                'Mzdový předpis se opravuje výhradně novou mzdovou revizí a rozdílovým zápisem.',
+            );
         }
         if ($original['reversed_by'] !== null) {
             throw new PostingException('already_reversed', 'Zápis #' . $entryId . ' už byl stornován.');
@@ -387,6 +408,52 @@ final class PostingService
                 $pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    private function assertPayrollPostingContext(
+        int $supplierId,
+        ?int $revisionId,
+    ): void {
+        if ($revisionId === null || $revisionId <= 0) {
+            throw new PostingException(
+                'payroll_posting_context_required',
+                'Mzdový předpis vyžaduje připravenou dávku schválené revize.',
+            );
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT batch.status, batch.journal_entry_id
+               FROM payroll_posting_batches batch
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = batch.supplier_id
+                AND revision.id = batch.revision_id
+                AND revision.run_id = batch.run_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE batch.supplier_id = ?
+                AND batch.revision_id = ?
+                AND revision.status = "approved"
+                AND run.current_revision_no = revision.revision_no
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $context = $statement->fetch(\PDO::FETCH_ASSOC);
+        if (!is_array($context)) {
+            throw new PostingException(
+                'payroll_posting_context_required',
+                'Mzdový předpis vyžaduje připravenou dávku schválené revize.',
+            );
+        }
+        $status = $context['status'] ?? null;
+        $journalEntryId = $context['journal_entry_id'] ?? null;
+        if ($status !== 'prepared'
+            && !($status === 'posted' && $journalEntryId !== null)
+        ) {
+            throw new PostingException(
+                'payroll_posting_context_required',
+                'Mzdový předpis vyžaduje připravenou dávku schválené revize.',
+            );
         }
     }
 
@@ -1416,6 +1483,24 @@ final class PostingService
         return $this->lockedUntilCache[$supplierId];
     }
 
+    private function lockedUntilForUpdate(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT locked_until
+               FROM accounting_supplier_settings
+              WHERE supplier_id = ?
+              FOR UPDATE',
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+        $lockedUntil = $value === false || $value === null
+            ? null
+            : (string) $value;
+        $this->lockedUntilCache[$supplierId] = $lockedUntil;
+
+        return $lockedUntil;
+    }
+
     /** @param array<string,int|string> $params */
     private function scalarFloat(string $sql, array $params): float
     {
@@ -1541,7 +1626,7 @@ final class PostingService
     /**
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array<string, array{id:int, is_active:bool, account_type:string}> $codeMap
-     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening' $sourceType
+     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll' $sourceType
      * @return list<array{account_id:int, side:'debit'|'credit', amount:float, cost_center:?string}>
      */
     private function resolveLines(int $supplierId, array $lines, array $codeMap, string $sourceType): array

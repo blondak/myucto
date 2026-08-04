@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Tests\Fixtures\Payroll\ActivePayrollRulesetFixture;
@@ -46,6 +47,30 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         );
     }
 
+    public function testRegularEmploymentDoesNotBecomeSmallScaleWhenAgreedIncomeIsMissing(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship(
+                    'regular-employment',
+                    SocialEmploymentKind::Employment,
+                    null,
+                    100_000,
+                ),
+            ]),
+        ]);
+
+        self::assertSame(SocialCalculationStatus::Calculated, $result->status);
+        self::assertSame(
+            SocialParticipationStatus::Participates,
+            $result->people[0]->relationships[0]->participation->status,
+        );
+        self::assertSame(
+            ['regular_relationship'],
+            $result->people[0]->relationships[0]->participation->reasonCodes,
+        );
+    }
+
     public function testAggregatesDppThresholdBeforeCalculatingContributions(): void
     {
         $result = $this->calculate([
@@ -58,6 +83,44 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         self::assertSame(1_200_000, $result->cappedAssessmentBaseMinorUnits);
         self::assertSame(85_200, $result->employeeContributionMinorUnits);
         self::assertSame(297_600, $result->employerContributionMinorUnits);
+    }
+
+    public function testExplicitSmallScaleEmploymentsShareTheirParticipationThreshold(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship(
+                    'small-a',
+                    SocialEmploymentKind::Employment,
+                    null,
+                    225_000,
+                    aggregationGroup:
+                        SocialParticipationAggregationGroup::SmallScaleCandidate,
+                ),
+                $this->relationship(
+                    'small-b',
+                    SocialEmploymentKind::Employment,
+                    null,
+                    225_000,
+                    aggregationGroup:
+                        SocialParticipationAggregationGroup::SmallScaleCandidate,
+                ),
+            ]),
+        ]);
+
+        self::assertSame(SocialCalculationStatus::Calculated, $result->status);
+        self::assertSame(450_000, $result->participatingAssessmentBaseMinorUnits);
+        self::assertSame(
+            [
+                SocialParticipationStatus::Participates,
+                SocialParticipationStatus::Participates,
+            ],
+            array_map(
+                static fn ($relationship): SocialParticipationStatus =>
+                    $relationship->participation->status,
+                $result->people[0]->relationships,
+            ),
+        );
     }
 
     public function testAppliesAnnualMaximumOncePerPersonAcrossRelationships(): void
@@ -559,6 +622,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         SocialEmployerRateCategory $employerRate = SocialEmployerRateCategory::Ordinary,
         bool $agricultureDiscountRequested = false,
         ?int $allocationOrder = null,
+        ?SocialParticipationAggregationGroup $aggregationGroup = null,
     ): SocialInsuranceRelationshipInput {
         return new SocialInsuranceRelationshipInput(
             $id,
@@ -574,6 +638,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
             $partTimeDiscount === SocialDiscountEvidence::Verified
                 ? "synthetic:part-time:{$id}"
                 : null,
+            $aggregationGroup,
         );
     }
 

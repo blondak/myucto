@@ -15,7 +15,9 @@ final class PayrollComponentValidator
      *   value_kind:string,
      *   frequency_kind:string,
      *   tax_treatment:string,
+     *   social_participation_treatment:string,
      *   social_treatment:string,
+     *   health_participation_treatment:string,
      *   health_treatment:string,
      *   average_earning_treatment:string,
      *   enforcement_treatment:string,
@@ -54,10 +56,20 @@ final class PayrollComponentValidator
                 $input['tax_treatment'] ?? null,
                 'tax_treatment',
             ),
+            socialParticipationTreatment: $this->enum(
+                PayrollComponentInclusion::class,
+                $input['social_participation_treatment'] ?? null,
+                'social_participation_treatment',
+            ),
             socialTreatment: $this->enum(
                 PayrollComponentInclusion::class,
                 $input['social_treatment'] ?? null,
                 'social_treatment',
+            ),
+            healthParticipationTreatment: $this->enum(
+                PayrollComponentInclusion::class,
+                $input['health_participation_treatment'] ?? null,
+                'health_participation_treatment',
             ),
             healthTreatment: $this->enum(
                 PayrollComponentInclusion::class,
@@ -110,7 +122,11 @@ final class PayrollComponentValidator
             'value_kind' => $definition->valueKind->value,
             'frequency_kind' => $definition->frequency->value,
             'tax_treatment' => $definition->taxTreatment->value,
+            'social_participation_treatment' =>
+                $definition->socialParticipationTreatment->value,
             'social_treatment' => $definition->socialTreatment->value,
+            'health_participation_treatment' =>
+                $definition->healthParticipationTreatment->value,
             'health_treatment' => $definition->healthTreatment->value,
             'average_earning_treatment' => $definition->averageEarningTreatment->value,
             'enforcement_treatment' => $definition->enforcementTreatment->value,

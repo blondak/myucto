@@ -9,7 +9,11 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
 final class PayrollDocumentStorage
 {
     /** @return array{storage_key:string,file_sha256:string,size_bytes:int,path:string} */
-    public function store(int $supplierId, string $bytes): array
+    public function store(
+        int $supplierId,
+        string $bytes,
+        ?PayrollDocumentStorageScope $scope = null,
+    ): array
     {
         if ($supplierId <= 0 || $bytes === '') {
             throw new \InvalidArgumentException('Payroll document storage input is invalid.');
@@ -38,6 +42,7 @@ final class PayrollDocumentStorage
                     @unlink($tmp);
                 }
             }
+            $scope?->recordCreated($hash);
         }
 
         return [
@@ -64,6 +69,39 @@ final class PayrollDocumentStorage
             throw new \RuntimeException('Payroll document integrity check failed.');
         }
         return $bytes;
+    }
+
+    public function delete(int $supplierId, string $storageKey): void
+    {
+        if (preg_match('/^[a-f0-9]{64}$/D', $storageKey) !== 1) {
+            throw new \InvalidArgumentException(
+                'Payroll document storage key is invalid.',
+            );
+        }
+        $base = self::baseDir($supplierId);
+        $path = $base . '/' . substr($storageKey, 0, 2) . '/' . $storageKey;
+        if (!is_file($path)) {
+            return;
+        }
+        $real = realpath($path);
+        $realBase = realpath($base);
+        if ($real === false
+            || $realBase === false
+            || !$this->inside($real, $realBase)
+        ) {
+            throw new \RuntimeException(
+                'Payroll document cleanup path is invalid.',
+            );
+        }
+        if (!@unlink($real) && is_file($real)) {
+            throw new \RuntimeException(
+                'Orphaned payroll document could not be removed.',
+            );
+        }
+        $directory = dirname($real);
+        if (is_dir($directory)) {
+            @rmdir($directory);
+        }
     }
 
     public static function baseDir(int $supplierId): string

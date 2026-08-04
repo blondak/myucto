@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthInsurerSnapshotStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthJurisdictionEvidence;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionInterval;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus;
@@ -296,6 +297,8 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
                 [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
                 otherEmployerBases: [$otherEmployer],
                 selectedEmployerEvidence: 'selection:synthetic-employer-1',
+                topUpEmployerSelection:
+                    HealthMinimumTopUpEmployerSelection::ThisEmployer,
             ),
         ]);
         $expected = $this->golden('multiple_employers');
@@ -310,6 +313,64 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
         self::assertSame(
             $expected['total_contribution_minor_units'],
             $result->totalContributionMinorUnits,
+        );
+    }
+
+    public function testSelectionEvidenceWithoutSelectedEmployerFailsClosed(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
+                otherEmployerBases: [
+                    new HealthOtherEmployerBase(
+                        'employer-2',
+                        1_000_000,
+                        '2026-08-01',
+                        null,
+                        'confirmation:synthetic-employer-2',
+                    ),
+                ],
+                selectedEmployerEvidence: 'selection:synthetic-unresolved',
+            ),
+        ]);
+
+        self::assertSame(HealthCalculationStatus::ManualReview, $result->status);
+        self::assertContains(
+            'person:person-1:selected_top_up_employer_unverified',
+            $result->issues,
+        );
+        self::assertNull($result->totalContributionMinorUnits);
+    }
+
+    public function testOtherSelectedEmployerCarriesTopUpOutsideThisEmployer(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
+                otherEmployerBases: [
+                    new HealthOtherEmployerBase(
+                        'employer-2',
+                        1_000_000,
+                        '2026-08-01',
+                        null,
+                        'confirmation:synthetic-employer-2',
+                    ),
+                ],
+                selectedEmployerEvidence: 'selection:synthetic-employer-2',
+                topUpEmployerSelection:
+                    HealthMinimumTopUpEmployerSelection::OtherEmployer,
+            ),
+        ]);
+
+        self::assertSame(HealthCalculationStatus::Calculated, $result->status);
+        self::assertSame(67_500, $result->totalContributionMinorUnits);
+        self::assertSame(0, $result->people[0]->employeeMinimumTopUpMinorUnits);
+        self::assertSame(0, $result->people[0]->employerMinimumTopUpMinorUnits);
+        self::assertSame(
+            HealthMinimumTopUpEmployerSelection::OtherEmployer,
+            $result->people[0]->topUpEmployerSelection,
         );
     }
 
@@ -563,6 +624,62 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
         self::assertSame(0, $result->people[0]->employmentCalendarDays);
         self::assertSame(0, $result->people[0]->effectiveMinimumMinorUnits);
         self::assertSame(13_500, $result->totalContributionMinorUnits);
+        self::assertFalse($result->people[0]->ppzCounted);
+        self::assertSame(0, $result->insurerLiabilities[0]->personCount);
+    }
+
+    public function testPostTerminationIncomeDoesNotInheritMinimumFromOtherEmployer(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [
+                    $this->relationship(
+                        'former-hpp',
+                        HealthEmploymentKind::Employment,
+                        100_000,
+                        from: '2026-01-01',
+                        to: '2026-07-31',
+                        attribution:
+                            HealthIncomeAttribution::PostTerminationPaymentMonthVerified,
+                    ),
+                ],
+                otherEmployerBases: [
+                    new HealthOtherEmployerBase(
+                        'employer-2',
+                        1_000_000,
+                        '2026-08-01',
+                        null,
+                        'confirmation:synthetic-employer-2',
+                    ),
+                ],
+            ),
+        ]);
+
+        self::assertSame(HealthCalculationStatus::Calculated, $result->status);
+        self::assertSame(0, $result->people[0]->effectiveMinimumMinorUnits);
+        self::assertSame(13_500, $result->totalContributionMinorUnits);
+        self::assertFalse($result->people[0]->ppzCounted);
+    }
+
+    public function testActiveInsuredPersonWithZeroBaseIsCountedForPpz(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [$this->relationship('hpp', HealthEmploymentKind::Employment, 0)],
+                reductions: [
+                    $this->fullMonthReduction(
+                        HealthMinimumReductionReason::SicknessCareOrQuarantine,
+                    ),
+                ],
+            ),
+        ]);
+
+        self::assertSame(HealthCalculationStatus::Calculated, $result->status);
+        self::assertSame(0, $result->totalContributionMinorUnits);
+        self::assertTrue($result->people[0]->ppzCounted);
+        self::assertSame(1, $result->insurerLiabilities[0]->personCount);
     }
 
     public function testResultCarriesImmutableRulesetIdentity(): void
@@ -612,6 +729,8 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
             HealthMinimumTopUpResponsibility::Employee,
         ?string $topUpEvidence = null,
         ?string $selectedEmployerEvidence = null,
+        HealthMinimumTopUpEmployerSelection $topUpEmployerSelection =
+            HealthMinimumTopUpEmployerSelection::Unverified,
     ): HealthPersonMonthInput {
         return new HealthPersonMonthInput(
             $id,
@@ -626,6 +745,7 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
             $topUpResponsibility,
             $topUpEvidence,
             $selectedEmployerEvidence,
+            $topUpEmployerSelection,
         );
     }
 

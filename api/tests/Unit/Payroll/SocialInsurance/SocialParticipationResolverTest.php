@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationResolver;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -56,7 +57,14 @@ final class SocialParticipationResolverTest extends TestCase
     public function testAggregatesSmallScaleEmploymentDpcAndCorporateBody(): void
     {
         $decisions = $this->resolve([
-            $this->relationship('hpp', SocialEmploymentKind::Employment, null, 150_000),
+            $this->relationship(
+                'hpp',
+                SocialEmploymentKind::Employment,
+                null,
+                150_000,
+                aggregationGroup:
+                    SocialParticipationAggregationGroup::SmallScaleCandidate,
+            ),
             $this->relationship('dpc', SocialEmploymentKind::Dpc, 200_000, 150_000),
             $this->relationship('body', SocialEmploymentKind::CorporateBody, null, 150_000),
         ]);
@@ -75,7 +83,7 @@ final class SocialParticipationResolverTest extends TestCase
 
         self::assertSame(SocialParticipationStatus::Participates, $decision->status);
         self::assertSame(
-            ['regular_relationship_agreed_income_threshold_met'],
+            ['regular_relationship'],
             $decision->reasonCodes,
         );
     }
@@ -178,6 +186,7 @@ final class SocialParticipationResolverTest extends TestCase
         int $creditedIncome,
         bool $active = true,
         SocialIncomeAttribution $attribution = SocialIncomeAttribution::CurrentEmploymentMonth,
+        ?SocialParticipationAggregationGroup $aggregationGroup = null,
     ): SocialInsuranceRelationshipInput {
         return new SocialInsuranceRelationshipInput(
             $id,
@@ -191,6 +200,7 @@ final class SocialParticipationResolverTest extends TestCase
                 SocialComponentTreatment::Included,
                 SocialComponentTreatment::Included,
             )],
+            participationAggregationGroup: $aggregationGroup,
         );
     }
 }

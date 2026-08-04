@@ -399,7 +399,9 @@ final class PayrollAbsenceApiTest extends TestCase
             ['id' => (string) $average['id']],
         );
         self::assertSame(200, $approved->getStatusCode());
-        self::assertSame('approved', $this->json($approved)['snapshot']['status']);
+        $approvedSnapshot = $this->json($approved)['snapshot'];
+        self::assertSame('approved', $approvedSnapshot['status']);
+        self::assertSame('supported', $approvedSnapshot['support_status']);
         return (int) $average['id'];
     }
 

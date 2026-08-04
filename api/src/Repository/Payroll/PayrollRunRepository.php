@@ -319,6 +319,42 @@ final class PayrollRunRepository
         }
     }
 
+    /** @param array<string,mixed> $result */
+    public function replaceStatutoryValidations(
+        int $supplierId,
+        int $revisionId,
+        array $result,
+    ): void {
+        $delete = $this->db->pdo()->prepare(
+            'DELETE FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code = "statutory_calculation_manual_review"'
+        );
+        $delete->execute([$supplierId, $revisionId]);
+        $statutory = $result['statutory'] ?? null;
+        if (!is_array($statutory) || array_is_list($statutory)
+            || ($statutory['status'] ?? null) === 'calculated'
+        ) {
+            return;
+        }
+        $issues = $statutory['issues'] ?? [];
+        $message = 'Zákonný výpočet pojistného, daně nebo čisté mzdy vyžaduje kontrolu.';
+        if (is_array($issues) && $issues !== []) {
+            $message .= ' ' . implode(', ', array_filter(
+                $issues,
+                static fn (mixed $issue): bool => is_string($issue),
+            ));
+        }
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_validations
+                (supplier_id, revision_id, severity, code, entity_type,
+                 entity_id, message, remediation_path, requires_override)
+             VALUES (?, ?, "blocker", "statutory_calculation_manual_review",
+                     "run", NULL, ?, "/payroll/runs", 0)'
+        );
+        $insert->execute([$supplierId, $revisionId, mb_substr($message, 0, 500)]);
+    }
+
     /** @return array<string,mixed>|null */
     public function commandReceipt(int $supplierId, string $keyHashBinary): ?array
     {

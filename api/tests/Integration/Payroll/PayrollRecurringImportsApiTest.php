@@ -588,13 +588,16 @@ final class PayrollRecurringImportsApiTest extends TestCase
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_component_definitions
                 (supplier_id, code, name, component_kind, value_kind,
-                 frequency_kind, tax_treatment, social_treatment,
-                 health_treatment, average_earning_treatment,
+                 frequency_kind, tax_treatment,
+                 social_participation_treatment, social_treatment,
+                 health_participation_treatment, health_treatment,
+                 average_earning_treatment,
                  enforcement_treatment, jmhz_treatment,
                  statistics_treatment, annual_limit_minor, valid_from)
              VALUES (?, ?, "Syntetická složka", ?, "monetary",
                      ?, "included", "included", "included", "included",
-                     "included", "included", "included", ?, "2026-01-01")'
+                     "included", "included", "included", "included",
+                     "included", ?, "2026-01-01")'
         );
         $stmt->execute([
             $supplierId,
