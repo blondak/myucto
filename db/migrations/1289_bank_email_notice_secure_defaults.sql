@@ -3,7 +3,7 @@
 -- Tři nezávislé věci:
 --   1) vypnout seedovaného globálního providera ČS, který věří komukoliv,
 --   2) tabulka per-supplier override, aby šel globální provider vypnout z produktu,
---   3) `require_email_auth` (DKIM/DMARC) překlopit na fail-closed default.
+--   3) `require_email_auth` (DKIM/DMARC) na fail-closed default pro NOVÉ účty.
 --
 -- Kontext: `0098_seed_ceska_sporitelna_provider.sql` naseedoval GLOBÁLNÍ
 -- (`supplier_id IS NULL`), ZAPNUTÝ regex provider s prázdným `sender_whitelist`.
@@ -47,19 +47,13 @@ CREATE TABLE IF NOT EXISTS bank_email_notice_provider_overrides (
   CONSTRAINT fk_benpo_provider FOREIGN KEY (provider_id) REFERENCES bank_email_notice_providers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3a) Ověření autenticity e-mailu (DKIM/DMARC) je nově zapnuté pro NOVÉ IMAP účty.
+-- 3) Ověření autenticity e-mailu (DKIM/DMARC) se zapíná pro NOVÉ IMAP účty.
+--
+-- EXISTUJÍCÍ účty se ZÁMĚRNĚ NEPŘEKLÁPÍ. Překlopení by komukoliv, komu přijímací
+-- server hlavičku `Authentication-Results` nepřidává, ze dne na den zastavilo
+-- zpracování avíz (skončila by ve stavu `security_rejected`) — na to je tohle
+-- příliš velká regrese. Na existujících instalacích zůstává kontrola volbou
+-- operátora v nastavení IMAP účtu; chrání je fail-closed `senderAllowed()` z bodu
+-- 1 a vypnutý seedovaný provider, což byl skutečný vektor nálezu.
 ALTER TABLE bank_email_imap_settings
   MODIFY COLUMN require_email_auth TINYINT(1) NOT NULL DEFAULT 1;
-
--- 3b) ZMĚNA CHOVÁNÍ ŽIVÝCH INSTALACÍ — samostatný příkaz, jde vyjmout.
---
--- Překlápí i EXISTUJÍCÍ IMAP účty na `require_email_auth = 1`. Komu dnes chodí
--- avíza bez hlavičky Authentication-Results (nebo s dkim/dmarc != pass), tomu se
--- přestanou zpracovávat a skončí ve stavu `security_rejected`. Je to vědomé
--- rozhodnutí: šlo o fail-open bezpečnostní kontrolu, kterou nikdo nezapínal.
--- Kdo hlavičku od svého přijímacího serveru nedostává, vypne si kontrolu zpět
--- v nastavení IMAP účtu. Smazáním tohoto jednoho UPDATE zůstanou existující
--- účty beze změny a nový default se projeví jen u nově zakládaných.
-UPDATE bank_email_imap_settings
-   SET require_email_auth = 1
- WHERE require_email_auth = 0;
