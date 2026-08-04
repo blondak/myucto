@@ -5,7 +5,9 @@ import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollHealthPaymentOverview,
+  type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
+  type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -23,7 +25,13 @@ const period = ref(new Date().toISOString().slice(0, 7))
 const environment = ref<PayrollRegzelEnvironment>('production')
 const allItems = ref<PayrollSubmissionOverviewItem[]>([])
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
+const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const downloadingHealthKey = ref<string | null>(null)
+const downloadingJmhzRevision = ref<number | null>(null)
+const jmhzError = ref('')
+const detail = ref<PayrollSubmissionDetail | null>(null)
+const detailLoadingId = ref<number | null>(null)
+const detailError = ref('')
 
 const environmentOptions = computed(() => [
   {
@@ -89,8 +97,39 @@ function formatMinor(value: number): string {
   }).format(value / 100)
 }
 
+function formatCzk(value: number): string {
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', {
+    style: 'currency',
+    currency: 'CZK',
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
 function healthOverviewKey(overview: PayrollHealthPaymentOverview): string {
   return `${overview.revision_id}:${overview.insurer.code}`
+}
+
+function readableBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function openDetail(item: PayrollSubmissionOverviewItem) {
+  if (!item.latest_submission || detailLoadingId.value !== null) return
+  detailError.value = ''
+  detailLoadingId.value = item.latest_submission.id
+  try {
+    detail.value = await payrollApi.submissionDetail(item.latest_submission.id)
+  } catch (exception) {
+    detail.value = null
+    detailError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.detail_load_failed'),
+    )
+  } finally {
+    detailLoadingId.value = null
+  }
 }
 
 async function loadHealthOverviews() {
@@ -114,6 +153,51 @@ async function loadHealthOverviews() {
   }
 }
 
+async function loadJmhzPreviews() {
+  jmhzPreviews.value = []
+  jmhzError.value = ''
+  if (props.mode !== 'jmhz') return
+  try {
+    const runs = await payrollApi.runs(period.value)
+    const approved = runs.filter(run =>
+      run.revision_status === 'approved' && run.revision_id !== null,
+    )
+    const responses = await Promise.allSettled(approved.map(run =>
+      payrollApi.jmhzPvpojPreview(run.revision_id!),
+    ))
+    jmhzPreviews.value = responses.flatMap(response =>
+      response.status === 'fulfilled' ? [response.value] : [],
+    )
+    const failed = responses.find(response => response.status === 'rejected')
+    if (failed?.status === 'rejected') {
+      jmhzError.value = apiErrorMessage(
+        failed.reason,
+        t('payroll.submissions.overview.jmhz_load_failed'),
+      )
+    }
+  } catch (exception) {
+    jmhzError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.jmhz_load_failed'),
+    )
+  }
+}
+
+async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
+  jmhzError.value = ''
+  downloadingJmhzRevision.value = preview.revision_id
+  try {
+    await payrollApi.downloadJmhzPvpojPreview(preview)
+  } catch (exception) {
+    jmhzError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.jmhz_download_failed'),
+    )
+  } finally {
+    downloadingJmhzRevision.value = null
+  }
+}
+
 async function downloadHealth(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
   downloadingHealthKey.value = healthOverviewKey(overview)
@@ -132,16 +216,22 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
 async function load() {
   loading.value = true
   error.value = ''
+  detail.value = null
+  detailError.value = ''
   try {
     const response = await payrollApi.submissionOverview(
       environment.value,
       period.value,
     )
     allItems.value = response.items
-    await loadHealthOverviews()
+    await Promise.all([
+      loadHealthOverviews(),
+      loadJmhzPreviews(),
+    ])
   } catch (exception) {
     allItems.value = []
     healthOverviews.value = []
+    jmhzPreviews.value = []
     error.value = apiErrorMessage(
       exception,
       t('payroll.submissions.overview.load_failed'),
@@ -247,6 +337,7 @@ onMounted(load)
                 <th class="px-4 py-3">{{ t('payroll.submissions.overview.due_on') }}</th>
                 <th class="px-4 py-3">{{ t('payroll.submissions.overview.channel_label') }}</th>
                 <th class="px-4 py-3">{{ t('payroll.submissions.overview.status_label') }}</th>
+                <th class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -259,6 +350,22 @@ onMounted(load)
                   <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                     {{ statusLabel(item.status) }}
                   </span>
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <button
+                    v-if="item.latest_submission"
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    :disabled="detailLoadingId !== null"
+                    data-test="submission-detail-open"
+                    @click="openDetail(item)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.doc" />
+                    </svg>
+                    {{ t('payroll.submissions.overview.detail_action') }}
+                  </button>
+                  <span v-else class="text-xs text-neutral-400">—</span>
                 </td>
               </tr>
             </tbody>
@@ -284,6 +391,272 @@ onMounted(load)
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
                 <dd class="mt-0.5 text-neutral-800">{{ channelLabel(item.preferred_channel) }}</dd>
+              </div>
+            </dl>
+            <button
+              v-if="item.latest_submission"
+              type="button"
+              class="mt-4"
+              :class="btnOutline('neutral')"
+              :disabled="detailLoadingId !== null"
+              data-test="submission-detail-open"
+              @click="openDetail(item)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.doc" />
+              </svg>
+              {{ t('payroll.submissions.overview.detail_action') }}
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <p
+        v-if="detailError"
+        class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        role="alert"
+        data-test="submission-detail-error"
+      >
+        {{ detailError }}
+      </p>
+
+      <section
+        v-if="detail"
+        class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        data-test="submission-detail"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-lg font-semibold text-neutral-900">
+                {{ t('payroll.submissions.overview.detail_title', {
+                  agenda: detail.submission.agenda_code,
+                  id: detail.submission.id,
+                }) }}
+              </h2>
+              <span
+                class="rounded-full px-2.5 py-1 text-xs font-medium"
+                :class="statusClass(detail.submission.status)"
+              >
+                {{ statusLabel(detail.submission.status) }}
+              </span>
+            </div>
+            <p class="mt-1 text-sm text-neutral-500">
+              {{ detail.submission.subject_reference }} ·
+              {{ detail.submission.period_start }}–{{ detail.submission.period_end }}
+            </p>
+          </div>
+          <button type="button" :class="btnOutline('neutral')" @click="detail = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.x" />
+            </svg>
+            {{ t('common.close') }}
+          </button>
+        </div>
+
+        <dl class="grid grid-cols-2 gap-4 border-b border-neutral-200 p-4 text-sm sm:grid-cols-4 sm:p-6">
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_kind') }}</dt>
+            <dd class="mt-1 font-medium text-neutral-900">{{ detail.submission.submission_kind }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
+            <dd class="mt-1 font-medium text-neutral-900">{{ channelLabel(detail.submission.channel) }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_created') }}</dt>
+            <dd class="mt-1 font-medium text-neutral-900">{{ detail.submission.created_at }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_correlation') }}</dt>
+            <dd class="mt-1 break-all font-medium text-neutral-900">
+              {{ detail.submission.correlation_reference || '—' }}
+            </dd>
+          </div>
+        </dl>
+
+        <div class="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2 sm:p-6">
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_parts', { count: detail.parts.length }) }}
+            </h3>
+            <p v-if="detail.parts.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="part in detail.parts" :key="part.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium text-neutral-900">{{ part.agenda_code }} · {{ part.part_reference }}</span>
+                  <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(part.status)">
+                    {{ statusLabel(part.status) }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-500">{{ part.subject_reference }}</p>
+              </li>
+            </ul>
+          </article>
+
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_artifacts', { count: detail.artifacts.length }) }}
+            </h3>
+            <p v-if="detail.artifacts.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="artifact in detail.artifacts" :key="artifact.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium text-neutral-900">{{ artifact.artifact_kind }}</span>
+                  <span class="text-xs text-neutral-500">{{ readableBytes(artifact.byte_size) }}</span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-500">
+                  {{ artifact.mime_type }}
+                  <template v-if="artifact.xsd_version"> · XSD {{ artifact.xsd_version }}</template>
+                </p>
+              </li>
+            </ul>
+          </article>
+
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_issues', { count: detail.issues.length }) }}
+            </h3>
+            <p v-if="detail.issues.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="issue in detail.issues" :key="issue.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium text-neutral-900">{{ issue.issue_code }}</span>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="issue.is_resolved
+                      ? 'bg-success-50 text-success-700'
+                      : 'bg-warning-50 text-warning-700'"
+                  >
+                    {{ issue.is_resolved
+                      ? t('payroll.submissions.overview.detail_resolved')
+                      : issue.severity }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-500">{{ issue.validation_stage }}</p>
+              </li>
+            </ul>
+          </article>
+
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_receipts', { count: detail.receipts.length }) }}
+            </h3>
+            <p v-if="detail.receipts.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="receipt in detail.receipts" :key="receipt.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium text-neutral-900">{{ receipt.protocol_code }}</span>
+                  <span class="text-xs text-neutral-500">{{ receipt.verification_status }}</span>
+                </div>
+                <p class="mt-1 break-all text-xs text-neutral-500">
+                  {{ receipt.receipt_reference }} · {{ receipt.remote_status || '—' }}
+                </p>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section
+        v-if="mode === 'jmhz'"
+        class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        data-test="jmhz-pvpoj-previews"
+      >
+        <div class="border-b border-neutral-200 p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.submissions.overview.jmhz_preview_title') }}
+          </h2>
+          <p class="mt-1 text-sm text-neutral-500">
+            {{ t('payroll.submissions.overview.jmhz_preview_description') }}
+          </p>
+        </div>
+
+        <p
+          v-if="jmhzError"
+          class="m-4 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700"
+          role="alert"
+          data-test="jmhz-preview-error"
+        >
+          {{ jmhzError }}
+        </p>
+
+        <div v-if="jmhzPreviews.length === 0 && !jmhzError" class="p-6 text-sm text-neutral-500">
+          {{ t('payroll.submissions.overview.jmhz_preview_empty') }}
+        </div>
+
+        <div v-else-if="jmhzPreviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
+          <article
+            v-for="preview in jmhzPreviews"
+            :key="preview.revision_id"
+            class="rounded-lg border border-neutral-200 p-4"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 class="font-semibold text-neutral-900">
+                  {{ t('payroll.submissions.overview.jmhz_preview_card', {
+                    period: preview.period,
+                  }) }}
+                </h3>
+                <p class="mt-1 text-xs text-neutral-500">
+                  {{ t('payroll.submissions.overview.health_run_revision', {
+                    run: preview.run_id,
+                    revision: preview.revision_no,
+                  }) }} · XSD {{ preview.xsd.bundle_version }}
+                </p>
+              </div>
+              <button
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                :disabled="downloadingJmhzRevision === preview.revision_id"
+                @click="downloadJmhz(preview)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.download" />
+                </svg>
+                {{ t('common.download') }}
+              </button>
+            </div>
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <dt class="text-neutral-500">
+                  {{ t('payroll.submissions.overview.jmhz_preview_base') }}
+                </dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatCzk(preview.pvpoj.pojistne.zakladZamestnavateleA) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">
+                  {{ t('payroll.submissions.overview.jmhz_preview_payable') }}
+                </dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatCzk(preview.pvpoj.pojistneUhrada) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">
+                  {{ t('payroll.submissions.overview.jmhz_preview_people') }}
+                </dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ preview.reconciliation.length }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">
+                  {{ t('payroll.submissions.overview.jmhz_preview_status') }}
+                </dt>
+                <dd class="mt-0.5 font-medium text-warning-700">
+                  {{ t('payroll.submissions.overview.jmhz_preview_only') }}
+                </dd>
               </div>
             </dl>
           </article>

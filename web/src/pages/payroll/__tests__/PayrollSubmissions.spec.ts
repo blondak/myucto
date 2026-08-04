@@ -8,7 +8,10 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   download: vi.fn(),
   overview: vi.fn(),
+  submissionDetail: vi.fn(),
   runs: vi.fn(),
+  jmhzPreview: vi.fn(),
+  downloadJmhzPreview: vi.fn(),
   healthOverviews: vi.fn(),
   downloadHealthOverview: vi.fn(),
 }))
@@ -21,7 +24,10 @@ vi.mock('@/api/payroll', () => ({
     prepareRegzel: m.prepare,
     downloadRegzelSnapshot: m.download,
     submissionOverview: m.overview,
+    submissionDetail: m.submissionDetail,
     runs: m.runs,
+    jmhzPvpojPreview: m.jmhzPreview,
+    downloadJmhzPvpojPreview: m.downloadJmhzPreview,
     healthPaymentOverviews: m.healthOverviews,
     downloadHealthPaymentOverview: m.downloadHealthOverview,
   },
@@ -143,6 +149,56 @@ function setup() {
       reason_code: 'health_insurance_transport_unavailable',
     },
   }))
+  m.jmhzPreview.mockImplementation(async (revisionId: number) => ({
+    schema_reference: 'payroll-jmhz-pvpoj-preview.v1',
+    document_kind: 'internal_jmhz_pvpoj_preview',
+    workflow_status: 'preview_only',
+    official_submission: {
+      supported: false,
+      reason_code: 'pvpoj_only_identity_snapshot_incomplete',
+    },
+    xsd: {
+      bundle_version: '1.4.3.4',
+      schema_version: '1.4.3',
+      entry_point: 'jmhz-1.4.3.4/PVPOJ.xsd',
+      namespace: 'http://schemas.cssz.cz/JMHZ/PVPOJ/1.0',
+    },
+    supplier_id: 1,
+    run_id: revisionId === 18 ? 8 : 9,
+    revision_id: revisionId,
+    revision_no: 1,
+    period: '2026-08',
+    currency_code: 'CZK',
+    source: {
+      revision_input_hash: 'a'.repeat(64),
+      statutory_result_id: 90,
+      statutory_result_hash: 'b'.repeat(64),
+      ruleset_id: 'cz-social-2026',
+      ruleset_hash: 'c'.repeat(64),
+      social_liability_id: 91,
+      social_liability_hash: 'd'.repeat(64),
+    },
+    pvpoj: {
+      pojistne: {
+        zakladZamestnavateleA: 100_000,
+        pojistneZamestnavateleA: 24_800,
+        pojistneZamestnavateleCelkem: 24_800,
+        pojistneZamestnance: 7_100,
+        pojistneCelkem: 31_900,
+      },
+      pojistneUhrada: 31_900,
+    },
+    reconciliation: [{
+      employee_reference: 'employee:1',
+      relationship_references: ['employment:1'],
+      capped_assessment_base_minor_units: 10_000_000,
+      employee_contribution_before_discount_minor_units: 710_000,
+      employee_discount_minor_units: 0,
+      employee_contribution_minor_units: 710_000,
+    }],
+    sha256: 'e'.repeat(64),
+    filename: `jmhz-pvpoj-preview-2026-08-revize-${revisionId}.json`,
+  }))
   m.prepare.mockResolvedValue({
     id: 9,
     environment: 'production',
@@ -156,6 +212,68 @@ function setup() {
     xml_byte_size: 123,
     request_fingerprint: 'c'.repeat(64),
     created: true,
+  })
+  m.submissionDetail.mockResolvedValue({
+    submission: {
+      id: 31,
+      environment: 'production',
+      obligation_id: 7,
+      agenda_code: 'JMHZ',
+      subject_type: 'office',
+      subject_reference: 'office:synthetic',
+      period_start: '2026-08-01',
+      period_end: '2026-08-31',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      status: 'validated',
+      row_version: 4,
+      source_revision_id: 18,
+      corrects_submission_id: null,
+      correlation_reference: null,
+      submitted_at: null,
+      decided_at: null,
+      created_at: '2026-09-01 08:00:00',
+      updated_at: '2026-09-01 08:05:00',
+    },
+    parts: [{
+      id: 41,
+      part_reference: 'jmhz-summary',
+      agenda_code: 'JMHZ',
+      subject_reference: 'office:synthetic',
+      status: 'validated',
+      source_entity_type: 'run_revision',
+      source_entity_reference: 'revision:18',
+      row_version: 1,
+      created_at: '2026-09-01 08:00:00',
+      updated_at: '2026-09-01 08:00:00',
+    }],
+    artifacts: [{
+      id: 51,
+      part_id: 41,
+      artifact_kind: 'outbound_xml',
+      direction: 'outbound',
+      mime_type: 'application/xml',
+      byte_size: 2048,
+      xsd_version: '1.4.3.4',
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
+    }],
+    receipts: [],
+    issues: [{
+      id: 61,
+      part_id: 41,
+      severity: 'warning',
+      validation_stage: 'catalog',
+      issue_code: 'MANUAL_REVIEW',
+      entity_type: null,
+      entity_reference: null,
+      is_resolved: false,
+      row_version: 1,
+      resolved_at: null,
+      created_at: '2026-09-01 08:02:00',
+      updated_at: '2026-09-01 08:02:00',
+    }],
   })
 }
 
@@ -248,5 +366,51 @@ describe('PayrollSubmissions', () => {
     expect(m.downloadHealthOverview).toHaveBeenCalledWith(
       expect.objectContaining({ revision_id: 18, insurer: { code: '111' } }),
     )
+  })
+
+  it('nabídne bezpečně označený PVPOJ kontrolní náhled ke stažení', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    expect(m.jmhzPreview).toHaveBeenCalledWith(18)
+    expect(m.jmhzPreview).toHaveBeenCalledWith(19)
+    expect(wrapper.findAll('[data-test="jmhz-pvpoj-previews"] article')).toHaveLength(2)
+    expect(wrapper.get('[data-test="jmhz-pvpoj-previews"]').text())
+      .toContain('payroll.submissions.overview.jmhz_preview_only')
+
+    await wrapper.get('[data-test="jmhz-pvpoj-previews"] button').trigger('click')
+    await flushPromises()
+    expect(m.downloadJmhzPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ revision_id: 18, workflow_status: 'preview_only' }),
+    )
+  })
+
+  it('zpřístupní bezpečný detail částí, artefaktů a problémů posledního podání', async () => {
+    const overview = await m.overview()
+    overview.items[0].latest_submission = {
+      id: 31,
+      status: 'validated',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      submitted_at: null,
+      decided_at: null,
+    }
+    m.overview.mockResolvedValue(overview)
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+
+    expect(m.submissionDetail).toHaveBeenCalledWith(31)
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('outbound_xml')
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('MANUAL_REVIEW')
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('2.0 kB')
   })
 })

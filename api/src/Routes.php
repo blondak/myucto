@@ -78,6 +78,7 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -87,6 +88,7 @@ use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
@@ -752,6 +754,18 @@ final class Routes
             $g->get(
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
+            );
+            $g->get(
+                '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}',
+                PayrollJmhzPvpojPreviewAction::class,
+            );
+            $g->get(
+                '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}/download',
+                [PayrollJmhzPvpojPreviewAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}',
+                PayrollSubmissionDetailAction::class,
             );
             $g->get(
                 '/submissions/health-overviews/{revisionId:[0-9]+}',

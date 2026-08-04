@@ -581,6 +581,21 @@ kontrolní — bez implementovaného důvěryhodného transportu a parseru proto
 nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
 podání.
 
+Má-li povinnost připravené podání, tlačítko **Detail** zobrazí jeho bezpečný
+provozní rozpad: stav a kanál, jednotlivé části, metadata archivovaných
+artefaktů, kontroly a problémy a přijaté dodejky. Obsah šifrovaných XML ani
+citlivé podrobnosti validačních chyb se do tohoto přehledu neposílají.
+Rozlišuj zejména stav **Odesláno** od **Přijato** — přijetí se smí zobrazit
+jen na základě důvěryhodně ověřeného protokolu.
+
+U schválených běhů může záložka JMHZ nabídnout také **Kontrolní náhled
+PVPOJ**. Zobrazuje vyměřovací základ, pojistné k úhradě, počet zahrnutých osob
+a připnutou verzi XSD; stejný deterministický kontrolní JSON lze stáhnout.
+Náhled vznikne pouze tehdy, když souhlasí neměnný vstup revize, vypočtené
+sociální pojištění, vztahové i osobní součty a odpovídající závazek ČSSZ.
+Viditelné označení **Pouze kontrolní náhled** znamená, že nejde o úplné XML
+JMHZ, připravené podání ani důkaz odeslání nebo přijetí.
+
 U schválených mzdových běhů připraví záložka zdravotních pojišťoven také
 interní měsíční přehled samostatně pro každý kód pojišťovny a každou aktuální
 revizi. Zobrazuje číslo běhu a revize, počet osob, úhrn vyměřovacích základů

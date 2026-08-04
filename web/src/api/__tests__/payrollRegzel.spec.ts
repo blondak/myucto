@@ -111,4 +111,44 @@ describe('payroll REGZEL API', () => {
       { responseType: 'blob' },
     )
   })
+
+  it('načte a stáhne pouze interní PVPOJ kontrolní náhled', async () => {
+    m.get.mockResolvedValueOnce({
+      data: {
+        revision_id: 18,
+        workflow_status: 'preview_only',
+        filename: 'jmhz-pvpoj-preview-2026-08-revize-18.json',
+      },
+    })
+    const preview = await payrollApi.jmhzPvpojPreview(18)
+    expect(m.get).toHaveBeenCalledWith('/payroll/submissions/jmhz-pvpoj/18')
+
+    m.get.mockResolvedValueOnce({ data: new Blob(['synthetic-pvpoj']) })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-pvpoj')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    await payrollApi.downloadJmhzPvpojPreview(preview)
+    expect(m.get).toHaveBeenLastCalledWith(
+      '/payroll/submissions/jmhz-pvpoj/18/download',
+      { responseType: 'blob' },
+    )
+  })
+
+  it('načte bezpečný detail posledního podání bez parametrů prostředí v URL', async () => {
+    m.get.mockResolvedValueOnce({
+      data: {
+        submission: { id: 31 },
+        parts: [],
+        artifacts: [],
+        receipts: [],
+        issues: [],
+      },
+    })
+
+    const detail = await payrollApi.submissionDetail(31)
+
+    expect(detail.submission.id).toBe(31)
+    expect(m.get).toHaveBeenCalledWith('/payroll/submissions/31')
+  })
 })

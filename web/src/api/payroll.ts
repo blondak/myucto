@@ -924,6 +924,80 @@ export interface PayrollSubmissionOverviewResponse {
   items: PayrollSubmissionOverviewItem[]
 }
 
+export interface PayrollSubmissionDetail {
+  submission: {
+    id: number
+    environment: PayrollRegzelEnvironment
+    obligation_id: number
+    agenda_code: string
+    subject_type: string
+    subject_reference: string
+    period_start: string
+    period_end: string
+    submission_kind: string
+    channel: string
+    status: string
+    row_version: number
+    source_revision_id: number | null
+    corrects_submission_id: number | null
+    correlation_reference: string | null
+    submitted_at: string | null
+    decided_at: string | null
+    created_at: string
+    updated_at: string
+  }
+  parts: Array<{
+    id: number
+    part_reference: string
+    agenda_code: string
+    subject_reference: string
+    status: string
+    source_entity_type: string
+    source_entity_reference: string
+    row_version: number
+    created_at: string
+    updated_at: string
+  }>
+  artifacts: Array<{
+    id: number
+    part_id: number | null
+    artifact_kind: string
+    direction: string
+    mime_type: string
+    byte_size: number
+    xsd_version: string | null
+    catalog_version: string | null
+    channel: string
+    created_at: string
+  }>
+  receipts: Array<{
+    id: number
+    part_id: number | null
+    artifact_id: number
+    receipt_reference: string
+    correlation_reference: string | null
+    protocol_code: string
+    remote_status: string | null
+    verification_status: string
+    received_at: string
+    created_at: string
+  }>
+  issues: Array<{
+    id: number
+    part_id: number | null
+    severity: string
+    validation_stage: string
+    issue_code: string
+    entity_type: string | null
+    entity_reference: string | null
+    is_resolved: boolean
+    row_version: number
+    resolved_at: string | null
+    created_at: string
+    updated_at: string
+  }>
+}
+
 export interface PayrollHealthPaymentOverview {
   schema_reference: 'payroll-health-payment-overview.v1'
   document_kind: 'internal_health_payment_overview'
@@ -960,6 +1034,67 @@ export interface PayrollHealthPaymentOverview {
     employee_contribution_minor_units: number
     employer_contribution_minor_units: number
     total_contribution_minor_units: number
+  }>
+  sha256: string
+  filename: string
+}
+
+export interface PayrollJmhzPvpojPreview {
+  schema_reference: 'payroll-jmhz-pvpoj-preview.v1'
+  document_kind: 'internal_jmhz_pvpoj_preview'
+  workflow_status: 'preview_only'
+  official_submission: {
+    supported: false
+    reason_code: string
+  }
+  xsd: {
+    bundle_version: string
+    schema_version: string
+    entry_point: string
+    namespace: string
+  }
+  supplier_id: number
+  run_id: number
+  revision_id: number
+  revision_no: number
+  period: string
+  currency_code: 'CZK'
+  source: {
+    revision_input_hash: string
+    statutory_result_id: number
+    statutory_result_hash: string
+    ruleset_id: string
+    ruleset_hash: string
+    social_liability_id: number
+    social_liability_hash: string
+  }
+  pvpoj: {
+    pojistne: {
+      zakladZamestnavateleA: number
+      pojistneZamestnavateleA: number
+      pojistneZamestnavateleCelkem: number
+      pojistneZamestnance: number
+      pojistneCelkem: number
+    }
+    slevaZamestnavatele?: {
+      pocetZamestnancu: number
+      uhrnVymerovacichZakladu: number
+      pojistneSleva: number
+    }
+    slevyZamestnancu?: {
+      pocetZamestnancu: number
+      uhrnVymerovacichZakladu: number
+      pojistneSleva: number
+    }
+    pojistneUhrada: number
+  }
+  reconciliation: Array<{
+    employee_reference: string
+    relationship_references: string[]
+    capped_assessment_base_minor_units: number
+    employee_contribution_before_discount_minor_units: number
+    employee_discount_minor_units: number
+    employee_contribution_minor_units: number
   }>
   sha256: string
   filename: string
@@ -1455,6 +1590,32 @@ export const payrollApi = {
     api.get<PayrollSubmissionOverviewResponse>('/payroll/submissions/overview', {
       params: { environment, period },
     }).then(response => response.data),
+  submissionDetail: (submissionId: number) =>
+    api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
+      .then(response => response.data),
+  jmhzPvpojPreview: (revisionId: number) =>
+    api.get<PayrollJmhzPvpojPreview>(
+      `/payroll/submissions/jmhz-pvpoj/${revisionId}`,
+    ).then(response => response.data),
+  downloadJmhzPvpojPreview: async (
+    preview: PayrollJmhzPvpojPreview,
+  ): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/submissions/jmhz-pvpoj/${preview.revision_id}/download`,
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = preview.filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   healthPaymentOverviews: (revisionId: number) =>
     api.get<{
       items: PayrollHealthPaymentOverview[]
