@@ -216,6 +216,61 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         self::assertSame('session_required', $this->json($bearer)['error']['code']);
     }
 
+    public function testNewIdentityVersionCanInheritBirthSurnameWithoutExposingIt(): void
+    {
+        $initial = $this->profilePayload('Jana Původní');
+        $initial['identity_history'][0]['birth_surname'] = 'Příkladová';
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($initial),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $sourceId = (int) $profile['identity_history'][0]['id'];
+        $effectiveFrom = date('Y-m-d');
+        $effectiveTo = date('Y-m-d', strtotime($effectiveFrom . ' -1 day'));
+
+        $response = $this->put([
+            'profile' => [
+                ...$this->profilePayload('Jana Nová'),
+                'row_version' => $profile['row_version'],
+                'identity_history' => [
+                    [
+                        'id' => $sourceId,
+                        'full_name' => 'Jana Původní',
+                        'first_name' => 'Jana',
+                        'last_name' => 'Původní',
+                        'effective_from' => '2026-01-01',
+                        'effective_to' => $effectiveTo,
+                    ],
+                    [
+                        'full_name' => 'Jana Nová',
+                        'first_name' => 'Jana',
+                        'last_name' => 'Nová',
+                        'birth_surname_source_id' => $sourceId,
+                        'effective_from' => $effectiveFrom,
+                        'effective_to' => null,
+                    ],
+                ],
+            ],
+            'employment' => null,
+        ]);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $statement = $this->db->pdo()->prepare(
+            'SELECT birth_surname
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$this->supplierId, $this->employeeId]);
+        self::assertSame('Příkladová', $statement->fetchColumn());
+    }
+
     /** @return array<string,mixed> */
     private function profilePayload(string $fullName): array
     {

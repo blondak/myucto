@@ -42,6 +42,7 @@ final class PayrollRegistrationIdentityRepository
         int $supplierId,
         int $employeeId,
         string $onDate,
+        bool $forUpdate = false,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
             'SELECT id, employee_id, first_name, last_name,
@@ -54,8 +55,9 @@ final class PayrollRegistrationIdentityRepository
                 AND employee_id = ?
                 AND effective_from <= ?
                 AND (effective_to IS NULL OR effective_to >= ?)
-              ORDER BY effective_from DESC, id DESC
+               ORDER BY effective_from DESC, id DESC
               LIMIT 2'
+            . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $statement->execute([
             $supplierId,
@@ -82,7 +84,11 @@ final class PayrollRegistrationIdentityRepository
      *   value_hash:string,value_masked:string,row_version:int
      * }>
      */
-    public function identifiers(int $supplierId, int $employeeId): array
+    public function identifiers(
+        int $supplierId,
+        int $employeeId,
+        bool $forUpdate = false,
+    ): array
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT id, identifier_type, value_ciphertext, value_hash,
@@ -90,6 +96,7 @@ final class PayrollRegistrationIdentityRepository
                FROM payroll_person_identifiers
               WHERE supplier_id = ? AND employee_id = ?
               ORDER BY identifier_type, id'
+            . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $statement->execute([$supplierId, $employeeId]);
         $result = [];
@@ -244,6 +251,91 @@ final class PayrollRegistrationIdentityRepository
         $raw = $statement->fetch(PDO::FETCH_ASSOC);
 
         return $raw === false ? null : $this->externalId($this->row($raw));
+    }
+
+    /**
+     * @return array{
+     *   id:int,employee_id:int,employment_id:int,environment:string,
+     *   identifier_type:string,value_ciphertext:string,value_hash:string,
+     *   value_masked:string,valid_from:string,valid_to:?string,
+     *   source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * }|null
+     */
+    public function externalIdAt(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        string $identifierType,
+        string $onDate,
+        bool $forUpdate = false,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, employment_id, environment,
+                    identifier_type, value_ciphertext, value_hash,
+                    value_masked, valid_from, valid_to, source_kind,
+                    source_receipt_id, source_reference_hash, row_version
+               FROM payroll_employment_external_ids
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND environment = ?
+                AND identifier_type = ?
+                AND valid_from <= ?
+                AND (valid_to IS NULL OR valid_to >= ?)
+              ORDER BY valid_from DESC, id DESC
+              LIMIT 2'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $environment,
+            $identifierType,
+            $onDate,
+            $onDate,
+        ]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        if (count($rows) > 1) {
+            throw new \DomainException(
+                'Historie ID PPV se k rozhodnému datu překrývá.',
+            );
+        }
+        if ($rows === []) {
+            return null;
+        }
+
+        return $this->externalId($this->row($rows[0]));
+    }
+
+    /** @return list<string> */
+    public function activeResolutionTaskKinds(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        bool $forUpdate = false,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT task_kind
+               FROM payroll_identity_resolution_tasks
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND environment = ?
+                AND status IN ("open", "manual_review")
+              ORDER BY task_kind, id'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $environment,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $raw) {
+            $row = $this->row($raw);
+            $result[] = $this->string($row, 'task_kind');
+        }
+
+        return $result;
     }
 
     public function insertExternalIdPlaceholder(

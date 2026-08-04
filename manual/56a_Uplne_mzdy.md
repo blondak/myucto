@@ -112,8 +112,9 @@ vstupní údaje: jméno, volitelné rodné číslo, datum narození, druh vztahu
 plánovaný nástup a základní mzdu. Jedno uložení založí kartu i první pracovní
 vztah; nový zaměstnanec se pak otevře k doplnění osobního profilu a podrobností
 vztahu. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
-EČP, VCP a zahraniční identifikátory se vedou samostatně v úplné osobní
-evidenci. Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
+EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
+přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
+Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
 i uživateli bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
 
 Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
@@ -132,9 +133,14 @@ a příjmení, rodné číslo, bydliště, e-mail, telefon, týdenní pracovní 
 a pravidelnou hrubou mzdu. Stát bydliště se vybírá ze společného číselníku
 zemí. Pokud je číselník dočasně nedostupný, formulář dovolí ručně zadat
 dvoupísmenný ISO kód, aby úpravu adresy nezablokoval výpadek sítě. Změna
-pracovní doby nebo mzdy nevynuluje historii: založí novou účinnou verzi
-podmínek od zvoleného dne. Osobní profil a primární pracovní vztah se ukládají
-jednou transakcí, takže při chybě nezůstane změněná jen jedna část.
+jména, bydliště, kontaktu, pracovní doby nebo mzdy nevynuluje historii:
+starší záznam uzavře a založí novou účinnou verzi; záznam založený tentýž den
+lze ještě opravit na místě. Uzavřená historická adresa se při založení nové
+adresy nemění. Pokud je u osoby uloženo rodné příjmení, nová verze jména je
+bez jeho odkrytí bezpečně převezme na serveru. Jméno a příjmení se zadávají
+samostatně a systém je nikdy neodhaduje z celého zobrazovaného jména. Osobní
+profil a primární pracovní vztah se ukládají jednou transakcí, takže při chybě
+nezůstane změněná jen jedna část.
 
 Na telefonu se seznam automaticky mění z tabulky na karty. Historii identit,
 adres a kontaktů, výplatní účty a další méně časté údaje otevřeš pod formulářem
@@ -581,12 +587,23 @@ kontrolní — bez implementovaného důvěryhodného transportu a parseru proto
 nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
 podání.
 
+U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
+otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na
+výsledek, splněno nebo je nutný zásah. Samotný stav **Odesláno** není důkazem
+splnění; po termínu zůstane povinnost zvýrazněná, dokud nepřijde důvěryhodné
+přijetí. Odmítnutí, částečné přijetí nebo čekání na ztotožnění se vždy ukáže
+jako stav vyžadující zásah. Pravidelný termín JMHZ je 20. den následujícího
+měsíce; připadne-li na sobotu, neděli nebo český svátek, aplikace jej posune
+na nejbližší následující pracovní den.
+
 Má-li povinnost připravené podání, tlačítko **Detail** zobrazí jeho bezpečný
 provozní rozpad: stav a kanál, jednotlivé části, metadata archivovaných
 artefaktů, kontroly a problémy a přijaté dodejky. Obsah šifrovaných XML ani
 citlivé podrobnosti validačních chyb se do tohoto přehledu neposílají.
 Rozlišuj zejména stav **Odesláno** od **Přijato** — přijetí se smí zobrazit
-jen na základě důvěryhodně ověřeného protokolu.
+jen na základě důvěryhodně ověřeného protokolu. Tlačítkem **Stáhnout**
+u artefaktu získáš přesně archivovaný XML, ZIP, PDF, JSON nebo jiný podklad;
+každé stažení používá krátkodobé jednorázové oprávnění.
 
 U schválených běhů může záložka JMHZ nabídnout také **Kontrolní náhled
 PVPOJ**. Zobrazuje vyměřovací základ, pojistné k úhradě, počet zahrnutých osob

@@ -8,7 +8,7 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 
 /**
- * @phpstan-type IdentityInput array{id:?int,full_name:string,first_name:string,last_name:string,birth_surname_present:bool,birth_surname:?string,effective_from:string,effective_to:?string}
+ * @phpstan-type IdentityInput array{id:?int,full_name:string,first_name:string,last_name:string,birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,effective_from:string,effective_to:?string}
  * @phpstan-type AddressInput array{id:?int,address_type:string,address_present:bool,street_line:?string,city:?string,postal_code:?string,country_code:?string,effective_from:string,effective_to:?string}
  * @phpstan-type ContactInput array{id:?int,contact_type:string,value:?string,is_primary:bool,is_active:bool}
  * @phpstan-type IdentifierInput array{id:?int,identifier_type:string,value:?string}
@@ -121,6 +121,15 @@ final class PayrollPersonProfileValidator
                     191,
                 )
                 : null;
+            $birthSurnameSourceId = $this->optionalId(
+                $row['birth_surname_source_id'] ?? null,
+                "identity_history.{$index}.birth_surname_source_id",
+            );
+            if ($birthSurnamePresent && $birthSurnameSourceId !== null) {
+                throw new \InvalidArgumentException(
+                    "identity_history.{$index} nesmí současně zadat rodné příjmení a jeho zdroj."
+                );
+            }
             if ($birthSurname !== null) {
                 $this->rejectMaskPlaceholder(
                     $birthSurname,
@@ -146,6 +155,7 @@ final class PayrollPersonProfileValidator
                 ),
                 'birth_surname_present' => $birthSurnamePresent,
                 'birth_surname' => $birthSurname,
+                'birth_surname_source_id' => $birthSurnameSourceId,
                 'effective_from' => $this->date(
                     $row['effective_from'] ?? null,
                     "identity_history.{$index}.effective_from",

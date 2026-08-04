@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -19,6 +20,7 @@ final class PayrollSubmissionOverviewAction
     public function __construct(
         private readonly PayrollSubmissionRepository $repository,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollDeadlineAssessmentService $deadlines,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -86,19 +88,40 @@ final class PayrollSubmissionOverviewAction
             'manual_review' => 0,
             'other' => 0,
         ];
-        foreach ($items as $item) {
+        $deadlineSummary = [
+            'not_open' => 0,
+            'open' => 0,
+            'due_soon' => 0,
+            'due_today' => 0,
+            'overdue' => 0,
+            'awaiting_result' => 0,
+            'fulfilled' => 0,
+            'action_required' => 0,
+            'cancelled' => 0,
+        ];
+        foreach ($items as &$item) {
             $status = $item['status'];
             if (array_key_exists($status, $summary) && $status !== 'total') {
                 ++$summary[$status];
             } else {
                 ++$summary['other'];
             }
+            $assessment = $this->deadlines->assess(
+                $item['earliest_submission_on'],
+                $item['due_on'],
+                $status,
+                $item['latest_submission']['status'] ?? null,
+            );
+            $item['deadline'] = $assessment->toArray();
+            ++$deadlineSummary[$assessment->phase];
         }
+        unset($item);
 
         return Json::ok($response, [
             'environment' => $environment,
             'period' => substr($periodStart, 0, 7),
             'summary' => $summary,
+            'deadline_summary' => $deadlineSummary,
             'items' => $items,
         ]);
     }

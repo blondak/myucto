@@ -134,6 +134,22 @@ final class PayrollSubmissionOverviewActionTest extends TestCase
             'draft',
             $body['items'][0]['latest_submission']['status'],
         );
+        self::assertIsArray($body['items'][0]['deadline']);
+        self::assertContains(
+            $body['items'][0]['deadline']['phase'],
+            [
+                'not_open',
+                'open',
+                'due_soon',
+                'due_today',
+                'overdue',
+            ],
+        );
+        self::assertIsInt($body['items'][0]['deadline']['days_to_due']);
+        self::assertSame(
+            1,
+            array_sum($body['deadline_summary']),
+        );
         self::assertArrayNotHasKey(
             'source_snapshot_hash',
             $body['items'][0]['latest_submission'],

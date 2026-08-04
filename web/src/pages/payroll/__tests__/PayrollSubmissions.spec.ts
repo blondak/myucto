@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   download: vi.fn(),
   overview: vi.fn(),
   submissionDetail: vi.fn(),
+  downloadSubmissionArtifact: vi.fn(),
   runs: vi.fn(),
   jmhzPreview: vi.fn(),
   downloadJmhzPreview: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('@/api/payroll', () => ({
     downloadRegzelSnapshot: m.download,
     submissionOverview: m.overview,
     submissionDetail: m.submissionDetail,
+    downloadSubmissionArtifact: m.downloadSubmissionArtifact,
     runs: m.runs,
     jmhzPvpojPreview: m.jmhzPreview,
     downloadJmhzPvpojPreview: m.downloadJmhzPreview,
@@ -83,6 +85,17 @@ function setup() {
       manual_review: 0,
       other: 0,
     },
+    deadline_summary: {
+      not_open: 1,
+      open: 0,
+      due_soon: 0,
+      due_today: 0,
+      overdue: 0,
+      awaiting_result: 0,
+      fulfilled: 0,
+      action_required: 0,
+      cancelled: 0,
+    },
     items: [{
       id: 7,
       environment: 'production',
@@ -98,6 +111,12 @@ function setup() {
       earliest_submission_on: '2026-09-01',
       due_on: '2026-09-20',
       calendar_basis: 'calendar_days',
+      deadline: {
+        phase: 'not_open',
+        days_to_due: 36,
+        is_action_required: false,
+        is_overdue: false,
+      },
       latest_submission: null,
     }],
   })
@@ -412,5 +431,60 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('outbound_xml')
     expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('MANUAL_REVIEW')
     expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('2.0 kB')
+
+    await wrapper.get('[data-test="submission-artifact-download"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ id: 51, mime_type: 'application/xml' }),
+    )
+  })
+
+  it('po otevření detailu znovu odstraní starou chybu stažení artefaktu', async () => {
+    const overview = await m.overview()
+    overview.items[0].latest_submission = {
+      id: 31,
+      status: 'validated',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      submitted_at: null,
+      decided_at: null,
+    }
+    m.overview.mockResolvedValue(overview)
+    m.downloadSubmissionArtifact.mockRejectedValueOnce({
+      response: {
+        data: {
+          error: {
+            message: 'Artefakt již není dostupný.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="submission-artifact-download"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="submission-artifact-download-error"]').text())
+      .toContain('Artefakt již není dostupný.')
+
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="submission-artifact-download-error"]').exists())
+      .toBe(false)
+  })
+
+  it('zobrazuje účinný stav lhůty odděleně od stavu podání', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submission-deadline-phase"]').text())
+      .toContain('payroll.submissions.overview.deadline_phase.not_open')
   })
 })

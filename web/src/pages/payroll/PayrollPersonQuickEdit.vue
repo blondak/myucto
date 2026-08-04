@@ -8,14 +8,16 @@ import {
   type PayrollPerson,
   type PayrollPersonProfile,
   type PayrollPersonProfilePayload,
+  type PayrollPersonIdentifierType,
   type PayrollPersonQuickEditPayload,
   type PayrollPersonQuickEditResponse,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
-import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
+import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
+import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields.vue'
 
 const props = defineProps<{
   personId: number
@@ -30,6 +32,9 @@ interface QuickEditForm {
   first_name: string
   last_name: string
   birth_number: string
+  ecp: string
+  vcp: string
+  foreign_tax_identifier: string
   street_line: string
   city: string
   postal_code: string
@@ -57,6 +62,9 @@ const form = reactive<QuickEditForm>({
   first_name: '',
   last_name: '',
   birth_number: '',
+  ecp: '',
+  vcp: '',
+  foreign_tax_identifier: '',
   street_line: '',
   city: '',
   postal_code: '',
@@ -84,29 +92,20 @@ const employmentChanged = computed(() => {
 
 const currentIdentity = computed(() => {
   const rows = profile.value?.identity_history ?? []
-  return rows.find(row => row.effective_to === null) ?? rows[0] ?? null
+  return rows.find(row => row.effective_to === null) ?? null
 })
 const residenceAddress = computed(() => {
   const rows = profile.value?.addresses.filter(row => row.address_type === 'residence') ?? []
-  return rows.find(row => row.effective_to === null) ?? rows[0] ?? null
+  return rows.find(row => row.effective_to === null) ?? null
 })
 const primaryEmail = computed(() => preferredContact('email'))
 const primaryPhone = computed(() => preferredContact('phone'))
-const birthNumber = computed(() =>
-  profile.value?.identifiers.find(row => row.identifier_type === 'birth_number') ?? null,
-)
 
 function preferredContact(type: 'email' | 'phone') {
   const rows = profile.value?.contacts.filter(row =>
     row.contact_type === type && row.is_active,
   ) ?? []
   return rows.find(row => row.is_primary) ?? rows[0] ?? null
-}
-
-function splitName(fullName: string): [string, string] {
-  const parts = fullName.trim().split(/\s+/u)
-  if (parts.length < 2) return [parts[0] ?? '', '']
-  return [parts.slice(0, -1).join(' '), parts.at(-1) ?? '']
 }
 
 function primaryFrom(value: PayrollPerson): PayrollEmployment | null {
@@ -160,11 +159,12 @@ function hydrate(
   primaryEmployment.value = employment
 
   const identity = profileValue.identity_history.find(row => row.effective_to === null)
-    ?? profileValue.identity_history[0]
-  const [fallbackFirst, fallbackLast] = splitName(profileValue.full_name)
-  form.first_name = identity?.first_name ?? fallbackFirst
-  form.last_name = identity?.last_name ?? fallbackLast
+  form.first_name = identity?.first_name ?? ''
+  form.last_name = identity?.last_name ?? ''
   form.birth_number = ''
+  form.ecp = ''
+  form.vcp = ''
+  form.foreign_tax_identifier = ''
   form.street_line = ''
   form.city = ''
   form.postal_code = ''
@@ -200,6 +200,12 @@ function optionalText(value: string): string | undefined {
   return trimmed === '' ? undefined : trimmed
 }
 
+function previousDayIso(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - 1)
+  return date.toISOString().slice(0, 10)
+}
+
 function profilePayload(): PayrollPersonProfilePayload {
   const value = profile.value
   if (!value) throw new Error('profile_missing')
@@ -208,13 +214,27 @@ function profilePayload(): PayrollPersonProfilePayload {
   const address = residenceAddress.value
   const email = primaryEmail.value
   const phone = primaryPhone.value
-  const identifier = birthNumber.value
   const hasAddressReplacement = [
     form.street_line,
     form.city,
     form.postal_code,
     form.country_code,
   ].some(item => item.trim() !== '')
+  const changeDate = todayIso()
+  const appendAddressVersion = address !== null
+    && hasAddressReplacement
+    && address.effective_from < changeDate
+  const emailReplacement = optionalText(form.email)
+  const phoneReplacement = optionalText(form.phone)
+  const identityNameChanged = identity === null
+    || form.first_name.trim() !== (identity.first_name ?? '').trim()
+    || form.last_name.trim() !== (identity.last_name ?? '').trim()
+  const appendIdentityVersion = identity !== null
+    && identityNameChanged
+    && identity.first_name !== null
+    && identity.last_name !== null
+    && identity.effective_from < changeDate
+  const createIdentityVersion = identity === null || appendIdentityVersion
 
   return {
     row_version: value.row_version,
@@ -223,31 +243,43 @@ function profilePayload(): PayrollPersonProfilePayload {
     cash_allocation_basis_points: value.cash_allocation_basis_points,
     payout_effective_on: value.payout_effective_on ?? todayIso(),
     secure_delivery_channel: value.secure_delivery_channel,
-    identity_history: value.identity_history.length > 0
-      ? value.identity_history.map(row => ({
+    identity_history: [
+      ...value.identity_history.map(row => ({
           id: row.id,
-          full_name: row.id === identity?.id ? fullName : row.full_name,
-          first_name: row.id === identity?.id
+          full_name: row.id === identity?.id && !appendIdentityVersion
+            ? fullName
+            : row.full_name,
+          first_name: row.id === identity?.id && !appendIdentityVersion
             ? form.first_name.trim()
-            : (row.first_name ?? splitName(row.full_name)[0]),
-          last_name: row.id === identity?.id
+            : (row.first_name ?? ''),
+          last_name: row.id === identity?.id && !appendIdentityVersion
             ? form.last_name.trim()
-            : (row.last_name ?? splitName(row.full_name)[1]),
+            : (row.last_name ?? ''),
           effective_from: row.effective_from,
-          effective_to: row.effective_to,
-        }))
-      : [{
+          effective_to: row.id === identity?.id && appendIdentityVersion
+            ? previousDayIso(changeDate)
+            : row.effective_to,
+        })),
+      ...(createIdentityVersion
+        ? [{
           full_name: fullName,
           first_name: form.first_name.trim(),
           last_name: form.last_name.trim(),
-          effective_from: todayIso(),
+          ...(identity?.birth_surname_masked
+            ? { birth_surname_source_id: identity.id }
+            : {}),
+          effective_from: changeDate,
           effective_to: null,
-        }],
+        }]
+        : []),
+    ],
     addresses: [
       ...value.addresses.map(row => ({
         id: row.id,
         address_type: row.address_type,
-        ...(row.id === address?.id && hasAddressReplacement
+        ...(row.id === address?.id
+          && hasAddressReplacement
+          && !appendAddressVersion
           ? {
               street_line: form.street_line.trim(),
               city: form.city.trim(),
@@ -256,16 +288,18 @@ function profilePayload(): PayrollPersonProfilePayload {
             }
           : {}),
         effective_from: row.effective_from,
-        effective_to: row.effective_to,
+        effective_to: row.id === address?.id && appendAddressVersion
+          ? previousDayIso(changeDate)
+          : row.effective_to,
       })),
-      ...(!address && hasAddressReplacement
+      ...((!address || appendAddressVersion) && hasAddressReplacement
         ? [{
             address_type: 'residence' as const,
             street_line: form.street_line.trim(),
             city: form.city.trim(),
             postal_code: form.postal_code.trim(),
             country_code: form.country_code.trim().toUpperCase(),
-            effective_from: todayIso(),
+            effective_from: changeDate,
             effective_to: null,
           }]
         : []),
@@ -274,47 +308,33 @@ function profilePayload(): PayrollPersonProfilePayload {
       ...value.contacts.map(row => ({
         id: row.id,
         contact_type: row.contact_type,
-        ...(row.id === email?.id && optionalText(form.email) !== undefined
-          ? { value: form.email.trim() }
-          : {}),
-        ...(row.id === phone?.id && optionalText(form.phone) !== undefined
-          ? { value: form.phone.trim() }
-          : {}),
-        is_primary: row.is_primary,
-        is_active: row.is_active,
+        is_primary: (row.id === email?.id && emailReplacement !== undefined)
+          || (row.id === phone?.id && phoneReplacement !== undefined)
+          ? false
+          : row.is_primary,
+        is_active: (row.id === email?.id && emailReplacement !== undefined)
+          || (row.id === phone?.id && phoneReplacement !== undefined)
+          ? false
+          : row.is_active,
       })),
-      ...(!email && optionalText(form.email) !== undefined
+      ...(emailReplacement !== undefined
         ? [{
             contact_type: 'email' as const,
-            value: form.email.trim(),
+            value: emailReplacement,
             is_primary: true,
             is_active: true,
           }]
         : []),
-      ...(!phone && optionalText(form.phone) !== undefined
+      ...(phoneReplacement !== undefined
         ? [{
             contact_type: 'phone' as const,
-            value: form.phone.trim(),
+            value: phoneReplacement,
             is_primary: true,
             is_active: true,
           }]
         : []),
     ],
-    identifiers: [
-      ...value.identifiers.map(row => ({
-        id: row.id,
-        identifier_type: row.identifier_type,
-        ...(row.id === identifier?.id && optionalText(form.birth_number) !== undefined
-          ? { value: form.birth_number.trim() }
-          : {}),
-      })),
-      ...(!identifier && optionalText(form.birth_number) !== undefined
-        ? [{
-            identifier_type: 'birth_number' as const,
-            value: form.birth_number.trim(),
-          }]
-        : []),
-    ],
+    identifiers: identifierPayloads(value),
     accounts: value.accounts.map(row => ({
       id: row.id,
       label: row.label,
@@ -324,6 +344,35 @@ function profilePayload(): PayrollPersonProfilePayload {
       is_active: row.is_active,
     })),
   }
+}
+
+function identifierPayloads(value: PayrollPersonProfile) {
+  const inputs: Record<PayrollPersonIdentifierType, string> = {
+    birth_number: form.birth_number,
+    ecp: form.ecp,
+    vcp: form.vcp,
+    foreign_tax_identifier: form.foreign_tax_identifier,
+  }
+  const existing = new Set(value.identifiers.map(row => row.identifier_type))
+
+  return [
+    ...value.identifiers.map(row => ({
+      id: row.id,
+      identifier_type: row.identifier_type,
+      ...(optionalText(inputs[row.identifier_type]) !== undefined
+        ? { value: inputs[row.identifier_type].trim() }
+        : {}),
+    })),
+    ...Object.entries(inputs)
+      .filter(([type, input]) =>
+        !existing.has(type as PayrollPersonIdentifierType)
+        && optionalText(input) !== undefined,
+      )
+      .map(([type, input]) => ({
+        identifier_type: type as PayrollPersonIdentifierType,
+        value: input.trim(),
+      })),
+  ]
 }
 
 function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayload {
@@ -357,6 +406,15 @@ function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayl
 function validate(): boolean {
   if (form.first_name.trim() === '' || form.last_name.trim() === '') {
     saveError.value = t('payroll.people.quick_edit.name_required')
+    return false
+  }
+  const selectedIdentity = currentIdentity.value
+  const incompleteHistory = profile.value?.identity_history.some(row =>
+    row.id !== selectedIdentity?.id
+    && (!row.first_name?.trim() || !row.last_name?.trim()),
+  ) ?? false
+  if (incompleteHistory) {
+    saveError.value = t('payroll.people.quick_edit.structured_history_required')
     return false
   }
   const addressParts = [
@@ -445,106 +503,29 @@ onMounted(load)
         {{ saveError }}
       </div>
 
-      <fieldset :disabled="!canWrite || saving" class="space-y-4">
-        <legend class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.personal_title') }}</legend>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label :class="labelClass">
-            {{ t('payroll.people.quick_edit.first_name') }}
-            <input
-              v-model="form.first_name"
-              required
-              autocomplete="given-name"
-              :class="inputClass"
-              data-test="first-name"
-            >
-          </label>
-          <label :class="labelClass">
-            {{ t('payroll.people.quick_edit.last_name') }}
-            <input
-              v-model="form.last_name"
-              required
-              autocomplete="family-name"
-              :class="inputClass"
-              data-test="last-name"
-            >
-          </label>
-          <label :class="[labelClass, 'sm:col-span-2']">
-            {{ t('payroll.people.quick_edit.birth_number') }}
-            <input
-              v-model="form.birth_number"
-              autocomplete="off"
-              inputmode="numeric"
-              :placeholder="birthNumber?.value_masked || t('payroll.people.quick_edit.not_set')"
-              :class="inputClass"
-              data-test="birth-number"
-            >
-            <span class="mt-1 block text-xs font-normal text-neutral-500">
-              {{ t('payroll.people.quick_edit.sensitive_replace_hint') }}
-            </span>
-          </label>
-        </div>
-      </fieldset>
+      <PayrollPersonIdentityQuickFields
+        v-model:first-name="form.first_name"
+        v-model:last-name="form.last_name"
+        v-model:birth-number="form.birth_number"
+        v-model:ecp="form.ecp"
+        v-model:vcp="form.vcp"
+        v-model:foreign-tax-identifier="form.foreign_tax_identifier"
+        :identifiers="profile.identifiers"
+        :disabled="!canWrite || saving"
+      />
 
-      <fieldset :disabled="!canWrite || saving" class="space-y-4">
-        <div>
-          <legend class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.contact_title') }}</legend>
-          <p v-if="residenceAddress" class="mt-1 text-xs text-neutral-500">
-            {{ t('payroll.people.quick_edit.current_address') }}: {{ residenceAddress.address_masked }}
-          </p>
-        </div>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
-          <label :class="[labelClass, 'sm:col-span-2 lg:col-span-2']">
-            {{ t('payroll.people.quick_edit.street_line') }}
-            <input
-              v-model="form.street_line"
-              autocomplete="street-address"
-              :class="inputClass"
-              :placeholder="t('payroll.people.quick_edit.keep_masked')"
-              data-test="street-line"
-            >
-          </label>
-          <label :class="[labelClass, 'lg:col-span-2']">
-            {{ t('payroll.people.quick_edit.city') }}
-            <input v-model="form.city" autocomplete="address-level2" :class="inputClass" data-test="city">
-          </label>
-          <label :class="labelClass">
-            {{ t('payroll.people.quick_edit.postal_code') }}
-            <input v-model="form.postal_code" autocomplete="postal-code" :class="inputClass" data-test="postal-code">
-          </label>
-          <label :class="labelClass">
-            {{ t('payroll.people.quick_edit.country_code') }}
-            <CountrySelect
-              v-model="form.country_code"
-              class="mt-1"
-              accent="payroll"
-              data-test="country-code"
-            />
-          </label>
-          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-3']">
-            {{ t('payroll.people.quick_edit.email') }}
-            <input
-              v-model="form.email"
-              type="email"
-              autocomplete="email"
-              :placeholder="primaryEmail?.value_masked || t('payroll.people.quick_edit.not_set')"
-              :class="inputClass"
-              data-test="email"
-            >
-          </label>
-          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-3']">
-            {{ t('payroll.people.quick_edit.phone') }}
-            <input
-              v-model="form.phone"
-              type="tel"
-              autocomplete="tel"
-              :placeholder="primaryPhone?.value_masked || t('payroll.people.quick_edit.not_set')"
-              :class="inputClass"
-              data-test="phone"
-            >
-          </label>
-        </div>
-        <p class="text-xs text-neutral-500">{{ t('payroll.people.quick_edit.contact_replace_hint') }}</p>
-      </fieldset>
+      <PayrollPersonContactQuickFields
+        v-model:street-line="form.street_line"
+        v-model:city="form.city"
+        v-model:postal-code="form.postal_code"
+        v-model:country-code="form.country_code"
+        v-model:email="form.email"
+        v-model:phone="form.phone"
+        :current-address-masked="residenceAddress?.address_masked ?? null"
+        :current-email-masked="primaryEmail?.value_masked ?? null"
+        :current-phone-masked="primaryPhone?.value_masked ?? null"
+        :disabled="!canWrite || saving"
+      />
 
       <fieldset :disabled="!canWrite || saving || !writableEmployment" class="space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-2">

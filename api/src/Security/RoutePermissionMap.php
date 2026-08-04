@@ -150,6 +150,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/overview$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/jmhz-pvpoj/[0-9]+(?:/download)?$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download-grant$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-overviews/[0-9]+(?:/[0-9]{3}/download)?$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/policies(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/policies$#', 'payroll.settings', AccessLevel::WRITE],

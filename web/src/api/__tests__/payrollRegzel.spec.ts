@@ -151,4 +151,92 @@ describe('payroll REGZEL API', () => {
     expect(detail.submission.id).toBe(31)
     expect(m.get).toHaveBeenCalledWith('/payroll/submissions/31')
   })
+
+  it('stáhne artefakt podání přes session-only jednorázový token v hlavičce', async () => {
+    m.post.mockResolvedValueOnce({
+      data: {
+        token: 'synthetic-opaque-token',
+        expires_at: '2026-08-04T12:00:00+00:00',
+      },
+    })
+    m.get.mockResolvedValueOnce({
+      data: new Blob(['synthetic-artifact']),
+      headers: {
+        'content-disposition': 'attachment; filename="jmhz-synthetic.xml"',
+      },
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-artifact')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    await payrollApi.downloadSubmissionArtifact(31, {
+      id: 51,
+      part_id: 41,
+      artifact_kind: 'outbound_xml',
+      direction: 'outbound',
+      mime_type: 'application/xml',
+      byte_size: 2048,
+      xsd_version: '1.4.3.4',
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
+    })
+
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/submissions/31/artifacts/51/download-grant',
+    )
+    expect(m.get).toHaveBeenCalledWith(
+      '/payroll/submissions/31/artifacts/51/download',
+      {
+        responseType: 'blob',
+        headers: {
+          'X-Payroll-Download-Token': 'synthetic-opaque-token',
+        },
+      },
+    )
+  })
+
+  it('dekóduje bezpečnou JSON chybu i při blob downloadu artefaktu', async () => {
+    m.post.mockResolvedValueOnce({
+      data: {
+        token: 'synthetic-opaque-token',
+        expires_at: '2026-08-04T12:00:00+00:00',
+      },
+    })
+    const error = {
+      response: {
+        status: 404,
+        data: new Blob([JSON.stringify({
+          error: {
+            code: 'payroll_artifact_not_found',
+            message: 'Artefakt již není dostupný.',
+          },
+        })], { type: 'application/json' }),
+      },
+      message: 'Request failed with status code 404',
+    }
+    m.get.mockRejectedValueOnce(error)
+
+    await expect(payrollApi.downloadSubmissionArtifact(31, {
+      id: 51,
+      part_id: 41,
+      artifact_kind: 'outbound_xml',
+      direction: 'outbound',
+      mime_type: 'application/xml',
+      byte_size: 2048,
+      xsd_version: '1.4.3.4',
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
+    })).rejects.toMatchObject({
+      response: {
+        data: {
+          error: {
+            code: 'payroll_artifact_not_found',
+            message: 'Artefakt již není dostupný.',
+          },
+        },
+      },
+    })
+  })
 })

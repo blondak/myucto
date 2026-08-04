@@ -262,6 +262,7 @@ export interface PayrollPersonIdentityPayload {
   first_name: string
   last_name: string
   birth_surname?: string | null
+  birth_surname_source_id?: number
   effective_from: string
   effective_to: string | null
 }
@@ -883,6 +884,17 @@ export type PayrollSubmissionObligationStatus =
   | 'cancelled'
   | 'manual_review'
 
+export type PayrollSubmissionDeadlinePhase =
+  | 'not_open'
+  | 'open'
+  | 'due_soon'
+  | 'due_today'
+  | 'overdue'
+  | 'awaiting_result'
+  | 'fulfilled'
+  | 'action_required'
+  | 'cancelled'
+
 export interface PayrollSubmissionOverviewItem {
   id: number
   environment: PayrollRegzelEnvironment
@@ -898,6 +910,12 @@ export interface PayrollSubmissionOverviewItem {
   earliest_submission_on: string
   due_on: string
   calendar_basis: string
+  deadline: {
+    phase: PayrollSubmissionDeadlinePhase
+    days_to_due: number
+    is_action_required: boolean
+    is_overdue: boolean
+  }
   latest_submission: {
     id: number
     status: string
@@ -921,6 +939,7 @@ export interface PayrollSubmissionOverviewResponse {
     manual_review: number
     other: number
   }
+  deadline_summary: Record<PayrollSubmissionDeadlinePhase, number>
   items: PayrollSubmissionOverviewItem[]
 }
 
@@ -1593,6 +1612,59 @@ export const payrollApi = {
   submissionDetail: (submissionId: number) =>
     api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
       .then(response => response.data),
+  downloadSubmissionArtifact: async (
+    submissionId: number,
+    artifact: PayrollSubmissionDetail['artifacts'][number],
+  ): Promise<void> => {
+    const grant = await api.post<{ token: string; expires_at: string }>(
+      `/payroll/submissions/${submissionId}/artifacts/${artifact.id}/download-grant`,
+    ).then(response => response.data)
+    let response
+    try {
+      response = await api.get<Blob>(
+        `/payroll/submissions/${submissionId}/artifacts/${artifact.id}/download`,
+        {
+          responseType: 'blob',
+          headers: { 'X-Payroll-Download-Token': grant.token },
+        },
+      )
+    } catch (error: any) {
+      const data = error?.response?.data
+      if (data instanceof Blob) {
+        try {
+          error.response.data = JSON.parse(await data.text())
+        } catch {
+          error.response.data = data
+        }
+      }
+      throw error
+    }
+    const disposition = response.headers['content-disposition']
+    const matchedFilename = typeof disposition === 'string'
+      ? /filename="([^"]+)"/u.exec(disposition)?.[1]
+      : undefined
+    const extension = artifact.mime_type === 'application/xml'
+      ? 'xml'
+      : artifact.mime_type === 'application/pdf'
+        ? 'pdf'
+        : artifact.mime_type === 'application/zip'
+          ? 'zip'
+          : artifact.mime_type === 'application/json'
+            ? 'json'
+            : 'bin'
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = matchedFilename
+        ?? `mzdove-podani-${submissionId}-artefakt-${artifact.id}.${extension}`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   jmhzPvpojPreview: (revisionId: number) =>
     api.get<PayrollJmhzPvpojPreview>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}`,

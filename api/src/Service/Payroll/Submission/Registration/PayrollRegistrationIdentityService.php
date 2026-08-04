@@ -11,12 +11,6 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 final readonly class PayrollRegistrationIdentityService
 {
     private const ENVIRONMENTS = ['production', 'test'];
-    private const IDENTIFIER_TYPES = [
-        'birth_number',
-        'ecp',
-        'vcp',
-        'foreign_tax_identifier',
-    ];
     private const TASK_KINDS = [
         'person_identity',
         'employment_external_id',
@@ -39,13 +33,184 @@ final readonly class PayrollRegistrationIdentityService
      *   identifiers:array{
      *     birth_number:?string,ecp:?string,vcp:?string,
      *     foreign_tax_identifier:?string
-     *   }
+     *   },
+     *   identifier_sources:array<string,array{id:int,row_version:int}>
      * }
      */
     public function sensitiveIdentityAt(
         int $supplierId,
         int $employeeId,
         string $onDate,
+    ): array {
+        return $this->sensitiveIdentityAtInternal(
+            $supplierId,
+            $employeeId,
+            $onDate,
+            false,
+        );
+    }
+
+    /**
+     * Interní citlivý zdroj pro neměnný submission snapshot.
+     *
+     * @return array{
+     *   identity:array<string,mixed>,
+     *   identifiers:array{
+     *     birth_number:?string,ecp:?string,vcp:?string,
+     *     foreign_tax_identifier:?string
+     *   },
+     *   identifier_sources:array<string,array{id:int,row_version:int}>,
+     *   employment_external_identifier:?array{
+     *     id:int,employee_id:int,employment_id:int,environment:string,
+     *     identifier_type:string,value:string,valid_from:string,
+     *     valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *     source_reference_hash:string,row_version:int
+     *   },
+     *   resolution:array{
+     *     person_identity:string,employment_external_id:string
+     *   }
+     * }
+     */
+    public function sensitiveSnapshotSourceAt(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($onDate, 'Rozhodné datum');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $environment,
+            $onDate,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null
+                || $employment['employee_id'] !== $employeeId
+            ) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_identity_employment_scope_mismatch',
+                    'Pracovní vztah nepatří stejné firmě a osobě.',
+                );
+            }
+            if ($onDate < $employment['start_date']
+                || ($employment['end_date'] !== null
+                    && $onDate > $employment['end_date'])
+            ) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_identity_employment_scope_mismatch',
+                    'Pracovní vztah není účinný k rozhodnému datu.',
+                );
+            }
+            $tasks = $this->repository->activeResolutionTaskKinds(
+                $supplierId,
+                $employmentId,
+                $environment,
+                true,
+            );
+            if ($tasks !== []) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_identity_unresolved',
+                    'Registrační identita má otevřený úkol ztotožnění.',
+                );
+            }
+            $person = $this->sensitiveIdentityAtInternal(
+                $supplierId,
+                $employeeId,
+                $onDate,
+                true,
+            );
+            $storedExternal = $this->repository->externalIdAt(
+                $supplierId,
+                $employmentId,
+                $environment,
+                'id_ppv',
+                $onDate,
+                true,
+            );
+            $external = null;
+            if ($storedExternal !== null) {
+                if ($storedExternal['employee_id'] !== $employeeId) {
+                    throw new PayrollRegistrationIdentitySnapshotException(
+                        'registration_identity_id_ppv_scope_mismatch',
+                        'ID PPV patří jiné osobě.',
+                    );
+                }
+                $plaintext = $this->sensitiveData->reveal(
+                    $storedExternal['value_ciphertext'],
+                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                    $storedExternal['id'],
+                );
+                $hash = $this->sensitiveData->lookupHash(
+                    $plaintext,
+                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                );
+                if (!hash_equals($storedExternal['value_hash'], $hash)) {
+                    throw new \RuntimeException(
+                        'Otisk ID PPV neodpovídá ciphertextu.',
+                    );
+                }
+                $external = [
+                    'id' => $storedExternal['id'],
+                    'employee_id' => $storedExternal['employee_id'],
+                    'employment_id' => $storedExternal['employment_id'],
+                    'environment' => $storedExternal['environment'],
+                    'identifier_type' =>
+                        $storedExternal['identifier_type'],
+                    'value' => $plaintext,
+                    'valid_from' => $storedExternal['valid_from'],
+                    'valid_to' => $storedExternal['valid_to'],
+                    'source_kind' => $storedExternal['source_kind'],
+                    'source_receipt_id' =>
+                        $storedExternal['source_receipt_id'],
+                    'source_reference_hash' =>
+                        $storedExternal['source_reference_hash'],
+                    'row_version' => $storedExternal['row_version'],
+                ];
+            }
+
+            return [
+                'identity' => $person['identity'],
+                'identifiers' => $person['identifiers'],
+                'identifier_sources' => $person['identifier_sources'],
+                'employment_external_identifier' => $external,
+                'resolution' => [
+                    'person_identity' => 'resolved',
+                    'employment_external_id' => $external === null
+                        ? 'not_assigned'
+                        : 'resolved',
+                ],
+            ];
+        });
+    }
+
+    /**
+     * @return array{
+     *   identity:array<string,mixed>,
+     *   identifiers:array{
+     *     birth_number:?string,ecp:?string,vcp:?string,
+     *     foreign_tax_identifier:?string
+     *   },
+     *   identifier_sources:array<string,array{id:int,row_version:int}>
+     * }
+     */
+    private function sensitiveIdentityAtInternal(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+        bool $forUpdate,
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
@@ -54,6 +219,7 @@ final readonly class PayrollRegistrationIdentityService
             $supplierId,
             $employeeId,
             $onDate,
+            $forUpdate,
         );
         if ($identity === null) {
             throw new \DomainException(
@@ -68,10 +234,17 @@ final readonly class PayrollRegistrationIdentityService
             );
         }
 
-        $identifiers = array_fill_keys(self::IDENTIFIER_TYPES, null);
+        $identifiers = [
+            'birth_number' => null,
+            'ecp' => null,
+            'vcp' => null,
+            'foreign_tax_identifier' => null,
+        ];
+        $identifierSources = [];
         foreach ($this->repository->identifiers(
             $supplierId,
             $employeeId,
+            $forUpdate,
         ) as $stored) {
             $type = $stored['identifier_type'];
             if (!array_key_exists($type, $identifiers)) {
@@ -99,11 +272,17 @@ final readonly class PayrollRegistrationIdentityService
                 );
             }
             $identifiers[$type] = $plaintext;
+            $identifierSources[$type] = [
+                'id' => $stored['id'],
+                'row_version' => $stored['row_version'],
+            ];
         }
+        ksort($identifierSources, SORT_STRING);
 
         return [
             'identity' => $identity,
             'identifiers' => $identifiers,
+            'identifier_sources' => $identifierSources,
         ];
     }
 

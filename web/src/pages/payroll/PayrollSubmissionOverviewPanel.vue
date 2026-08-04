@@ -32,6 +32,8 @@ const jmhzError = ref('')
 const detail = ref<PayrollSubmissionDetail | null>(null)
 const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
+const downloadingArtifactId = ref<number | null>(null)
+const artifactDownloadError = ref('')
 
 const environmentOptions = computed(() => [
   {
@@ -48,11 +50,17 @@ const items = computed(() => allItems.value.filter(item =>
 ))
 const counts = computed(() => ({
   total: items.value.length,
-  open: items.value.filter(item => ['open', 'prepared'].includes(item.status)).length,
-  submitted: items.value.filter(item => item.status === 'submitted').length,
-  fulfilled: items.value.filter(item => item.status === 'fulfilled').length,
+  open: items.value.filter(item =>
+    ['not_open', 'open', 'due_soon', 'due_today'].includes(item.deadline.phase),
+  ).length,
+  submitted: items.value.filter(item =>
+    item.deadline.phase === 'awaiting_result',
+  ).length,
+  fulfilled: items.value.filter(item =>
+    item.deadline.phase === 'fulfilled',
+  ).length,
   attention: items.value.filter(item =>
-    ['overdue', 'manual_review'].includes(item.status),
+    ['overdue', 'action_required'].includes(item.deadline.phase),
   ).length,
 }))
 
@@ -89,6 +97,31 @@ function channelLabel(channel: string): string {
   return translated === key ? channel : translated
 }
 
+function formatDate(value: string): string {
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ').format(date)
+}
+
+function deadlineClass(item: PayrollSubmissionOverviewItem): string {
+  if (item.deadline.phase === 'fulfilled') return 'bg-success-50 text-success-700'
+  if (item.deadline.phase === 'cancelled') return 'bg-neutral-100 text-neutral-600'
+  if (['overdue', 'action_required'].includes(item.deadline.phase)) {
+    return 'bg-danger-50 text-danger-700'
+  }
+  if (item.deadline.phase === 'due_today') return 'bg-warning-50 text-warning-700'
+  if (item.deadline.phase === 'due_soon') return 'bg-payroll-50 text-payroll-700'
+  if (item.deadline.phase === 'awaiting_result') return 'bg-primary-50 text-primary-700'
+  return 'bg-neutral-100 text-neutral-700'
+}
+
+function deadlineLabel(item: PayrollSubmissionOverviewItem): string {
+  return t(
+    `payroll.submissions.overview.deadline_phase.${item.deadline.phase}`,
+    { count: Math.abs(item.deadline.days_to_due) },
+  )
+}
+
 function formatMinor(value: number): string {
   return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', {
     style: 'currency',
@@ -118,6 +151,7 @@ function readableBytes(bytes: number): string {
 async function openDetail(item: PayrollSubmissionOverviewItem) {
   if (!item.latest_submission || detailLoadingId.value !== null) return
   detailError.value = ''
+  artifactDownloadError.value = ''
   detailLoadingId.value = item.latest_submission.id
   try {
     detail.value = await payrollApi.submissionDetail(item.latest_submission.id)
@@ -129,6 +163,27 @@ async function openDetail(item: PayrollSubmissionOverviewItem) {
     )
   } finally {
     detailLoadingId.value = null
+  }
+}
+
+async function downloadArtifact(
+  artifact: PayrollSubmissionDetail['artifacts'][number],
+) {
+  if (!detail.value || downloadingArtifactId.value !== null) return
+  artifactDownloadError.value = ''
+  downloadingArtifactId.value = artifact.id
+  try {
+    await payrollApi.downloadSubmissionArtifact(
+      detail.value.submission.id,
+      artifact,
+    )
+  } catch (exception) {
+    artifactDownloadError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.artifact_download_failed'),
+    )
+  } finally {
+    downloadingArtifactId.value = null
   }
 }
 
@@ -218,6 +273,7 @@ async function load() {
   error.value = ''
   detail.value = null
   detailError.value = ''
+  artifactDownloadError.value = ''
   try {
     const response = await payrollApi.submissionOverview(
       environment.value,
@@ -344,7 +400,16 @@ onMounted(load)
               <tr v-for="item in items" :key="item.id">
                 <td class="px-4 py-3 font-medium text-neutral-900">{{ item.agenda_code }}</td>
                 <td class="px-4 py-3 text-neutral-700">{{ item.subject_reference }}</td>
-                <td class="px-4 py-3 text-neutral-700">{{ item.due_on }}</td>
+                <td class="px-4 py-3 text-neutral-700">
+                  <span class="block">{{ formatDate(item.due_on) }}</span>
+                  <span
+                    class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="deadlineClass(item)"
+                    data-test="submission-deadline-phase"
+                  >
+                    {{ deadlineLabel(item) }}
+                  </span>
+                </td>
                 <td class="px-4 py-3 text-neutral-700">{{ channelLabel(item.preferred_channel) }}</td>
                 <td class="px-4 py-3">
                   <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
@@ -386,7 +451,14 @@ onMounted(load)
             <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.due_on') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ item.due_on }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ formatDate(item.due_on) }}</dd>
+                <dd
+                  class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                  :class="deadlineClass(item)"
+                  data-test="submission-deadline-phase"
+                >
+                  {{ deadlineLabel(item) }}
+                </dd>
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
@@ -500,14 +572,40 @@ onMounted(load)
             <h3 class="font-semibold text-neutral-900">
               {{ t('payroll.submissions.overview.detail_artifacts', { count: detail.artifacts.length }) }}
             </h3>
+            <p
+              v-if="artifactDownloadError"
+              class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+              role="alert"
+              data-test="submission-artifact-download-error"
+            >
+              {{ artifactDownloadError }}
+            </p>
             <p v-if="detail.artifacts.length === 0" class="mt-3 text-sm text-neutral-500">
               {{ t('payroll.submissions.overview.detail_none') }}
             </p>
             <ul v-else class="mt-3 divide-y divide-neutral-100">
               <li v-for="artifact in detail.artifacts" :key="artifact.id" class="py-3 first:pt-0 last:pb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span class="font-medium text-neutral-900">{{ artifact.artifact_kind }}</span>
-                  <span class="text-xs text-neutral-500">{{ readableBytes(artifact.byte_size) }}</span>
+                  <div>
+                    <span class="font-medium text-neutral-900">{{ artifact.artifact_kind }}</span>
+                    <span class="ml-2 text-xs text-neutral-500">{{ readableBytes(artifact.byte_size) }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    :disabled="downloadingArtifactId !== null"
+                    data-test="submission-artifact-download"
+                    @click="downloadArtifact(artifact)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.download" />
+                    </svg>
+                    {{
+                      downloadingArtifactId === artifact.id
+                        ? t('payroll.submissions.overview.artifact_downloading')
+                        : t('common.download')
+                    }}
+                  </button>
                 </div>
                 <p class="mt-1 text-xs text-neutral-500">
                   {{ artifact.mime_type }}

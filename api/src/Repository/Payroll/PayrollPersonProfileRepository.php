@@ -379,15 +379,36 @@ final class PayrollPersonProfileRepository
                     row_version = row_version + 1
               WHERE supplier_id = ? AND employee_id = ? AND id = ?'
         );
+        $birthSurnameSource = $this->db->pdo()->prepare(
+            'SELECT birth_surname
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?
+              FOR UPDATE'
+        );
         foreach ($rows as $row) {
             if ($row['id'] === null) {
+                $birthSurname = $row['birth_surname'];
+                if (!$row['birth_surname_present'] && $row['birth_surname_source_id'] !== null) {
+                    $birthSurnameSource->execute([
+                        $supplierId,
+                        $employeeId,
+                        $row['birth_surname_source_id'],
+                    ]);
+                    $source = $birthSurnameSource->fetch(PDO::FETCH_ASSOC);
+                    if (!is_array($source) || !array_key_exists('birth_surname', $source)) {
+                        throw new \InvalidArgumentException(
+                            'Zdroj rodného příjmení nepatří upravovanému zaměstnanci.'
+                        );
+                    }
+                    $birthSurname = $source['birth_surname'];
+                }
                 $insert->execute([
                     $supplierId,
                     $employeeId,
                     $row['full_name'],
                     $row['first_name'],
                     $row['last_name'],
-                    $row['birth_surname'],
+                    $birthSurname,
                     $row['effective_from'],
                     $row['effective_to'],
                 ]);

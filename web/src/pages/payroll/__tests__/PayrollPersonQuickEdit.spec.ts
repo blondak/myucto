@@ -5,6 +5,7 @@ import type {
   PayrollPerson,
   PayrollPersonProfile,
 } from '@/api/payroll'
+import { todayIso } from '@/pages/payroll/employmentLifecycleUi'
 
 const mocks = vi.hoisted(() => ({
   person: vi.fn(),
@@ -250,22 +251,60 @@ describe('PayrollPersonQuickEdit', () => {
       expect.objectContaining({
         profile: expect.objectContaining({
           row_version: 5,
-          identity_history: [expect.objectContaining({
-            id: 51,
-            full_name: 'Jana Marie Bezpečná',
-            first_name: 'Jana Marie',
-            last_name: 'Bezpečná',
-          })],
-          addresses: [expect.objectContaining({
-            id: 52,
-            street_line: 'Testovací 12',
-            city: 'Praha',
-            postal_code: '110 00',
-            country_code: 'CZ',
-          })],
+          identity_history: expect.arrayContaining([
+            expect.objectContaining({
+              id: 51,
+              full_name: 'Jana Testovací',
+              first_name: 'Jana',
+              last_name: 'Testovací',
+              effective_to: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+            }),
+            expect.objectContaining({
+              full_name: 'Jana Marie Bezpečná',
+              first_name: 'Jana Marie',
+              last_name: 'Bezpečná',
+              effective_from: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+              effective_to: null,
+            }),
+          ]),
+          addresses: expect.arrayContaining([
+            expect.objectContaining({
+              id: 52,
+              effective_to: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+            }),
+            expect.objectContaining({
+              address_type: 'residence',
+              street_line: 'Testovací 12',
+              city: 'Praha',
+              postal_code: '110 00',
+              country_code: 'CZ',
+              effective_from: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+              effective_to: null,
+            }),
+          ]),
           contacts: expect.arrayContaining([
-            expect.objectContaining({ id: 53, value: 'jana@example.invalid' }),
-            expect.objectContaining({ id: 54, value: '+420 777 888 999' }),
+            expect.objectContaining({
+              id: 53,
+              is_primary: false,
+              is_active: false,
+            }),
+            expect.objectContaining({
+              contact_type: 'email',
+              value: 'jana@example.invalid',
+              is_primary: true,
+              is_active: true,
+            }),
+            expect.objectContaining({
+              id: 54,
+              is_primary: false,
+              is_active: false,
+            }),
+            expect.objectContaining({
+              contact_type: 'phone',
+              value: '+420 777 888 999',
+              is_primary: true,
+              is_active: true,
+            }),
           ]),
           identifiers: [expect.objectContaining({
             id: 55,
@@ -327,6 +366,197 @@ describe('PayrollPersonQuickEdit', () => {
         }),
       }),
     )
+  })
+
+  it('změnu jména historizuje uzavřením starého a založením nového řádku', async () => {
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+    await wrapper.get('[data-test="last-name"]').setValue('Nová')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = mocks.savePersonQuickEdit.mock.calls[0][1]
+    expect(payload.profile.identity_history).toHaveLength(2)
+    expect(payload.profile.identity_history[0]).toEqual(expect.objectContaining({
+      id: 51,
+      full_name: 'Jana Testovací',
+      first_name: 'Jana',
+      last_name: 'Testovací',
+      effective_from: '2026-01-01',
+      effective_to: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    }))
+    expect(payload.profile.identity_history[1]).toEqual(expect.objectContaining({
+      full_name: 'Jana Marie Nová',
+      first_name: 'Jana Marie',
+      last_name: 'Nová',
+      birth_surname_source_id: 51,
+      effective_from: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      effective_to: null,
+    }))
+    expect(payload.profile.identity_history[1]).not.toHaveProperty('id')
+  })
+
+  it('novou adresou nemění uzavřenou adresní historii', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      addresses: [{
+        ...profile().addresses[0],
+        effective_from: '2025-01-01',
+        effective_to: '2025-12-31',
+      }],
+    })
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="street-line"]').setValue('Nová 12')
+    await wrapper.get('[data-test="city"]').setValue('Praha')
+    await wrapper.get('[data-test="postal-code"]').setValue('110 00')
+    const country = wrapper.get('[data-test="country-code"] input')
+    await country.trigger('focus')
+    await country.setValue('Česko')
+    await country.trigger('keydown', { key: 'Enter' })
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const addresses = mocks.savePersonQuickEdit.mock.calls[0][1].profile.addresses
+    expect(addresses).toEqual([
+      expect.objectContaining({
+        id: 52,
+        effective_from: '2025-01-01',
+        effective_to: '2025-12-31',
+      }),
+      expect.objectContaining({
+        address_type: 'residence',
+        street_line: 'Nová 12',
+        effective_to: null,
+      }),
+    ])
+  })
+
+  it('jméno založené dnes opraví na místě bez další historické verze', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      identity_history: [{
+        ...profile().identity_history[0],
+        effective_from: todayIso(),
+      }],
+    })
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+    await wrapper.get('[data-test="last-name"]').setValue('Opravená')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = mocks.savePersonQuickEdit.mock.calls[0][1]
+    expect(payload.profile.identity_history).toEqual([
+      expect.objectContaining({
+        id: 51,
+        full_name: 'Jana Marie Opravená',
+        first_name: 'Jana Marie',
+        last_name: 'Opravená',
+        effective_from: todayIso(),
+        effective_to: null,
+      }),
+    ])
+  })
+
+  it('zpřístupní EČP, VČP a zahraniční identifikátor bez otevírání pokročilé evidence', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      identifiers: [
+        ...profile().identifiers,
+        {
+          id: 56,
+          identifier_type: 'ecp',
+          value_masked: '••••ECP1',
+          row_version: 1,
+        },
+      ],
+    })
+    const wrapper = await mountedEditor()
+
+    expect(wrapper.get('[data-test="identifier-ecp"]').attributes('placeholder'))
+      .toBe('••••ECP1')
+    expect(wrapper.find('[data-test="identifier-vcp"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="identifier-foreign-tax"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="identifier-ecp"]').setValue('ECP-NOVE-1')
+    await wrapper.get('[data-test="identifier-vcp"]').setValue('VCP-NOVE-2')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledWith(
+      17,
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          identifiers: expect.arrayContaining([
+            expect.objectContaining({
+              id: 56,
+              identifier_type: 'ecp',
+              value: 'ECP-NOVE-1',
+            }),
+            expect.objectContaining({
+              identifier_type: 'vcp',
+              value: 'VCP-NOVE-2',
+            }),
+          ]),
+        }),
+      }),
+    )
+  })
+
+  it('nikdy neodvozuje jméno a příjmení z full_name', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      full_name: 'Jan Křtitel z Testova',
+      identity_history: [{
+        ...profile().identity_history[0],
+        full_name: 'Jan Křtitel z Testova',
+        first_name: null,
+        last_name: null,
+      }],
+    })
+    const wrapper = await mountedEditor()
+
+    expect(wrapper.get<HTMLInputElement>('[data-test="first-name"]').element.value)
+      .toBe('')
+    expect(wrapper.get<HTMLInputElement>('[data-test="last-name"]').element.value)
+      .toBe('')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="quick-edit-error"]').text())
+      .toContain('payroll.people.quick_edit.name_required')
+  })
+
+  it('nepřepisuje nerozlišené starší jméno automatickým odhadem', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      identity_history: [
+        {
+          ...profile().identity_history[0],
+          id: 50,
+          full_name: 'Historické Víceslovné Jméno',
+          first_name: null,
+          last_name: null,
+          effective_from: '2025-01-01',
+          effective_to: '2025-12-31',
+        },
+        profile().identity_history[0],
+      ],
+    })
+    const wrapper = await mountedEditor()
+
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="quick-edit-error"]').text())
+      .toContain('payroll.people.quick_edit.structured_history_required')
   })
 
   it('ponechá při chybě celý formulář beze změny a ukáže přesnou atomickou chybu inline', async () => {

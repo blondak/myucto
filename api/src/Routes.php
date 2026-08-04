@@ -88,6 +88,7 @@ use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
@@ -766,6 +767,14 @@ final class Routes
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',
                 PayrollSubmissionDetailAction::class,
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/artifacts/{artifactId:[0-9]+}/download-grant',
+                [PayrollSubmissionArtifactDownloadAction::class, 'grant'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/artifacts/{artifactId:[0-9]+}/download',
+                [PayrollSubmissionArtifactDownloadAction::class, 'download'],
             );
             $g->get(
                 '/submissions/health-overviews/{revisionId:[0-9]+}',
