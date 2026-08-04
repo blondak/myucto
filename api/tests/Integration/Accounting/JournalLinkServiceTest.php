@@ -82,7 +82,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         $txId = $this->transaction($this->statement(), 500.0, [
             'variable_symbol'    => 'JL0002',
             'matched_invoice_id' => $invoiceId,
-            'match_status'       => 'matched',
+            'match_status'       => 'auto_exact',
         ]);
         $this->invoicePayment($invoiceId, $txId, 500.0);
         $this->invoicePaymentMatch($txId, $invoiceId, 500.0);

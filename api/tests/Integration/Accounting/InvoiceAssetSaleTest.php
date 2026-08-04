@@ -374,7 +374,10 @@ final class InvoiceAssetSaleTest extends BankPostingTestCase
                  status, vat_classification_code, created_by)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, "issued", "1", ?)'
         )->execute([
-            $this->supplierId, $varsymbol . '-' . uniqid('', false), $type, $clientId, $issue, $issue, $issue,
+            // invoices.varsymbol je varchar(20) — základ i unikátní přípona se musí vejít,
+            // jinak to na přísném sql_mode (výchozí MariaDB) skončí chybou 1406.
+            $this->supplierId, substr($varsymbol, 0, 9) . '-' . substr(uniqid('', false), -10),
+            $type, $clientId, $issue, $issue, $issue,
             $currencyId ?? $this->currencyId, $rate, $net, $vat, $net + $vat, $this->userId,
         ]);
         $invoiceId = (int) $pdo->lastInsertId();

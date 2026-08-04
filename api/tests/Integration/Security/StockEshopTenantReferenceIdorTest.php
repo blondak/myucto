@@ -617,8 +617,8 @@ final class StockEshopTenantReferenceIdorTest extends TestCase
         $this->pdo->prepare(
             'INSERT INTO invoices
                 (supplier_id, client_id, varsymbol, invoice_type, issue_date, tax_date, due_date,
-                 currency_id, status, total_without_vat, total_vat, total_with_vat, amount_to_pay, paid_total)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, "issued", 1000, 210, 1210, 1210, 0)'
+                 currency_id, status, total_without_vat, total_vat, total_with_vat, paid_total)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, "issued", 1000, 210, 1210, 0)'
         )->execute([$supplierId, $clientId, $varsymbol, self::DOC_DATE, self::DOC_DATE, self::DOC_DATE, $this->currencyId]);
         $invoiceId = (int) $this->pdo->lastInsertId();
 

@@ -362,10 +362,10 @@ final class PostingMatrixTest extends BankPostingTestCase
             'INSERT INTO invoices
                 (supplier_id, varsymbol, invoice_type, parent_invoice_id, client_id, issue_date, tax_date, due_date,
                  currency_id, reverse_charge, prices_include_vat, total_without_vat, total_vat, total_with_vat,
-                 amount_to_pay, paid_total, status, vat_classification_code, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, 0, "issued", "1", ?)'
+                 paid_total, status, vat_classification_code, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, "issued", "1", ?)'
         )->execute([$this->supplierId, $vs, $type, $parentId, $clientId, $issue, $issue, $issue,
-            $this->currencyId, $base, $vat, $with, $with, $this->userId]);
+            $this->currencyId, $base, $vat, $with, $this->userId]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->db->pdo()->prepare(
             "INSERT INTO invoice_items

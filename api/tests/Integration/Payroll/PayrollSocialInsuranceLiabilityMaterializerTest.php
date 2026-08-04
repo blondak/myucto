@@ -543,7 +543,7 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         )->execute([
             'payroll-social-' . bin2hex(random_bytes(6))
                 . '@example.invalid',
-            '$2y$10$uses.only.synthetic.placeholder.hash000000000000000000',
+            '$2y$10$uses.only.synthetic.placeholder.hash00000000000000000',
         ]);
 
         return (int) $pdo->lastInsertId();

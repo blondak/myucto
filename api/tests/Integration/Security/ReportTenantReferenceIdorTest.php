@@ -381,8 +381,8 @@ final class ReportTenantReferenceIdorTest extends TestCase
         ), 'Cizí faktura nesmí být označena za uhrazenou.');
 
         $this->pdo->prepare(
-            "INSERT INTO invoice_payments (supplier_id, invoice_id, bank_transaction_id, amount, paid_on, source)
-             VALUES (?, ?, ?, 1210, ?, 'bank')"
+            "INSERT INTO invoice_payments (supplier_id, invoice_id, bank_transaction_id, amount, currency, paid_on, source)
+             VALUES (?, ?, ?, 1210, 'CZK', ?, 'bank')"
         )->execute([$this->supplierA, $otherA, $txId, self::YEAR . '-05-02']);
 
         $ok = $this->call($action, 'manualMatch', 'POST', ['invoice_id' => $invoiceA], $args);
@@ -509,9 +509,9 @@ final class ReportTenantReferenceIdorTest extends TestCase
             'INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
                  due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
-                 total_without_vat, total_vat, total_with_vat, amount_to_pay, status,
+                 total_without_vat, total_vat, total_with_vat, status,
                  vat_classification_code, vat_deduction, is_fixed_asset, created_by)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", 10000, 2100, 12100, 12100, "received", "40", "full", 1, ?)'
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", 10000, 2100, 12100, "received", "40", "full", 1, ?)'
         )->execute([$supplierId, $vendorId, $number, $date, $date, $date, $date, $this->currencyId, $this->userId]);
         $invoiceId = (int) $this->pdo->lastInsertId();
 
@@ -532,8 +532,8 @@ final class ReportTenantReferenceIdorTest extends TestCase
         $this->pdo->prepare(
             'INSERT INTO invoices
                 (supplier_id, client_id, varsymbol, invoice_type, issue_date, tax_date, due_date,
-                 currency_id, status, total_without_vat, total_vat, total_with_vat, amount_to_pay, paid_total)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, "issued", 1000, 210, 1210, 1210, 0)'
+                 currency_id, status, total_without_vat, total_vat, total_with_vat, paid_total)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, "issued", 1000, 210, 1210, 0)'
         )->execute([$supplierId, $clientId, '97' . $supplierId . '0' . random_int(100, 999), $date, $date, $date, $this->currencyId]);
 
         return (int) $this->pdo->lastInsertId();
@@ -546,7 +546,7 @@ final class ReportTenantReferenceIdorTest extends TestCase
             "INSERT INTO assets
                 (supplier_id, inventory_number, name, input_price, acquisition_date,
                  tax_method, tax_group, acc_useful_life_months, status, created_by)
-             VALUES (?, ?, ?, 500000, ?, 'straight', 2, 60, 'acquired', ?)"
+             VALUES (?, ?, ?, 500000, ?, 'straight', 2, 60, 'in_use', ?)"
         )->execute([$supplierId, $inventoryNumber, $name, self::YEAR . '-01-10', $this->userId]);
 
         return (int) $this->pdo->lastInsertId();

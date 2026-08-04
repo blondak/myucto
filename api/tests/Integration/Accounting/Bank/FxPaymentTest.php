@@ -158,7 +158,7 @@ final class FxPaymentTest extends BankPostingTestCase
     {
         $settings = $this->container->get(AccountingSupplierSettingsRepository::class);
         $rates = $this->container->get(FixedExchangeRateRepository::class);
-        $rates->upsert($this->supplierId, 'EUR', self::YEAR, 6, 24.00, 'test');
+        $rates->upsert($this->supplierId, 'EUR', self::YEAR, 6, 24.00, 'manual');
         $settings->setFxRateMode($this->supplierId, 'fixed_monthly');
 
         $client = $this->client('EUR Odběratel fixed');
@@ -498,11 +498,11 @@ final class FxPaymentTest extends BankPostingTestCase
             'INSERT INTO invoices
                 (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                  currency_id, exchange_rate, reverse_charge, total_without_vat, total_vat, total_with_vat,
-                 amount_to_pay, paid_total, status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, 0, "issued", "1", ?)'
+                 paid_total, status, vat_classification_code, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, "issued", "1", ?)'
         )->execute([
             $this->supplierId, $vs, $clientId, $issue, $issue, $issue, $this->eurId, $rate,
-            $foreignTotal, $foreignTotal, $foreignTotal, $this->userId,
+            $foreignTotal, $foreignTotal, $this->userId,
         ]);
         $invId = (int) $this->db->pdo()->lastInsertId();
 
@@ -534,11 +534,11 @@ final class FxPaymentTest extends BankPostingTestCase
         $this->db->pdo()->prepare(
             'INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, vat_deduction,
-                 issue_date, tax_date, due_date, currency_id, exchange_rate, reverse_charge, is_fixed_asset,
+                 issue_date, tax_date, due_date, received_at, currency_id, exchange_rate, reverse_charge, is_fixed_asset,
                  total_without_vat, total_vat, total_with_vat, status, created_by)
-             VALUES (?, ?, ?, ?, "invoice", "full", ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, "booked", ?)'
+             VALUES (?, ?, ?, ?, "invoice", "full", ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, "booked", ?)'
         )->execute([
-            $this->supplierId, $vendorId, $number, $snapshot, $issue, $issue, $issue, $this->eurId, $rate,
+            $this->supplierId, $vendorId, $number, $snapshot, $issue, $issue, $issue, $issue, $this->eurId, $rate,
             $foreignTotal, $foreignTotal, $this->userId,
         ]);
         $pfId = (int) $this->db->pdo()->lastInsertId();

@@ -1446,7 +1446,7 @@ final class PayrollRunPersistenceTest extends TestCase
         );
         $stmt->execute([
             "mz09-{$suffix}-" . bin2hex(random_bytes(4)) . '@invalid.example',
-            '$2y$10$uses.only.synthetic.placeholder.hash000000000000000000',
+            '$2y$10$uses.only.synthetic.placeholder.hash00000000000000000',
             "Synthetic {$suffix}",
         ]);
         return (int) $this->db->pdo()->lastInsertId();

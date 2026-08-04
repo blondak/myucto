@@ -254,10 +254,10 @@ abstract class BankPostingTestCase extends TestCase
         $this->db->pdo()->prepare(
             'INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind, vat_deduction,
-                 issue_date, tax_date, due_date, currency_id, reverse_charge, is_fixed_asset,
+                 issue_date, tax_date, due_date, received_at, currency_id, reverse_charge, is_fixed_asset,
                  total_without_vat, total_vat, total_with_vat, status, created_by)
-             VALUES (?, ?, ?, ?, ?, "full", ?, ?, ?, ?, 0, 0, ?, 0, ?, "received", ?)'
-        )->execute([$this->supplierId, $vendorId, $number, $snapshot, $documentKind, $issue, $issue, $issue, $this->currencyId, $total, $total, $this->userId]);
+             VALUES (?, ?, ?, ?, ?, "full", ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, "received", ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $snapshot, $documentKind, $issue, $issue, $issue, $issue, $this->currencyId, $total, $total, $this->userId]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

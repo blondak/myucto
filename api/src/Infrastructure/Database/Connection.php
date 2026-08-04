@@ -31,6 +31,13 @@ final class Connection
     private static array $sharedPdo = [];
 
     /**
+     * Připnutý `sql_mode` — jedna definice pro navázání spojení i pro reset sdílené
+     * testovací session. Kdyby to byly dva literály, můžou se rozejít, což je přesně
+     * ta třída chyby, kterou tohle připnutí zavírá.
+     */
+    private const SQL_MODE = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
+    /**
      * Hloubka „nesdílené" zóny — viz withoutSharedTestConnection(). Počítadlo, ne bool,
      * aby šlo zóny vnořovat.
      */
@@ -96,6 +103,14 @@ final class Connection
             PDO::ATTR_STRINGIFY_FETCHES  => false,
         ], $this->logger);
 
+        // sql_mode se připíná EXPLICITNĚ, ať se dev, CI i produkce chovají stejně.
+        // Bez toho rozhoduje konfigurace serveru: stroj s vypnutým STRICT_TRANS_TABLES
+        // tiše ořízne příliš dlouhou hodnotu nebo zahodí zápis do generovaného sloupce,
+        // kdežto výchozí (přísná) MariaDB na tomtéž kódu spadne. Stejný princip jako
+        // připnuté konce řádků v .gitattributes — prostředí nesmí měnit chování.
+        // Sada odpovídá výchozímu sql_mode MariaDB; ONLY_FULL_GROUP_BY se vědomě
+        // nepřidává, není ve výchozím režimu a shodil by existující agregační dotazy.
+        $pdo->exec("SET SESSION sql_mode = '" . self::SQL_MODE . "'");
         $pdo->exec("SET time_zone = '" . date('P') . "'");
 
         if ($shareable) {
@@ -175,7 +190,10 @@ final class Connection
                     $pdo->rollBack();
                     $leaked[] = $dsn;
                 }
-                $pdo->exec('SET SESSION foreign_key_checks = 1, unique_checks = 1, innodb_lock_wait_timeout = DEFAULT');
+                $pdo->exec(
+                    "SET SESSION foreign_key_checks = 1, unique_checks = 1, innodb_lock_wait_timeout = DEFAULT,"
+                    . " sql_mode = '" . self::SQL_MODE . "'"
+                );
                 $pdo->query('SELECT RELEASE_ALL_LOCKS()');
             } catch (\Throwable) {
                 // Spojení je rozbité (server odešel, killnutá session) — zahoď ho ze

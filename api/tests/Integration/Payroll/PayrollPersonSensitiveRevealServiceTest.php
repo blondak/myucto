@@ -350,7 +350,7 @@ final class PayrollPersonSensitiveRevealServiceTest extends TestCase
         )->execute([
             'payroll-sensitive-reveal-' . bin2hex(random_bytes(6))
                 . '@example.invalid',
-            '$2y$10$uses.only.synthetic.placeholder.hash000000000000000000',
+            '$2y$10$uses.only.synthetic.placeholder.hash00000000000000000',
         ]);
 
         return (int) $pdo->lastInsertId();

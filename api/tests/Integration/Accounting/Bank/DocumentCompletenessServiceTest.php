@@ -37,7 +37,7 @@ final class DocumentCompletenessServiceTest extends BankPostingTestCase
         // 3) Čerstvý pohyb pod prahem → NEPATŘÍ.
         $txRecent = $this->transaction($stId, -999.0, ['posted_at' => $recent, 'counterparty_name' => 'Cerstvy']);
         // 4) Spárovaný pohyb (má doklad) → NEPATŘÍ.
-        $txMatched = $this->transaction($stId, -50.0, ['posted_at' => $old, 'match_status' => 'matched', 'counterparty_name' => 'Sparovany']);
+        $txMatched = $this->transaction($stId, -50.0, ['posted_at' => $old, 'match_status' => 'manual', 'counterparty_name' => 'Sparovany']);
         // 5) Pohyb s evidovanou úhradou faktury → NEPATŘÍ.
         $customer = $this->client('Klient E');
         $invId = $this->saleInvoice('2099901', $customer, 70.0);
