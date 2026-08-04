@@ -224,7 +224,18 @@ final class LedgerInvariantService
                          ON e.supplier_id = p.supplier_id
                         AND e.entry_date <= p.ends_on
                         AND e.posted_at IS NOT NULL
+                        -- Ze stornované DVOJICE musí vypadnout OBĚ strany. `reversed_by`
+                        -- nese jen originál, takže samotné `reversed_by IS NULL` vyhodí
+                        -- originál a storno nechá — zbude jednostranná částka a invariant
+                        -- ohlásí zůstatek, který v účetnictví není. Naměřeno na ostrých
+                        -- datech: zápis #639 (314 MD / 221 D) stornovaný #2100 (221 MD /
+                        -- 314 D) vyrobil na 314 fantomových −35 375 Kč.
+                        -- Sloupec `reverses_id` v schématu není, takže druhou stranu
+                        -- dohledáváme poddotazem přes `reversed_by`.
                         AND e.reversed_by IS NULL
+                        AND e.id NOT IN (SELECT rev.reversed_by
+                                           FROM journal_entries rev
+                                          WHERE rev.reversed_by IS NOT NULL)
                         -- Uzávěrkový zápis TOHOTO období převádí zůstatky na 702
                         -- a tím zúčtovací účty vynuluje. Bez jeho vyloučení vyjde
                         -- balance vždy 0 a invariant nemůže z principu nic najít —
@@ -279,10 +290,22 @@ final class LedgerInvariantService
      */
     private function i26DisposedAssetHasNoBalance(): array
     {
-        if (!$this->hasTable('assets')) {
+        if (!$this->hasTable('assets') || !$this->hasTable('depreciation_entries')) {
             return $this->skipped('I26', 'vyřazená karta nemá zůstatek na 02x ani 08x', 'ČÚS 013', 'modul majetku není v DB');
         }
 
+        // Karta se do deníku promítá TŘEMI druhy zápisů a každý na kartu ukazuje jinak:
+        //   `asset` a `asset_disposal` mají `source_id` = id karty,
+        //   `depreciation` má `source_id` = id řádku v `depreciation_entries` (ten nese `asset_id`).
+        // Původní verze joinovala jen `asset`, takže u vyřazené karty viděla POUZE debet 022
+        // ze zařazení — protikus z vyřazení ani odpisy ne. Označila tím každé korektně
+        // vyřazené aktivum (ověřeno na ostrých datech: karta BMW se čtyřřádkovým a zcela
+        // správným zápisem vyřazení). Falešný poplach na každém vyřazení je horší než
+        // žádný invariant, protože odnaučí lidi hlášení číst.
+        //
+        // Stornované zápisy se ZÁMĚRNĚ nefiltrují: originál i storno se sečtou a vzájemně
+        // se vyruší, což je právě správný výsledek. Jednostranné vyloučení by vyrobilo
+        // fantomový zůstatek — přesně ta chyba, kterou má I20 opravenou vedle.
         return $this->run(
             'I26',
             'vyřazená karta nemá zůstatek na 02x ani 08x',
@@ -293,9 +316,16 @@ final class LedgerInvariantService
                             ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS balance
                        FROM assets a
                        JOIN journal_entries e
-                         ON e.source_type = 'asset' AND e.source_id = a.id
-                        AND e.supplier_id = a.supplier_id
+                         ON e.supplier_id = a.supplier_id
                         AND e.posted_at IS NOT NULL
+                        AND (
+                              (e.source_type IN ('asset', 'asset_disposal') AND e.source_id = a.id)
+                           OR (e.source_type = 'depreciation'
+                               AND e.source_id IN (SELECT d.id
+                                                     FROM depreciation_entries d
+                                                    WHERE d.asset_id = a.id
+                                                      AND d.supplier_id = a.supplier_id))
+                            )
                        JOIN journal_entry_lines l ON l.entry_id = e.id
                        JOIN chart_of_accounts ac ON ac.id = l.account_id
                       WHERE a.status = 'disposed'

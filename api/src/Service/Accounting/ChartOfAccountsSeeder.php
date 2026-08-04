@@ -20,6 +20,9 @@ use PDO;
  */
 final class ChartOfAccountsSeeder
 {
+    /** Zrcadlo migrace 1112 — viz markClearingAccounts(). */
+    private const CLEARING_PREFIXES = ['041', '042', '111', '131', '139', '261', '314', '324', '395'];
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -106,6 +109,7 @@ final class ChartOfAccountsSeeder
                 $inserted++;
             }
             $this->seedAnalyticPostingRules($pdo, $supplierId);
+            $this->markClearingAccounts($pdo, $supplierId);
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -117,6 +121,33 @@ final class ChartOfAccountsSeeder
         }
 
         return $inserted;
+    }
+
+    /**
+     * Zúčtovací účty (`is_clearing`) — musí je dostat i firmy založené PO migraci 1112.
+     *
+     * Migrace `1112_chart_of_accounts_is_clearing.sql` sloupec zavedla a označila účty,
+     * které v tu chvíli existovaly. Seeder ho ale nikdy neplnil, takže každá firma
+     * naseedovaná od té doby měla `is_clearing = 0` na všech účtech — a invariant I20
+     * ani uzávěrková kontrola `clearing_accounts_open` nad ní z principu nemohly nic
+     * najít. Naměřeno: 224 účtů v testovací DB, z toho 0 označených.
+     *
+     * Tichá slepota kontroly je horší než její absence: hlášení je zelené, protože se
+     * nemá nač ptát, ne protože je účetnictví v pořádku.
+     *
+     * Prefixy jsou zrcadlem migrace 1112 — když se sada mění, musí se změnit na obou
+     * místech (migrace opravuje historii, seeder zakládá budoucnost).
+     */
+    private function markClearingAccounts(\PDO $pdo, int $supplierId): void
+    {
+        $like = implode(' OR ', array_map(
+            static fn (string $p): string => "account_code LIKE '{$p}%'",
+            self::CLEARING_PREFIXES,
+        ));
+        $pdo->prepare(
+            "UPDATE chart_of_accounts SET is_clearing = 1
+              WHERE supplier_id = ? AND is_clearing = 0 AND ({$like})"
+        )->execute([$supplierId]);
     }
 
     /**
