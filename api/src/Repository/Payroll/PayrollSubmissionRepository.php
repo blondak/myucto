@@ -61,6 +61,146 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * @return list<array{
+     *   id:int,environment:string,agenda_code:string,subject_type:string,
+     *   subject_reference:string,period_start:string,period_end:string,
+     *   obligation_kind:string,preferred_channel:string,status:string,
+     *   row_version:int,earliest_submission_on:string,due_on:string,
+     *   calendar_basis:string,latest_submission:?array{
+     *     id:int,status:string,submission_kind:string,channel:string,
+     *     submitted_at:?string,decided_at:?string
+     *   }
+     * }>
+     */
+    public function listOverview(
+        int $supplierId,
+        string $environment,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.id, obligation.environment,
+                    obligation.agenda_code, obligation.subject_type,
+                    obligation.subject_reference, obligation.period_start,
+                    obligation.period_end, obligation.obligation_kind,
+                    obligation.preferred_channel, obligation.status,
+                    obligation.row_version,
+                    deadline.earliest_submission_on, deadline.due_on,
+                    deadline.calendar_basis,
+                    latest_submission.id AS submission_id,
+                    latest_submission.status AS submission_status,
+                    latest_submission.submission_kind,
+                    latest_submission.channel AS submission_channel,
+                    latest_submission.submitted_at,
+                    latest_submission.decided_at
+               FROM payroll_obligations obligation
+               JOIN payroll_submission_deadlines deadline
+                 ON deadline.supplier_id = obligation.supplier_id
+                AND deadline.environment = obligation.environment
+                AND deadline.obligation_id = obligation.id
+                AND deadline.deadline_kind = "regular"
+               LEFT JOIN (
+                    SELECT ranked.*
+                      FROM (
+                           SELECT submission.id, submission.supplier_id,
+                                  submission.environment,
+                                  submission.obligation_id,
+                                  submission.status,
+                                  submission.submission_kind,
+                                  submission.channel,
+                                  submission.submitted_at,
+                                  submission.decided_at,
+                                  ROW_NUMBER() OVER (
+                                      PARTITION BY submission.supplier_id,
+                                                   submission.environment,
+                                                   submission.obligation_id
+                                      ORDER BY submission.created_at DESC,
+                                               submission.id DESC
+                                  ) AS row_rank
+                             FROM payroll_submissions submission
+                            WHERE submission.supplier_id = ?
+                              AND submission.environment = ?
+                      ) ranked
+                     WHERE ranked.row_rank = 1
+               ) latest_submission
+                 ON latest_submission.supplier_id = obligation.supplier_id
+                AND latest_submission.environment = obligation.environment
+                AND latest_submission.obligation_id = obligation.id
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.period_start <= ?
+                AND obligation.period_end >= ?
+              ORDER BY deadline.due_on ASC,
+                       obligation.agenda_code ASC,
+                       obligation.id ASC
+              LIMIT 200',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $supplierId,
+            $environment,
+            $periodEnd,
+            $periodStart,
+        ]);
+
+        $result = [];
+        while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $row = self::associativeRow($row, 'přehled mzdových podání');
+            $submissionId = self::nullableInteger($row, 'submission_id');
+            $result[] = [
+                'id' => self::integer($row, 'id'),
+                'environment' => self::string($row, 'environment'),
+                'agenda_code' => self::string($row, 'agenda_code'),
+                'subject_type' => self::string($row, 'subject_type'),
+                'subject_reference' => self::string(
+                    $row,
+                    'subject_reference',
+                ),
+                'period_start' => self::string($row, 'period_start'),
+                'period_end' => self::string($row, 'period_end'),
+                'obligation_kind' => self::string($row, 'obligation_kind'),
+                'preferred_channel' => self::string(
+                    $row,
+                    'preferred_channel',
+                ),
+                'status' => self::string($row, 'status'),
+                'row_version' => self::integer($row, 'row_version'),
+                'earliest_submission_on' => self::string(
+                    $row,
+                    'earliest_submission_on',
+                ),
+                'due_on' => self::string($row, 'due_on'),
+                'calendar_basis' => self::string($row, 'calendar_basis'),
+                'latest_submission' => $submissionId === null
+                    ? null
+                    : [
+                        'id' => $submissionId,
+                        'status' => self::string($row, 'submission_status'),
+                        'submission_kind' => self::string(
+                            $row,
+                            'submission_kind',
+                        ),
+                        'channel' => self::string(
+                            $row,
+                            'submission_channel',
+                        ),
+                        'submitted_at' => self::nullableString(
+                            $row,
+                            'submitted_at',
+                        ),
+                        'decided_at' => self::nullableString(
+                            $row,
+                            'decided_at',
+                        ),
+                    ],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * @return array{
      *   id:int,due_on:string,status:string,row_version:int,
      *   request_fingerprint:string

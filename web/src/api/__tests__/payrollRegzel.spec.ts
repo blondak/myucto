@@ -23,6 +23,13 @@ describe('payroll REGZEL API', () => {
   })
 
   it('posílá prostředí odděleně v historii, prepare i downloadu', async () => {
+    m.get.mockResolvedValueOnce({ data: { items: [], summary: {}, period: '2026-08' } })
+    await payrollApi.submissionOverview('production', '2026-08')
+    expect(m.get).toHaveBeenCalledWith(
+      '/payroll/submissions/overview',
+      { params: { environment: 'production', period: '2026-08' } },
+    )
+
     m.get.mockResolvedValueOnce({ data: { items: [] } })
     await payrollApi.regzelSnapshots('test')
     expect(m.get).toHaveBeenCalledWith(
@@ -70,6 +77,38 @@ describe('payroll REGZEL API', () => {
         params: { environment: 'test' },
         responseType: 'blob',
       },
+    )
+  })
+
+  it('načte a stáhne interní přehled zdravotní pojišťovny podle revize', async () => {
+    m.get.mockResolvedValueOnce({
+      data: {
+        items: [],
+        electronic_submission: {
+          supported: false,
+          reason_code: 'health_insurance_transport_unavailable',
+        },
+      },
+    })
+    await payrollApi.healthPaymentOverviews(18)
+    expect(m.get).toHaveBeenCalledWith(
+      '/payroll/submissions/health-overviews/18',
+    )
+
+    const overview = {
+      revision_id: 18,
+      insurer: { code: '111' },
+      filename: 'zp-prehled-2026-08-111-revize-18.json',
+    } as Parameters<typeof payrollApi.downloadHealthPaymentOverview>[0]
+    m.get.mockResolvedValueOnce({ data: new Blob(['synthetic-health']) })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-health')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    await payrollApi.downloadHealthPaymentOverview(overview)
+    expect(m.get).toHaveBeenLastCalledWith(
+      '/payroll/submissions/health-overviews/18/111/download',
+      { responseType: 'blob' },
     )
   })
 })

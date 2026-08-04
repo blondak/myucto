@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 
 type SubmissionTab = 'regzel' | 'jmhz' | 'health'
 
@@ -460,19 +461,9 @@ onMounted(load)
       </section>
     </template>
 
-    <section
+    <PayrollSubmissionOverviewPanel
       v-else
-      class="rounded-xl border border-neutral-200 bg-surface p-6 shadow-sm"
-    >
-      <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600">
-        {{ t('payroll.submissions.unsupported') }}
-      </span>
-      <h2 class="mt-4 text-lg font-semibold text-neutral-900">
-        {{ t(`payroll.submissions.${activeTab}_title`) }}
-      </h2>
-      <p class="mt-2 max-w-3xl text-sm text-neutral-600">
-        {{ t(`payroll.submissions.${activeTab}_fail_closed`) }}
-      </p>
-    </section>
+      :mode="activeTab === 'health' ? 'health' : 'jmhz'"
+    />
   </div>
 </template>

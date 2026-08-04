@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   person: vi.fn(),
   personProfile: vi.fn(),
   savePersonQuickEdit: vi.fn(),
+  countries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -19,6 +20,12 @@ vi.mock('@/api/payroll', () => ({
     person: mocks.person,
     personProfile: mocks.personProfile,
     savePersonQuickEdit: mocks.savePersonQuickEdit,
+  },
+}))
+
+vi.mock('@/api/codebooks', () => ({
+  codebooksApi: {
+    countries: mocks.countries,
   },
 }))
 
@@ -32,6 +39,7 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
+    locale: { value: 'cs' },
   }),
 }))
 
@@ -182,6 +190,14 @@ describe('PayrollPersonQuickEdit', () => {
     vi.clearAllMocks()
     mocks.person.mockResolvedValue(person())
     mocks.personProfile.mockResolvedValue(profile())
+    mocks.countries.mockResolvedValue([{
+      id: 1,
+      iso2: 'CZ',
+      iso3: 'CZE',
+      name_cs: 'Česko',
+      name_en: 'Czechia',
+      is_eu: true,
+    }])
     mocks.savePersonQuickEdit.mockResolvedValue({
       profile: profile(),
       employment: employment(),
@@ -218,7 +234,10 @@ describe('PayrollPersonQuickEdit', () => {
     await wrapper.get('[data-test="street-line"]').setValue('Testovací 12')
     await wrapper.get('[data-test="city"]').setValue('Praha')
     await wrapper.get('[data-test="postal-code"]').setValue('110 00')
-    await wrapper.get('[data-test="country-code"]').setValue('CZ')
+    const country = wrapper.get('[data-test="country-code"] input')
+    await country.trigger('focus')
+    await country.setValue('Česko')
+    await country.trigger('keydown', { key: 'Enter' })
     await wrapper.get('[data-test="email"]').setValue('jana@example.invalid')
     await wrapper.get('[data-test="phone"]').setValue('+420 777 888 999')
     await wrapper.get('[data-test="weekly-hours"]').setValue('37.5')
@@ -285,6 +304,27 @@ describe('PayrollPersonQuickEdit', () => {
       expect.objectContaining({
         profile: expect.objectContaining({ row_version: 5 }),
         employment: null,
+      }),
+    )
+  })
+
+  it('umožní zaměstnance bez rodného čísla a nevytvoří prázdný identifikátor', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      identifiers: [],
+    })
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledWith(
+      17,
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          identifiers: [],
+        }),
       }),
     )
   })

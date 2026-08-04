@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   noResultsLabel?: string
   clearable?: boolean
   disabled?: boolean
+  required?: boolean
   /** Server-side režim: options dodává rodič podle @search (žádný client-side filtr). */
   remote?: boolean
   /** Indikátor načítání ve výsledcích (jen remote). */
@@ -34,6 +35,7 @@ const props = withDefaults(defineProps<{
   noResultsLabel: 'Žádné výsledky',
   clearable: true,
   disabled: false,
+  required: false,
   remote: false,
   loading: false,
   loadingLabel: 'Hledám…',
@@ -242,9 +244,11 @@ onUnmounted(() => {
         :aria-controls="open ? listboxId : undefined"
         :aria-activedescendant="activeOptionId"
         :aria-invalid="invalid || undefined"
+        :aria-required="required || undefined"
         :aria-label="ariaLabel"
         :placeholder="placeholder"
         :disabled="disabled"
+        :required="required"
         autocomplete="off"
         :class="[
           'w-full h-10 pl-3 pr-16 border border-neutral-300 rounded-md text-sm bg-surface',

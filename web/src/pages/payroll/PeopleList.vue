@@ -361,6 +361,9 @@ onMounted(load)
         <label class="min-w-0 text-xs text-neutral-600">
           {{ t('payroll.people.create.birth_number') }}
           <input v-model="employeeForm.birth_number" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" inputmode="numeric" autocomplete="off" data-test="new-employee-birth-number">
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.people.quick_edit.sensitive_replace_hint') }}
+          </span>
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
           {{ t('payroll.people.create.birth_date') }}

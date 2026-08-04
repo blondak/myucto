@@ -117,6 +117,7 @@ final class JmhzXsdDownloader
                 $this->log("Prepared {$id} {$package['version']}: {$count} XSD file(s).");
             }
 
+            $this->writeContentManifest($stage);
             $this->replaceDirectory($stage, $targetRoot);
             $this->log("JMHZ schemas installed in {$targetRoot}.");
         } finally {
@@ -669,6 +670,63 @@ final class JmhzXsdDownloader
             ) {
                 throw new RuntimeException("Cannot copy existing schema metadata {$item->getPathname()}.");
             }
+        }
+    }
+
+    private function writeContentManifest(string $root): void
+    {
+        $resolvedRoot = realpath($root);
+        if ($resolvedRoot === false) {
+            throw new RuntimeException("Cannot resolve JMHZ schema staging directory {$root}.");
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        );
+        $rootPrefix = rtrim($resolvedRoot, '/\\') . DIRECTORY_SEPARATOR;
+        $entries = [];
+        foreach ($iterator as $item) {
+            if (!$item instanceof \SplFileInfo || !$item->isFile()) {
+                continue;
+            }
+            if ($item->isLink()) {
+                throw new RuntimeException("Symlinks are not allowed in JMHZ schema storage: {$item->getPathname()}.");
+            }
+            if (strtolower($item->getExtension()) !== 'xsd') {
+                continue;
+            }
+
+            $itemPath = $item->getRealPath();
+            if (
+                $itemPath === false
+                || !str_starts_with(strtolower($itemPath), strtolower($rootPrefix))
+            ) {
+                throw new RuntimeException("Cannot resolve JMHZ schema path {$item->getPathname()}.");
+            }
+            $relative = substr($itemPath, strlen($rootPrefix));
+            if ($relative === '') {
+                throw new RuntimeException("Cannot determine relative JMHZ schema path for {$itemPath}.");
+            }
+            $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+            $hash = hash_file('sha256', $itemPath);
+            if (!is_string($hash)) {
+                throw new RuntimeException("Cannot hash JMHZ schema {$itemPath}.");
+            }
+            $entries[$relative] = $hash;
+        }
+        if ($entries === []) {
+            throw new RuntimeException('Cannot write an empty JMHZ schema content manifest.');
+        }
+
+        ksort($entries, SORT_STRING);
+        $lines = [];
+        foreach ($entries as $relative => $hash) {
+            $lines[] = $hash . '  ' . $relative;
+        }
+        $contents = implode("\n", $lines) . "\n";
+        $path = $root . DIRECTORY_SEPARATOR . 'SHA256SUMS';
+        if (file_put_contents($path, $contents, LOCK_EX) !== strlen($contents)) {
+            throw new RuntimeException("Cannot write JMHZ schema content manifest {$path}.");
         }
     }
 

@@ -103,7 +103,10 @@ final class JmhzXsdDownloaderTest extends TestCase
         );
         foreach ($items as $item) {
             self::assertInstanceOf(\SplFileInfo::class, $item);
-            if (strtolower($item->getExtension()) === 'md') {
+            if (
+                strtolower($item->getExtension()) === 'md'
+                || $item->getFilename() === 'SHA256SUMS'
+            ) {
                 continue;
             }
             self::assertSame('xsd', strtolower($item->getExtension()), $item->getPathname());
@@ -146,6 +149,19 @@ final class JmhzXsdDownloaderTest extends TestCase
         self::assertFileDoesNotExist($target . '/sample-9.9/readme.txt');
         self::assertSame('legacy', file_get_contents($target . '/legacy/1.0/old.xsd'));
         self::assertSame('metadata', file_get_contents($target . '/README.md'));
+        self::assertSame(
+            [
+                hash('sha256', 'legacy') . '  legacy/1.0/old.xsd',
+                hash_file('sha256', $target . '/sample-9.9/schema/base.xsd')
+                    . '  sample-9.9/schema/base.xsd',
+                hash_file('sha256', $target . '/sample-9.9/schema/main.xsd')
+                    . '  sample-9.9/schema/main.xsd',
+                hash_file('sha256', $target . '/sample-9.9/schema/utf16.xsd')
+                    . '  sample-9.9/schema/utf16.xsd',
+                '',
+            ],
+            explode("\n", (string) file_get_contents($target . '/SHA256SUMS')),
+        );
     }
 
     public function testHashMismatchLeavesExistingTreeUntouched(): void

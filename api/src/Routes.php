@@ -74,6 +74,7 @@ use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
+use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
@@ -86,6 +87,7 @@ use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
@@ -746,6 +748,18 @@ final class Routes
             $g->get(
                 '/submissions/regzel/snapshots/{id:[0-9]+}/xml',
                 [PayrollRegzelAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/overview',
+                PayrollSubmissionOverviewAction::class,
+            );
+            $g->get(
+                '/submissions/health-overviews/{revisionId:[0-9]+}',
+                [PayrollHealthInsuranceOverviewAction::class, 'index'],
+            );
+            $g->get(
+                '/submissions/health-overviews/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/download',
+                [PayrollHealthInsuranceOverviewAction::class, 'download'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);

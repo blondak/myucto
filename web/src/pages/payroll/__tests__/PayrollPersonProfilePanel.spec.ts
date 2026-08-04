@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   personProfile: vi.fn(),
   savePersonProfile: vi.fn(),
   verifyPersonAccount: vi.fn(),
+  countries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -15,6 +16,12 @@ vi.mock('@/api/payroll', () => ({
     personProfile: mocks.personProfile,
     savePersonProfile: mocks.savePersonProfile,
     verifyPersonAccount: mocks.verifyPersonAccount,
+  },
+}))
+
+vi.mock('@/api/codebooks', () => ({
+  codebooksApi: {
+    countries: mocks.countries,
   },
 }))
 
@@ -28,6 +35,7 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
+    locale: { value: 'cs' },
   }),
 }))
 
@@ -117,6 +125,14 @@ describe('PayrollPersonProfilePanel', () => {
     vi.clearAllMocks()
     mocks.personProfile.mockResolvedValue(profile())
     mocks.savePersonProfile.mockResolvedValue(profile())
+    mocks.countries.mockResolvedValue([{
+      id: 1,
+      iso2: 'CZ',
+      iso3: 'CZE',
+      name_cs: 'Česko',
+      name_en: 'Czechia',
+      is_eu: true,
+    }])
     mocks.verifyPersonAccount.mockResolvedValue({
       ...profile().accounts[0],
       verification_source: 'user_verified',
@@ -135,6 +151,12 @@ describe('PayrollPersonProfilePanel', () => {
     await openPayout(wrapper)
     expect(wrapper.text()).toContain('••••••0005/0100')
     expect(wrapper.get<HTMLInputElement>('[data-test="bank-account-plaintext"]').element.value).toBe('')
+  })
+
+  it('používá pro všechny adresy společný číselník států', async () => {
+    const wrapper = await mountedPanel()
+
+    expect(wrapper.find('[data-test="profile-country-code"] input').exists()).toBe(true)
   })
 
   it('používá pro přidávací akce plné primární tlačítko', async () => {

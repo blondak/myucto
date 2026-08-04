@@ -15,6 +15,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import CountrySelect from '@/components/ui/CountrySelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
@@ -579,7 +580,17 @@ onMounted(load)
                   <label :class="labelClass">{{ t('payroll.people.profile.street') }}<input v-model="row.street_line" :required="!row.id" autocomplete="off" :class="inputClass"></label>
                   <label :class="labelClass">{{ t('payroll.people.profile.city') }}<input v-model="row.city" :required="!row.id" autocomplete="off" :class="inputClass"></label>
                   <label :class="labelClass">{{ t('payroll.people.profile.postal_code') }}<input v-model="row.postal_code" :required="!row.id" autocomplete="off" :class="inputClass"></label>
-                  <label :class="labelClass">{{ t('payroll.people.profile.country_code') }}<input v-model="row.country_code" :required="!row.id" maxlength="2" autocomplete="off" :class="inputClass"></label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.country_code') }}
+                    <CountrySelect
+                      v-model="row.country_code"
+                      class="mt-1"
+                      :required="!row.id"
+                      :disabled="!canWrite"
+                      accent="payroll"
+                      data-test="profile-country-code"
+                    />
+                  </label>
                 </template>
               </div>
               <p v-if="canWrite && row.id" class="mt-2 text-xs text-neutral-500">{{ t('payroll.people.profile.address_replace_hint') }}</p>

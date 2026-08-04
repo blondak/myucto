@@ -27,7 +27,9 @@ archivu, přesný počet XSD a vstupní schémata. Downloader fail-closed odmít
 jiný host nebo cestu (včetně redirectu), příliš velký či ne-ZIP obsah, chybný
 hash, neočekávaný počet souborů, chybějící entry point, nevalidní XSD a síťovou,
 chybějící nebo adresář opouštějící závislost. Instalace proběhne atomicky až po
-ověření všech šesti balíčků.
+ověření všech šesti balíčků. Soubor `SHA256SUMS` je deterministický katalog
+všech uložených XSD včetně zachovaných starších verzí. Neobsahuje čas stažení
+ani lokální cesty; cílený test kontroluje úplnost seznamu i každý hash.
 
 Změna URL, verze, kontrolního součtu, počtu souborů nebo entry pointu musí být
 vědomá a musí ji doprovodit aktualizace tohoto manifestu, této tabulky a testů.

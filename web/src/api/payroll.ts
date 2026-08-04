@@ -874,6 +874,97 @@ export interface PayrollEmployerSettingsPayload {
 
 export type PayrollRegzelEnvironment = 'production' | 'test'
 
+export type PayrollSubmissionObligationStatus =
+  | 'open'
+  | 'prepared'
+  | 'submitted'
+  | 'fulfilled'
+  | 'overdue'
+  | 'cancelled'
+  | 'manual_review'
+
+export interface PayrollSubmissionOverviewItem {
+  id: number
+  environment: PayrollRegzelEnvironment
+  agenda_code: string
+  subject_type: string
+  subject_reference: string
+  period_start: string
+  period_end: string
+  obligation_kind: string
+  preferred_channel: string
+  status: PayrollSubmissionObligationStatus
+  row_version: number
+  earliest_submission_on: string
+  due_on: string
+  calendar_basis: string
+  latest_submission: {
+    id: number
+    status: string
+    submission_kind: string
+    channel: string
+    submitted_at: string | null
+    decided_at: string | null
+  } | null
+}
+
+export interface PayrollSubmissionOverviewResponse {
+  environment: PayrollRegzelEnvironment
+  period: string
+  summary: {
+    total: number
+    open: number
+    prepared: number
+    submitted: number
+    fulfilled: number
+    overdue: number
+    manual_review: number
+    other: number
+  }
+  items: PayrollSubmissionOverviewItem[]
+}
+
+export interface PayrollHealthPaymentOverview {
+  schema_reference: 'payroll-health-payment-overview.v1'
+  document_kind: 'internal_health_payment_overview'
+  official_submission: {
+    supported: false
+    reason_code: string
+  }
+  supplier_id: number
+  run_id: number
+  revision_id: number
+  revision_no: number
+  period: string
+  currency_code: 'CZK'
+  insurer: {
+    code: string
+  }
+  source: {
+    statutory_result_id: number
+    statutory_result_hash: string
+    ruleset_id: string
+    ruleset_hash: string
+  }
+  totals: {
+    person_count: number
+    assessment_base_minor_units: number
+    employee_contribution_minor_units: number
+    employer_contribution_minor_units: number
+    total_contribution_minor_units: number
+  }
+  people: Array<{
+    employee_reference: string
+    display_name: string
+    assessment_base_minor_units: number
+    employee_contribution_minor_units: number
+    employer_contribution_minor_units: number
+    total_contribution_minor_units: number
+  }>
+  sha256: string
+  filename: string
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
@@ -1357,6 +1448,38 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  submissionOverview: (
+    environment: PayrollRegzelEnvironment,
+    period: string,
+  ) =>
+    api.get<PayrollSubmissionOverviewResponse>('/payroll/submissions/overview', {
+      params: { environment, period },
+    }).then(response => response.data),
+  healthPaymentOverviews: (revisionId: number) =>
+    api.get<{
+      items: PayrollHealthPaymentOverview[]
+      electronic_submission: { supported: false; reason_code: string }
+    }>(`/payroll/submissions/health-overviews/${revisionId}`)
+      .then(response => response.data),
+  downloadHealthPaymentOverview: async (
+    overview: PayrollHealthPaymentOverview,
+  ): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/submissions/health-overviews/${overview.revision_id}/${overview.insurer.code}/download`,
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = overview.filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   regzelProfile: () =>
     api.get<{ profile: PayrollRegzelProfile | null }>('/payroll/submissions/regzel/profile')
       .then(response => response.data.profile),

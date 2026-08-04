@@ -13,6 +13,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
 
@@ -491,8 +492,8 @@ onMounted(load)
             {{ t('payroll.people.quick_edit.current_address') }}: {{ residenceAddress.address_masked }}
           </p>
         </div>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label :class="[labelClass, 'sm:col-span-2']">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+          <label :class="[labelClass, 'sm:col-span-2 lg:col-span-2']">
             {{ t('payroll.people.quick_edit.street_line') }}
             <input
               v-model="form.street_line"
@@ -502,21 +503,24 @@ onMounted(load)
               data-test="street-line"
             >
           </label>
-          <label :class="labelClass">
+          <label :class="[labelClass, 'lg:col-span-2']">
             {{ t('payroll.people.quick_edit.city') }}
             <input v-model="form.city" autocomplete="address-level2" :class="inputClass" data-test="city">
           </label>
-          <div class="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
-            <label :class="labelClass">
-              {{ t('payroll.people.quick_edit.postal_code') }}
-              <input v-model="form.postal_code" autocomplete="postal-code" :class="inputClass" data-test="postal-code">
-            </label>
-            <label :class="labelClass">
-              {{ t('payroll.people.quick_edit.country_code') }}
-              <input v-model="form.country_code" maxlength="2" autocomplete="country" :class="[inputClass, 'uppercase']" data-test="country-code">
-            </label>
-          </div>
-          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-2']">
+          <label :class="labelClass">
+            {{ t('payroll.people.quick_edit.postal_code') }}
+            <input v-model="form.postal_code" autocomplete="postal-code" :class="inputClass" data-test="postal-code">
+          </label>
+          <label :class="labelClass">
+            {{ t('payroll.people.quick_edit.country_code') }}
+            <CountrySelect
+              v-model="form.country_code"
+              class="mt-1"
+              accent="payroll"
+              data-test="country-code"
+            />
+          </label>
+          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-3']">
             {{ t('payroll.people.quick_edit.email') }}
             <input
               v-model="form.email"
@@ -527,7 +531,7 @@ onMounted(load)
               data-test="email"
             >
           </label>
-          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-2']">
+          <label :class="[labelClass, 'sm:col-span-1 lg:col-span-3']">
             {{ t('payroll.people.quick_edit.phone') }}
             <input
               v-model="form.phone"

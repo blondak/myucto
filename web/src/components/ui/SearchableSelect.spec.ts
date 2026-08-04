@@ -29,6 +29,7 @@ describe('SearchableSelect', () => {
         options,
         accent: 'payroll',
         invalid: true,
+        required: true,
         ariaLabel: 'Mzda — Má dáti',
         inputClass: 'font-mono',
       },
@@ -37,6 +38,8 @@ describe('SearchableSelect', () => {
     expect(payrollInput.classes()).toContain('focus:border-payroll-500')
     expect(payrollInput.classes()).toContain('font-mono')
     expect(payrollInput.attributes('aria-invalid')).toBe('true')
+    expect(payrollInput.attributes('aria-required')).toBe('true')
+    expect(payrollInput.attributes('required')).toBeDefined()
     expect(payrollInput.attributes('aria-label')).toBe('Mzda — Má dáti')
     payrollWrapper.unmount()
   })

@@ -108,11 +108,13 @@ téže osoby; žádné slučování duplicitních karet není potřeba.
 
 Primárním tlačítkem **Přidat zaměstnance** založíš právě tuto společnou kartu,
 nikoli druhou osobu jen pro úplné mzdy. Krátký formulář obsahuje nejčastější
-vstupní údaje: jméno, rodné číslo, datum narození, druh vztahu, plánovaný nástup
-a základní mzdu. Jedno uložení založí kartu i první pracovní vztah; nový
-zaměstnanec se pak otevře k doplnění osobního profilu a podrobností vztahu.
-Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné i uživateli
-bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
+vstupní údaje: jméno, volitelné rodné číslo, datum narození, druh vztahu,
+plánovaný nástup a základní mzdu. Jedno uložení založí kartu i první pracovní
+vztah; nový zaměstnanec se pak otevře k doplnění osobního profilu a podrobností
+vztahu. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
+EČP, VCP a zahraniční identifikátory se vedou samostatně v úplné osobní
+evidenci. Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
+i uživateli bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
 
 Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
 všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
@@ -127,16 +129,21 @@ Seznam ukazuje:
 Tlačítkem **Upravit zaměstnance** otevřeš vztahy a zároveň jeden formulář
 **Běžné údaje zaměstnance**. Bez přepínání záložek v něm upravíš jméno
 a příjmení, rodné číslo, bydliště, e-mail, telefon, týdenní pracovní dobu
-a pravidelnou hrubou mzdu. Změna pracovní doby nebo mzdy nevynuluje historii:
-založí novou účinnou verzi podmínek od zvoleného dne. Osobní profil a primární
-pracovní vztah se ukládají jednou transakcí, takže při chybě nezůstane změněná
-jen jedna část.
+a pravidelnou hrubou mzdu. Stát bydliště se vybírá ze společného číselníku
+zemí. Pokud je číselník dočasně nedostupný, formulář dovolí ručně zadat
+dvoupísmenný ISO kód, aby úpravu adresy nezablokoval výpadek sítě. Změna
+pracovní doby nebo mzdy nevynuluje historii: založí novou účinnou verzi
+podmínek od zvoleného dne. Osobní profil a primární pracovní vztah se ukládají
+jednou transakcí, takže při chybě nezůstane změněná jen jedna část.
 
 Na telefonu se seznam automaticky mění z tabulky na karty. Historii identit,
 adres a kontaktů, výplatní účty a další méně časté údaje otevřeš pod formulářem
-ve sbalené části **Pokročilé a historické údaje**. U citlivých údajů se
-zobrazuje pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit.
-Po uložení aplikace otevřenou hodnotu z formuláře odstraní.
+ve sbalené části **Úplná osobní evidence a historie**. Nejde o nahrazenou nebo
+ztracenou evidenci: zůstávají zde vazby 1:N pro historické identity, adresy,
+kontakty, výplatní účty a jejich období účinnosti. Také u všech historických
+adres se stát vybírá ze stejného číselníku. U citlivých údajů se zobrazuje
+pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit. Po uložení
+aplikace otevřenou hodnotu z formuláře odstraní.
 
 Výplatní účet musí mít název, období účinnosti a rozdělení výplaty. Před
 zařazením do platební dávky jej samostatně ověř tlačítkem **Ověřit účet** a
@@ -565,9 +572,22 @@ tenant, prostředí, XSD i kryptografický otisk výsledného XML.
 
 Tato funkce XML pouze připraví a stáhne. Neodesílá je a neoznačuje registraci
 za přijatou. Prvotní registrace zaměstnavatele, přidání nebo ukončení účtárny
-a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné. Záložky
-JMHZ a zdravotních pojišťoven proto zobrazují současný nepodporovaný stav a
-nenabízejí falešné tlačítko odeslání.
+a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné.
+
+Záložky **JMHZ** a **Zdravotní pojišťovny** zobrazují za vybraný měsíc skutečný
+přehled evidovaných povinností, termínů, kanálů a posledních stavů podání.
+Produkční a testovací prostředí zůstávají oddělená. Přehled je pouze
+kontrolní — bez implementovaného důvěryhodného transportu a parseru protokolu
+nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
+podání.
+
+U schválených mzdových běhů připraví záložka zdravotních pojišťoven také
+interní měsíční přehled samostatně pro každý kód pojišťovny a každou aktuální
+revizi. Zobrazuje číslo běhu a revize, počet osob, úhrn vyměřovacích základů
+a pojistného a lze jej stáhnout jako deterministický kontrolní JSON. Nejde
+o oficiální PPZ/HOZ ani o elektronické podání; výstup vzniká jen ze všech
+aktuálních schválených neměnných revizí měsíce a před stažením se znovu
+ověřují jejich hashe a kontrolní součty.
 
 ## 56a.16 Oprávnění a citlivé údaje
 

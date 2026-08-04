@@ -89,6 +89,36 @@ final class JmhzSchemaBundleTest extends TestCase
         }
     }
 
+    public function testContentManifestPinsEveryVendoredSchemaByteForByte(): void
+    {
+        $manifestPath = self::ROOT . '/SHA256SUMS';
+        self::assertFileExists($manifestPath);
+        $lines = file($manifestPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($lines);
+
+        $expected = [];
+        foreach ($this->schemaFiles() as $file) {
+            $relative = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                substr($file, strlen(self::ROOT) + 1),
+            );
+            $hash = hash_file('sha256', $file);
+            self::assertIsString($hash);
+            $expected[$relative] = $hash;
+        }
+
+        $actual = [];
+        foreach ($lines as $line) {
+            self::assertMatchesRegularExpression('/\A[a-f0-9]{64}  [^\r\n]+\z/D', $line);
+            [$hash, $relative] = explode('  ', $line, 2);
+            self::assertArrayNotHasKey($relative, $actual, 'Duplicitní cesta v SHA256SUMS.');
+            $actual[$relative] = $hash;
+        }
+
+        self::assertSame($expected, $actual);
+    }
+
     /** @return list<string> */
     private function schemaFiles(): array
     {
