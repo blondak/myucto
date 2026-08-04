@@ -113,16 +113,25 @@ final class ProductVendorAction
             }
         }
 
+        // Reentrantní obal (vzor služeb) — pod už běžící transakcí by holé
+        // beginTransaction() shodilo request na PDOException místo zápisu.
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
         try {
             $this->vendors->deleteForItem($supplierId, $itemId);
             foreach ($prepared as $v) {
                 $this->vendors->add($supplierId, $itemId, $v);
             }
-            $pdo->commit();
+            if ($owns) {
+                $pdo->commit();
+            }
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($owns && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
 

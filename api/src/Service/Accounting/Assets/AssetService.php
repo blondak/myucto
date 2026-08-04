@@ -108,8 +108,19 @@ final class AssetService
             throw new AssetException('asset_locked', 'Vyřazený majetek nelze upravovat — nejdřív vraťte vyřazení.');
         }
 
-        // stav a vyřazení se mění výhradně lifecycle metodami, ne přes update
-        unset($data['status'], $data['disposal_date'], $data['disposal_type'], $data['disposal_price']);
+        // stav a vyřazení se mění výhradně lifecycle metodami, ne přes update.
+        // `sale_invoice_id` patří do TÉŽE skupiny (píše ho jen dispose()/revertDisposal()),
+        // ale ve výčtu chybělo — a protože normalize() staví kartu nad `SELECT *` existující
+        // řádky, prošlo z těla requestu do whitelistu AssetRepository::COLUMNS bez jediné
+        // kontroly vlastnictví. Cizí `invoices.id` se tak dal natrvalo zapsat na vlastní
+        // kartu (CWE-639, externí report 2026-08 R2 — třída, kterou sweep u /assets minul).
+        unset(
+            $data['status'],
+            $data['disposal_date'],
+            $data['disposal_type'],
+            $data['disposal_price'],
+            $data['sale_invoice_id'],
+        );
         $card = $this->normalize($data, $existing);
         $this->assertLocks($existing, $card, $data);
         [$card, $warnings] = $this->validateCard($supplierId, $card, false);
@@ -1121,6 +1132,7 @@ final class AssetService
         }
 
         $this->assertPurchaseInvoiceOwned($supplierId, $card['purchase_invoice_id']);
+        $this->assertPurchaseInvoiceItemOwned($supplierId, $card['purchase_invoice_item_id']);
 
         // Pozn.: assertDepreciatorGround() se volá VÝŠ, ještě před vynulováním
         // `tax_first_year_increase` u metod, které ho neznají — jinak by se vazba
@@ -1355,6 +1367,31 @@ final class AssetService
         $stmt->execute([$purchaseInvoiceId, $supplierId]);
         if ($stmt->fetchColumn() === false) {
             throw new AssetException('not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+    }
+
+    /**
+     * Cizí/neexistující řádek PF nesmí jít navázat na kartu (tenant izolace).
+     *
+     * `assets.purchase_invoice_item_id` deklarovaný FK NEMÁ (viz 1013_assets.sql) a dnes
+     * ho žádný read-back nejoinuje, takže cizí id se v odpovědi neprojeví. Zůstal by ale
+     * TRVALÝ zápis přes hranici firmy — a první JOIN, který na ten sloupec někdo napíše,
+     * z něj udělá únik. Vlastnictví se odvozuje přes hlavičku dokladu, stejně jako
+     * {@see \MyInvoice\Service\Accounting\SmallAsset\SmallAssetService::assertSourceBelongsToTenant()}.
+     */
+    private function assertPurchaseInvoiceItemOwned(int $supplierId, ?int $purchaseInvoiceItemId): void
+    {
+        if ($purchaseInvoiceItemId === null) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pii.id = ? AND pi.supplier_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceItemId, $supplierId]);
+        if ($stmt->fetchColumn() === false) {
+            throw new AssetException('not_found', 'Řádek přijaté faktury nenalezen.', 404);
         }
     }
 

@@ -62,6 +62,7 @@ final class StockDocumentService
         private readonly StockItemRepository $items,
         private readonly StockTakeRepository $takes,
         private readonly StockLandedCostRepository $landedCosts,
+        private readonly StockReferenceGuard $references,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -774,7 +775,43 @@ final class StockDocumentService
             'status'              => 'draft',
         ];
 
+        $this->assertReferencesOwned($supplierId, $header, $lines);
+
         return [$header, $lines];
+    }
+
+    /**
+     * Vazby dokladu do jiných agend (FV, PF, inventura) musí patřit témuž tenantovi.
+     *
+     * `warehouse_id` a `stock_item_id` mají vlastní kontrolu výš
+     * (requireActiveWarehouse / itemsMeta); tyhle sloupce ji do opravy R2 neměly
+     * a zapisovaly se rovnou z těla requestu (security report 2026-08, S102).
+     * Únik z toho nebyl — všechny čtecí cesty skladu nesou `supplier_id` —, ale
+     * trvalý zápis přes hranici firmy ano, a ten se stane únikem první den, kdy
+     * na některý z těch sloupců někdo napíše JOIN.
+     *
+     * @param array<string,mixed>       $header
+     * @param list<array<string,mixed>> $lines
+     */
+    private function assertReferencesOwned(int $supplierId, array $header, array $lines): void
+    {
+        $refs = [];
+        foreach (array_keys(StockReferenceGuard::DIRECT) as $column) {
+            $refs[$column] = $header[$column] ?? null;
+        }
+        foreach (array_keys(StockReferenceGuard::VIA_PARENT) as $column) {
+            $refs[$column] = array_map(static fn (array $line): mixed => $line[$column] ?? null, $lines);
+        }
+
+        $bad = $this->references->violations($supplierId, $refs);
+        if ($bad !== []) {
+            throw new StockException(
+                'invalid_reference',
+                'Doklad odkazuje na záznam mimo vaši firmu.',
+                422,
+                $bad,
+            );
+        }
     }
 
     /**

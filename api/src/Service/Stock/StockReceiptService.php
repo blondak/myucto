@@ -50,6 +50,7 @@ final class StockReceiptService
         private readonly StockDocumentRepository $docs,
         private readonly StockLandedCostRepository $landedCosts,
         private readonly VatStatusService $vatStatus,
+        private readonly StockReferenceGuard $references,
     ) {}
 
     private static function isNotReceivableKind(string $documentKind): bool
@@ -266,6 +267,29 @@ final class StockReceiptService
     {
         if ($rawCosts === []) {
             return;
+        }
+
+        // Vedlejší náklad si nese vlastní vazbu na PF a její řádek — obojí z TĚLA
+        // requestu a do opravy R2 bez kontroly vlastnictví (sweep S020 měl ověřené
+        // jen `lines`, ne `landed_costs`). Tenant hranice se hlídá stejným guardem
+        // jako u hlavičky dokladu; zbytek (existence, částka) řeší validace níž.
+        $bad = $this->references->violations($supplierId, [
+            'purchase_invoice_id'      => array_map(
+                static fn (mixed $rc): mixed => is_array($rc) ? ($rc['purchase_invoice_id'] ?? null) : null,
+                $rawCosts,
+            ),
+            'purchase_invoice_item_id' => array_map(
+                static fn (mixed $rc): mixed => is_array($rc) ? ($rc['purchase_invoice_item_id'] ?? null) : null,
+                $rawCosts,
+            ),
+        ]);
+        if ($bad !== []) {
+            throw new StockException(
+                'invalid_reference',
+                'Vedlejší náklad odkazuje na záznam mimo vaši firmu.',
+                422,
+                $bad,
+            );
         }
 
         $costs = [];

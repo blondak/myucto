@@ -107,8 +107,13 @@ final class ProductPriceAction
             ];
         }
 
+        // Reentrantní obal (vzor služeb) — pod už běžící transakcí by holé
+        // beginTransaction() shodilo request na PDOException místo zápisu.
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
         try {
             // Smaž měny, které v payloadu nejsou.
             foreach ($this->prices->listForItem($supplierId, $itemId) as $existing) {
@@ -119,9 +124,13 @@ final class ProductPriceAction
             foreach ($prepared as $p) {
                 $this->prices->upsert($supplierId, $itemId, $p['currency_code'], $p);
             }
-            $pdo->commit();
+            if ($owns) {
+                $pdo->commit();
+            }
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($owns && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
 
