@@ -68,6 +68,11 @@ final class ActionTenantReferenceTest extends TestCase
         'RelatedPartyAction.php' => ['client_id'],
         // R2 #9 / sweep F6 — PUT /api/invoices/{id}/work-report/materials
         'SaveWorkReportMaterialsAction.php' => ['project_id'],
+        // Revize invoice_id/purchase_invoice_id (2026-08-04) — POST /api/reports/s79.
+        // Jediný nález z pěti prověřených Action: obě vazby šly z těla rovnou do INSERTu
+        // v Section79Service::register() a `vat_registration_corrections` na nich nemá FK,
+        // takže neexistovala ani databázová záchranná síť.
+        'Section79Action.php' => ['purchase_invoice_id', 'asset_id'],
     ];
 
     /**
@@ -108,6 +113,38 @@ final class ActionTenantReferenceTest extends TestCase
         // (varianta MS-P1-1), plus kontrola shody klienta na ř. ~93. Právě tuhle kontrolu
         // sesterský SaveWorkReportMaterialsAction neměl = nález F6.
         'SaveWorkReportAction.php:project_id' => 'SupplierGuard::owns($request, project) + client match',
+
+        // ── revize invoice_id / purchase_invoice_id (2026-08-04) ─────────────────────
+        //
+        // Doplnění obou sloupců do SCOPES rozsvítilo pět Action. Revize je prošla celým
+        // zápisovým povrchem VČETNĚ service vrstvy (poučení z minulého kola: reporterova
+        // extrakce četla jen Action a kvůli tomu minula čtyři nálezy) — čtyři z pěti vazbu
+        // mají, jen ji sken nevidí, protože je o vrstvu níž nebo v jiném idiomu.
+        //
+        // Každá položka níž má ŽIVÝ dvoutenantní protějšek v
+        // tests/Integration/Security/ReportTenantReferenceIdorTest.php. Bez něj je zápis
+        // do whitelistu jen tvrzení — a nekontrolované tvrzení je přesně to, co z mapy
+        // dělá bezcennou dekoraci.
+
+        // AssetService::addImprovement() ř. ~458 → assertPurchaseInvoiceOwned() ř. ~1361.
+        // (`sale_invoice_id` v dispose() váže vlastní SELECT ř. ~539; v SCOPES není.)
+        'AssetLifecycleAction.php:purchase_invoice_id' => 'AssetService::assertPurchaseInvoiceOwned() (AssetService:458)',
+
+        // SmallAssetService::create() ř. ~41 → assertSourceBelongsToTenant() ř. ~466.
+        // Sesterský `sale_invoice_id` v sell() má vlastní kontrolu na ř. ~103.
+        'SmallAssetAction.php:purchase_invoice_id' => 'SmallAssetService::assertSourceBelongsToTenant() (SmallAssetService:466)',
+
+        // manualMatch() ř. ~2464 — invoices->find() + SupplierGuard::owns($request, $invoice);
+        // manualMatchPurchase() ř. ~2978 — shoda `pi.supplier_id` s SupplierGuard::currentId().
+        // Obě Action ten řádek stejně potřebuje (stav dokladu, částka k úhradě), takže
+        // duplikovat kontrolu guardem by byl dotaz navíc bez užitku.
+        'BankStatementAction.php:invoice_id'          => 'SupplierGuard::owns($request, $invoice) (BankStatementAction:2465)',
+        'BankStatementAction.php:purchase_invoice_id' => 'shoda pi.supplier_id v manualMatchPurchase() (BankStatementAction:2978)',
+
+        // Section46Service::registerCorrection() ř. ~145 → fetchInvoice($supplierId, $invoiceId),
+        // jehož SELECT má `supplier_id = ?` v predikátu (Section46Service:477–480) — cizí
+        // doklad se ani nenačte a skončí na 'Doklad #N nenalezen.'.
+        'Section46Action.php:invoice_id' => 'Section46Service::fetchInvoice($supplierId, …) (Section46Service:477)',
     ];
 
     /**

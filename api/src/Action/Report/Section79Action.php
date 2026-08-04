@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Report;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -31,6 +32,7 @@ final class Section79Action
 {
     public function __construct(
         private readonly Section79Service $service,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     /** GET rozpis položek za období — účetní|admin (reports READ). */
@@ -86,6 +88,16 @@ final class Section79Action
         $periodYears = isset($body['period_years']) && $body['period_years'] !== null && $body['period_years'] !== ''
             ? (int) $body['period_years']
             : null;
+
+        // Doložení položky — obě vazby jdou z těla requestu rovnou do INSERTu
+        // v Section79Service::register(). `vat_registration_corrections` na nich deklarovaný
+        // FK NEMÁ (jediný constraint je fk_vrc_supplier), takže bez téhle kontroly projde
+        // cizí i zcela neexistující id a evidence § 79 odkazuje přes hranici firmy
+        // (CWE-639, revize navazující na externí security report 2026-08 R2).
+        $badRefs = $this->tenantRefs->violations($supplierId, $body, ['purchase_invoice_id', 'asset_id']);
+        if ($badRefs !== []) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+        }
 
         try {
             $id = $this->service->register(

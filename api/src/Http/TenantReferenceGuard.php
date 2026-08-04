@@ -68,6 +68,30 @@ final class TenantReferenceGuard
      * `revenue_category_id` a `expense_category_id` deklarovaný FK nemají —
      * žijí jen tady a schema test je přeskakuje.
      *
+     * ## Proč tu `invoice_id` / `purchase_invoice_id` / `asset_id` JSOU
+     *
+     * Předchozí kolo je sem vědomě nedalo (viz {@see \MyInvoice\Service\Stock\StockReferenceGuard}),
+     * protože zápis do mapy okamžitě rozsvítí discovery test na pěti Action mimo sklad.
+     * Samostatná revize je všech pět prošla a rozhodnutí otočila:
+     *
+     *   - **Schématicky jsou jednoznačné.** Past, kvůli které se sloupce do mapy nedávají
+     *     naslepo (`category_id` míří v `trips` jinam než ve `stock_item_categories`), tu
+     *     neplatí: v celém schématu míří KAŽDÝ `invoice_id` na `invoices`, každý
+     *     `purchase_invoice_id` na `purchase_invoices` a každý `asset_id` na `assets` —
+     *     a všechny tři cílové tabulky mají vlastní `supplier_id`. Ověřeno dotazem do
+     *     `information_schema`, drží TenantReferenceGuardSchemaTest.
+     *   - **Byla potřeba za běhu.** `Section79Action` psal `purchase_invoice_id` i `asset_id`
+     *     do `vat_registration_corrections` bez jakékoli kontroly vlastnictví (a ta tabulka
+     *     na obou sloupcích FK nemá, takže neexistovala ani databázová záchranná síť).
+     *     Bez řádku v mapě by se ta kontrola musela pošesté ručně opsat do service.
+     *   - **Cena je pět položek v `ALTERNATIVE_GUARDS`, ne otevřený seznam.** Zbylé čtyři
+     *     Action vazbu mají, jen jiným idiomem (`find($supplierId,$id)`, `SupplierGuard::owns`,
+     *     supplier-scoped `fetchInvoice`). Každá z nich má živý dvoutenantní protějšek
+     *     v `tests/Integration/Security/ReportTenantReferenceIdorTest.php`, takže whitelist
+     *     cituje ověřenou obranu, ne domněnku. Vynechat sloupce z mapy by stálo víc:
+     *     discovery sken by pak NIKDY neuviděl novou Action, která `invoice_id` z těla čte —
+     *     a to je přesně ta třída chyby, kvůli které R2 vzniklo.
+     *
      * @var array<string, array{0:string, 1:string}>
      */
     public const SCOPES = [
@@ -80,7 +104,10 @@ final class TenantReferenceGuard
         'branding_profile_id'        => ['branding_profiles',  self::VIA_SUPPLIER],
         'category_id'                => ['trip_categories',    self::VIA_SUPPLIER],
         'car_id'                     => ['cars',               self::VIA_SUPPLIER],
+        'invoice_id'                 => ['invoices',           self::VIA_SUPPLIER],
+        'purchase_invoice_id'        => ['purchase_invoices',  self::VIA_SUPPLIER],
         'source_purchase_invoice_id' => ['purchase_invoices',  self::VIA_SUPPLIER],
+        'asset_id'                   => ['assets',             self::VIA_SUPPLIER],
         'project_id'                 => ['projects',           self::VIA_CLIENT],
     ];
 

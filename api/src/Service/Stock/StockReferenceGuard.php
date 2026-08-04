@@ -21,15 +21,20 @@ use PDO;
  *
  * ## Proč to nežije v `TenantReferenceGuard::SCOPES`
  *
- * Dva důvody, oba schématické, ne stylové:
+ * Původně dva důvody; po navazující revizi (2026-08-04) zbyl jeden — ten schématický:
  *
  *   1. `invoice_items` a `purchase_invoice_items` NEMAJÍ `supplier_id` — vlastnictví
  *      se odvozuje přes rodičovský doklad. Centrální guard umí jen `VIA_SUPPLIER`
- *      a `VIA_CLIENT` (`clients.client_id`), tenhle tvar do něj nepatří.
- *   2. `invoice_id` / `purchase_invoice_id` čte z těla requestu i pět Action mimo
- *      sklad (majetek, banka, sestavy §46/§79). Zápis do centrální mapy by je
- *      okamžitě prohlásil za nevázané v `ActionTenantReferenceTest` — což je samo
- *      o sobě legitimní zjištění, ale je to jiná revize než tahle.
+ *      a `VIA_CLIENT` (`clients.client_id`), tenhle tvar do něj nepatří. `stock_take_id`
+ *      zůstává tady s nimi, ať skladový povrch drží jedna třída.
+ *   2. ~~`invoice_id` / `purchase_invoice_id` rozsvítí discovery test na pěti Action
+ *      mimo sklad~~ — VYŘEŠENO. Ta revize proběhla: oba sloupce (a `asset_id`) jsou
+ *      od té doby v `TenantReferenceGuard::SCOPES`, čtyři z pěti Action dostaly
+ *      zdůvodněnou položku v `ALTERNATIVE_GUARDS` s živým testem a pátá
+ *      (`Section79Action`) byla skutečný nález a volá teď centrální guard.
+ *      Hlavičkové `invoice_id` / `purchase_invoice_id` tu proto zůstávají jen kvůli
+ *      volacímu tvaru (`refs` mapa se seznamy id vedle položkových sloupců), ne proto,
+ *      že by do centrální mapy nepatřily.
  *
  * Sémantika je záměrně shodná s `TenantReferenceGuard`: prázdné pole = vše v
  * pořádku, `null` / `0` / nekladná hodnota = „nevyplněno" a neověřuje se
