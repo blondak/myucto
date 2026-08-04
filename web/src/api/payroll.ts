@@ -838,6 +838,57 @@ export interface PayrollEmployerSettingsPayload {
   offices: PayrollOfficePayload[]
 }
 
+export type PayrollBusinessDayRule = 'none' | 'previous_business_day' | 'next_business_day'
+export type PayrollBalanceRoundingMode = 'exact_minor_units' | 'nearest_crown' | 'up_to_crown'
+export type PayrollOptionalPolicyState = 'not_used' | 'manual_review' | 'configured'
+export type PayrollDeliveryChannel = 'disabled' | 'employee_portal' | 'smime_email' | 'manual_handover'
+export type PayrollPolicySourceKind = 'manual' | 'import' | 'migration' | 'system'
+
+export interface PayrollEmployerPolicy {
+  id: number
+  supplier_id: number
+  valid_from: string
+  valid_to: string | null
+  payday_day: number
+  payday_month_offset: 0 | 1
+  payday_business_day_rule: PayrollBusinessDayRule
+  balance_rounding_mode: PayrollBalanceRoundingMode
+  home_office_policy: PayrollOptionalPolicyState
+  travel_expense_policy: PayrollOptionalPolicyState
+  four_eyes_required: boolean
+  automatic_calculation_enabled: boolean
+  automatic_posting_enabled: boolean
+  automatic_payments_enabled: boolean
+  delivery_channel: PayrollDeliveryChannel
+  delivery_verified_on: string | null
+  source_kind: PayrollPolicySourceKind
+  source_reference: string | null
+  created_by: number | null
+  updated_by: number | null
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export type PayrollEmployerPolicyPayload = Omit<
+  PayrollEmployerPolicy,
+  'id' | 'supplier_id' | 'created_by' | 'updated_by' | 'created_at' | 'updated_at'
+>
+
+export interface PayrollSetupCheckItem {
+  code: string
+  status: 'ok' | 'blocked'
+  message: string
+}
+
+export interface PayrollSetupCheck {
+  ready: boolean
+  effective_on: string
+  policy_id: number | null
+  checks: PayrollSetupCheckItem[]
+  blockers: string[]
+}
+
 export type PayrollInstitutionType =
   | 'social_security'
   | 'tax_office'
@@ -1183,6 +1234,20 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  employerPolicies: (effectiveOn?: string) =>
+    api.get<{ policies: PayrollEmployerPolicy[] }>('/payroll/settings/policies', {
+      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
+    }).then(response => response.data.policies),
+  createEmployerPolicy: (payload: PayrollEmployerPolicyPayload) =>
+    api.post<{ policy: PayrollEmployerPolicy }>('/payroll/settings/policies', payload)
+      .then(response => response.data.policy),
+  updateEmployerPolicy: (id: number, payload: PayrollEmployerPolicyPayload) =>
+    api.put<{ policy: PayrollEmployerPolicy }>(`/payroll/settings/policies/${id}`, payload)
+      .then(response => response.data.policy),
+  payrollSetupCheck: (effectiveOn: string) =>
+    api.get<{ setup: PayrollSetupCheck }>('/payroll/setup-check', {
+      params: { effective_on: effectiveOn },
+    }).then(response => response.data.setup),
   institutionAccounts: (effectiveOn?: string) =>
     api.get<{ accounts: PayrollInstitutionAccount[] }>('/payroll/settings/institution-accounts', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,

@@ -45,7 +45,9 @@ nahradit nejbližším rokem nebo odhadem.
 ## 56a.3 Nastavení zaměstnavatele
 
 V **Mzdy → Nastavení zaměstnavatele** se evidují registrační a kontaktní údaje
-pro mzdovou agendu. Firma může mít více mzdových účtáren, ale právě jedna
+pro mzdovou agendu. Stránka používá čtyři samostatné záložky:
+**Zaměstnavatel a účtárny**, **Účty institucí**, **Automatické účtování** a
+**Politiky a připravenost**. Firma může mít více mzdových účtáren, ale právě jedna
 aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní kód,
 název a vlastní variabilní symbol pro platby sociálního pojištění. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
@@ -73,8 +75,23 @@ se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odm�
 výkon funkce člena orgánu. Dále se vybírají účty pojistného, daně a ostatních
 srážek. Nabídka obsahuje jen aktivní účty vhodného typu z účtového rozvrhu firmy.
 
+V záložce **Politiky a připravenost** se vede časová historie výplatního dne,
+pravidla posunu na pracovní den, zaokrouhlení doplatku, kontroly čtyř očí,
+automatických kroků a bezpečného doručení. Období dvou politik se nesmějí
+překrývat. Nové budoucí pravidlo proto založ až po ukončení platnosti
+předchozího záznamu. Původ systémového nebo migrovaného záznamu nelze při
+ruční úpravě změnit.
+
+Kontrola připravenosti se spouští k vybranému dni. Ukazuje každý ověřený
+předpoklad i přesný blokující nedostatek. Kontrolují se jen funkce, které firma
+skutečně zapnula; zapnutá automatizace, JMHZ nebo bezpečné doručení však bez
+pozitivního důkazu zůstávají zablokované. Přepínač **Vést mzdy** je nadále jen
+v obecném Nastavení firmy a na této stránce se neduplikuje.
+
 Změny se ukládají s kontrolou souběžné editace. Pokud mezitím nastavení změnil
-jiný uživatel, aplikace načte aktuální data a vyžádá nové potvrzení změn.
+jiný uživatel, aplikace zobrazí přesný důvod konfliktu. Tlačítko pro načtení
+aktuální verze obnoví také její nové číslo verze a teprve potom dovolí úpravu
+uložit znovu.
 
 ## 56a.4 Společný seznam zaměstnanců
 

@@ -13,6 +13,10 @@ const m = vi.hoisted(() => ({
   institutionAccounts: vi.fn(),
   createInstitutionAccount: vi.fn(),
   updateInstitutionAccount: vi.fn(),
+  employerPolicies: vi.fn(),
+  payrollSetupCheck: vi.fn(),
+  createEmployerPolicy: vi.fn(),
+  updateEmployerPolicy: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -25,6 +29,10 @@ vi.mock('@/api/payroll', () => ({
     institutionAccounts: m.institutionAccounts,
     createInstitutionAccount: m.createInstitutionAccount,
     updateInstitutionAccount: m.updateInstitutionAccount,
+    employerPolicies: m.employerPolicies,
+    payrollSetupCheck: m.payrollSetupCheck,
+    createEmployerPolicy: m.createEmployerPolicy,
+    updateEmployerPolicy: m.updateEmployerPolicy,
   },
 }))
 
@@ -114,10 +122,22 @@ async function mountPage(value = settings()) {
   m.employerSettings.mockResolvedValue(value)
   m.accountOptions.mockResolvedValue(chartAccounts())
   m.institutionAccounts.mockResolvedValue([])
+  m.employerPolicies.mockResolvedValue([])
+  m.payrollSetupCheck.mockResolvedValue({
+    ready: false,
+    effective_on: '2026-08-04',
+    policy_id: null,
+    checks: [],
+    blockers: ['effective_policy'],
+  })
   m.saveEmployerSettings.mockResolvedValue(value)
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()
   return wrapper
+}
+
+async function openAccounting(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+  await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
 }
 
 describe('EmployerSettings — účtová osnova', () => {
@@ -128,6 +148,7 @@ describe('EmployerSettings — účtová osnova', () => {
 
   it('načte i neaktivní účty pro validaci a nabízí jen aktivní účet správného typu', async () => {
     const wrapper = await mountPage()
+    await openAccounting(wrapper)
 
     expect(m.accountOptions).toHaveBeenCalledOnce()
     const picker = wrapper.findAll('[data-account-key="employment_gross_debit"]')[0]
@@ -147,6 +168,7 @@ describe('EmployerSettings — účtová osnova', () => {
   it('typově chybný účet označí a neodešle', async () => {
     const invalid = settings({ ...defaultAccounts, employment_gross_debit: '331' })
     const wrapper = await mountPage(invalid)
+    await openAccounting(wrapper)
 
     const picker = wrapper.findAll('[data-account-key="employment_gross_debit"]')[0]
     expect(picker.find('input').attributes('aria-invalid')).toBe('true')
@@ -162,6 +184,7 @@ describe('EmployerSettings — účtová osnova', () => {
 
   it('umožní účet vyhledat klávesnicí a pošle jeho kód', async () => {
     const wrapper = await mountPage()
+    await openAccounting(wrapper)
     const picker = wrapper.findAll('[data-account-key="employment_gross_debit"]')[0]
     const input = picker.find('input[role="combobox"]')
 
@@ -183,6 +206,7 @@ describe('EmployerSettings — účtová osnova', () => {
 
   it('při více našeptávačích propojí každý combobox s vlastním listboxem', async () => {
     const wrapper = await mountPage()
+    await openAccounting(wrapper)
     const inputs = wrapper.findAll('input[role="combobox"]')
 
     await inputs[0].trigger('focus')
@@ -227,6 +251,34 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.saveEmployerSettings).not.toHaveBeenCalled()
     expect(input.attributes('aria-invalid')).toBe('true')
     expect(wrapper.text()).toContain('payroll.employer.validation.social_security_variable_symbol')
+
+    wrapper.unmount()
+  })
+
+  it('používá standardní záložky a neukazuje globální uložení u vlastních formulářů', async () => {
+    const wrapper = await mountPage()
+    const tabs = wrapper.findAll('[role="tab"]')
+
+    expect(tabs).toHaveLength(4)
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('payroll.employer.registration_title')
+    expect(wrapper.text()).not.toContain('payroll.employer.health_accounts.title')
+
+    await tabs[1].trigger('click')
+    await flushPromises()
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('payroll.employer.health_accounts.title')
+    expect(wrapper.findAll('button').some(button => button.text() === 'common.save')).toBe(false)
+
+    await tabs[2].trigger('click')
+    expect(wrapper.text()).toContain('payroll.employer.accounting_title')
+    expect(wrapper.findAll('button').some(button => button.text() === 'common.save')).toBe(true)
+
+    await tabs[3].trigger('click')
+    await flushPromises()
+    expect(m.employerPolicies).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('payroll.employer.policies.title')
+    expect(wrapper.findAll('button').filter(button => button.text() === 'common.save')).toHaveLength(1)
 
     wrapper.unmount()
   })

@@ -1527,7 +1527,7 @@
     },
     "employer": {
       "title": "Employer settings",
-      "subtitle": "Employer registration, payroll offices, contacts and accounts used for automatic payroll posting.",
+      "subtitle": "Registration, payroll offices, institution accounts, automatic posting and setup readiness.",
       "load_failed": "The employer settings could not be loaded.",
       "save_failed": "The employer settings could not be saved.",
       "saved": "The employer settings have been saved.",
@@ -1563,6 +1563,139 @@
       "office_active": "Active office",
       "active": "Active",
       "inactive": "Inactive",
+      "tabs": {
+        "label": "Employer settings sections",
+        "employer": "Employer and offices",
+        "institutions": "Institution accounts",
+        "accounting": "Automatic posting",
+        "policies": "Policies and readiness"
+      },
+      "policies": {
+        "title": "Employer policies",
+        "hint": "Effective-dated rules for payday, review, automation and secure delivery. Periods must not overlap.",
+        "load_failed": "Employer policies could not be loaded.",
+        "save_failed": "The employer policy could not be saved.",
+        "setup_failed": "The setup readiness check could not be loaded.",
+        "saved": "The employer policy has been saved.",
+        "add": "New policy",
+        "empty": "No employer policy has been created yet.",
+        "new_title": "New employer policy",
+        "edit_title": "Edit employer policy",
+        "editor_hint": "Changing an audited record increments its version. Create a separate policy for a new effective period.",
+        "validation": "Check the effective period, payday, delivery-channel verification and reference length.",
+        "reload_current": "Load current version",
+        "setup_title": "Setup readiness",
+        "setup_hint": "Checks the effective policy and every prerequisite for safe automation on the selected date.",
+        "setup_ready": "Payroll setup is ready on the selected date.",
+        "setup_blocked": "Payroll setup has blocking issues.",
+        "setup_summary": "{ok} of {all} checks passed.",
+        "effective_on": "Check as of",
+        "validity": "Effective period",
+        "valid_from": "Valid from",
+        "valid_to": "Valid to",
+        "payday": "Payday",
+        "payday_day": "Payday day",
+        "payday_month": "Payday month",
+        "payday_current_month": "In the payroll month",
+        "payday_next_month": "In the following month",
+        "payday_value": "Day {day}, month offset +{offset}",
+        "business_day_rule": "Business-day adjustment",
+        "rounding_mode": "Balance rounding",
+        "home_office": "Home office",
+        "travel_expenses": "Travel expenses",
+        "automation": "Automation",
+        "automation_title": "Approval and automated steps",
+        "four_eyes": "Require four-eyes review",
+        "automatic_calculation": "Calculate automatically",
+        "automatic_posting": "Post automatically",
+        "automatic_payments": "Prepare payments automatically",
+        "auto_calculation_short": "calculation",
+        "auto_posting_short": "posting",
+        "auto_payments_short": "payments",
+        "delivery_channel": "Secure delivery channel",
+        "delivery_verified_on": "Channel verified on",
+        "source_reference": "Approved source reference",
+        "state": "Status",
+        "effective": "Effective",
+        "outside_period": "Outside period",
+        "status": {
+          "ok": "OK",
+          "blocked": "Blocking"
+        },
+        "options": {
+          "business_day_rule": {
+            "none": "No adjustment",
+            "previous_business_day": "Previous business day",
+            "next_business_day": "Next business day"
+          },
+          "rounding": {
+            "exact_minor_units": "Exact minor units",
+            "nearest_crown": "Nearest crown",
+            "up_to_crown": "Up to a whole crown"
+          },
+          "optional_policy": {
+            "not_used": "Not used",
+            "manual_review": "Manual review",
+            "configured": "Configured"
+          },
+          "delivery": {
+            "disabled": "Disabled",
+            "employee_portal": "Employee portal",
+            "smime_email": "Signed and encrypted email",
+            "manual_handover": "Audited manual handover"
+          }
+        },
+        "checks": {
+          "employer_settings": {
+            "ok": "The employer profile and active default payroll office are ready.",
+            "blocked": "The employer profile or an active default payroll office is missing."
+          },
+          "effective_policy": {
+            "ok": "Exactly one policy is effective on the selected date.",
+            "blocked": "No employer policy is effective on the selected date."
+          },
+          "home_office_policy": {
+            "ok": "Home-office rules are configured.",
+            "blocked": "Enabled home office requires a completed policy."
+          },
+          "travel_expense_policy": {
+            "ok": "The travel-expense policy is configured.",
+            "blocked": "Travel expenses require a completed policy."
+          },
+          "four_eyes": {
+            "ok": "Four-eyes review has at least two active approvers.",
+            "blocked": "Four-eyes review requires at least two active approvers."
+          },
+          "automatic_calculation": {
+            "ok": "Automatic calculation is allowed by policy.",
+            "blocked": "Automatic calculation is not allowed by the effective policy."
+          },
+          "automatic_posting": {
+            "ok": "Automatic posting is allowed by policy.",
+            "blocked": "Automatic posting is not allowed by the effective policy."
+          },
+          "automatic_payments": {
+            "ok": "Automatic payment preparation is allowed by policy.",
+            "blocked": "Automatic payment preparation is not allowed by the effective policy."
+          },
+          "secure_delivery": {
+            "ok": "The secure delivery channel is verified.",
+            "blocked": "Secure delivery requires a verified channel effective on the check date."
+          },
+          "jmhz_registry": {
+            "ok": "JMHZ employer registries are ready.",
+            "blocked": "JMHZ requires completed employer registries."
+          },
+          "jmhz_certificate": {
+            "ok": "The JMHZ authentication credential is ready.",
+            "blocked": "JMHZ requires a valid authentication credential."
+          },
+          "jmhz_feature_source": {
+            "ok": "The tenant JMHZ activation source is verified.",
+            "blocked": "A verifiable tenant JMHZ activation source is missing."
+          }
+        }
+      },
       "health_accounts": {
         "title": "Institution payment accounts",
         "hint": "Bank accounts and payment symbols for social security, the tax office, health insurers and other recipients are recorded separately for each effective period. For security, a saved account is displayed only in masked form.",

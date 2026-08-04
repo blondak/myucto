@@ -1527,7 +1527,7 @@
     },
     "employer": {
       "title": "Nastavení zaměstnavatele",
-      "subtitle": "Registrace zaměstnavatele, mzdové účtárny, kontakty a účty pro automatické zaúčtování mezd.",
+      "subtitle": "Registrace, mzdové účtárny, účty institucí, automatické účtování a kontrola připravenosti.",
       "load_failed": "Nastavení zaměstnavatele se nepodařilo načíst.",
       "save_failed": "Nastavení zaměstnavatele se nepodařilo uložit.",
       "saved": "Nastavení zaměstnavatele bylo uloženo.",
@@ -1563,6 +1563,139 @@
       "office_active": "Aktivní účtárna",
       "active": "Aktivní",
       "inactive": "Neaktivní",
+      "tabs": {
+        "label": "Sekce nastavení zaměstnavatele",
+        "employer": "Zaměstnavatel a účtárny",
+        "institutions": "Účty institucí",
+        "accounting": "Automatické účtování",
+        "policies": "Politiky a připravenost"
+      },
+      "policies": {
+        "title": "Zaměstnavatelské politiky",
+        "hint": "Časově účinná pravidla pro výplatní termín, kontrolu, automatizaci a bezpečné doručování. Období se nesmějí překrývat.",
+        "load_failed": "Zaměstnavatelské politiky se nepodařilo načíst.",
+        "save_failed": "Zaměstnavatelskou politiku se nepodařilo uložit.",
+        "setup_failed": "Kontrolu připravenosti se nepodařilo načíst.",
+        "saved": "Zaměstnavatelská politika byla uložena.",
+        "add": "Nová politika",
+        "empty": "Zatím není založena žádná zaměstnavatelská politika.",
+        "new_title": "Nová zaměstnavatelská politika",
+        "edit_title": "Upravit zaměstnavatelskou politiku",
+        "editor_hint": "Změna auditovaného záznamu zvýší jeho verzi. Nové období založte samostatnou politikou.",
+        "validation": "Zkontrolujte období platnosti, výplatní den, ověření doručovacího kanálu a délku reference.",
+        "reload_current": "Načíst aktuální verzi",
+        "setup_title": "Kontrola připravenosti",
+        "setup_hint": "Ověří účinnou politiku a všechny podklady potřebné pro bezpečnou automatizaci ke zvolenému dni.",
+        "setup_ready": "Mzdové nastavení je k vybranému dni připravené.",
+        "setup_blocked": "Mzdové nastavení má blokující nedostatky.",
+        "setup_summary": "V pořádku {ok} z {all} kontrol.",
+        "effective_on": "Kontrolovat ke dni",
+        "validity": "Platnost",
+        "valid_from": "Platnost od",
+        "valid_to": "Platnost do",
+        "payday": "Výplatní termín",
+        "payday_day": "Den výplaty",
+        "payday_month": "Měsíc výplaty",
+        "payday_current_month": "Ve mzdovém měsíci",
+        "payday_next_month": "V následujícím měsíci",
+        "payday_value": "{day}. den, posun měsíce +{offset}",
+        "business_day_rule": "Posun pracovního dne",
+        "rounding_mode": "Zaokrouhlení zůstatku",
+        "home_office": "Home office",
+        "travel_expenses": "Cestovní náhrady",
+        "automation": "Automatizace",
+        "automation_title": "Schvalování a automatické kroky",
+        "four_eyes": "Vyžadovat kontrolu čtyř očí",
+        "automatic_calculation": "Automaticky vypočítat",
+        "automatic_posting": "Automaticky zaúčtovat",
+        "automatic_payments": "Automaticky připravit platby",
+        "auto_calculation_short": "výpočet",
+        "auto_posting_short": "účtování",
+        "auto_payments_short": "platby",
+        "delivery_channel": "Bezpečný kanál doručení",
+        "delivery_verified_on": "Kanál ověřen dne",
+        "source_reference": "Reference schváleného podkladu",
+        "state": "Stav",
+        "effective": "Účinná",
+        "outside_period": "Mimo období",
+        "status": {
+          "ok": "V pořádku",
+          "blocked": "Blokuje"
+        },
+        "options": {
+          "business_day_rule": {
+            "none": "Bez posunu",
+            "previous_business_day": "Předchozí pracovní den",
+            "next_business_day": "Následující pracovní den"
+          },
+          "rounding": {
+            "exact_minor_units": "Přesně na haléře",
+            "nearest_crown": "Na nejbližší korunu",
+            "up_to_crown": "Nahoru na celou korunu"
+          },
+          "optional_policy": {
+            "not_used": "Nepoužívá se",
+            "manual_review": "Ruční kontrola",
+            "configured": "Nastaveno"
+          },
+          "delivery": {
+            "disabled": "Vypnuto",
+            "employee_portal": "Portál zaměstnance",
+            "smime_email": "Podepsaný a šifrovaný e-mail",
+            "manual_handover": "Auditované ruční předání"
+          }
+        },
+        "checks": {
+          "employer_settings": {
+            "ok": "Profil zaměstnavatele a aktivní výchozí účtárna jsou připravené.",
+            "blocked": "Chybí profil zaměstnavatele nebo aktivní výchozí účtárna."
+          },
+          "effective_policy": {
+            "ok": "Pro zvolené datum existuje právě jedna účinná politika.",
+            "blocked": "Pro zvolené datum chybí účinná zaměstnavatelská politika."
+          },
+          "home_office_policy": {
+            "ok": "Pravidla home office jsou nakonfigurovaná.",
+            "blocked": "Zapnutý home office vyžaduje dokončenou politiku."
+          },
+          "travel_expense_policy": {
+            "ok": "Cestovní politika je nakonfigurovaná.",
+            "blocked": "Cestovní náhrady vyžadují dokončenou politiku."
+          },
+          "four_eyes": {
+            "ok": "Kontrola čtyř očí má alespoň dva aktivní schvalovatele.",
+            "blocked": "Kontrola čtyř očí vyžaduje alespoň dva aktivní schvalovatele."
+          },
+          "automatic_calculation": {
+            "ok": "Automatický výpočet je povolený politikou.",
+            "blocked": "Automatický výpočet není povolený účinnou politikou."
+          },
+          "automatic_posting": {
+            "ok": "Automatické zaúčtování je povolené politikou.",
+            "blocked": "Automatické zaúčtování není povolené účinnou politikou."
+          },
+          "automatic_payments": {
+            "ok": "Automatická příprava plateb je povolená politikou.",
+            "blocked": "Automatická příprava plateb není povolená účinnou politikou."
+          },
+          "secure_delivery": {
+            "ok": "Bezpečný kanál doručení je ověřený.",
+            "blocked": "Bezpečné doručení vyžaduje ověřený kanál účinný k datu kontroly."
+          },
+          "jmhz_registry": {
+            "ok": "Registry zaměstnavatele pro JMHZ jsou připravené.",
+            "blocked": "JMHZ vyžaduje dokončené registry zaměstnavatele."
+          },
+          "jmhz_certificate": {
+            "ok": "Přihlašovací prostředek pro JMHZ je připravený.",
+            "blocked": "JMHZ vyžaduje platný přihlašovací prostředek."
+          },
+          "jmhz_feature_source": {
+            "ok": "Tenantový zdroj aktivace JMHZ je ověřený.",
+            "blocked": "Chybí ověřitelný tenantový zdroj aktivace JMHZ."
+          }
+        }
+      },
       "health_accounts": {
         "title": "Platební účty institucí",
         "hint": "Bankovní účty a platební symboly ČSSZ, finančního úřadu, zdravotních pojišťoven a dalších příjemců se evidují pro každé období samostatně. Uložený účet se z bezpečnostních důvodů zobrazuje pouze maskovaně.",

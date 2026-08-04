@@ -14,6 +14,7 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
+import EmployerPolicies from './EmployerPolicies.vue'
 import {
   PAYROLL_ACCOUNT_TYPES,
   normalizedPayrollAccountCode,
@@ -32,6 +33,9 @@ const loadFailed = ref(false)
 const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
+type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies'
+const activeTab = ref<SettingsTab>('employer')
+const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies']
 
 type AccountKey = PayrollAccountKey
 type FormOffice = PayrollEmployerSettings['offices'][number] & { is_new?: boolean }
@@ -81,6 +85,12 @@ const formOffices = ref<FormOffice[]>([])
 
 const canWrite = computed(() => auth.canWrite('payroll.settings'))
 const activeOffices = computed(() => formOffices.value.filter(office => office.is_active))
+const officeOptions = computed(() => activeOffices.value
+  .map(office => ({
+    value: office.code.trim().toUpperCase(),
+    label: `${office.code.trim().toUpperCase()} — ${office.name || t('payroll.employer.unnamed_office')}`,
+  }))
+  .filter(option => option.value !== ''))
 const officeCodes = computed(() => formOffices.value.map(office => office.code.trim().toUpperCase()))
 const duplicateOfficeCodes = computed(() => new Set(
   officeCodes.value.filter((code, index, all) => code !== '' && all.indexOf(code) !== index),
@@ -318,7 +328,7 @@ onMounted(load)
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.employer.subtitle') }}</p>
       </div>
       <button
-        v-if="settings && canWrite"
+        v-if="settings && canWrite && (activeTab === 'employer' || activeTab === 'accounting')"
         type="button"
         :class="btnFilled('primary')"
         :disabled="saving"
@@ -330,6 +340,27 @@ onMounted(load)
         {{ saving ? t('common.saving') : t('common.save') }}
       </button>
     </header>
+
+    <nav
+      class="flex flex-wrap gap-1 border-b border-neutral-200"
+      role="tablist"
+      :aria-label="t('payroll.employer.tabs.label')"
+    >
+      <button
+        v-for="tab in tabs"
+        :key="tab"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === tab"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="activeTab === tab
+          ? 'border-payroll-600 text-payroll-600'
+          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
+        @click="activeTab = tab"
+      >
+        {{ t(`payroll.employer.tabs.${tab}`) }}
+      </button>
+    </nav>
 
     <div v-if="loading" class="space-y-4">
       <div class="h-32 animate-pulse rounded-xl bg-neutral-100" />
@@ -350,7 +381,10 @@ onMounted(load)
     </section>
 
     <template v-else-if="settings">
-      <section v-if="conflict" class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-5">
+      <section
+        v-if="conflict && (activeTab === 'employer' || activeTab === 'accounting')"
+        class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-5"
+      >
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="font-semibold text-neutral-900">{{ t('payroll.employer.conflict_title') }}</h2>
@@ -366,7 +400,7 @@ onMounted(load)
       </section>
 
       <section
-        v-if="showValidation && !isValid"
+        v-if="showValidation && !isValid && (activeTab === 'employer' || activeTab === 'accounting')"
         class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
         role="alert"
       >
@@ -378,7 +412,10 @@ onMounted(load)
         </ul>
       </section>
 
-      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+      <section
+        v-if="activeTab === 'employer'"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      >
         <div class="mb-5">
           <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.registration_title') }}</h2>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.registration_hint') }}</p>
@@ -403,18 +440,25 @@ onMounted(load)
 
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_office') }}</span>
-            <select v-model="form.default_office_code" :disabled="!canWrite || activeOffices.length === 0" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-              <option value="">{{ t('payroll.employer.select_default_office') }}</option>
-              <option v-for="office in activeOffices" :key="office.id || office.code" :value="office.code.trim().toUpperCase()">
-                {{ office.code || '—' }} — {{ office.name || t('payroll.employer.unnamed_office') }}
-              </option>
-            </select>
+            <SearchableSelect
+              :model-value="form.default_office_code || null"
+              :options="officeOptions"
+              :placeholder="t('payroll.employer.select_default_office')"
+              :no-results-label="t('payroll.employer.account_no_results')"
+              :clearable="false"
+              :disabled="!canWrite || activeOffices.length === 0"
+              accent="payroll"
+              @update:model-value="form.default_office_code = $event ?? ''"
+            />
             <span v-if="showValidation && !defaultOfficeValid" class="mt-1 block text-xs text-danger-600">{{ t('payroll.employer.validation.default_office') }}</span>
           </label>
         </div>
       </section>
 
-      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+      <section
+        v-if="activeTab === 'employer'"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      >
         <div class="mb-5">
           <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.contact_title') }}</h2>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.contact_hint') }}</p>
@@ -436,7 +480,10 @@ onMounted(load)
         </div>
       </section>
 
-      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+      <section
+        v-if="activeTab === 'employer'"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      >
         <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.offices_title') }}</h2>
@@ -534,9 +581,12 @@ onMounted(load)
         </div>
       </section>
 
-      <HealthInsurerAccounts :can-write="canWrite" />
+      <HealthInsurerAccounts v-if="activeTab === 'institutions'" :can-write="canWrite" />
 
-      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+      <section
+        v-if="activeTab === 'accounting'"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      >
         <div class="mb-5">
           <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.accounting_title') }}</h2>
           <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.employer.accounting_hint') }}</p>
@@ -654,11 +704,19 @@ onMounted(load)
         </div>
       </section>
 
-      <div v-if="!canWrite" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+      <EmployerPolicies v-if="activeTab === 'policies'" :can-write="canWrite" />
+
+      <div
+        v-if="!canWrite && (activeTab === 'employer' || activeTab === 'accounting')"
+        class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600"
+      >
         {{ t('payroll.employer.read_only') }}
       </div>
 
-      <div v-else class="flex flex-wrap justify-end gap-2">
+      <div
+        v-else-if="activeTab === 'employer' || activeTab === 'accounting'"
+        class="flex flex-wrap justify-end gap-2"
+      >
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="load">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.employer.discard') }}
