@@ -38,8 +38,8 @@ namespace MyInvoice\Service\Accounting\Payroll;
  * mají hrubou mzdu v kulatých stovkách (4 000 / 4 500), takže tohle pravidlo
  * v nich není vidět — proto ho hlídají vlastní testy.
  *
- * ── Progresivní sazba (§38ha ZDP) ───────────────────────────────────────────
- * Nad měsíční hranicí 4× průměrné mzdy (`advance_tax_high_threshold`) se ČÁST
+ * ── Progresivní sazba (§38h odst. 2 ZDP) ─────────────────────────────────────
+ * Nad měsíční hranicí 3× průměrné mzdy (`advance_tax_high_threshold`) se ČÁST
  * základu nad hranicí daní 23 %, zbytek dál 15 %.
  *
  * ── Maximální vyměřovací základ SP (§15a z. 589/1992) ───────────────────────
@@ -229,7 +229,7 @@ final class PayrollCalculator
             'health_min_topup'    => $healthMinTopup,
             'employee_deductions' => $employeeDeductions,
             'tax_base'            => $taxBase,
-            // Část základu zdaněná 23 % (§38ha) — nula u běžných mezd.
+            // Část základu zdaněná 23 % (§38h odst. 2) — nula u běžných mezd.
             'tax_high_threshold'  => $highThreshold,
             'tax_high_base'       => $highThreshold > 0 ? max(0, $taxBase - $highThreshold) : 0,
             // `advance_tax` = záloha PŘED slevami (co by se srazilo bez prohlášení),
@@ -257,8 +257,8 @@ final class PayrollCalculator
     }
 
     /**
-     * Progresivní záloha na daň (§38ha ZDP): 15 % ze základu do měsíční hranice
-     * (4× průměrná mzda) a 23 % jen z ČÁSTI základu nad ni — ne z celého základu.
+     * Progresivní záloha na daň (§38h odst. 2 ZDP): 15 % ze základu do měsíční
+     * hranice (3× průměrná mzda) a 23 % jen z ČÁSTI základu nad ni — ne z celého.
      *
      * Bez hranice v konstantách (`advance_tax_high_threshold` = 0) se počítá jednou
      * sazbou; ročníky před zavedením progrese tak zůstávají beze změny.

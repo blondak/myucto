@@ -265,6 +265,7 @@ final class Config
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
+            'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],
             'MYINVOICE_TIMEZONE'    => ['app.timezone', 'string'],
             'MYINVOICE_LOCALE'      => ['app.locale_default', 'string'],
 

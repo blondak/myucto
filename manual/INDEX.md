@@ -95,6 +95,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 54. [Měsíční kontrola](54_Mesicni_kontrola.md)
 55. [Měsíční přehled](55_Mesicni_report.md)
 56. [Mzdová rekapitulace a mzdový list](56_Mzdy.md)
+56a. [Úplné mzdy — aktivace a zaměstnanci](56a_Uplne_mzdy.md)
 57. [Majetek](57_Majetek.md)
 58. [Účetní kontroly a inventarizace — metodika](58_Ucetni_kontroly_a_inventarizace.md)
 

@@ -12,6 +12,7 @@ use MyInvoice\Repository\BankPostingRuleRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Payroll\PayrollPaymentIdentifierResolver;
 use PDO;
 use PDOException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -28,6 +29,7 @@ final class BankRuleTemplateAction
         private readonly Connection $db,
         private readonly PostingRuleRepository $postingRules,
         private readonly BankPostingRuleRepository $rules,
+        private readonly PayrollPaymentIdentifierResolver $payrollIdentifiers,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -54,7 +56,11 @@ final class BankRuleTemplateAction
                 'counterparty_bank' => $row['counterparty_bank'],
                 'counterparty_prefix' => $this->resolvedPrefix($row, $supplier),
                 'vs_placeholder' => $row['vs_placeholder'],
-                'vs_value' => $this->placeholderValue($row['vs_placeholder'], $supplier),
+                'vs_value' => $this->placeholderValue(
+                    $row['vs_placeholder'],
+                    $supplier,
+                    (string) $row['operation_type'],
+                ),
                 'message_contains' => $row['message_contains'],
                 'rule_key' => (string) $row['rule_key'],
                 'debit_account_code' => $posting['debit_account_code'] ?? null,
@@ -80,14 +86,24 @@ final class BankRuleTemplateAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $supplier = $this->supplier($supplierId);
-        $placeholder = $this->placeholderValue($template['vs_placeholder'], $supplier);
+        $placeholder = $this->placeholderValue(
+            $template['vs_placeholder'],
+            $supplier,
+            (string) $template['operation_type'],
+        );
         $override = array_key_exists('variable_symbol', $body)
             ? VariableSymbolNormalizer::digits((string) $body['variable_symbol']) : null;
         $variableSymbol = $override !== null && $override !== '' ? $override : $placeholder;
         if ($template['vs_placeholder'] !== null && ($variableSymbol === null || $variableSymbol === '')) {
             $field = match ((string) $template['vs_placeholder']) {
-                '{cssz_vsdp}' => 'cssz_vsdp',
-                '{health_insurance_number}' => 'health_insurance_number',
+                '{cssz_vsdp}' => (string) $template['operation_type']
+                    === 'bank.remittance.social.employer'
+                    ? 'payroll_office.social_security_variable_symbol'
+                    : 'cssz_vsdp',
+                '{health_insurance_number}' => (string) $template['operation_type']
+                    === 'bank.remittance.health.employer'
+                    ? 'payroll_institution_account.variable_symbol'
+                    : 'health_insurance_number',
                 default => 'dic',
             };
             return Json::error($response, 'placeholder_missing', 'V nastavení firmy chybí identifikátor platby.', 422, ['field' => $field]);
@@ -137,15 +153,32 @@ final class BankRuleTemplateAction
     private function supplier(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT dic, cssz_vsdp, health_insurance_number, taxpayer_type FROM supplier WHERE id = ?'
+            'SELECT id, dic, cssz_vsdp, health_insurance_number, taxpayer_type
+               FROM supplier
+              WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     }
 
     /** @param array<string,mixed> $supplier */
-    private function placeholderValue(mixed $placeholder, array $supplier): ?string
+    private function placeholderValue(
+        mixed $placeholder,
+        array $supplier,
+        string $operationType,
+    ): ?string
     {
+        if (in_array($operationType, [
+            'bank.remittance.social.employer',
+            'bank.remittance.health.employer',
+        ], true)) {
+            $resolved = $this->payrollIdentifiers->defaultForOperation(
+                (int) ($supplier['id'] ?? 0),
+                $operationType,
+            );
+            return $resolved['value'] ?? null;
+        }
+
         return match ((string) $placeholder) {
             '{cssz_vsdp}' => VariableSymbolNormalizer::digits((string) ($supplier['cssz_vsdp'] ?? '')) ?: null,
             '{health_insurance_number}' => VariableSymbolNormalizer::digits((string) ($supplier['health_insurance_number'] ?? '')) ?: null,

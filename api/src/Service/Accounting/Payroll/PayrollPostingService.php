@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Payroll;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PayrollEmployeeRepository;
 use MyInvoice\Repository\PayrollMonthlyRecordRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 
 /**
  * Zaúčtování měsíční mzdové rekapitulace (Fáze F — dosud se účtovalo ručně).
@@ -31,10 +34,12 @@ use MyInvoice\Service\Accounting\PostingService;
 final class PayrollPostingService
 {
     public function __construct(
+        private readonly Connection $db,
         private readonly PostingService $posting,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly PayrollEmployeeRepository $employees,
         private readonly PayrollMonthlyRecordRepository $records,
+        private readonly PayrollPeriodOwnershipService $periodOwnership,
     ) {}
 
     /**
@@ -179,6 +184,62 @@ final class PayrollPostingService
         bool $taxpayerCredit = false,
         int $childCount = 0,
     ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $result = $this->postTransactional(
+                $supplierId,
+                $year,
+                $month,
+                $gross,
+                $taxpayerType,
+                $meta,
+                $employeeId,
+                $taxpayerCredit,
+                $childCount,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     * @return array{journal_entry_id:int, source_id:int, breakdown:array<string,int>}
+     */
+    private function postTransactional(
+        int $supplierId,
+        int $year,
+        int $month,
+        float $gross,
+        string $taxpayerType,
+        array $meta,
+        ?int $employeeId,
+        bool $taxpayerCredit,
+        int $childCount,
+    ): array {
+        try {
+            $this->periodOwnership->claimLegacy(
+                $supplierId,
+                $year,
+                $month,
+                self::sourceId($year, $month),
+                isset($meta['user_id']) ? (int) $meta['user_id'] : null,
+            );
+        } catch (PayrollPeriodOwnedException $e) {
+            throw new PostingException('payroll_period_owned', $e->getMessage(), 409);
+        }
+
         // Zaměstnance je nutné načíst PŘED výpočtem — jeho slevy určují, co se
         // zaúčtuje na 342, ne jen co se uloží do mzdového listu.
         $employee = $employeeId === null ? null : $this->employees->find($supplierId, $employeeId);

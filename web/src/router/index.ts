@@ -15,6 +15,7 @@ declare module 'vue-router' {
     requiresTaxEvidence?: boolean
     requiresCashMode?: boolean
     requiresStock?: boolean
+    requiresPayroll?: boolean
     commercialOnly?: boolean
     requiresNoStock?: boolean
     requiresOss?: boolean
@@ -92,6 +93,19 @@ const routes: RouteRecordRaw[] = [
       { path: 'documents/:id(\\d+)',    name: 'document-detail',  component: () => import('@/pages/documents/DocumentDetail.vue') },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — účetní pohled.
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
+      // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
+      { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/runs', name: 'payroll-runs', component: () => import('@/pages/payroll/PayrollRuns.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/payments', name: 'payroll-payments', component: () => import('@/pages/payroll/PayrollPayments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/quick-inputs', name: 'payroll-quick-inputs', component: () => import('@/pages/payroll/PayrollQuickInputs.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
       { path: 'accounting/accounts',      name: 'accounting-accounts',      component: () => import('@/pages/accounting/ChartOfAccounts.vue'), meta: { requiresDoubleEntry: true } },
       // Předkontace, Kurzový režim, Repo sazba, Archiv účetnictví a Hromadný export
@@ -381,6 +395,18 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
+  'payroll-dashboard': ['payroll'],
+  'payroll-runs': ['payroll'],
+  'payroll-payments': ['payroll.payments'],
+  'payroll-people': ['payroll'],
+  'payroll-quick-inputs': ['payroll'],
+  'payroll-components': ['payroll'],
+  'payroll-time': ['payroll'],
+  'payroll-absences': ['payroll'],
+  'payroll-enforcement': ['payroll.enforcement'],
+  'payroll-documents': ['payroll.documents'],
+  'payroll-submissions': ['payroll.submissions'],
+  'payroll-settings': ['payroll.settings'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
   'accounting-document-completeness': ['accounting'],
@@ -660,6 +686,11 @@ router.beforeEach(async (to) => {
   // Nav sekci gatuje AppLayout; tady tvrdě blokujeme i přímý přístup přes URL.
   const requiresStock = to.matched.some((r) => r.meta.requiresStock)
   if (requiresStock && !useSupplierStore().currentSupplier?.stock_enabled) {
+    return { name: 'home' }
+  }
+
+  const requiresPayroll = to.matched.some((r) => r.meta.requiresPayroll)
+  if (requiresPayroll && useSupplierStore().currentSupplier?.payroll_enabled === false) {
     return { name: 'home' }
   }
 

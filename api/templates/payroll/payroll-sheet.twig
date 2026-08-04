@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Mzdový list</title>
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 6.8pt; color: #211923; }
+.accent { height: 2mm; background: #98466F; margin-bottom: 3mm; }
+.head { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+.head td { vertical-align: top; padding: 0; }
+.title { font-size: 18pt; font-weight: bold; color: #351C2B; }
+.year { font-size: 15pt; font-weight: bold; color: #98466F; text-align: right; }
+.sub { color: #6B5C66; margin-top: 1mm; }
+.identity { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+.identity td { border: 0.3pt solid #DEC8D4; padding: 1.5mm; vertical-align: top; }
+.label { color: #7D6E78; font-size: 6.5pt; text-transform: uppercase; margin-bottom: 0.7mm; }
+.value { font-weight: bold; font-size: 8pt; }
+.meta { color: #5F515A; margin-top: 0.6mm; }
+.section { color: #98466F; font-size: 7.6pt; font-weight: bold; margin: 1.8mm 0 0.8mm; text-transform: uppercase; }
+table.book { width: 100%; border-collapse: collapse; }
+table.book th { background: #FAF1F6; color: #5F515A; border: 0.25pt solid #DEC8D4; padding: 0.7mm 0.6mm; font-size: 5.9pt; font-weight: bold; text-align: right; vertical-align: bottom; }
+table.book td { border: 0.2pt solid #EADDE4; padding: 0.65mm 0.6mm; text-align: right; font-family: jetbrainsmono, dejavusans, sans-serif; white-space: nowrap; }
+table.book th.first, table.book td.first { text-align: left; font-family: montserrat, dejavusans, sans-serif; }
+table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font-weight: bold; }
+.note { margin-top: 2mm; border: 0.3pt solid #DEC8D4; background: #F8F5F7; padding: 1.5mm; color: #5F515A; line-height: 1.35; }
+.audit { margin-top: 1.5mm; font-size: 5.9pt; color: #7D6E78; }
+.mono { font-family: jetbrainsmono, dejavusans, sans-serif; }
+</style>
+</head>
+<body>
+<div class="accent"></div>
+<table class="head">
+  <tr>
+    <td>
+      <div class="title">Mzdový list</div>
+      <div class="sub">Roční evidence ze schválených a neměnných mzdových revizí</div>
+    </td>
+    <td><div class="year">{{ tax_year }}</div></td>
+  </tr>
+</table>
+
+<table class="identity">
+  <tr>
+    <td style="width:33%">
+      <div class="label">Zaměstnavatel</div>
+      <div class="value">{{ employer.name }}</div>
+      <div class="meta">IČO: {{ employer.identification_number }}<br>{{ employer.address }}</div>
+    </td>
+    <td style="width:34%">
+      <div class="label">Zaměstnanec</div>
+      <div class="value">{{ employee.name }}</div>
+      <div class="meta">{{ employee.identifier_label }}: {{ employee.identifier_value }}<br>{{ employee.address }}</div>
+    </td>
+    <td style="width:33%">
+      <div class="label">Dřívější jména v evidenci</div>
+      <div class="value">{{ employee.previous_names is empty ? '—' : employee.previous_names|join(', ') }}</div>
+      <div class="meta">Roční zúčtování: {{ annual_settlement_status == 'approved' ? 'schváleno' : 'neprovedeno' }}</div>
+    </td>
+  </tr>
+</table>
+
+<div class="section">Příjmy, pojistné a čistá mzda</div>
+<table class="book">
+  <thead>
+    <tr>
+      <th class="first">Měsíc</th>
+      <th>Hrubý<br>příjem</th>
+      <th>Peněžní<br>příjem</th>
+      <th>Nepeněžní<br>příjem</th>
+      <th>Základ<br>SP</th>
+      <th>SP<br>zaměstnanec</th>
+      <th>SP<br>zaměstnavatel</th>
+      <th>Základ<br>ZP</th>
+      <th>ZP<br>zaměstnanec</th>
+      <th>Doplatek<br>ZP</th>
+      <th>ZP<br>zaměstnavatel</th>
+      <th>Ostatní<br>srážky</th>
+      <th>K výplatě</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% set names = ['Leden','Únor','Březen','Duben','Květen','Červen','Červenec','Srpen','Září','Říjen','Listopad','Prosinec'] %}
+  {% for month in months %}
+    <tr>
+      <td class="first">{{ names[month.month - 1] }}{% if month.source_revision_count > 1 %} ({{ month.source_revision_count }} rev.){% endif %}</td>
+      <td>{{ month.gross_minor_units|minor_money }}</td>
+      <td>{{ month.cash_income_minor_units|minor_money }}</td>
+      <td>{{ month.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ month.social_assessment_base_minor_units|minor_money }}</td>
+      <td>{{ month.employee_social_minor_units|minor_money }}</td>
+      <td>{{ month.employer_social_minor_units|minor_money }}</td>
+      <td>{{ month.health_assessment_base_minor_units|minor_money }}</td>
+      <td>{{ month.employee_health_minor_units|minor_money }}</td>
+      <td>{{ month.health_minimum_top_up_minor_units|minor_money }}</td>
+      <td>{{ month.employer_health_minor_units|minor_money }}</td>
+      <td>{{ month.other_deductions_minor_units|minor_money }}</td>
+      <td>{{ month.net_payable_minor_units|minor_money }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td class="first">Celkem</td>
+      <td>{{ totals.gross_minor_units|minor_money }}</td>
+      <td>{{ totals.cash_income_minor_units|minor_money }}</td>
+      <td>{{ totals.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ totals.social_assessment_base_minor_units|minor_money }}</td>
+      <td>{{ totals.employee_social_minor_units|minor_money }}</td>
+      <td>{{ totals.employer_social_minor_units|minor_money }}</td>
+      <td>{{ totals.health_assessment_base_minor_units|minor_money }}</td>
+      <td>{{ totals.employee_health_minor_units|minor_money }}</td>
+      <td>{{ totals.health_minimum_top_up_minor_units|minor_money }}</td>
+      <td>{{ totals.employer_health_minor_units|minor_money }}</td>
+      <td>{{ totals.other_deductions_minor_units|minor_money }}</td>
+      <td>{{ totals.net_payable_minor_units|minor_money }}</td>
+    </tr>
+  </tfoot>
+</table>
+
+<div class="section">Daň z příjmů</div>
+<table class="book">
+  <thead>
+    <tr>
+      <th class="first">Měsíc</th>
+      <th>Zálohový<br>základ</th>
+      <th>Daň před<br>slevami</th>
+      <th>Nezdanitelné<br>slevy</th>
+      <th>Zvýhodnění<br>na děti</th>
+      <th>Sražená<br>záloha</th>
+      <th>Daňový<br>bonus</th>
+      <th>Srážková<br>daň</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for month in months %}
+    <tr>
+      <td class="first">{{ names[month.month - 1] }}</td>
+      <td>{{ month.advance_tax_base_minor_units|minor_money }}</td>
+      <td>{{ month.advance_tax_before_credits_minor_units|minor_money }}</td>
+      <td>{{ month.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ month.child_credit_minor_units|minor_money }}</td>
+      <td>{{ month.advance_tax_minor_units|minor_money }}</td>
+      <td>{{ month.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ month.withholding_tax_minor_units|minor_money }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td class="first">Celkem</td>
+      <td>{{ totals.advance_tax_base_minor_units|minor_money }}</td>
+      <td>{{ totals.advance_tax_before_credits_minor_units|minor_money }}</td>
+      <td>{{ totals.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ totals.child_credit_minor_units|minor_money }}</td>
+      <td>{{ totals.advance_tax_minor_units|minor_money }}</td>
+      <td>{{ totals.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ totals.withholding_tax_minor_units|minor_money }}</td>
+    </tr>
+  </tfoot>
+</table>
+
+<div class="note">
+Částky jsou uvedeny v Kč a vznikly součtem schválených měsíčních výsledků. Více účtáren nebo
+doplatek po skončení se v jednom měsíci sčítají; počet zahrnutých revizí je uveden u názvu měsíce.
+Roční zúčtování se v tomto dokumentu nedopočítává. Zobrazí se pouze tehdy, pokud existuje jeho
+samostatně schválený roční výsledek.
+</div>
+<div class="audit">
+Renderer: <span class="mono">{{ renderer_version }}</span> · Chráněný otisk zdroje HMAC-SHA-256:
+<span class="mono">{{ source_snapshot_sha256 }}</span>
+</div>
+</body>
+</html>

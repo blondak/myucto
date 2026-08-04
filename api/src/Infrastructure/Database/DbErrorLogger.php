@@ -37,6 +37,19 @@ final class DbErrorLogger
         '/\boptions_json\b/i',
         '/\bsession_id_hash\b/i',
         '/\bflow_token_hash\b/i',
+        '/\bbirth_number\b/i',
+        '/\bbirth_surname\b/i',
+        '/\bstreet_line\b/i',
+        '/\bcontact_value(?:_ciphertext|_hash|_masked)?\b/i',
+        '/\bpersonal_identifier(?:_ciphertext|_hash)?\b/i',
+        '/\bnational_id(?:_ciphertext|_hash)?\b/i',
+        '/\bforeign_tax_(?:id|identifier)(?:_ciphertext|_hash)?\b/i',
+        '/\bbank_account(?:_ciphertext|_hash)?\b/i',
+        '/\biban(?:_ciphertext|_hash)?\b/i',
+        '/\bdiagnosis\b/i',
+        '/\bmedical_code\b/i',
+        '/\b(?:enforcement|insolvency)_case_number\b/i',
+        '/\bciphertext\b/i',
     ];
 
     /** @param array<array-key,mixed> $params */

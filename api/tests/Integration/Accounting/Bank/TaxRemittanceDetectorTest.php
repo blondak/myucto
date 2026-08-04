@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Service\Accounting\Bank\Detect\TaxRemittanceDetector;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Payroll\PayrollInstitutionAccountValidator;
+use MyInvoice\Service\Payroll\PayrollPaymentIdentifierResolver;
 use PHPUnit\Framework\Attributes\Group;
 
 #[Group('integration')]
@@ -100,6 +103,361 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         }
     }
 
+    public function testPhysicalPersonEmployerUsesPayrollOfficeSocialVariableSymbol(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+
+        $employer = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '21012-7928311', vs: '1234509876'),
+        );
+        self::assertNotNull($employer);
+        self::assertSame(OperationType::REMITTANCE_SOCIAL_EMPLOYER, $employer->operationType);
+        self::assertSame(0.90, $employer->confidence);
+
+        $personal = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '21012-7928311', vs: '87654321'),
+        );
+        self::assertNotNull($personal);
+        self::assertSame(OperationType::REMITTANCE_SOCIAL, $personal->operationType);
+    }
+
+    public function testPhysicalPersonEmployerUsesEffectiveInsurerPayerNumber(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        $repository->create($this->supplierId, $validator->validateCreate([
+            'institution_type' => 'health_insurer',
+            'institution_code' => 'SYNTH-EMPLOYER-213',
+            'institution_name' => 'Syntetická zaměstnanecká pojišťovna',
+            'bank_account' => '1000000005/0710',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '9876543210',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => self::YEAR . '-01-01',
+            'valid_to' => self::YEAR . '-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'SYNTHETIC-EMPLOYER-HEALTH-001',
+            'verified_on' => date('Y-m-d'),
+        ]), $this->userId);
+
+        $employer = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '1000000005', vs: '9876543210'),
+        );
+        self::assertNotNull($employer);
+        self::assertSame(OperationType::REMITTANCE_HEALTH_EMPLOYER, $employer->operationType);
+        self::assertSame(0.90, $employer->confidence);
+
+        $personal = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '77628031', vs: '555666777'),
+        );
+        self::assertNotNull($personal);
+        self::assertSame(OperationType::REMITTANCE_HEALTH, $personal->operationType);
+    }
+
+    public function testPersonalHealthVariableSymbolIsNotOverriddenBySharedEmployerAccount(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        $repository->create($this->supplierId, $validator->validateCreate([
+            'institution_type' => 'health_insurer',
+            'institution_code' => 'SYNTH-SHARED-111',
+            'institution_name' => 'Syntetická společná zdravotní pojišťovna',
+            'bank_account' => '1000000005/0710',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '9876543210',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => self::YEAR . '-01-01',
+            'valid_to' => self::YEAR . '-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'SYNTHETIC-SHARED-HEALTH-001',
+            'verified_on' => date('Y-m-d'),
+        ]), $this->userId);
+
+        $personal = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '1000000005', vs: '555666777'),
+        );
+
+        self::assertNotNull($personal);
+        self::assertSame(OperationType::REMITTANCE_HEALTH, $personal->operationType);
+    }
+
+    public function testDisabledPayrollDoesNotExposeLegacyEmployerIdentifier(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET payroll_enabled = 0, taxpayer_type = 'po', cssz_vsdp = '87654321'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        $resolved = $this->container->get(PayrollPaymentIdentifierResolver::class)
+            ->defaultForOperation(
+                $this->supplierId,
+                OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+            );
+
+        self::assertNull($resolved);
+    }
+
+    public function testCanonicalSocialIdentifierBlocksStaleLegacyDefault(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET taxpayer_type = 'po', cssz_vsdp = '87654321'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices
+                SET is_active = 0
+              WHERE supplier_id = ?
+                AND social_security_variable_symbol = ?'
+        )->execute([$this->supplierId, '1234509876']);
+
+        $resolved = $this->container->get(PayrollPaymentIdentifierResolver::class)
+            ->defaultForOperation(
+                $this->supplierId,
+                OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+            );
+
+        self::assertNull(
+            $resolved,
+            'Neaktivní kanonický záznam nesmí oživit starý osobní VS právnické osoby.',
+        );
+    }
+
+    public function testInactivePayrollOfficeIdentifierDoesNotMatchLaterPayment(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices
+                SET is_active = 0
+              WHERE supplier_id = ?
+                AND social_security_variable_symbol = ?'
+        )->execute([$this->supplierId, '1234509876']);
+
+        $detected = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '21012-7928311', vs: '1234509876'),
+        );
+
+        self::assertNotNull($detected);
+        self::assertNotSame(
+            OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+            $detected->operationType,
+            'Neaktivní účtárna nesmí klasifikovat pozdější platbu zaměstnavatele.',
+        );
+    }
+
+    public function testExpiredInstitutionIdentifierDoesNotMatchLaterPayment(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        $repository->create($this->supplierId, $validator->validateCreate([
+            'institution_type' => 'health_insurer',
+            'institution_code' => 'SYNTH-EXPIRED-111',
+            'institution_name' => 'Syntetická historická pojišťovna',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '444555666',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2098-01-01',
+            'valid_to' => '2098-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'SYNTHETIC-EXPIRED-HEALTH-001',
+            'verified_on' => date('Y-m-d'),
+        ]), $this->userId);
+
+        $resolved = $this->container->get(PayrollPaymentIdentifierResolver::class)
+            ->matchEmployerRemittance(
+                $this->supplierId,
+                '444555666',
+                self::YEAR . '-06-15',
+                '1000000005',
+                '0100',
+            );
+
+        self::assertNull($resolved);
+    }
+
+    public function testIdentifierSharedByTwoInstitutionTypesRequiresManualReview(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        $repository->create($this->supplierId, $validator->validateCreate([
+            'institution_type' => 'health_insurer',
+            'institution_code' => 'SYNTH-AMBIGUOUS-111',
+            'institution_name' => 'Syntetická nejednoznačná pojišťovna',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234509876',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => self::YEAR . '-01-01',
+            'valid_to' => self::YEAR . '-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'SYNTHETIC-AMBIGUOUS-HEALTH-001',
+            'verified_on' => date('Y-m-d'),
+        ]), $this->userId);
+
+        $ambiguous = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '21012-7928311', vs: '1234509876'),
+        );
+
+        self::assertNotNull($ambiguous);
+        self::assertSame(OperationType::REMITTANCE_OTHER, $ambiguous->operationType);
+        self::assertSame(0.40, $ambiguous->confidence);
+        self::assertSame('remittance_unclassified', $ambiguous->note);
+        self::assertFalse($ambiguous->autoAllowed);
+    }
+
+    public function testEvidenceFromDifferentInstitutionAccountsIsNotCombined(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        foreach ([
+            [
+                'institution_code' => 'SYNTH-ACCOUNT-MATCH',
+                'institution_name' => 'Syntetická pojišťovna podle účtu',
+                'bank_account' => '1000000005/0100',
+                'variable_symbol' => null,
+            ],
+            [
+                'institution_code' => 'SYNTH-VS-MATCH',
+                'institution_name' => 'Syntetická pojišťovna podle VS',
+                'bank_account' => '1111006311/0710',
+                'variable_symbol' => '1234509876',
+            ],
+        ] as $index => $account) {
+            $repository->create($this->supplierId, $validator->validateCreate([
+                'institution_type' => 'health_insurer',
+                'institution_code' => $account['institution_code'],
+                'institution_name' => $account['institution_name'],
+                'bank_account' => $account['bank_account'],
+                'currency_code' => 'CZK',
+                'variable_symbol' => $account['variable_symbol'],
+                'specific_symbol' => null,
+                'constant_symbol' => null,
+                'valid_from' => self::YEAR . '-01-01',
+                'valid_to' => self::YEAR . '-12-31',
+                'source_kind' => 'official_document',
+                'source_reference' => "SYNTHETIC-SPLIT-EVIDENCE-{$index}",
+                'verified_on' => date('Y-m-d'),
+            ]), $this->userId);
+        }
+
+        $resolved = $this->container->get(PayrollPaymentIdentifierResolver::class)
+            ->matchEmployerRemittance(
+                $this->supplierId,
+                '1234509876',
+                self::YEAR . '-06-15',
+                '1000000005',
+                '0100',
+            );
+
+        self::assertNotNull($resolved);
+        self::assertSame(OperationType::REMITTANCE_OTHER, $resolved['operation_type']);
+        self::assertTrue($resolved['ambiguous']);
+    }
+
+    public function testSocialIdentifierSentToHealthAccountRequiresManualReview(): void
+    {
+        $this->configurePayrollOffice('1234509876');
+        $repository = $this->container->get(PayrollInstitutionAccountRepository::class);
+        $validator = $this->container->get(PayrollInstitutionAccountValidator::class);
+        $repository->create($this->supplierId, $validator->validateCreate([
+            'institution_type' => 'health_insurer',
+            'institution_code' => 'SYNTH-MISMATCH-111',
+            'institution_name' => 'Syntetická pojišťovna s kontrolou VS',
+            'bank_account' => '1111006311/0710',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '9876543210',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => self::YEAR . '-01-01',
+            'valid_to' => self::YEAR . '-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'SYNTHETIC-MISMATCH-HEALTH-001',
+            'verified_on' => date('Y-m-d'),
+        ]), $this->userId);
+
+        $mismatch = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '1111006311', vs: '1234509876'),
+        );
+
+        self::assertNotNull($mismatch);
+        self::assertSame(OperationType::REMITTANCE_OTHER, $mismatch->operationType);
+        self::assertSame(0.40, $mismatch->confidence);
+        self::assertSame('remittance_unclassified', $mismatch->note);
+        self::assertFalse($mismatch->autoAllowed);
+    }
+
+    public function testLegalPersonPersonalIdentifierIsNotEmployerFallback(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_employer_settings WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_offices WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_institutions WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET payroll_enabled = 1,
+                    taxpayer_type = 'po',
+                    cssz_vsdp = '87654321',
+                    health_insurance_number = '555666777'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        $resolver = $this->container->get(PayrollPaymentIdentifierResolver::class);
+        $social = $resolver->matchEmployerRemittance(
+            $this->supplierId,
+            '87654321',
+            self::YEAR . '-06-15',
+            '21012-7928311',
+            '0710',
+        );
+        $health = $resolver->matchEmployerRemittance(
+            $this->supplierId,
+            '555666777',
+            self::YEAR . '-06-15',
+            '1111006311',
+            '0710',
+        );
+
+        self::assertNull(
+            $social,
+            'Osobní identifikátor z obecných údajů firmy nesmí být zdrojem mzdového párování.',
+        );
+        self::assertNull($health);
+        self::assertNull($resolver->defaultForOperation(
+            $this->supplierId,
+            OperationType::REMITTANCE_SOCIAL_EMPLOYER,
+        ));
+        self::assertNull($resolver->defaultForOperation(
+            $this->supplierId,
+            OperationType::REMITTANCE_HEALTH_EMPLOYER,
+            self::YEAR . '-06-15',
+        ));
+    }
+
     public function testScheduleHasPriorityAndAbsoluteHundredCrownTolerance(): void
     {
         $this->db->pdo()->prepare(
@@ -138,5 +496,36 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
             'variable_symbol' => $vs,
             'posted_at' => self::YEAR . '-06-15',
         ];
+    }
+
+    private function configurePayrollOffice(string $socialVariableSymbol): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier
+                SET payroll_enabled = 1, taxpayer_type = "fo"
+              WHERE id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol)
+             VALUES (?, "SYNTH", "Syntetická mzdová účtárna", ?)
+             ON DUPLICATE KEY UPDATE
+                name = VALUES(name),
+                social_security_variable_symbol = VALUES(social_security_variable_symbol),
+                is_active = 1'
+        )->execute([$this->supplierId, $socialVariableSymbol]);
+        $officeId = (int) $this->db->pdo()->lastInsertId();
+        if ($officeId === 0) {
+            $select = $this->db->pdo()->prepare(
+                'SELECT id FROM payroll_offices WHERE supplier_id = ? AND code = "SYNTH"'
+            );
+            $select->execute([$this->supplierId]);
+            $officeId = (int) $select->fetchColumn();
+        }
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE default_office_id = VALUES(default_office_id)'
+        )->execute([$this->supplierId, $officeId]);
     }
 }

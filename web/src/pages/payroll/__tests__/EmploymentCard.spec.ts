@@ -1,0 +1,132 @@
+import { describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import type { PayrollEmployment } from '@/api/payroll'
+
+vi.mock('@/api/payroll', () => ({
+  payrollApi: {
+    transitionEmployment: vi.fn(),
+    addEmploymentTerms: vi.fn(),
+    updateEmploymentChecklist: vi.fn(),
+  },
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}:${JSON.stringify(params)}` : key,
+  }),
+}))
+
+import EmploymentCard from '@/pages/payroll/EmploymentCard.vue'
+
+function employment(): PayrollEmployment {
+  return {
+    id: 10,
+    employee_id: 20,
+    office_id: null,
+    office_code: null,
+    office_name: null,
+    code: 'HPP-1',
+    relation_type: 'employment',
+    status: 'planned',
+    is_primary: true,
+    start_date: '2026-01-01',
+    actual_start_date: null,
+    end_date: null,
+    archived_at: null,
+    is_legacy_projection: false,
+    monthly_gross_minor: 4000000,
+    row_version: 1,
+    allowed_transitions: ['preregistered', 'no_show'],
+    accounting: {
+      gross_debit: '521',
+      gross_credit: '331',
+      employer_insurance_debit: '524',
+      employer_insurance_credit: '336',
+    },
+    terms: [{
+      id: 1,
+      office_id: null,
+      office_code: null,
+      effective_from: '2026-01-01',
+      effective_to: null,
+      contract_signed_on: null,
+      planned_start_on: '2026-01-01',
+      actual_start_on: null,
+      fixed_term_end_on: null,
+      weekly_hours: '40.00',
+      workload_basis_points: 10000,
+      work_place: null,
+      regular_workplace: null,
+      cz_isco_code: null,
+      activity_code: null,
+      social_insurance_participation: 'automatic',
+      health_insurance_participation: 'automatic',
+      tax_regime: 'advance',
+      foreign_legislation_country_code: null,
+      a1_certificate_until: null,
+      risky_work: false,
+      tax_declaration_signed: false,
+      is_primary: true,
+      change_reason: 'Initial',
+      row_version: 1,
+      created_at: '2026-01-01 00:00:00',
+    }],
+    checklist: [{
+      id: 1,
+      phase: 'onboarding',
+      item_key: 'employment_contract',
+      status: 'pending',
+      due_date: '2026-01-01',
+      completed_at: null,
+      note: null,
+      row_version: 1,
+    }],
+    timeline: [{
+      id: 1,
+      event_type: 'created',
+      from_status: null,
+      to_status: 'planned',
+      effective_on: '2026-01-01',
+      note: null,
+      diff: { relation_type: { from: null, to: 'employment' } },
+      created_at: '2026-01-01 00:00:00',
+    }],
+  }
+}
+
+describe('EmploymentCard', () => {
+  it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: false },
+    })
+
+    expect(wrapper.text()).toContain('payroll.people.timeline_title')
+    expect(wrapper.text()).toContain('payroll.people.checklist.employment_contract')
+    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('payroll.people.transition.preregistered')
+  })
+
+  it('oprávněnému uživateli sestaví stavové ActionBar akce a datum účinnosti', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: {
+        stubs: {
+          ActionBar: {
+            props: ['actions'],
+            template: '<div data-test="actions"><span v-for="action in actions" v-show="action.show">{{ action.label }}</span></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('input[type="date"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.preregistered')
+    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.no_show')
+    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.new_terms')
+  })
+})

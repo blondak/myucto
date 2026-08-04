@@ -85,6 +85,22 @@ final class AboPaymentOrderWriterTest extends TestCase
         self::assertStringContainsString(' 000000123457 ', $out);
     }
 
+    public function testExactMinorUnitsBypassFloatingPointConversion(): void
+    {
+        $out = $this->writer->build($this->orderWith([
+            'account_number' => '123456789',
+            'bank_code' => '0800',
+            'amount_minor' => 12_345,
+            'variable_symbol' => '1',
+        ]));
+
+        self::assertStringContainsString(' 000000012345 ', $out);
+        self::assertStringContainsString(
+            '2 000000-2000145399 00000000012345 ',
+            $out,
+        );
+    }
+
     public function testThrowsOnEmptyItems(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -92,6 +108,51 @@ final class AboPaymentOrderWriterTest extends TestCase
             'payer_account_number' => '2000145399', 'payer_bank_code' => '0800',
             'payment_date' => '2026-06-12', 'items' => [],
         ]);
+    }
+
+    public function testThrowsOnMissingOrNonArrayItems(): void
+    {
+        $rejected = 0;
+        foreach ([null, 'not-an-array'] as $items) {
+            $order = [
+                'payer_account_number' => '2000145399',
+                'payer_bank_code' => '0800',
+                'payment_date' => '2026-06-12',
+            ];
+            if ($items !== null) {
+                $order['items'] = $items;
+            }
+            try {
+                $this->writer->build($order);
+                self::fail('Neplatné položky musí být odmítnuty.');
+            } catch (\InvalidArgumentException) {
+                ++$rejected;
+            }
+        }
+        self::assertSame(2, $rejected);
+    }
+
+    public function testExactMinorUnitsRespectAboFieldLimits(): void
+    {
+        try {
+            $this->writer->build($this->orderWith([
+                'account_number' => '123456789',
+                'bank_code' => '0800',
+                'amount_minor' => 1_000_000_000_000,
+            ]));
+            self::fail('Položka nad 12 míst nesmí vytvořit neplatné ABO.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        $item = [
+            'account_number' => '123456789',
+            'bank_code' => '0800',
+            'amount_minor' => 999_999_999_999,
+        ];
+        $order = $this->orderWith($item);
+        $order['items'] = array_fill(0, 101, $item);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->writer->build($order);
     }
 
     public function testThrowsWhenPayeeHasNoCzechAccount(): void
@@ -110,6 +171,99 @@ final class AboPaymentOrderWriterTest extends TestCase
             'account_number' => '123456789', 'bank_code' => '0800',
             'amount' => 0, 'variable_symbol' => '1',
         ]));
+    }
+
+    public function testAcceptsExactMaximumFixedFieldLengths(): void
+    {
+        $order = [
+            'client_name' => 'X',
+            'client_number' => '1234567890',
+            'file_number' => '123456',
+            'payer_account_number' => '123456-1234567890',
+            'payer_bank_code' => '1234',
+            'payment_date' => '2026-06-12',
+            'items' => [[
+                'account_number' => '654321-0987654321',
+                'bank_code' => '4321',
+                'amount_minor' => 1,
+                'variable_symbol' => '1234567890',
+                'constant_symbol' => '1234',
+                'specific_symbol' => '0987654321',
+            ]],
+        ];
+
+        $result = $this->writer->build($order);
+
+        self::assertStringContainsString(
+            '123456-1234567890',
+            $result,
+        );
+        self::assertStringContainsString(
+            '654321-0987654321 000000000001 1234567890'
+                . ' 43211234 0987654321',
+            $result,
+        );
+    }
+
+    public function testRejectsEveryOversizedFixedNumericField(): void
+    {
+        $base = [
+            'client_name' => 'X',
+            'client_number' => '1234567890',
+            'file_number' => '123456',
+            'payer_account_number' => '123456-1234567890',
+            'payer_bank_code' => '1234',
+            'payment_date' => '2026-06-12',
+            'items' => [[
+                'account_number' => '654321-0987654321',
+                'bank_code' => '4321',
+                'amount_minor' => 1,
+                'variable_symbol' => '1234567890',
+                'constant_symbol' => '1234',
+                'specific_symbol' => '0987654321',
+            ]],
+        ];
+        $cases = [];
+        foreach ([
+            'client_number' => '12345678901',
+            'file_number' => '1234567',
+            'payer_account_number' => '1234567-1234567890',
+            'payer_account_number_number' => '123456-12345678901',
+            'payer_bank_code' => '12345',
+        ] as $field => $value) {
+            $order = $base;
+            $order[$field === 'payer_account_number_number'
+                ? 'payer_account_number'
+                : $field] = $value;
+            $cases[] = $order;
+        }
+        foreach ([
+            'account_number' => '1234567-1234567890',
+            'account_number_number' => '123456-12345678901',
+            'bank_code' => '12345',
+            'variable_symbol' => '12345678901',
+            'constant_symbol' => '12345',
+            'specific_symbol' => '12345678901',
+        ] as $field => $value) {
+            $order = $base;
+            $order['items'][0][
+                $field === 'account_number_number'
+                    ? 'account_number'
+                    : $field
+            ] = $value;
+            $cases[] = $order;
+        }
+
+        $rejected = 0;
+        foreach ($cases as $order) {
+            try {
+                $this->writer->build($order);
+                self::fail('Přetečené pevné ABO pole musí být odmítnuto.');
+            } catch (\InvalidArgumentException) {
+                ++$rejected;
+            }
+        }
+        self::assertSame(11, $rejected);
     }
 
     /**

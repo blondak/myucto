@@ -1,0 +1,490 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+
+const m = vi.hoisted(() => ({
+  employerSettings: vi.fn(),
+  profile: vi.fn(),
+  snapshots: vi.fn(),
+  prepare: vi.fn(),
+  download: vi.fn(),
+  overview: vi.fn(),
+  submissionDetail: vi.fn(),
+  downloadSubmissionArtifact: vi.fn(),
+  runs: vi.fn(),
+  jmhzPreview: vi.fn(),
+  downloadJmhzPreview: vi.fn(),
+  healthOverviews: vi.fn(),
+  downloadHealthOverview: vi.fn(),
+}))
+
+vi.mock('@/api/payroll', () => ({
+  payrollApi: {
+    employerSettings: m.employerSettings,
+    regzelProfile: m.profile,
+    regzelSnapshots: m.snapshots,
+    prepareRegzel: m.prepare,
+    downloadRegzelSnapshot: m.download,
+    submissionOverview: m.overview,
+    submissionDetail: m.submissionDetail,
+    downloadSubmissionArtifact: m.downloadSubmissionArtifact,
+    runs: m.runs,
+    jmhzPvpojPreview: m.jmhzPreview,
+    downloadJmhzPvpojPreview: m.downloadJmhzPreview,
+    healthPaymentOverviews: m.healthOverviews,
+    downloadHealthPaymentOverview: m.downloadHealthOverview,
+  },
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    canWrite: (permission: string) => permission === 'payroll.submissions',
+  }),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, parameters?: Record<string, string | number>) =>
+      parameters
+        ? `${key} ${Object.values(parameters).join(' ')}`
+        : key,
+    locale: { value: 'cs' },
+  }),
+}))
+
+import PayrollSubmissions from '@/pages/payroll/PayrollSubmissions.vue'
+
+function setup() {
+  m.employerSettings.mockResolvedValue({
+    offices: [{
+      id: 42,
+      code: 'MAIN',
+      name: 'Hlavní účtárna',
+      is_active: true,
+    }],
+  })
+  m.profile.mockResolvedValue({
+    supplier_id: 1,
+    social_enterprise: false,
+    employment_agency: false,
+    protected_labor_market: false,
+    evidence_confirmed_at: '2026-08-04 12:00:00',
+    row_version: 1,
+    updated_at: '2026-08-04 12:00:00',
+  })
+  m.snapshots.mockResolvedValue([])
+  m.overview.mockResolvedValue({
+    environment: 'production',
+    period: '2026-08',
+    summary: {
+      total: 1,
+      open: 1,
+      prepared: 0,
+      submitted: 0,
+      fulfilled: 0,
+      overdue: 0,
+      manual_review: 0,
+      other: 0,
+    },
+    deadline_summary: {
+      not_open: 1,
+      open: 0,
+      due_soon: 0,
+      due_today: 0,
+      overdue: 0,
+      awaiting_result: 0,
+      fulfilled: 0,
+      action_required: 0,
+      cancelled: 0,
+    },
+    items: [{
+      id: 7,
+      environment: 'production',
+      agenda_code: 'JMHZ',
+      subject_type: 'office',
+      subject_reference: 'office:synthetic',
+      period_start: '2026-08-01',
+      period_end: '2026-08-31',
+      obligation_kind: 'regular',
+      preferred_channel: 'manual_upload',
+      status: 'open',
+      row_version: 1,
+      earliest_submission_on: '2026-09-01',
+      due_on: '2026-09-20',
+      calendar_basis: 'calendar_days',
+      deadline: {
+        phase: 'not_open',
+        days_to_due: 36,
+        is_action_required: false,
+        is_overdue: false,
+      },
+      latest_submission: null,
+    }],
+  })
+  m.runs.mockResolvedValue([{
+    id: 8,
+    status: 'approved',
+    revision_id: 18,
+    revision_status: 'approved',
+  }, {
+    id: 9,
+    status: 'posted',
+    revision_id: 19,
+    revision_status: 'approved',
+  }])
+  m.healthOverviews.mockImplementation(async (revisionId: number) => ({
+    items: [{
+      schema_reference: 'payroll-health-payment-overview.v1',
+      document_kind: 'internal_health_payment_overview',
+      official_submission: {
+        supported: false,
+        reason_code: 'health_insurance_official_format_unavailable',
+      },
+      supplier_id: 1,
+      run_id: revisionId === 18 ? 8 : 9,
+      revision_id: revisionId,
+      revision_no: 1,
+      period: '2026-08',
+      currency_code: 'CZK',
+      insurer: { code: '111' },
+      source: {
+        statutory_result_id: 90,
+        statutory_result_hash: 'a'.repeat(64),
+        ruleset_id: 'cz-health-2026',
+        ruleset_hash: 'b'.repeat(64),
+      },
+      totals: {
+        person_count: 2,
+        assessment_base_minor_units: 10_000_000,
+        employee_contribution_minor_units: 450_000,
+        employer_contribution_minor_units: 900_000,
+        total_contribution_minor_units: 1_350_000,
+      },
+      people: [],
+      sha256: 'c'.repeat(64),
+      filename: `zp-prehled-2026-08-111-revize-${revisionId}.json`,
+    }],
+    electronic_submission: {
+      supported: false,
+      reason_code: 'health_insurance_transport_unavailable',
+    },
+  }))
+  m.jmhzPreview.mockImplementation(async (revisionId: number) => ({
+    schema_reference: 'payroll-jmhz-pvpoj-preview.v1',
+    document_kind: 'internal_jmhz_pvpoj_preview',
+    workflow_status: 'preview_only',
+    official_submission: {
+      supported: false,
+      reason_code: 'pvpoj_only_identity_snapshot_incomplete',
+    },
+    xsd: {
+      bundle_version: '1.4.3.4',
+      schema_version: '1.4.3',
+      entry_point: 'jmhz-1.4.3.4/PVPOJ.xsd',
+      namespace: 'http://schemas.cssz.cz/JMHZ/PVPOJ/1.0',
+    },
+    supplier_id: 1,
+    run_id: revisionId === 18 ? 8 : 9,
+    revision_id: revisionId,
+    revision_no: 1,
+    period: '2026-08',
+    currency_code: 'CZK',
+    source: {
+      revision_input_hash: 'a'.repeat(64),
+      statutory_result_id: 90,
+      statutory_result_hash: 'b'.repeat(64),
+      ruleset_id: 'cz-social-2026',
+      ruleset_hash: 'c'.repeat(64),
+      social_liability_id: 91,
+      social_liability_hash: 'd'.repeat(64),
+    },
+    pvpoj: {
+      pojistne: {
+        zakladZamestnavateleA: 100_000,
+        pojistneZamestnavateleA: 24_800,
+        pojistneZamestnavateleCelkem: 24_800,
+        pojistneZamestnance: 7_100,
+        pojistneCelkem: 31_900,
+      },
+      pojistneUhrada: 31_900,
+    },
+    reconciliation: [{
+      employee_reference: 'employee:1',
+      relationship_references: ['employment:1'],
+      capped_assessment_base_minor_units: 10_000_000,
+      employee_contribution_before_discount_minor_units: 710_000,
+      employee_discount_minor_units: 0,
+      employee_contribution_minor_units: 710_000,
+    }],
+    sha256: 'e'.repeat(64),
+    filename: `jmhz-pvpoj-preview-2026-08-revize-${revisionId}.json`,
+  }))
+  m.prepare.mockResolvedValue({
+    id: 9,
+    environment: 'production',
+    office_id: 42,
+    document_type: 'REGZELDOPL25',
+    interaction_code: 'supplemental_information',
+    mapping_version: 'regzeldopl25-map-1',
+    xsd_version: '1.2',
+    source_snapshot_hash: 'a'.repeat(64),
+    xml_sha256: 'b'.repeat(64),
+    xml_byte_size: 123,
+    request_fingerprint: 'c'.repeat(64),
+    created: true,
+  })
+  m.submissionDetail.mockResolvedValue({
+    submission: {
+      id: 31,
+      environment: 'production',
+      obligation_id: 7,
+      agenda_code: 'JMHZ',
+      subject_type: 'office',
+      subject_reference: 'office:synthetic',
+      period_start: '2026-08-01',
+      period_end: '2026-08-31',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      status: 'validated',
+      row_version: 4,
+      source_revision_id: 18,
+      corrects_submission_id: null,
+      correlation_reference: null,
+      submitted_at: null,
+      decided_at: null,
+      created_at: '2026-09-01 08:00:00',
+      updated_at: '2026-09-01 08:05:00',
+    },
+    parts: [{
+      id: 41,
+      part_reference: 'jmhz-summary',
+      agenda_code: 'JMHZ',
+      subject_reference: 'office:synthetic',
+      status: 'validated',
+      source_entity_type: 'run_revision',
+      source_entity_reference: 'revision:18',
+      row_version: 1,
+      created_at: '2026-09-01 08:00:00',
+      updated_at: '2026-09-01 08:00:00',
+    }],
+    artifacts: [{
+      id: 51,
+      part_id: 41,
+      artifact_kind: 'outbound_xml',
+      direction: 'outbound',
+      mime_type: 'application/xml',
+      byte_size: 2048,
+      xsd_version: '1.4.3.4',
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
+    }],
+    receipts: [],
+    issues: [{
+      id: 61,
+      part_id: 41,
+      severity: 'warning',
+      validation_stage: 'catalog',
+      issue_code: 'MANUAL_REVIEW',
+      entity_type: null,
+      entity_reference: null,
+      is_resolved: false,
+      row_version: 1,
+      resolved_at: null,
+      created_at: '2026-09-01 08:02:00',
+      updated_at: '2026-09-01 08:02:00',
+    }],
+  })
+}
+
+describe('PayrollSubmissions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setup()
+  })
+
+  it('oddělí test a produkci, používá standardní záložky a SearchableSelect', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
+    expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
+    expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
+
+    const environment = wrapper.get('[data-test="regzel-environment"] input')
+    await environment.trigger('focus')
+    await environment.trigger('keydown', { key: 'ArrowDown' })
+    await environment.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(m.snapshots).toHaveBeenLastCalledWith('test')
+    expect(wrapper.text()).toContain('payroll.regzel.environment.test_warning')
+
+    const tabs = wrapper.findAll('[role="tab"]')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    expect(m.overview).toHaveBeenCalledWith(
+      'production',
+      expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
+    )
+    expect(wrapper.text()).toContain('JMHZ')
+    expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
+  })
+
+  it('bez potvrzení XML nevytvoří a API chybu zobrazí trvale inline', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
+    expect(m.prepare).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="regzel-error"]').text()).toContain(
+      'payroll.regzel.prepare.confirmation_required',
+    )
+
+    m.prepare.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            message: 'Produkční VS nesmí být testovací.',
+          },
+        },
+      },
+    })
+    await wrapper.get('[data-test="regzel-prepare-confirmation"]').setValue(true)
+    await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      office_id: 42,
+      environment: 'production',
+      evidence_confirmed: true,
+    }))
+    expect(wrapper.get('[data-test="regzel-error"]').text()).toContain(
+      'Produkční VS nesmí být testovací.',
+    )
+  })
+
+  it('nabídne interní měsíční přehled zdravotní pojišťovny ke stažení', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await flushPromises()
+
+    expect(m.runs).toHaveBeenCalledWith(expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/))
+    expect(m.healthOverviews).toHaveBeenCalledWith(18)
+    expect(m.healthOverviews).toHaveBeenCalledWith(19)
+    expect(m.healthOverviews).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[data-test="health-payment-overviews"] article')).toHaveLength(2)
+    expect(wrapper.get('[data-test="health-payment-overviews"]').text()).toContain('111')
+    expect(wrapper.get('[data-test="health-payment-overviews"]').text())
+      .toContain('payroll.submissions.overview.health_description')
+
+    const download = wrapper.get('[data-test="health-payment-overviews"] button')
+    await download.trigger('click')
+    await flushPromises()
+    expect(m.downloadHealthOverview).toHaveBeenCalledWith(
+      expect.objectContaining({ revision_id: 18, insurer: { code: '111' } }),
+    )
+  })
+
+  it('nabídne bezpečně označený PVPOJ kontrolní náhled ke stažení', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    expect(m.jmhzPreview).toHaveBeenCalledWith(18)
+    expect(m.jmhzPreview).toHaveBeenCalledWith(19)
+    expect(wrapper.findAll('[data-test="jmhz-pvpoj-previews"] article')).toHaveLength(2)
+    expect(wrapper.get('[data-test="jmhz-pvpoj-previews"]').text())
+      .toContain('payroll.submissions.overview.jmhz_preview_only')
+
+    await wrapper.get('[data-test="jmhz-pvpoj-previews"] button').trigger('click')
+    await flushPromises()
+    expect(m.downloadJmhzPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ revision_id: 18, workflow_status: 'preview_only' }),
+    )
+  })
+
+  it('zpřístupní bezpečný detail částí, artefaktů a problémů posledního podání', async () => {
+    const overview = await m.overview()
+    overview.items[0].latest_submission = {
+      id: 31,
+      status: 'validated',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      submitted_at: null,
+      decided_at: null,
+    }
+    m.overview.mockResolvedValue(overview)
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+
+    expect(m.submissionDetail).toHaveBeenCalledWith(31)
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('outbound_xml')
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('MANUAL_REVIEW')
+    expect(wrapper.get('[data-test="submission-detail"]').text()).toContain('2.0 kB')
+
+    await wrapper.get('[data-test="submission-artifact-download"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ id: 51, mime_type: 'application/xml' }),
+    )
+  })
+
+  it('po otevření detailu znovu odstraní starou chybu stažení artefaktu', async () => {
+    const overview = await m.overview()
+    overview.items[0].latest_submission = {
+      id: 31,
+      status: 'validated',
+      submission_kind: 'regular',
+      channel: 'manual_upload',
+      submitted_at: null,
+      decided_at: null,
+    }
+    m.overview.mockResolvedValue(overview)
+    m.downloadSubmissionArtifact.mockRejectedValueOnce({
+      response: {
+        data: {
+          error: {
+            message: 'Artefakt již není dostupný.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="submission-artifact-download"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="submission-artifact-download-error"]').text())
+      .toContain('Artefakt již není dostupný.')
+
+    await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="submission-artifact-download-error"]').exists())
+      .toBe(false)
+  })
+
+  it('zobrazuje účinný stav lhůty odděleně od stavu podání', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submission-deadline-phase"]').text())
+      .toContain('payroll.submissions.overview.deadline_phase.not_open')
+  })
+})

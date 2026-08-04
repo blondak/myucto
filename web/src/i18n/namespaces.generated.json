@@ -57,6 +57,8 @@
     "monthly_report",
     "payment_method",
     "payment_order",
+    "payroll",
+    "payroll_absence",
     "permissions",
     "portal",
     "portfolio",
@@ -262,6 +264,43 @@
     ],
     "document-requests": [
       "document_requests"
+    ],
+    "payroll-dashboard": [
+      "payroll"
+    ],
+    "payroll-runs": [
+      "payroll"
+    ],
+    "payroll-payments": [
+      "payroll"
+    ],
+    "payroll-people": [
+      "payroll"
+    ],
+    "payroll-quick-inputs": [
+      "payroll"
+    ],
+    "payroll-components": [
+      "payroll"
+    ],
+    "payroll-time": [
+      "payroll"
+    ],
+    "payroll-absences": [
+      "payroll",
+      "payroll_absence"
+    ],
+    "payroll-enforcement": [
+      "payroll"
+    ],
+    "payroll-documents": [
+      "payroll"
+    ],
+    "payroll-submissions": [
+      "payroll"
+    ],
+    "payroll-settings": [
+      "payroll"
     ],
     "accounting-accounts": [
       "accounting",
@@ -685,6 +724,8 @@
       "monthly_report",
       "payment_method",
       "payment_order",
+      "payroll",
+      "payroll_absence",
       "permissions",
       "portal",
       "portfolio",

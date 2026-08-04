@@ -41,9 +41,19 @@ export function useNavOrder() {
     return next
   }
 
+  /** Nový mzdový bounded context patří v uloženém pořadí bezprostředně za Daně. */
+  function migratePayroll(saved: string[]): string[] {
+    const taxesAt = saved.indexOf('taxes')
+    const payrollAt = saved.indexOf('payroll')
+    if (taxesAt === -1 || payrollAt === taxesAt + 1) return saved
+    const next = saved.filter(key => key !== 'payroll')
+    next.splice(next.indexOf('taxes') + 1, 0, 'payroll')
+    return next
+  }
+
   /** Vrátí sekce v uloženém pořadí; neznámé klíče appenduje v defaultním pořadí. */
   function orderedSections<S extends OrderableSection>(sections: S[]): S[] {
-    const savedSections = migrateAccountingTools(order.value.sections ?? [])
+    const savedSections = migratePayroll(migrateAccountingTools(order.value.sections ?? []))
     const hiddenItems = new Set(order.value.hidden ?? [])
     const byKey = new Map(sections.map(s => [s.key, s]))
 

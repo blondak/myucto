@@ -60,6 +60,8 @@ export interface SupplierBrief {
    * `undefined` = zapnuto (starší backend bez pole). Na licenci nemá vliv.
    */
   accounting_enabled?: boolean
+  /** „Vést mzdy" — výchozí true; false skryje mzdový modul pro tuto firmu. */
+  payroll_enabled?: boolean
 }
 
 export interface SetupStatus {

@@ -1,17 +1,18 @@
 @echo off
-REM Stáhne XSD schémata do api/xsd/ (Windows verze): EPO MFČR výkazy (DPH/KH/SH/
-REM DPFO/DPPO) + ISDOC 6.0.2 (formát faktur) + ČSSZ OSVC (přehled OSVČ, e-podání).
-REM Default jsou commitnutá v repo — skript použij jen pro upgrade na nové ročníky.
+REM Stahne XSD schemata do api/xsd/ (Windows verze): EPO MFCR vykazy (DPH/KH/SH/
+REM DPFO/DPPO) + ISDOC 6.0.2 + CSSZ OSVC + JMHZ balicky z portalu MPSV.
+REM Default jsou commitnuta v repo - skript pouzij jen pro upgrade na nove rocniky.
 REM
 REM Pouziti:
-REM   cmd\download-xsd.cmd           — stáhne všechna schémata (EPO + ISDOC + ČSSZ)
-REM   cmd\download-xsd.cmd dphkh1    — stáhne jen jedno EPO schema
-REM   cmd\download-xsd.cmd isdoc     — stáhne jen ISDOC schema
-REM   cmd\download-xsd.cmd osvc25    — stáhne jen ČSSZ přehled OSVČ (annual)
+REM   cmd\download-xsd.cmd           - stahne vsechna schemata (EPO + ISDOC + CSSZ + JMHZ)
+REM   cmd\download-xsd.cmd dphkh1    - stahne jen jedno EPO schema
+REM   cmd\download-xsd.cmd isdoc     - stahne jen ISDOC schema
+REM   cmd\download-xsd.cmd osvc25    - stahne jen CSSZ prehled OSVC (annual)
+REM   cmd\download-xsd.cmd jmhz      - stahne 6 pripnutych JMHZ XSD balicku
 REM
-REM Pozn.: ČSSZ mění název souboru per ročník (OSVC24/OSVC25/…) i dokument-ID v URL,
-REM proto je URL napevno níže — při novém ročníku aktualizuj CSSZ_OSVC_URL i cílový
-REM název (form_code osvcYY). Zdrojová stránka: viz api/xsd/README.md.
+REM Pozn.: CSSZ meni nazev souboru per rocnik (OSVC24/OSVC25/...) i dokument-ID v URL,
+REM proto je URL napevno nize - pri novem rocniku aktualizuj CSSZ_OSVC_URL i cilovy
+REM nazev (form_code osvcYY). Zdrojova stranka: viz api/xsd/README.md.
 
 setlocal EnableDelayedExpansion
 
@@ -23,18 +24,25 @@ set "CSSZ_OSVC_URL=https://www.cssz.gov.cz/documents/20143/3201321/OSVC25.xsd/5d
 if not exist "%DIR%" mkdir "%DIR%"
 
 if "%~1"=="" (
-    set "FORMS=dphdp3 dphkh1 dphshv dpfdp5 dppdp9 isdoc osvc25"
+    set "FORMS=dphdp3 dphkh1 dphshv dpfdp5 dppdp9 isdoc osvc25 jmhz"
 ) else (
     set "FORMS=%*"
 )
 
 for %%F in (%FORMS%) do (
-    if /I "%%F"=="isdoc" (
+    if /I "%%F"=="jmhz" (
+        echo -^> jmhz: 6 oficialnich XSD balicku MPSV
+        call "%~dp0download-jmhz-xsd.cmd"
+        if errorlevel 1 (
+            endlocal
+            exit /b 1
+        )
+    ) else if /I "%%F"=="isdoc" (
         echo -^> isdoc: %ISDOC_URL%
         powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%ISDOC_URL%' -OutFile '%DIR%\isdoc-invoice-6.0.2.xsd' -UseBasicParsing; Write-Host '  OK' } catch { Write-Host '  FAIL:' $_.Exception.Message }"
     ) else (
         if /I "%%F"=="osvc25" (
-            echo -^> osvc25 ^(ČSSZ přehled OSVČ^): %CSSZ_OSVC_URL%
+            echo -^> osvc25 ^(CSSZ prehled OSVC^): %CSSZ_OSVC_URL%
             powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%CSSZ_OSVC_URL%' -OutFile '%DIR%\osvc25.xsd' -UseBasicParsing; Write-Host '  OK' } catch { Write-Host '  FAIL:' $_.Exception.Message }"
         ) else (
             echo -^> %%F: %BASE%/%%F_epo2.xsd

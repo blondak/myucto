@@ -38,6 +38,25 @@ final class PermissionMiddlewareTest extends TestCase
         self::assertSame(403, $middleware->process($this->request('POST', '/api/invoices'), $this->handler())->getStatusCode());
     }
 
+    public function testPayrollAccountOptionsRequirePayrollSettingsWithoutAccountingPermission(): void
+    {
+        $payrollOnly = new EffectiveRole(2, 'Mzdová účetní', 'staff', true, ['payroll.settings' => 1]);
+        self::assertSame(
+            204,
+            $this->middleware($payrollOnly, new SupplierAccess(1, false, null))
+                ->process($this->request('GET', '/api/payroll/settings/account-options'), $this->handler())
+                ->getStatusCode(),
+        );
+
+        $accountingOnly = new EffectiveRole(3, 'Účetní', 'staff', true, ['accounting' => 2]);
+        self::assertSame(
+            403,
+            $this->middleware($accountingOnly, new SupplierAccess(1, false, null))
+                ->process($this->request('GET', '/api/payroll/settings/account-options'), $this->handler())
+                ->getStatusCode(),
+        );
+    }
+
     public function testMissingMembershipHasDedicatedError(): void
     {
         $role = new EffectiveRole(2, 'Writer', 'staff', true, ['invoices' => 2]);

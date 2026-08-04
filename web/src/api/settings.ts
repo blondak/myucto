@@ -198,6 +198,8 @@ export interface Supplier {
   accounting_mode?: 'tax_evidence' | 'double_entry'
   // „Vést účetnictví" (migrace 1179) — opt-out účetní nadstavby v menu. Na licenci nemá vliv.
   accounting_enabled?: boolean
+  // „Vést mzdy" (migrace 1187) — výchozí opt-in modulu. Na licenci zatím nemá vliv.
+  payroll_enabled?: boolean
   // Skladová evidence (Epic SKLAD, migrace 1022) — nezávislé na accounting_mode.
   // Smí přepínat i účetní (ne jen admin) — viz SettingsAction::$stockOnlyFields.
   stock_enabled?: boolean

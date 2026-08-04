@@ -475,7 +475,7 @@ const taxScalarFields: Record<typeof taxConstantTabs[number], readonly string[]>
     'social_min_base_main', 'social_min_base_secondary', 'social_max_base',
     'social_secondary_participation_threshold', 'health_min_base', 'sickness_rate',
     'sickness_min_monthly_base'],
-  // Měsíční hranice §38ha; samotné sazby jsou vnořené v `payroll` a mají vlastní blok.
+  // Měsíční hranice §38h odst. 2; samotné sazby jsou vnořené v `payroll` a mají vlastní blok.
   payroll: ['advance_tax_high_threshold'],
   po: ['corporate_tax_rate', 'donation_min_po', 'donation_cap_po_pct', 'disabled_employee_credit',
     'disabled_employee_credit_severe', 'advance_threshold_low', 'advance_threshold_high',

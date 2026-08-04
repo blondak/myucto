@@ -6,12 +6,12 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-07-roles-v1';
+    public const VERSION = '2026-08-payroll-v1';
 
     /** @var list<string> */
     private const GROUPS = [
         'dashboard', 'clients', 'projects', 'invoices', 'purchase_invoices', 'recurring',
-        'bank', 'documents', 'accounting', 'tax_evidence', 'reports', 'cash', 'assets',
+        'bank', 'documents', 'accounting', 'tax_evidence', 'reports', 'payroll', 'cash', 'assets',
         'stock', 'eshop', 'logbook', 'settings', 'utilities', 'profile',
     ];
 
@@ -84,6 +84,25 @@ final class PermissionCatalog
             ['reports.submit', 'reports', 'Elektronicky podat', $staffOnly],
             ['reports.reopen', 'reports', 'Znovu otevřít výkaz', $staffOnly],
             ['reports.export', 'reports', 'Exportovat výkaz', $staffOnly],
+            ['payroll', 'payroll', 'Mzdy', $staffOnly],
+            ['payroll.settings', 'payroll', 'Nastavení mezd', $staffOnly],
+            ['payroll.person.read_sensitive', 'payroll', 'Odhalit citlivé osobní údaje', $staffOnly],
+            ['payroll.person.write', 'payroll', 'Spravovat zaměstnance', $staffOnly],
+            ['payroll.employment.write', 'payroll', 'Spravovat pracovní vztahy', $staffOnly],
+            ['payroll.time.write', 'payroll', 'Spravovat docházku a absence', $staffOnly],
+            ['payroll.inputs.write', 'payroll', 'Spravovat mzdové vstupy', $staffOnly],
+            ['payroll.calculate', 'payroll', 'Vypočítat mzdy', $staffOnly],
+            ['payroll.review', 'payroll', 'Zkontrolovat mzdový běh', $staffOnly],
+            ['payroll.approve', 'payroll', 'Schválit mzdový běh', $staffOnly],
+            ['payroll.reopen', 'payroll', 'Odemknout schválený mzdový běh', $staffOnly],
+            ['payroll.post', 'payroll', 'Zaúčtovat mzdy', $staffOnly],
+            ['payroll.payments', 'payroll', 'Spravovat výplaty a odvody', $staffOnly],
+            ['payroll.submissions', 'payroll', 'Spravovat mzdová podání', $staffOnly],
+            ['payroll.enforcement', 'payroll', 'Spravovat exekuční srážky', $staffOnly],
+            ['payroll.insolvency', 'payroll', 'Spravovat insolvence zaměstnanců', $staffOnly],
+            ['payroll.reports', 'payroll', 'Mzdové sestavy a exporty', $staffOnly],
+            ['payroll.rulesets', 'payroll', 'Spravovat legislativní pravidla mezd', $staffOnly],
+            ['payroll.documents', 'payroll', 'Mzdové dokumenty', $staffOnly],
             ['cash', 'cash', 'Pokladna', $staffOnly],
             ['cash.document.write', 'cash', 'Pokladní doklady', $staffOnly],
             ['cash.close', 'cash', 'Uzavřít pokladnu', $staffOnly],
@@ -156,6 +175,8 @@ final class PermissionCatalog
                 'accounting.periods.close', 'accounting.periods.manage',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'utilities.import',
+                'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
+                'payroll.reopen', 'payroll.enforcement', 'payroll.insolvency', 'payroll.rulesets',
             ];
             $read = [
                 'dashboard', 'dashboard.portfolio', 'tax_evidence', 'tax_evidence.export',

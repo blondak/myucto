@@ -109,6 +109,39 @@ final class DocumentRepository
         return $row !== false ? $row : null;
     }
 
+    /** @return array{id:int,sha256:string}|null */
+    public function findActiveReferenceForUpdate(
+        int $id,
+        int $supplierId,
+        DocumentViewerContext $viewer,
+    ): ?array {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, sha256
+               FROM documents
+              WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL'
+            . $scopeSql
+            . ' FOR UPDATE'
+        );
+        $stmt->execute(array_merge([$id, $supplierId], $scopeParams));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $rowId = $row['id'] ?? null;
+        $sha256 = $row['sha256'] ?? null;
+        if (
+            (!is_int($rowId) && !(is_string($rowId) && ctype_digit($rowId)))
+            || !is_string($sha256)
+        ) {
+            return null;
+        }
+        return [
+            'id' => (int) $rowId,
+            'sha256' => $sha256,
+        ];
+    }
+
     /**
      * WHERE fragment (bez SELECT/ORDER/LIMIT) pro aktivní dokumenty ve složce — sdílené
      * mezi {@see listInFolder()} a {@see countInFolder()}, aby COUNT a data dotaz vždy

@@ -47,6 +47,11 @@
   --color-teal-50:     #E2F3F4;
   --color-teal-500:    #4AA9AE;
   --color-teal-600:    #2D8A91;
+  /* Mzdy — ostružinová, mimo stavové zelené/červené a účetní indigo. */
+  --color-payroll-50:   #FAF1F6;
+  --color-payroll-100:  #F3DEEA;
+  --color-payroll-500:  #B45D87;
+  --color-payroll-600:  #98466F;
 
   /* ─── Semantic (pastel) ─── */
   --color-success-50:  #ECF6F0;
@@ -154,6 +159,8 @@
      světlý #D7E8F6 a v dark módu zářil. Laděno k ostatním -50 stavům. */
   --color-accent-100: #16344C;
   --color-teal-50:    #102A2D;   /* stav „Odesláno" — tmavý tint */
+  --color-payroll-50: #2B1824;
+  --color-payroll-100: #351C2B;
   /* Částečné úhrady (#89): badge „Částečně uhrazeno" (amber) a „Přeplaceno"
      (purple) — bez override by světlé -50 tinty v dark módu zářily. Text -600/-700
      naopak zesvětlit, default Tailwind hodnoty jsou na tmavém nečitelné. */
@@ -228,6 +235,8 @@
   --color-accent-50:  #172B3D;
   --color-accent-100: #1C3A52;
   --color-teal-50:    #12313A;
+  --color-payroll-50: #351C2B;
+  --color-payroll-100: #422238;
 }
 
 /* V tmavém režimu musí navigace sedět na TÉŽE barevné ose jako plátno — sytě
@@ -483,6 +492,7 @@ table:not(.table-plain) > tbody > tr > td.text-right.font-mono:not([class*="text
 [data-accent="danger"]      { --module-accent: var(--color-danger-500);   --module-accent-soft: var(--color-danger-50); }
 [data-accent="accent"]      { --module-accent: var(--color-accent-500);   --module-accent-soft: var(--color-accent-50); }
 [data-accent="teal"]        { --module-accent: var(--color-teal-500);     --module-accent-soft: var(--color-teal-50); }
+[data-accent="payroll"]      { --module-accent: var(--color-payroll-500);  --module-accent-soft: var(--color-payroll-50); }
 [data-accent="neutral"]     { --module-accent: var(--color-neutral-400);  --module-accent-soft: var(--color-neutral-100); }
 
 /* Proužek pod topbarem — identita modulu na první pohled, bez jediného zásahu

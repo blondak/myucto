@@ -84,36 +84,30 @@ final class SupplierMembershipTest extends TestCase
             $this->markTestSkipped('Žádný supplier v DB.');
         }
 
-        // Druhý supplier — vezmi existující, nebo založ fixture (FK hodnoty od A)
-        $second = $this->db->pdo()->query(
-            'SELECT id FROM supplier ORDER BY id LIMIT 1 OFFSET 1'
-        )->fetchColumn();
-        if ($second !== false && $second !== null) {
-            $this->supplierB = (int) $second;
-        } else {
-            $stmt = $this->db->pdo()->prepare(
-                "INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
-                                       is_vat_payer, email, default_currency_id, default_vat_rate_id,
-                                       default_payment_due_days, default_hourly_rate)
-                 SELECT '__TEST F0 supplier B', '__TEST F0 supplier B', street, city, zip, country_id,
-                        0, email, default_currency_id, default_vat_rate_id,
-                        default_payment_due_days, default_hourly_rate
-                   FROM supplier WHERE id = ?"
-            );
-            $stmt->execute([$this->supplierA]);
-            $this->supplierB = (int) $this->db->pdo()->lastInsertId();
-            $this->createdSupplierB = true;
+        // Izolovaný druhý supplier: existující tenant může být záměrně rozpracovaný
+        // a nemít vlastní měnu, což nesmí měnit výsledek membership testu.
+        $stmt = $this->db->pdo()->prepare(
+            "INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
+                                   is_vat_payer, email, default_currency_id, default_vat_rate_id,
+                                   default_payment_due_days, default_hourly_rate)
+             SELECT '__TEST F0 supplier B', '__TEST F0 supplier B', street, city, zip, country_id,
+                    0, email, default_currency_id, default_vat_rate_id,
+                    default_payment_due_days, default_hourly_rate
+               FROM supplier WHERE id = ?"
+        );
+        $stmt->execute([$this->supplierA]);
+        $this->supplierB = (int) $this->db->pdo()->lastInsertId();
+        $this->createdSupplierB = true;
 
-            // Currencies jsou per-supplier — bez CZK řádku by create klienta pod B
-            // spadl na "Currency not found". default_currency_id supplier-a B záměrně
-            // ukazuje na měnu A (vyhneme se cyklickému FK při úklidu).
-            $cur = $this->db->pdo()->prepare(
-                "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
-                 VALUES (?, 'CZK', 'CZK — test', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)"
-            );
-            $cur->execute([$this->supplierB]);
-            $this->currencyB = (int) $this->db->pdo()->lastInsertId();
-        }
+        // Currencies jsou per-supplier — bez CZK řádku by create klienta pod B
+        // spadl na "Currency not found". default_currency_id supplier-a B záměrně
+        // ukazuje na měnu A (vyhneme se cyklickému FK při úklidu).
+        $cur = $this->db->pdo()->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+             VALUES (?, 'CZK', 'CZK — test', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)"
+        );
+        $cur->execute([$this->supplierB]);
+        $this->currencyB = (int) $this->db->pdo()->lastInsertId();
     }
 
     protected function tearDown(): void

@@ -1,0 +1,302 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+
+const m = vi.hoisted(() => ({
+  listDocuments: vi.fn(),
+  listAnnualDocuments: vi.fn(),
+  people: vi.fn(),
+  generatePayrollSheet: vi.fn(),
+  generateTaxCertificate: vi.fn(),
+  generateMonthlyBundle: vi.fn(),
+  downloadDocument: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}))
+
+vi.mock('@/api/payroll', () => ({
+  payrollApi: {
+    listDocuments: m.listDocuments,
+    listAnnualDocuments: m.listAnnualDocuments,
+    people: m.people,
+    generatePayrollSheet: m.generatePayrollSheet,
+    generateTaxCertificate: m.generateTaxCertificate,
+    generateMonthlyBundle: m.generateMonthlyBundle,
+    downloadDocument: m.downloadDocument,
+  },
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    canWrite: (permission: string) => permission === 'payroll.documents',
+  }),
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}:${JSON.stringify(params)}` : key,
+  }),
+}))
+
+import PayrollDocuments from '@/pages/payroll/PayrollDocuments.vue'
+
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver
+  })
+  return { promise, resolve }
+}
+
+describe('PayrollDocuments', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [{
+        run_id: 11,
+        revision_id: 12,
+        revision_no: 2,
+        status: 'approved',
+        office_id: null,
+        office_name: 'Praha',
+      }],
+      items: [
+        {
+          id: 21,
+          run_id: 11,
+          revision_id: 12,
+          revision_no: 2,
+          employee_id: 31,
+          employee_name: 'Testovací Zaměstnanec',
+          office_name: 'Praha',
+          document_kind: 'payslip',
+          document_revision_no: 1,
+          mime_type: 'application/pdf',
+          suggested_filename: 'vyplatni-paska-2026-07-abcdef123456.pdf',
+          file_sha256: 'a'.repeat(64),
+          size_bytes: 4567,
+          created_at: '2026-08-01 08:00:00',
+        },
+        {
+          id: 22,
+          run_id: 11,
+          revision_id: 12,
+          revision_no: 2,
+          employee_id: null,
+          employee_name: null,
+          office_name: 'Praha',
+          document_kind: 'monthly_bundle',
+          document_revision_no: 2,
+          mime_type: 'application/zip',
+          suggested_filename: 'mzdovy-balicek-2026-07-bcdef1234567.zip',
+          file_sha256: 'b'.repeat(64),
+          size_bytes: 9876,
+          created_at: '2026-08-01 08:05:00',
+        },
+      ],
+    })
+    m.generateMonthlyBundle.mockResolvedValue({
+      id: 22,
+      document_kind: 'monthly_bundle',
+      revision_id: 12,
+      file_sha256: 'b'.repeat(64),
+      size_bytes: 9876,
+    })
+    m.listAnnualDocuments.mockResolvedValue({
+      year: 2026,
+      items: [],
+    })
+    m.people.mockResolvedValue([{
+      id: 31,
+      full_name: 'Testovací Zaměstnanec',
+      needs_setup: false,
+    }])
+    m.generatePayrollSheet.mockResolvedValue({
+      id: 41,
+      document_kind: 'payroll_sheet',
+    })
+    m.generateTaxCertificate.mockResolvedValue({
+      id: 42,
+      document_kind: 'taxable_income_advance_certificate',
+    })
+    m.downloadDocument.mockResolvedValue(undefined)
+  })
+
+  it('renders responsive document cards and a desktop table without exposing hashes as names', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(m.listDocuments).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="documents-table"]').classes()).toContain('md:block')
+    expect(wrapper.get('[data-test="documents-cards"]').classes()).toContain('md:hidden')
+    expect(wrapper.text()).toContain('Testovací Zaměstnanec')
+    expect(wrapper.text()).toContain('Praha')
+    expect(wrapper.text()).toContain('payroll.documents.document_revision')
+    expect(wrapper.text()).toContain('payroll.documents.company')
+    expect(wrapper.text()).toContain('payroll.documents.kind.payslip')
+    expect(wrapper.text()).not.toContain('a'.repeat(64))
+  })
+
+  it('creates an idempotent monthly bundle and downloads individual artifacts', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="generate-bundle"]').trigger('click')
+    expect(m.generateMonthlyBundle).toHaveBeenCalledWith(11, 12, expect.any(String))
+
+    const buttons = wrapper.findAll('[data-test="download-document"]')
+    await buttons[0].trigger('click')
+    expect(m.downloadDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 21, mime_type: 'application/pdf' }),
+    )
+  })
+
+  it('ignores an older period response that arrives after a newer request', async () => {
+    const first = deferred<Awaited<ReturnType<typeof m.listDocuments>>>()
+    const second = deferred<Awaited<ReturnType<typeof m.listDocuments>>>()
+    m.listDocuments
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const wrapper = mount(PayrollDocuments)
+    const periodInput = wrapper.get('input[type="month"]')
+    expect(m.listDocuments).toHaveBeenCalledTimes(1)
+    await periodInput.setValue('2026-08')
+    expect(m.listDocuments).toHaveBeenCalledTimes(2)
+
+    second.resolve({
+      period: '2026-08',
+      revisions: [],
+      items: [{
+        id: 81,
+        employee_name: 'Novější období',
+        document_kind: 'payslip',
+        size_bytes: 1,
+        created_at: '2026-08-01 08:00:00',
+      }],
+    })
+    await flushPromises()
+    first.resolve({
+      period: '2026-07',
+      revisions: [],
+      items: [{
+        id: 71,
+        employee_name: 'Starší období',
+        document_kind: 'payslip',
+        size_bytes: 1,
+        created_at: '2026-07-01 08:00:00',
+      }],
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Novější období')
+    expect(wrapper.text()).not.toContain('Starší období')
+  })
+
+  it('creates both annual tax certificate variants from the annual tab', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    expect(annualTab).toBeDefined()
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    const advanceButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_advance')
+    expect(advanceButton).toBeDefined()
+    await advanceButton!.trigger('click')
+    await flushPromises()
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_advance_certificate',
+      {
+        supersedes_document_id: null,
+        correction_reason: null,
+      },
+    )
+
+    const withholdingButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_withholding')
+    expect(withholdingButton).toBeDefined()
+    await withholdingButton!.trigger('click')
+    await flushPromises()
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_withholding_certificate',
+      {
+        supersedes_document_id: null,
+        correction_reason: null,
+      },
+    )
+    expect(m.toastSuccess).toHaveBeenCalledWith(
+      'payroll.documents.tax_certificate_created',
+    )
+  })
+
+  it('requires a concrete reason and references the latest certificate when correcting it', async () => {
+    m.listAnnualDocuments.mockResolvedValue({
+      year: 2026,
+      items: [{
+        id: 77,
+        run_id: null,
+        revision_id: null,
+        annual_revision_id: 8,
+        annual_revision_no: 2,
+        tax_year: 2026,
+        employee_id: 31,
+        employee_name: 'Testovací Zaměstnanec',
+        document_kind: 'taxable_income_advance_certificate',
+        document_revision_no: 2,
+        supersedes_document_id: 70,
+        mime_type: 'application/pdf',
+        suggested_filename: 'potvrzeni.pdf',
+        file_sha256: 'c'.repeat(64),
+        size_bytes: 4567,
+        created_at: '2026-08-04 12:00:00',
+      }],
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    const advanceButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_advance')
+    await advanceButton!.trigger('click')
+    expect(m.generateTaxCertificate).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="tax-certificate-correction"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="submit-tax-certificate-correction"]').trigger('submit')
+    expect(m.toastError).toHaveBeenCalledWith(
+      'payroll.documents.correction_reason_required',
+    )
+    await wrapper.get<HTMLTextAreaElement>('[data-test="correction-reason"]')
+      .setValue('Oprava nesprávně uvedeného identifikátoru poplatníka.')
+    await wrapper.get('[data-test="tax-certificate-correction"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_advance_certificate',
+      {
+        supersedes_document_id: 77,
+        correction_reason: 'Oprava nesprávně uvedeného identifikátoru poplatníka.',
+      },
+    )
+  })
+})

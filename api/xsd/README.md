@@ -5,10 +5,37 @@ Commitnutá veřejná schémata pro **automatickou XSD validaci** vygenerovanéh
 1. **EPO MFČR** výkazy (DPH/KH/SH/DPFO/DPPO) — validace daňových podání.
 2. **ISDOC 6.0.2** (`isdoc-invoice-6.0.2.xsd`) — validace exportu faktur; ověřuje
    ji unit test `tests/Unit/Service/Export/IsdocExporterSchemaTest`.
+3. **JMHZ a navazující věty ČSSZ/MPSV** — verzované balíčky v `jmhz/`, včetně
+   lokálních závislostí a kontrolních součtů oficiálních archivů.
 
 Aktuální verze jsou v repo — clone má funkční validaci bez setup kroku. Re-stáhnout
 přes `bash cmd/download-xsd.sh` nebo `cmd\download-xsd.cmd` (při novém ročníku MFČR,
 příp. nové verzi ISDOC).
+
+## Zdroj ČSSZ/MPSV — JMHZ
+
+Jednotné měsíční hlášení zaměstnavatelů a související registrační věty používají
+vlastní schémata a komunikační kanály ČSSZ, nikoli EPO finanční správy. Připnuté
+verze, vstupní XSD, oficiální URL a SHA-256 archivů jsou v
+[`jmhz/README.md`](jmhz/README.md).
+
+Aktualizace celé sady:
+
+```powershell
+pwsh -File cmd\download-jmhz-xsd.ps1
+cmd\download-jmhz-xsd.cmd
+```
+
+```bash
+bash cmd/download-jmhz-xsd.sh
+```
+
+Obecný `download-xsd` s argumentem `jmhz` používá stejné wrappery. Downloader
+přijímá jen HTTPS archivy z připnuté cesty `developers.mpsv.cz/assets/documents`,
+ověřuje i každý redirect, SHA-256 celého ZIPu, bezpečnost cest, počet XSD,
+očekávaná vstupní schémata a úplnost lokálních `include`/`import`. Až poté
+atomicky nahradí verzované adresáře; při jakékoli odchylce zůstane původní sada
+beze změny.
 
 ## Zdroje EPO MFČR
 

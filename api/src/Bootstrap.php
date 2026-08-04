@@ -116,6 +116,104 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
+                ),
+            \MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentSnapshotWriter::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
+                ),
+            \MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentPort::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Garnishment\RepositoryPayrollGarnishmentPort::class,
+                ),
+            \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class =>
+                fn () => \MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026::provider(),
+            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository(
+                        $c->get(Connection::class),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService(
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver(
+                        $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                        $c->get(\MyInvoice\Service\Payroll\SupportMatrix::class),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService(
+                        $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                    ),
+            \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder(
+                    $c->get(Connection::class),
+                    $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollStatutoryPeriodResolver::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                    ),
+                ),
+            \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculator::class),
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor::class),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryAccumulatorApprover::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunDeductionLedgerApprover::class,
+                    ),
+                ),
+            \MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCommandService(
+                    $c->get(Connection::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollRunRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class),
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class),
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunWorkflow::class),
+                    $c->get(\MyInvoice\Service\Payroll\PayrollPeriodOwnershipService::class),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
+                    ),
+                ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (

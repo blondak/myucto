@@ -24,6 +24,7 @@ use MyInvoice\Service\Export\ExportFilename;
 final class SepaPaymentOrderWriter
 {
     private const NS = 'urn:iso:std:iso:20022:tech:xsd:pain.001.001.03';
+    private const MAX_AMOUNT_MINOR = 999_999_999_999_999_999;
 
     public function __construct(private readonly IbanValidator $iban) {}
 
@@ -35,10 +36,13 @@ final class SepaPaymentOrderWriter
      *     payer_iban: string,
      *     payer_bic?: ?string,
      *     payment_date: string|\DateTimeInterface,
+     *     creation_datetime?: string|\DateTimeInterface,
      *     currency?: string,
      *     items: list<array{
-     *         payee_name?: ?string, iban: ?string, bic?: ?string, amount: int|float,
-     *         variable_symbol?: ?string, message?: ?string,
+     *         payee_name?: ?string, iban: ?string, bic?: ?string,
+     *         amount?: int|float, amount_minor?: int,
+     *         variable_symbol?: ?string, end_to_end_id?: ?string,
+     *         message?: ?string,
      *     }>
      * } $order
      *
@@ -46,28 +50,39 @@ final class SepaPaymentOrderWriter
      */
     public function build(array $order): string
     {
-        $items = $order['items'] ?? [];
-        if (!is_array($items) || $items === []) {
-            throw new \InvalidArgumentException('Platební příkaz neobsahuje žádnou položku.');
-        }
+        $items = $this->items($order);
 
-        $payerIban = $this->iban->normalize((string) ($order['payer_iban'] ?? ''));
+        $payerIban = $this->iban->normalize(
+            $this->requiredText($order, 'payer_iban'),
+        );
         if ($payerIban === '' || !$this->iban->isValid($payerIban)) {
             throw new \InvalidArgumentException('Účet plátce nemá platný IBAN — SEPA export vyžaduje IBAN.');
         }
         $payerBic = $this->normalizedBic((string) ($order['payer_bic'] ?? ''));
 
-        $execDate = $this->normalizeDate($order['payment_date']);
+        $execDate = $this->requiredDate($order, 'payment_date');
         $currency = strtoupper((string) ($order['currency'] ?? 'EUR'));
-        $now = new \DateTimeImmutable();
+        $createdAt = isset($order['creation_datetime'])
+            ? $this->normalizeDateTime($order['creation_datetime'])
+            : new \DateTimeImmutable();
         // Deterministický z order_id (BEZ timestampu) — stejná dávka musí mít při
         // opakovaném stažení STEJNÉ MsgId napříč re-exporty, jinak banka nemůže
         // uplatnit vlastní duplicate-detection (riziko dvojí platby při 2× uploadu).
-        $msgId = $this->text('MYUCTO-' . (string) ($order['order_id'] ?? '1'), 35);
+        $msgId = 'MYUCTO-' . substr(
+            hash('sha256', (string) ($order['order_id'] ?? '1')),
+            0,
+            28,
+        );
 
-        $totalAmount = 0.0;
-        foreach ($items as $it) {
-            $totalAmount += round((float) ($it['amount'] ?? 0), 2);
+        $totalMinor = 0;
+        foreach ($items as $index => $item) {
+            $minor = $this->minorUnits($item, (int) $index);
+            if ($totalMinor > self::MAX_AMOUNT_MINOR - $minor) {
+                throw new \InvalidArgumentException(
+                    'Součet SEPA dávky překračuje 18 číslic XSD pole.',
+                );
+            }
+            $totalMinor += $minor;
         }
 
         $dom = new \DOMDocument('1.0', 'UTF-8');
@@ -82,9 +97,9 @@ final class SepaPaymentOrderWriter
         $grpHdr = $dom->createElementNS(self::NS, 'GrpHdr');
         $cstmr->appendChild($grpHdr);
         $this->el($dom, $grpHdr, 'MsgId', $msgId);
-        $this->el($dom, $grpHdr, 'CreDtTm', $now->format('Y-m-d\TH:i:s'));
+        $this->el($dom, $grpHdr, 'CreDtTm', $createdAt->format('Y-m-d\TH:i:s'));
         $this->el($dom, $grpHdr, 'NbOfTxs', (string) count($items));
-        $this->el($dom, $grpHdr, 'CtrlSum', $this->fmtAmount($totalAmount));
+        $this->el($dom, $grpHdr, 'CtrlSum', $this->formatMinor($totalMinor));
         $initgPty = $dom->createElementNS(self::NS, 'InitgPty');
         $grpHdr->appendChild($initgPty);
         $this->el($dom, $initgPty, 'Nm', $this->text((string) ($order['initiator_name'] ?? $order['payer_name'] ?? ''), 140) ?: 'Platce');
@@ -95,7 +110,7 @@ final class SepaPaymentOrderWriter
         $this->el($dom, $pmtInf, 'PmtInfId', $msgId);
         $this->el($dom, $pmtInf, 'PmtMtd', 'TRF');
         $this->el($dom, $pmtInf, 'NbOfTxs', (string) count($items));
-        $this->el($dom, $pmtInf, 'CtrlSum', $this->fmtAmount($totalAmount));
+        $this->el($dom, $pmtInf, 'CtrlSum', $this->formatMinor($totalMinor));
 
         $pmtTpInf = $dom->createElementNS(self::NS, 'PmtTpInf');
         $pmtInf->appendChild($pmtTpInf);
@@ -150,32 +165,45 @@ final class SepaPaymentOrderWriter
      */
     private function buildTransaction(\DOMDocument $dom, array $item, int $index, string $currency): \DOMElement
     {
-        $iban = $this->iban->normalize((string) ($item['iban'] ?? ''));
+        $iban = $this->iban->normalize(
+            $this->optionalText($item, 'iban'),
+        );
         if ($iban === '' || !$this->iban->isValid($iban)) {
             throw new \InvalidArgumentException(
                 'Položka #' . ($index + 1) . ' nemá platný IBAN — do SEPA příkazu ji nelze zařadit.'
             );
         }
-        $amount = round((float) ($item['amount'] ?? 0), 2);
-        if ($amount <= 0) {
-            throw new \InvalidArgumentException('Položka #' . ($index + 1) . ' má nekladnou částku.');
-        }
+        $amountMinor = $this->minorUnits($item, $index);
 
         $tx = $dom->createElementNS(self::NS, 'CdtTrfTxInf');
 
         $pmtId = $dom->createElementNS(self::NS, 'PmtId');
         $tx->appendChild($pmtId);
-        $vs = (string) ($item['variable_symbol'] ?? '');
-        $endToEnd = $this->text($vs !== '' ? $vs : ('PLATBA' . ($index + 1)), 35);
-        $this->el($dom, $pmtId, 'EndToEndId', $endToEnd !== '' ? $endToEnd : 'NOTPROVIDED');
+        $vs = $this->optionalText($item, 'variable_symbol');
+        $explicitEndToEnd = $this->optionalText(
+            $item,
+            'end_to_end_id',
+        );
+        $endToEnd = $explicitEndToEnd !== ''
+            ? $this->identifier($explicitEndToEnd, 'EndToEndId')
+            : ($vs !== ''
+                ? $this->identifier($vs, 'variabilní symbol')
+                : 'NOTPROVIDED');
+        $this->el($dom, $pmtId, 'EndToEndId', $endToEnd);
 
         $amt = $dom->createElementNS(self::NS, 'Amt');
         $tx->appendChild($amt);
-        $instdAmt = $dom->createElementNS(self::NS, 'InstdAmt', $this->fmtAmount($amount));
+        $instdAmt = $dom->createElementNS(
+            self::NS,
+            'InstdAmt',
+            $this->formatMinor($amountMinor),
+        );
         $instdAmt->setAttribute('Ccy', $currency);
         $amt->appendChild($instdAmt);
 
-        $bic = $this->normalizedBic((string) ($item['bic'] ?? ''));
+        $bic = $this->normalizedBic(
+            $this->optionalText($item, 'bic'),
+        );
         if ($bic !== '') {
             $cdtrAgt = $dom->createElementNS(self::NS, 'CdtrAgt');
             $tx->appendChild($cdtrAgt);
@@ -186,7 +214,15 @@ final class SepaPaymentOrderWriter
 
         $cdtr = $dom->createElementNS(self::NS, 'Cdtr');
         $tx->appendChild($cdtr);
-        $this->el($dom, $cdtr, 'Nm', $this->text((string) ($item['payee_name'] ?? ''), 140) ?: 'Prijemce');
+        $this->el(
+            $dom,
+            $cdtr,
+            'Nm',
+            $this->text(
+                $this->optionalText($item, 'payee_name'),
+                140,
+            ) ?: 'Prijemce',
+        );
 
         $cdtrAcct = $dom->createElementNS(self::NS, 'CdtrAcct');
         $tx->appendChild($cdtrAcct);
@@ -194,7 +230,10 @@ final class SepaPaymentOrderWriter
         $cdtrAcct->appendChild($cdtrAcctId);
         $this->el($dom, $cdtrAcctId, 'IBAN', $iban);
 
-        $message = $this->text((string) ($item['message'] ?? $vs), 140);
+        $message = $this->text(
+            $this->optionalText($item, 'message', $vs),
+            140,
+        );
         if ($message !== '') {
             $rmtInf = $dom->createElementNS(self::NS, 'RmtInf');
             $tx->appendChild($rmtInf);
@@ -212,9 +251,134 @@ final class SepaPaymentOrderWriter
         return $el;
     }
 
-    private function fmtAmount(float $amount): string
+    /** @param array<string,mixed> $item */
+    private function minorUnits(array $item, int $index): int
     {
-        return number_format($amount, 2, '.', '');
+        if (array_key_exists('amount_minor', $item)) {
+            $minor = $item['amount_minor'];
+            if (!is_int($minor)) {
+                throw new \InvalidArgumentException(
+                    'Položka #' . ($index + 1)
+                    . ' nemá částku v celých minor jednotkách.',
+                );
+            }
+        } else {
+            $amount = $item['amount'] ?? 0;
+            if (!is_int($amount) && !is_float($amount)) {
+                throw new \InvalidArgumentException(
+                    'Položka #' . ($index + 1)
+                    . ' nemá platnou částku.',
+                );
+            }
+            $minor = (int) round($amount * 100);
+        }
+        if ($minor <= 0) {
+            throw new \InvalidArgumentException(
+                'Položka #' . ($index + 1) . ' má nekladnou částku.',
+            );
+        }
+        if ($minor > self::MAX_AMOUNT_MINOR) {
+            throw new \InvalidArgumentException(
+                'Položka #' . ($index + 1)
+                . ' překračuje 18 číslic XSD částky SEPA.',
+            );
+        }
+
+        return $minor;
+    }
+
+    /** @param array<string,mixed> $item */
+    private function optionalText(
+        array $item,
+        string $field,
+        string $default = '',
+    ): string {
+        $value = $item[$field] ?? null;
+        if ($value === null) {
+            return $default;
+        }
+        if (!is_string($value)) {
+            throw new \InvalidArgumentException(
+                "Pole {$field} SEPA položky musí být text.",
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string,mixed> $order
+     * @return non-empty-list<array<string,mixed>>
+     */
+    private function items(array $order): array
+    {
+        $value = $order['items'] ?? null;
+        if (!is_array($value) || !array_is_list($value) || $value === []) {
+            throw new \InvalidArgumentException(
+                'Platební příkaz neobsahuje platný seznam položek.',
+            );
+        }
+        $result = [];
+        foreach ($value as $item) {
+            if (!is_array($item) || array_is_list($item)) {
+                throw new \InvalidArgumentException(
+                    'SEPA položka musí být objekt.',
+                );
+            }
+            $normalized = [];
+            foreach ($item as $key => $fieldValue) {
+                if (!is_string($key)) {
+                    throw new \InvalidArgumentException(
+                        'SEPA položka má neplatný klíč.',
+                    );
+                }
+                $normalized[$key] = $fieldValue;
+            }
+            $result[] = $normalized;
+        }
+
+        return $result;
+    }
+
+    /** @param array<string,mixed> $order */
+    private function requiredText(array $order, string $field): string
+    {
+        $value = $order[$field] ?? null;
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException(
+                "SEPA příkaz nemá platné pole {$field}.",
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $order */
+    private function requiredDate(
+        array $order,
+        string $field,
+    ): \DateTimeImmutable {
+        $value = $order[$field] ?? null;
+        if (!is_string($value) && !$value instanceof \DateTimeInterface) {
+            throw new \InvalidArgumentException(
+                "SEPA příkaz nemá platné pole {$field}.",
+            );
+        }
+
+        return $this->normalizeDate($value);
+    }
+
+    private function formatMinor(int $minor): string
+    {
+        $whole = intdiv($minor, 100);
+        $fraction = $minor % 100;
+
+        return $whole . '.' . str_pad(
+            (string) $fraction,
+            2,
+            '0',
+            STR_PAD_LEFT,
+        );
     }
 
     /**
@@ -226,6 +390,23 @@ final class SepaPaymentOrderWriter
         $s = ExportFilename::transliterate($s);
         $s = trim((string) preg_replace('/\s+/', ' ', $s));
         return mb_substr($s, 0, $maxLen);
+    }
+
+    private function identifier(string $value, string $label): string
+    {
+        $normalized = ExportFilename::transliterate($value);
+        $normalized = trim(
+            (string) preg_replace('/\s+/', ' ', $normalized),
+        );
+        if ($normalized === ''
+            || mb_strlen($normalized, 'UTF-8') > 35
+        ) {
+            throw new \InvalidArgumentException(
+                "{$label} musí mít 1 až 35 znaků.",
+            );
+        }
+
+        return $normalized;
     }
 
     private function normalizedBic(string $bic): string
@@ -240,5 +421,15 @@ final class SepaPaymentOrderWriter
             return \DateTimeImmutable::createFromInterface($date);
         }
         return new \DateTimeImmutable($date);
+    }
+
+    private function normalizeDateTime(
+        string|\DateTimeInterface $dateTime,
+    ): \DateTimeImmutable {
+        if ($dateTime instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($dateTime);
+        }
+
+        return new \DateTimeImmutable($dateTime);
     }
 }

@@ -200,7 +200,8 @@ final class MfaStepUpServiceTest extends TestCase
         // uživatele zamkla ven.
         $policy->expects(self::never())->method('isMethodAllowed');
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
-        $credentials->method('findActiveForUserById')
+        $credentials->expects(self::once())
+            ->method('findActiveForUserById')
             ->with(17, 42)
             ->willReturn(self::storedCredential());
 

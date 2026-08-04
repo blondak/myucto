@@ -1,0 +1,540 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\IncomeTax;
+
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
+use MyInvoice\Service\Payroll\Calculation\DecimalRate;
+use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxCalculator;
+use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxInput;
+use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxResult;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+
+final class MonthlyEmploymentIncomeTaxCalculator
+{
+    private readonly MonthlyAdvanceTaxCalculator $advanceTaxCalculator;
+
+    public function __construct(
+        private readonly PayrollRulesetProvider $rulesets,
+        private readonly EmploymentIncomeTaxPolicy2026 $policy,
+    ) {
+        $this->advanceTaxCalculator = new MonthlyAdvanceTaxCalculator($rulesets);
+    }
+
+    public function calculate(
+        MonthlyEmploymentIncomeTaxInput $input,
+    ): MonthlyEmploymentIncomeTaxResult {
+        $ruleset = $this->rulesets->forCalculation(
+            PayrollRulesetDomain::IncomeTax,
+            $input->calculationDate,
+        );
+        $this->policy->assertCompatibleRuleset($ruleset);
+
+        $issues = [];
+        if (substr($input->calculationDate, 0, 4) !== '2026') {
+            $issues[] = 'unsupported-tax-year';
+        }
+
+        $declarations = array_values(array_filter(
+            $input->declarations,
+            static fn (TaxDeclarationEvidence $evidence): bool => $evidence->isEffective(
+                $input->calculationDate,
+            ),
+        ));
+        if ($declarations === []) {
+            $issues[] = 'tax-declaration-evidence-missing';
+        } elseif (count($declarations) > 1) {
+            $issues[] = 'tax-declaration-conflict';
+        }
+        $declaration = count($declarations) === 1 ? $declarations[0] : null;
+        if ($declaration?->status === TaxDeclarationStatus::Unverified) {
+            $issues[] = 'tax-declaration-unverified';
+        }
+        if ($input->residence->residence === TaxResidence::Unverified) {
+            $issues[] = 'tax-residence-unverified';
+        } elseif (!$input->residence->isEffective($input->calculationDate)) {
+            $issues[] = 'tax-residence-evidence-not-effective';
+        }
+
+        $signed = $declaration?->status === TaxDeclarationStatus::Signed;
+        $bases = [];
+        $groups = [];
+        $relationshipReferences = [];
+        foreach ($input->relationships as $index => $relationship) {
+            if (isset($relationshipReferences[$relationship->relationshipReference])) {
+                $issues[] = 'duplicate-employment-relationship-reference';
+            }
+            $relationshipReferences[$relationship->relationshipReference] = true;
+            $base = $relationship->includedBaseMinorUnits();
+            $bases[$index] = $base;
+            if ($base < 0) {
+                $issues[] = 'negative-relationship-tax-base';
+            }
+            foreach ($relationship->components as $component) {
+                if ($component->treatment === IncomeTaxComponentTreatment::ManualReview) {
+                    $issues[] = 'income-component-tax-treatment-unverified';
+                }
+                if (
+                    $component->treatment === IncomeTaxComponentTreatment::Exempt
+                    && !$component->hasVerifiedTreatmentEvidence($input->calculationDate)
+                ) {
+                    $issues[] = 'income-component-exemption-evidence-unverified';
+                }
+                if ($component->correctionTreatment !== TaxCorrectionTreatment::CurrentMonth) {
+                    $issues[] = 'prior-period-tax-correction-requires-revision';
+                }
+            }
+            $classification = $this->candidateGroup(
+                $relationship,
+                $input->residence->residence,
+                $signed,
+            );
+            $groups[$index] = $classification['group'];
+            if ($classification['issue'] !== null) {
+                $issues[] = $classification['issue'];
+            }
+        }
+
+        $creditResolution = $this->resolveCredits($input, $declaration);
+        $issues = [...$issues, ...$creditResolution['issues']];
+        $childResolution = $this->resolveChildren($input, $declaration);
+        $issues = [...$issues, ...$childResolution['issues']];
+        $issues = array_values(array_unique($issues));
+
+        if ($issues !== []) {
+            $relationships = [];
+            foreach ($input->relationships as $index => $relationship) {
+                $relationships[] = new RelationshipTaxResult(
+                    $relationship->relationshipReference,
+                    $relationship->kind,
+                    $bases[$index],
+                    TaxRegime::ManualReview,
+                    $groups[$index],
+                );
+            }
+
+            return new MonthlyEmploymentIncomeTaxResult(
+                TaxCalculationStatus::ManualReview,
+                $input->calculationDate,
+                $input->employeeReference,
+                $input->payerReference,
+                $relationships,
+                null,
+                [],
+                0,
+                0,
+                $creditResolution['amount'],
+                0,
+                $childResolution['amount'],
+                0,
+                $this->annualResult($input, null, 0, 0, 0, 0),
+                $issues,
+                EmploymentIncomeTaxPolicy2026::ID,
+                $this->policy->canonicalHash,
+                $ruleset->id,
+                $ruleset->canonicalHash,
+            );
+        }
+
+        $groupTotals = ['dpp' => 0, 'other' => 0];
+        foreach ($groups as $index => $group) {
+            if ($group !== null) {
+                $groupTotals[$group] = TaxIntegerMath::add(
+                    $groupTotals[$group],
+                    $bases[$index],
+                );
+            }
+        }
+
+        $relationships = [];
+        $advanceBase = 0;
+        $withholdingBases = ['dpp' => 0, 'other' => 0];
+        foreach ($input->relationships as $index => $relationship) {
+            $group = $groups[$index];
+            $regime = $this->regime(
+                $signed,
+                $group,
+                $group === null ? 0 : $groupTotals[$group],
+            );
+            if ($regime === TaxRegime::Advance) {
+                $advanceBase = TaxIntegerMath::add($advanceBase, $bases[$index]);
+            } elseif ($group !== null) {
+                $withholdingBases[$group] = TaxIntegerMath::add(
+                    $withholdingBases[$group],
+                    $bases[$index],
+                );
+            }
+            $relationships[] = new RelationshipTaxResult(
+                $relationship->relationshipReference,
+                $relationship->kind,
+                $bases[$index],
+                $regime,
+                $regime === TaxRegime::Withholding ? $group : null,
+            );
+        }
+
+        $advanceTax = $this->advanceTaxCalculator->calculate(
+            $input->calculationDate,
+            new MonthlyAdvanceTaxInput(
+                taxableIncomeMinorUnits: $advanceBase,
+                signedDeclaration: $signed,
+                claimTaxpayerCredit: $creditResolution['taxpayer'],
+                otherNonRefundableCreditsMinorUnits: $creditResolution['other'],
+                childCreditMinorUnits: $childResolution['amount'],
+            ),
+        );
+        $withholdingGroups = [];
+        foreach ($withholdingBases as $group => $base) {
+            if ($base === 0) {
+                continue;
+            }
+            $step = CalculationStep::calculate(
+                "monthly-withholding-tax-{$group}",
+                $base,
+                DecimalRate::fromString($this->policy->rate('withholding.rate')),
+                RoundingMode::Floor,
+            );
+            $withholdingGroups[] = new WithholdingTaxGroupResult(
+                $group,
+                $base,
+                intdiv($step->outputMinorUnits, 100) * 100,
+                $step,
+            );
+        }
+        $withholdingBase = 0;
+        foreach ($withholdingBases as $base) {
+            $withholdingBase = TaxIntegerMath::add($withholdingBase, $base);
+        }
+        $withholdingTax = 0;
+        foreach ($withholdingGroups as $group) {
+            $withholdingTax = TaxIntegerMath::add(
+                $withholdingTax,
+                $group->taxMinorUnits,
+            );
+        }
+        $appliedNonRefundable = min(
+            $advanceTax->taxBeforeCreditsMinorUnits,
+            $creditResolution['amount'],
+        );
+        $taxAfterNonRefundable = max(
+            0,
+            $advanceTax->taxBeforeCreditsMinorUnits - $creditResolution['amount'],
+        );
+        $appliedChild = min($taxAfterNonRefundable, $childResolution['amount']);
+
+        return new MonthlyEmploymentIncomeTaxResult(
+            TaxCalculationStatus::Calculated,
+            $input->calculationDate,
+            $input->employeeReference,
+            $input->payerReference,
+            $relationships,
+            $advanceTax,
+            $withholdingGroups,
+            $withholdingBase,
+            $withholdingTax,
+            $creditResolution['amount'],
+            $appliedNonRefundable,
+            $childResolution['amount'],
+            $appliedChild,
+            $this->annualResult(
+                $input,
+                $advanceTax,
+                $withholdingBase,
+                $withholdingTax,
+                $appliedNonRefundable,
+                $appliedChild,
+            ),
+            [],
+            EmploymentIncomeTaxPolicy2026::ID,
+            $this->policy->canonicalHash,
+            $ruleset->id,
+            $ruleset->canonicalHash,
+        );
+    }
+
+    /**
+     * @return array{group:?string,issue:?string}
+     */
+    private function candidateGroup(
+        EmploymentRelationshipTaxInput $relationship,
+        TaxResidence $residence,
+        bool $signed,
+    ): array {
+        if (
+            $relationship->kind === EmploymentRelationshipKind::Dpp
+            && $relationship->otherWithholdingEligibility
+                !== OtherWithholdingEligibility::Automatic
+        ) {
+            return [
+                'group' => null,
+                'issue' => 'relationship-tax-classification-conflict',
+            ];
+        }
+        if (
+            $relationship->kind === EmploymentRelationshipKind::Employment
+            && $relationship->otherWithholdingEligibility
+                === OtherWithholdingEligibility::EligibleVerified
+        ) {
+            return [
+                'group' => null,
+                'issue' => 'relationship-tax-classification-conflict',
+            ];
+        }
+        if (
+            $relationship->kind === EmploymentRelationshipKind::SmallScaleEmployment
+            && $relationship->otherWithholdingEligibility
+                === OtherWithholdingEligibility::IneligibleVerified
+        ) {
+            return [
+                'group' => null,
+                'issue' => 'relationship-tax-classification-conflict',
+            ];
+        }
+        if (
+            $relationship->kind === EmploymentRelationshipKind::StatutoryBody
+            && $residence === TaxResidence::NonResident
+            && $relationship->otherWithholdingEligibility
+                === OtherWithholdingEligibility::EligibleVerified
+        ) {
+            return [
+                'group' => null,
+                'issue' => 'relationship-tax-classification-conflict',
+            ];
+        }
+        if ($signed) {
+            return ['group' => null, 'issue' => null];
+        }
+        if (
+            $relationship->kind === EmploymentRelationshipKind::StatutoryBody
+            && $residence === TaxResidence::NonResident
+        ) {
+            return ['group' => null, 'issue' => null];
+        }
+
+        return match ($relationship->otherWithholdingEligibility) {
+            OtherWithholdingEligibility::EligibleVerified => [
+                'group' => 'other',
+                'issue' => null,
+            ],
+            OtherWithholdingEligibility::IneligibleVerified => [
+                'group' => null,
+                'issue' => null,
+            ],
+            OtherWithholdingEligibility::Unverified => [
+                'group' => null,
+                'issue' => 'other-withholding-eligibility-unverified',
+            ],
+            OtherWithholdingEligibility::Automatic => match ($relationship->kind) {
+                EmploymentRelationshipKind::Employment => [
+                    'group' => null,
+                    'issue' => null,
+                ],
+                EmploymentRelationshipKind::Dpp => [
+                    'group' => 'dpp',
+                    'issue' => null,
+                ],
+                EmploymentRelationshipKind::SmallScaleEmployment => [
+                    'group' => 'other',
+                    'issue' => null,
+                ],
+                EmploymentRelationshipKind::Dpc,
+                EmploymentRelationshipKind::ManagingPartnerDependent,
+                EmploymentRelationshipKind::StatutoryBody => [
+                    'group' => null,
+                    'issue' => 'other-withholding-eligibility-unverified',
+                ],
+            },
+        };
+    }
+
+    private function regime(bool $signed, ?string $group, int $groupBase): TaxRegime
+    {
+        if ($signed || $group === null) {
+            return TaxRegime::Advance;
+        }
+        $maximum = $group === 'dpp'
+            ? $this->policy->money('dpp.withholding.maximum')
+            : $this->policy->money('other.withholding.maximum');
+
+        return $groupBase <= $maximum
+            ? TaxRegime::Withholding
+            : TaxRegime::Advance;
+    }
+
+    /**
+     * @return array{amount:int,other:int,taxpayer:bool,issues:list<string>}
+     */
+    private function resolveCredits(
+        MonthlyEmploymentIncomeTaxInput $input,
+        ?TaxDeclarationEvidence $declaration,
+    ): array {
+        $active = array_values(array_filter(
+            $input->creditClaims,
+            static fn (TaxCreditClaim $claim): bool => $claim->isEffective($input->calculationDate),
+        ));
+        $issues = [];
+        $kinds = [];
+        foreach ($active as $claim) {
+            if ($claim->evidenceStatus !== TaxEvidenceStatus::Verified) {
+                $issues[] = 'tax-credit-evidence-unverified';
+            }
+            if (isset($kinds[$claim->kind->value])) {
+                $issues[] = 'duplicate-tax-credit-claim';
+            }
+            $kinds[$claim->kind->value] = true;
+            if (
+                $input->residence->residence === TaxResidence::NonResident
+                && $claim->kind !== TaxCreditKind::Taxpayer
+            ) {
+                $issues[] = 'nonresident-monthly-credit-not-supported';
+            }
+        }
+        if (
+            isset($kinds[TaxCreditKind::DisabilityBasic->value])
+            && isset($kinds[TaxCreditKind::DisabilityExtended->value])
+        ) {
+            $issues[] = 'disability-credit-conflict';
+        }
+        if ($active !== [] && $declaration?->status !== TaxDeclarationStatus::Signed) {
+            $issues[] = 'tax-credit-requires-signed-declaration';
+        }
+
+        $taxpayer = isset($kinds[TaxCreditKind::Taxpayer->value]);
+        $other = 0;
+        foreach ($active as $claim) {
+            $other = TaxIntegerMath::add($other, match ($claim->kind) {
+                TaxCreditKind::Taxpayer => 0,
+                TaxCreditKind::DisabilityBasic
+                    => $this->policy->money('credit.disability.basic.monthly'),
+                TaxCreditKind::DisabilityExtended
+                    => $this->policy->money('credit.disability.extended.monthly'),
+                TaxCreditKind::ZtpP => $this->policy->money('credit.ztp_p.monthly'),
+            });
+        }
+        $amount = TaxIntegerMath::add($other, $taxpayer
+            ? $this->policy->money('credit.taxpayer.monthly')
+            : 0);
+
+        return [
+            'amount' => $amount,
+            'other' => $other,
+            'taxpayer' => $taxpayer,
+            'issues' => array_values(array_unique($issues)),
+        ];
+    }
+
+    /** @return array{amount:int,issues:list<string>} */
+    private function resolveChildren(
+        MonthlyEmploymentIncomeTaxInput $input,
+        ?TaxDeclarationEvidence $declaration,
+    ): array {
+        $active = array_values(array_filter(
+            $input->childClaims,
+            static fn (TaxChildClaim $claim): bool => $claim->isEffective($input->calculationDate),
+        ));
+        $issues = [];
+        $orders = [];
+        $references = [];
+        foreach ($active as $claim) {
+            if ($claim->evidenceStatus !== TaxEvidenceStatus::Verified) {
+                $issues[] = 'tax-child-evidence-unverified';
+            }
+            if (!$claim->sharedHouseholdConfirmed) {
+                $issues[] = 'tax-child-shared-household-unverified';
+            }
+            if (!$claim->otherClaimantExcluded) {
+                $issues[] = 'tax-child-concurrent-claim-unresolved';
+            }
+            if (isset($orders[$claim->order])) {
+                $issues[] = 'tax-child-order-conflict';
+            }
+            if (isset($references[$claim->childReference])) {
+                $issues[] = 'duplicate-tax-child-claim';
+            }
+            $orders[$claim->order] = true;
+            $references[$claim->childReference] = true;
+        }
+        if ($active !== [] && $declaration?->status !== TaxDeclarationStatus::Signed) {
+            $issues[] = 'tax-child-requires-signed-declaration';
+        }
+        if ($active !== [] && $input->residence->residence !== TaxResidence::CzechResident) {
+            $issues[] = 'nonresident-monthly-child-credit-not-supported';
+        }
+        if ($orders !== []) {
+            ksort($orders);
+            if (array_keys($orders) !== range(1, count($orders))) {
+                $issues[] = 'tax-child-order-gap';
+            }
+        }
+
+        $amount = 0;
+        foreach ($active as $claim) {
+            $credit = match ($claim->order) {
+                1 => $this->policy->money('credit.child.first.monthly'),
+                2 => $this->policy->money('credit.child.second.monthly'),
+                default => $this->policy->money('credit.child.third_and_next.monthly'),
+            };
+            $amount = TaxIntegerMath::add(
+                $amount,
+                $claim->ztpP ? TaxIntegerMath::add($credit, $credit) : $credit,
+            );
+        }
+
+        return [
+            'amount' => $amount,
+            'issues' => array_values(array_unique($issues)),
+        ];
+    }
+
+    private function annualResult(
+        MonthlyEmploymentIncomeTaxInput $input,
+        ?MonthlyAdvanceTaxResult $advanceTax,
+        int $withholdingBase,
+        int $withholdingTax,
+        int $appliedNonRefundable,
+        int $appliedChild,
+    ): AnnualTaxAccumulatorResult {
+        $prior = $input->annualAccumulator
+            ?? AnnualTaxAccumulatorInput::empty((int) substr($input->calculationDate, 0, 4));
+        $calculated = $advanceTax !== null;
+        $currentAdvanceBase = $advanceTax === null
+            ? 0
+            : $advanceTax->taxableIncomeMinorUnits;
+        $currentAdvanceTax = $advanceTax === null
+            ? 0
+            : $advanceTax->taxAfterCreditsMinorUnits;
+        $currentTaxBonus = $advanceTax === null
+            ? 0
+            : $advanceTax->taxBonusMinorUnits;
+        $bonusQualifyingIncome = TaxIntegerMath::add(
+            $prior->bonusQualifyingIncomeMinorUnits,
+            $currentAdvanceBase,
+        );
+
+        return new AnnualTaxAccumulatorResult(
+            $prior->year,
+            TaxIntegerMath::add($prior->completedMonths, $calculated ? 1 : 0),
+            TaxIntegerMath::add($prior->advanceBaseMinorUnits, $currentAdvanceBase),
+            TaxIntegerMath::add($prior->withholdingBaseMinorUnits, $withholdingBase),
+            TaxIntegerMath::add($prior->advanceTaxMinorUnits, $currentAdvanceTax),
+            TaxIntegerMath::add($prior->withholdingTaxMinorUnits, $withholdingTax),
+            TaxIntegerMath::add(
+                $prior->appliedNonRefundableCreditsMinorUnits,
+                $appliedNonRefundable,
+            ),
+            TaxIntegerMath::add(
+                $prior->appliedChildCreditMinorUnits,
+                $appliedChild,
+            ),
+            TaxIntegerMath::add($prior->taxBonusMinorUnits, $currentTaxBonus),
+            $bonusQualifyingIncome,
+            $bonusQualifyingIncome >= $this->policy->money('bonus.minimum_income.yearly'),
+            $input->externalCertificates,
+            false,
+            false,
+        );
+    }
+}

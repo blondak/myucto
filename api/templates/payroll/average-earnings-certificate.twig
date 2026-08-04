@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Potvrzení zaměstnavatele pro Úřad práce ČR</title>
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.1pt; color: #211923; line-height: 1.3; }
+.accent { height: 2mm; background: #98466F; margin-bottom: 3mm; }
+.title { font-size: 16pt; font-weight: bold; color: #351C2B; }
+.subtitle { color: #6B5C66; margin-top: 1mm; }
+.section { margin: 3mm 0 1mm; color: #98466F; font-size: 7.8pt; font-weight: bold; text-transform: uppercase; }
+.grid { width: 100%; border-collapse: collapse; }
+.grid td, .grid th { border: 0.3pt solid #DEC8D4; padding: 1.7mm; vertical-align: top; }
+.grid th { background: #FAF1F6; color: #5F515A; text-align: left; font-size: 6.8pt; }
+.label { color: #7D6E78; font-size: 6.3pt; text-transform: uppercase; }
+.value { margin-top: 0.5mm; font-weight: bold; }
+.amount { font-family: jetbrainsmono, dejavusans, sans-serif; font-size: 15pt; color: #98466F; font-weight: bold; }
+.check { font-size: 9pt; }
+.note { margin-top: 2mm; border: 0.3pt solid #DEC8D4; background: #F8F5F7; padding: 1.7mm; }
+.signature { margin-top: 5mm; width: 100%; border-collapse: collapse; }
+.signature td { width: 50%; vertical-align: bottom; padding-right: 5mm; }
+.line { border-top: 0.3pt solid #7D6E78; padding-top: 1mm; margin-top: 8mm; }
+.mono { font-family: jetbrainsmono, dejavusans, sans-serif; font-size: 5.8pt; color: #7D6E78; }
+</style>
+</head>
+<body>
+{% set relation_labels = {
+  'employment': 'pracovní poměr',
+  'dpc': 'dohoda o pracovní činnosti',
+  'dpp': 'dohoda o provedení práce'
+} %}
+{% set reason_labels = {
+  'none': 'Zaměstnání nebylo skončeno z žádného z níže uvedených zvláštních důvodů.',
+  'gross_breach': 'Zaměstnanec porušil pracovní povinnosti zvlášť hrubým způsobem.',
+  'sickness_regime_breach': 'Zaměstnanec porušil režim dočasně práce neschopného zvlášť hrubým způsobem.',
+  'organizational': 'Organizační důvody.',
+  'health': 'Zdravotní důvody.',
+  'employer_breach': 'Zaměstnavatel porušil podstatnou povinnost.',
+  'employee_unilateral': 'Zaměstnanec ukončil zaměstnání sám.',
+  'agreement': 'Zaměstnanec ukončil zaměstnání dohodou se zaměstnavatelem.'
+} %}
+<div class="accent"></div>
+<div class="title">Potvrzení zaměstnavatele</div>
+<div class="subtitle">Pro účely posouzení nároku na podporu v nezaměstnanosti · § 313 odst. 2 zákoníku práce</div>
+
+<div class="section">I. Údaje o zaměstnání</div>
+<table class="grid">
+  <tr>
+    <td style="width:50%">
+      <div class="label">Zaměstnavatel</div>
+      <div class="value">{{ employer.name }}</div>
+      <div>IČ: {{ employer.identification_number }}</div>
+      <div>{{ employer.address.street_line }}, {{ employer.address.postal_code }} {{ employer.address.city }}</div>
+    </td>
+    <td style="width:50%">
+      <div class="label">Zaměstnanec</div>
+      <div class="value">{{ employee.name }}</div>
+      <div>Datum narození: {{ employee.birth_date|cz_date }}</div>
+      <div>{{ employee.address }}</div>
+    </td>
+  </tr>
+  <tr>
+    <td><div class="label">Právní vztah</div><div class="value">{{ relation_labels[relationship_kind] }}</div></td>
+    <td><div class="label">Trvání</div><div class="value">{{ employment_from|cz_date }} – {{ employment_to|cz_date }}</div></td>
+  </tr>
+</table>
+
+<div class="section">Doby důchodového pojištění v posledních dvou letech</div>
+{% if pension_insurance_periods is empty %}
+  <div class="note">V rámci uvedeného zaměstnání nebyl doložen interval důchodového pojištění.</div>
+{% else %}
+  <table class="grid">
+    <thead><tr><th>Od</th><th>Do</th></tr></thead>
+    <tbody>
+    {% for period in pension_insurance_periods %}
+      <tr><td>{{ period.from|cz_date }}</td><td>{{ period.to|cz_date }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<div class="section">II. Průměrný měsíční čistý výdělek</div>
+<table class="grid">
+  <tr>
+    <td style="width:58%">
+      <div class="label">{{ average_kind == 'actual' ? 'Průměrný' : 'Pravděpodobný' }} měsíční čistý výdělek</div>
+      <div class="amount">{{ average_monthly_net_minor_units|whole_czk }} Kč</div>
+    </td>
+    <td>
+      <div class="label">Schválený podklad</div>
+      <div class="value">{{ average_applicable_year }} / Q{{ average_applicable_quarter }}</div>
+      <div>{{ average_kind == 'actual' ? 'skutečný průměr' : 'pravděpodobný výdělek' }}</div>
+    </td>
+  </tr>
+</table>
+
+<div class="section">III. Další skutečnosti rozhodné pro podporu</div>
+<div class="note">
+  <span class="check">☒</span> {{ reason_labels[termination_reason_kind] }}
+  {% if employee_stated_reason is not null %}
+    <br><strong>Důvod uvedený v písemném rozvázání:</strong> {{ employee_stated_reason }}
+  {% endif %}
+</div>
+
+<table class="signature">
+  <tr>
+    <td>
+      Vystaveno dne {{ issued_at|cz_date }}<br>
+      Zpracoval(a): {{ employer.issuer.name }}<br>
+      Telefon: {{ employer.issuer.phone }}
+    </td>
+    <td><div class="line">Jméno, funkce a podpis oprávněné osoby</div></td>
+  </tr>
+</table>
+<div class="mono">
+Renderer: {{ renderer_version }}<br>
+SHA-256 zdroje: {{ source_snapshot_sha256 }}<br>
+SHA-256 schváleného průměru: {{ average_snapshot_sha256 }}
+</div>
+</body>
+</html>

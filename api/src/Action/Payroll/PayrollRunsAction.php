@@ -1,0 +1,402 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Payroll;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollRunConflictException;
+use MyInvoice\Repository\Payroll\PayrollRunDeletionException;
+use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
+use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
+use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+final class PayrollRunsAction
+{
+    use PayrollActionSupport;
+
+    public function __construct(
+        private readonly PayrollRunCommandService $commands,
+        private readonly PayrollRunRepository $runs,
+        private readonly PayrollRunWorkflow $workflow,
+        private readonly PayrollModuleAccess $access,
+    ) {}
+
+    public function list(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $period = $this->optionalPeriod(
+                $request->getQueryParams()['period'] ?? null,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $items = $this->runs->list(
+            $this->currentSupplierId($request),
+            $period === null ? null : "{$period}-01",
+        );
+        foreach ($items as &$item) {
+            $status = PayrollTimeValue::string(
+                $item['status'] ?? null,
+                'run.status',
+            );
+            $revisionId = ($item['revision_id'] ?? null) === null
+                ? null
+                : PayrollTimeValue::int(
+                    $item['revision_id'],
+                    'run.revision_id',
+                );
+            $item['available_commands'] = array_map(
+                static fn ($command): string => $command->value,
+                $this->workflow->availableCommands(
+                    PayrollRunStatus::from($status),
+                ),
+            );
+            $item['validations'] = $revisionId === null
+                ? []
+                : $this->runs->validations(
+                    $this->currentSupplierId($request),
+                    $revisionId,
+                );
+            $deletion = $this->runs->canDelete(
+                $this->currentSupplierId($request),
+                PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
+            );
+            $item['can_delete'] = $deletion !== null && $deletion->canDelete;
+        }
+        unset($item);
+        return Json::ok($response, ['runs' => $items]);
+    }
+
+    public function create(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.inputs.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $officeId = $body['office_id'] ?? null;
+        if ($officeId !== null) {
+            $officeId = filter_var($officeId, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if (!is_int($officeId)) {
+                return Json::error(
+                    $response,
+                    'validation_failed',
+                    'office_id musí být kladné celé číslo.',
+                    422,
+                );
+            }
+        }
+        try {
+            $run = $this->commands->createRun(
+                $this->currentSupplierId($request),
+                $this->requiredString($body, 'period_start'),
+                $this->requiredString($body, 'payment_date'),
+                $officeId,
+                $this->requiredUserId($request),
+            );
+        } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        return Json::ok($response, ['run' => $run], 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function delete(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.inputs.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var($body['row_version'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $runId = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (!is_int($version) || !is_int($runId)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Smazání vyžaduje platné ID běhu a row_version.',
+                422,
+            );
+        }
+        try {
+            $this->commands->deleteRun(
+                $this->currentSupplierId($request),
+                $runId,
+                $version,
+                $this->requiredUserId($request),
+            );
+        } catch (PayrollRunConflictException $e) {
+            return Json::error(
+                $response,
+                'row_version_conflict',
+                $e->getMessage(),
+                409,
+                ['current_row_version' => $e->currentVersion],
+            );
+        } catch (PayrollRunDeletionException $e) {
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                409,
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, [
+            'deleted' => true,
+            'run_id' => $runId,
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function command(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $command = (string) ($args['command'] ?? '');
+        $permission = match ($command) {
+            'calculate' => 'payroll.calculate',
+            'review', 'request_correction' => 'payroll.review',
+            'approve' => 'payroll.approve',
+            'reopen' => 'payroll.reopen',
+            default => 'payroll.inputs.write',
+        };
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            $permission,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var($body['row_version'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $runId = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $idempotencyKey = trim($request->getHeaderLine('Idempotency-Key'));
+        if (!is_int($version) || !is_int($runId) || $idempotencyKey === '') {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Příkaz vyžaduje row_version a hlavičku Idempotency-Key.',
+                422,
+            );
+        }
+        $reason = isset($body['reason']) && is_string($body['reason'])
+            ? trim($body['reason'])
+            : '';
+        try {
+            $result = $this->dispatch(
+                $command,
+                $this->currentSupplierId($request),
+                $runId,
+                $version,
+                $idempotencyKey,
+                $this->requiredUserId($request),
+                $reason,
+            );
+        } catch (PayrollRunConflictException $e) {
+            return Json::error(
+                $response,
+                'row_version_conflict',
+                $e->getMessage(),
+                409,
+                ['current_row_version' => $e->currentVersion],
+            );
+        } catch (PayrollRunIdempotencyException $e) {
+            return Json::error(
+                $response,
+                'idempotency_conflict',
+                $e->getMessage(),
+                409,
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        return Json::ok($response, $this->serialize($result));
+    }
+
+    private function dispatch(
+        string $command,
+        int $supplierId,
+        int $runId,
+        int $version,
+        string $idempotencyKey,
+        int $userId,
+        string $reason,
+    ): PayrollRunCommandResult {
+        return match ($command) {
+            'lock_inputs' => $this->commands->lockInputs(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'calculate' => $this->commands->calculate(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'review' => $this->commands->review(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'approve' => $this->commands->approve(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'request_correction' => $this->commands->requestCorrection(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $reason,
+            ),
+            'reopen' => $this->commands->reopen(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $reason,
+            ),
+            'cancel' => $this->commands->cancel(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $reason,
+            ),
+            'close' => $this->commands->close(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            default => throw new \InvalidArgumentException(
+                'Nepodporovaný příkaz mzdového běhu.',
+            ),
+        };
+    }
+
+    /** @return array<string,mixed> */
+    private function serialize(PayrollRunCommandResult $result): array
+    {
+        return [
+            'command' => $result->command->value,
+            'from_status' => $result->from->value,
+            'to_status' => $result->to->value,
+            'run' => $result->run,
+            'revision' => $result->revision,
+            'idempotent_replay' => $result->idempotentReplay,
+        ];
+    }
+
+    private function authorize(
+        Request $request,
+        Response $response,
+        string $permission,
+        AccessLevel $level,
+    ): ?Response {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+        }
+        $error = null;
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            $permission,
+            $level,
+            $error,
+        )) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error;
+        }
+        return null;
+    }
+
+    /** @return array<string,mixed> */
+    private function input(Request $request): array
+    {
+        $body = $request->getParsedBody();
+        return is_array($body) ? PayrollTimeValue::row($body, 'request_body') : [];
+    }
+
+    /** @param array<string,mixed> $body */
+    private function requiredString(array $body, string $key): string
+    {
+        $value = $body[$key] ?? null;
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException("Pole {$key} je povinné.");
+        }
+        return trim($value);
+    }
+
+    private function requiredUserId(Request $request): int
+    {
+        return $this->userId($request)
+            ?? throw new \DomainException('Uživatel mzdového příkazu není dostupný.');
+    }
+
+    private function optionalPeriod(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)
+            || preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/D', $value) !== 1
+        ) {
+            throw new \InvalidArgumentException('Období musí mít formát YYYY-MM.');
+        }
+        return $value;
+    }
+}

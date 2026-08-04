@@ -552,7 +552,7 @@ export interface PayrollBreakdown {
   employee_deductions: number
   /** Základ pro zálohu na daň — nad 100 Kč zaokrouhlený na stokoruny nahoru (§38h odst. 1). */
   tax_base: number
-  /** Měsíční hranice vyšší sazby = 4× průměrná mzda (§38ha). */
+  /** Měsíční hranice vyšší sazby = 3× průměrná mzda (§38h odst. 2). */
   tax_high_threshold: number
   /** Část základu nad hranicí, zdaněná 23 % — nula u běžných mezd. */
   tax_high_base: number

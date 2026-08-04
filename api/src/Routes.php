@@ -62,6 +62,36 @@ use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
+use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
+use MyInvoice\Action\Payroll\PayrollActivationAction;
+use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
+use MyInvoice\Action\Payroll\PayrollAbsenceAction;
+use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
+use MyInvoice\Action\Payroll\PayrollComponentsAction;
+use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEnforcementAction;
+use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
+use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentAction;
+use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Action\Payroll\PayrollInputImportsAction;
+use MyInvoice\Action\Payroll\PayrollInputsAction;
+use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
+use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Action\Payroll\PayrollPeopleAction;
+use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
+use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
+use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
+use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
+use MyInvoice\Action\Payroll\PayrollRegzelAction;
+use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
+use MyInvoice\Action\Payroll\PayrollRunsAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
+use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
 use MyInvoice\Action\Settings\SigningProfilesAction;
 use MyInvoice\Action\Settings\SupplierInvoiceCounterAction;
@@ -569,6 +599,225 @@ final class Routes
         $app->get    ('/api/public/work-report/{token:[a-f0-9]{32,128}}',              PublicWorkReportGetAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/request-code', PublicWorkReportRequestCodeAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/verify',       PublicWorkReportVerifyAction::class);
+
+        // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
+        $app->group('/api/payroll', function ($g) {
+            $g->get('/capabilities', PayrollCapabilitiesAction::class);
+            $g->get('/components', [PayrollComponentsAction::class, 'list']);
+            $g->post('/components', [PayrollComponentsAction::class, 'create']);
+            $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
+            $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
+            $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
+            $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/claims', [PayrollEnforcementAction::class, 'addClaim']);
+            $g->put('/enforcement/cases/{id:[0-9]+}/evidence', [PayrollEnforcementAction::class, 'updateEvidence']);
+            $g->post(
+                '/enforcement/cases/{id:[0-9]+}/commands/{command:[a-z_]+}',
+                [PayrollEnforcementAction::class, 'transition'],
+            );
+            $g->put(
+                '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'saveMonthEvidence'],
+            );
+            $g->get(
+                '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'monthEvidence'],
+            );
+            $g->post(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants',
+                [PayrollEnforcementAction::class, 'addDependant'],
+            );
+            $g->get(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants',
+                [PayrollEnforcementAction::class, 'dependants'],
+            );
+            $g->get('/inputs', [PayrollInputsAction::class, 'list']);
+            $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);
+            $g->post('/inputs', [PayrollInputsAction::class, 'create']);
+            $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
+            $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
+            $g->get('/quick-inputs', [PayrollQuickInputsAction::class, 'list']);
+            $g->put('/quick-inputs', [PayrollQuickInputsAction::class, 'save']);
+            $g->get('/recurring-components', [PayrollRecurringComponentsAction::class, 'list']);
+            $g->post('/recurring-components', [PayrollRecurringComponentsAction::class, 'create']);
+            $g->post('/recurring-components/materialize', [PayrollRecurringComponentsAction::class, 'materialize']);
+            $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
+            $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
+            $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
+            $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
+            $g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);
+            $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);
+            $g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);
+            $g->get('/payments/reconciliation', [PayrollPaymentAction::class, 'listReconciliation']);
+            $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
+            $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
+            $g->post(
+                '/payments/batches/{batchId:[0-9]+}/exports',
+                [PayrollPaymentAction::class, 'generateExport'],
+            );
+            $g->post(
+                '/payments/exports/{exportId:[0-9]+}/download-grants',
+                [PayrollPaymentAction::class, 'createDownloadGrant'],
+            );
+            $g->post('/payments/exports/download', [PayrollPaymentAction::class, 'downloadExport']);
+            $g->post(
+                '/revisions/{revisionId:[0-9]+}/payments/liabilities',
+                [PayrollPaymentAction::class, 'materializeLiabilities'],
+            );
+            $g->post(
+                '/revisions/{revisionId:[0-9]+}/payments/net-wage-liabilities',
+                [PayrollPaymentAction::class, 'materializeNetWages'],
+            );
+            $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->post('/runs', [PayrollRunsAction::class, 'create']);
+            $g->delete('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'delete']);
+            $g->post(
+                '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
+                [PayrollRunsAction::class, 'command'],
+            );
+            $g->get('/documents', [PayrollDocumentAction::class, 'list']);
+            $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
+            $g->post(
+                '/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}',
+                [PayrollDocumentAction::class, 'generatePayrollSheet'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/documents/tax-certificate/{kind:advance|withholding}/{year:[0-9]{4}}',
+                [AnnualTaxCertificateAction::class, 'generate'],
+            );
+            $g->post(
+                '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
+                [PayrollDocumentAction::class, 'generateBundle'],
+            );
+            $g->get(
+                '/employments/{id:[0-9]+}/documents/exit',
+                [PayrollEmploymentExitDocumentAction::class, 'list'],
+            );
+            $g->post(
+                '/employments/{id:[0-9]+}/documents/exit/{kind:employment-certificate|average-earnings-certificate}',
+                [PayrollEmploymentExitDocumentAction::class, 'generate'],
+            );
+            $g->post(
+                '/documents/{documentId:[0-9]+}/download-grant',
+                [PayrollDocumentAction::class, 'grant'],
+            );
+            $g->get(
+                '/documents/{documentId:[0-9]+}/download',
+                [PayrollDocumentAction::class, 'download'],
+            );
+            $g->get('/people', [PayrollPeopleAction::class, 'list']);
+            $g->post('/people', [PayrollPeopleAction::class, 'create']);
+            $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
+            $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
+            $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
+            $g->post(
+                '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
+                [PayrollEmploymentAction::class, 'transition'],
+            );
+            $g->put(
+                '/employments/{id:[0-9]+}/checklist/{item_key:[a-z0-9_]+}',
+                [PayrollEmploymentAction::class, 'checklist'],
+            );
+            $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
+            $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
+            $g->put(
+                '/people/{id:[0-9]+}/quick-edit',
+                [PayrollPersonQuickEditAction::class, 'put'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/sensitive-reveal',
+                [PayrollPersonSensitiveRevealAction::class, 'post'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
+                [PayrollPaymentAction::class, 'verifyPersonAccount'],
+            );
+            $g->get(
+                '/submissions/regzel/profile',
+                [PayrollRegzelAction::class, 'profile'],
+            );
+            $g->put(
+                '/submissions/regzel/profile',
+                [PayrollRegzelAction::class, 'saveProfile'],
+            );
+            $g->post(
+                '/submissions/regzel/prepare',
+                [PayrollRegzelAction::class, 'prepare'],
+            );
+            $g->get(
+                '/submissions/regzel/snapshots',
+                [PayrollRegzelAction::class, 'snapshots'],
+            );
+            $g->get(
+                '/submissions/regzel/snapshots/{id:[0-9]+}/xml',
+                [PayrollRegzelAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/overview',
+                PayrollSubmissionOverviewAction::class,
+            );
+            $g->get(
+                '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}',
+                PayrollJmhzPvpojPreviewAction::class,
+            );
+            $g->get(
+                '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}/download',
+                [PayrollJmhzPvpojPreviewAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}',
+                PayrollSubmissionDetailAction::class,
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/artifacts/{artifactId:[0-9]+}/download-grant',
+                [PayrollSubmissionArtifactDownloadAction::class, 'grant'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/artifacts/{artifactId:[0-9]+}/download',
+                [PayrollSubmissionArtifactDownloadAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/health-overviews/{revisionId:[0-9]+}',
+                [PayrollHealthInsuranceOverviewAction::class, 'index'],
+            );
+            $g->get(
+                '/submissions/health-overviews/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/download',
+                [PayrollHealthInsuranceOverviewAction::class, 'download'],
+            );
+            $g->get('/time/month', [PayrollTimeAction::class, 'month']);
+            $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
+            $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
+            $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);
+            $g->post('/time/imports/preview', [PayrollTimeAction::class, 'previewImport']);
+            $g->post('/time/imports', [PayrollTimeAction::class, 'import']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/approve', [PayrollTimeAction::class, 'approve']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
+            $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
+            $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
+            $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
+            $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
+            $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
+            $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
+            $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);
+            $g->put('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'update']);
+            $g->get('/setup-check', [PayrollEmployerPolicyAction::class, 'setupCheck']);
+            $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);
+            $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
+            $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);
+            $g->put('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'update']);
+            $g->get('/time/context', [PayrollAbsenceAction::class, 'context']);
+            $g->get('/time/absences', [PayrollAbsenceAction::class, 'list']);
+            $g->post('/time/absences', [PayrollAbsenceAction::class, 'create']);
+            $g->post('/time/absences/{id:[0-9]+}/decision', [PayrollAbsenceAction::class, 'decision']);
+            $g->post('/time/absences/{id:[0-9]+}/cancel', [PayrollAbsenceAction::class, 'cancel']);
+            $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
+            $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
+            $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
+            $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
+            $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
+            $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
+        });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
         // Vše tenant-scoped (ATTR_CURRENT_ID). Zápisy = účetní|admin, GET = readonly+;

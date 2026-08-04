@@ -89,8 +89,8 @@ final class TaxConstants
      *    13,5 % z vyměřovacího základu (§2 z. 592/1992)
      *  - `employer_social` 24,8 % (§7 odst. 1 písm. a) z. 589/1992)
      *  - `advance_tax` 15 % / `advance_tax_high` 23 % — progresivní zálohová daň
-     *    (§38ha ZDP). Vyšší sazbou se daní jen ČÁST základu nad měsíční hranicí
-     *    `advance_tax_high_threshold`, ne celý základ. Hranice je roční (4× průměrná
+     *    (§38h odst. 2 ZDP). Vyšší sazbou se daní jen ČÁST základu nad měsíční hranicí
+     *    `advance_tax_high_threshold`, ne celý základ. Hranice je měsíční (3× průměrná
      *    mzda), proto sedí v {@see self::TABLE} u konkrétního roku, ne tady.
      */
     private const PAYROLL_2024_PLUS = [
@@ -126,8 +126,8 @@ final class TaxConstants
             'child_bonus_min' => 100,
             'minimum_wage' => 18900,
             'payroll' => self::PAYROLL_2024_PLUS,
-            // §38ha: 4× průměrná mzda měsíčně = social_max_base / 12 (48× ročně).
-            'advance_tax_high_threshold' => 175868, // 4 × 43 967
+            // §38h odst. 2: 3× průměrná mzda měsíčně = social_max_base / 16 (48× ročně).
+            'advance_tax_high_threshold' => 131901, // 3 × 43 967
 
             'child_bonus_min_income' => 113400,
             'spouse_income_limit' => 68000,
@@ -255,7 +255,7 @@ final class TaxConstants
             'child_bonus_min' => 100,
             'minimum_wage' => 20800,
             'payroll' => self::PAYROLL_2024_PLUS,
-            'advance_tax_high_threshold' => 186228, // 4 × 46 557 (= social_max_base / 12)
+            'advance_tax_high_threshold' => 139671, // 3 × 46 557 (= social_max_base / 16)
 
             'child_bonus_min_income' => 124800,
             'spouse_income_limit' => 68000,
@@ -402,7 +402,7 @@ final class TaxConstants
             'child_bonus_min' => 100,
             'minimum_wage' => 22400,
             'payroll' => self::PAYROLL_2024_PLUS,
-            'advance_tax_high_threshold' => 195868, // 4 × 48 967 (= social_max_base / 12)
+            'advance_tax_high_threshold' => 146901, // 3 × 48 967 (= social_max_base / 16)
 
             'child_bonus_min_income' => 134400,
             'spouse_income_limit' => 68000,

@@ -15,7 +15,7 @@ interface NavItem {
 interface NavSection {
   key: string
   title?: string
-  accent?: 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal'
+  accent?: 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal' | 'payroll'
   items: NavItem[]
 }
 
@@ -37,6 +37,7 @@ const ACCENT_PILL: Record<NonNullable<NavSection['accent']>, string> = {
   neutral: 'bg-neutral-100',
   accent:  'bg-accent-50',
   teal:    'bg-teal-50',
+  payroll: 'bg-payroll-50',
 }
 
 const props = defineProps<{

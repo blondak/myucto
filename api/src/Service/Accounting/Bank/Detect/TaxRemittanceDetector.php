@@ -10,6 +10,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Payroll\PayrollPaymentIdentifierResolver;
 use PDO;
 
 final class TaxRemittanceDetector implements BankTransactionDetector
@@ -17,6 +18,7 @@ final class TaxRemittanceDetector implements BankTransactionDetector
     public function __construct(
         private readonly Connection $db,
         private readonly PostingRuleRepository $postingRules,
+        private readonly PayrollPaymentIdentifierResolver $payrollIdentifiers,
     ) {}
 
     public function key(): string
@@ -79,13 +81,58 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         if ($supplier === null) {
             return null;
         }
-        $vsType = $this->vsType($vs, $supplier);
         $account = (string) ($tx['counterparty_account'] ?? '');
+        $employerIdentifier = $this->payrollIdentifiers->matchEmployerRemittance(
+            $supplierId,
+            $vs,
+            (new DateTimeImmutable((string) $tx['posted_at']))->format('Y-m-d'),
+            $account,
+            isset($tx['counterparty_bank']) ? (string) $tx['counterparty_bank'] : null,
+        );
+        if (($employerIdentifier['ambiguous'] ?? false) === true) {
+            return $this->fromRule(
+                $supplierId,
+                OperationType::REMITTANCE_OTHER,
+                'detector',
+                0.40,
+                'insurance.social.paid',
+                'Nejednoznačný identifikátor odvodu zaměstnavatele',
+                null,
+                'remittance_unclassified',
+                false,
+            );
+        }
+        $vsType = $employerIdentifier === null
+            ? $this->vsType($vs, $supplier)
+            : match ($employerIdentifier['operation_type']) {
+                OperationType::REMITTANCE_SOCIAL_EMPLOYER => 'cssz_vsdp',
+                OperationType::REMITTANCE_HEALTH_EMPLOYER => 'health_insurance_number',
+                default => 'other',
+            };
+        $mapTaxpayerType = $employerIdentifier === null
+            ? (string) ($supplier['taxpayer_type'] ?? 'fo')
+            : 'po';
         $prefix = AccountNumberNormalizer::czechAccountPrefix($account);
         $base = AccountNumberNormalizer::czechAccountBase($account);
-        $map = $this->map($vsType, (string) ($supplier['taxpayer_type'] ?? 'fo'), $prefix, $base);
+        $map = $this->map($vsType, $mapTaxpayerType, $prefix, $base);
         if ($map === null) {
             return null;
+        }
+        if ($employerIdentifier !== null
+            && !$employerIdentifier['legacy_fallback']
+            && (string) $map['operation_type'] !== $employerIdentifier['operation_type']
+        ) {
+            return $this->fromRule(
+                $supplierId,
+                OperationType::REMITTANCE_OTHER,
+                'detector',
+                0.40,
+                'insurance.social.paid',
+                'Neshoda účtu a identifikátoru odvodu zaměstnavatele',
+                null,
+                'remittance_unclassified',
+                false,
+            );
         }
         $specificVs = $vsType !== 'other' && (string) $map['vs_type'] === $vsType;
         $specificPrefix = $prefix !== null && $map['account_prefix'] !== null;
@@ -96,9 +143,16 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         $specificAccount = $base !== null && $map['account_number'] !== null;
         $fallback = (string) $map['vs_type'] === 'other'
             && $map['account_prefix'] === null && $map['account_number'] === null;
-        $confidence = $fallback
+        $institutionAccountMatch = $employerIdentifier['account_match'] ?? false;
+        $legacyFallback = $employerIdentifier['legacy_fallback'] ?? false;
+        $confidence = $legacyFallback
+            ? 0.70
+            : ($fallback
             ? 0.40
-            : (($specificVs || $specificAccount) && ($specificPrefix || $specificAccount) ? 0.90 : 0.70);
+            : ($institutionAccountMatch
+                || (($specificVs || $specificAccount) && ($specificPrefix || $specificAccount))
+                ? 0.90
+                : 0.70));
         return $this->fromRule(
             $supplierId,
             (string) $map['operation_type'],
@@ -107,8 +161,10 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             (string) $map['rule_key'],
             (string) $map['label_cs'],
             null,
-            $fallback ? 'remittance_unclassified' : null,
-            (bool) $map['auto_allowed'],
+            $legacyFallback
+                ? 'remittance_unclassified'
+                : ($fallback ? 'remittance_unclassified' : null),
+            !$legacyFallback && (bool) $map['auto_allowed'],
         );
     }
 
@@ -147,8 +203,15 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             return 'other';
         }
         $dic = preg_replace('/\D/', '', strtoupper((string) ($supplier['dic'] ?? ''))) ?? '';
-        $cssz = VariableSymbolNormalizer::forMatching((string) ($supplier['cssz_vsdp'] ?? ''));
-        $health = VariableSymbolNormalizer::forMatching((string) ($supplier['health_insurance_number'] ?? ''));
+        $isNaturalPerson = (string) ($supplier['taxpayer_type'] ?? 'fo') === 'fo';
+        $cssz = $isNaturalPerson
+            ? VariableSymbolNormalizer::forMatching((string) ($supplier['cssz_vsdp'] ?? ''))
+            : '';
+        $health = $isNaturalPerson
+            ? VariableSymbolNormalizer::forMatching(
+                (string) ($supplier['health_insurance_number'] ?? '')
+            )
+            : '';
         return match (true) {
             $dic !== '' && $vs === $dic => 'dic_kmen',
             $cssz !== '' && $vs === $cssz => 'cssz_vsdp',

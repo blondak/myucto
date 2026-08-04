@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Výplatní páska</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.6pt; color: #211923; }
+    .accent { height: 2.2mm; background: #98466F; margin-bottom: 5mm; }
+    .header { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header td { padding: 0; vertical-align: top; }
+    .title { font-size: 20pt; font-weight: bold; color: #351C2B; }
+    .subtitle { margin-top: 1mm; color: #6B5C66; font-size: 8pt; }
+    .period-box { text-align: right; }
+    .period-label { color: #7D6E78; font-size: 7.5pt; text-transform: uppercase; }
+    .period { font-size: 15pt; font-weight: bold; color: #98466F; margin-top: 1mm; }
+    .identity { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .identity td { width: 50%; padding: 3mm 3.5mm; border: 0.35pt solid #DEC8D4; vertical-align: top; }
+    .label { color: #7D6E78; font-size: 7.3pt; text-transform: uppercase; margin-bottom: 1mm; }
+    .identity-name { font-size: 10.5pt; font-weight: bold; color: #351C2B; }
+    .identity-meta { margin-top: 1mm; color: #5F515A; }
+    .section-title { margin: 0 0 1.8mm 0; color: #98466F; font-size: 9pt; font-weight: bold; text-transform: uppercase; }
+    .columns { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .columns td { width: 50%; vertical-align: top; }
+    .column-left { padding-right: 2mm; }
+    .column-right { padding-left: 2mm; }
+    .card { border: 0.35pt solid #DEC8D4; padding: 2.5mm 3mm; }
+    .line-table { width: 100%; border-collapse: collapse; }
+    .line-table td { padding: 1.15mm 0; border-bottom: 0.2pt solid #EEE3E9; }
+    .line-table td.amount { width: 36mm; text-align: right; font-family: jetbrainsmono, dejavusans, sans-serif; white-space: nowrap; }
+    .line-table tr.total td { padding-top: 1.8mm; border-top: 0.5pt solid #98466F; border-bottom: 0; font-weight: bold; }
+    .line-table tr.credit td { color: #3E6B54; }
+    .line-table tr.muted td { color: #7D6E78; }
+    .net-box { margin: 4mm 0; background: #FAF1F6; border: 0.7pt solid #98466F; padding: 3.5mm 4mm; }
+    .net-table { width: 100%; border-collapse: collapse; }
+    .net-table td { padding: 0; vertical-align: middle; }
+    .net-label { color: #6B3951; font-size: 9pt; font-weight: bold; text-transform: uppercase; }
+    .net-value { text-align: right; color: #6B2949; font-family: jetbrainsmono, dejavusans, sans-serif; font-size: 18pt; font-weight: bold; white-space: nowrap; }
+    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .info-table td { width: 50%; vertical-align: top; }
+    .info-left { padding-right: 2mm; }
+    .info-right { padding-left: 2mm; }
+    .note { background: #F8F5F7; padding: 2.5mm 3mm; font-size: 7.7pt; color: #5F515A; line-height: 1.45; }
+    .note strong { color: #351C2B; }
+    .audit { margin-top: 4mm; border-top: 0.35pt solid #DEC8D4; padding-top: 2.2mm; color: #7D6E78; font-size: 6.8pt; }
+    .audit-row { margin-bottom: 0.7mm; }
+    .audit-code { font-family: jetbrainsmono, dejavusans, sans-serif; color: #5F515A; }
+</style>
+</head>
+<body>
+
+<div class="accent"></div>
+
+<table class="header">
+    <tr>
+        <td style="width:68%;">
+            <div class="title">Výplatní páska</div>
+            <div class="subtitle">Přehled měsíční mzdy, zákonných odvodů, daně a srážek</div>
+        </td>
+        <td class="period-box" style="width:32%;">
+            <div class="period-label">Mzdové období</div>
+            <div class="period">{{ period }}</div>
+        </td>
+    </tr>
+</table>
+
+<table class="identity">
+    <tr>
+        <td>
+            <div class="label">Zaměstnavatel</div>
+            <div class="identity-name">{{ employer.name }}</div>
+            <div class="identity-meta">IČO: {{ employer.identification_number }}</div>
+        </td>
+        <td>
+            <div class="label">Zaměstnanec</div>
+            <div class="identity-name">{{ employee.display_name }}</div>
+            <div class="identity-meta">Pracovněprávní vztah: {{ employment_label }}</div>
+        </td>
+    </tr>
+</table>
+
+<table class="columns">
+    <tr>
+        <td class="column-left">
+            <div class="section-title">Příjmy</div>
+            <div class="card">
+                <table class="line-table">
+                    {% for line in income_lines %}
+                    <tr>
+                        <td>{{ line.label }}</td>
+                        <td class="amount">{{ line.amount_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="total">
+                        <td>Hrubá mzda</td>
+                        <td class="amount">{{ gross_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+        <td class="column-right">
+            <div class="section-title">Odvody zaměstnance</div>
+            <div class="card">
+                <table class="line-table">
+                    <tr>
+                        <td>Sociální pojištění</td>
+                        <td class="amount">{{ employee_social_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Zdravotní pojištění</td>
+                        <td class="amount">{{ employee_health_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Doplatek ZP do minima</td>
+                        <td class="amount">{{ health_minimum_top_up_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Daň po slevách</td>
+                        <td class="amount">{{ tax_after_credits_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="credit">
+                        <td>Daňový bonus</td>
+                        <td class="amount">+{{ tax_bonus_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Ostatní srážky</td>
+                        <td class="amount">{{ total_other_deductions_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="total">
+                        <td>Odvody a srážky celkem</td>
+                        <td class="amount">{{ total_employee_deductions_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+</table>
+
+<table class="columns">
+    <tr>
+        <td class="column-left">
+            <div class="section-title">Výpočet daně</div>
+            <div class="card">
+                <table class="line-table">
+                    <tr>
+                        <td>Základ daně</td>
+                        <td class="amount">{{ tax_base_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Daň před slevami</td>
+                        <td class="amount">{{ tax_before_credits_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="credit">
+                        <td>Slevy na dani</td>
+                        <td class="amount">-{{ tax_non_refundable_credits_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="credit">
+                        <td>Zvýhodnění na děti</td>
+                        <td class="amount">-{{ tax_child_credit_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Daň po slevách</td>
+                        <td class="amount">{{ tax_after_credits_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="muted">
+                        <td>Nárok na daňový bonus</td>
+                        <td class="amount">{{ tax_bonus_eligible ? 'Ano' : 'Ne' }}</td>
+                    </tr>
+                    <tr class="credit total">
+                        <td>Daňový bonus</td>
+                        <td class="amount">+{{ tax_bonus_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+        <td class="column-right">
+            <div class="section-title">Ostatní srážky</div>
+            <div class="card">
+                <table class="line-table">
+                    {% for line in other_deduction_lines %}
+                    <tr>
+                        <td>{{ line.label }}</td>
+                        <td class="amount">{{ line.amount_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="muted">
+                        <td>Zaokrouhlovací rozdíl</td>
+                        <td class="amount">{{ rounding_adjustment_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="total">
+                        <td>Srážky celkem</td>
+                        <td class="amount">{{ total_other_deductions_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+</table>
+
+<div class="net-box">
+    <table class="net-table">
+        <tr>
+            <td><div class="net-label">Čistá mzda k výplatě</div></td>
+            <td class="net-value">{{ net_minor_units|minor_money }} {{ currency }}</td>
+        </tr>
+    </table>
+</div>
+
+<table class="info-table">
+    <tr>
+        <td class="info-left">
+            <div class="section-title">Pojistné zaměstnavatele</div>
+            <div class="card">
+                <table class="line-table">
+                    <tr>
+                        <td>Sociální pojištění</td>
+                        <td class="amount">{{ employer_social_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr>
+                        <td>Zdravotní pojištění</td>
+                        <td class="amount">{{ employer_health_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="total">
+                        <td>Náklad zaměstnavatele celkem</td>
+                        <td class="amount">{{ total_employer_cost_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+        <td class="info-right">
+            <div class="section-title">Účetní a výpočtová stopa</div>
+            <div class="note">
+                <strong>Kontace:</strong> hrubá mzda {{ accounting.gross }}, pojistné zaměstnavatele
+                {{ accounting.employer_insurance }}. Výplatní páska je informační doklad, samotný
+                účetní zápis vzniká odděleně z uzavřené mzdové revize.<br>
+                <strong>Zaokrouhlení:</strong> výpočet pracuje v haléřích bez plovoucí desetinné
+                aritmetiky. Zaokrouhlovací rozdíl je samostatně uveden a je zahrnut v čisté mzdě.
+            </div>
+        </td>
+    </tr>
+</table>
+
+<div class="audit">
+    <div class="audit-row">Revize: <span class="audit-code">{{ revision_id }}</span> | Renderer: <span class="audit-code">{{ renderer_version }}</span></div>
+    <div class="audit-row">Otisk zdrojového snapshotu SHA-256: <span class="audit-code">{{ source_snapshot_sha256 }}</span></div>
+    <div>SHA-256 výsledného PDF se vypočítá po renderu a ukládá se v metadatech vedle dokumentu.</div>
+</div>
+
+</body>
+</html>

@@ -33,6 +33,7 @@ return [
         'pepper' => 'CHANGE-ME',                     // doplňková sůl k password_hash, 32B base64: openssl rand -base64 32
         'secret_encryption_key' => '',               // 32B base64 pro AES-256-GCM (TOTP secrets); openssl rand -base64 32. Pokud prázdné, fallback HKDF z pepperu.
         'secret_encryption_previous_keys' => [],      // při rotaci sem dočasně vlož staré 32B base64 klíče; nové zápisy používají pouze aktuální klíč
+        'payroll_hash_key' => '',                    // volitelný oddělený 32B base64 klíč pro HMAC citlivých mzdových identifikátorů; fallback je doménově oddělený HKDF z pepperu
         'timezone' => 'Europe/Prague',               // PHP date_default_timezone_set
         'locale_default' => 'cs',                    // jazyk UI při prvním načtení (před přihlášením)
     ],
