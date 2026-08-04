@@ -221,6 +221,14 @@ mění s kontrolou jejich verze; schválený nebo uzamčený vstup formulář ni
 nepřepíše. Pokud základní mzdu už spravuje pravidelný či jiný měsíční vstup,
 rychlý formulář ji zobrazí pouze pro čtení.
 
+Částky zadávej v Kč s nejvýše dvěma desetinnými místy a hodiny s nejvýše
+třemi. Prázdná hodnota neznamená nulu; pokud složka v měsíci není, zadej
+**0**. Formulář označí konkrétní chybné pole a rozliší chybějící hodnotu,
+neplatný formát, záporné číslo a překročení podporovaného rozsahu. Pokud se
+uložení nepodaří například proto, že stejný vstup mezitím změnil jiný
+uživatel, přesný důvod zůstane viditelný nad formulářem. Před dalším pokusem
+načti aktuální měsíc tlačítkem **Obnovit** a změny zkontroluj.
+
 ## 56a.10 Absence, dovolená a DPN
 
 V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
@@ -267,6 +275,17 @@ Uzamknutí vytvoří neměnný snapshot zaměstnanců, vztahů, složek, data v�
 a měsíčních podkladů srážek. Pozdější změna živé karty už rozpracovanou revizi
 nepřepíše. Oprava schváleného měsíce vytváří novou revizi; původní zůstává
 dohledatelná.
+
+Po výpočtu je u běhu dostupný **Rozpad daně ze závislé činnosti**. Pro každého
+zaměstnance ukazuje zdanitelný a zákonně zaokrouhlený základ, základ a sazbu
+jednotlivých pásem, daň před slevami, uplatněné a skutečně použité slevy,
+zvýhodnění na děti, daňový bonus a případnou srážkovou daň. U souběhu vztahů
+je vidět, který příjem spadl do zálohového nebo srážkového režimu.
+
+Stav **Vyžaduje ruční kontrolu** není vypočtená nula. Rozpad vypíše konkrétní
+důvody, například neověřené prohlášení k dani, rezidenci nebo nárok na dítě.
+Nejdřív oprav podklad na kartě osoby a potom vytvoř novou revizi výpočtu;
+historický snapshot se zpětně nemění.
 
 Výpočet odděluje hotovost zahrnutou do exekučního základu od částek, které se
 nesrážejí, například správně klasifikovaných cestovních náhrad. Vypočtená

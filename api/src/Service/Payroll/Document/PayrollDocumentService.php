@@ -241,6 +241,138 @@ class PayrollDocumentService
     }
 
     /** @return array<string,mixed> */
+    public function archiveEmploymentExitPdf(
+        int $supplierId,
+        int $employmentExitRevisionId,
+        int $employeeId,
+        PayrollArtifact $artifact,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        if (!in_array($artifact->kind, [
+            PayrollDocumentKind::EmploymentCertificate,
+            PayrollDocumentKind::AverageEarningsCertificate,
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Tento archiv ukončení vztahu nepodporuje zadaný druh dokumentu.',
+            );
+        }
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
+            throw new \InvalidArgumentException(
+                'Payroll document idempotency key is invalid.',
+            );
+        }
+        $idempotencyKeyHash = hash('sha256', $idempotencyKey);
+        $existing = $this->documents->findByIdempotency(
+            $supplierId,
+            $idempotencyKeyHash,
+        );
+        if ($existing !== null) {
+            if (
+                $existing['run_id'] !== null
+                || $existing['revision_id'] !== null
+                || $existing['annual_revision_id'] !== null
+                || (int) $existing['employment_exit_revision_id']
+                    !== $employmentExitRevisionId
+                || $existing['employee_id'] !== $employeeId
+                || $existing['document_kind'] !== $artifact->kind->value
+                || $existing['source_snapshot_hash']
+                    !== $artifact->sourceSnapshotHash
+            ) {
+                throw new \RuntimeException(
+                    'Payroll document idempotency key was reused for another request.',
+                );
+            }
+            return $existing;
+        }
+        $exitRevision = $this->documents->approvedEmploymentExitRevision(
+            $supplierId,
+            $employmentExitRevisionId,
+        ) ?? throw new \RuntimeException(
+            'Výstupní dokument vyžaduje schválený snapshot ukončení vztahu.',
+        );
+        if ((int) $exitRevision['employee_id'] !== $employeeId
+            || $exitRevision['purpose'] !== $artifact->kind->value
+            || !hash_equals(
+                (string) $exitRevision['snapshot_hash'],
+                $artifact->sourceSnapshotHash,
+            )
+        ) {
+            throw new \RuntimeException(
+                'Výstupní dokument neodpovídá snapshotu ukončení vztahu.',
+            );
+        }
+        $latest = $this->documents->latestForEmploymentExitKind(
+            $supplierId,
+            (int) $exitRevision['employment_id'],
+            (string) $exitRevision['purpose'],
+            $artifact->kind->value,
+        );
+        $supersedesDocumentId = null;
+        $documentRevisionNo = 1;
+        if ($latest !== null) {
+            if ((int) $latest['employment_exit_revision_id']
+                === $employmentExitRevisionId
+            ) {
+                if (!hash_equals(
+                    (string) $latest['source_snapshot_hash'],
+                    $artifact->sourceSnapshotHash,
+                )) {
+                    throw new \RuntimeException(
+                        'Revize ukončení již má dokument s jiným zdrojovým otiskem.',
+                    );
+                }
+                if (
+                    $latest['template_version'] === $artifact->templateVersion
+                    && $latest['renderer_version'] === $artifact->rendererVersion
+                ) {
+                    return $latest;
+                }
+            } elseif (
+                (int) $latest['employment_exit_revision_no']
+                >= (int) $exitRevision['revision_no']
+            ) {
+                throw new \RuntimeException(
+                    'Výstupní dokument nelze nahradit starší revizí ukončení.',
+                );
+            }
+            $supersedesDocumentId = (int) $latest['id'];
+            $documentRevisionNo = (int) $latest['document_revision_no'] + 1;
+        }
+        $stored = $this->storage->store(
+            $supplierId,
+            $artifact->bytes,
+            $storageScope,
+        );
+        return $this->documents->insertOrGet([
+            'supplier_id' => $supplierId,
+            'run_id' => null,
+            'revision_id' => null,
+            'annual_revision_id' => null,
+            'employment_exit_revision_id' => $employmentExitRevisionId,
+            'employee_id' => $employeeId,
+            'document_kind' => $artifact->kind->value,
+            'document_revision_no' => $documentRevisionNo,
+            'supersedes_document_id' => $supersedesDocumentId,
+            'source_snapshot_hash' => $artifact->sourceSnapshotHash,
+            'revision_snapshot_hash' => $exitRevision['snapshot_hash'],
+            'template_version' => $artifact->templateVersion,
+            'renderer_version' => $artifact->rendererVersion,
+            'file_sha256' => $stored['file_sha256'],
+            'size_bytes' => $stored['size_bytes'],
+            'mime_type' => $artifact->mimeType,
+            'storage_key' => $stored['storage_key'],
+            'suggested_filename' => $artifact->suggestedFilename,
+            'manifest_json' => $artifact->manifest === null
+                ? null
+                : CanonicalJson::encode($artifact->manifest),
+            'idempotency_key_hash' => $idempotencyKeyHash,
+            'created_by' => $actorUserId,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
     public function generateMonthlyBundle(
         int $supplierId,
         int $runId,

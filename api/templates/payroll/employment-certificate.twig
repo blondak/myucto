@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Potvrzení o zaměstnání</title>
+<style>
+body { font-family: montserrat, dejavusans, sans-serif; font-size: 8.2pt; color: #211923; line-height: 1.35; }
+.accent { height: 2mm; background: #98466F; margin-bottom: 4mm; }
+.title { font-size: 19pt; font-weight: bold; color: #351C2B; }
+.subtitle { margin-top: 1mm; color: #6B5C66; }
+.section { margin: 4mm 0 1.5mm; color: #98466F; font-size: 8pt; font-weight: bold; text-transform: uppercase; }
+.grid { width: 100%; border-collapse: collapse; }
+.grid td, .grid th { border: 0.3pt solid #DEC8D4; padding: 2mm; vertical-align: top; }
+.grid th { background: #FAF1F6; color: #5F515A; text-align: left; font-size: 7pt; }
+.label { color: #7D6E78; font-size: 6.5pt; text-transform: uppercase; }
+.value { margin-top: 0.7mm; font-weight: bold; }
+.muted { color: #6B5C66; }
+.note { margin-top: 3mm; border: 0.3pt solid #DEC8D4; background: #F8F5F7; padding: 2mm; }
+.signature { margin-top: 8mm; width: 100%; border-collapse: collapse; }
+.signature td { width: 50%; vertical-align: bottom; padding-right: 5mm; }
+.line { border-top: 0.3pt solid #7D6E78; padding-top: 1.2mm; margin-top: 9mm; }
+.mono { font-family: jetbrainsmono, dejavusans, sans-serif; font-size: 6pt; }
+</style>
+</head>
+<body>
+{% set relation_labels = {
+  'employment': 'pracovní poměr',
+  'dpc': 'dohoda o pracovní činnosti',
+  'dpp': 'dohoda o provedení práce'
+} %}
+<div class="accent"></div>
+<div class="title">Potvrzení o zaměstnání</div>
+<div class="subtitle">Vydané podle § 313 odst. 1 zákoníku práce při skončení pracovněprávního vztahu</div>
+
+<div class="section">Zaměstnavatel a zaměstnanec</div>
+<table class="grid">
+  <tr>
+    <td style="width:50%">
+      <div class="label">Zaměstnavatel</div>
+      <div class="value">{{ employer.name }}</div>
+      <div>IČ: {{ employer.identification_number }}</div>
+      <div>{{ employer.address.street_line }}, {{ employer.address.postal_code }} {{ employer.address.city }}</div>
+    </td>
+    <td style="width:50%">
+      <div class="label">Zaměstnanec</div>
+      <div class="value">{{ employee.name }}</div>
+      <div>Datum narození: {{ employee.birth_date|cz_date }}</div>
+      <div>{{ employee.address }}</div>
+    </td>
+  </tr>
+</table>
+
+<div class="section">Údaje o zaměstnání</div>
+<table class="grid">
+  <tr>
+    <td><div class="label">Právní vztah</div><div class="value">{{ relation_labels[relationship_kind] }}</div></td>
+    <td><div class="label">Trvání</div><div class="value">{{ employment_from|cz_date }} – {{ employment_to|cz_date }}</div></td>
+  </tr>
+  <tr>
+    <td><div class="label">Druh konaných prací</div><div class="value">{{ work_description }}</div></td>
+    <td><div class="label">Dosažená kvalifikace</div><div class="value">{{ achieved_qualification }}</div></td>
+  </tr>
+  {% if relationship_kind == 'dpp' %}
+  <tr>
+    <td colspan="2">
+      <div class="label">Zákonný důvod vydání potvrzení pro DPP</div>
+      <div class="value">{{ dpp_issuance_basis == 'sickness_insurance' ? 'účast na nemocenském pojištění' : 'provádění srážek ze mzdy' }}</div>
+    </td>
+  </tr>
+  {% endif %}
+</table>
+
+<div class="section">Expoziční doba</div>
+{% if exposure_facts is empty %}
+  <div class="note">Nebyla evidována odpracovaná doba ani jiná skutečnost rozhodná pro dosažení nejvýše přípustné expoziční doby.</div>
+{% else %}
+  <table class="grid">
+    <thead><tr><th>Ověřená skutečnost rozhodná pro expoziční dobu</th></tr></thead>
+    <tbody>
+    {% for fact in exposure_facts %}
+      <tr><td>{{ fact }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<div class="section">Pokračující srážky ze mzdy</div>
+{% if deductions is empty %}
+  <div class="note">Ke dni skončení pracovněprávního vztahu nebyla evidována srážka, kterou má další plátce mzdy dále provádět.</div>
+{% else %}
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Oprávněný / rozhodnutí</th>
+        <th>Pohledávka</th>
+        <th>Dosud sraženo</th>
+        <th>Zbývá</th>
+        <th>Pořadí / orgán</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for deduction in deductions %}
+      <tr>
+        <td><strong>{{ deduction.beneficiary }}</strong><br>{{ deduction.decision_reference }}</td>
+        <td>{{ deduction.claim_amount_minor_units|minor_money }} Kč</td>
+        <td>{{ deduction.withheld_amount_minor_units|minor_money }} Kč</td>
+        <td>{{ deduction.remaining_amount_minor_units|minor_money }} Kč</td>
+        <td>{{ deduction.priority_date|cz_date }}<br>{{ deduction.ordering_authority }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<div class="section">Pracovní kategorie před 1. lednem 1993</div>
+{% if pre1993_pension_category_periods is empty %}
+  <div class="note">Nebyla evidována započitatelná doba zaměstnání v I. ani II. pracovní kategorii před 1. lednem 1993.</div>
+{% else %}
+  <table class="grid">
+    <thead><tr><th>Kategorie</th><th>Od</th><th>Do</th></tr></thead>
+    <tbody>
+    {% for period in pre1993_pension_category_periods %}
+      <tr><td>{{ period.category }}</td><td>{{ period.from|cz_date }}</td><td>{{ period.to|cz_date }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<div class="note">
+Průměrný výdělek, důvod skončení a další údaje pro posouzení podpory v nezaměstnanosti nejsou
+součástí tohoto potvrzení. Uvádějí se na žádost zaměstnance v odděleném potvrzení podle § 313 odst. 2 zákoníku práce.
+</div>
+
+<table class="signature">
+  <tr>
+    <td>
+      Vystaveno dne {{ issued_at|cz_date }}<br>
+      Zpracoval(a): {{ employer.issuer.name }}<br>
+      {{ employer.issuer.email }} · {{ employer.issuer.phone }}
+    </td>
+    <td><div class="line">Jméno, funkce a podpis oprávněné osoby</div></td>
+  </tr>
+</table>
+<div class="muted mono">Renderer: {{ renderer_version }} · SHA-256 zdroje: {{ source_snapshot_sha256 }}</div>
+</body>
+</html>

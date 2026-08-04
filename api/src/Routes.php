@@ -70,6 +70,7 @@ use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
+use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
@@ -78,6 +79,7 @@ use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
+use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
@@ -701,6 +703,10 @@ final class Routes
             $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
             $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
             $g->post(
+                '/people/{id:[0-9]+}/sensitive-reveal',
+                [PayrollPersonSensitiveRevealAction::class, 'post'],
+            );
+            $g->post(
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
                 [PayrollPaymentAction::class, 'verifyPersonAccount'],
             );
@@ -717,6 +723,11 @@ final class Routes
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
+            $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
+            $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);
+            $g->put('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'update']);
+            $g->get('/setup-check', [PayrollEmployerPolicyAction::class, 'setupCheck']);
             $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);
             $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
             $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);

@@ -203,6 +203,20 @@ final class PayrollDocumentRepository
     }
 
     /** @return array<string,mixed>|null */
+    public function approvedEmploymentExitRevision(
+        int $supplierId,
+        int $employmentExitRevisionId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_employment_exit_revisions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentExitRevisionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
+    /** @return array<string,mixed>|null */
     public function latestForRunKind(
         int $supplierId,
         int $runId,
@@ -257,6 +271,40 @@ final class PayrollDocumentRepository
             $supplierId,
             $employeeId,
             $taxYear,
+            $purpose,
+            $documentKind,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function latestForEmploymentExitKind(
+        int $supplierId,
+        int $employmentId,
+        string $purpose,
+        string $documentKind,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    exit_revision.employment_id,
+                    exit_revision.employment_end_date,
+                    exit_revision.purpose,
+                    exit_revision.revision_no AS employment_exit_revision_no
+               FROM payroll_generated_documents document
+               JOIN payroll_employment_exit_revisions exit_revision
+                 ON exit_revision.supplier_id = document.supplier_id
+                AND exit_revision.id = document.employment_exit_revision_id
+              WHERE document.supplier_id = ?
+                AND exit_revision.employment_id = ?
+                AND exit_revision.purpose = ?
+                AND document.document_kind = ?
+              ORDER BY document.document_revision_no DESC, document.id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([
+            $supplierId,
+            $employmentId,
             $purpose,
             $documentKind,
         ]);
@@ -375,13 +423,13 @@ final class PayrollDocumentRepository
         $stmt = $pdo->prepare(
             'INSERT INTO payroll_generated_documents
                 (supplier_id, run_id, revision_id, annual_revision_id,
-                 employee_id, document_kind,
+                 employment_exit_revision_id, employee_id, document_kind,
                  document_revision_no, supersedes_document_id, source_snapshot_hash,
                  revision_snapshot_hash,
                  template_version, renderer_version, file_sha256, size_bytes,
                   mime_type, storage_key, suggested_filename, manifest_json,
                   idempotency_key_hash, created_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      UNHEX(?), ?, COALESCE(?, CURRENT_TIMESTAMP))'
         );
         try {
@@ -390,6 +438,7 @@ final class PayrollDocumentRepository
                 $record['run_id'],
                 $record['revision_id'],
                 $record['annual_revision_id'] ?? null,
+                $record['employment_exit_revision_id'] ?? null,
                 $record['employee_id'],
                 $record['document_kind'],
                 $record['document_revision_no'],
@@ -446,6 +495,8 @@ final class PayrollDocumentRepository
             || $found['run_id'] !== $record['run_id']
             || $found['revision_id'] !== $record['revision_id']
             || $found['annual_revision_id'] !== ($record['annual_revision_id'] ?? null)
+            || $found['employment_exit_revision_id']
+                !== ($record['employment_exit_revision_id'] ?? null)
         ) {
             throw new \RuntimeException('Payroll document idempotency key was reused for another request.');
         }
@@ -511,6 +562,7 @@ final class PayrollDocumentRepository
         foreach ([
             'id', 'supplier_id', 'document_revision_no',
             'size_bytes', 'revision_no', 'annual_revision_no', 'tax_year',
+            'employment_id', 'employment_exit_revision_no',
         ] as $key) {
             if (array_key_exists($key, $row)) {
                 $row[$key] = (int) $row[$key];
@@ -522,6 +574,7 @@ final class PayrollDocumentRepository
             'created_by',
             'office_id',
             'annual_revision_id',
+            'employment_exit_revision_id',
             'run_id',
             'revision_id',
         ] as $key) {

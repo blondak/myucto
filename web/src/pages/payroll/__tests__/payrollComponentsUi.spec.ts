@@ -5,6 +5,7 @@ import {
   localPayrollPeriod,
   monthStart,
   parsePayrollAmountToMinor,
+  parsePayrollHoursToMilli,
   payrollEmploymentOptions,
   payrollImportFingerprint,
   payrollImportIssues,
@@ -92,6 +93,13 @@ describe('payrollComponentsUi', () => {
     expect(parsePayrollAmountToMinor('12,345')).toBeNull()
     expect(payrollMinorToInput(123456)).toBe('1234,56')
     expect(monthStart('2026-06')).toBe('2026-06-01')
+  })
+
+  it('accepts at most thousandths of an overtime hour without rounding user input', () => {
+    expect(parsePayrollHoursToMilli('1,25')).toBe(1250)
+    expect(parsePayrollHoursToMilli('0.001')).toBe(1)
+    expect(parsePayrollHoursToMilli('1.2345')).toBeNull()
+    expect(parsePayrollHoursToMilli('-1')).toBeNull()
   })
 
   it('selects the payroll period from local time around midnight', () => {

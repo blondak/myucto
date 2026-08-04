@@ -15,6 +15,7 @@ import {
   formatPayrollMinor,
   localPayrollPeriod,
   parsePayrollAmountToMinor,
+  parsePayrollHoursToMilli,
   payrollMinorToInput,
 } from '@/pages/payroll/payrollComponentsUi'
 
@@ -25,6 +26,18 @@ interface UiRow extends PayrollQuickInputRow {
   bonusAmount: string
 }
 
+type ValidationCode =
+  | 'amount_required'
+  | 'amount_format'
+  | 'amount_non_negative'
+  | 'amount_limit'
+  | 'hours_required'
+  | 'hours_format'
+  | 'hours_non_negative'
+  | 'hours_limit'
+
+const MAX_AMOUNT_MINOR = 1_000_000_000_000
+const MAX_OVERTIME_HOURS_MILLI = 1_000_000
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
@@ -32,6 +45,7 @@ const period = ref(localPayrollPeriod())
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<UiRow[]>([])
+const saveError = ref<string | null>(null)
 let loadGeneration = 0
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const hasBlockingRows = computed(() => rows.value.some(row =>
@@ -62,27 +76,96 @@ function parsedAmount(value: string): number | null {
 }
 
 function parsedHoursMilli(row: UiRow): number | null {
-  if (row.overtimeHours.trim() === '') return null
-  const parsed = Number(row.overtimeHours.replace(',', '.'))
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 1000) : null
+  return parsePayrollHoursToMilli(row.overtimeHours)
+}
+
+function amountError(value: string): ValidationCode | null {
+  if (value.trim() === '') return 'amount_required'
+  const parsed = parsedAmount(value)
+  if (parsed === null) return 'amount_format'
+  if (parsed < 0) return 'amount_non_negative'
+  if (parsed > MAX_AMOUNT_MINOR) return 'amount_limit'
+  return null
+}
+
+function hoursError(value: string): ValidationCode | null {
+  const normalized = value.trim()
+  if (normalized === '') return 'hours_required'
+  if (normalized.startsWith('-')) return 'hours_non_negative'
+  const parsed = parsePayrollHoursToMilli(normalized)
+  if (parsed === null) return 'hours_format'
+  if (parsed > MAX_OVERTIME_HOURS_MILLI) return 'hours_limit'
+  return null
+}
+
+function baseError(row: UiRow): ValidationCode | null {
+  return row.base_managed_elsewhere || !editable(row.inputs.base)
+    ? null
+    : amountError(row.baseAmount)
+}
+
+function bonusError(row: UiRow): ValidationCode | null {
+  return row.bonus_managed_elsewhere || !editable(row.inputs.bonus)
+    ? null
+    : amountError(row.bonusAmount)
+}
+
+function overtimeError(row: UiRow): ValidationCode | null {
+  if (row.overtime_managed_elsewhere || !editable(row.inputs.overtime)) return null
+  return row.overtime_mode === 'hours'
+    ? hoursError(row.overtimeHours)
+    : amountError(row.overtimeAmount)
 }
 
 function rowInvalid(row: UiRow): boolean {
-  if (!row.base_managed_elsewhere && editable(row.inputs.base)
-    && parsedAmount(row.baseAmount) === null) return true
-  if (!row.bonus_managed_elsewhere && editable(row.inputs.bonus)
-    && parsedAmount(row.bonusAmount) === null) return true
-  if (row.overtime_managed_elsewhere || !editable(row.inputs.overtime)) return false
-  return row.overtime_mode === 'hours'
-    ? parsedHoursMilli(row) === null
-    : parsedAmount(row.overtimeAmount) === null
+  return baseError(row) !== null
+    || overtimeError(row) !== null
+    || bonusError(row) !== null
 }
 
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
+const invalidFieldCount = computed(() => rows.value.reduce(
+  (count, row) => count
+    + Number(baseError(row) !== null)
+    + Number(overtimeError(row) !== null)
+    + Number(bonusError(row) !== null),
+  0,
+))
+
+function validationMessage(code: ValidationCode | null): string {
+  return code === null ? '' : t(`payroll.quick_inputs.validation.${code}`)
+}
+
+function fieldClass(error: ValidationCode | null, alignRight = false): string[] {
+  return [
+    'h-10 rounded-md border bg-surface px-3 text-sm text-neutral-900 outline-none',
+    'focus:ring-2 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
+    alignRight ? 'text-right tabular-nums' : '',
+    error === null
+      ? 'border-neutral-300 focus:border-payroll-500 focus:ring-payroll-500/20'
+      : 'border-danger-400 focus:border-danger-500 focus:ring-danger-500/20',
+  ]
+}
+
+function modeButtonClass(active: boolean): string[] {
+  return [
+    'h-9 cursor-pointer rounded-md border px-3 text-xs font-medium transition-colors',
+    'disabled:cursor-not-allowed disabled:opacity-50',
+    active
+      ? 'border-payroll-600 bg-payroll-50 text-payroll-700'
+      : 'border-neutral-300 bg-surface text-neutral-600 hover:border-payroll-300 hover:text-payroll-700',
+  ]
+}
+
+function validAmount(value: string): number {
+  const parsed = parsedAmount(value)
+  return parsed !== null && parsed >= 0 && parsed <= MAX_AMOUNT_MINOR ? parsed : 0
+}
 
 function overtimePreview(row: UiRow): number {
-  if (row.overtime_mode === 'amount') return parsedAmount(row.overtimeAmount) ?? 0
+  if (row.overtime_mode === 'amount') return validAmount(row.overtimeAmount)
   const hours = parsedHoursMilli(row)
+  if (hours === null || hours > MAX_OVERTIME_HOURS_MILLI) return 0
   if (row.inputs.overtime && row.inputs.overtime.quantity_milliunits === hours) {
     return row.inputs.overtime.amount_minor
   }
@@ -91,9 +174,9 @@ function overtimePreview(row: UiRow): number {
 }
 
 function grossPreview(row: UiRow): number {
-  return (parsedAmount(row.baseAmount) ?? 0)
+  return validAmount(row.baseAmount)
     + overtimePreview(row)
-    + (parsedAmount(row.bonusAmount) ?? 0)
+    + validAmount(row.bonusAmount)
     + row.other_amount_minor
 }
 
@@ -101,6 +184,7 @@ async function load(): Promise<void> {
   const requestedPeriod = period.value
   const generation = ++loadGeneration
   loading.value = true
+  saveError.value = null
   try {
     const month = await payrollApi.quickInputs(requestedPeriod)
     if (generation !== loadGeneration || period.value !== requestedPeriod
@@ -150,6 +234,7 @@ async function save(): Promise<void> {
   const requestedPeriod = period.value
   const generation = loadGeneration
   saving.value = true
+  saveError.value = null
   try {
     const month = await payrollApi.saveQuickInputs(payload())
     if (generation !== loadGeneration || period.value !== requestedPeriod
@@ -157,7 +242,8 @@ async function save(): Promise<void> {
     rows.value = month.items.map(toUi)
     toast.success(t('payroll.quick_inputs.saved'))
   } catch (error) {
-    toast.error(apiErrorMessage(error, t('payroll.quick_inputs.save_failed')))
+    saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
+    toast.error(saveError.value)
   } finally {
     saving.value = false
   }
@@ -166,6 +252,11 @@ async function save(): Promise<void> {
 function setOvertimeMode(row: UiRow, mode: 'hours' | 'amount'): void {
   if (mode === 'hours' && !row.overtime_hours_available) return
   row.overtime_mode = mode
+  saveError.value = null
+}
+
+function clearSaveError(): void {
+  saveError.value = null
 }
 
 onMounted(load)
@@ -201,6 +292,32 @@ onMounted(load)
       {{ t('payroll.quick_inputs.info') }}
     </div>
 
+    <div
+      v-if="!canWrite"
+      class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600"
+    >
+      {{ t('payroll.quick_inputs.readonly_hint') }}
+    </div>
+
+    <div
+      v-if="saveError"
+      class="rounded-xl border border-danger-200 bg-danger-50 p-4"
+      role="alert"
+      data-testid="quick-payroll-save-error"
+    >
+      <p class="font-medium text-danger-800">{{ t('payroll.quick_inputs.save_error_title') }}</p>
+      <p class="mt-1 text-sm text-danger-700">{{ saveError }}</p>
+    </div>
+
+    <div
+      v-if="rows.length && hasInvalidRows"
+      class="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"
+      role="alert"
+      data-testid="quick-payroll-validation-summary"
+    >
+      {{ t('payroll.quick_inputs.validation_summary', { count: invalidFieldCount }) }}
+    </div>
+
     <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
       <div v-else-if="rows.length === 0" class="p-8 text-center">
@@ -213,9 +330,9 @@ onMounted(load)
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.base') }}</th>
+                <th class="px-4 py-3">{{ t('payroll.quick_inputs.base_amount') }}</th>
                 <th class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.bonus') }}</th>
+                <th class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
                 <th class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
               </tr>
             </thead>
@@ -228,31 +345,43 @@ onMounted(load)
                   <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 max-w-xs text-xs text-warning-700">
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
-                  <p v-if="rowInvalid(row)" class="mt-2 text-xs text-danger-700">{{ t('payroll.quick_inputs.invalid_amount') }}</p>
                 </td>
                 <td class="px-4 py-4">
                   <input
                     :data-testid="`quick-base-${row.employment_id}`"
                     v-model="row.baseAmount"
+                    type="text"
                     inputmode="decimal"
-                    class="h-10 w-36 rounded-md border border-neutral-300 bg-surface px-3 text-right"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.base_amount')"
+                    :aria-invalid="baseError(row) !== null"
+                    :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
+                    :class="[fieldClass(baseError(row), true), 'w-36']"
                     :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
+                    @input="clearSaveError"
                   >
+                  <p
+                    v-if="baseError(row)"
+                    :id="`quick-base-error-${row.employment_id}`"
+                    class="mt-1 max-w-40 text-xs text-danger-700"
+                  >
+                    {{ validationMessage(baseError(row)) }}
+                  </p>
                 </td>
                 <td class="px-4 py-4">
-                  <div class="flex flex-wrap gap-1">
+                  <div class="flex flex-wrap gap-1" role="group" :aria-label="t('payroll.quick_inputs.overtime_mode')">
                     <button
                       :data-testid="`overtime-mode-hours-${row.employment_id}`"
                       type="button"
-                      class="rounded-md border px-3 py-1.5 text-xs font-medium"
-                      :class="row.overtime_mode === 'hours' ? 'border-payroll-600 bg-payroll-50 text-payroll-700' : 'border-neutral-300 text-neutral-600'"
+                      :class="modeButtonClass(row.overtime_mode === 'hours')"
+                      :aria-pressed="row.overtime_mode === 'hours'"
                       :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)"
                       @click="setOvertimeMode(row, 'hours')"
                     >{{ t('payroll.quick_inputs.hours') }}</button>
                     <button
                       type="button"
-                      class="rounded-md border px-3 py-1.5 text-xs font-medium"
-                      :class="row.overtime_mode === 'amount' ? 'border-payroll-600 bg-payroll-50 text-payroll-700' : 'border-neutral-300 text-neutral-600'"
+                      :class="modeButtonClass(row.overtime_mode === 'amount')"
+                      :aria-pressed="row.overtime_mode === 'amount'"
                       :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
                       @click="setOvertimeMode(row, 'amount')"
                     >{{ t('payroll.quick_inputs.total_amount') }}</button>
@@ -260,17 +389,36 @@ onMounted(load)
                   <input
                     v-if="row.overtime_mode === 'hours'"
                     v-model="row.overtimeHours"
+                    type="text"
                     inputmode="decimal"
-                    class="mt-2 h-10 w-36 rounded-md border border-neutral-300 bg-surface px-3 text-right"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.overtime_hours')"
+                    :aria-invalid="overtimeError(row) !== null"
+                    :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
+                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    @input="clearSaveError"
                   >
                   <input
                     v-else
                     v-model="row.overtimeAmount"
+                    type="text"
                     inputmode="decimal"
-                    class="mt-2 h-10 w-36 rounded-md border border-neutral-300 bg-surface px-3 text-right"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.overtime_amount')"
+                    :aria-invalid="overtimeError(row) !== null"
+                    :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
+                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    @input="clearSaveError"
                   >
+                  <p
+                    v-if="overtimeError(row)"
+                    :id="`quick-overtime-error-${row.employment_id}`"
+                    class="mt-1 max-w-56 text-xs text-danger-700"
+                  >
+                    {{ validationMessage(overtimeError(row)) }}
+                  </p>
                   <p v-if="row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.rate_hint', { rate: formatMoney(row.overtime_hourly_rate_minor) }) }}
                   </p>
@@ -281,10 +429,23 @@ onMounted(load)
                 <td class="px-4 py-4">
                   <input
                     v-model="row.bonusAmount"
+                    type="text"
                     inputmode="decimal"
-                    class="h-10 w-36 rounded-md border border-neutral-300 bg-surface px-3 text-right"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.bonus_amount')"
+                    :aria-invalid="bonusError(row) !== null"
+                    :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
+                    :class="[fieldClass(bonusError(row), true), 'w-36']"
                     :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
+                    @input="clearSaveError"
                   >
+                  <p
+                    v-if="bonusError(row)"
+                    :id="`quick-bonus-error-${row.employment_id}`"
+                    class="mt-1 max-w-40 text-xs text-danger-700"
+                  >
+                    {{ validationMessage(bonusError(row)) }}
+                  </p>
                 </td>
                 <td class="px-4 py-4 text-right">
                   <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
@@ -304,29 +465,86 @@ onMounted(load)
                 <h2 class="font-semibold text-neutral-900">{{ row.full_name }}</h2>
                 <p class="text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }} · {{ row.employment_code }}</p>
               </div>
-              <strong class="text-payroll-700">{{ formatMoney(grossPreview(row)) }}</strong>
+              <div class="text-right">
+                <strong class="text-payroll-700">{{ formatMoney(grossPreview(row)) }}</strong>
+                <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
+                  {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
+                </p>
+              </div>
             </div>
             <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
             </p>
-            <p v-if="rowInvalid(row)" class="mt-2 text-xs text-danger-700">{{ t('payroll.quick_inputs.invalid_amount') }}</p>
             <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label class="block">
-                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.base') }}</span>
-                <input :data-testid="`quick-base-mobile-${row.employment_id}`" v-model="row.baseAmount" inputmode="decimal" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.base_amount') }}</span>
+                <input
+                  :data-testid="`quick-base-mobile-${row.employment_id}`"
+                  v-model="row.baseAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  :aria-invalid="baseError(row) !== null"
+                  :class="[fieldClass(baseError(row)), 'w-full']"
+                  :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
+                  @input="clearSaveError"
+                >
+                <span v-if="baseError(row)" class="mt-1 block text-xs text-danger-700">
+                  {{ validationMessage(baseError(row)) }}
+                </span>
               </label>
               <label class="block">
-                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.bonus') }}</span>
-                <input v-model="row.bonusAmount" inputmode="decimal" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.bonus_amount') }}</span>
+                <input
+                  v-model="row.bonusAmount"
+                  type="text"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  :aria-invalid="bonusError(row) !== null"
+                  :class="[fieldClass(bonusError(row)), 'w-full']"
+                  :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
+                  @input="clearSaveError"
+                >
+                <span v-if="bonusError(row)" class="mt-1 block text-xs text-danger-700">
+                  {{ validationMessage(bonusError(row)) }}
+                </span>
               </label>
               <div class="sm:col-span-2">
                 <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.quick_inputs.overtime') }}</span>
-                <div class="flex flex-wrap gap-2">
-                  <button type="button" class="rounded-md border px-3 py-2 text-xs" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
-                  <button type="button" class="rounded-md border px-3 py-2 text-xs" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
-                  <input v-if="row.overtime_mode === 'hours'" v-model="row.overtimeHours" inputmode="decimal" class="h-10 min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)">
-                  <input v-else v-model="row.overtimeAmount" inputmode="decimal" class="h-10 min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)">
+                <div class="flex flex-wrap gap-2" role="group" :aria-label="t('payroll.quick_inputs.overtime_mode')">
+                  <button type="button" :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
+                  <button type="button" :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
+                  <input
+                    v-if="row.overtime_mode === 'hours'"
+                    v-model="row.overtimeHours"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.overtime_hours')"
+                    :aria-invalid="overtimeError(row) !== null"
+                    :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
+                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    @input="clearSaveError"
+                  >
+                  <input
+                    v-else
+                    v-model="row.overtimeAmount"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.overtime_amount')"
+                    :aria-invalid="overtimeError(row) !== null"
+                    :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
+                    :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
+                    @input="clearSaveError"
+                  >
                 </div>
+                <p v-if="overtimeError(row)" class="mt-1 text-xs text-danger-700">
+                  {{ validationMessage(overtimeError(row)) }}
+                </p>
+                <p v-else-if="row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
+                  {{ t('payroll.quick_inputs.rate_hint', { rate: formatMoney(row.overtime_hourly_rate_minor) }) }}
+                </p>
                 <p v-if="!row.overtime_hours_available" class="mt-1 text-xs text-warning-700">{{ t('payroll.quick_inputs.hours_unavailable') }}</p>
               </div>
             </div>

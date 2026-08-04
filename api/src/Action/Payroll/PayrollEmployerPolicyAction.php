@@ -1,0 +1,452 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Payroll;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyConflictException;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyOverlapException;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService;
+use MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService;
+use MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+final class PayrollEmployerPolicyAction
+{
+    use PayrollActionSupport;
+
+    public function __construct(
+        private readonly PayrollEmployerPolicyRepository $policies,
+        private readonly PayrollEmployerPolicyService $service,
+        private readonly PayrollSetupFeaturesResolver $featureResolver,
+        private readonly PayrollSetupCheckService $setupCheckService,
+        private readonly PayrollModuleAccess $access,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+    ) {}
+
+    public function list(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $effectiveOn = $this->dateQuery(
+                $request->getQueryParams()['effective_on'] ?? null,
+                false,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        if ($effectiveOn !== null) {
+            $effective = $this->policies->findEffective(
+                $supplierId,
+                $effectiveOn,
+            );
+            return Json::ok($response, [
+                'policies' => $effective === null ? [] : [$effective],
+            ]);
+        }
+
+        return Json::ok($response, [
+            'policies' => $this->policies->list($supplierId),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function detail(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+
+        $policy = $this->policies->find(
+            $this->currentSupplierId($request),
+            (int) ($args['id'] ?? 0),
+        );
+
+        return $policy === null
+            ? Json::error(
+                $response,
+                'not_found',
+                'Zaměstnavatelská politika nebyla nalezena.',
+                404,
+            )
+            : Json::ok($response, ['policy' => $policy]);
+    }
+
+    public function create(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var(
+            $body['row_version'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 0, 'max_range' => 0]],
+        );
+        if ($version === false) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Nová politika musí mít row_version 0.',
+                422,
+            );
+        }
+        unset($body['row_version']);
+
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $policy = $this->service->save(
+                $supplierId,
+                null,
+                $body,
+                0,
+                $this->userId($request),
+            );
+        } catch (PayrollEmployerPolicyOverlapException $e) {
+            return Json::error(
+                $response,
+                'employer_policy_interval_overlap',
+                $e->getMessage(),
+                409,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        }
+
+        $this->audit(
+            $request,
+            'payroll.employer_policy.created',
+            $policy,
+        );
+
+        return Json::ok($response, ['policy' => $policy], 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function update(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var(
+            $body['row_version'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        if ($version === false) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Upravovaná politika musí mít kladné row_version.',
+                422,
+            );
+        }
+        unset($body['row_version']);
+
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $policy = $this->service->save(
+                $supplierId,
+                (int) ($args['id'] ?? 0),
+                $body,
+                (int) $version,
+                $this->userId($request),
+            );
+        } catch (PayrollEmployerPolicyOverlapException $e) {
+            return Json::error(
+                $response,
+                'employer_policy_interval_overlap',
+                $e->getMessage(),
+                409,
+            );
+        } catch (PayrollEmployerPolicyConflictException $e) {
+            return Json::error(
+                $response,
+                'row_version_conflict',
+                $e->getMessage(),
+                409,
+                ['current_row_version' => $e->currentVersion],
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage()
+                !== 'Zaměstnavatelská politika nebyla nalezena.'
+            ) {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'not_found',
+                $e->getMessage(),
+                404,
+            );
+        }
+
+        $this->audit(
+            $request,
+            'payroll.employer_policy.updated',
+            $policy,
+        );
+
+        return Json::ok($response, ['policy' => $policy]);
+    }
+
+    public function setupCheck(
+        Request $request,
+        Response $response,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $effectiveOn = $this->dateQuery(
+                $request->getQueryParams()['effective_on'] ?? null,
+                true,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        }
+        if ($effectiveOn === null) {
+            throw new \LogicException('Povinné datum setup checku chybí.');
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        $features = $this->featureResolver->resolve(
+            $supplierId,
+            $effectiveOn,
+        );
+
+        return Json::ok($response, [
+            'setup' => $this->setupCheckService->check(
+                $supplierId,
+                $effectiveOn,
+                $features,
+            ),
+        ]);
+    }
+
+    private function authorize(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+    ): ?Response {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+        }
+        $error = null;
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.settings',
+            $level,
+            $error,
+        )) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled(
+            $request,
+            $response,
+            $this->access,
+            $error,
+        )) {
+            return $error;
+        }
+
+        return null;
+    }
+
+    /** @return array<string,mixed> */
+    private function input(Request $request): array
+    {
+        $parsed = $request->getParsedBody();
+        if (!is_array($parsed)) {
+            return [];
+        }
+        $result = [];
+        foreach ($parsed as $key => $value) {
+            if (is_string($key)) {
+                $result[$key] = $value;
+            }
+        }
+
+        return $result;
+    }
+
+    private function dateQuery(mixed $raw, bool $required): ?string
+    {
+        if ($raw === null || $raw === '') {
+            if ($required) {
+                throw new \InvalidArgumentException(
+                    'effective_on je povinné datum YYYY-MM-DD.',
+                );
+            }
+            return null;
+        }
+        if (!is_string($raw)) {
+            throw new \InvalidArgumentException(
+                'effective_on musí být platné datum YYYY-MM-DD.',
+            );
+        }
+        $value = trim($raw);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        $errors = \DateTimeImmutable::getLastErrors();
+        if ($date === false
+            || ($errors !== false
+                && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+            || $date->format('Y-m-d') !== $value
+        ) {
+            throw new \InvalidArgumentException(
+                'effective_on musí být platné datum YYYY-MM-DD.',
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $policy */
+    private function audit(
+        Request $request,
+        string $action,
+        array $policy,
+    ): void {
+        $supplierId = $this->currentSupplierId($request);
+        $this->logger->log(
+            $action,
+            $this->userId($request),
+            'payroll_employer_policy',
+            $this->int($policy, 'id'),
+            [
+                'valid_from' => $this->string($policy, 'valid_from'),
+                'valid_to' => $this->nullableString($policy, 'valid_to'),
+                'row_version' => $this->int($policy, 'row_version'),
+                'source_kind' => $this->string($policy, 'source_kind'),
+            ],
+            $this->ipMatcher->clientIpFromRequest(
+                $this->serverParams($request),
+            ),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function serverParams(Request $request): array
+    {
+        $result = [];
+        foreach ($request->getServerParams() as $key => $value) {
+            if (is_string($key)) {
+                $result[$key] = $value;
+            }
+        }
+
+        return $result;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function int(array $row, string $field): int
+    {
+        $value = $row[$field] ?? null;
+        if (!is_int($value)) {
+            throw new \UnexpectedValueException(
+                "DTO politiky nemá celé pole {$field}.",
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function string(array $row, string $field): string
+    {
+        $value = $row[$field] ?? null;
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(
+                "DTO politiky nemá textové pole {$field}.",
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function nullableString(array $row, string $field): ?string
+    {
+        $value = $row[$field] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(
+                "DTO politiky nemá textové pole {$field}.",
+            );
+        }
+
+        return $value;
+    }
+}

@@ -6,6 +6,7 @@ import {
   type PayrollRun,
   type PayrollRunCommand,
 } from '@/api/payroll'
+import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -18,6 +19,7 @@ const saving = ref(false)
 const period = ref(new Date().toISOString().slice(0, 7))
 const paymentDate = ref(defaultPaymentDate(period.value))
 const runs = ref<PayrollRun[]>([])
+const personNames = ref<Record<number, string>>({})
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 
@@ -88,7 +90,16 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
 async function load() {
   loading.value = true
   try {
-    runs.value = await payrollApi.runs(period.value)
+    const [loadedRuns, people] = await Promise.all([
+      payrollApi.runs(period.value),
+      payrollApi.people().catch(() => null),
+    ])
+    runs.value = loadedRuns
+    if (people !== null) {
+      personNames.value = Object.fromEntries(
+        people.map(person => [person.id, person.full_name]),
+      )
+    }
   } catch {
     toast.error(t('payroll.runs.load_failed'))
   } finally {
@@ -259,6 +270,12 @@ onMounted(load)
             </dd>
           </div>
         </dl>
+
+        <PayrollIncomeTaxBreakdown
+          v-if="run.result_snapshot?.people"
+          :people="run.result_snapshot.people"
+          :person-names="personNames"
+        />
 
         <div v-if="run.validations.length" class="mt-4 space-y-2">
           <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>

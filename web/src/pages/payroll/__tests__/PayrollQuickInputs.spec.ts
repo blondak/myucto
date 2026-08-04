@@ -105,7 +105,40 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
     expect(m.save).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('payroll.quick_inputs.invalid_amount')
+    expect(wrapper.text()).toContain('payroll.quick_inputs.validation.amount_required')
+    expect(wrapper.find('[data-testid="quick-payroll-validation-summary"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('aria-invalid')).toBe('true')
+  })
+
+  it('rejects a negative amount locally and keeps the gross preview fail-safe', async () => {
+    const wrapper = mount(PayrollQuickInputs)
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-base-12"]').setValue('-1')
+
+    expect(wrapper.text()).toContain('payroll.quick_inputs.validation.amount_non_negative')
+    expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeDefined()
+    expect(m.save).not.toHaveBeenCalled()
+  })
+
+  it('keeps the exact API failure visible next to the form', async () => {
+    m.save.mockRejectedValueOnce({
+      response: {
+        data: {
+          error: {
+            code: 'row_version_conflict',
+            message: 'Syntetický vztah mezitím změnil jiný uživatel.',
+          },
+        },
+      },
+    })
+    const wrapper = mount(PayrollQuickInputs)
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-payroll-save-error"]').text())
+      .toContain('Syntetický vztah mezitím změnil jiný uživatel.')
+    expect(m.error).toHaveBeenCalledWith('Syntetický vztah mezitím změnil jiný uživatel.')
   })
 
   it('does not apply a stale response after the payroll period changes', async () => {

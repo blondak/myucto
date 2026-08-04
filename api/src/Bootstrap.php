@@ -130,6 +130,35 @@ final class Bootstrap
                 ),
             \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class =>
                 fn () => \MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026::provider(),
+            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository(
+                        $c->get(Connection::class),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService(
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver(
+                        $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                        $c->get(\MyInvoice\Service\Payroll\SupportMatrix::class),
+                    ),
+            \MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService(
+                        $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
+                        ),
+                    ),
             \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder(
                     $c->get(Connection::class),

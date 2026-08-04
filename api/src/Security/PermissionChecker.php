@@ -23,11 +23,3 @@ final class PermissionChecker
         }
     }
 }
-
-final class PermissionDenied extends \RuntimeException
-{
-    public function __construct(public readonly string $permissionKey, public readonly AccessLevel $minimum)
-    {
-        parent::__construct('Permission denied: ' . $permissionKey);
-    }
-}

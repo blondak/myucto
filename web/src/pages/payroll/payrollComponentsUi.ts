@@ -81,6 +81,17 @@ export function parsePayrollAmountToMinor(value: string): number | null {
   return match[1] === '-' ? -minor : minor
 }
 
+export function parsePayrollHoursToMilli(value: string): number | null {
+  const normalized = value.trim().replace(',', '.')
+  const match = /^(\d+)(?:\.(\d{1,3}))?$/.exec(normalized)
+  if (!match) return null
+  const whole = Number(match[1])
+  const fraction = Number((match[2] ?? '').padEnd(3, '0'))
+  if (!Number.isSafeInteger(whole)) return null
+  const milli = whole * 1000 + fraction
+  return Number.isSafeInteger(milli) ? milli : null
+}
+
 export function payrollMinorToInput(value: number | null): string {
   if (value === null) return ''
   const sign = value < 0 ? '-' : ''

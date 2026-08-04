@@ -1002,6 +1002,101 @@ export interface PayrollRunValidation {
   requires_override: boolean
 }
 
+export interface PayrollIncomeTaxRate {
+  decimal: string
+  numerator: number
+  scale: number
+  denominator: number
+}
+
+export interface PayrollIncomeTaxRateStep {
+  label: string
+  input_minor_units: number
+  rate: PayrollIncomeTaxRate
+  unrounded_numerator: number
+  unrounded_denominator: number
+  rounding_mode: string
+  output_minor_units: number
+}
+
+export interface PayrollIncomeTaxAdvanceResult {
+  taxable_income_minor_units: number
+  rounded_tax_base_minor_units: number
+  low_rate_base_minor_units: number
+  high_rate_base_minor_units: number
+  rate_steps: PayrollIncomeTaxRateStep[]
+  tax_before_credits_minor_units: number
+  non_refundable_credits_minor_units: number
+  child_credit_minor_units: number
+  tax_bonus_eligible: boolean
+  tax_after_credits_minor_units: number
+  tax_bonus_minor_units: number
+  ruleset_id: string
+  ruleset_hash: string
+}
+
+export interface PayrollIncomeTaxRelationshipResult {
+  relationship_reference: string
+  kind:
+    | 'employment'
+    | 'small-scale-employment'
+    | 'dpp'
+    | 'dpc'
+    | 'managing-partner-dependent'
+    | 'statutory-body'
+  taxable_base_minor_units: number
+  regime: 'advance' | 'withholding' | 'manual-review'
+  withholding_group: string | null
+}
+
+export interface PayrollIncomeTaxWithholdingGroup {
+  group: string
+  base_minor_units: number
+  tax_minor_units: number
+  rate_step: PayrollIncomeTaxRateStep
+}
+
+export interface PayrollIncomeTaxResult {
+  status: 'calculated' | 'manual-review'
+  calculation_date: string
+  employee_reference: string
+  payer_reference: string
+  relationships: PayrollIncomeTaxRelationshipResult[]
+  advance_tax: PayrollIncomeTaxAdvanceResult | null
+  withholding_groups: PayrollIncomeTaxWithholdingGroup[]
+  withholding_base_minor_units: number
+  withholding_tax_minor_units: number
+  claimed_non_refundable_credits_minor_units: number
+  applied_non_refundable_credits_minor_units: number
+  claimed_child_credit_minor_units: number
+  applied_child_credit_minor_units: number
+  annual_accumulator: Record<string, unknown>
+  issues: string[]
+  policy_id: string
+  policy_hash: string
+  ruleset_id: string
+  ruleset_hash: string
+}
+
+export interface PayrollRunResultPerson {
+  employee_id: number
+  statutory?: {
+    person_reference: string
+    status: 'calculated' | 'manual_review' | 'error'
+    income_tax?: PayrollIncomeTaxResult
+    issues?: string[]
+  }
+}
+
+export interface PayrollRunResultSnapshot {
+  totals?: {
+    cash_payable_minor?: number
+    enforcement_withheld_minor?: number
+    payable_after_enforcement_minor?: number
+  }
+  people?: PayrollRunResultPerson[]
+}
+
 export interface PayrollRun {
   id: number
   supplier_id: number
@@ -1015,13 +1110,7 @@ export interface PayrollRun {
   revision_no: number | null
   revision_status: string | null
   payment_materialization_supported: boolean
-  result_snapshot: {
-    totals?: {
-      cash_payable_minor?: number
-      enforcement_withheld_minor?: number
-      payable_after_enforcement_minor?: number
-    }
-  } | null
+  result_snapshot: PayrollRunResultSnapshot | null
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
 }
