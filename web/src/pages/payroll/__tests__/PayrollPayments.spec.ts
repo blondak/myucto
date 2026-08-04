@@ -245,7 +245,7 @@ describe('PayrollPayments', () => {
     expect(wrapper.findAll('nav button')).toHaveLength(3)
   })
 
-  it('shows two health insurers and blocks an incoming correction on both layouts', async () => {
+  it('shows institutions and blocks an incoming correction on both layouts', async () => {
     const healthItem = {
       id: 42,
       run_id: 11,
@@ -295,6 +295,26 @@ describe('PayrollPayments', () => {
           revision_kind: 'correction',
           amount_minor: 50_000,
         },
+        {
+          ...healthItem,
+          id: 45,
+          recipient_name: 'Syntetická správa sociálního zabezpečení',
+          institution_type: 'social_security',
+          institution_code: 'P',
+          liability_kind: 'social_insurance',
+          payment_target_masked: '••••2005/0100',
+          amount_minor: 3_190_000,
+        },
+        {
+          ...healthItem,
+          id: 46,
+          recipient_name: 'Syntetický finanční úřad',
+          institution_type: 'tax_office',
+          institution_code: 'advance_tax',
+          liability_kind: 'advance_tax',
+          payment_target_masked: '••••3005/0100',
+          amount_minor: 1_250_000,
+        },
       ],
     })
 
@@ -305,17 +325,23 @@ describe('PayrollPayments', () => {
       const layout = wrapper.get(selector)
       expect(layout.text()).toContain('Syntetická pojišťovna 111')
       expect(layout.text()).toContain('Syntetická pojišťovna 201')
+      expect(layout.text()).toContain('Syntetická správa sociálního zabezpečení')
+      expect(layout.text()).toContain('Syntetický finanční úřad')
       expect(layout.text()).toContain('••••0005/0100')
       expect(layout.text()).toContain('••••1005/0100')
+      expect(layout.text()).toContain('social_insurance')
+      expect(layout.text()).toContain('advance_tax')
       expect(layout.text()).toContain('payroll.payments.target.ready')
       expect(layout.text()).toContain('payroll.payments.correction')
     }
     const rowCheckboxes = wrapper.get('[data-layout="desktop"]')
       .findAll('tbody input[type="checkbox"]')
-    expect(rowCheckboxes).toHaveLength(3)
+    expect(rowCheckboxes).toHaveLength(5)
     expect(rowCheckboxes[0].attributes('disabled')).toBeUndefined()
     expect(rowCheckboxes[1].attributes('disabled')).toBeUndefined()
     expect(rowCheckboxes[2].attributes('disabled')).toBeDefined()
+    expect(rowCheckboxes[3].attributes('disabled')).toBeUndefined()
+    expect(rowCheckboxes[4].attributes('disabled')).toBeUndefined()
   })
 
   it('materializes only the approved current revision and safely replays it', async () => {

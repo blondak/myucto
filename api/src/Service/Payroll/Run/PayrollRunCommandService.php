@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
+use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
@@ -30,6 +31,8 @@ final class PayrollRunCommandService
             $approvedPosting = null,
         private readonly ?ApprovedRevisionPayslipBatchService
             $approvedPayslips = null,
+        private readonly ?PayrollControlTotalsService
+            $controlTotals = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -449,6 +452,10 @@ final class PayrollRunCommandService
                     $supplierId,
                     (int) $revision['id'],
                     $actorUserId,
+                );
+                $this->controlTotals?->forApprovedRevision(
+                    $supplierId,
+                    (int) $revision['id'],
                 );
                 $this->calculationPipeline
                     ->storeApprovedStatutoryAccumulators(

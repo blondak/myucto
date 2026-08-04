@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
@@ -24,6 +25,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationConflictException;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
+use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -40,6 +42,8 @@ final class PayrollPaymentAction
         private readonly PayrollPaymentReconciliationService $reconciliation,
         private readonly PayrollNetWageLiabilityMaterializer $netWages,
         private readonly PayrollHealthInsuranceLiabilityMaterializer $healthInsurance,
+        private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
+        private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
@@ -963,6 +967,17 @@ final class PayrollPaymentAction
                     $revisionId,
                     $userId,
                 ),
+            'social_insurance' => fn (): array =>
+                $this->socialInsurance->materialize(
+                    $supplierId,
+                    $revisionId,
+                    $userId,
+                ),
+            'income_tax' => fn (): array => $this->incomeTax->materialize(
+                $supplierId,
+                $revisionId,
+                $userId,
+            ),
         ] as $liabilityKind => $materialize) {
             try {
                 $result = $this->transaction(

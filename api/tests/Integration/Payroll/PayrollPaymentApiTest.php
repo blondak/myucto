@@ -12,6 +12,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
@@ -20,6 +21,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
+use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -231,7 +233,12 @@ final class PayrollPaymentApiTest extends TestCase
         self::assertSame([], $payload['liability_ids'] ?? null);
         self::assertSame(0, $payload['created_count'] ?? null);
         self::assertSame(
-            ['net_wage', 'health_insurance'],
+            [
+                'net_wage',
+                'health_insurance',
+                'social_insurance',
+                'income_tax',
+            ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
         self::assertStringNotContainsString(
@@ -436,6 +443,12 @@ final class PayrollPaymentApiTest extends TestCase
             $this->container->get(PayrollNetWageLiabilityMaterializer::class),
             $this->container->get(
                 PayrollHealthInsuranceLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollSocialInsuranceLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollIncomeTaxLiabilityMaterializer::class,
             ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),

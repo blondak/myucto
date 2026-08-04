@@ -178,6 +178,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
+                    ),
                 ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));

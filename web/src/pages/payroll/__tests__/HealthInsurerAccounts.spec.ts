@@ -95,17 +95,29 @@ describe('HealthInsurerAccounts', () => {
     wrapper.unmount()
   })
 
-  it('založí nový historický účet a odešle nemaskovaný účet pouze create endpointu', async () => {
-    const created = account({ id: 8, institution_code: 'SYNTH-201', bank_account_masked: '••••0005/0300' })
+  it('založí nový historický účet zvoleného typu a odešle nemaskovaný účet pouze create endpointu', async () => {
+    const created = account({
+      id: 8,
+      institution_type: 'social_security',
+      institution_code: 'SYNTH-201',
+      bank_account_masked: '••••0005/0300',
+    })
     m.createInstitutionAccount.mockResolvedValue(created)
     const wrapper = await mountComponent([])
 
     const add = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.employer.health_accounts.add')
     await add!.trigger('click')
-    expect(wrapper.findAllComponents(SearchableSelect)).toHaveLength(1)
+    const selects = wrapper.findAllComponents(SearchableSelect)
+    expect(selects).toHaveLength(2)
+    await wrapper
+      .get('[aria-label="payroll.employer.health_accounts.institution_type"]')
+      .trigger('focus')
+    const socialSecurity = wrapper.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.employer.health_accounts.types.social_security')
+    await socialSecurity!.trigger('click')
     await wrapper.get('[data-testid="health-create-code"]').setValue('synth-201')
-    await wrapper.get('[data-testid="health-create-name"]').setValue('Syntetická zaměstnanecká pojišťovna')
+    await wrapper.get('[data-testid="health-create-name"]').setValue('Syntetická správa sociálního zabezpečení')
     await wrapper.get('[data-testid="health-create-account"]').setValue('1000000005/0300')
     await wrapper.get('[data-testid="health-create-vs"]').setValue('0000000042')
     await wrapper.get('[data-testid="health-create-source-reference"]').setValue('SYNTHETIC-NOTICE-002')
@@ -117,9 +129,9 @@ describe('HealthInsurerAccounts', () => {
 
     expect(m.createInstitutionAccount).toHaveBeenCalledTimes(1)
     expect(m.createInstitutionAccount.mock.calls[0][0]).toMatchObject({
-      institution_type: 'health_insurer',
+      institution_type: 'social_security',
       institution_code: 'SYNTH-201',
-      institution_name: 'Syntetická zaměstnanecká pojišťovna',
+      institution_name: 'Syntetická správa sociálního zabezpečení',
       bank_account: '1000000005/0300',
       currency_code: 'CZK',
       variable_symbol: '0000000042',
@@ -158,6 +170,33 @@ describe('HealthInsurerAccounts', () => {
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('bank_account_masked')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('institution_code')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('valid_from')
+
+    wrapper.unmount()
+  })
+
+  it('zobrazuje účty všech podporovaných institucí včetně jejich typu', async () => {
+    const wrapper = await mountReadOnly([
+      account(),
+      account({
+        id: 8,
+        institution_id: 12,
+        institution_type: 'social_security',
+        institution_code: 'SYNTH-CSSZ',
+        institution_name: 'Syntetická správa sociálního zabezpečení',
+      }),
+      account({
+        id: 9,
+        institution_id: 13,
+        institution_type: 'tax_office',
+        institution_code: 'SYNTH-FU',
+        institution_name: 'Syntetický finanční úřad',
+      }),
+    ])
+
+    expect(wrapper.text()).toContain('payroll.employer.health_accounts.types.health_insurer')
+    expect(wrapper.text()).toContain('payroll.employer.health_accounts.types.social_security')
+    expect(wrapper.text()).toContain('payroll.employer.health_accounts.types.tax_office')
+    expect(wrapper.text()).toContain('Syntetický finanční úřad')
 
     wrapper.unmount()
   })

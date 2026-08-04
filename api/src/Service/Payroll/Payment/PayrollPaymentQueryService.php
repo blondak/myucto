@@ -11,6 +11,14 @@ use PDO;
 
 final class PayrollPaymentQueryService
 {
+    private const BATCHABLE_LIABILITY_KINDS = [
+        'net_wage',
+        'health_insurance',
+        'social_insurance',
+        'advance_tax',
+        'withholding_tax',
+    ];
+
     private readonly PayrollPaymentBatchQueryService $batchQueries;
 
     public function __construct(
@@ -209,7 +217,7 @@ final class PayrollPaymentQueryService
                     self::text($row, 'direction') === 'outgoing'
                     && in_array(
                         self::text($row, 'liability_kind'),
-                        ['net_wage', 'health_insurance'],
+                        self::BATCHABLE_LIABILITY_KINDS,
                         true,
                     )
                         ? 'ready'
@@ -220,7 +228,7 @@ final class PayrollPaymentQueryService
                         : (
                             in_array(
                                 self::text($row, 'liability_kind'),
-                                ['net_wage', 'health_insurance'],
+                                self::BATCHABLE_LIABILITY_KINDS,
                                 true,
                             )
                                 ? null

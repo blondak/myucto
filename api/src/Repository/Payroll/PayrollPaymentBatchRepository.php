@@ -377,6 +377,60 @@ final class PayrollPaymentBatchRepository
      *   id:int,
      *   code:string,
      *   is_active:bool,
+     *   variable_symbol:string,
+     *   office_row_version:int,
+     *   institution_code:string,
+     *   settings_row_version:int
+     * }|null
+     */
+    public function lockSocialPaymentContext(
+        int $supplierId,
+        int $officeId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT office.id, office.code, office.is_active,
+                    office.social_security_variable_symbol AS variable_symbol,
+                    office.row_version AS office_row_version,
+                    settings.social_security_office_code AS institution_code,
+                    settings.row_version AS settings_row_version
+               FROM payroll_offices office
+               JOIN payroll_employer_settings settings
+                 ON settings.supplier_id = office.supplier_id
+              WHERE office.supplier_id = ? AND office.id = ?
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $officeId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'platební kontext ČSSZ');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'code' => self::string($row, 'code'),
+            'is_active' => self::boolean($row, 'is_active'),
+            'variable_symbol' => self::string($row, 'variable_symbol'),
+            'office_row_version' => self::integer(
+                $row,
+                'office_row_version',
+            ),
+            'institution_code' => self::string(
+                $row,
+                'institution_code',
+            ),
+            'settings_row_version' => self::integer(
+                $row,
+                'settings_row_version',
+            ),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   id:int,
+     *   code:string,
+     *   is_active:bool,
      *   account_number:?string,
      *   bank_code:?string,
      *   iban:?string,

@@ -8,6 +8,7 @@ import {
   type PayrollInstitutionAccountCreatePayload,
   type PayrollInstitutionAccountSource,
   type PayrollInstitutionAccountUpdatePayload,
+  type PayrollInstitutionType,
 } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -33,9 +34,20 @@ const sources: PayrollInstitutionAccountSource[] = [
   'user_verified',
   'imported',
 ]
+const institutionTypes: PayrollInstitutionType[] = [
+  'health_insurer',
+  'social_security',
+  'tax_office',
+  'statutory_insurance',
+  'other_recipient',
+]
 const sourceOptions = computed(() => sources.map(source => ({
   value: source,
   label: sourceLabel(source),
+})))
+const institutionTypeOptions = computed(() => institutionTypes.map(type => ({
+  value: type,
+  label: institutionTypeLabel(type),
 })))
 
 function localToday(): string {
@@ -77,8 +89,11 @@ const editForm = reactive<PayrollInstitutionAccountUpdatePayload>({
   verified_on: localToday(),
 })
 
-const healthAccounts = computed(() =>
-  accounts.value.filter(account => account.institution_type === 'health_insurer'),
+const institutionAccounts = computed(() =>
+  [...accounts.value].sort((left, right) =>
+    institutionTypes.indexOf(left.institution_type) - institutionTypes.indexOf(right.institution_type)
+    || left.institution_name.localeCompare(right.institution_name, 'cs'),
+  ),
 )
 
 function nullable(value: string | null): string | null {
@@ -274,6 +289,14 @@ function sourceLabel(source: PayrollInstitutionAccountSource): string {
   return t(`payroll.employer.health_accounts.sources.${source}`)
 }
 
+function institutionTypeLabel(type: PayrollInstitutionType): string {
+  return t(`payroll.employer.health_accounts.types.${type}`)
+}
+
+function setCreateInstitutionType(value: PayrollInstitutionType | null) {
+  if (value !== null) createForm.institution_type = value
+}
+
 function setCreateSource(value: PayrollInstitutionAccountSource | null) {
   if (value !== null) createForm.source_kind = value
 }
@@ -318,14 +341,15 @@ onMounted(async () => {
     </div>
 
     <template v-else>
-      <div v-if="healthAccounts.length === 0 && !showCreate" class="rounded-lg border border-dashed border-neutral-300 px-4 py-8 text-center">
+      <div v-if="institutionAccounts.length === 0 && !showCreate" class="rounded-lg border border-dashed border-neutral-300 px-4 py-8 text-center">
         <p class="text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.empty') }}</p>
       </div>
 
-      <div v-if="healthAccounts.length > 0" class="hidden overflow-x-auto md:block">
-        <table class="min-w-[980px] divide-y divide-neutral-200 text-sm">
+      <div v-if="institutionAccounts.length > 0" class="hidden overflow-x-auto md:block">
+        <table class="min-w-[1080px] divide-y divide-neutral-200 text-sm">
           <thead>
             <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution_type') }}</th>
               <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution') }}</th>
               <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.account') }}</th>
               <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.variable_symbol') }}</th>
@@ -335,7 +359,8 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="account in healthAccounts" :key="account.id">
+            <tr v-for="account in institutionAccounts" :key="account.id">
+              <td class="px-3 py-3 text-neutral-700">{{ institutionTypeLabel(account.institution_type) }}</td>
               <td class="px-3 py-3">
                 <p class="font-medium text-neutral-900">{{ account.institution_name }}</p>
                 <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
@@ -358,10 +383,11 @@ onMounted(async () => {
         </table>
       </div>
 
-      <div v-if="healthAccounts.length > 0" class="grid grid-cols-1 gap-3 md:hidden">
-        <article v-for="account in healthAccounts" :key="`mobile-${account.id}`" class="rounded-lg border border-neutral-200 p-4">
+      <div v-if="institutionAccounts.length > 0" class="grid grid-cols-1 gap-3 md:hidden">
+        <article v-for="account in institutionAccounts" :key="`mobile-${account.id}`" class="rounded-lg border border-neutral-200 p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
+              <p class="mb-1 text-xs font-medium uppercase tracking-wide text-payroll-700">{{ institutionTypeLabel(account.institution_type) }}</p>
               <h3 class="font-medium text-neutral-900">{{ account.institution_name }}</h3>
               <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
             </div>
@@ -398,6 +424,18 @@ onMounted(async () => {
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.create_hint') }}</p>
         </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_type') }}</span>
+            <SearchableSelect
+              data-testid="institution-create-type"
+              :model-value="createForm.institution_type"
+              :options="institutionTypeOptions"
+              :clearable="false"
+              :aria-label="t('payroll.employer.health_accounts.institution_type')"
+              accent="payroll"
+              @update:model-value="setCreateInstitutionType"
+            />
+          </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}</span>
             <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">

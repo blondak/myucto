@@ -16,6 +16,12 @@ use Psr\Clock\ClockInterface;
 final class PayrollPaymentBatchBuilder
 {
     private const MAX_LIABILITIES = 500;
+    private const INSTITUTION_LIABILITY_KINDS = [
+        'health_insurance',
+        'social_insurance',
+        'advance_tax',
+        'withholding_tax',
+    ];
 
     public function __construct(
         private readonly PayrollPaymentBatchRepository $batches,
@@ -182,12 +188,15 @@ final class PayrollPaymentBatchBuilder
                     $groups[$recipient] = [
                         'recipient_reference' => $recipient,
                         'employee_id' => $liability['employee_id'],
+                        'liability_kind' => $liability['liability_kind'],
                         'amount_minor' => 0,
                         'liabilities' => [],
                         'source' => $source,
                     ];
                 } elseif ($groups[$recipient]['employee_id']
                     !== $liability['employee_id']
+                    || $groups[$recipient]['liability_kind']
+                        !== $liability['liability_kind']
                     || !$this->sameFrozenTarget(
                         $groups[$recipient]['source'],
                         $source,
@@ -424,10 +433,13 @@ final class PayrollPaymentBatchBuilder
         }
         $netWage = $liability['liability_kind'] === 'net_wage'
             && $liability['employee_id'] !== null;
-        $healthInsurance =
-            $liability['liability_kind'] === 'health_insurance'
-            && $liability['employee_id'] === null;
-        if (!$netWage && !$healthInsurance) {
+        $institutional = $liability['employee_id'] === null
+            && in_array(
+                $liability['liability_kind'],
+                self::INSTITUTION_LIABILITY_KINDS,
+                true,
+            );
+        if (!$netWage && !$institutional) {
             throw new \DomainException(
                 'Druh závazku zatím nelze vložit do platební dávky.',
             );
@@ -464,10 +476,10 @@ final class PayrollPaymentBatchBuilder
             ) === 1) {
                 return;
             }
-        } elseif (preg_match(
-            '/^institution:health_insurer:[0-9]{3}:account:[1-9][0-9]*$/D',
+        } elseif ($this->institutionReference(
+            $liability['liability_kind'],
             $liability['recipient_reference'],
-        ) === 1) {
+        ) !== null) {
             return;
         }
         throw new \DomainException(
@@ -478,6 +490,7 @@ final class PayrollPaymentBatchBuilder
     /**
      * @param array{
      *   employee_id:?int,
+     *   liability_kind:string,
      *   recipient_reference:string,
      *   source_snapshot_json:string,
      *   source_snapshot_hash:string
@@ -508,6 +521,8 @@ final class PayrollPaymentBatchBuilder
             || !in_array($source['schema_reference'] ?? null, [
                 'payroll-payment-net-wage-source.v1',
                 'payroll-payment-health-insurance-source.v1',
+                'payroll-payment-social-insurance-source.v1',
+                'payroll-payment-income-tax-source.v1',
             ], true)
             || ($source['recipient_reference'] ?? null)
                 !== $liability['recipient_reference']
@@ -516,23 +531,54 @@ final class PayrollPaymentBatchBuilder
                 'Závazek neodpovídá svému zmrazenému zdroji.',
             );
         }
-        if ($source['schema_reference']
-                === 'payroll-payment-net-wage-source.v1'
-            && ($source['person_id'] ?? null)
-                !== $liability['employee_id']
+        if ($liability['liability_kind'] === 'net_wage'
+            && (
+                $source['schema_reference']
+                    !== 'payroll-payment-net-wage-source.v1'
+                || $liability['employee_id'] === null
+                || ($source['person_id'] ?? null)
+                    !== $liability['employee_id']
+            )
         ) {
             throw new \DomainException(
                 'Závazek čisté mzdy neodpovídá své osobě.',
             );
         }
-        if ($source['schema_reference']
-                === 'payroll-payment-health-insurance-source.v1'
-            && ($liability['employee_id'] !== null
+        $expectedInstitution = match ($liability['liability_kind']) {
+            'health_insurance' => [
+                'payroll-payment-health-insurance-source.v1',
+                'health_insurer',
+            ],
+            'social_insurance' => [
+                'payroll-payment-social-insurance-source.v1',
+                'social_security',
+            ],
+            'advance_tax', 'withholding_tax' => [
+                'payroll-payment-income-tax-source.v1',
+                'tax_office',
+            ],
+            default => null,
+        };
+        if ($expectedInstitution !== null
+            && (
+                $liability['employee_id'] !== null
+                || $source['schema_reference'] !== $expectedInstitution[0]
                 || ($source['institution_type'] ?? null)
-                    !== 'health_insurer')
+                    !== $expectedInstitution[1]
+                || ($source['liability_kind']
+                    ?? $liability['liability_kind'])
+                    !== $liability['liability_kind']
+            )
         ) {
             throw new \DomainException(
                 'Institucionální závazek neodpovídá svému zmrazenému zdroji.',
+            );
+        }
+        if ($expectedInstitution === null
+            && $liability['liability_kind'] !== 'net_wage'
+        ) {
+            throw new \DomainException(
+                'Druh závazku neodpovídá svému zmrazenému zdroji.',
             );
         }
 
@@ -546,10 +592,19 @@ final class PayrollPaymentBatchBuilder
     private function sameFrozenTarget(array $left, array $right): bool
     {
         foreach ([
+            'institution_type',
+            'institution_code',
             'payment_target_id',
             'payment_target_hash',
             'payment_target_row_version',
             'payment_target_verification_hash',
+            'payroll_office_id',
+            'payroll_office_code',
+            'payroll_office_row_version',
+            'employer_settings_row_version',
+            'variable_symbol',
+            'specific_symbol',
+            'constant_symbol',
         ] as $field) {
             if (($left[$field] ?? null) !== ($right[$field] ?? null)) {
                 return false;
@@ -660,6 +715,7 @@ final class PayrollPaymentBatchBuilder
      * @param array{
      *   recipient_reference:string,
      *   employee_id:?int,
+     *   liability_kind:string,
      *   amount_minor:int,
      *   liabilities:list<array{
      *     id:int,
@@ -838,9 +894,227 @@ final class PayrollPaymentBatchBuilder
     }
 
     /**
+     * @return array{
+     *   institution_type:string,
+     *   institution_code:string,
+     *   account_id:int,
+     *   payment_message:string
+     * }|null
+     */
+    private function institutionReference(
+        string $liabilityKind,
+        string $recipientReference,
+    ): ?array {
+        $definition = match ($liabilityKind) {
+            'health_insurance' => [
+                'type' => 'health_insurer',
+                'reference_code' => '[0-9]{3}',
+                'institution_code' => null,
+                'message' => null,
+            ],
+            'social_insurance' => [
+                'type' => 'social_security',
+                'reference_code' => '[A-Z0-9][A-Z0-9._-]{0,31}',
+                'institution_code' => null,
+                'message' => null,
+            ],
+            'advance_tax' => [
+                'type' => 'tax_office',
+                'reference_code' => 'advance',
+                'institution_code' => 'advance_tax',
+                'message' => 'Zaloha na dan z prijmu',
+            ],
+            'withholding_tax' => [
+                'type' => 'tax_office',
+                'reference_code' => 'withholding',
+                'institution_code' => 'withholding_tax',
+                'message' => 'Srazkova dan z prijmu',
+            ],
+            default => null,
+        };
+        if ($definition === null) {
+            return null;
+        }
+        $pattern = '/^institution:' . $definition['type'] . ':('
+            . $definition['reference_code']
+            . '):account:([1-9][0-9]*)$/D';
+        if (preg_match($pattern, $recipientReference, $match) !== 1) {
+            return null;
+        }
+        $referenceCode = $match[1];
+        $institutionCode = $definition['institution_code']
+            ?? $referenceCode;
+        $message = $definition['message'] ?? match ($liabilityKind) {
+            'health_insurance' => "Zdravotni pojisteni {$referenceCode}",
+            'social_insurance' => "Socialni pojisteni {$referenceCode}",
+            default => throw new \LogicException(
+                'Chybí zpráva institucionální platby.',
+            ),
+        };
+
+        return [
+            'institution_type' => $definition['type'],
+            'institution_code' => $institutionCode,
+            'account_id' => (int) $match[2],
+            'payment_message' => $message,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $account
+     * @param array<string,mixed> $source
+     * @return array{
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string
+     * }
+     */
+    private function institutionSymbols(
+        int $supplierId,
+        string $institutionType,
+        string $institutionCode,
+        array $account,
+        array $source,
+    ): array {
+        if ($institutionType !== 'social_security') {
+            return [
+                'variable_symbol' => $this->nullableTextValue(
+                    $account['variable_symbol'] ?? null,
+                    'variabilní symbol instituce',
+                ),
+                'specific_symbol' => $this->nullableTextValue(
+                    $account['specific_symbol'] ?? null,
+                    'specifický symbol instituce',
+                ),
+                'constant_symbol' => $this->nullableTextValue(
+                    $account['constant_symbol'] ?? null,
+                    'konstantní symbol instituce',
+                ),
+            ];
+        }
+        $officeId = $source['payroll_office_id'] ?? null;
+        if (!is_int($officeId) || $officeId <= 0) {
+            throw new \DomainException(
+                'Sociální závazek nemá zmrazenou mzdovou účtárnu.',
+            );
+        }
+        $context = $this->batches->lockSocialPaymentContext(
+            $supplierId,
+            $officeId,
+        );
+        if ($context === null
+            || !$context['is_active']
+            || $context['institution_code'] !== $institutionCode
+            || $context['code'] !== ($source['payroll_office_code'] ?? null)
+            || $context['office_row_version']
+                !== ($source['payroll_office_row_version'] ?? null)
+            || $context['settings_row_version']
+                !== ($source['employer_settings_row_version'] ?? null)
+            || $context['variable_symbol']
+                !== ($source['variable_symbol'] ?? null)
+        ) {
+            throw new \DomainException(
+                'Mzdová účtárna nebo její platební identifikátory '
+                . 'neodpovídají zmrazenému sociálnímu závazku.',
+            );
+        }
+
+        return [
+            'variable_symbol' => $context['variable_symbol'],
+            'specific_symbol' => $this->nullableTextValue(
+                $account['specific_symbol'] ?? null,
+                'specifický symbol ČSSZ',
+            ),
+            'constant_symbol' => $this->nullableTextValue(
+                $account['constant_symbol'] ?? null,
+                'konstantní symbol ČSSZ',
+            ),
+        ];
+    }
+
+    private function nullableTextValue(
+        mixed $value,
+        string $context,
+    ): ?string {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || trim($value) === '') {
+            throw new \UnexpectedValueException(
+                ucfirst($context) . ' musí být neprázdný text.',
+            );
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * @param array<string,mixed> $account
+     * @param array<string,mixed> $source
+     * @param array{
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string
+     * } $symbols
+     */
+    private function institutionVerificationHash(
+        string $institutionType,
+        string $institutionCode,
+        array $account,
+        array $source,
+        array $symbols,
+    ): string {
+        if ($institutionType === 'social_security') {
+            $material = [
+                'schema_reference' =>
+                    'payroll-social-institution-target-verification.v1',
+                'institution_type' => $institutionType,
+                'institution_code' => $institutionCode,
+                'payment_target_id' => $account['id'],
+                'payment_target_hash' => $account['bank_account_hash'],
+                'payment_target_row_version' => $account['row_version'],
+                'payroll_office_id' => $source['payroll_office_id'] ?? null,
+                'payroll_office_code' =>
+                    $source['payroll_office_code'] ?? null,
+                'payroll_office_row_version' =>
+                    $source['payroll_office_row_version'] ?? null,
+                'employer_settings_row_version' =>
+                    $source['employer_settings_row_version'] ?? null,
+                'variable_symbol' => $symbols['variable_symbol'],
+                'specific_symbol' => $symbols['specific_symbol'],
+                'constant_symbol' => $symbols['constant_symbol'],
+                'source_kind' => $account['source_kind'],
+                'source_reference' => $account['source_reference'],
+                'verified_on' => $account['verified_on'],
+                'verified_by' => $account['verified_by'],
+            ];
+        } else {
+            $material = [
+                'schema_reference' =>
+                    'payroll-institution-payment-target-verification.v1',
+                'institution_type' => $institutionType,
+                'institution_code' => $institutionCode,
+                'payment_target_id' => $account['id'],
+                'payment_target_hash' => $account['bank_account_hash'],
+                'row_version' => $account['row_version'],
+                'variable_symbol' => $symbols['variable_symbol'],
+                'specific_symbol' => $symbols['specific_symbol'],
+                'constant_symbol' => $symbols['constant_symbol'],
+                'source_kind' => $account['source_kind'],
+                'source_reference' => $account['source_reference'],
+                'verified_on' => $account['verified_on'],
+                'verified_by' => $account['verified_by'],
+            ];
+        }
+
+        return hash('sha256', CanonicalJson::encode($material));
+    }
+
+    /**
      * @param array{
      *   recipient_reference:string,
      *   employee_id:?int,
+     *   liability_kind:string,
      *   amount_minor:int,
      *   liabilities:list<array{
      *     id:int,
@@ -859,24 +1133,25 @@ final class PayrollPaymentBatchBuilder
         string $plannedDate,
         array $group,
     ): array {
-        if (preg_match(
-            '/^institution:health_insurer:([0-9]{3}):account:([1-9][0-9]*)$/D',
+        $reference = $this->institutionReference(
+            $group['liability_kind'],
             $group['recipient_reference'],
-            $match,
-        ) !== 1) {
+        );
+        if ($reference === null) {
             throw new \DomainException(
                 'Institucionální reference příjemce není platná.',
             );
         }
-        $code = $match[1];
-        $accountId = (int) $match[2];
+        $institutionType = $reference['institution_type'];
+        $institutionCode = $reference['institution_code'];
+        $accountId = $reference['account_id'];
         $source = $group['source'];
         $frozenHash = $source['payment_target_hash'] ?? null;
         $frozenVersion = $source['payment_target_row_version'] ?? null;
         $frozenVerification =
             $source['payment_target_verification_hash'] ?? null;
-        if (($source['institution_type'] ?? null) !== 'health_insurer'
-            || ($source['institution_code'] ?? null) !== $code
+        if (($source['institution_type'] ?? null) !== $institutionType
+            || ($source['institution_code'] ?? null) !== $institutionCode
             || ($source['payment_target_id'] ?? null) !== $accountId
             || !is_string($frozenHash)
             || preg_match('/^[0-9a-f]{64}$/D', $frozenHash) !== 1
@@ -897,8 +1172,8 @@ final class PayrollPaymentBatchBuilder
             $accountId,
         );
         if ($account === null
-            || $account['institution_type'] !== 'health_insurer'
-            || $account['institution_code'] !== $code
+            || $account['institution_type'] !== $institutionType
+            || $account['institution_code'] !== $institutionCode
             || $account['currency_code'] !== $currencyCode
             || $account['valid_from'] > $plannedDate
             || ($account['valid_to'] !== null
@@ -921,32 +1196,27 @@ final class PayrollPaymentBatchBuilder
                 'Aktuální účet instituce neodpovídá zmrazenému cíli.',
             );
         }
-        $verificationHash = hash(
-            'sha256',
-            CanonicalJson::encode([
-                'schema_reference' =>
-                    'payroll-institution-payment-target-verification.v1',
-                'institution_type' => 'health_insurer',
-                'institution_code' => $code,
-                'payment_target_id' => $accountId,
-                'payment_target_hash' => $account['bank_account_hash'],
-                'row_version' => $account['row_version'],
-                'variable_symbol' => $account['variable_symbol'],
-                'specific_symbol' => $account['specific_symbol'],
-                'constant_symbol' => $account['constant_symbol'],
-                'source_kind' => $account['source_kind'],
-                'source_reference' => $account['source_reference'],
-                'verified_on' => $account['verified_on'],
-                'verified_by' => $account['verified_by'],
-            ]),
+        $symbols = $this->institutionSymbols(
+            $supplierId,
+            $institutionType,
+            $institutionCode,
+            $account,
+            $source,
+        );
+        $verificationHash = $this->institutionVerificationHash(
+            $institutionType,
+            $institutionCode,
+            $account,
+            $source,
+            $symbols,
         );
         if (!hash_equals($frozenVerification, $verificationHash)
             || ($source['variable_symbol'] ?? null)
-                !== $account['variable_symbol']
+                !== $symbols['variable_symbol']
             || ($source['specific_symbol'] ?? null)
-                !== $account['specific_symbol']
+                !== $symbols['specific_symbol']
             || ($source['constant_symbol'] ?? null)
-                !== $account['constant_symbol']
+                !== $symbols['constant_symbol']
         ) {
             throw new \DomainException(
                 'Ověření nebo symboly instituce se od materializace změnily.',
@@ -976,10 +1246,10 @@ final class PayrollPaymentBatchBuilder
             'currency_code' => $currencyCode,
             'planned_payment_date' => $plannedDate,
             'recipient_name' => $account['institution_name'],
-            'variable_symbol' => $account['variable_symbol'],
-            'specific_symbol' => $account['specific_symbol'],
-            'constant_symbol' => $account['constant_symbol'],
-            'payment_message' => "Zdravotni pojisteni {$code}",
+            'variable_symbol' => $symbols['variable_symbol'],
+            'specific_symbol' => $symbols['specific_symbol'],
+            'constant_symbol' => $symbols['constant_symbol'],
+            'payment_message' => $reference['payment_message'],
             'liabilities' => $group['liabilities'],
         ];
         if ($exportFormat === 'abo') {

@@ -51,21 +51,22 @@ název a vlastní variabilní symbol pro platby sociálního pojištění. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
 variabilním symbolem platby.
 
-V části **Účty zdravotních pojišťoven** se pro každou pojišťovnu eviduje
-zaměstnavatelský variabilní symbol společně s účtem, měnou a obdobím platnosti.
-Ulož také druh ověřovacího zdroje, jeho referenci a datum ověření. V seznamu se
-bankovní účet zobrazuje jen maskovaně. Změnu samotného účtu nebo začátku
-platnosti založ jako nový historický záznam; u existujícího záznamu lze bezpečně
-upravit název, platební symboly, konec platnosti a údaje o ověření. Období stejné
-pojišťovny a měny se nesmějí překrývat.
+V části **Platební účty institucí** se evidují účty ČSSZ, finančního úřadu,
+zdravotních pojišťoven, zákonného pojištění a dalších příjemců. Pro každý účet
+vyber typ instituce a ulož zaměstnavatelský variabilní symbol, měnu, období
+platnosti, druh ověřovacího zdroje, jeho referenci a datum ověření. V seznamu se
+bankovní účet zobrazuje jen maskovaně. Změnu samotného účtu, typu nebo kódu
+instituce či začátku platnosti založ jako nový historický záznam; u existujícího
+záznamu lze bezpečně upravit název, platební symboly, konec platnosti a údaje
+o ověření. Období stejné instituce a měny se nesmějí překrývat.
 
 Osobní variabilní symbol ČSSZ a číslo pojištěnce OSVČ v obecném nastavení firmy
 zůstávají určena pro vlastní odvody fyzické osoby. Platby zaměstnavatele je
 nepřebírají. U právnické osoby se tato osobní pole v obecném nastavení
 nezobrazují; identifikátory zaměstnavatele se ukládají jen v mzdovém nastavení.
 Automatické návrhy a rozpoznání bankovních plateb používají aktivní mzdovou
-účtárnu a účet pojišťovny platný k datu platby; nejednoznačný nebo historický
-údaj zůstane k ručnímu posouzení.
+účtárnu a účet příslušné instituce platný k datu platby; nejednoznačný nebo
+historický údaj zůstane k ručnímu posouzení.
 
 Na stejné stránce se nastavují výchozí účty automatického zaúčtování. Samostatně
 se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odměna za
@@ -316,17 +317,25 @@ ověření; celé číslo účtu ani interní reference neposílá. Splatnost se
 odvodí z mzdového období, ne z dne, kdy byl historický běh vypočten nebo
 opraven.
 
+Ze stejných schválených podkladů se připraví jeden závazek sociálního
+pojištění za mzdovou účtárnu a oddělené závazky zálohové a srážkové daně.
+Sociální pojistné používá zaměstnavatelský VS z účtárny a účet ČSSZ účinný
+ke splatnosti. Zálohová a srážková daň se neslučují: každá má vlastní účet
+finančního úřadu a platební symboly. Záloha je splatná 20. den následujícího
+měsíce, srážková daň jeho poslední den.
+
 Opakované stisknutí **Připravit závazky** je bezpečné a nevytvoří duplicity.
 Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
 závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost,
-částku a odvozený stav. Záporný rozdíl zdravotního pojistného se zobrazí jako
+částku a odvozený stav. Záporný rozdíl institucionálního odvodu se zobrazí jako
 příchozí opravný závazek, ale nelze jej vložit do odchozí bankovní dávky;
 vratku je nutné doložit příchozím bankovním nebo pokladním dokladem.
 
 V záložce **Platební dávky** vybereš připravené závazky. Aplikace podle
 výplatních cílů nabídne účet plátce a formát ABO nebo SEPA, znovu ověří
-nezměněné účty příjemců a vytvoří dávku. U zdravotní pojišťovny použije přesné
-zmrazené VS, SS a KS. Export se ukládá šifrovaně přesně
+nezměněné účty příjemců a vytvoří dávku. U zdravotní pojišťovny, ČSSZ i
+finančního úřadu použije přesné zmrazené VS, SS a KS. Export se ukládá
+šifrovaně přesně
 v těch bajtech, které se stáhnou do banky. Opakování se stejným klíčem vrátí
 tentýž export a nevytvoří další ekonomický závazek. Stažení vyžaduje právo
 zápisu a používá krátkodobé jednorázové oprávnění.
