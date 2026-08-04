@@ -567,14 +567,21 @@ BEGIN
   END IF;
 
   IF NEW.event_kind = 'reversed' THEN
+    -- BEZ `FOR UPDATE`: tenhle SELECT čte tabulku, NAD KTEROU trigger sám visí.
+    -- Obyčejné čtení vlastní tabulky MariaDB v triggeru dovolí, zamykající ne —
+    -- skončilo by chybou 1442 („Can't update table … already used by statement
+    -- which invoked this trigger"), takže by KAŽDÝ zápis reverzace spadl.
+    -- Ostatní `FOR UPDATE` v tomhle triggeru zůstávají: míří na jiné tabulky
+    -- (allocations, liabilities, bank_statements, cash_documents), kde je to legální.
+    -- Serializaci souběžných reverzací téhož source_match drží kontrola součtu níž
+    -- spolu s unikátním indexem, ne zámek řádku.
     SELECT source_match.amount_minor,
            source_match.event_kind,
            source_match.allocation_id
       INTO source_amount, source_event, source_allocation_id
       FROM payroll_payment_matches source_match
      WHERE source_match.supplier_id = NEW.supplier_id
-       AND source_match.id = NEW.source_match_id
-     FOR UPDATE;
+       AND source_match.id = NEW.source_match_id;
 
     IF source_amount IS NULL
        OR source_event <> 'matched'

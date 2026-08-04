@@ -38,8 +38,10 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
     /** @return iterable<string,array{array<string,mixed>}> */
     public static function goldenCases(): iterable
     {
+        // Adresář je `Fixtures/Payroll` s velkým P. Malé písmeno projde na Windows,
+        // ale na Linuxu (a tedy na CI) vrátí file_get_contents rovnou false.
         $json = file_get_contents(
-            dirname(__DIR__, 3) . '/Fixtures/payroll/income-tax-2026-golden.json',
+            dirname(__DIR__, 3) . '/Fixtures/Payroll/income-tax-2026-golden.json',
         );
         self::assertIsString($json);
         $cases = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
