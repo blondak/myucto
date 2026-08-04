@@ -1,0 +1,191 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Payroll\Document;
+
+use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
+use PHPUnit\Framework\TestCase;
+
+final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
+{
+    public function testMapsAdvanceAndWithholdingRegimesWithoutMixingThem(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $person = self::person();
+        $inputPerson = self::inputPerson();
+
+        $advance = $method->invoke(
+            $builder,
+            $person,
+            $inputPerson,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+        self::assertSame(10_000_000, $advance['income_minor_units']);
+        self::assertSame(1_250_000, $advance['tax_minor_units']);
+        self::assertSame(50_000, $advance['tax_bonus_minor_units']);
+        self::assertSame(7_000_000, $advance['expected_net_minor_units']);
+
+        $withholding = $method->invoke(
+            $builder,
+            $person,
+            $inputPerson,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        );
+        self::assertSame(2_000_000, $withholding['income_minor_units']);
+        self::assertSame(300_000, $withholding['tax_minor_units']);
+        self::assertSame(0, $withholding['tax_bonus_minor_units']);
+    }
+
+    public function testRejectsBackpayThatCannotBeSplitIntoOfficialRows(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        $input['employments'][0]['inputs'][0]['component']['kind'] = 'backpay';
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Doplatek');
+        $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+    }
+
+    public function testRejectsNonCashIncomeWithoutActualReceiptEvidence(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $person = self::person();
+        $person['statutory']['net_pay']['non_cash_income_minor_units'] = 10_000;
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Nepeněžní');
+        $method->invoke(
+            $builder,
+            $person,
+            self::inputPerson(),
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+    }
+
+    public function testRejectsMissingDeclarationEvidenceForAdvanceCertificate(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        unset($input['statutory_evidence']['income_tax']['declaration']);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Prohlášení');
+        $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+    }
+
+    public function testRejectsUnverifiedDeclarationEvidenceForAdvanceCertificate(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        $input['statutory_evidence']['income_tax']['declaration']['status'] =
+            'unverified';
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Prohlášení');
+        $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private static function person(): array
+    {
+        return [
+            'statutory' => [
+                'status' => 'calculated',
+                'income_tax' => [
+                    'status' => 'calculated',
+                    'advance_tax' => [
+                        'taxable_income_minor_units' => 10_000_000,
+                    ],
+                    'withholding_base_minor_units' => 2_000_000,
+                    'withholding_tax_minor_units' => 300_000,
+                ],
+                'net_pay' => [
+                    'non_cash_income_minor_units' => 0,
+                    'advance_tax_minor_units' => 1_250_000,
+                    'withholding_tax_minor_units' => 300_000,
+                    'tax_bonus_minor_units' => 50_000,
+                ],
+            ],
+            'payable_after_enforcement_minor' => 7_000_000,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function inputPerson(): array
+    {
+        return [
+            'statutory_evidence' => [
+                'income_tax' => [
+                    'declaration' => [
+                        'status' => 'signed',
+                        'effective_from' => '2026-01-01',
+                        'effective_to' => null,
+                    ],
+                    'residence' => [
+                        'residence' => 'czech-resident',
+                        'country_code' => 'CZ',
+                    ],
+                    'credit_claims' => [[
+                        'credit_kind' => 'taxpayer',
+                        'evidence_status' => 'verified',
+                    ]],
+                    'child_claims' => [],
+                ],
+            ],
+            'employments' => [[
+                'inputs' => [[
+                    'amount_minor' => 12_000_000,
+                    'component' => ['kind' => 'monthly_wage'],
+                ]],
+            ]],
+        ];
+    }
+}

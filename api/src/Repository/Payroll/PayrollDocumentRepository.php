@@ -264,6 +264,46 @@ final class PayrollDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
+    /** @return array<string,mixed>|null */
+    public function findAnnualArtifact(
+        int $supplierId,
+        int $annualRevisionId,
+        int $employeeId,
+        string $documentKind,
+        string $templateVersion,
+        string $rendererVersion,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    annual.tax_year,
+                    annual.purpose,
+                    annual.revision_no AS annual_revision_no
+               FROM payroll_generated_documents document
+               JOIN payroll_annual_document_revisions annual
+                 ON annual.supplier_id = document.supplier_id
+                AND annual.id = document.annual_revision_id
+              WHERE document.supplier_id = ?
+                AND document.annual_revision_id = ?
+                AND document.employee_id = ?
+                AND document.document_kind = ?
+                AND document.template_version = ?
+                AND document.renderer_version = ?
+              ORDER BY document.document_revision_no DESC, document.id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([
+            $supplierId,
+            $annualRevisionId,
+            $employeeId,
+            $documentKind,
+            $templateVersion,
+            $rendererVersion,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::cast($row);
+    }
+
     /** @return list<array<string,mixed>> */
     public function listAnnualDocuments(int $supplierId, int $taxYear): array
     {
@@ -339,9 +379,10 @@ final class PayrollDocumentRepository
                  document_revision_no, supersedes_document_id, source_snapshot_hash,
                  revision_snapshot_hash,
                  template_version, renderer_version, file_sha256, size_bytes,
-                 mime_type, storage_key, suggested_filename, manifest_json,
-                 idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UNHEX(?), ?)'
+                  mime_type, storage_key, suggested_filename, manifest_json,
+                  idempotency_key_hash, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     UNHEX(?), ?, COALESCE(?, CURRENT_TIMESTAMP))'
         );
         try {
             $stmt->execute([
@@ -365,6 +406,7 @@ final class PayrollDocumentRepository
                 $record['manifest_json'],
                 $record['idempotency_key_hash'],
                 $record['created_by'],
+                $record['created_at'] ?? null,
             ]);
         } catch (PDOException $exception) {
             if ((int) ($exception->errorInfo[1] ?? 0) !== 1062) {

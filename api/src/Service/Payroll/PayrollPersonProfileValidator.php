@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 
 /**
- * @phpstan-type IdentityInput array{id:?int,full_name:string,birth_surname_present:bool,birth_surname:?string,effective_from:string,effective_to:?string}
+ * @phpstan-type IdentityInput array{id:?int,full_name:string,first_name:string,last_name:string,birth_surname_present:bool,birth_surname:?string,effective_from:string,effective_to:?string}
  * @phpstan-type AddressInput array{id:?int,address_type:string,address_present:bool,street_line:?string,city:?string,postal_code:?string,country_code:?string,effective_from:string,effective_to:?string}
  * @phpstan-type ContactInput array{id:?int,contact_type:string,value:?string,is_primary:bool,is_active:bool}
  * @phpstan-type IdentifierInput array{id:?int,identifier_type:string,value:?string}
@@ -34,7 +35,10 @@ final class PayrollPersonProfileValidator
     private const CONTACT_TYPES = ['email', 'phone'];
     private const IDENTIFIER_TYPES = ['birth_number', 'ecp', 'vcp', 'foreign_tax_identifier'];
 
-    public function __construct(private readonly IbanValidator $ibanValidator) {}
+    public function __construct(
+        private readonly IbanValidator $ibanValidator,
+        private readonly CzechBankAccountValidator $czechBankAccountValidator,
+    ) {}
 
     /**
      * @param array<string,mixed> $input
@@ -129,6 +133,16 @@ final class PayrollPersonProfileValidator
                     $row['full_name'] ?? null,
                     "identity_history.{$index}.full_name",
                     191,
+                ),
+                'first_name' => $this->text(
+                    $row['first_name'] ?? null,
+                    "identity_history.{$index}.first_name",
+                    96,
+                ),
+                'last_name' => $this->text(
+                    $row['last_name'] ?? null,
+                    "identity_history.{$index}.last_name",
+                    96,
                 ),
                 'birth_surname_present' => $birthSurnamePresent,
                 'birth_surname' => $birthSurname,
@@ -615,38 +629,6 @@ final class PayrollPersonProfileValidator
             return $compact;
         }
 
-        if (preg_match('/^(?:(\d{1,6})-)?(\d{2,10})\/(\d{4})$/', $compact, $match) !== 1) {
-            throw new \InvalidArgumentException(
-                'Český účet musí mít formát [předčíslí-]číslo/kód banky.'
-            );
-        }
-        $prefix = $match[1];
-        if (($prefix !== '' && !$this->validCzechAccountPart($prefix, 6))
-            || !$this->validCzechAccountPart($match[2], 10)
-        ) {
-            throw new \InvalidArgumentException('Český bankovní účet neprošel kontrolou modulo 11.');
-        }
-        $base = ltrim($match[2], '0');
-        if ($base === '') {
-            throw new \InvalidArgumentException('Číslo bankovního účtu nesmí být nulové.');
-        }
-        $normalizedPrefix = ltrim($prefix, '0');
-
-        return ($normalizedPrefix === '' ? '' : $normalizedPrefix . '-')
-            . $base . '/' . $match[3];
-    }
-
-    private function validCzechAccountPart(string $value, int $length): bool
-    {
-        $weights = $length === 6
-            ? [10, 5, 8, 4, 2, 1]
-            : [6, 3, 7, 9, 10, 5, 8, 4, 2, 1];
-        $digits = str_pad($value, $length, '0', STR_PAD_LEFT);
-        $sum = 0;
-        foreach (str_split($digits) as $index => $digit) {
-            $sum += (int) $digit * $weights[$index];
-        }
-
-        return $sum % 11 === 0;
+        return $this->czechBankAccountValidator->normalize($compact);
     }
 }

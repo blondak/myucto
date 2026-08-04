@@ -7,12 +7,14 @@ import {
   type PayrollEmploymentCreatePayload,
   type PayrollPerson,
   type PayrollPersonListItem,
+  type PayrollPersonProfile,
   type PayrollRelationType,
 } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
+import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import { todayIso } from './employmentLifecycleUi'
 
 const { t } = useI18n()
@@ -137,6 +139,20 @@ function updateEmployment(personId: number, updated: PayrollEmployment) {
   if (!employments) return
   const index = employments.findIndex(item => item.id === updated.id)
   if (index >= 0) employments[index] = updated
+}
+
+function updatePersonProfile(updated: PayrollPersonProfile) {
+  const person = people.value.find(item => item.id === updated.employee_id)
+  if (!person) return
+  person.full_name = updated.full_name
+  person.profile_status = updated.profile_status
+  person.needs_setup = updated.profile_status !== 'ready'
+  const detail = details.value[updated.employee_id]
+  if (detail) {
+    detail.full_name = updated.full_name
+    detail.profile_status = updated.profile_status
+    detail.needs_setup = updated.profile_status !== 'ready'
+  }
 }
 
 onMounted(load)
@@ -270,5 +286,12 @@ onMounted(load)
         </div>
       </template>
     </section>
+
+    <PayrollPersonProfilePanel
+      v-if="expandedId !== null && details[expandedId]"
+      :person-id="expandedId"
+      :can-write="auth.canWrite('payroll.person.write')"
+      @saved="updatePersonProfile"
+    />
   </div>
 </template>

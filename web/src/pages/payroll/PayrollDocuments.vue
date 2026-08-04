@@ -6,6 +6,8 @@ import {
   type PayrollDocument,
   type PayrollDocumentList,
   type PayrollPersonListItem,
+  type PayrollTaxCertificateKind,
+  type PayrollTaxCertificateGenerationPayload,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
@@ -13,6 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -26,7 +29,10 @@ const people = ref<PayrollPersonListItem[]>([])
 const selectedEmployeeId = ref<number | null>(null)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
-const generatingEmployeeId = ref<number | null>(null)
+type AnnualGenerationKind = 'payroll_sheet' | PayrollTaxCertificateKind
+const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
+const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
+const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
 let loadSequence = 0
 
@@ -41,6 +47,48 @@ const employeeOptions = computed(() => people.value.map(person => ({
   label: person.full_name,
   secondary: person.needs_setup ? t('payroll.documents.employee_profile_incomplete') : undefined,
 })))
+const annualActions = computed<ActionItem[]>(() => {
+  const disabled = selectedEmployeeId.value === null
+    || generatingAnnualKind.value !== null
+  return [
+    {
+      key: 'payroll-sheet',
+      label: t('payroll.documents.generate_payroll_sheet'),
+      icon: 'doc',
+      tier: 'primary',
+      variant: 'primary',
+      disabled,
+      loading: generatingAnnualKind.value === 'payroll_sheet',
+      run: generatePayrollSheet,
+    },
+    {
+      key: 'tax-certificate-advance',
+      label: t('payroll.documents.generate_tax_certificate_advance'),
+      icon: 'doc',
+      tier: 'secondary',
+      variant: 'primary',
+      disabled,
+      loading: generatingAnnualKind.value
+        === 'taxable_income_advance_certificate',
+      run: () => requestTaxCertificate(
+        'taxable_income_advance_certificate',
+      ),
+    },
+    {
+      key: 'tax-certificate-withholding',
+      label: t('payroll.documents.generate_tax_certificate_withholding'),
+      icon: 'doc',
+      tier: 'secondary',
+      variant: 'primary',
+      disabled,
+      loading: generatingAnnualKind.value
+        === 'taxable_income_withholding_certificate',
+      run: () => requestTaxCertificate(
+        'taxable_income_withholding_certificate',
+      ),
+    },
+  ]
+})
 
 function kindLabel(item: PayrollDocument): string {
   return t(`payroll.documents.kind.${item.document_kind}`)
@@ -59,6 +107,56 @@ function formatCreated(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
+}
+
+function latestTaxCertificate(kind: PayrollTaxCertificateKind): PayrollDocument | null {
+  const employeeId = selectedEmployeeId.value
+  if (employeeId === null) return null
+
+  return annualItems.value
+    .filter(item => item.employee_id === employeeId && item.document_kind === kind)
+    .reduce<PayrollDocument | null>((latest, item) => {
+      if (latest === null) return item
+      const itemRevision = item.document_revision_no ?? 0
+      const latestRevision = latest.document_revision_no ?? 0
+      if (itemRevision !== latestRevision) {
+        return itemRevision > latestRevision ? item : latest
+      }
+      return item.id > latest.id ? item : latest
+    }, null)
+}
+
+function cancelCorrection(): void {
+  pendingCorrectionKind.value = null
+  correctionReason.value = ''
+}
+
+function requestTaxCertificate(kind: PayrollTaxCertificateKind): void {
+  const latest = latestTaxCertificate(kind)
+  if (latest !== null) {
+    pendingCorrectionKind.value = kind
+    correctionReason.value = ''
+    return
+  }
+  void generateTaxCertificate(kind, {
+    supersedes_document_id: null,
+    correction_reason: null,
+  })
+}
+
+function submitCorrection(): void {
+  const kind = pendingCorrectionKind.value
+  const latest = kind === null ? null : latestTaxCertificate(kind)
+  const reason = correctionReason.value.trim()
+  if (kind === null || latest === null) return
+  if (reason === '') {
+    toast.error(t('payroll.documents.correction_reason_required'))
+    return
+  }
+  void generateTaxCertificate(kind, {
+    supersedes_document_id: latest.id,
+    correction_reason: reason,
+  })
 }
 
 async function load(): Promise<void> {
@@ -104,8 +202,8 @@ async function load(): Promise<void> {
 
 async function generatePayrollSheet(): Promise<void> {
   const employeeId = selectedEmployeeId.value
-  if (employeeId === null || generatingEmployeeId.value !== null) return
-  generatingEmployeeId.value = employeeId
+  if (employeeId === null || generatingAnnualKind.value !== null) return
+  generatingAnnualKind.value = 'payroll_sheet'
   try {
     await payrollApi.generatePayrollSheet(employeeId, year.value)
     toast.success(t('payroll.documents.payroll_sheet_created'))
@@ -113,7 +211,29 @@ async function generatePayrollSheet(): Promise<void> {
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.documents.payroll_sheet_failed')))
   } finally {
-    generatingEmployeeId.value = null
+    generatingAnnualKind.value = null
+  }
+}
+
+async function generateTaxCertificate(
+  kind: PayrollTaxCertificateKind,
+  payload: PayrollTaxCertificateGenerationPayload,
+): Promise<void> {
+  const employeeId = selectedEmployeeId.value
+  if (employeeId === null || generatingAnnualKind.value !== null) return
+  generatingAnnualKind.value = kind
+  try {
+    await payrollApi.generateTaxCertificate(employeeId, year.value, kind, payload)
+    toast.success(t('payroll.documents.tax_certificate_created'))
+    cancelCorrection()
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.documents.tax_certificate_failed'),
+    ))
+  } finally {
+    generatingAnnualKind.value = null
   }
 }
 
@@ -147,7 +267,11 @@ async function download(item: PayrollDocument): Promise<void> {
   }
 }
 
-watch(activeTab, load)
+watch(activeTab, () => {
+  cancelCorrection()
+  void load()
+})
+watch([selectedEmployeeId, year], cancelCorrection)
 onMounted(load)
 </script>
 
@@ -245,20 +369,61 @@ onMounted(load)
             :aria-label="t('payroll.documents.select_employee')"
           />
         </label>
-        <button
-          type="button"
-          data-test="generate-payroll-sheet"
-          :class="btnFilled('primary')"
-          :disabled="selectedEmployeeId === null || generatingEmployeeId !== null"
-          @click="generatePayrollSheet"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path :d="ICONS.doc" />
-          </svg>
-          {{ generatingEmployeeId === null ? t('payroll.documents.generate_payroll_sheet') : t('payroll.documents.generating_payroll_sheet') }}
-        </button>
+        <ActionBar :actions="annualActions" />
       </div>
       <p class="mt-2 text-xs text-neutral-500">{{ t('payroll.documents.payroll_sheet_hint') }}</p>
+      <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.documents.tax_certificate_hint') }}</p>
+      <form
+        v-if="pendingCorrectionKind && latestTaxCertificate(pendingCorrectionKind)"
+        data-test="tax-certificate-correction"
+        class="mt-4 rounded-lg border border-warning-500/40 bg-warning-50 p-4"
+        @submit.prevent="submitCorrection"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="font-semibold text-neutral-900">{{ t('payroll.documents.correction_title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-600">
+              {{
+                t('payroll.documents.correction_hint', {
+                  document: latestTaxCertificate(pendingCorrectionKind)?.id,
+                  created: formatCreated(latestTaxCertificate(pendingCorrectionKind)?.created_at ?? ''),
+                })
+              }}
+            </p>
+          </div>
+          <button type="button" :class="btnOutline('neutral')" @click="cancelCorrection">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.x" />
+            </svg>
+            {{ t('payroll.documents.correction_cancel') }}
+          </button>
+        </div>
+        <label class="mt-4 block">
+          <span class="form-label">{{ t('payroll.documents.correction_reason') }}</span>
+          <textarea
+            v-model="correctionReason"
+            data-test="correction-reason"
+            required
+            rows="3"
+            maxlength="1000"
+            class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
+            :placeholder="t('payroll.documents.correction_reason_placeholder')"
+          />
+        </label>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <button
+            type="submit"
+            data-test="submit-tax-certificate-correction"
+            :class="btnFilled('warning')"
+            :disabled="generatingAnnualKind !== null"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.doc" />
+            </svg>
+            {{ t('payroll.documents.correction_submit') }}
+          </button>
+        </div>
+      </form>
     </section>
 
     <section class="rounded-xl border border-payroll-500/20 bg-payroll-50 p-4 text-sm text-neutral-700">

@@ -52,7 +52,8 @@ final class AboPaymentOrderWriter
      *     payer_account_number: string,
      *     payer_bank_code: string,
      *     payment_date: string|\DateTimeInterface,
-     *     items: list<array{account_number?:?string, bank_code?:?string, amount:int|float,
+     *     items: list<array{account_number?:?string, bank_code?:?string, amount?:int|float,
+     *                        amount_minor?:int,
      *                        variable_symbol?:?string, constant_symbol?:?string,
      *                        specific_symbol?:?string, message?:?string}>
      * } $order
@@ -61,36 +62,59 @@ final class AboPaymentOrderWriter
      */
     public function build(array $order): string
     {
-        $items = $order['items'] ?? [];
-        if (!is_array($items) || $items === []) {
-            throw new \InvalidArgumentException('Platební příkaz neobsahuje žádnou položku.');
-        }
-
-        $date = $this->normalizeDate($order['payment_date']);
+        $items = $this->items($order);
+        $date = $this->requiredDate($order, 'payment_date');
         $ddmmrr = $date->format('dmy');
 
-        [$payerPrefix, $payerNumber] = $this->splitAccount((string) $order['payer_account_number']);
+        [$payerPrefix, $payerNumber] = $this->splitAccount(
+            $this->requiredOrderText($order, 'payer_account_number'),
+        );
         if ($payerNumber === '') {
             throw new \InvalidArgumentException('Účet plátce nemá platné číslo účtu.');
         }
-        $payerBank = $this->digits((string) $order['payer_bank_code']);
+        $payerBank = $this->boundedDigits(
+            $this->requiredOrderText($order, 'payer_bank_code'),
+            4,
+            'Kód banky plátce',
+        );
+        if ($payerBank === '') {
+            throw new \InvalidArgumentException(
+                'Kód banky plátce musí obsahovat číslice.',
+            );
+        }
 
         // Číslo klienta (UHL1) = povinná část čísla účtu plátce (bez předčíslí), 10 míst.
         // Override z nastavení dodavatele má přednost (banka ho někdy přiděluje zvlášť).
-        $clientNumber = $this->digits((string) ($order['client_number'] ?? ''));
+        $clientNumber = $this->boundedDigits(
+            (string) ($order['client_number'] ?? ''),
+            10,
+            'Číslo klienta',
+        );
         if ($clientNumber === '') {
             $clientNumber = $payerNumber;
         }
         $clientNumber = $this->padLeft($clientNumber, 10);
 
         $clientName = $this->asciiField((string) ($order['client_name'] ?? ''), 20);
-        $fileNumber = $this->padLeft($this->digits((string) ($order['file_number'] ?? '1')) ?: '1', 6);
+        $fileNumber = $this->padLeft(
+            $this->boundedDigits(
+                (string) ($order['file_number'] ?? '1'),
+                6,
+                'Číslo souboru',
+            ) ?: '1',
+            6,
+        );
 
         // Sestav položky a zároveň spočítej celkovou částku skupiny v haléřích.
         $itemLines = [];
         $totalHaler = 0;
         foreach ($items as $i => $item) {
             [$line, $haler] = $this->buildItemLine($item, $i);
+            if ($totalHaler > 99_999_999_999_999 - $haler) {
+                throw new \InvalidArgumentException(
+                    'Celková částka ABO dávky překračuje 14místné pole.',
+                );
+            }
             $itemLines[] = $line;
             $totalHaler += $haler;
         }
@@ -122,32 +146,57 @@ final class AboPaymentOrderWriter
      */
     private function buildItemLine(array $item, int $index): array
     {
-        [$prefix, $number] = $this->splitAccount((string) ($item['account_number'] ?? ''));
-        $bank = $this->digits((string) ($item['bank_code'] ?? ''));
+        [$prefix, $number] = $this->splitAccount(
+            $this->optionalText($item, 'account_number'),
+        );
+        $bank = $this->boundedDigits(
+            $this->optionalText($item, 'bank_code'),
+            4,
+            'Kód banky příjemce',
+        );
         if ($number === '' || $bank === '') {
             throw new \InvalidArgumentException(
                 "Položka #" . ($index + 1) . " nemá český účet (číslo + kód banky) — do ABO ji nelze zařadit."
             );
         }
 
-        $haler = $this->toHaler($item['amount'] ?? 0);
+        $haler = $this->minorUnits($item);
         if ($haler <= 0) {
             throw new \InvalidArgumentException('Položka #' . ($index + 1) . ' má nekladnou částku.');
         }
+        if ($haler > 999_999_999_999) {
+            throw new \InvalidArgumentException(
+                'Položka #' . ($index + 1)
+                . ' překračuje 12místné částkové pole ABO.',
+            );
+        }
 
-        $vs = $this->digits((string) ($item['variable_symbol'] ?? ''));
-        $vs = $vs === '' ? '0' : substr($vs, 0, 10);
+        $vs = $this->boundedDigits(
+            $this->optionalText($item, 'variable_symbol'),
+            10,
+            'Variabilní symbol',
+        );
+        $vs = $vs === '' ? '0' : $vs;
 
         // KS pole (8 míst) = směrový kód banky příjemce (4) + konstantní symbol (4).
-        $ks = $this->digits((string) ($item['constant_symbol'] ?? ''));
+        $ks = $this->boundedDigits(
+            $this->optionalText($item, 'constant_symbol'),
+            4,
+            'Konstantní symbol',
+        );
         $ksField = $this->padLeft($bank, 4) . $this->padLeft($ks, 4);
 
         // Specifický symbol (10 míst, nuly pokud chybí).
-        $ss = $this->digits((string) ($item['specific_symbol'] ?? ''));
+        $ss = $this->boundedDigits(
+            $this->optionalText($item, 'specific_symbol'),
+            10,
+            'Specifický symbol',
+        );
         $ssField = $this->padLeft($ss, 10);
 
         // Zpráva pro příjemce (max 35 vč. prefixu „AV:"), čisté ASCII.
-        $msg = 'AV:' . $this->asciiMessage((string) ($item['message'] ?? $vs));
+        $message = $this->optionalText($item, 'message', $vs);
+        $msg = 'AV:' . $this->asciiMessage($message);
         $msg = substr($msg, 0, 35);
 
         $line = $prefix . '-' . $number
@@ -185,6 +234,11 @@ final class AboPaymentOrderWriter
         if ($n === '') {
             return ['000000', ''];
         }
+        if (strlen($p) > 6 || strlen($n) > 10) {
+            throw new \InvalidArgumentException(
+                'Číslo účtu překračuje pevnou délku ABO pole.',
+            );
+        }
         return [$this->padLeft($p, 6), $this->padLeft($n, 10)];
     }
 
@@ -194,9 +248,129 @@ final class AboPaymentOrderWriter
         return (int) round(((float) $amount) * 100);
     }
 
+    /** @param array<string,mixed> $item */
+    private function minorUnits(array $item): int
+    {
+        if (array_key_exists('amount_minor', $item)) {
+            $minor = $item['amount_minor'];
+            if (!is_int($minor)) {
+                throw new \InvalidArgumentException(
+                    'Částka v haléřích musí být celé číslo.',
+                );
+            }
+
+            return $minor;
+        }
+
+        $amount = $item['amount'] ?? 0;
+        if (!is_int($amount) && !is_float($amount) && !is_string($amount)) {
+            throw new \InvalidArgumentException(
+                'Částka položky není platná.',
+            );
+        }
+
+        return $this->toHaler($amount);
+    }
+
+    /** @param array<string,mixed> $item */
+    private function optionalText(
+        array $item,
+        string $field,
+        string $default = '',
+    ): string {
+        $value = $item[$field] ?? null;
+        if ($value === null) {
+            return $default;
+        }
+        if (!is_string($value)) {
+            throw new \InvalidArgumentException(
+                "Pole {$field} platební položky musí být text.",
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string,mixed> $order
+     * @return non-empty-list<array<string,mixed>>
+     */
+    private function items(array $order): array
+    {
+        $value = $order['items'] ?? null;
+        if (!is_array($value) || !array_is_list($value) || $value === []) {
+            throw new \InvalidArgumentException(
+                'Platební příkaz neobsahuje platný seznam položek.',
+            );
+        }
+        $result = [];
+        foreach ($value as $item) {
+            if (!is_array($item) || array_is_list($item)) {
+                throw new \InvalidArgumentException(
+                    'Položka platebního příkazu musí být objekt.',
+                );
+            }
+            $normalized = [];
+            foreach ($item as $key => $fieldValue) {
+                if (!is_string($key)) {
+                    throw new \InvalidArgumentException(
+                        'Položka platebního příkazu má neplatný klíč.',
+                    );
+                }
+                $normalized[$key] = $fieldValue;
+            }
+            $result[] = $normalized;
+        }
+
+        return $result;
+    }
+
+    /** @param array<string,mixed> $order */
+    private function requiredOrderText(array $order, string $field): string
+    {
+        $value = $order[$field] ?? null;
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException(
+                "Platební příkaz nemá platné pole {$field}.",
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $order */
+    private function requiredDate(
+        array $order,
+        string $field,
+    ): \DateTimeImmutable {
+        $value = $order[$field] ?? null;
+        if (!is_string($value) && !$value instanceof \DateTimeInterface) {
+            throw new \InvalidArgumentException(
+                "Platební příkaz nemá platné pole {$field}.",
+            );
+        }
+
+        return $this->normalizeDate($value);
+    }
+
     private function digits(string $s): string
     {
         return (string) preg_replace('/\D+/', '', $s);
+    }
+
+    private function boundedDigits(
+        string $value,
+        int $maxLength,
+        string $label,
+    ): string {
+        $digits = $this->digits($value);
+        if (strlen($digits) > $maxLength) {
+            throw new \InvalidArgumentException(
+                "{$label} překračuje {$maxLength} číslic ABO pole.",
+            );
+        }
+
+        return $digits;
     }
 
     private function padLeft(string $s, int $len): string

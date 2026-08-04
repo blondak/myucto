@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 
 final class PayrollInstitutionAccountValidator
 {
-    public function __construct(private readonly IbanValidator $ibanValidator) {}
+    public function __construct(
+        private readonly IbanValidator $ibanValidator,
+        private readonly CzechBankAccountValidator $czechBankAccountValidator,
+    ) {}
 
     /**
      * @param array<string,mixed> $input
@@ -195,42 +199,7 @@ final class PayrollInstitutionAccountValidator
             return $compact;
         }
 
-        $national = (string) preg_replace('/\s+/', '', $value);
-        if (preg_match('/^(?:(\d{1,6})-)?(\d{2,10})\/(\d{4})$/', $national, $match) !== 1) {
-            throw new \InvalidArgumentException(
-                'Český účet musí mít formát [předčíslí-]číslo/kód banky.'
-            );
-        }
-        $prefix = $match[1];
-        if (($prefix !== '' && !$this->validCzechPart($prefix, 6))
-            || !$this->validCzechPart($match[2], 10)
-        ) {
-            throw new \InvalidArgumentException('Český bankovní účet neprošel kontrolou modulo 11.');
-        }
-
-        $normalizedBase = ltrim($match[2], '0');
-        if ($normalizedBase === '') {
-            throw new \InvalidArgumentException('Číslo bankovního účtu nesmí být nulové.');
-        }
-
-        $normalizedPrefix = ltrim($prefix, '0');
-        return ($normalizedPrefix !== '' ? $normalizedPrefix . '-' : '')
-            . $normalizedBase
-            . '/'
-            . $match[3];
-    }
-
-    private function validCzechPart(string $value, int $length): bool
-    {
-        $weights = $length === 6
-            ? [10, 5, 8, 4, 2, 1]
-            : [6, 3, 7, 9, 10, 5, 8, 4, 2, 1];
-        $digits = str_pad($value, $length, '0', STR_PAD_LEFT);
-        $sum = 0;
-        foreach (str_split($digits) as $index => $digit) {
-            $sum += (int) $digit * $weights[$index];
-        }
-        return $sum % 11 === 0;
+        return $this->czechBankAccountValidator->normalize($value);
     }
 
     private function paymentSymbol(

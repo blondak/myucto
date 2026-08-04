@@ -75,6 +75,10 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.get('[data-layout="mobile"]').text()).toContain('Syntetická osoba')
     expect(wrapper.text()).toContain('******/**42')
     expect(wrapper.text()).not.toContain('123456/7842')
+    const saveBar = wrapper.get('[data-testid="quick-payroll-save"]').element.parentElement
+    expect(saveBar?.classList.contains('sticky')).toBe(false)
+    expect(saveBar?.classList.contains('md:sticky')).toBe(true)
+    expect(wrapper.get('[data-testid="quick-payroll-save"]').classes()).toContain('w-full')
   })
 
   it('keeps hour mode unavailable without an approved average and saves one bulk payload', async () => {

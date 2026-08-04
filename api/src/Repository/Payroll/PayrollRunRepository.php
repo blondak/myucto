@@ -20,6 +20,7 @@ final class PayrollRunRepository
                        revision.id AS revision_id,
                        revision.revision_no,
                        revision.status AS revision_status,
+                       revision.input_snapshot_json,
                        revision.result_snapshot_json,
                        revision.calculated_by,
                        revision.reviewed_by,
@@ -48,6 +49,15 @@ final class PayrollRunRepository
                 ? null
                 : (int) $row['revision_no'];
             $run['revision_status'] = $row['revision_status'];
+            $inputSnapshot = $row['input_snapshot_json'] === null
+                ? null
+                : json_decode(
+                    (string) $row['input_snapshot_json'],
+                    true,
+                    flags: JSON_THROW_ON_ERROR,
+                );
+            $run['payment_materialization_supported'] =
+                self::supportsPaymentMaterialization($inputSnapshot);
             $run['result_snapshot'] = $row['result_snapshot_json'] === null
                 ? null
                 : json_decode(
@@ -59,6 +69,7 @@ final class PayrollRunRepository
                 $run[$field] = $row[$field] === null ? null : (int) $row[$field];
             }
             unset($run['result_snapshot_json']);
+            unset($run['input_snapshot_json']);
             $items[] = $run;
         }
         return $items;
@@ -775,5 +786,29 @@ final class PayrollRunRepository
         }
         unset($row['idempotency_key_hash']);
         return $row;
+    }
+
+    private static function supportsPaymentMaterialization(mixed $snapshot): bool
+    {
+        if (!is_array($snapshot) || array_is_list($snapshot)
+            || ($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v2'
+        ) {
+            return false;
+        }
+        $people = $snapshot['people'] ?? null;
+        if (!is_array($people) || !array_is_list($people)) {
+            return false;
+        }
+        foreach ($people as $person) {
+            if (!is_array($person) || array_is_list($person)
+                || !array_key_exists('payout_accounts', $person)
+                || !is_array($person['payout_accounts'])
+                || !array_is_list($person['payout_accounts'])
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS payroll_generated_documents (
     FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
   CONSTRAINT chk_payroll_document_kind CHECK (
     document_kind IN (
-      'payslip','payroll_sheet','taxable_income_certificate',
+      'payslip','payroll_sheet','taxable_income_advance_certificate',
+      'taxable_income_withholding_certificate',
       'employment_certificate','average_earnings_certificate','monthly_bundle'
     )
   ),

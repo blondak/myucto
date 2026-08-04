@@ -29,6 +29,14 @@ final class PayrollDocumentsApiContractTest extends TestCase
             $routes,
         );
         self::assertStringContainsString(
+            "'/people/{employeeId:[0-9]+}/documents/tax-certificate/{kind:advance|withholding}/{year:[0-9]{4}}'",
+            $routes,
+        );
+        self::assertStringContainsString(
+            "[AnnualTaxCertificateAction::class, 'generate']",
+            $routes,
+        );
+        self::assertStringContainsString(
             "'/documents/{documentId:[0-9]+}/download-grant'",
             $routes,
         );
@@ -43,6 +51,20 @@ final class PayrollDocumentsApiContractTest extends TestCase
         $openApi = $this->read('api/openapi.yaml');
 
         self::assertStringNotContainsString('/api/v1/payroll/', $openApi);
+    }
+
+    public function testTaxCertificateGenerationHasExactWritePermission(): void
+    {
+        $map = $this->read('api/src/Security/RoutePermissionMap.php');
+
+        self::assertStringContainsString(
+            "#^/api/payroll/people/[0-9]+/documents/tax-certificate/(advance|withholding)/[0-9]{4}$#",
+            $map,
+        );
+        self::assertStringContainsString(
+            "'payroll.documents', AccessLevel::WRITE",
+            $map,
+        );
     }
 
     public function testDownloadTokenNeverTravelsInQueryString(): void

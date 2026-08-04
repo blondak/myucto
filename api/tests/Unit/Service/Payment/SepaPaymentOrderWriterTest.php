@@ -51,6 +51,15 @@ final class SepaPaymentOrderWriterTest extends TestCase
         self::assertStringContainsString('<ChrgBr>SLEV</ChrgBr>', $xml);
         // Chybějící BIC u druhé položky → CdtrAgt se vůbec nevynechá jen pro ni.
         self::assertStringNotContainsString('<BIC></BIC>', $xml);
+        $document = new \DOMDocument();
+        self::assertTrue($document->loadXML($xml));
+        self::assertTrue(
+            $document->schemaValidate(
+                dirname(__DIR__, 4)
+                    . '/xsd/pain.001.001.03.xsd',
+            ),
+            'Vygenerovaný SEPA příkaz musí projít oficiálním XSD.',
+        );
     }
 
     public function testDiacriticsAreTransliteratedToAsciiLatinCharset(): void
@@ -68,6 +77,40 @@ final class SepaPaymentOrderWriterTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->writer->build([
             'payer_iban' => self::PAYER_IBAN, 'payment_date' => '2026-07-15', 'items' => [],
+        ]);
+    }
+
+    public function testThrowsOnMissingOrNonArrayItems(): void
+    {
+        $rejected = 0;
+        foreach ([null, 'not-an-array'] as $items) {
+            $order = [
+                'payer_iban' => self::PAYER_IBAN,
+                'payment_date' => '2026-07-15',
+            ];
+            if ($items !== null) {
+                $order['items'] = $items;
+            }
+            try {
+                $this->writer->build($order);
+                self::fail('Neplatné položky musí být odmítnuty.');
+            } catch (\InvalidArgumentException) {
+                ++$rejected;
+            }
+        }
+        self::assertSame(2, $rejected);
+    }
+
+    public function testThrowsOnMissingPayerIbanKey(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->writer->build([
+            'payment_date' => '2026-07-15',
+            'items' => [[
+                'payee_name' => 'X',
+                'iban' => self::DE_IBAN,
+                'amount_minor' => 10_000,
+            ]],
         ]);
     }
 
@@ -161,10 +204,132 @@ final class SepaPaymentOrderWriterTest extends TestCase
         preg_match('#<MsgId>(.*?)</MsgId>#', $xml1, $m1);
         preg_match('#<MsgId>(.*?)</MsgId>#', $xml2, $m2);
 
-        // Formát bez timestampu (jen 'MYUCTO-<order_id>') — dokazuje deterministicky,
-        // ne jen shodou dvou volání provedených ve stejné sekundě.
-        self::assertSame('MYUCTO-1', $m1[1] ?? null);
+        self::assertSame(
+            'MYUCTO-' . substr(hash('sha256', '1'), 0, 28),
+            $m1[1] ?? null,
+        );
         self::assertSame($m1[1], $m2[1], 'MsgId musí být stejné napříč re-exporty téže dávky (order_id).');
+        self::assertSame(35, strlen((string) ($m1[1] ?? '')));
+    }
+
+    public function testMsgIdHashesFullOrderIdentifierBeforeTruncation(): void
+    {
+        $order = $this->orderWith([[
+            'payee_name' => 'X',
+            'iban' => self::DE_IBAN,
+            'amount_minor' => 100,
+        ]]);
+        $order['creation_datetime'] = '2026-07-01T08:09:10+00:00';
+        $order['order_id'] = str_repeat('A', 80) . '-LEFT';
+        $left = $this->writer->build($order);
+        $order['order_id'] = str_repeat('A', 80) . '-RIGHT';
+        $right = $this->writer->build($order);
+
+        preg_match('#<MsgId>(.*?)</MsgId>#', $left, $leftMatch);
+        preg_match('#<MsgId>(.*?)</MsgId>#', $right, $rightMatch);
+
+        self::assertNotSame(
+            $leftMatch[1] ?? null,
+            $rightMatch[1] ?? null,
+        );
+    }
+
+    public function testExplicitEndToEndIdentifiersStayDistinct(): void
+    {
+        $xml = $this->writer->build($this->orderWith([
+            [
+                'payee_name' => 'A',
+                'iban' => self::DE_IBAN,
+                'amount_minor' => 100,
+                'end_to_end_id' => 'MYUCTO-'
+                    . str_repeat('a', 28),
+            ],
+            [
+                'payee_name' => 'B',
+                'iban' => self::FR_IBAN,
+                'amount_minor' => 200,
+                'end_to_end_id' => 'MYUCTO-'
+                    . str_repeat('b', 28),
+            ],
+        ]));
+
+        self::assertStringContainsString(
+            '<EndToEndId>MYUCTO-' . str_repeat('a', 28)
+                . '</EndToEndId>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<EndToEndId>MYUCTO-' . str_repeat('b', 28)
+                . '</EndToEndId>',
+            $xml,
+        );
+    }
+
+    public function testExactLargeMinorUnitsNeverPassThroughFloat(): void
+    {
+        $order = $this->orderWith([[
+            'payee_name' => 'X',
+            'iban' => self::DE_IBAN,
+            'amount_minor' => 9_007_199_254_740_993,
+        ]]);
+        $order['creation_datetime'] = '2026-07-01T08:09:10+00:00';
+
+        $xml = $this->writer->build($order);
+
+        self::assertStringContainsString(
+            '<CtrlSum>90071992547409.93</CtrlSum>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            'Ccy="EUR">90071992547409.93</InstdAmt>',
+            $xml,
+        );
+    }
+
+    public function testRejectsAmountsBeyondXsdTotalDigits(): void
+    {
+        try {
+            $this->writer->build($this->orderWith([[
+                'payee_name' => 'X',
+                'iban' => self::DE_IBAN,
+                'amount_minor' => 1_000_000_000_000_000_000,
+            ]]));
+            self::fail('Položka nad XSD totalDigits musí být odmítnuta.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->writer->build($this->orderWith([
+            [
+                'payee_name' => 'X',
+                'iban' => self::DE_IBAN,
+                'amount_minor' => 500_000_000_000_000_000,
+            ],
+            [
+                'payee_name' => 'Y',
+                'iban' => self::FR_IBAN,
+                'amount_minor' => 500_000_000_000_000_000,
+            ],
+        ]));
+    }
+
+    public function testExplicitCreationTimestampMakesWholeDocumentDeterministic(): void
+    {
+        $order = $this->orderWith([[
+            'payee_name' => 'X',
+            'iban' => self::DE_IBAN,
+            'amount_minor' => 10_001,
+        ]]);
+        $order['creation_datetime'] = '2026-07-01T08:09:10+00:00';
+
+        $first = $this->writer->build($order);
+        $second = $this->writer->build($order);
+
+        self::assertSame($first, $second);
+        self::assertStringContainsString(
+            '<CreDtTm>2026-07-01T08:09:10</CreDtTm>',
+            $first,
+        );
     }
 
     /**

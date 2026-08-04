@@ -335,8 +335,8 @@ onMounted(load)
       </template>
     </section>
 
-    <div v-if="rows.length && canWrite" class="sticky bottom-4 flex justify-end">
-      <button data-testid="quick-payroll-save" :class="btnFilled('primary')" :disabled="saving || loading || hasBlockingRows || hasInvalidRows" @click="save">
+    <div v-if="rows.length && canWrite" class="flex justify-end md:sticky md:bottom-4">
+      <button data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || hasBlockingRows || hasInvalidRows" @click="save">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.quick_inputs.save_all') }}
       </button>

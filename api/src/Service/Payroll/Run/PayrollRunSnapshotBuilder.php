@@ -175,6 +175,11 @@ final class PayrollRunSnapshotBuilder
                     $periodEnd,
                 ),
                 'payout_rules' => $this->payoutRules($supplierId, $employeeId),
+                'payout_accounts' => $this->payoutAccounts(
+                    $supplierId,
+                    $employeeId,
+                    $paymentDate,
+                ),
                 'employments' => [],
             ];
             $people[$employeeId]['employments'][] = [
@@ -643,7 +648,8 @@ final class PayrollRunSnapshotBuilder
                     basis_points, priority_no, row_version
                FROM payroll_payout_rules
               WHERE supplier_id = ? AND employee_id = ? AND is_active = 1
-              ORDER BY priority_no, id'
+              ORDER BY priority_no, id
+              FOR UPDATE'
         );
         $stmt->execute([$supplierId, $employeeId]);
         return array_values(array_map(
@@ -661,6 +667,54 @@ final class PayrollRunSnapshotBuilder
                     : (int) $row['basis_points'],
                 'priority_no' => (int) $row['priority_no'],
                 'row_version' => (int) $row['row_version'],
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function payoutAccounts(
+        int $supplierId,
+        int $employeeId,
+        string $paymentDate,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, label, LOWER(HEX(bank_account_hash)) AS bank_account_hash,
+                    bank_account_masked, allocation_basis_points,
+                    effective_from, effective_to, row_version,
+                    verification_source, verified_on, verified_by
+               FROM payroll_person_accounts
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND is_active = 1
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY id
+              FOR UPDATE'
+        );
+        $stmt->execute([
+            $supplierId,
+            $employeeId,
+            $paymentDate,
+            $paymentDate,
+        ]);
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'label' => (string) $row['label'],
+                'bank_account_hash' => (string) $row['bank_account_hash'],
+                'bank_account_masked' => (string) $row['bank_account_masked'],
+                'allocation_basis_points' =>
+                    (int) $row['allocation_basis_points'],
+                'effective_from' => (string) $row['effective_from'],
+                'effective_to' => $row['effective_to'],
+                'row_version' => (int) $row['row_version'],
+                'verification_source' => $row['verification_source'],
+                'verified_on' => $row['verified_on'],
+                'verified_by' => $row['verified_by'] === null
+                    ? null
+                    : (int) $row['verified_by'],
             ],
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));

@@ -1,0 +1,261 @@
+import { api } from './client'
+
+export type PayrollPaymentLiabilityState =
+  | 'open'
+  | 'partially_batched'
+  | 'batched'
+  | 'partially_settled'
+  | 'settled'
+
+export interface PayrollPaymentLiability {
+  id: number
+  run_id: number
+  revision_id: number
+  revision_no: number
+  employee_id: number | null
+  employee_name: string | null
+  liability_kind: string
+  direction: 'outgoing' | 'incoming'
+  recipient_kind: 'bank' | 'cash'
+  due_on: string
+  currency_code: string
+  amount_minor: number
+  allocated_minor: number
+  settled_minor: number
+  state: PayrollPaymentLiabilityState
+  created_at: string
+}
+
+export interface PayrollPaymentLiabilityList {
+  period: string
+  items: PayrollPaymentLiability[]
+}
+
+export interface PayrollPayerOption {
+  reference: string
+  currency_id: number
+  currency_code: string
+  bank_name: string | null
+  masked_account: string
+  export_formats: Array<'abo' | 'sepa'>
+}
+
+export interface PayrollPaymentExport {
+  id: number
+  revision_no: number
+  file_sha256: string
+  size_bytes: number
+  mime_type: string
+  suggested_filename: string
+  created_at: string
+}
+
+export interface PayrollPaymentBatch {
+  id: number
+  batch_reference: string
+  channel: 'bank' | 'cash'
+  export_format: 'abo' | 'sepa' | 'manual'
+  planned_payment_date: string
+  currency_code: string
+  declared_total_minor: number
+  declared_item_count: number
+  settled_minor: number
+  created_at: string
+  exports: PayrollPaymentExport[]
+}
+
+export interface PayrollPaymentBatchList {
+  period: string
+  items: PayrollPaymentBatch[]
+}
+
+export interface PayrollPaymentBatchResult {
+  batch_id: number
+  batch_reference: string
+  channel: 'bank' | 'cash'
+  export_format: 'abo' | 'sepa' | 'manual'
+  planned_payment_date: string
+  currency_code: string
+  declared_total_minor: number
+  declared_item_count: number
+  snapshot_hash: string
+  created: boolean
+  replayed: boolean
+}
+
+export interface PayrollPaymentExportResult {
+  export_id: number
+  batch_id: number
+  export_format: 'abo' | 'sepa'
+  export_revision_no: number
+  source_snapshot_hash: string
+  file_sha256: string
+  size_bytes: number
+  mime_type: string
+  suggested_filename: string
+  created: boolean
+  replayed: boolean
+}
+
+export interface PayrollPaymentAllocation {
+  id: number
+  item_id: number
+  item_reference: string
+  batch_id: number
+  batch_reference: string
+  channel: 'bank' | 'cash'
+  planned_payment_date: string
+  liability_id: number
+  liability_kind: string
+  direction: 'outgoing' | 'incoming'
+  currency_code: string
+  employee_name: string | null
+  amount_minor: number
+  settled_minor: number
+  remaining_minor: number
+}
+
+export interface PayrollPaymentEvidence {
+  kind: 'bank' | 'cash'
+  bank_statement_id: number | null
+  bank_transaction_id: number | null
+  cash_document_id: number | null
+  date: string
+  amount_minor: number
+  currency_code: string
+  direction: 'outgoing' | 'incoming'
+  description: string | null
+  status?: 'posted' | 'reversed'
+  reference?: string | null
+  available_match_minor: number
+  available_reversal_minor: number
+}
+
+export interface PayrollPaymentMatch {
+  id: number
+  allocation_id: number
+  event_kind: 'matched' | 'reversed'
+  source_match_id: number | null
+  amount_minor: number
+  evidence_kind: 'bank' | 'cash'
+  bank_statement_id: number | null
+  bank_transaction_id: number | null
+  cash_document_id: number | null
+  actual_payment_date: string
+  evidence_amount_minor: number
+  evidence_currency_code: string
+  evidence_fact_hash: string
+  batch_reference: string
+  liability_kind: string
+  employee_name: string | null
+  reversible_minor: number
+  created_at: string
+}
+
+export interface PayrollPaymentReconciliation {
+  period: string
+  allocations: PayrollPaymentAllocation[]
+  matches: PayrollPaymentMatch[]
+  bank_evidence: PayrollPaymentEvidence[]
+  cash_evidence: PayrollPaymentEvidence[]
+}
+
+export interface PayrollPaymentReconciliationEventResult {
+  id: number
+  allocation_id: number
+  event_kind: 'matched' | 'reversed'
+  source_match_id: number | null
+  amount_minor: number
+  evidence_kind: 'bank' | 'cash'
+  bank_statement_id: number | null
+  bank_transaction_id: number | null
+  cash_document_id: number | null
+  actual_payment_date: string
+  evidence_amount_minor: number
+  evidence_currency_code: string
+  evidence_fact_hash: string
+  replayed: boolean
+}
+
+export const payrollPaymentsApi = {
+  liabilities: (period: string) =>
+    api.get<PayrollPaymentLiabilityList>('/payroll/payments/liabilities', {
+      params: { period },
+    }).then(response => response.data),
+  materializeNetWages: (revisionId: number) =>
+    api.post<{ liability_ids: number[]; created_count: number }>(
+      `/payroll/revisions/${revisionId}/payments/net-wage-liabilities`,
+    ).then(response => response.data),
+  payerOptions: () =>
+    api.get<{ items: PayrollPayerOption[] }>('/payroll/payments/payer-options')
+      .then(response => response.data.items),
+  batches: (period: string) =>
+    api.get<PayrollPaymentBatchList>('/payroll/payments/batches', {
+      params: { period },
+    }).then(response => response.data),
+  createBatch: (payload: {
+    export_format: 'abo' | 'sepa' | 'manual'
+    payer_reference: string
+    items: Array<{ liability_id: number; amount_minor: number }>
+  }) =>
+    api.post<PayrollPaymentBatchResult>(
+      '/payroll/payments/batches',
+      payload,
+    ).then(response => response.data),
+  reconciliation: (period: string) =>
+    api.get<PayrollPaymentReconciliation>(
+      '/payroll/payments/reconciliation',
+      { params: { period } },
+    ).then(response => response.data),
+  match: (payload: {
+    allocation_id: number
+    amount_minor: number
+    evidence: {
+      kind: 'bank' | 'cash'
+      bank_statement_id?: number
+      bank_transaction_id?: number
+      cash_document_id?: number
+    }
+    idempotency_key: string
+  }) =>
+    api.post<{ event: PayrollPaymentReconciliationEventResult }>(
+      '/payroll/payments/reconciliation/matches',
+      payload,
+    ).then(response => response.data.event),
+  reverse: (payload: {
+    source_match_id: number
+    amount_minor: number
+    evidence: {
+      kind: 'bank' | 'cash'
+      bank_statement_id?: number
+      bank_transaction_id?: number
+      cash_document_id?: number
+    }
+    idempotency_key: string
+  }) =>
+    api.post<{ event: PayrollPaymentReconciliationEventResult }>(
+      '/payroll/payments/reconciliation/reversals',
+      payload,
+    ).then(response => response.data.event),
+  generateExport: (batchId: number, idempotencyKey: string) =>
+    api.post<PayrollPaymentExportResult>(
+      `/payroll/payments/batches/${batchId}/exports`,
+      { idempotency_key: idempotencyKey },
+    ).then(response => response.data),
+  createDownloadGrant: (exportId: number) =>
+    api.post<{
+      grant_id: number
+      export_id: number
+      token: string
+      expires_at: string
+    }>(
+      `/payroll/payments/exports/${exportId}/download-grants`,
+      { ttl_seconds: 120 },
+    ).then(response => response.data),
+  downloadExport: (token: string) =>
+    api.post<Blob>(
+      '/payroll/payments/exports/download',
+      { token },
+      { responseType: 'blob' },
+    ).then(response => response.data),
+}

@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Document;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
-final class PayrollDocumentService
+class PayrollDocumentService
 {
     public function __construct(
         private readonly PayrollDocumentRepository $documents,
@@ -128,9 +128,16 @@ final class PayrollDocumentService
         string $idempotencyKey,
         ?int $actorUserId,
         ?PayrollDocumentStorageScope $storageScope = null,
+        ?string $createdAt = null,
     ): array {
-        if ($artifact->kind !== PayrollDocumentKind::PayrollSheet) {
-            throw new \InvalidArgumentException('Tento roční archiv podporuje pouze mzdový list.');
+        if (!in_array($artifact->kind, [
+            PayrollDocumentKind::PayrollSheet,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Tento roční archiv nepodporuje zadaný druh dokumentu.',
+            );
         }
         if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
             throw new \InvalidArgumentException('Payroll document idempotency key is invalid.');
@@ -229,6 +236,7 @@ final class PayrollDocumentService
                 : CanonicalJson::encode($artifact->manifest),
             'idempotency_key_hash' => $idempotencyKeyHash,
             'created_by' => $actorUserId,
+            'created_at' => $createdAt,
         ]);
     }
 

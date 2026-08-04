@@ -271,6 +271,9 @@
     "payroll-runs": [
       "payroll"
     ],
+    "payroll-payments": [
+      "payroll"
+    ],
     "payroll-people": [
       "payroll"
     ],

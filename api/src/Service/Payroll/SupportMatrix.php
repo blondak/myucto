@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-03-v4';
+    public const VERSION = '2026-08-04-v5';
     private const SUPPORTED_YEARS = [2024, 2025, 2026];
 
     public function supportsYear(int $year): bool
@@ -49,9 +49,9 @@ final class SupportMatrix
                 ['key' => 'leave_ledger', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'dpn_compensation', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-07'],
                 ['key' => 'enforcement_deductions', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-14'],
-                ['key' => 'payroll_runs', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-09'],
-                ['key' => 'payslips', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-16'],
-                ['key' => 'automatic_posting', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-18'],
+                ['key' => 'payroll_runs', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-09'],
+                ['key' => 'payslips', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-16'],
+                ['key' => 'automatic_posting', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-18'],
                 ['key' => 'jmhz_export', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-22'],
                 ['key' => 'health_insurer_export', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-23'],
                 ['key' => 'direct_submission', 'status' => 'not_supported', 'available' => false, 'min_epic' => 'MZ-27'],

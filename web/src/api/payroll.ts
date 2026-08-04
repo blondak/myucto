@@ -157,6 +157,160 @@ export interface PayrollPersonResponse {
   person: PayrollPerson
 }
 
+export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'
+export type PayrollPersonEditableProfileStatus = Exclude<PayrollPersonProfileStatus, 'missing'>
+export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed'
+export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
+export type PayrollPersonAddressType = 'residence' | 'mailing'
+export type PayrollPersonContactType = 'email' | 'phone'
+export type PayrollPersonIdentifierType = 'birth_number' | 'ecp' | 'vcp' | 'foreign_tax_identifier'
+export type PayrollPersonAccountVerificationSource =
+  | 'employee_confirmation'
+  | 'bank_document'
+  | 'user_verified'
+
+export interface PayrollPersonIdentityHistory {
+  id: number
+  full_name: string
+  first_name: string | null
+  last_name: string | null
+  birth_surname_masked: string | null
+  effective_from: string
+  effective_to: string | null
+  row_version: number
+}
+
+export interface PayrollPersonAddress {
+  id: number
+  address_type: PayrollPersonAddressType
+  address_masked: string
+  effective_from: string
+  effective_to: string | null
+  row_version: number
+}
+
+export interface PayrollPersonContact {
+  id: number
+  contact_type: PayrollPersonContactType
+  value_masked: string
+  is_primary: boolean
+  is_active: boolean
+  row_version: number
+}
+
+export interface PayrollPersonIdentifier {
+  id: number
+  identifier_type: PayrollPersonIdentifierType
+  value_masked: string
+  row_version: number
+}
+
+export interface PayrollPersonAccount {
+  id: number
+  label: string
+  bank_account_masked: string
+  allocation_basis_points: number
+  effective_from: string
+  effective_to: string | null
+  is_active: boolean
+  row_version: number
+  verification_source: PayrollPersonAccountVerificationSource | null
+  verified_on: string | null
+  verified_by: number | null
+}
+
+export interface PayrollPersonVerifiedAccount {
+  id: number
+  bank_account_masked: string
+  verification_source: PayrollPersonAccountVerificationSource
+  verified_on: string
+  verified_by: number
+  row_version: number
+}
+
+export interface PayrollPersonProfile {
+  employee_id: number
+  full_name: string
+  profile_status: PayrollPersonProfileStatus
+  payout_method: PayrollPayoutMethod
+  cash_allocation_basis_points: number
+  payout_effective_on: string | null
+  secure_delivery_channel: PayrollSecureDeliveryChannel
+  row_version: number
+  identity_history: PayrollPersonIdentityHistory[]
+  addresses: PayrollPersonAddress[]
+  contacts: PayrollPersonContact[]
+  identifiers: PayrollPersonIdentifier[]
+  accounts: PayrollPersonAccount[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PayrollPersonIdentityPayload {
+  id?: number
+  full_name: string
+  first_name: string
+  last_name: string
+  birth_surname?: string | null
+  effective_from: string
+  effective_to: string | null
+}
+
+export interface PayrollPersonAddressPayload {
+  id?: number
+  address_type: PayrollPersonAddressType
+  street_line?: string
+  city?: string
+  postal_code?: string
+  country_code?: string
+  effective_from: string
+  effective_to: string | null
+}
+
+export interface PayrollPersonContactPayload {
+  id?: number
+  contact_type: PayrollPersonContactType
+  value?: string | null
+  is_primary: boolean
+  is_active: boolean
+}
+
+export interface PayrollPersonIdentifierPayload {
+  id?: number
+  identifier_type: PayrollPersonIdentifierType
+  value?: string | null
+}
+
+export interface PayrollPersonAccountPayload {
+  id?: number
+  label: string
+  bank_account?: string | null
+  allocation_basis_points: number
+  effective_from: string
+  effective_to: string | null
+  is_active: boolean
+}
+
+export interface PayrollPersonProfilePayload {
+  row_version: number
+  profile_status: PayrollPersonEditableProfileStatus
+  payout_method: PayrollPayoutMethod
+  cash_allocation_basis_points: number
+  payout_effective_on: string
+  secure_delivery_channel: PayrollSecureDeliveryChannel
+  identity_history: PayrollPersonIdentityPayload[]
+  addresses: PayrollPersonAddressPayload[]
+  contacts: PayrollPersonContactPayload[]
+  identifiers: PayrollPersonIdentifierPayload[]
+  accounts: PayrollPersonAccountPayload[]
+}
+
+export interface PayrollPersonAccountVerificationPayload {
+  verification_source: PayrollPersonAccountVerificationSource
+  verified_on: string
+  row_version: number
+}
+
 export type PayrollTimeCategory =
   | 'regular'
   | 'overtime'
@@ -752,10 +906,22 @@ export interface PayrollInstitutionAccountUpdatePayload {
 export type PayrollDocumentKind =
   | 'payslip'
   | 'payroll_sheet'
-  | 'taxable_income_certificate'
+  | 'taxable_income_advance_certificate'
+  | 'taxable_income_withholding_certificate'
   | 'employment_certificate'
   | 'average_earnings_certificate'
   | 'monthly_bundle'
+
+export type PayrollTaxCertificateKind = Extract<
+  PayrollDocumentKind,
+  | 'taxable_income_advance_certificate'
+  | 'taxable_income_withholding_certificate'
+>
+
+export interface PayrollTaxCertificateGenerationPayload {
+  supersedes_document_id: number | null
+  correction_reason: string | null
+}
 
 export interface PayrollDocument {
   id: number
@@ -848,6 +1014,7 @@ export interface PayrollRun {
   revision_id: number | null
   revision_no: number | null
   revision_status: string | null
+  payment_materialization_supported: boolean
   result_snapshot: {
     totals?: {
       cash_payable_minor?: number
@@ -879,6 +1046,21 @@ export const payrollApi = {
     api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
   person: (id: number) =>
     api.get<PayrollPersonResponse>(`/payroll/people/${id}`).then(response => response.data.person),
+  personProfile: (id: number) =>
+    api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
+      .then(response => response.data.profile),
+  savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
+    api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
+      .then(response => response.data.profile),
+  verifyPersonAccount: (
+    personId: number,
+    accountId: number,
+    payload: PayrollPersonAccountVerificationPayload,
+  ) =>
+    api.post<{ account: PayrollPersonVerifiedAccount }>(
+      `/payroll/people/${personId}/accounts/${accountId}/verify`,
+      payload,
+    ).then(response => response.data.account),
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
     api.post<{ employment: PayrollEmployment }>(`/payroll/people/${personId}/employments`, payload)
       .then(response => response.data.employment),
@@ -933,6 +1115,20 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,
       {},
     ).then(response => response.data),
+  generateTaxCertificate: (
+    employeeId: number,
+    year: number,
+    kind: PayrollTaxCertificateKind,
+    payload: PayrollTaxCertificateGenerationPayload,
+  ) => {
+    const routeKind = kind === 'taxable_income_advance_certificate'
+      ? 'advance'
+      : 'withholding'
+    return api.post<PayrollDocument>(
+      `/payroll/people/${employeeId}/documents/tax-certificate/${routeKind}/${year}`,
+      payload,
+    ).then(response => response.data)
+  },
   generateMonthlyBundle: (runId: number, revisionId: number, idempotencyKey: string) =>
     api.post<PayrollDocument>(
       `/payroll/runs/${runId}/revisions/${revisionId}/documents/monthly-bundle`,

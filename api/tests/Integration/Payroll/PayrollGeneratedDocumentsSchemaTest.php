@@ -20,6 +20,31 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
+    public function testTaxCertificatesUseLegallyDistinctDocumentKinds(): void
+    {
+        self::assertSame(
+            'taxable_income_advance_certificate',
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate->value,
+        );
+        self::assertSame(
+            'taxable_income_withholding_certificate',
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate->value,
+        );
+        self::assertNull(PayrollDocumentKind::tryFrom('taxable_income_certificate'));
+
+        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        $create = (string) $this->query(
+            $connection->pdo(),
+            'SHOW CREATE TABLE payroll_generated_documents',
+        )->fetch(\PDO::FETCH_NUM)[1];
+
+        self::assertStringContainsString('taxable_income_advance_certificate', $create);
+        self::assertStringContainsString('taxable_income_withholding_certificate', $create);
+        self::assertStringNotContainsString("'taxable_income_certificate'", $create);
+        $connection->close();
+    }
+
     public function testImmutableArtifactDownloadAndDmsSchemaIsInstalled(): void
     {
         $connection = Bootstrap::buildContainer()->get(Connection::class);

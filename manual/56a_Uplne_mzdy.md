@@ -91,6 +91,18 @@ Seznam ukazuje:
 Tlačítkem **Zobrazit vztahy** rozbalíš detail. Na telefonu se seznam automaticky
 mění z tabulky na karty.
 
+Pod seznamem otevřeš **Osobní kartu** vybraného zaměstnance. Záložky oddělují
+identitu, adresy, kontakty, identifikátory a výplatní účty. U citlivých údajů
+se zobrazuje pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit.
+Po uložení aplikace otevřenou hodnotu z formuláře odstraní.
+
+Výplatní účet musí mít název, období účinnosti a rozdělení výplaty. Před
+zařazením do platební dávky jej samostatně ověř tlačítkem **Ověřit účet** a
+uveď druh podkladu i datum ověření. Máš-li ve formuláři neuloženou změnu účtu,
+ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila předchozí
+uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
+účinnosti nebo aktivního stavu ověření automaticky zneplatní.
+
 ## 56a.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
@@ -276,7 +288,46 @@ a nevznikne částečně schválená mzda.
 > pro ruční kontrolu a schválení zablokuje; aplikace chybějící zákonné údaje
 > neodhaduje.
 
-## 56a.12 Srážky, exekuce a oddlužení
+## 56a.12 Platby mezd a odvodů
+
+V **Mzdy → Platby mezd a odvodů** vybereš mzdové období a připravíš platební
+závazky z aktuálních schválených revizí. Čistá mzda se vždy odvozuje z částky
+po exekučních srážkách. Rozdělení mezi ověřené bankovní účty a hotovost se
+znovu vypočte nad pravidly a účty zmrazenými při uzamčení vstupů; pozdější
+změna živé karty už schválenou revizi nepřesměruje.
+
+Bankovní cíl musí mít ve snapshotu úplné ověření, období platnosti a verzi
+účtu. Starší schválená revize, která vznikla před zavedením zmrazených
+výplatních účtů, se k přípravě plateb nenabídne. Pro její zaplacení nejprve
+vytvoř opravnou revizi z aktuálních a ověřených podkladů. Selhání jedné
+účtárny nezastaví přípravu ostatních běhů téhož měsíce; aplikace vypíše počet
+nezpracovaných běhů a konkrétní důvod.
+
+Opakované stisknutí **Připravit závazky** je bezpečné a nevytvoří duplicity.
+Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
+závazkům. Seznam ukazuje zaměstnance, druh závazku, způsob úhrady, splatnost,
+částku a odvozený stav. Nevrací číslo účtu ani interní odkaz příjemce.
+
+V záložce **Platební dávky** vybereš připravené závazky. Aplikace podle
+výplatních cílů nabídne účet plátce a formát ABO nebo SEPA, znovu ověří
+nezměněné účty příjemců a vytvoří dávku. Export se ukládá šifrovaně přesně
+v těch bajtech, které se stáhnou do banky. Opakování se stejným klíčem vrátí
+tentýž export a nevytvoří další ekonomický závazek. Stažení vyžaduje právo
+zápisu a používá krátkodobé jednorázové oprávnění.
+
+V záložce **Úhrady a párování** vybereš konkrétní alokaci závazku a kompatibilní
+bankovní pohyb nebo zaúčtovaný pokladní doklad. Lze zapsat i částečnou úhradu.
+Historie je neměnná: vratka nebo storno nevynuluje původní záznam, ale přidá
+samostatnou reverzní událost s vlastním důkazem. Jeden bankovní nebo pokladní
+důkaz nesmí současně převzít fakturace ani jiné párování.
+
+Skutečné datum úhrady vzniká výhradně z data zvoleného důkazu, nikdy z
+plánovaného data výplaty mzdového běhu ani ze samotné existence exportního
+souboru. Dokud nejsou všechny požadované částky průkazně spárovány a případné
+vratky vyřešeny, aplikace závazek ani daňové potvrzení neoznačí za skutečně
+uhrazené.
+
+## 56a.13 Srážky, exekuce a oddlužení
 
 V **Mzdy → Srážky a exekuce** založíš zaměstnanci zákonnou srážku, exekuci
 nebo dohodu o srážkách. Případ začíná ve stavu **Přijato — čeká na ověření**.
@@ -305,18 +356,37 @@ ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevř
 Označení případu za uhrazený se zpřístupní až po zavedení skutečné platby
 a nulovém zůstatku; na této obrazovce se zatím nenabízí.
 
-## 56a.13 Dokumenty a měsíční balíček
+## 56a.14 Dokumenty a měsíční balíček
 
 V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
 uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
 číslo revize, čas vytvoření a velikost. Na telefonu se tabulka mění na karty.
 
 Záložka **Roční dokumenty** umožňuje zvolit rok a zaměstnance a vytvořit
-**mzdový list**. List vzniká pouze z posledních schválených revizí všech
-mzdových účtáren v daném roce. Zahrne také více souběžných revizí v jednom
-měsíci, například doplatek po skončení vztahu. Pokud chybí schválený výsledek,
+**mzdový list**, **potvrzení k zálohové dani** nebo **potvrzení ke srážkové
+dani**. Mzdový list vzniká pouze z posledních schválených revizí všech mzdových
+účtáren v daném roce. Zahrne také více souběžných revizí v jednom měsíci,
+například doplatek po skončení vztahu. Pokud chybí schválený výsledek,
 historická identifikace nebo jiný povinný podklad, aplikace dokument nevytvoří
 a zobrazí konkrétní důvod.
+
+Daňová potvrzení jsou dva samostatné formuláře: `25 5460, MFin 5460 – vzor
+č. 33` pro zálohovou daň a `25 5460/A, MFin 5460/A – vzor č. 12` pro příjmy
+zdaněné srážkou. V této verzi se automaticky vytvářejí pro rok 2026 a českého
+daňového rezidenta v podporovaném běžném režimu. Zálohové potvrzení zmrazí
+stav Prohlášení poplatníka i měsíce, ve kterých bylo podepsané; srážkové
+potvrzení uvádí přesné měsíce příjmů. Pro přesná pole tiskopisu musí mít
+historická identita zaměstnance vedle celého zobrazovaného jména vyplněné
+také samostatné jméno a příjmení; systém je z celého jména neodhaduje.
+
+Řádek skutečně vyplacených příjmů nevychází z plánovaného výplatního dne.
+Aplikace jej povolí jen tehdy, když neměnná platební evidence dokládá úplnou
+výplatu všech zahrnutých čistých mezd nejpozději do 31. ledna následujícího
+roku. Chybějící, částečná, pozdní nebo zvrácená úhrada vytvoření zablokuje.
+Stejně bezpečně se odmítnou situace, pro které snapshot zatím nemá všechna
+povinná pole formuláře, například dítě, invalidita, nerezident, podporovaný
+produkt spoření, nepeněžní příjem, doplatek za minulý rok nebo provedené roční
+zúčtování. Údaj se nikdy tiše nedopočítá z dnešní karty zaměstnance.
 
 Roční dokument má vlastní neměnnou revizi a není uměle připojený k prosincové
 mzdě. Osobní údaje jeho zdrojového snapshotu jsou kontextově šifrované;
@@ -324,6 +394,10 @@ manifest obsahuje pouze interní identifikátory a kryptografické otisky.
 Pozdější oprava mzdy vytvoří další revizi mzdového listu a původní soubor
 zůstane dohledatelný. Roční zúčtování se v mzdovém listu nedopočítává a bez
 samostatně schváleného ročního výsledku se označí jako neprovedené.
+Opravné daňové potvrzení musí navazovat na poslední vydaný dokument stejného
+druhu a vyžaduje konkrétní důvod. Nová revize uvádí datum nahrazovaného
+potvrzení a důvod v příloze; původní PDF zůstává beze změny. Opakování stejné
+opravné žádosti bezpečně vrátí již archivovanou revizi.
 
 Stažení nejprve získá krátkodobé jednorázové oprávnění a potom soubor předá
 prohlížeči. Původní dokument se při opravě nikdy nepřepisuje. Nový výstup má
@@ -335,20 +409,23 @@ manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
 
 > [!WARNING]
-> Výplatní pásky vznikají automaticky při schválení a roční mzdový list lze
-> vytvořit v záložce Roční dokumenty. Daňová potvrzení, výstupní dokumenty
-> a podací protokoly se zatím vytvářejí samostatně, takže neúplný balíček
-> neznamená, že jsou všechny povinné výstupy hotové.
+> Výplatní pásky vznikají automaticky při schválení; mzdový list a obě daňová
+> potvrzení vytvoříš v záložce Roční dokumenty. Výstupní dokumenty při skončení
+> vztahu a podací protokoly se zatím vytvářejí samostatně, takže neúplný
+> měsíční balíček neznamená, že jsou všechny povinné výstupy hotové.
 
-## 56a.14 Oprávnění a citlivé údaje
+## 56a.15 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
 jen z přihlášené webové relace, ne přes běžný bearer token.
 Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyžadují
 `payroll.employment.write`; bez něj je detail pouze pro čtení.
+Změna osobní karty a ověření výplatního účtu vyžadují `payroll.person.write`.
 Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvořit
 měsíční balíček.
+Platební závazky, dávky a párování vyžadují samostatné oprávnění
+`payroll.payments`.
 Agenda srážek má samostatné oprávnění `payroll.enforcement`; právo pro běžné
 mzdy ani původní Mzdovou rekapitulaci samo o sobě přístup k těmto údajům
 nedává. Změna měsíčního insolvenčního režimu vyžaduje také
@@ -359,7 +436,7 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.15 Vztah k Mzdové rekapitulaci
+## 56a.16 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

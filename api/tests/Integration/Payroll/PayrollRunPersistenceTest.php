@@ -404,13 +404,33 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
         $agreementId = (int) $this->db->pdo()->lastInsertId();
         $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_accounts
+                (supplier_id, employee_id, label, bank_account_ciphertext,
+                 bank_account_hash, bank_account_masked,
+                 allocation_basis_points, effective_from, is_active,
+                 verification_source, verified_on, verified_by)
+             VALUES (?, ?, "Syntetický účet", "enc:v2:synthetic-account",
+                     ?, "••••0005/0100", 10000, "2026-01-01", 1,
+                     "user_verified", "2026-05-01", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            hash('sha256', 'synthetic-account', true),
+            $this->actors[0],
+        ]);
+        $accountId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
             'INSERT INTO payroll_payout_rules
                 (supplier_id, employee_id, allocation_reference,
                  destination_kind, destination_reference, allocation_kind,
                  priority_no, is_active)
              VALUES (?, ?, "SYNTHETIC-REMAINDER", "bank",
-                     "synthetic-account", "remainder", 100, 1)'
-        )->execute([$this->supplierId, $this->employeeId]);
+                     ?, "remainder", 100, 1)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            "account:{$accountId}",
+        ]);
         $payoutRuleId = (int) $this->db->pdo()->lastInsertId();
 
         $run = $this->createRun();
@@ -427,6 +447,19 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(3000, $person['deduction_agreements'][0]['withheld_total_minor']);
         self::assertSame($payoutRuleId, $person['payout_rules'][0]['id']);
         self::assertSame('remainder', $person['payout_rules'][0]['allocation_kind']);
+        self::assertSame([
+            'allocation_basis_points' => 10000,
+            'bank_account_hash' => hash('sha256', 'synthetic-account'),
+            'bank_account_masked' => '••••0005/0100',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'id' => $accountId,
+            'label' => 'Syntetický účet',
+            'row_version' => 1,
+            'verification_source' => 'user_verified',
+            'verified_by' => $this->actors[0],
+            'verified_on' => '2026-05-01',
+        ], $person['payout_accounts'][0]);
 
         $this->db->pdo()->prepare(
             'UPDATE payroll_deduction_agreements
@@ -437,6 +470,18 @@ final class PayrollRunPersistenceTest extends TestCase
             'UPDATE payroll_payout_rules SET is_active = 0
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $payoutRuleId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_accounts
+                SET bank_account_ciphertext = "enc:v2:changed-account",
+                    bank_account_hash = ?,
+                    bank_account_masked = "••••1116/0100",
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([
+            hash('sha256', 'changed-account', true),
+            $this->supplierId,
+            $accountId,
+        ]);
 
         $persisted = $this->runs->revision(
             $this->supplierId,
@@ -447,6 +492,14 @@ final class PayrollRunPersistenceTest extends TestCase
             $persisted['deduction_agreements'][0]['withheld_total_minor'],
         );
         self::assertSame($payoutRuleId, $persisted['payout_rules'][0]['id']);
+        self::assertSame(
+            hash('sha256', 'synthetic-account'),
+            $persisted['payout_accounts'][0]['bank_account_hash'],
+        );
+        self::assertSame(
+            '2026-05-01',
+            $persisted['payout_accounts'][0]['verified_on'],
+        );
     }
 
     public function testPostTerminationInputKeepsEndedRelationshipInSnapshot(): void

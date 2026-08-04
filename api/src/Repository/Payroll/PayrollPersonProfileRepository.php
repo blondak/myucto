@@ -67,7 +67,8 @@ final class PayrollPersonProfileRepository
         $row = $this->normalizeRow($fetched);
 
         $identity = $this->rows(
-            'SELECT id, full_name, birth_surname, effective_from, effective_to, row_version
+            'SELECT id, full_name, first_name, last_name, birth_surname,
+                    effective_from, effective_to, row_version
                FROM payroll_person_identity_history
               WHERE supplier_id = ? AND employee_id = ?
               ORDER BY effective_from DESC, id DESC',
@@ -76,6 +77,8 @@ final class PayrollPersonProfileRepository
             fn (array $item): array => [
                 'id' => (int) $item['id'],
                 'full_name' => (string) $item['full_name'],
+                'first_name' => (string) $item['first_name'],
+                'last_name' => (string) $item['last_name'],
                 'birth_surname_masked' => $item['birth_surname'] === null
                     ? null
                     : $this->maskName((string) $item['birth_surname']),
@@ -136,7 +139,8 @@ final class PayrollPersonProfileRepository
         );
         $accounts = $this->rows(
             'SELECT id, label, bank_account_masked, allocation_basis_points,
-                    effective_from, effective_to, is_active, row_version
+                    effective_from, effective_to, is_active, row_version,
+                    verification_source, verified_on, verified_by
                FROM payroll_person_accounts
               WHERE supplier_id = ? AND employee_id = ?
               ORDER BY is_active DESC, effective_from DESC, id ASC',
@@ -151,6 +155,15 @@ final class PayrollPersonProfileRepository
                 'effective_to' => $item['effective_to'] === null ? null : (string) $item['effective_to'],
                 'is_active' => (bool) $item['is_active'],
                 'row_version' => (int) $item['row_version'],
+                'verification_source' => $item['verification_source'] === null
+                    ? null
+                    : (string) $item['verification_source'],
+                'verified_on' => $item['verified_on'] === null
+                    ? null
+                    : (string) $item['verified_on'],
+                'verified_by' => $item['verified_by'] === null
+                    ? null
+                    : (int) $item['verified_by'],
             ],
         );
 
@@ -352,12 +365,15 @@ final class PayrollPersonProfileRepository
     {
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_person_identity_history
-                (supplier_id, employee_id, full_name, birth_surname, effective_from, effective_to)
-             VALUES (?, ?, ?, ?, ?, ?)'
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 birth_surname, effective_from, effective_to)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $update = $this->db->pdo()->prepare(
             'UPDATE payroll_person_identity_history
                 SET full_name = ?,
+                    first_name = ?,
+                    last_name = ?,
                     birth_surname = CASE WHEN ? = 1 THEN ? ELSE birth_surname END,
                     effective_from = ?, effective_to = ?,
                     row_version = row_version + 1
@@ -369,6 +385,8 @@ final class PayrollPersonProfileRepository
                     $supplierId,
                     $employeeId,
                     $row['full_name'],
+                    $row['first_name'],
+                    $row['last_name'],
                     $row['birth_surname'],
                     $row['effective_from'],
                     $row['effective_to'],
@@ -377,6 +395,8 @@ final class PayrollPersonProfileRepository
             }
             $update->execute([
                 $row['full_name'],
+                $row['first_name'],
+                $row['last_name'],
                 (int) $row['birth_surname_present'],
                 $row['birth_surname'],
                 $row['effective_from'],
@@ -791,6 +811,8 @@ final class PayrollPersonProfileRepository
                 EXISTS(
                     SELECT 1 FROM payroll_person_identity_history
                      WHERE supplier_id = ? AND employee_id = ?
+                       AND first_name IS NOT NULL AND first_name <> ''
+                       AND last_name IS NOT NULL AND last_name <> ''
                        AND effective_from <= CURRENT_DATE
                        AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
                 ) AS has_identity,
@@ -821,7 +843,7 @@ final class PayrollPersonProfileRepository
         foreach (['has_identity', 'has_residence', 'has_contact', 'has_supported_identifier'] as $key) {
             if ($this->intValue($row, $key) !== 1) {
                 throw new \InvalidArgumentException(
-                    'Profil nelze označit ready bez aktuální identity, adresy, kontaktu'
+                    'Profil nelze označit ready bez strukturovaného jména, adresy, kontaktu'
                     . ' a ověřeného osobního identifikátoru (RČ, EČP nebo VČP).'
                 );
             }
@@ -892,7 +914,8 @@ final class PayrollPersonProfileRepository
 
     /**
      * @param list<array{
-     *   id:int,full_name:string,birth_surname_masked:?string,effective_from:string,
+     *   id:int,full_name:string,first_name:string,last_name:string,
+     *   birth_surname_masked:?string,effective_from:string,
      *   effective_to:?string,row_version:int
      * }> $identity
      */

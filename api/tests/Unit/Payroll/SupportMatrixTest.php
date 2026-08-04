@@ -22,8 +22,10 @@ final class SupportMatrixTest extends TestCase
         self::assertTrue($features['persons']['available']);
         self::assertTrue($features['employments']['available']);
         self::assertTrue($features['time_attendance']['available']);
-        self::assertFalse($features['payroll_runs']['available']);
+        self::assertTrue($features['payroll_runs']['available']);
         self::assertSame('supported', $features['payroll_runs']['status']);
+        self::assertTrue($features['payslips']['available']);
+        self::assertTrue($features['automatic_posting']['available']);
         self::assertSame('not_supported', $features['direct_submission']['status']);
 
         $employmentTypes = array_column($matrix['employment_types'], null, 'key');

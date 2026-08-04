@@ -3,6 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
   listDocuments: vi.fn(),
+  listAnnualDocuments: vi.fn(),
+  people: vi.fn(),
+  generatePayrollSheet: vi.fn(),
+  generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
@@ -12,6 +16,10 @@ const m = vi.hoisted(() => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     listDocuments: m.listDocuments,
+    listAnnualDocuments: m.listAnnualDocuments,
+    people: m.people,
+    generatePayrollSheet: m.generatePayrollSheet,
+    generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
     downloadDocument: m.downloadDocument,
   },
@@ -102,6 +110,23 @@ describe('PayrollDocuments', () => {
       file_sha256: 'b'.repeat(64),
       size_bytes: 9876,
     })
+    m.listAnnualDocuments.mockResolvedValue({
+      year: 2026,
+      items: [],
+    })
+    m.people.mockResolvedValue([{
+      id: 31,
+      full_name: 'Testovací Zaměstnanec',
+      needs_setup: false,
+    }])
+    m.generatePayrollSheet.mockResolvedValue({
+      id: 41,
+      document_kind: 'payroll_sheet',
+    })
+    m.generateTaxCertificate.mockResolvedValue({
+      id: 42,
+      document_kind: 'taxable_income_advance_certificate',
+    })
     m.downloadDocument.mockResolvedValue(undefined)
   })
 
@@ -174,5 +199,104 @@ describe('PayrollDocuments', () => {
 
     expect(wrapper.text()).toContain('Novější období')
     expect(wrapper.text()).not.toContain('Starší období')
+  })
+
+  it('creates both annual tax certificate variants from the annual tab', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    expect(annualTab).toBeDefined()
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    const advanceButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_advance')
+    expect(advanceButton).toBeDefined()
+    await advanceButton!.trigger('click')
+    await flushPromises()
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_advance_certificate',
+      {
+        supersedes_document_id: null,
+        correction_reason: null,
+      },
+    )
+
+    const withholdingButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_withholding')
+    expect(withholdingButton).toBeDefined()
+    await withholdingButton!.trigger('click')
+    await flushPromises()
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_withholding_certificate',
+      {
+        supersedes_document_id: null,
+        correction_reason: null,
+      },
+    )
+    expect(m.toastSuccess).toHaveBeenCalledWith(
+      'payroll.documents.tax_certificate_created',
+    )
+  })
+
+  it('requires a concrete reason and references the latest certificate when correcting it', async () => {
+    m.listAnnualDocuments.mockResolvedValue({
+      year: 2026,
+      items: [{
+        id: 77,
+        run_id: null,
+        revision_id: null,
+        annual_revision_id: 8,
+        annual_revision_no: 2,
+        tax_year: 2026,
+        employee_id: 31,
+        employee_name: 'Testovací Zaměstnanec',
+        document_kind: 'taxable_income_advance_certificate',
+        document_revision_no: 2,
+        supersedes_document_id: 70,
+        mime_type: 'application/pdf',
+        suggested_filename: 'potvrzeni.pdf',
+        file_sha256: 'c'.repeat(64),
+        size_bytes: 4567,
+        created_at: '2026-08-04 12:00:00',
+      }],
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    const advanceButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_tax_certificate_advance')
+    await advanceButton!.trigger('click')
+    expect(m.generateTaxCertificate).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="tax-certificate-correction"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="submit-tax-certificate-correction"]').trigger('submit')
+    expect(m.toastError).toHaveBeenCalledWith(
+      'payroll.documents.correction_reason_required',
+    )
+    await wrapper.get<HTMLTextAreaElement>('[data-test="correction-reason"]')
+      .setValue('Oprava nesprávně uvedeného identifikátoru poplatníka.')
+    await wrapper.get('[data-test="tax-certificate-correction"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.generateTaxCertificate).toHaveBeenCalledWith(
+      31,
+      expect.any(Number),
+      'taxable_income_advance_certificate',
+      {
+        supersedes_document_id: 77,
+        correction_reason: 'Oprava nesprávně uvedeného identifikátoru poplatníka.',
+      },
+    )
   })
 })

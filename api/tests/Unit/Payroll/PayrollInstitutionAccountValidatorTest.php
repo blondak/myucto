@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll;
 
+use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\PayrollInstitutionAccountValidator;
 use PHPUnit\Framework\TestCase;
@@ -14,7 +15,10 @@ final class PayrollInstitutionAccountValidatorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->validator = new PayrollInstitutionAccountValidator(new IbanValidator());
+        $this->validator = new PayrollInstitutionAccountValidator(
+            new IbanValidator(),
+            new CzechBankAccountValidator(),
+        );
     }
 
     public function testCreateNormalizesSyntheticCzechAccountAndMetadata(): void

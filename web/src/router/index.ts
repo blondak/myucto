@@ -96,6 +96,7 @@ const routes: RouteRecordRaw[] = [
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
       { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/runs', name: 'payroll-runs', component: () => import('@/pages/payroll/PayrollRuns.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/payments', name: 'payroll-payments', component: () => import('@/pages/payroll/PayrollPayments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/quick-inputs', name: 'payroll-quick-inputs', component: () => import('@/pages/payroll/PayrollQuickInputs.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
@@ -395,6 +396,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'accounting-payroll': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
+  'payroll-payments': ['payroll.payments'],
   'payroll-people': ['payroll'],
   'payroll-quick-inputs': ['payroll'],
   'payroll-components': ['payroll'],

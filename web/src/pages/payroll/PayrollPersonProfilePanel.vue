@@ -1,0 +1,686 @@
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import {
+  payrollApi,
+  type PayrollPayoutMethod,
+  type PayrollPersonAccountVerificationSource,
+  type PayrollPersonAddressType,
+  type PayrollPersonContactType,
+  type PayrollPersonEditableProfileStatus,
+  type PayrollPersonIdentifierType,
+  type PayrollPersonProfile,
+  type PayrollPersonProfilePayload,
+  type PayrollSecureDeliveryChannel,
+} from '@/api/payroll'
+import { apiErrorMessage } from '@/api/errors'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { useToast } from '@/composables/useToast'
+import { todayIso } from './employmentLifecycleUi'
+
+const props = defineProps<{
+  personId: number
+  canWrite: boolean
+}>()
+
+const emit = defineEmits<{
+  saved: [profile: PayrollPersonProfile]
+}>()
+
+type Tab = 'identity' | 'contacts' | 'payout'
+type SelectOption<T extends string> = { value: T; label: string }
+
+interface IdentityFormRow {
+  id?: number
+  full_name: string
+  first_name: string
+  last_name: string
+  birth_surname_masked: string | null
+  birth_surname: string
+  effective_from: string
+  effective_to: string
+}
+
+interface AddressFormRow {
+  id?: number
+  address_type: PayrollPersonAddressType
+  address_masked: string
+  street_line: string
+  city: string
+  postal_code: string
+  country_code: string
+  effective_from: string
+  effective_to: string
+}
+
+interface ContactFormRow {
+  id?: number
+  contact_type: PayrollPersonContactType
+  value_masked: string
+  value: string
+  is_primary: boolean
+  is_active: boolean
+}
+
+interface IdentifierFormRow {
+  id?: number
+  identifier_type: PayrollPersonIdentifierType
+  value_masked: string
+  value: string
+}
+
+interface AccountFormRow {
+  id?: number
+  label: string
+  bank_account_masked: string
+  bank_account: string
+  allocation_basis_points: number
+  effective_from: string
+  effective_to: string
+  is_active: boolean
+  verification_source: PayrollPersonAccountVerificationSource | null
+  verified_on: string | null
+  verified_by: number | null
+  row_version: number
+}
+
+interface ProfileForm {
+  profile_status: PayrollPersonEditableProfileStatus
+  payout_method: PayrollPayoutMethod
+  cash_allocation_basis_points: number
+  payout_effective_on: string
+  secure_delivery_channel: PayrollSecureDeliveryChannel
+  row_version: number
+  identity_history: IdentityFormRow[]
+  addresses: AddressFormRow[]
+  contacts: ContactFormRow[]
+  identifiers: IdentifierFormRow[]
+  accounts: AccountFormRow[]
+}
+
+interface VerificationForm {
+  verification_source: PayrollPersonAccountVerificationSource
+  verified_on: string
+}
+
+const { t } = useI18n()
+const toast = useToast()
+const loading = ref(true)
+const saving = ref(false)
+const profile = ref<PayrollPersonProfile | null>(null)
+const tab = ref<Tab>('identity')
+const verifyingAccountId = ref<number | null>(null)
+const verificationForms = reactive<Record<number, VerificationForm>>({})
+const form = reactive<ProfileForm>({
+  profile_status: 'setup',
+  payout_method: 'cash',
+  cash_allocation_basis_points: 10000,
+  payout_effective_on: todayIso(),
+  secure_delivery_channel: 'portal',
+  row_version: 0,
+  identity_history: [],
+  addresses: [],
+  contacts: [],
+  identifiers: [],
+  accounts: [],
+})
+
+const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-100 disabled:text-neutral-500'
+const labelClass = 'block text-xs font-medium text-neutral-600'
+const cardClass = 'rounded-lg border border-neutral-200 bg-surface p-3 sm:p-4'
+
+const tabs: Tab[] = ['identity', 'contacts', 'payout']
+const statusOptions = computed<SelectOption<PayrollPersonEditableProfileStatus>[]>(() => [
+  { value: 'legacy', label: t('payroll.people.profile.status.legacy') },
+  { value: 'setup', label: t('payroll.people.profile.status.setup') },
+  { value: 'ready', label: t('payroll.people.profile.status.ready') },
+])
+const deliveryOptions = computed<SelectOption<PayrollSecureDeliveryChannel>[]>(() => [
+  { value: 'portal', label: t('payroll.people.profile.delivery.portal') },
+  { value: 'paper', label: t('payroll.people.profile.delivery.paper') },
+])
+const payoutOptions = computed<SelectOption<PayrollPayoutMethod>[]>(() => [
+  { value: 'cash', label: t('payroll.people.profile.payout.cash') },
+  { value: 'bank', label: t('payroll.people.profile.payout.bank') },
+  { value: 'mixed', label: t('payroll.people.profile.payout.mixed') },
+])
+const addressTypeOptions = computed<SelectOption<PayrollPersonAddressType>[]>(() => [
+  { value: 'residence', label: t('payroll.people.profile.address_type.residence') },
+  { value: 'mailing', label: t('payroll.people.profile.address_type.mailing') },
+])
+const contactTypeOptions = computed<SelectOption<PayrollPersonContactType>[]>(() => [
+  { value: 'email', label: t('payroll.people.profile.contact_type.email') },
+  { value: 'phone', label: t('payroll.people.profile.contact_type.phone') },
+])
+const identifierTypeOptions = computed<SelectOption<PayrollPersonIdentifierType>[]>(() => [
+  { value: 'birth_number', label: t('payroll.people.profile.identifier_type.birth_number') },
+  { value: 'ecp', label: t('payroll.people.profile.identifier_type.ecp') },
+  { value: 'vcp', label: t('payroll.people.profile.identifier_type.vcp') },
+  { value: 'foreign_tax_identifier', label: t('payroll.people.profile.identifier_type.foreign_tax_identifier') },
+])
+const verificationSourceOptions = computed<SelectOption<PayrollPersonAccountVerificationSource>[]>(() => [
+  { value: 'employee_confirmation', label: t('payroll.people.profile.verification_source.employee_confirmation') },
+  { value: 'bank_document', label: t('payroll.people.profile.verification_source.bank_document') },
+  { value: 'user_verified', label: t('payroll.people.profile.verification_source.user_verified') },
+])
+
+function hydrate(value: PayrollPersonProfile) {
+  profile.value = value
+  form.profile_status = value.profile_status === 'missing' ? 'setup' : value.profile_status
+  form.payout_method = value.payout_method
+  form.cash_allocation_basis_points = value.cash_allocation_basis_points
+  form.payout_effective_on = value.payout_effective_on ?? todayIso()
+  form.secure_delivery_channel = value.secure_delivery_channel
+  form.row_version = value.row_version
+  form.identity_history = value.identity_history.map(row => ({
+    id: row.id,
+    full_name: row.full_name,
+    first_name: row.first_name ?? '',
+    last_name: row.last_name ?? '',
+    birth_surname_masked: row.birth_surname_masked,
+    birth_surname: '',
+    effective_from: row.effective_from,
+    effective_to: row.effective_to ?? '',
+  }))
+  form.addresses = value.addresses.map(row => ({
+    id: row.id,
+    address_type: row.address_type,
+    address_masked: row.address_masked,
+    street_line: '',
+    city: '',
+    postal_code: '',
+    country_code: '',
+    effective_from: row.effective_from,
+    effective_to: row.effective_to ?? '',
+  }))
+  form.contacts = value.contacts.map(row => ({
+    id: row.id,
+    contact_type: row.contact_type,
+    value_masked: row.value_masked,
+    value: '',
+    is_primary: row.is_primary,
+    is_active: row.is_active,
+  }))
+  form.identifiers = value.identifiers.map(row => ({
+    id: row.id,
+    identifier_type: row.identifier_type,
+    value_masked: row.value_masked,
+    value: '',
+  }))
+  form.accounts = value.accounts.map(row => ({
+    id: row.id,
+    label: row.label,
+    bank_account_masked: row.bank_account_masked,
+    bank_account: '',
+    allocation_basis_points: row.allocation_basis_points,
+    effective_from: row.effective_from,
+    effective_to: row.effective_to ?? '',
+    is_active: row.is_active,
+    verification_source: row.verification_source ?? null,
+    verified_on: row.verified_on ?? null,
+    verified_by: row.verified_by ?? null,
+    row_version: row.row_version,
+  }))
+  for (const key of Object.keys(verificationForms)) delete verificationForms[Number(key)]
+  for (const account of form.accounts) {
+    if (account.id) {
+      verificationForms[account.id] = {
+        verification_source: account.verification_source ?? 'user_verified',
+        verified_on: account.verified_on ?? todayIso(),
+      }
+    }
+  }
+}
+
+function clearPlaintextInputs() {
+  for (const row of form.identity_history) row.birth_surname = ''
+  for (const row of form.addresses) {
+    row.street_line = ''
+    row.city = ''
+    row.postal_code = ''
+    row.country_code = ''
+  }
+  for (const row of form.contacts) row.value = ''
+  for (const row of form.identifiers) row.value = ''
+  for (const row of form.accounts) row.bank_account = ''
+}
+
+async function load() {
+  loading.value = true
+  try {
+    hydrate(await payrollApi.personProfile(props.personId))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.load_failed')))
+  } finally {
+    loading.value = false
+  }
+}
+
+function optionalValue(value: string): string | undefined {
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+function payload(): PayrollPersonProfilePayload {
+  return {
+    row_version: form.row_version,
+    profile_status: form.profile_status,
+    payout_method: form.payout_method,
+    cash_allocation_basis_points: Number(form.cash_allocation_basis_points),
+    payout_effective_on: form.payout_effective_on,
+    secure_delivery_channel: form.secure_delivery_channel,
+    identity_history: form.identity_history.map(row => ({
+      ...(row.id ? { id: row.id } : {}),
+      full_name: row.full_name,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      ...(optionalValue(row.birth_surname) !== undefined
+        ? { birth_surname: optionalValue(row.birth_surname) }
+        : {}),
+      effective_from: row.effective_from,
+      effective_to: optionalValue(row.effective_to) ?? null,
+    })),
+    addresses: form.addresses.map(row => {
+      const replacesAddress = [
+        row.street_line,
+        row.city,
+        row.postal_code,
+        row.country_code,
+      ].some(value => optionalValue(value) !== undefined)
+      return {
+        ...(row.id ? { id: row.id } : {}),
+        address_type: row.address_type,
+        ...(replacesAddress
+          ? {
+              street_line: row.street_line.trim(),
+              city: row.city.trim(),
+              postal_code: row.postal_code.trim(),
+              country_code: row.country_code.trim(),
+            }
+          : {}),
+        effective_from: row.effective_from,
+        effective_to: optionalValue(row.effective_to) ?? null,
+      }
+    }),
+    contacts: form.contacts.map(row => ({
+      ...(row.id ? { id: row.id } : {}),
+      contact_type: row.contact_type,
+      ...(optionalValue(row.value) !== undefined ? { value: row.value.trim() } : {}),
+      is_primary: row.is_primary,
+      is_active: row.is_active,
+    })),
+    identifiers: form.identifiers.map(row => ({
+      ...(row.id ? { id: row.id } : {}),
+      identifier_type: row.identifier_type,
+      ...(optionalValue(row.value) !== undefined ? { value: row.value.trim() } : {}),
+    })),
+    accounts: form.accounts.map(row => ({
+      ...(row.id ? { id: row.id } : {}),
+      label: row.label,
+      ...(optionalValue(row.bank_account) !== undefined
+        ? { bank_account: row.bank_account.trim() }
+        : {}),
+      allocation_basis_points: Number(row.allocation_basis_points),
+      effective_from: row.effective_from,
+      effective_to: optionalValue(row.effective_to) ?? null,
+      is_active: row.is_active,
+    })),
+  }
+}
+
+async function save() {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const saved = await payrollApi.savePersonProfile(props.personId, payload())
+    hydrate(saved)
+    emit('saved', saved)
+    toast.success(t('payroll.people.profile.saved'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.save_failed')))
+  } finally {
+    clearPlaintextInputs()
+    saving.value = false
+  }
+}
+
+async function verifyAccount(account: AccountFormRow) {
+  if (!account.id
+    || verifyingAccountId.value !== null
+    || accountHasUnsavedChanges(account)
+  ) return
+  const verification = verificationForms[account.id]
+  if (!verification) return
+  verifyingAccountId.value = account.id
+  try {
+    const saved = await payrollApi.verifyPersonAccount(props.personId, account.id, {
+      ...verification,
+      row_version: account.row_version,
+    })
+    account.verification_source = saved.verification_source ?? verification.verification_source
+    account.verified_on = saved.verified_on ?? verification.verified_on
+    account.verified_by = saved.verified_by ?? null
+    account.row_version = saved.row_version
+    toast.success(t('payroll.people.profile.account_verified'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.verification_failed')))
+  } finally {
+    verifyingAccountId.value = null
+  }
+}
+
+function accountHasUnsavedChanges(account: AccountFormRow): boolean {
+  if (account.bank_account.trim() !== '' || !account.id) return true
+  const stored = profile.value?.accounts.find(
+    item => item.id === account.id,
+  )
+  if (!stored) return true
+
+  return account.label !== stored.label
+    || Number(account.allocation_basis_points)
+      !== stored.allocation_basis_points
+    || account.effective_from !== stored.effective_from
+    || (account.effective_to || null) !== stored.effective_to
+    || account.is_active !== stored.is_active
+}
+
+function addIdentity() {
+  form.identity_history.unshift({
+    full_name: profile.value?.full_name ?? '',
+    first_name: '',
+    last_name: '',
+    birth_surname_masked: null,
+    birth_surname: '',
+    effective_from: todayIso(),
+    effective_to: '',
+  })
+}
+
+function addAddress() {
+  form.addresses.unshift({
+    address_type: 'residence',
+    address_masked: '',
+    street_line: '',
+    city: '',
+    postal_code: '',
+    country_code: 'CZ',
+    effective_from: todayIso(),
+    effective_to: '',
+  })
+}
+
+function addContact() {
+  form.contacts.unshift({
+    contact_type: 'email',
+    value_masked: '',
+    value: '',
+    is_primary: false,
+    is_active: true,
+  })
+}
+
+function addIdentifier() {
+  form.identifiers.unshift({
+    identifier_type: 'birth_number',
+    value_masked: '',
+    value: '',
+  })
+}
+
+function addAccount() {
+  form.accounts.unshift({
+    label: '',
+    bank_account_masked: '',
+    bank_account: '',
+    allocation_basis_points: 10000,
+    effective_from: todayIso(),
+    effective_to: '',
+    is_active: true,
+    verification_source: null,
+    verified_on: null,
+    verified_by: null,
+    row_version: 0,
+  })
+}
+
+function removeUnsaved<T extends { id?: number }>(rows: T[], index: number) {
+  if (!rows[index]?.id) rows.splice(index, 1)
+}
+
+watch(() => props.personId, load)
+onMounted(load)
+</script>
+
+<template>
+  <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-profile">
+    <header class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-4 py-4 sm:px-6">
+      <div>
+        <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.profile.title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.profile.subtitle') }}</p>
+      </div>
+      <button
+        v-if="canWrite && !loading && profile"
+        type="button"
+        :class="btnFilled('primary')"
+        :disabled="saving"
+        data-test="save-profile"
+        @click="save"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.check" />
+        </svg>
+        {{ t('common.save') }}
+      </button>
+    </header>
+
+    <div v-if="loading" class="space-y-3 p-4 sm:p-6">
+      <div v-for="index in 3" :key="index" class="h-20 animate-pulse rounded-lg bg-neutral-100" />
+    </div>
+    <div v-else-if="!profile" class="p-6 text-sm text-neutral-500">
+      {{ t('payroll.people.profile.load_failed') }}
+    </div>
+    <form v-else class="p-4 sm:p-6" @submit.prevent="save">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label :class="labelClass">
+          {{ t('payroll.people.profile.profile_status') }}
+          <SearchableSelect
+            v-model="form.profile_status"
+            class="mt-1"
+            :options="statusOptions"
+            :clearable="false"
+            :disabled="!canWrite"
+            accent="payroll"
+          />
+        </label>
+        <label :class="labelClass">
+          {{ t('payroll.people.profile.delivery_channel') }}
+          <SearchableSelect
+            v-model="form.secure_delivery_channel"
+            class="mt-1"
+            :options="deliveryOptions"
+            :clearable="false"
+            :disabled="!canWrite"
+            accent="payroll"
+          />
+        </label>
+        <div class="rounded-lg bg-neutral-50 px-3 py-2">
+          <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.version') }}</span>
+          <p class="mt-1 text-sm font-medium text-neutral-800">{{ form.row_version }}</p>
+        </div>
+      </div>
+
+      <nav class="mb-5 mt-6 flex flex-wrap gap-1 border-b border-neutral-200" :aria-label="t('payroll.people.profile.tabs.label')">
+        <button
+          v-for="name in tabs"
+          :key="name"
+          type="button"
+          class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+          :class="tab === name
+            ? 'border-payroll-600 text-payroll-600'
+            : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
+          :aria-selected="tab === name"
+          role="tab"
+          @click="tab = name"
+        >
+          {{ t(`payroll.people.profile.tabs.${name}`) }}
+        </button>
+      </nav>
+
+      <div v-if="tab === 'identity'" class="space-y-6">
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identity_title') }}</h3>
+              <p class="text-xs text-neutral-500">{{ t('payroll.people.profile.mask_hint') }}</p>
+            </div>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addIdentity">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+              {{ t('payroll.people.profile.add_identity') }}
+            </button>
+          </div>
+          <div class="space-y-3">
+            <article v-for="(row, index) in form.identity_history" :key="row.id ?? `new-identity-${index}`" :class="cardClass">
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <label :class="labelClass">{{ t('payroll.people.profile.first_name') }}<input v-model="row.first_name" required autocomplete="given-name" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.last_name') }}<input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.full_name') }}<input v-model="row.full_name" required autocomplete="name" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }}<input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <div v-if="row.birth_surname_masked" class="lg:col-span-2">
+                  <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
+                  <p class="mt-1 font-mono text-sm text-neutral-800">{{ row.birth_surname_masked }}</p>
+                </div>
+                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_birth_surname') }}<input v-model="row.birth_surname" autocomplete="off" :class="inputClass" :placeholder="t('payroll.people.profile.keep_masked')"></label>
+              </div>
+              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end">
+                <button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.identity_history, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.addresses_title') }}</h3>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAddress">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+              {{ t('payroll.people.profile.add_address') }}
+            </button>
+          </div>
+          <div class="space-y-3">
+            <article v-for="(row, index) in form.addresses" :key="row.id ?? `new-address-${index}`" :class="cardClass">
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <label :class="labelClass">{{ t('payroll.people.profile.address_type_label') }}<SearchableSelect v-model="row.address_type" class="mt-1" :options="addressTypeOptions" :clearable="false" :disabled="!canWrite" accent="payroll" /></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }}<input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <div v-if="row.address_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-1 text-sm text-neutral-800">{{ row.address_masked }}</p></div>
+                <template v-if="canWrite">
+                  <label :class="labelClass">{{ t('payroll.people.profile.street') }}<input v-model="row.street_line" :required="!row.id" autocomplete="off" :class="inputClass"></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.city') }}<input v-model="row.city" :required="!row.id" autocomplete="off" :class="inputClass"></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.postal_code') }}<input v-model="row.postal_code" :required="!row.id" autocomplete="off" :class="inputClass"></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.country_code') }}<input v-model="row.country_code" :required="!row.id" maxlength="2" autocomplete="off" :class="inputClass"></label>
+                </template>
+              </div>
+              <p v-if="canWrite && row.id" class="mt-2 text-xs text-neutral-500">{{ t('payroll.people.profile.address_replace_hint') }}</p>
+              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.addresses, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <div v-else-if="tab === 'contacts'" class="space-y-6">
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.contacts_title') }}</h3>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addContact"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_contact') }}</button>
+          </div>
+          <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <article v-for="(row, index) in form.contacts" :key="row.id ?? `new-contact-${index}`" :class="cardClass">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label :class="labelClass">{{ t('payroll.people.profile.contact_type_label') }}<SearchableSelect v-model="row.contact_type" class="mt-1" :options="contactTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
+                <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
+                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }}<input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''"></label>
+                <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_primary" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.primary_contact') }}</label>
+                <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
+              </div>
+              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.contacts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+            </article>
+          </div>
+        </section>
+
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identifiers_title') }}</h3>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addIdentifier"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_identifier') }}</button>
+          </div>
+          <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <article v-for="(row, index) in form.identifiers" :key="row.id ?? `new-identifier-${index}`" :class="cardClass">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label :class="labelClass">{{ t('payroll.people.profile.identifier_type_label') }}<SearchableSelect v-model="row.identifier_type" class="mt-1" :options="identifierTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
+                <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
+                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }}<input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''"></label>
+              </div>
+              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.identifiers, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <div v-else class="space-y-6">
+        <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label :class="labelClass">{{ t('payroll.people.profile.payout_method') }}<SearchableSelect v-model="form.payout_method" class="mt-1" :options="payoutOptions" :clearable="false" :disabled="!canWrite" accent="payroll" /></label>
+          <label :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }}<input v-model.number="form.cash_allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
+          <label :class="labelClass">{{ t('payroll.people.profile.payout_effective_on') }}<input v-model="form.payout_effective_on" required type="date" :disabled="!canWrite" :class="inputClass"></label>
+        </section>
+
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div><h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.accounts_title') }}</h3><p class="text-xs text-neutral-500">{{ t('payroll.people.profile.account_hint') }}</p></div>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
+          </div>
+          <div class="space-y-3">
+            <article v-for="(row, index) in form.accounts" :key="row.id ?? `new-account-${index}`" :class="cardClass">
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <label :class="labelClass">{{ t('payroll.people.profile.account_label') }}<input v-model="row.label" required :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }}<input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }}<input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <div v-if="row.bank_account_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.bank_account_masked }}</p></div>
+                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_bank_account') }}<input v-model="row.bank_account" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : t('payroll.people.profile.bank_account_placeholder')" data-test="bank-account-plaintext"></label>
+                <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
+              </div>
+
+              <div v-if="row.id" class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p class="text-sm font-medium text-neutral-800">{{ t('payroll.people.profile.account_verification') }}</p>
+                    <p v-if="row.verified_on && row.verification_source" class="mt-1 text-xs text-success-600" data-test="verification-status">
+                      {{ t('payroll.people.profile.verified_summary', {
+                        date: row.verified_on,
+                        source: t(`payroll.people.profile.verification_source.${row.verification_source}`),
+                      }) }}
+                    </p>
+                    <p v-else class="mt-1 text-xs text-warning-700">{{ t('payroll.people.profile.not_verified') }}</p>
+                  </div>
+                </div>
+                <div v-if="canWrite && row.is_active && verificationForms[row.id]" class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto] md:items-end">
+                  <label :class="labelClass">{{ t('payroll.people.profile.verification_source_label') }}<SearchableSelect v-model="verificationForms[row.id].verification_source" class="mt-1" :options="verificationSourceOptions" :clearable="false" accent="payroll" /></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.verified_on') }}<input v-model="verificationForms[row.id].verified_on" required type="date" :class="inputClass"></label>
+                  <button type="button" :class="btnOutline('success')" :disabled="verifyingAccountId !== null || accountHasUnsavedChanges(row)" data-test="verify-account" @click="verifyAccount(row)">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                    {{ t('payroll.people.profile.verify_account') }}
+                  </button>
+                  <p v-if="accountHasUnsavedChanges(row)" class="text-xs text-warning-700 md:col-span-3">
+                    {{ t('payroll.people.profile.save_before_verify') }}
+                  </p>
+                </div>
+              </div>
+              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.accounts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </form>
+  </section>
+</template>

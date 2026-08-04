@@ -1,0 +1,366 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Document\AnnualTaxCertificatePaymentEvidenceProvider;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+#[Group('integration')]
+final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    public function testProvesCurrentNetLiabilityFromImmutableActualPayment(): void
+    {
+        [$connection, $fixture] = $this->fixture('2026-02-15', 42_000_000);
+        try {
+            $proof = (new AnnualTaxCertificatePaymentEvidenceProvider(
+                $connection,
+            ))->prove(
+                $fixture['supplier_id'],
+                $fixture['employee_id'],
+                $fixture['run_id'],
+                $fixture['revision_id'],
+                42_000_000,
+                '2027-01-31',
+            );
+
+            self::assertSame('2026-02-15', $proof['last_payment_date']);
+            self::assertSame(42_000_000, $proof['expected_net_minor_units']);
+            self::assertCount(1, $proof['liabilities']);
+            self::assertSame(
+                42_000_000,
+                $proof['liabilities'][0]['settled_minor_units'],
+            );
+            self::assertMatchesRegularExpression(
+                '/^[a-f0-9]{64}$/D',
+                $proof['liabilities'][0]['events'][0]['evidence_fact_hash'],
+            );
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    public function testFailsClosedWhenActualPaymentIsAfterJanuaryCutoff(): void
+    {
+        [$connection, $fixture] = $this->fixture('2027-02-01', 42_000_000);
+        try {
+            $this->expectException(\DomainException::class);
+            $this->expectExceptionMessage('31. 1. 2027');
+
+            (new AnnualTaxCertificatePaymentEvidenceProvider(
+                $connection,
+            ))->prove(
+                $fixture['supplier_id'],
+                $fixture['employee_id'],
+                $fixture['run_id'],
+                $fixture['revision_id'],
+                42_000_000,
+                '2027-01-31',
+            );
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    public function testFailsClosedWhenLiabilityVectorDoesNotEqualApprovedNet(): void
+    {
+        [$connection, $fixture] = $this->fixture('2026-02-15', 41_000_000);
+        try {
+            $this->expectException(\DomainException::class);
+            $this->expectExceptionMessage('schválené čisté mzdě');
+
+            (new AnnualTaxCertificatePaymentEvidenceProvider(
+                $connection,
+            ))->prove(
+                $fixture['supplier_id'],
+                $fixture['employee_id'],
+                $fixture['run_id'],
+                $fixture['revision_id'],
+                42_000_000,
+                '2027-01-31',
+            );
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    /**
+     * @return array{
+     *   Connection,
+     *   array{supplier_id:int,employee_id:int,run_id:int,revision_id:int}
+     * }
+     */
+    private function fixture(
+        string $actualPaymentDate,
+        int $liabilityAmountMinor,
+    ): array {
+        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        if (!$connection->hasTable('payroll_payment_matches')) {
+            $this->markTestSkipped('Migrace platební evidence mezd neproběhla.');
+        }
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        self::assertGreaterThan(0, $sourceSupplierId);
+        $pdo->beginTransaction();
+        try {
+            return $this->createFixture(
+                $connection,
+                $sourceSupplierId,
+                $actualPaymentDate,
+                $liabilityAmountMinor,
+            );
+        } catch (\Throwable $exception) {
+            $this->rollback($connection);
+            throw $exception;
+        }
+    }
+
+    /**
+     * @return array{
+     *   Connection,
+     *   array{supplier_id:int,employee_id:int,run_id:int,revision_id:int}
+     * }
+     */
+    private function createFixture(
+        Connection $connection,
+        int $sourceSupplierId,
+        string $actualPaymentDate,
+        int $liabilityAmountMinor,
+    ): array {
+        $pdo = $connection->pdo();
+        $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Syntetická platební osoba", "employee", 1)',
+        )->execute([$supplierId]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status,
+                 current_revision_no)
+             VALUES (?, "2026-01-01", "2026-02-15", "approved", 1)',
+        )->execute([$supplierId]);
+        $runId = (int) $pdo->lastInsertId();
+        $snapshot = '{"schema":"synthetic-tax-certificate-payment.v1"}';
+        $snapshotHash = hash('sha256', $snapshot);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 1, "approved", "synthetic-payment.v1",
+                     ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $supplierId,
+            $runId,
+            str_repeat('a', 64),
+            $snapshot,
+            $snapshotHash,
+            $snapshot,
+            $snapshotHash,
+            hash(
+                'sha256',
+                "synthetic-tax-certificate-revision-{$supplierId}",
+                true,
+            ),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, result_json,
+                 result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")',
+        )->execute([
+            $supplierId,
+            $revisionId,
+            $employeeId,
+            $snapshot,
+            $snapshotHash,
+        ]);
+
+        $liabilitySnapshot = '{"schema":"synthetic-liability.v1"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, source_snapshot_json,
+                 source_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, ?, ?, "net_wage", "outgoing", ?,
+                     "2026-02-15", "CZK", ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $revisionId,
+            $employeeId,
+            'net-wage.tax-certificate',
+            'recipient:synthetic',
+            $liabilityAmountMinor,
+            $liabilitySnapshot,
+            hash('sha256', $liabilitySnapshot),
+            hash(
+                'sha256',
+                "synthetic-tax-certificate-liability-{$supplierId}",
+                true,
+            ),
+        ]);
+        $liabilityId = (int) $pdo->lastInsertId();
+        $allocationId = $this->allocation(
+            $pdo,
+            $supplierId,
+            $liabilityId,
+            $liabilityAmountMinor,
+        );
+        $statementId = $this->bankStatement($pdo, $supplierId);
+        $transactionId = $this->bankTransaction(
+            $pdo,
+            $statementId,
+            $actualPaymentDate,
+            $liabilityAmountMinor,
+        );
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id,
+                 idempotency_key_hash)
+             VALUES (?, ?, "matched", ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $allocationId,
+            $liabilityAmountMinor,
+            $statementId,
+            $transactionId,
+            hash(
+                'sha256',
+                "synthetic-tax-certificate-match-{$supplierId}",
+                true,
+            ),
+        ]);
+
+        return [
+            $connection,
+            [
+                'supplier_id' => $supplierId,
+                'employee_id' => $employeeId,
+                'run_id' => $runId,
+                'revision_id' => $revisionId,
+            ],
+        ];
+    }
+
+    private function allocation(
+        PDO $pdo,
+        int $supplierId,
+        int $liabilityId,
+        int $amountMinor,
+    ): int {
+        $reference = "tax-certificate-{$liabilityId}";
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_batches
+                (supplier_id, batch_reference, channel, export_format,
+                 direction, planned_payment_date, currency_code,
+                 payer_reference, declared_total_minor, declared_item_count,
+                 snapshot_ciphertext, snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, "bank", "manual", "outgoing", "2026-02-15",
+                     "CZK", "payer:synthetic", ?, 1, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            "{$reference}-batch",
+            $amountMinor,
+            'enc:v2:synthetic-batch',
+            hash('sha256', "{$reference}-batch"),
+            hash('sha256', "{$reference}-batch", true),
+        ]);
+        $batchId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_items
+                (supplier_id, batch_id, item_reference, recipient_reference,
+                 amount_minor, instruction_ciphertext, instruction_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "recipient:synthetic", ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $batchId,
+            "{$reference}-item",
+            $amountMinor,
+            'enc:v2:synthetic-instruction',
+            hash('sha256', "{$reference}-item"),
+            hash('sha256', "{$reference}-item", true),
+        ]);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_allocations
+                (supplier_id, item_id, liability_id, amount_minor,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $itemId,
+            $liabilityId,
+            $amountMinor,
+            hash('sha256', "{$reference}-allocation", true),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function bankStatement(PDO $pdo, int $supplierId): int
+    {
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number,
+                 bank_code, currency, statement_date)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK", "2027-02-01")',
+        )->execute([
+            $supplierId,
+            "synthetic-tax-certificate-{$supplierId}.gpc",
+            hash('sha256', "synthetic-tax-certificate-{$supplierId}"),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function bankTransaction(
+        PDO $pdo,
+        int $statementId,
+        string $postedAt,
+        int $amountMinor,
+    ): int {
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, ?, ?, "CZK", "Syntetická roční mzdová úhrada", ?)',
+        )->execute([
+            $statementId,
+            $postedAt,
+            number_format(-$amountMinor / 100, 2, '.', ''),
+            hash(
+                'sha256',
+                "synthetic-tax-certificate-transaction-{$statementId}",
+            ),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function rollback(Connection $connection): void
+    {
+        if ($connection->pdo()->inTransaction()) {
+            $connection->pdo()->rollBack();
+        }
+        $connection->close();
+    }
+}

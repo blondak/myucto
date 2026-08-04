@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="cs">
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            color: #241c22;
+            font-family: montserrat, dejavusans, sans-serif;
+            font-size: 9pt;
+            line-height: 1.35;
+        }
+        h1 {
+            color: #341c2b;
+            font-size: 15pt;
+            line-height: 1.15;
+            margin: 0 0 2mm;
+        }
+        .withholding-title { padding-top: 8mm; }
+        h2 {
+            color: #341c2b;
+            font-size: 10.5pt;
+            margin: 0 0 2mm;
+        }
+        p { margin: 0 0 1.5mm; }
+        .meta {
+            color: #6b5c66;
+            font-size: 8pt;
+            margin-bottom: 4mm;
+        }
+        .box {
+            border: 0.5pt solid #dec8d4;
+            border-radius: 2mm;
+            margin-bottom: 4mm;
+            padding: 3mm;
+        }
+        .identity {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        .identity td {
+            padding: 0.8mm 1.5mm 0.8mm 0;
+            vertical-align: top;
+            width: 50%;
+        }
+        .label {
+            color: #776873;
+            display: block;
+            font-size: 7.5pt;
+            text-transform: uppercase;
+        }
+        .rows {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        .rows th {
+            background: #f4edf1;
+            border-bottom: 0.5pt solid #dec8d4;
+            color: #5c334a;
+            font-size: 7.5pt;
+            padding: 2mm;
+            text-align: left;
+            text-transform: uppercase;
+        }
+        .rows td {
+            border-bottom: 0.3pt solid #eadce4;
+            padding: 1.7mm 2mm;
+            vertical-align: top;
+        }
+        .rows .number { width: 8mm; text-align: center; }
+        .rows .amount {
+            font-family: dejavusansmono, dejavusans, sans-serif;
+            text-align: right;
+            white-space: nowrap;
+            width: 34mm;
+        }
+        .subtable {
+            border-collapse: collapse;
+            font-size: 7.5pt;
+            margin-top: 1mm;
+            width: 100%;
+        }
+        .subtable th, .subtable td {
+            border: 0.3pt solid #eadce4;
+            padding: 0.8mm 1mm;
+        }
+        .subtable th {
+            background: #fbf7f9;
+            text-transform: none;
+        }
+        .advance-page-break {
+            page-break-before: always;
+        }
+        .closing-block {
+            page-break-inside: avoid;
+        }
+        .correction-appendix {
+            border-top: 0.5pt solid #dec8d4;
+            margin-top: 4mm;
+            padding-top: 2mm;
+        }
+        .evidence {
+            background: #f7fbf8;
+            border: 0.5pt solid #bad8c1;
+            color: #315a3c;
+            margin-top: 4mm;
+            padding: 2.5mm 3mm;
+        }
+        .signature {
+            border-collapse: collapse;
+            margin-top: 7mm;
+            width: 100%;
+        }
+        .signature td { padding-top: 7mm; width: 50%; }
+        .line { border-top: 0.4pt solid #8d7b86; padding-top: 1mm; }
+        .footnote {
+            color: #776873;
+            font-size: 7pt;
+            margin-top: 4mm;
+        }
+    </style>
+</head>
+<body>
+    {% if is_advance %}
+        <h1>Potvrzení o zdanitelných příjmech ze závislé činnosti</h1>
+    {% else %}
+        <h1 class="withholding-title">
+            Potvrzení o zdanitelných příjmech<br>
+            zdaněných srážkovou daní
+        </h1>
+    {% endif %}
+    <div class="meta">
+        Tiskopis {{ form.form_number }} · {{ form.ministry_form }} ·
+        vzor č. {{ form.pattern_number }} ·
+        {% if is_advance %}
+            zdaňovací období {{ tax_year }}
+        {% else %}
+            Zdaňovací období: kalendářní měsíce {{ months_label }}
+            roku {{ tax_year }}
+        {% endif %}
+    </div>
+
+    <div class="box">
+        <h2>Plátce daně</h2>
+        <table class="identity">
+            <tr>
+                <td>
+                    <span class="label">Název</span>
+                    {{ employer.name }}
+                </td>
+                <td>
+                    <span class="label">IČ / DIČ</span>
+                    {{ employer.identification_number }} /
+                    {{ employer.tax_identification_number }}
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <span class="label">Sídlo</span>
+                    {{ employer.address.street_line }},
+                    {{ employer.address.postal_code }} {{ employer.address.city }},
+                    {{ employer.address.country_name }}
+                </td>
+                <td>
+                    <span class="label">Vystavil</span>
+                    {{ employer.issuer.name }} · {{ employer.issuer.email }} ·
+                    {{ employer.issuer.phone }}
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="box">
+        <h2>Poplatník</h2>
+        <table class="identity">
+            <tr>
+                {% if is_advance %}
+                <td>
+                    <span class="label">Jméno a příjmení</span>
+                    {{ employee.name }}
+                </td>
+                {% else %}
+                <td>
+                    <span class="label">Příjmení</span>
+                    {{ employee.last_name }}
+                </td>
+                <td>
+                    <span class="label">Jméno</span>
+                    {{ employee.first_name }}
+                </td>
+                {% endif %}
+                {% if is_advance %}
+                <td>
+                    <span class="label">{{ employee.identifier_label }}</span>
+                    {{ employee.identifier_value }}
+                </td>
+                {% endif %}
+            </tr>
+            {% if not is_advance %}
+            <tr>
+                <td>
+                    <span class="label">{{ employee.identifier_label }}</span>
+                    {{ employee.identifier_value }}
+                </td>
+                <td></td>
+            </tr>
+            {% endif %}
+            <tr>
+                <td>
+                    <span class="label">Bydliště</span>
+                    {{ employee.address }}
+                </td>
+                <td>
+                    <span class="label">Dřívější jména</span>
+                    {{ employee.previous_names is empty
+                        ? '—'
+                        : employee.previous_names|join(', ') }}
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="box">
+        {% if is_advance %}
+            <span class="label">Prohlášení poplatníka k dani</span>
+            Prohlášení poplatníka: {{ tax_declaration.status_label }}.
+            {% if tax_declaration.signed_months is not empty %}
+                Podepsané kalendářní měsíce:
+                {{ tax_declaration.signed_months_label }}.
+            {% endif %}
+        {% else %}
+            <span class="label">Daňová rezidence poplatníka</span>
+            Daňový rezident ČR
+            ({{ tax_residence.country_code }})
+        {% endif %}
+    </div>
+
+    {% if replaces_issued_at %}
+        <div class="box">
+            <span class="label">Opravné potvrzení</span>
+            Toto potvrzení nahrazuje potvrzení vydané dne
+            {{ replaces_issued_at }}. Důvod opravy je uveden v příloze.
+        </div>
+    {% else %}
+        <div class="box">
+            <span class="label">První vydání</span>
+            První vydání – nenahrazuje dřívější potvrzení
+        </div>
+    {% endif %}
+
+    <table class="rows">
+        <thead>
+            <tr>
+                <th class="number">Řádek</th>
+                <th>Údaj za zdaňovací období {{ tax_year }}</th>
+                <th class="amount">Celé Kč</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% if is_advance %}
+            <tr>
+                <td class="number">1</td>
+                <td>Úhrn zúčtovaných příjmů ze závislé činnosti</td>
+                <td class="amount">{{ amounts.accrued_income_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">2</td>
+                <td>
+                    Z řádku 1 příjmy skutečně vyplacené nebo obdržené
+                    do {{ payment_evidence.cutoff }}
+                </td>
+                <td class="amount">{{ amounts.paid_income_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">3</td>
+                <td>Kalendářní měsíce zúčtování: {{ months_label }}</td>
+                <td class="amount">—</td>
+            </tr>
+            <tr>
+                <td class="number">4</td>
+                <td>Doplatky příjmů za předchozí zdaňovací období</td>
+                <td class="amount">0</td>
+            </tr>
+            <tr>
+                <td class="number">5</td>
+                <td>Úhrn příjmů pro výpočet daně (ř. 2 + ř. 4)</td>
+                <td class="amount">{{ amounts.paid_income_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">6</td>
+                <td>Skutečně sražené zálohy na daň z příjmů na řádku 2</td>
+                <td class="amount">{{ amounts.advance_tax_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">7</td>
+                <td>Zálohy na daň z doplatků za předchozí období</td>
+                <td class="amount">0</td>
+            </tr>
+            <tr>
+                <td class="number">8</td>
+                <td>Úhrn skutečně sražených záloh na daň (ř. 6 + ř. 7)</td>
+                <td class="amount">{{ amounts.advance_tax_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">9</td>
+                <td>Úhrn vyplacených měsíčních daňových bonusů</td>
+                <td class="amount">{{ amounts.tax_bonus_czk|whole_czk }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="advance-page-break"></div>
+    <table class="rows">
+        <thead>
+            <tr>
+                <th class="number">Řádek</th>
+                <th>Údaj za zdaňovací období {{ tax_year }}</th>
+                <th class="amount">Celé Kč</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td class="number">10</td>
+                <td>
+                    Příspěvek zaměstnavatele na daňově podporované produkty
+                    spoření na stáří
+                    <table class="subtable">
+                        <tr><td>na doplňkové penzijní spoření</td><td class="amount">{{ employer_product_contributions.supplementary_pension|whole_czk }}</td></tr>
+                        <tr><td>na penzijní pojištění u instituce penzijního pojištění</td><td class="amount">{{ employer_product_contributions.pension_insurance|whole_czk }}</td></tr>
+                        <tr><td>na soukromé životní pojištění</td><td class="amount">{{ employer_product_contributions.private_life_insurance|whole_czk }}</td></tr>
+                        <tr><td>na dlouhodobý investiční produkt</td><td class="amount">{{ employer_product_contributions.long_term_investment_product|whole_czk }}</td></tr>
+                    </table>
+                </td>
+                <td class="amount">—</td>
+            </tr>
+            <tr>
+                <td class="number">11</td>
+                <td>
+                    Děti uplatněné jako vyživované pro účely daňového zvýhodnění
+                    <table class="subtable">
+                        <tr>
+                            <th>Jméno a příjmení</th><th>Rodné číslo</th>
+                            <th>ZTP/P od–do</th><th>Jedno dítě od–do</th>
+                            <th>Druhé dítě od–do</th><th>Třetí a další od–do</th>
+                        </tr>
+                        {% for child in child_tax_benefits %}
+                            <tr>
+                                <td>{{ child.name }}</td><td>{{ child.identifier }}</td>
+                                <td>{{ child.ztpp_period }}</td><td>{{ child.first_child_period }}</td>
+                                <td>{{ child.second_child_period }}</td><td>{{ child.third_child_period }}</td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="6">Neuplatněno</td></tr>
+                        {% endfor %}
+                    </table>
+                </td>
+                <td class="amount">—</td>
+            </tr>
+            <tr>
+                <td class="number">12</td>
+                <td>
+                    Invalidita (ZTP/P) poplatníka uplatněná jako sleva na dani
+                    <table class="subtable">
+                        <tr><th>Od–do</th><th>Stupeň invalidity (ZTP/P)</th></tr>
+                        {% for credit in disability_tax_credits %}
+                            <tr><td>{{ credit.period }}</td><td>{{ credit.degree }}</td></tr>
+                        {% else %}
+                            <tr><td colspan="2">Neuplatněno</td></tr>
+                        {% endfor %}
+                    </table>
+                </td>
+                <td class="amount">—</td>
+            </tr>
+            <tr>
+                <td class="number">13</td>
+                <td>
+                    Roční zúčtování záloh a daňového zvýhodnění
+                    {% if annual_settlement.performed %}
+                        bylo provedeno s výsledkem uvedeným níže
+                    {% else %}
+                        <strong>nebylo provedeno</strong>
+                    {% endif %}
+                </td>
+                <td class="amount"></td>
+            </tr>
+            <tr>
+                <td class="number">14</td>
+                <td>Povinné pojistné vztahující se k daňovému nerezidentovi</td>
+                <td class="amount">{% if nonresident_insurance_czk is not null %}{{ nonresident_insurance_czk|whole_czk }}{% endif %}</td>
+            </tr>
+        {% else %}
+            <tr>
+                <td class="number">1</td>
+                <td>Úhrn zúčtovaných příjmů zdaněných srážkovou daní</td>
+                <td class="amount">{{ amounts.accrued_income_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">2</td>
+                <td>
+                    Z řádku 1 příjmy skutečně vyplacené nebo obdržené
+                    do {{ payment_evidence.cutoff }}
+                </td>
+                <td class="amount">{{ amounts.paid_income_czk|whole_czk }}</td>
+            </tr>
+            <tr>
+                <td class="number">3</td>
+                <td>Skutečně sražená daň z příjmů uvedených na řádku 2</td>
+                <td class="amount">{{ amounts.withholding_tax_czk|whole_czk }}</td>
+            </tr>
+        {% endif %}
+        </tbody>
+    </table>
+
+    <div class="closing-block">
+        <div class="evidence">
+            Skutečné vyplacení částek bylo doloženo neměnnou platební evidencí.
+            Poslední doložená úhrada: {{ payment_evidence.last_payment_date }};
+            rozhodný stav k {{ payment_evidence.cutoff }}.
+        </div>
+
+        {% if correction_reason %}
+            <div class="correction-appendix">
+                <strong>Příloha k opravnému potvrzení – důvod vydání nového potvrzení</strong><br>
+                Nahrazovaný dokument byl vydán dne {{ replaces_issued_at }}.<br>
+                {{ correction_reason }}
+            </div>
+        {% endif %}
+
+        <table class="signature">
+            <tr>
+                <td><div class="line">Datum vystavení: {{ issued_at }}</div></td>
+                <td><div class="line">Podpis oprávněné osoby a otisk razítka</div></td>
+            </tr>
+        </table>
+
+        <p class="footnote">
+            Zdroj: schválené mzdové revize a neměnná evidence skutečných úhrad.
+            Zdrojový otisk a verze rendereru jsou vloženy do metadat PDF.
+        </p>
+    </div>
+</body>
+</html>

@@ -49,6 +49,23 @@ describe('PayrollFileDropzone', () => {
     click.mockRestore()
   })
 
+  it('emits the file selected in the native picker and resets the input', async () => {
+    const wrapper = mountDropzone()
+    const input = wrapper.get('[data-testid="input"]')
+    const file = new File(['employment_code\nSYN-HPP'], 'attendance.csv', {
+      type: 'text/csv',
+    })
+
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [file],
+    })
+    await input.trigger('change')
+
+    expect(wrapper.emitted('selected')).toEqual([[file]])
+    expect((input.element as HTMLInputElement).value).toBe('')
+  })
+
   it('shows the active payroll drop state while a file is dragged over it', async () => {
     const wrapper = mountDropzone()
     const dropzone = wrapper.get('[data-testid="dropzone"]')

@@ -139,6 +139,11 @@ final class PayrollPersonProfileApiTest extends TestCase
         $profile = $this->json($response)['profile'];
         self::assertSame(1, $profile['row_version']);
         self::assertSame('Jana Testovací', $profile['full_name']);
+        self::assertSame('Jana', $profile['identity_history'][0]['first_name']);
+        self::assertSame(
+            'Testovací',
+            $profile['identity_history'][0]['last_name'],
+        );
         self::assertSame('bank', $profile['payout_method']);
         self::assertCount(1, $profile['identity_history']);
         self::assertCount(1, $profile['addresses']);
@@ -159,6 +164,12 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertStringContainsString('example.invalid', $profile['contacts'][0]['value_masked']);
         self::assertStringEndsWith('6789', $profile['identifiers'][0]['value_masked']);
         self::assertStringEndsWith('5/0100', $profile['accounts'][0]['bank_account_masked']);
+        self::assertArrayHasKey('verification_source', $profile['accounts'][0]);
+        self::assertArrayHasKey('verified_on', $profile['accounts'][0]);
+        self::assertArrayHasKey('verified_by', $profile['accounts'][0]);
+        self::assertNull($profile['accounts'][0]['verification_source']);
+        self::assertNull($profile['accounts'][0]['verified_on']);
+        self::assertNull($profile['accounts'][0]['verified_by']);
 
         $identifier = $this->db->pdo()->query(
             'SELECT value_ciphertext, value_hash FROM payroll_person_identifiers'
@@ -218,6 +229,52 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertSame('Jana Testovací', $legacy['full_name']);
     }
 
+    public function testChangingAccountThroughProfileClearsPreviousVerification(): void
+    {
+        $created = $this->json($this->put(
+            $this->supplierId,
+            $this->employeeId,
+            $this->completePayload(),
+        ))['profile'];
+        $accountId = (int) $created['accounts'][0]['id'];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_accounts
+                SET verification_source = "user_verified",
+                    verified_on = "2026-01-02",
+                    verified_by = ?
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?',
+        )->execute([
+            $this->userId,
+            $this->supplierId,
+            $this->employeeId,
+            $accountId,
+        ]);
+
+        $verified = $this->json(
+            $this->get($this->supplierId, $this->employeeId),
+        )['profile'];
+        self::assertSame(
+            'user_verified',
+            $verified['accounts'][0]['verification_source'],
+        );
+
+        $verified['row_version'] = 1;
+        $verified['accounts'][0]['bank_account'] =
+            'CZ6508000000192000145399';
+        $response = $this->put(
+            $this->supplierId,
+            $this->employeeId,
+            $verified,
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $savedAccount = $this->json($response)['profile']['accounts'][0];
+        self::assertNull($savedAccount['verification_source']);
+        self::assertNull($savedAccount['verified_on']);
+        self::assertNull($savedAccount['verified_by']);
+        self::assertStringEndsWith('5399', $savedAccount['bank_account_masked']);
+    }
+
     public function testMaskedValuesCannotBeStoredAsPlaintext(): void
     {
         $created = $this->json($this->put(
@@ -269,6 +326,8 @@ final class PayrollPersonProfileApiTest extends TestCase
             'secure_delivery_channel' => 'portal',
             'identity_history' => [[
                 'full_name' => 'Jana Překryv',
+                'first_name' => 'Jana',
+                'last_name' => 'Překryv',
                 'effective_from' => '2026-06-01',
             ]],
         ]);
@@ -514,6 +573,8 @@ final class PayrollPersonProfileApiTest extends TestCase
             'secure_delivery_channel' => 'portal',
             'identity_history' => [[
                 'full_name' => 'Jana Testovací',
+                'first_name' => 'Jana',
+                'last_name' => 'Testovací',
                 'birth_surname' => 'Příkladová',
                 'effective_from' => '2026-01-01',
             ]],

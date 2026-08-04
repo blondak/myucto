@@ -62,6 +62,7 @@ use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
+use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
@@ -74,6 +75,7 @@ use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
@@ -632,6 +634,26 @@ final class Routes
             $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
+            $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
+            $g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);
+            $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);
+            $g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);
+            $g->get('/payments/reconciliation', [PayrollPaymentAction::class, 'listReconciliation']);
+            $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
+            $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
+            $g->post(
+                '/payments/batches/{batchId:[0-9]+}/exports',
+                [PayrollPaymentAction::class, 'generateExport'],
+            );
+            $g->post(
+                '/payments/exports/{exportId:[0-9]+}/download-grants',
+                [PayrollPaymentAction::class, 'createDownloadGrant'],
+            );
+            $g->post('/payments/exports/download', [PayrollPaymentAction::class, 'downloadExport']);
+            $g->post(
+                '/revisions/{revisionId:[0-9]+}/payments/net-wage-liabilities',
+                [PayrollPaymentAction::class, 'materializeNetWages'],
+            );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
             $g->post('/runs', [PayrollRunsAction::class, 'create']);
             $g->post(
@@ -643,6 +665,10 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}',
                 [PayrollDocumentAction::class, 'generatePayrollSheet'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/documents/tax-certificate/{kind:advance|withholding}/{year:[0-9]{4}}',
+                [AnnualTaxCertificateAction::class, 'generate'],
             );
             $g->post(
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
@@ -670,6 +696,10 @@ final class Routes
             );
             $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
             $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
+            $g->post(
+                '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
+                [PayrollPaymentAction::class, 'verifyPersonAccount'],
+            );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);

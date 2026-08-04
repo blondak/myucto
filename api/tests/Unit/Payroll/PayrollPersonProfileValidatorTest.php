@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll;
 
+use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
 use PHPUnit\Framework\TestCase;
@@ -14,7 +15,10 @@ final class PayrollPersonProfileValidatorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->validator = new PayrollPersonProfileValidator(new IbanValidator());
+        $this->validator = new PayrollPersonProfileValidator(
+            new IbanValidator(),
+            new CzechBankAccountValidator(),
+        );
     }
 
     public function testNormalizesCompleteSyntheticProfile(): void
@@ -27,6 +31,8 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             'secure_delivery_channel' => 'portal',
             'identity_history' => [[
                 'full_name' => '  Jana Testovací  ',
+                'first_name' => '  Jana  ',
+                'last_name' => '  Testovací  ',
                 'birth_surname' => 'Příkladová',
                 'effective_from' => '2026-01-01',
                 'effective_to' => null,
@@ -59,6 +65,8 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         ]);
 
         self::assertSame('Jana Testovací', $data['identity_history'][0]['full_name']);
+        self::assertSame('Jana', $data['identity_history'][0]['first_name']);
+        self::assertSame('Testovací', $data['identity_history'][0]['last_name']);
         self::assertSame('CZ', $data['addresses'][0]['country_code']);
         self::assertSame(2500, $data['cash_allocation_basis_points']);
         self::assertSame('123456789', $data['identifiers'][0]['value']);
@@ -71,11 +79,15 @@ final class PayrollPersonProfileValidatorTest extends TestCase
                 'identity_history' => [
                     [
                         'full_name' => 'Jana První',
+                        'first_name' => 'Jana',
+                        'last_name' => 'První',
                         'effective_from' => '2026-01-01',
                         'effective_to' => '2026-06-30',
                     ],
                     [
                         'full_name' => 'Jana Druhá',
+                        'first_name' => 'Jana',
+                        'last_name' => 'Druhá',
                         'effective_from' => '2026-06-30',
                     ],
                 ],
@@ -170,6 +182,8 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             'identity_history' => [[
                 'id' => 1,
                 'full_name' => 'Jana Testovací',
+                'first_name' => 'Jana',
+                'last_name' => 'Testovací',
                 'birth_surname_masked' => 'P••••••••',
                 'effective_from' => '2026-01-01',
             ]],
@@ -196,6 +210,8 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             ['identity_history' => [[
                 'id' => 1,
                 'full_name' => 'Jana Testovací',
+                'first_name' => 'Jana',
+                'last_name' => 'Testovací',
                 'birth_surname' => 'P••••••••',
                 'effective_from' => '2026-01-01',
             ]]],
@@ -224,6 +240,8 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             'identity_history' => [[
                 'id' => 1,
                 'full_name' => 'Jana Testovací',
+                'first_name' => 'Jana',
+                'last_name' => 'Testovací',
                 'birth_surname' => null,
                 'effective_from' => '2026-01-01',
             ]],
@@ -231,6 +249,20 @@ final class PayrollPersonProfileValidatorTest extends TestCase
 
         self::assertFalse($normalized['identity_history'][0]['birth_surname_present']);
         self::assertNull($normalized['identity_history'][0]['birth_surname']);
+    }
+
+    public function testRejectsIdentityWithoutStructuredFirstOrLastName(): void
+    {
+        foreach (['first_name', 'last_name'] as $missing) {
+            $identity = [
+                'full_name' => 'Jana Testovací',
+                'first_name' => 'Jana',
+                'last_name' => 'Testovací',
+                'effective_from' => '2026-01-01',
+            ];
+            unset($identity[$missing]);
+            $this->expectInvalid(['identity_history' => [$identity]]);
+        }
     }
 
     public function testNormalizesTypedIdentifiersAndRejectsArbitraryValues(): void
@@ -300,10 +332,12 @@ final class PayrollPersonProfileValidatorTest extends TestCase
     {
         try {
             $this->validator->validate($this->payload($payload));
-            self::fail('Neplatný profil musí být odmítnut.');
-        } catch (\InvalidArgumentException) {
-            self::assertTrue(true);
+        } catch (\InvalidArgumentException $exception) {
+            self::assertNotSame('', $exception->getMessage());
+            return;
         }
+
+        self::fail('Neplatný profil musí být odmítnut.');
     }
 
     /**

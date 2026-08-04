@@ -382,6 +382,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
         { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey },
         { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
@@ -983,6 +984,7 @@ const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
   [/^\/payroll\/components(?:\/|$)/, '56a_Uplne_mzdy'],
   [/^\/payroll\/enforcement(?:\/|$)/, '56a_Uplne_mzdy'],
   [/^\/payroll\/documents(?:\/|$)/, '56a_Uplne_mzdy'],
+  [/^\/payroll(?:\/|$)/, '56a_Uplne_mzdy'],
   [/^\/accounting\/payroll(?:\/|$)/, '56_Mzdy'],
   [/^\/accounting\/assets(?:\/|$)|^\/accounting\/small-assets(?:\/|$)/, '57_Majetek'],
   [/^\/accounting\/accounts(?:\/|$)/, '60_Ucetni_osnova'],
