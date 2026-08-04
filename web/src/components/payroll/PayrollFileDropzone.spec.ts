@@ -8,6 +8,7 @@ function mountDropzone(maxSizeBytes = 5_000_000) {
       dropHint: 'Drop file',
       dropActiveHint: 'Release file',
       fileHint: 'CSV or XLSX',
+      chooseFileText: 'Choose file',
       maxSizeBytes,
       dropzoneTestId: 'dropzone',
       inputTestId: 'input',
@@ -31,17 +32,36 @@ describe('PayrollFileDropzone', () => {
     expect(wrapper.emitted('rejected')).toBeUndefined()
   })
 
-  it('opens the native picker from Enter and Space', async () => {
+  it('opens the native picker from the visible primary button or drop surface', async () => {
     const wrapper = mountDropzone()
     const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
 
-    await wrapper.get('[data-testid="dropzone"]').trigger('keydown', { key: 'Enter' })
-    await wrapper.get('[data-testid="dropzone"]').trigger('keydown', { key: ' ' })
+    const button = wrapper.get('button')
+    expect(button.text()).toBe('Choose file')
+    expect(button.classes()).toContain('bg-primary-600')
+    await button.trigger('click')
+    await wrapper.get('[data-testid="dropzone"]').trigger('click')
 
     expect(click).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="dropzone"]').classes())
       .toContain('focus:ring-payroll-500/30')
+    expect(button.attributes('aria-describedby')).toContain('payroll-file-description-')
     click.mockRestore()
+  })
+
+  it('shows the active payroll drop state while a file is dragged over it', async () => {
+    const wrapper = mountDropzone()
+    const dropzone = wrapper.get('[data-testid="dropzone"]')
+
+    await dropzone.trigger('dragenter', {
+      dataTransfer: { dropEffect: 'none' },
+    })
+
+    expect(dropzone.classes()).toContain('border-payroll-500')
+    expect(dropzone.text()).toContain('Release file')
+
+    await dropzone.trigger('dragleave')
+    expect(dropzone.classes()).not.toContain('border-payroll-500')
   })
 
   it('rejects unsupported and oversized files before the page reads them', async () => {
@@ -69,6 +89,7 @@ describe('PayrollFileDropzone', () => {
         dropHint: 'Drop file',
         dropActiveHint: 'Release file',
         fileHint: 'CSV or XLSX',
+        chooseFileText: 'Choose file',
         selectedFileName: 'attendance.csv',
         selectedText: 'Selected: attendance.csv',
         selectedTestId: 'selected',
@@ -78,7 +99,7 @@ describe('PayrollFileDropzone', () => {
 
     expect(wrapper.get('[data-testid="selected"]').text()).toBe('Selected: attendance.csv')
     expect(wrapper.attributes('aria-disabled')).toBe('true')
-    expect(wrapper.attributes('tabindex')).toBe('-1')
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
 
     const file = new File(['data'], 'other.csv', { type: 'text/csv' })
     await wrapper.trigger('drop', { dataTransfer: { files: [file] } })
@@ -91,6 +112,7 @@ describe('PayrollFileDropzone', () => {
         dropHint: 'Drop file',
         dropActiveHint: 'Release file',
         fileHint: 'CSV or XLSX',
+        chooseFileText: 'Choose file',
         error: 'Unsupported file',
       },
     })

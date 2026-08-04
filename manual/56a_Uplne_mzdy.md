@@ -183,9 +183,10 @@ změna katalogu proto nepřepíše již zpracované období.
 Pravidelný předpis má vlastní interval platnosti a lze jej zadat pevnou částkou
 nebo procentem. Jednorázový vstup se nejprve zkontroluje a potom samostatně
 schválí. Import odmítá nebezpečné sešity, vzorce a duplicitní řádky a před
-zápisem vždy ukáže výsledek náhledu. Soubor můžeš vybrat kliknutím nebo jej
-přetáhnout do fialové plochy; stejný ovládací prvek používá také import
-docházky. Přijímá CSV a XLSX do 5 MB a chybu zobrazí přímo u souboru.
+zápisem vždy ukáže výsledek náhledu. Soubor můžeš vybrat fialovým tlačítkem
+**Vybrat soubor** nebo jej přetáhnout do zvýrazněné plochy; stejný ovládací
+prvek používá také import docházky. Přijímá CSV a XLSX do 5 MB a chybu zobrazí
+přímo u souboru.
 
 ### 56a.9.1 Rychlý měsíční vstup bez docházky
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ICONS } from '@/components/ui/buttonStyles'
+import { computed, ref, useId } from 'vue'
+import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 
 export type PayrollFileRejectReason = 'unsupported_file' | 'file_too_large'
 
@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   dropHint: string
   dropActiveHint: string
   fileHint: string
+  chooseFileText: string
   error?: string
   selectedText?: string
   dropzoneTestId?: string
@@ -39,9 +40,22 @@ const emit = defineEmits<{
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragDepth = ref(0)
 const isDragging = computed(() => dragDepth.value > 0 && !props.disabled)
+const descriptionId = `payroll-file-description-${useId()}`
+const errorId = `payroll-file-error-${useId()}`
+const selectedId = `payroll-file-selected-${useId()}`
+const describedBy = computed(() => [
+  descriptionId,
+  props.error ? errorId : '',
+  props.selectedFileName ? selectedId : '',
+].filter(Boolean).join(' '))
 
 function openPicker() {
   if (!props.disabled) fileInput.value?.click()
+}
+
+function openPickerFromSurface(event: MouseEvent) {
+  if ((event.target as HTMLElement).closest('button')) return
+  openPicker()
 }
 
 function handleFile(file: File) {
@@ -93,9 +107,9 @@ function dropFile(event: DragEvent) {
 <template>
   <div
     :data-testid="dropzoneTestId"
-    role="button"
-    :tabindex="disabled ? -1 : 0"
+    role="group"
     :aria-disabled="disabled"
+    :aria-describedby="describedBy"
     class="flex min-h-36 flex-col items-center justify-center rounded-xl border-2 border-dashed px-5 py-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-payroll-500/30"
     :class="[
       disabled ? 'cursor-not-allowed border-neutral-200 bg-neutral-50 opacity-60' : 'cursor-pointer',
@@ -106,9 +120,7 @@ function dropFile(event: DragEvent) {
           : !disabled && 'border-neutral-300 bg-neutral-50 hover:border-payroll-400 hover:bg-payroll-50/50',
     ]"
     :aria-invalid="error ? 'true' : undefined"
-    @click="openPicker"
-    @keydown.enter.prevent="openPicker"
-    @keydown.space.prevent="openPicker"
+    @click="openPickerFromSurface"
     @dragenter="dragEnter"
     @dragover="dragOver"
     @dragleave="dragLeave"
@@ -121,6 +133,7 @@ function dropFile(event: DragEvent) {
       :accept="accept"
       class="sr-only"
       :disabled="disabled"
+      :aria-describedby="describedBy"
       @change="chooseFile"
     >
     <svg
@@ -136,12 +149,25 @@ function dropFile(event: DragEvent) {
     <p class="mt-2 font-medium text-neutral-900">
       {{ isDragging ? dropActiveHint : dropHint }}
     </p>
-    <p class="mt-1 text-xs text-neutral-500">{{ fileHint }}</p>
-    <p v-if="error" role="alert" class="mt-2 text-sm font-medium text-danger-600">
+    <button
+      type="button"
+      :class="`${btnFilled('primary')} mt-3`"
+      :disabled="disabled"
+      :aria-describedby="describedBy"
+      @click="openPicker"
+    >
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path :d="ICONS.upload" />
+      </svg>
+      {{ chooseFileText }}
+    </button>
+    <p :id="descriptionId" class="mt-2 text-xs text-neutral-500">{{ fileHint }}</p>
+    <p v-if="error" :id="errorId" role="alert" class="mt-2 text-sm font-medium text-danger-600">
       {{ error }}
     </p>
     <p
       v-if="selectedFileName"
+      :id="selectedId"
       :data-testid="selectedTestId"
       :title="selectedFileName"
       class="mt-3 max-w-full truncate rounded-full bg-payroll-100 px-3 py-1 text-xs font-medium text-payroll-700"

@@ -801,6 +801,7 @@ onMounted(load)
               :drop-hint="t('payroll.components.import.drop_hint')"
               :drop-active-hint="t('payroll.components.import.drop_active')"
               :file-hint="t('payroll.components.import.file_limit')"
+              :choose-file-text="t('payroll.components.import.choose_file')"
               :selected-text="importName ? t('payroll.components.import.selected_file', { name: importName }) : ''"
               @selected="loadImportFile"
               @rejected="rejectImportFile"
