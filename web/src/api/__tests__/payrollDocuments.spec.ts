@@ -57,4 +57,19 @@ describe('payroll document downloads', () => {
     )
     expect(m.get.mock.calls[0][0]).not.toContain('token=')
   })
+
+  it('uses the dedicated annual anchor endpoints', async () => {
+    m.get.mockResolvedValueOnce({ data: { year: 2026, items: [] } })
+    await payrollApi.listAnnualDocuments(2026)
+    expect(m.get).toHaveBeenCalledWith('/payroll/documents/annual', {
+      params: { year: 2026 },
+    })
+
+    m.post.mockResolvedValueOnce({ data: { id: 77 } })
+    await payrollApi.generatePayrollSheet(9, 2026)
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/people/9/documents/payroll-sheet/2026',
+      {},
+    )
+  })
 })

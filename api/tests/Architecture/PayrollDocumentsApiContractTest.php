@@ -21,6 +21,14 @@ final class PayrollDocumentsApiContractTest extends TestCase
             $routes,
         );
         self::assertStringContainsString(
+            "\$g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);",
+            $routes,
+        );
+        self::assertStringContainsString(
+            "'/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}'",
+            $routes,
+        );
+        self::assertStringContainsString(
             "'/documents/{documentId:[0-9]+}/download-grant'",
             $routes,
         );

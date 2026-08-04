@@ -59,6 +59,28 @@ final class PayrollSensitiveData
         );
     }
 
+    public function keyedFingerprint(
+        string $canonicalValue,
+        string $purpose,
+        int $supplierId,
+    ): string {
+        if ($canonicalValue === '' || strlen($canonicalValue) > 10_000_000) {
+            throw new \InvalidArgumentException('Kanonická hodnota pro otisk není platná.');
+        }
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException('supplier_id musí být kladné.');
+        }
+        if (preg_match('/^[a-z0-9][a-z0-9._-]{0,95}$/D', $purpose) !== 1) {
+            throw new \InvalidArgumentException('Účel citlivého otisku není platný.');
+        }
+
+        return hash_hmac(
+            'sha256',
+            "payroll-fingerprint-v1\0{$purpose}\0{$supplierId}\0{$canonicalValue}",
+            $this->hashKey(),
+        );
+    }
+
     public function mask(string $plaintext, PayrollSensitiveField $field): string
     {
         return $this->maskNormalized($this->normalize($plaintext, $field), $field);

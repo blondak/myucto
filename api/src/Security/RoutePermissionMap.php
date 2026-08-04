@@ -133,6 +133,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/documents$#', 'payroll.documents', AccessLevel::READ],
+        ['GET', '#^/api/payroll/documents/annual$#', 'payroll.documents', AccessLevel::READ],
+        ['POST', '#^/api/payroll/people/[0-9]+/documents/payroll-sheet/[0-9]{4}$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/monthly-bundle$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/documents/[0-9]+/download-grant$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/[0-9]+/download$#', 'payroll.documents', AccessLevel::READ],

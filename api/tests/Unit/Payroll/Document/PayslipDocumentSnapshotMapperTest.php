@@ -32,6 +32,7 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         self::assertSame(0, $document['health_minimum_top_up_minor_units']);
         self::assertSame(1_188_000, $document['employer_social_minor_units']);
         self::assertSame(431_100, $document['employer_health_minor_units']);
+        self::assertSame(4_790_100, $document['tax_base_minor_units']);
         self::assertSame([
             ['label' => 'Syntetická srážka', 'amount_minor_units' => 8_000],
         ], $document['other_deduction_lines']);
@@ -386,6 +387,7 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
                         'status' => 'calculated',
                         'advance_tax' => [
                             'taxable_income_minor_units' => 4_790_000,
+                            'rounded_tax_base_minor_units' => 4_790_100,
                             'tax_before_credits_minor_units' => 718_500,
                             'non_refundable_credits_minor_units' => 257_000,
                             'child_credit_minor_units' => 511_500,

@@ -639,6 +639,11 @@ final class Routes
                 [PayrollRunsAction::class, 'command'],
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
+            $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
+            $g->post(
+                '/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}',
+                [PayrollDocumentAction::class, 'generatePayrollSheet'],
+            );
             $g->post(
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
                 [PayrollDocumentAction::class, 'generateBundle'],

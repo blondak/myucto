@@ -120,6 +120,119 @@ final class PayrollDocumentService
     }
 
     /** @return array<string,mixed> */
+    public function archiveAnnualPdf(
+        int $supplierId,
+        int $annualRevisionId,
+        int $employeeId,
+        PayrollArtifact $artifact,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        if ($artifact->kind !== PayrollDocumentKind::PayrollSheet) {
+            throw new \InvalidArgumentException('Tento roční archiv podporuje pouze mzdový list.');
+        }
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
+            throw new \InvalidArgumentException('Payroll document idempotency key is invalid.');
+        }
+        $idempotencyKeyHash = hash('sha256', $idempotencyKey);
+        $existing = $this->documents->findByIdempotency(
+            $supplierId,
+            $idempotencyKeyHash,
+        );
+        if ($existing !== null) {
+            if (
+                $existing['run_id'] !== null
+                || $existing['revision_id'] !== null
+                || (int) $existing['annual_revision_id'] !== $annualRevisionId
+                || $existing['employee_id'] !== $employeeId
+                || $existing['document_kind'] !== $artifact->kind->value
+                || $existing['source_snapshot_hash'] !== $artifact->sourceSnapshotHash
+            ) {
+                throw new \RuntimeException(
+                    'Payroll document idempotency key was reused for another request.',
+                );
+            }
+            return $existing;
+        }
+        $annual = $this->documents->approvedAnnualRevision(
+            $supplierId,
+            $annualRevisionId,
+        ) ?? throw new \RuntimeException(
+            'Roční dokument vyžaduje schválený zdrojový snapshot.',
+        );
+        if ((int) $annual['employee_id'] !== $employeeId
+            || $annual['purpose'] !== $artifact->kind->value
+            || !hash_equals(
+                (string) $annual['snapshot_hash'],
+                $artifact->sourceSnapshotHash,
+            )
+        ) {
+            throw new \RuntimeException('Roční dokument neodpovídá zdrojovému snapshotu.');
+        }
+        $latest = $this->documents->latestForAnnualKind(
+            $supplierId,
+            $employeeId,
+            (int) $annual['tax_year'],
+            (string) $annual['purpose'],
+            $artifact->kind->value,
+        );
+        $supersedesDocumentId = null;
+        $documentRevisionNo = 1;
+        if ($latest !== null) {
+            if ((int) $latest['annual_revision_id'] === $annualRevisionId) {
+                if (!hash_equals(
+                    (string) $latest['source_snapshot_hash'],
+                    $artifact->sourceSnapshotHash,
+                )) {
+                    throw new \RuntimeException(
+                        'Roční revize již má dokument s jiným zdrojovým otiskem.',
+                    );
+                }
+                if (
+                    $latest['template_version'] === $artifact->templateVersion
+                    && $latest['renderer_version'] === $artifact->rendererVersion
+                ) {
+                    return $latest;
+                }
+            } elseif ((int) $latest['annual_revision_no'] >= (int) $annual['revision_no']) {
+                throw new \RuntimeException('Roční dokument nelze nahradit starší revizí.');
+            }
+            $supersedesDocumentId = (int) $latest['id'];
+            $documentRevisionNo = (int) $latest['document_revision_no'] + 1;
+        }
+        $stored = $this->storage->store(
+            $supplierId,
+            $artifact->bytes,
+            $storageScope,
+        );
+        return $this->documents->insertOrGet([
+            'supplier_id' => $supplierId,
+            'run_id' => null,
+            'revision_id' => null,
+            'annual_revision_id' => $annualRevisionId,
+            'employee_id' => $employeeId,
+            'document_kind' => $artifact->kind->value,
+            'document_revision_no' => $documentRevisionNo,
+            'supersedes_document_id' => $supersedesDocumentId,
+            'source_snapshot_hash' => $artifact->sourceSnapshotHash,
+            'revision_snapshot_hash' => $annual['snapshot_hash'],
+            'template_version' => $artifact->templateVersion,
+            'renderer_version' => $artifact->rendererVersion,
+            'file_sha256' => $stored['file_sha256'],
+            'size_bytes' => $stored['size_bytes'],
+            'mime_type' => $artifact->mimeType,
+            'storage_key' => $stored['storage_key'],
+            'suggested_filename' => $artifact->suggestedFilename,
+            'manifest_json' => $artifact->manifest === null
+                ? null
+                : CanonicalJson::encode($artifact->manifest),
+            'idempotency_key_hash' => $idempotencyKeyHash,
+            'created_by' => $actorUserId,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
     public function generateMonthlyBundle(
         int $supplierId,
         int $runId,

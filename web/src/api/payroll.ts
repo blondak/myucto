@@ -759,8 +759,12 @@ export type PayrollDocumentKind =
 
 export interface PayrollDocument {
   id: number
-  run_id: number
-  revision_id: number
+  run_id: number | null
+  revision_id: number | null
+  annual_revision_id?: number | null
+  annual_revision_no?: number
+  tax_year?: number
+  purpose?: string
   revision_no?: number
   revision_status?: 'approved' | 'superseded'
   office_id?: number | null
@@ -789,6 +793,11 @@ export interface PayrollDocumentRevision {
 export interface PayrollDocumentList {
   period: string
   revisions: PayrollDocumentRevision[]
+  items: PayrollDocument[]
+}
+
+export interface PayrollAnnualDocumentList {
+  year: number
   items: PayrollDocument[]
 }
 
@@ -916,6 +925,14 @@ export const payrollApi = {
   listDocuments: (period: string) =>
     api.get<PayrollDocumentList>('/payroll/documents', { params: { period } })
       .then(response => response.data),
+  listAnnualDocuments: (year: number) =>
+    api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', { params: { year } })
+      .then(response => response.data),
+  generatePayrollSheet: (employeeId: number, year: number) =>
+    api.post<PayrollDocument>(
+      `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,
+      {},
+    ).then(response => response.data),
   generateMonthlyBundle: (runId: number, revisionId: number, idempotencyKey: string) =>
     api.post<PayrollDocument>(
       `/payroll/runs/${runId}/revisions/${revisionId}/documents/monthly-bundle`,

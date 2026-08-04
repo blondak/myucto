@@ -225,7 +225,7 @@ final class PayslipDocumentSnapshotMapper
         }
         $taxBase = $advanceTax === null
             ? 0
-            : $this->nonNegativeInt($advanceTax, 'taxable_income_minor_units');
+            : $this->nonNegativeInt($advanceTax, 'rounded_tax_base_minor_units');
         $taxBeforeCredits = $advanceTax === null
             ? 0
             : $this->nonNegativeInt($advanceTax, 'tax_before_credits_minor_units');

@@ -82,6 +82,43 @@ final class PayrollSensitiveDataTest extends TestCase
         );
     }
 
+    public function testCanonicalFingerprintIsTenantAndPurposeBound(): void
+    {
+        $canonical = '{"identifier":"0001010009","name":"Syntetická Osoba"}';
+
+        $first = $this->service->keyedFingerprint(
+            $canonical,
+            'annual-payroll-sheet',
+            10,
+        );
+
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $first);
+        self::assertSame(
+            $first,
+            $this->service->keyedFingerprint(
+                $canonical,
+                'annual-payroll-sheet',
+                10,
+            ),
+        );
+        self::assertNotSame(
+            $first,
+            $this->service->keyedFingerprint(
+                $canonical,
+                'annual-payroll-sheet',
+                11,
+            ),
+        );
+        self::assertNotSame(
+            $first,
+            $this->service->keyedFingerprint(
+                $canonical,
+                'another-purpose',
+                10,
+            ),
+        );
+    }
+
     public function testContactsAreNormalizedEncryptedAndContextBound(): void
     {
         $email = $this->service->seal(

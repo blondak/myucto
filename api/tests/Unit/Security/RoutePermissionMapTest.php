@@ -88,6 +88,8 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/payroll/time/months/2026-05/reopen', 'payroll.reopen', AccessLevel::WRITE],
             ['POST', '/api/payroll/inputs/42/approve', 'payroll.approve', AccessLevel::WRITE],
             ['GET', '/api/payroll/documents', 'payroll.documents', AccessLevel::READ],
+            ['GET', '/api/payroll/documents/annual', 'payroll.documents', AccessLevel::READ],
+            ['POST', '/api/payroll/people/7/documents/payroll-sheet/2026', 'payroll.documents', AccessLevel::WRITE],
             ['POST', '/api/payroll/runs/7/revisions/9/documents/monthly-bundle', 'payroll.documents', AccessLevel::WRITE],
             ['POST', '/api/payroll/documents/42/download-grant', 'payroll.documents', AccessLevel::READ],
             ['GET', '/api/payroll/documents/42/download', 'payroll.documents', AccessLevel::READ],

@@ -310,6 +310,20 @@ V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
 uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
 číslo revize, čas vytvoření a velikost. Na telefonu se tabulka mění na karty.
 
+Záložka **Roční dokumenty** umožňuje zvolit rok a zaměstnance a vytvořit
+**mzdový list**. List vzniká pouze z posledních schválených revizí všech
+mzdových účtáren v daném roce. Zahrne také více souběžných revizí v jednom
+měsíci, například doplatek po skončení vztahu. Pokud chybí schválený výsledek,
+historická identifikace nebo jiný povinný podklad, aplikace dokument nevytvoří
+a zobrazí konkrétní důvod.
+
+Roční dokument má vlastní neměnnou revizi a není uměle připojený k prosincové
+mzdě. Osobní údaje jeho zdrojového snapshotu jsou kontextově šifrované;
+manifest obsahuje pouze interní identifikátory a kryptografické otisky.
+Pozdější oprava mzdy vytvoří další revizi mzdového listu a původní soubor
+zůstane dohledatelný. Roční zúčtování se v mzdovém listu nedopočítává a bez
+samostatně schváleného ročního výsledku se označí jako neprovedené.
+
 Stažení nejprve získá krátkodobé jednorázové oprávnění a potom soubor předá
 prohlížeči. Původní dokument se při opravě nikdy nepřepisuje. Nový výstup má
 vlastní revizi a původní zůstává dohledatelný.
@@ -320,10 +334,10 @@ manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
 
 > [!WARNING]
-> Výplatní pásky vznikají automaticky při schválení. Mzdové listy, daňová
-> potvrzení, výstupní dokumenty a podací protokoly se zatím vytvářejí
-> samostatně, takže neúplný balíček neznamená, že jsou všechny povinné
-> výstupy hotové.
+> Výplatní pásky vznikají automaticky při schválení a roční mzdový list lze
+> vytvořit v záložce Roční dokumenty. Daňová potvrzení, výstupní dokumenty
+> a podací protokoly se zatím vytvářejí samostatně, takže neúplný balíček
+> neznamená, že jsou všechny povinné výstupy hotové.
 
 ## 56a.14 Oprávnění a citlivé údaje
 

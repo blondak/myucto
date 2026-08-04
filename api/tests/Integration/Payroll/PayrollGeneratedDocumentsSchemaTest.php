@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Service\Payroll\Document\PayrollArtifact;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
@@ -28,6 +29,8 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
             'payroll_generated_documents',
             'payroll_document_download_grants',
             'payroll_document_dms_links',
+            'payroll_annual_document_revisions',
+            'payroll_annual_document_sources',
         ] as $table) {
             self::assertTrue($connection->hasTable($table), "Missing table {$table}.");
         }
@@ -38,6 +41,8 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         )
             ->fetchAll(\PDO::FETCH_COLUMN);
         self::assertContains('revision_snapshot_hash', $columns);
+        self::assertContains('annual_revision_id', $columns);
+        self::assertNotContains('annual_scope_id', $columns);
         self::assertContains('source_snapshot_hash', $columns);
         self::assertContains('file_sha256', $columns);
         self::assertNotContains('dms_document_id', $columns);
@@ -47,8 +52,118 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
         self::assertContains('trg_payroll_generated_document_immutable_update', $triggers);
         self::assertContains('trg_payroll_document_approved_revision_insert', $triggers);
         self::assertContains('trg_payroll_document_dms_tenant_insert', $triggers);
+        self::assertContains('trg_payroll_annual_revision_immutable_update', $triggers);
+        self::assertContains('trg_payroll_annual_revision_validate_insert', $triggers);
+        self::assertContains('trg_payroll_annual_source_validate_insert', $triggers);
 
         $connection->close();
+    }
+
+    public function testAnnualDocumentUsesAnnualAnchorWithoutFakeMonthlyRun(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(PayrollDocumentService::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        self::assertInstanceOf(PayrollDocumentService::class, $service);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $this->query(
+            $pdo,
+            'SELECT MIN(id) FROM supplier',
+        )->fetchColumn();
+        self::assertGreaterThan(0, $sourceSupplierId);
+        $pdo->beginTransaction();
+        try {
+            $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+            $pdo->prepare(
+                'INSERT INTO payroll_employees
+                    (supplier_id, full_name, taxpayer_type, is_active)
+                 VALUES (?, "Syntetická roční osoba", "employee", 1)'
+            )->execute([$supplierId]);
+            $employeeId = (int) $pdo->lastInsertId();
+            $snapshotHash = str_repeat('a', 64);
+            $manifest = '{"schema_version":"synthetic-annual-source.v1"}';
+            $pdo->prepare(
+                'INSERT INTO payroll_annual_document_revisions
+                    (supplier_id, employee_id, tax_year, purpose, revision_no,
+                     snapshot_ciphertext, snapshot_hash, source_manifest_json,
+                     source_manifest_hash, approved_at)
+                 VALUES (?, ?, 2099, "payroll_sheet", 1, ?, ?, ?, ?, NOW())'
+            )->execute([
+                $supplierId,
+                $employeeId,
+                'enc:v2:synthetic',
+                $snapshotHash,
+                $manifest,
+                hash('sha256', $manifest),
+            ]);
+            $annualRevisionId = (int) $pdo->lastInsertId();
+            $pdf = '%PDF-1.4 synthetic annual payroll sheet';
+            $document = $service->archiveAnnualPdf(
+                $supplierId,
+                $annualRevisionId,
+                $employeeId,
+                new PayrollArtifact(
+                    PayrollDocumentKind::PayrollSheet,
+                    $pdf,
+                    'application/pdf',
+                    'synthetic-annual-payroll-sheet.pdf',
+                    $snapshotHash,
+                    'synthetic-v1',
+                    'synthetic-v1',
+                ),
+                'synthetic-annual-document',
+                null,
+            );
+
+            self::assertNull($document['run_id']);
+            self::assertNull($document['revision_id']);
+            self::assertSame($annualRevisionId, $document['annual_revision_id']);
+            self::assertSame(
+                $document['id'],
+                $service->archiveAnnualPdf(
+                    $supplierId,
+                    $annualRevisionId,
+                    $employeeId,
+                    new PayrollArtifact(
+                        PayrollDocumentKind::PayrollSheet,
+                        $pdf,
+                        'application/pdf',
+                        'synthetic-annual-payroll-sheet.pdf',
+                        $snapshotHash,
+                        'synthetic-v1',
+                        'synthetic-v1',
+                    ),
+                    'synthetic-annual-document',
+                    null,
+                )['id'],
+            );
+
+            $rerendered = $service->archiveAnnualPdf(
+                $supplierId,
+                $annualRevisionId,
+                $employeeId,
+                new PayrollArtifact(
+                    PayrollDocumentKind::PayrollSheet,
+                    '%PDF-1.4 synthetic annual payroll sheet v2',
+                    'application/pdf',
+                    'synthetic-annual-payroll-sheet-v2.pdf',
+                    $snapshotHash,
+                    'synthetic-v1',
+                    'synthetic-v2',
+                ),
+                'synthetic-annual-document-v2',
+                null,
+            );
+            self::assertNotSame($document['id'], $rerendered['id']);
+            self::assertSame(2, $rerendered['document_revision_no']);
+            self::assertSame($document['id'], $rerendered['supersedes_document_id']);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
     }
 
     public function testIdempotentReplayWorksWithImmutableDocumentTrigger(): void
@@ -138,6 +253,140 @@ final class PayrollGeneratedDocumentsSchemaTest extends TestCase
                 $duplicateRejected,
                 'Stejná revize firemního dokumentu nesmí obejít unikátnost přes NULL employee_id.',
             );
+
+            $pdo->prepare(
+                'INSERT INTO payroll_runs
+                    (supplier_id, period_start, payment_date)
+                 VALUES (?, "2099-11-01", "2099-11-30")'
+            )->execute([$supplierId]);
+            $secondRunId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_run_revisions
+                    (supplier_id, run_id, revision_no, status, schema_version,
+                     ruleset_manifest_hash, input_snapshot_json,
+                     input_snapshot_hash, result_snapshot_json,
+                     result_snapshot_hash, idempotency_key_hash)
+                 VALUES (?, ?, 1, "approved", "payroll-run-input.v1",
+                         ?, "{}", ?, "{}", ?, UNHEX(?))'
+            )->execute([
+                $supplierId,
+                $secondRunId,
+                str_repeat('1', 64),
+                str_repeat('2', 64),
+                str_repeat('3', 64),
+                hash('sha256', 'synthetic-second-month-revision'),
+            ]);
+            $secondRecord = $record;
+            $secondRecord['run_id'] = $secondRunId;
+            $secondRecord['revision_id'] = (int) $pdo->lastInsertId();
+            $secondRecord['revision_snapshot_hash'] = str_repeat('3', 64);
+            $secondRecord['file_sha256'] = str_repeat('4', 64);
+            $secondRecord['storage_key'] = str_repeat('4', 64);
+            $secondRecord['idempotency_key_hash'] = hash(
+                'sha256',
+                'synthetic-document-second-month',
+            );
+            $secondMonth = $repository->insertOrGet($secondRecord);
+            self::assertNotSame($created['id'], $secondMonth['id']);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
+    public function testAnnualSourceCannotCrossEmployeeBoundary(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $this->query(
+            $pdo,
+            'SELECT MIN(id) FROM supplier',
+        )->fetchColumn();
+        self::assertGreaterThan(0, $sourceSupplierId);
+        $pdo->beginTransaction();
+        try {
+            $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+            $employeeIds = [];
+            foreach (['Syntetická osoba A', 'Syntetická osoba B'] as $name) {
+                $pdo->prepare(
+                    'INSERT INTO payroll_employees
+                        (supplier_id, full_name, taxpayer_type, is_active)
+                     VALUES (?, ?, "employee", 1)'
+                )->execute([$supplierId, $name]);
+                $employeeIds[] = (int) $pdo->lastInsertId();
+            }
+            $pdo->prepare(
+                'INSERT INTO payroll_runs
+                    (supplier_id, period_start, payment_date)
+                 VALUES (?, "2099-01-01", "2099-01-31")'
+            )->execute([$supplierId]);
+            $runId = (int) $pdo->lastInsertId();
+            $resultHash = hash('sha256', '{}');
+            $pdo->prepare(
+                'INSERT INTO payroll_run_revisions
+                    (supplier_id, run_id, revision_no, status, schema_version,
+                     ruleset_manifest_hash, input_snapshot_json,
+                     input_snapshot_hash, result_snapshot_json,
+                     result_snapshot_hash, idempotency_key_hash)
+                 VALUES (?, ?, 1, "approved", "payroll-run-input.v1",
+                         ?, "{}", ?, "{}", ?, UNHEX(?))'
+            )->execute([
+                $supplierId,
+                $runId,
+                str_repeat('a', 64),
+                $resultHash,
+                $resultHash,
+                hash('sha256', 'synthetic-annual-source-run'),
+            ]);
+            $runRevisionId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_run_persons
+                    (supplier_id, revision_id, employee_id, result_json,
+                     result_hash, status)
+                 VALUES (?, ?, ?, "{}", ?, "calculated")'
+            )->execute([
+                $supplierId,
+                $runRevisionId,
+                $employeeIds[1],
+                $resultHash,
+            ]);
+            $manifest = '{"schema_version":"synthetic-annual-source.v1"}';
+            $pdo->prepare(
+                'INSERT INTO payroll_annual_document_revisions
+                    (supplier_id, employee_id, tax_year, purpose, revision_no,
+                     snapshot_ciphertext, snapshot_hash, source_manifest_json,
+                     source_manifest_hash, approved_at)
+                 VALUES (?, ?, 2099, "payroll_sheet", 1, ?, ?, ?, ?, NOW())'
+            )->execute([
+                $supplierId,
+                $employeeIds[0],
+                'enc:v2:synthetic',
+                str_repeat('b', 64),
+                $manifest,
+                hash('sha256', $manifest),
+            ]);
+            $annualRevisionId = (int) $pdo->lastInsertId();
+
+            $this->expectException(\PDOException::class);
+            $this->expectExceptionMessage(
+                'Annual payroll source does not match its approved revision',
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_annual_document_sources
+                    (supplier_id, annual_revision_id, run_revision_id,
+                     employee_id, period_start, person_result_hash)
+                 VALUES (?, ?, ?, ?, "2099-01-01", ?)'
+            )->execute([
+                $supplierId,
+                $annualRevisionId,
+                $runRevisionId,
+                $employeeIds[1],
+                $resultHash,
+            ]);
         } finally {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

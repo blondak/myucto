@@ -36,6 +36,20 @@ final class PayrollDocumentRepository
     }
 
     /** @return array<string,mixed>|null */
+    public function approvedAnnualRevision(
+        int $supplierId,
+        int $annualRevisionId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_annual_document_revisions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $annualRevisionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
+    /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $documentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -214,6 +228,70 @@ final class PayrollDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
+    /** @return array<string,mixed>|null */
+    public function latestForAnnualKind(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        string $purpose,
+        string $documentKind,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    annual.tax_year,
+                    annual.purpose,
+                    annual.revision_no AS annual_revision_no
+               FROM payroll_generated_documents document
+               JOIN payroll_annual_document_revisions annual
+                 ON annual.supplier_id = document.supplier_id
+                AND annual.id = document.annual_revision_id
+              WHERE document.supplier_id = ?
+                AND document.employee_id = ?
+                AND annual.tax_year = ?
+                AND annual.purpose = ?
+                AND document.document_kind = ?
+              ORDER BY document.document_revision_no DESC, document.id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $purpose,
+            $documentKind,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listAnnualDocuments(int $supplierId, int $taxYear): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    annual.tax_year,
+                    annual.purpose,
+                    annual.revision_no AS annual_revision_no,
+                    employee.full_name AS employee_name
+               FROM payroll_generated_documents document
+               JOIN payroll_annual_document_revisions annual
+                 ON annual.supplier_id = document.supplier_id
+                AND annual.id = document.annual_revision_id
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = document.supplier_id
+                AND employee.id = document.employee_id
+              WHERE document.supplier_id = ? AND annual.tax_year = ?
+              ORDER BY employee.full_name,
+                       document.document_kind,
+                       document.document_revision_no DESC'
+        );
+        $stmt->execute([$supplierId, $taxYear]);
+        return array_values(array_map(
+            self::cast(...),
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
     public function employeeBelongsToRevision(
         int $supplierId,
         int $revisionId,
@@ -256,19 +334,21 @@ final class PayrollDocumentRepository
         }
         $stmt = $pdo->prepare(
             'INSERT INTO payroll_generated_documents
-                (supplier_id, run_id, revision_id, employee_id, document_kind,
+                (supplier_id, run_id, revision_id, annual_revision_id,
+                 employee_id, document_kind,
                  document_revision_no, supersedes_document_id, source_snapshot_hash,
                  revision_snapshot_hash,
                  template_version, renderer_version, file_sha256, size_bytes,
                  mime_type, storage_key, suggested_filename, manifest_json,
                  idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UNHEX(?), ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UNHEX(?), ?)'
         );
         try {
             $stmt->execute([
                 $record['supplier_id'],
                 $record['run_id'],
                 $record['revision_id'],
+                $record['annual_revision_id'] ?? null,
                 $record['employee_id'],
                 $record['document_kind'],
                 $record['document_revision_no'],
@@ -323,6 +403,7 @@ final class PayrollDocumentRepository
             || $found['employee_id'] !== $record['employee_id']
             || $found['run_id'] !== $record['run_id']
             || $found['revision_id'] !== $record['revision_id']
+            || $found['annual_revision_id'] !== ($record['annual_revision_id'] ?? null)
         ) {
             throw new \RuntimeException('Payroll document idempotency key was reused for another request.');
         }
@@ -386,23 +467,33 @@ final class PayrollDocumentRepository
     private static function cast(array $row): array
     {
         foreach ([
-            'id', 'supplier_id', 'run_id', 'revision_id', 'document_revision_no',
-            'size_bytes', 'revision_no',
+            'id', 'supplier_id', 'document_revision_no',
+            'size_bytes', 'revision_no', 'annual_revision_no', 'tax_year',
         ] as $key) {
             if (array_key_exists($key, $row)) {
                 $row[$key] = (int) $row[$key];
             }
         }
-        foreach (['employee_id', 'supersedes_document_id', 'created_by', 'office_id'] as $key) {
+        foreach ([
+            'employee_id',
+            'supersedes_document_id',
+            'created_by',
+            'office_id',
+            'annual_revision_id',
+            'run_id',
+            'revision_id',
+        ] as $key) {
             if (!array_key_exists($key, $row)) {
                 continue;
             }
             $row[$key] = $row[$key] === null ? null : (int) $row[$key];
         }
-        $row['manifest'] = $row['manifest_json'] === null
-            ? null
-            : json_decode((string) $row['manifest_json'], true, 512, JSON_THROW_ON_ERROR);
-        unset($row['manifest_json']);
+        if (array_key_exists('manifest_json', $row)) {
+            $row['manifest'] = $row['manifest_json'] === null
+                ? null
+                : json_decode((string) $row['manifest_json'], true, 512, JSON_THROW_ON_ERROR);
+            unset($row['manifest_json']);
+        }
         return $row;
     }
 }

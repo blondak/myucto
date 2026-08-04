@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -20,6 +22,8 @@ final class PayrollDocumentAction
 
     public function __construct(
         private readonly PayrollDocumentService $documents,
+        private readonly PayrollDocumentRepository $documentRepository,
+        private readonly AnnualPayrollSheetService $annualPayrollSheets,
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -52,6 +56,90 @@ final class PayrollDocumentAction
             'revisions' => $result['revisions'],
             'items' => array_map(self::publicDocument(...), $result['items']),
         ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function listAnnual(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::READ,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $year = (int) ($request->getQueryParams()['year'] ?? 0);
+        if ($year < 2000 || $year > 2199) {
+            return Json::error($response, 'validation_failed', 'Rok dokumentů není platný.', 422);
+        }
+        return Json::ok($response, [
+            'year' => $year,
+            'items' => array_map(
+                self::publicDocument(...),
+                $this->documentRepository->listAnnualDocuments(
+                    $this->currentSupplierId($request),
+                    $year,
+                ),
+            ),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function generatePayrollSheet(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        $employeeId = (int) ($args['employeeId'] ?? 0);
+        $year = (int) ($args['year'] ?? 0);
+        if ($userId === null || $employeeId <= 0 || $year < 2000 || $year > 2199) {
+            return Json::error($response, 'validation_failed', 'Požadavek na mzdový list není platný.', 422);
+        }
+        try {
+            $document = $this->annualPayrollSheets->generate(
+                $supplierId,
+                $employeeId,
+                $year,
+                $userId,
+            );
+        } catch (\DomainException|\InvalidArgumentException $exception) {
+            return Json::error($response, 'payroll_sheet_incomplete', $exception->getMessage(), 422);
+        } catch (\Throwable) {
+            return Json::error(
+                $response,
+                'payroll_sheet_failed',
+                'Mzdový list se nepodařilo vytvořit. Zkontrolujte úplnost schválených mezd a profilu zaměstnance.',
+                409,
+            );
+        }
+        $this->activity->log(
+            'payroll.annual_sheet_generated',
+            $userId,
+            'payroll_document',
+            (int) $document['id'],
+            [
+                'document_kind' => $document['document_kind'],
+                'annual_revision_id' => $document['annual_revision_id'],
+                'file_sha256' => $document['file_sha256'],
+            ],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+        return Json::ok($response, self::publicDocument($document), 201);
     }
 
     /** @param array<string,string> $args */
@@ -95,6 +183,7 @@ final class PayrollDocumentAction
             [
                 'document_kind' => $document['document_kind'],
                 'revision_id' => $document['revision_id'],
+                'annual_revision_id' => $document['annual_revision_id'],
                 'file_sha256' => $document['file_sha256'],
             ],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
@@ -210,6 +299,7 @@ final class PayrollDocumentAction
     {
         $keys = [
             'id', 'run_id', 'revision_id', 'revision_no', 'revision_status',
+            'annual_revision_id', 'annual_revision_no', 'tax_year', 'purpose',
             'office_id', 'office_name',
             'employee_id', 'employee_name', 'document_kind', 'document_revision_no',
             'supersedes_document_id', 'file_sha256', 'size_bytes', 'mime_type',
