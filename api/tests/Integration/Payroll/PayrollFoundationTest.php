@@ -294,7 +294,15 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame('employee', $preview['taxpayer_type']);
     }
 
-    public function testPayrollSettingDefaultsToEnabledInSchema(): void
+    /**
+     * Mzdy jsou opt-in modul (migrace 1290), stejně jako sklad.
+     *
+     * Původně sem migrace 1187 dala DEFAULT 1. Mzdy ale vede menšina firem, takže
+     * se modul otevíral v menu i v interním API všem, kdo o něj nestáli. Default
+     * musí zůstat v DB, ne jen v aplikaci — nová firma nesmí mzdy dostat ani
+     * cestou, která `payroll_enabled` v INSERTu vůbec neuvádí.
+     */
+    public function testPayrollSettingDefaultsToDisabledInSchema(): void
     {
         $default = $this->db->pdo()->query(
             "SELECT COLUMN_DEFAULT
@@ -304,7 +312,7 @@ final class PayrollFoundationTest extends TestCase
                 AND COLUMN_NAME = 'payroll_enabled'"
         )->fetchColumn();
 
-        self::assertSame('1', (string) $default);
+        self::assertSame('0', (string) $default);
     }
 
     public function testCompanySettingsCanTogglePayroll(): void

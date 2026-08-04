@@ -12,8 +12,11 @@ final class PayrollModuleAccess
 
     public function isEnabled(int $supplierId): bool
     {
+        // Chybějící sloupec = modul vypnutý. Mzdy jsou opt-in (migrace 1290), takže
+        // se neotevírají ani schématu, které o přepínači ještě neví — shodně
+        // s PayrollPaymentIdentifierResolver::payrollEnabled().
         if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
-            return true;
+            return false;
         }
 
         $stmt = $this->db->pdo()->prepare(

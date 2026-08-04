@@ -9105,7 +9105,7 @@
     "payroll_enabled": {
       "title": "Vést mzdy",
       "label": "Vést mzdy",
-      "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Nastavení je ve výchozím stavu zapnuté a nyní není vázané na licenci.",
+      "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Nastavení je ve výchozím stavu vypnuté a není vázané na licenci.",
       "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná."
     },
     "accounting_mode": "Režim účetnictví",

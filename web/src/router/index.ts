@@ -690,7 +690,7 @@ router.beforeEach(async (to) => {
   }
 
   const requiresPayroll = to.matched.some((r) => r.meta.requiresPayroll)
-  if (requiresPayroll && useSupplierStore().currentSupplier?.payroll_enabled === false) {
+  if (requiresPayroll && !useSupplierStore().currentSupplier?.payroll_enabled) {
     return { name: 'home' }
   }
 

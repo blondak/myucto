@@ -40,7 +40,7 @@ function syncSupplierStore(s: Supplier) {
     payment_thanks_default_checked: s.payment_thanks_default_checked,
     stock_enabled: s.stock_enabled ?? false,
     accounting_enabled: s.accounting_enabled ?? true,
-    payroll_enabled: s.payroll_enabled ?? true,
+    payroll_enabled: s.payroll_enabled ?? false,
   })
 }
 
@@ -396,8 +396,8 @@ async function saveSupplier() {
       accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
       // „Vést účetnictví" (1179) — opt-out účetní nadstavby v menu; na licenci bez vlivu.
       accounting_enabled: supplier.value.accounting_enabled ?? true,
-      // „Vést mzdy" (1187) — výchozí zapnuto; samostatná licence se zatím neřeší.
-      payroll_enabled: supplier.value.payroll_enabled ?? true,
+      // „Vést mzdy" (1187, opt-in od 1290) — výchozí vypnuto jako sklad; licence bez vlivu.
+      payroll_enabled: supplier.value.payroll_enabled ?? false,
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,

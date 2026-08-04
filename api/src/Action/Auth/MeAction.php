@@ -115,7 +115,9 @@ final class MeAction
             // jako by nebyla licence. Default TRUE i pro řádky bez sloupce (starší schéma),
             // aby vypnutí bylo vždy vědomé rozhodnutí, ne důsledek chybějící migrace.
             $s['accounting_enabled']       = (bool) ($s['accounting_enabled'] ?? true);
-            $s['payroll_enabled']          = (bool) ($s['payroll_enabled'] ?? true);
+            // „Vést mzdy" (migrace 1187, opt-in od 1290) — narozdíl od účetnictví výš je
+            // to samostatná agenda, kterou většina firem nevede, takže se zapíná vědomě.
+            $s['payroll_enabled']          = (bool) ($s['payroll_enabled'] ?? false);
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; nav sekce Sklad se řídí
             // touto hodnotou (stejný vzor jako accounting_mode výše).
             $s['stock_enabled']            = (bool) ($s['stock_enabled'] ?? false);

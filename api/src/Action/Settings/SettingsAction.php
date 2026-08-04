@@ -994,7 +994,9 @@ final class SettingsAction
         // „Vést účetnictví" (migrace 1179) — vypnuté schová účetní sekce z menu. Na licenci
         // vliv nemá: licencují se všechny firmy i uživatelé bez ohledu na tenhle přepínač.
         $row['accounting_enabled']       = (bool) ($row['accounting_enabled'] ?? true);
-        $row['payroll_enabled']          = (bool) ($row['payroll_enabled'] ?? true);
+        // „Vést mzdy" (migrace 1187, opt-in od 1290) — stejný vzor jako sklad níž:
+        // chybějící hodnota znamená vypnuto, ne zapnuto.
+        $row['payroll_enabled']          = (bool) ($row['payroll_enabled'] ?? false);
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);
