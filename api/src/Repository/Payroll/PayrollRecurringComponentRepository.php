@@ -232,17 +232,45 @@ final class PayrollRecurringComponentRepository
         $period = new \DateTimeImmutable($periodStart);
         $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT recurring.*, employment.employee_id,
+            'WITH effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status,
+                           EXISTS (
+                               SELECT 1
+                                 FROM payroll_employment_events lifecycle
+                                WHERE lifecycle.supplier_id = employment.supplier_id
+                                  AND lifecycle.employment_id = employment.id
+                                  AND lifecycle.event_type = "status_changed"
+                                  AND lifecycle.effective_on BETWEEN ? AND ?
+                                  AND (
+                                      lifecycle.from_status = "suspended"
+                                      OR lifecycle.to_status = "suspended"
+                                  )
+                           ) AS suspended_in_month
+                      FROM payroll_employments employment
+                     WHERE employment.supplier_id = ?
+                 )
+             SELECT recurring.*, employment.employee_id,
                     employment.monthly_gross_minor,
                     employment.code AS employment_code,
-                    employment.status AS employment_status,
+                    employment.effective_status AS employment_effective_status,
+                    COALESCE(
+                      employment.actual_start_date,
+                      employment.start_date,
+                      CASE WHEN employment.is_legacy_projection = 1
+                           THEN "1900-01-01" ELSE NULL END
+                    ) AS employment_start,
+                    employment.end_date AS employment_end,
+                    employment.suspended_in_month
+                        AS employment_suspended_in_month,
                     component.code AS component_code,
                     component.name AS component_name,
                     component.is_active AS component_is_active,
                     component.valid_from AS component_valid_from,
                     component.valid_to AS component_valid_to
                FROM payroll_recurring_components recurring
-               JOIN payroll_employments employment
+               JOIN effective_employment employment
                  ON employment.supplier_id = recurring.supplier_id
                 AND employment.id = recurring.employment_id
                JOIN payroll_component_definitions component
@@ -261,10 +289,16 @@ final class PayrollRecurringComponentRepository
                       END
                     ) <= ?
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)
+                AND employment.effective_status IS NOT NULL
+                AND employment.effective_status NOT IN ("archived", "no_show")
               ORDER BY recurring.id
               FOR UPDATE'
         );
         $stmt->execute([
+            $periodEnd,
+            $periodStart,
+            $periodEnd,
+            $supplierId,
             $supplierId,
             $periodEnd,
             $periodStart,
@@ -510,7 +544,11 @@ final class PayrollRecurringComponentRepository
                 $row[$key] = PayrollTimeValue::int($row[$key], $key);
             }
         }
-        foreach (['is_active', 'component_is_active'] as $key) {
+        foreach ([
+            'is_active',
+            'component_is_active',
+            'employment_suspended_in_month',
+        ] as $key) {
             if (array_key_exists($key, $row)) {
                 $row[$key] = PayrollTimeValue::bool($row[$key], $key);
             }

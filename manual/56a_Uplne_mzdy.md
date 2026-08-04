@@ -23,8 +23,11 @@ a nyní není navázaný na samostatnou licenci. Je-li vypnutý, sekce Mzdy se s
 z menu a její přímé adresy nejsou dostupné.
 
 Na přehledu mezd zvolíš první měsíc, který má v budoucnu zpracovat nový modul.
-Starší měsíce mohou zůstat v Mzdové rekapitulaci. Jeden měsíc však nelze
-zpracovat současně oběma cestami.
+Po aktivaci slouží horní část přehledu jako pracovní rozcestník **Tento měsíc**:
+vede přímo na měsíční zadání mezd a odměn, mzdový běh, zaměstnance, platby
+a dokumenty. Technický rozsah podporovaných scénářů zůstává dostupný ve sbalené
+diagnostické části. Starší měsíce mohou zůstat v Mzdové rekapitulaci. Jeden
+měsíc však nelze zpracovat současně oběma cestami.
 
 Rozpracovanou aktivaci lze zrušit, dokud je pouze ve stavu nastavení. Ostrý
 začátek se nezruší obyčejným přepínačem, aby nezmizely vazby na uzavřené mzdy,
@@ -74,6 +77,10 @@ Na stejné stránce se nastavují výchozí účty automatického zaúčtování
 se rozlišuje mzda zaměstnance mimo výkon funkce, příjem společníka a odměna za
 výkon funkce člena orgánu. Dále se vybírají účty pojistného, daně a ostatních
 srážek. Nabídka obsahuje jen aktivní účty vhodného typu z účtového rozvrhu firmy.
+Příznak automatického zaúčtování se při uzamčení vstupů uloží do neměnné revize
+mzdového běhu. Je-li pro dané období vypnutý, schválení automatický účetní deník
+nevytvoří. Pozdější změna politiky už uzamčený běh nezmění; chybějící nebo
+neplatná politika automatické účtování bezpečně zastaví.
 
 V záložce **Politiky a připravenost** se vede časová historie výplatního dne,
 pravidla posunu na pracovní den, zaokrouhlení doplatku, kontroly čtyř očí,
@@ -99,6 +106,17 @@ V **Mzdy → Zaměstnanci** se zobrazují stejné karty jako ve spodní části 
 rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto týká
 téže osoby; žádné slučování duplicitních karet není potřeba.
 
+Primárním tlačítkem **Přidat zaměstnance** založíš právě tuto společnou kartu,
+nikoli druhou osobu jen pro úplné mzdy. Krátký formulář obsahuje nejčastější
+vstupní údaje: jméno, rodné číslo, datum narození, druh vztahu, plánovaný nástup
+a základní mzdu. Jedno uložení založí kartu i první pracovní vztah; nový
+zaměstnanec se pak otevře k doplnění osobního profilu a podrobností vztahu.
+Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné i uživateli
+bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
+
+Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
+všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
+
 Seznam ukazuje:
 
 - aktivní nebo neaktivní stav osoby;
@@ -106,12 +124,18 @@ Seznam ukazuje:
 - počet a druh pracovních vztahů;
 - původní vztah převzatý z Mzdové rekapitulace.
 
-Tlačítkem **Zobrazit vztahy** rozbalíš detail. Na telefonu se seznam automaticky
-mění z tabulky na karty.
+Tlačítkem **Upravit zaměstnance** otevřeš vztahy a zároveň jeden formulář
+**Běžné údaje zaměstnance**. Bez přepínání záložek v něm upravíš jméno
+a příjmení, rodné číslo, bydliště, e-mail, telefon, týdenní pracovní dobu
+a pravidelnou hrubou mzdu. Změna pracovní doby nebo mzdy nevynuluje historii:
+založí novou účinnou verzi podmínek od zvoleného dne. Osobní profil a primární
+pracovní vztah se ukládají jednou transakcí, takže při chybě nezůstane změněná
+jen jedna část.
 
-Pod seznamem otevřeš **Osobní kartu** vybraného zaměstnance. Záložky oddělují
-identitu, adresy, kontakty, identifikátory a výplatní účty. U citlivých údajů
-se zobrazuje pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit.
+Na telefonu se seznam automaticky mění z tabulky na karty. Historii identit,
+adres a kontaktů, výplatní účty a další méně časté údaje otevřeš pod formulářem
+ve sbalené části **Pokročilé a historické údaje**. U citlivých údajů se
+zobrazuje pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit.
 Po uložení aplikace otevřenou hodnotu z formuláře odstraní.
 
 Výplatní účet musí mít název, období účinnosti a rozdělení výplaty. Před
@@ -211,7 +235,10 @@ pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 změna katalogu proto nepřepíše již zpracované období.
 
 Pravidelný předpis má vlastní interval platnosti a lze jej zadat pevnou částkou
-nebo procentem. Jednorázový vstup se nejprve zkontroluje a potom samostatně
+nebo procentem. Účty MD/D se vybírají našeptáváním z aktivního účtového rozvrhu;
+formulář nezadává interní identifikátory. Procentní sazbu zadávej jako běžné
+procento a množství v přirozené jednotce — převod na interní bazické body
+a tisíciny provede aplikace. Jednorázový vstup se nejprve zkontroluje a potom samostatně
 schválí. Import odmítá nebezpečné sešity, vzorce a duplicitní řádky a před
 zápisem vždy ukáže výsledek náhledu. Soubor můžeš vybrat fialovým tlačítkem
 **Vybrat soubor** nebo jej přetáhnout do zvýrazněné plochy; stejný ovládací
@@ -222,21 +249,36 @@ přímo u souboru.
 
 V **Mzdy → Rychlý měsíční vstup** vybereš měsíc a upravíš všechny účinné
 pracovní vztahy na jedné stránce. U každého zaměstnance se zobrazí jméno,
-maskované rodné číslo, základní mzda ze vztahu, přesčas a bonus nebo odměna.
+maskované rodné číslo, typ vztahu, základní mzda nebo odměna ze vztahu,
+přesčas a bonus či další odměna. Pracovní poměr, DPP, DPČ, závislý příjem
+společníka a odměna za výkon funkce zůstávají v samostatných řádcích a systém
+je neslučuje.
 Náhled hrubé mzdy se přepočítává okamžitě; další již existující mzdové vstupy
-jsou v něm zobrazeny samostatně.
+jsou v něm zobrazeny samostatně. Do hrubého náhledu vstupují všechny složky
+zařazené jako zdanitelný příjem včetně nepeněžních. Osvobozené náhrady a jiné
+složky mimo hrubý příjem se zobrazí zvlášť a do součtu se nepřičtou. Složka
+s neuzavřeným daňovým zařazením vytvoří ruční kontrolu. Jde pouze o náhled
+hrubých složek, nikoli o výpočet čisté mzdy; ten vznikne až ve mzdovém běhu.
 
 Přesčas lze zadat celkovou částkou. Zadání v hodinách je dostupné pouze tehdy,
 když má vztah pro dané čtvrtletí schválený průměrný hodinový výdělek. Systém
 pak použije tento doložený průměr a 25% příplatek; bez schváleného podkladu
-hodinovou sazbu neodhaduje a vyžádá celkovou částku.
+hodinovou sazbu neodhaduje a vyžádá celkovou částku. U závislého příjmu
+společníka, odměny za výkon funkce, DPP a DPČ se hodinový přesčas s 25%
+příplatkem nenabízí; použije se doložená celková částka nebo odměna.
 
 Hromadné uložení vytváří běžné vstupy složek `MZDA_MESICNI`,
 `PREMIE_PRIPLATKY` a `ODMENA`, takže nevzniká paralelní evidence mezd.
 Opakované uložení stejného měsíce nevytvoří duplicity. Rozpracované vstupy se
 mění s kontrolou jejich verze; schválený nebo uzamčený vstup formulář nikdy
 nepřepíše. Pokud základní mzdu už spravuje pravidelný či jiný měsíční vstup,
-rychlý formulář ji zobrazí pouze pro čtení.
+rychlý formulář ji zobrazí pouze pro čtení. Kontroluje také verzi pracovního
+vztahu, takže po souběžné změně smlouvy vyžádá obnovení formuláře. Historický
+měsíc zachová vztah, který byl tehdy účinný a později archivován. Při nástupu,
+ukončení nebo pozastavení v průběhu měsíce nepředvyplní plnou měsíční mzdu a
+vyžádá skutečnou částku za zpracovávané období. Plný měsíční pravidelný předpis
+v takovém měsíci také nepřevezme automaticky; zůstane v ruční kontrole, dokud
+není doložené správné časové rozpočítání.
 
 Částky zadávej v Kč s nejvýše dvěma desetinnými místy a hodiny s nejvýše
 třemi. Prázdná hodnota neznamená nulu; pokud složka v měsíci není, zadej
@@ -255,7 +297,11 @@ V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
 - hodinový ledger dovolené, ve kterém oprava vytváří novou položku a nemaže historii.
 
 Nejprve vyber pracovní vztah a založ snapshot průměrného výdělku. Skutečný
-průměr používá započitatelnou mzdu a odpracované minuty v rozhodném období.
+průměr používá započitatelnou mzdu a odpracovaný čas v rozhodném období.
+Formuláře zadávají částky v Kč a čas v hodinách či dnech; interní haléře
+a minuty převádí aplikace až při uložení. Stejně se v hodinách zadává částečný
+první nebo poslední den absence i ruční změna dovolené. Přesný důvod chyby
+zůstane viditelný přímo u příslušného formuláře.
 Při méně než 21 odpracovaných dnech je povinný pravděpodobný hodinový výdělek
 a jeho odůvodnění. Snapshot musí projít ruční kontrolou a schválením; teprve
 potom jej lze připojit k absenci s náhradou.
@@ -287,6 +333,12 @@ zadává také skutečné datum výplaty; podle něj se vybírají účinná pra
 srážek. Jeden běh prochází řízenými kroky **Uzamknout vstupy → Vypočítat →
 Zkontrolovat → Schválit**. Výpočet a kontrolu musí provést různí uživatelé a
 schválení vyžaduje samostatné oprávnění.
+
+Skutečně prázdný technický běh lze tlačítkem **Smazat prázdný běh** odstranit
+i po jeho zrušení. Tlačítko se zobrazí pouze tehdy, když běh nemá žádnou revizi,
+uzamčené vstupy, výpočet, dokument, podání, platbu ani účetní stopu. Jakmile
+běh obsahoval věcnou evidenci, zůstává kvůli auditu dohledatelný a lze jej jen
+zrušit, nikoli smazat.
 
 Uzamknutí vytvoří neměnný snapshot zaměstnanců, vztahů, složek, data výplaty
 a měsíčních podkladů srážek. Pozdější změna živé karty už rozpracovanou revizi
@@ -464,6 +516,18 @@ druhu a vyžaduje konkrétní důvod. Nová revize uvádí datum nahrazovaného
 potvrzení a důvod v příloze; původní PDF zůstává beze změny. Opakování stejné
 opravné žádosti bezpečně vrátí již archivovanou revizi.
 
+U ukončeného pracovního vztahu otevři v **Mzdy → Zaměstnanci** jeho detail
+a část **Dokumenty při skončení vztahu**. Potvrzení o zaměstnání lze vytvořit
+jen po kontrole přesné identity, adresy a smluvních podmínek účinných ke dni
+skončení. Ve formuláři potvrď druh práce, kvalifikaci, pracovní expozici,
+pokračující srážky a případné důchodové kategorie před rokem 1993. Částky
+srážek se nezadávají — aplikace je přebírá z uzavřené evidence. Každá oprava
+vyžaduje konkrétní důvod a vytvoří novou neměnnou revizi.
+
+Samostatné potvrzení pro Úřad práce zatím zůstává zablokované. Zpřístupní se až
+po odborném schválení výpočtu průměrného měsíčního čistého výdělku; aplikace
+proto nenabízí ruční zadání hotové čisté částky.
+
 Stažení nejprve získá krátkodobé jednorázové oprávnění a potom soubor předá
 prohlížeči. Původní dokument se při opravě nikdy nepřepisuje. Nový výstup má
 vlastní revizi a původní zůstává dohledatelný.
@@ -475,11 +539,37 @@ revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsl
 
 > [!WARNING]
 > Výplatní pásky vznikají automaticky při schválení; mzdový list a obě daňová
-> potvrzení vytvoříš v záložce Roční dokumenty. Výstupní dokumenty při skončení
-> vztahu a podací protokoly se zatím vytvářejí samostatně, takže neúplný
-> měsíční balíček neznamená, že jsou všechny povinné výstupy hotové.
+> potvrzení vytvoříš v záložce Roční dokumenty. Potvrzení při skončení vytváříš
+> v detailu konkrétního vztahu a podací protokoly se evidují samostatně. Neúplný
+> měsíční balíček proto neznamená, že jsou všechny povinné výstupy hotové.
 
-## 56a.15 Oprávnění a citlivé údaje
+## 56a.15 Podání a hlášení
+
+V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
+REGZEL. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
+agenturou práce nebo zaměstnavatelem na chráněném trhu práce. Potvrzení se
+vztahuje i na nezaškrtnuté hodnoty; při každém uložení je proto nutné znovu
+výslovně potvrdit, že byly všechny tři údaje ověřeny.
+
+V **Mzdy → Podání a hlášení** lze připravit doplňující údaje zaměstnavatele
+`REGZELDOPL25` ve verzi XSD 1.2. Vyber produkční nebo testovací prostředí a
+konkrétní aktivní mzdovou účtárnu. Prostředí jsou striktně oddělená:
+test vyžaduje fiktivní desetimístný variabilní symbol začínající `999`,
+zatímco produkce jej odmítne. Před každou přípravou XML znovu potvrď aktuálnost
+prostředí, účtárny, identifikátorů i evidenčních příznaků.
+
+Příprava vytvoří neměnný šifrovaný snapshot a XML ověří proti lokálně
+připnutému oficiálnímu XSD. Historie se filtruje podle právě vybraného
+prostředí a XML lze znovu stáhnout. Při stažení aplikace ověří šifrovaný zdroj,
+tenant, prostředí, XSD i kryptografický otisk výsledného XML.
+
+Tato funkce XML pouze připraví a stáhne. Neodesílá je a neoznačuje registraci
+za přijatou. Prvotní registrace zaměstnavatele, přidání nebo ukončení účtárny
+a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné. Záložky
+JMHZ a zdravotních pojišťoven proto zobrazují současný nepodporovaný stav a
+nenabízejí falešné tlačítko odeslání.
+
+## 56a.16 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
@@ -491,6 +581,9 @@ Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvo�
 měsíční balíček.
 Platební závazky, dávky a párování vyžadují samostatné oprávnění
 `payroll.payments`.
+REGZEL profil, příprava, historie a stažení používají samostatné oprávnění
+`payroll.submissions`; zápis a čtení se rozlišují. Všechny route jsou dostupné
+jen z přihlášené webové relace a bearer token odmítnou.
 Agenda srážek má samostatné oprávnění `payroll.enforcement`; právo pro běžné
 mzdy ani původní Mzdovou rekapitulaci samo o sobě přístup k těmto údajům
 nedává. Změna měsíčního insolvenčního režimu vyžaduje také
@@ -501,7 +594,7 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.16 Vztah k Mzdové rekapitulaci
+## 56a.17 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

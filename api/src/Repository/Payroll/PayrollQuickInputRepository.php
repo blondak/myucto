@@ -34,10 +34,31 @@ final class PayrollQuickInputRepository
         $this->components->list($supplierId, $periodStart);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.id AS employment_id, employment.employee_id,
+            'WITH effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status,
+                           EXISTS (
+                               SELECT 1
+                                 FROM payroll_employment_events lifecycle
+                                WHERE lifecycle.supplier_id = employment.supplier_id
+                                  AND lifecycle.employment_id = employment.id
+                                  AND lifecycle.event_type = "status_changed"
+                                  AND lifecycle.effective_on BETWEEN ? AND ?
+                                  AND (
+                                      lifecycle.from_status = "suspended"
+                                      OR lifecycle.to_status = "suspended"
+                                  )
+                           ) AS suspended_in_month
+                      FROM payroll_employments employment
+                     WHERE employment.supplier_id = ?
+                 )
+             SELECT employment.id AS employment_id, employment.employee_id,
                     employment.code AS employment_code, employment.relation_type,
                     employment.monthly_gross_minor, employment.start_date,
                     employment.actual_start_date, employment.end_date,
+                    employment.row_version AS employment_row_version,
+                    employment.effective_status, employment.suspended_in_month,
                     employee.full_name,
                     (
                         SELECT identifier.value_masked
@@ -51,7 +72,7 @@ final class PayrollQuickInputRepository
                     average.id AS overtime_average_snapshot_id,
                     average.row_version AS overtime_average_snapshot_version,
                     average.average_hourly_minor AS overtime_hourly_rate_minor
-               FROM payroll_employments employment
+               FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
@@ -76,8 +97,7 @@ final class PayrollQuickInputRepository
                 AND average.employment_id = employment.id
                 AND average.applicable_year = ?
                 AND average.applicable_quarter = ?
-              WHERE employment.supplier_id = ?
-                AND employment.status IN ("active", "suspended", "ended")
+              WHERE employment.effective_status IN ("active", "suspended", "ended")
                 AND COALESCE(
                       employment.actual_start_date,
                       employment.start_date,
@@ -87,7 +107,16 @@ final class PayrollQuickInputRepository
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)
               ORDER BY employee.full_name, employment.is_primary DESC, employment.id'
         );
-        $stmt->execute([$year, $quarter, $supplierId, $periodEnd, $periodStart]);
+        $stmt->execute([
+            $periodEnd,
+            $periodStart,
+            $periodEnd,
+            $supplierId,
+            $year,
+            $quarter,
+            $periodEnd,
+            $periodStart,
+        ]);
         $rows = PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'quick_employments');
 
         $inputStmt = $this->db->pdo()->prepare(
@@ -95,7 +124,8 @@ final class PayrollQuickInputRepository
                     input.quantity_milliunits, input.source_kind, input.external_id,
                     input.status, input.row_version, input.source_snapshot_json,
                     component.code AS component_code,
-                    component.component_kind
+                    component.component_kind, component.value_kind,
+                    component.tax_treatment
                FROM payroll_inputs input
                JOIN payroll_component_definitions component
                  ON component.supplier_id = input.supplier_id
@@ -111,13 +141,43 @@ final class PayrollQuickInputRepository
         }
 
         $recurringStmt = $this->db->pdo()->prepare(
-            'SELECT recurring.*, component.code AS component_code,
-                    component.component_kind, employment.monthly_gross_minor
+            'WITH effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status,
+                           EXISTS (
+                               SELECT 1
+                                 FROM payroll_employment_events lifecycle
+                                WHERE lifecycle.supplier_id = employment.supplier_id
+                                  AND lifecycle.employment_id = employment.id
+                                  AND lifecycle.event_type = "status_changed"
+                                  AND lifecycle.effective_on BETWEEN ? AND ?
+                                  AND (
+                                      lifecycle.from_status = "suspended"
+                                      OR lifecycle.to_status = "suspended"
+                                  )
+                           ) AS suspended_in_month
+                      FROM payroll_employments employment
+                     WHERE employment.supplier_id = ?
+                 )
+             SELECT recurring.*, component.code AS component_code,
+                    component.component_kind, component.value_kind,
+                    component.tax_treatment, employment.monthly_gross_minor,
+                    COALESCE(
+                      employment.actual_start_date,
+                      employment.start_date,
+                      CASE WHEN employment.is_legacy_projection = 1
+                           THEN "1900-01-01" ELSE NULL END
+                    ) AS employment_start,
+                    employment.end_date AS employment_end,
+                    employment.effective_status AS employment_effective_status,
+                    employment.suspended_in_month
+                        AS employment_suspended_in_month
                FROM payroll_recurring_components recurring
                JOIN payroll_component_definitions component
                  ON component.supplier_id = recurring.supplier_id
                 AND component.id = recurring.component_id
-               JOIN payroll_employments employment
+               JOIN effective_employment employment
                  ON employment.supplier_id = recurring.supplier_id
                 AND employment.id = recurring.employment_id
               WHERE recurring.supplier_id = ?
@@ -130,6 +190,10 @@ final class PayrollQuickInputRepository
               ORDER BY recurring.employment_id, recurring.id'
         );
         $recurringStmt->execute([
+            $periodEnd,
+            $periodStart,
+            $periodEnd,
+            $supplierId,
             $supplierId,
             $periodEnd,
             $periodStart,
@@ -160,7 +224,7 @@ final class PayrollQuickInputRepository
 
     /**
      * @param list<array{
-     *   employment_id:int,base_amount_minor:int,overtime_mode:string,
+     *   employment_id:int,employment_row_version:int,base_amount_minor:int,overtime_mode:string,
      *   overtime_hours_milli:?int,overtime_amount_minor:?int,bonus_amount_minor:int,
      *   overtime_average_snapshot_id:?int,overtime_average_snapshot_version:?int,
      *   versions:array{base:?int,overtime:?int,bonus:?int}
@@ -195,7 +259,11 @@ final class PayrollQuickInputRepository
                         'Pracovní vztah nepatří této firmě nebo není v daném měsíci účinný.'
                     );
                 }
-                $this->lockEffectiveEmployment($supplierId, $employmentId, $period);
+                $this->lockEffectiveEmployment(
+                    $supplierId,
+                    $employmentId,
+                    $row['employment_row_version'],
+                );
                 if ((bool) $item['base_conflict']) {
                     throw new \DomainException(
                         'Základní mzda je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte v měsíčních vstupech.'
@@ -239,6 +307,11 @@ final class PayrollQuickInputRepository
                         );
                     }
                 } elseif ($row['overtime_mode'] === 'hours') {
+                    if (!(bool) $item['overtime_hours_relation_supported']) {
+                        throw new \DomainException(
+                            'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
+                        );
+                    }
                     $existing = $item['inputs']['overtime'];
                     $unchanged = is_array($existing)
                         && $existing['quantity_milliunits'] === $hours;
@@ -344,6 +417,8 @@ final class PayrollQuickInputRepository
         $managedAmounts = ['base' => 0, 'overtime' => 0, 'bonus' => 0];
         $blockers = [];
         $other = 0;
+        $nonMonetary = 0;
+        $excludedFromGross = 0;
         foreach ($inputs as $input) {
             $code = PayrollTimeValue::string($input['component_code'] ?? null, 'component_code');
             $kind = PayrollTimeValue::string(
@@ -375,11 +450,29 @@ final class PayrollQuickInputRepository
             if ($managedSlot !== null) {
                 $managed[$managedSlot] = true;
                 $managedAmounts[$managedSlot] += $amount;
-            } elseif (in_array($kind, [
-                'hourly_wage', 'task_wage', 'allowance', 'compensation',
-                'severance', 'competitive_clause', 'backpay',
-            ], true)) {
-                $other += PayrollTimeValue::int($input['amount_minor'] ?? null, 'amount_minor');
+            } else {
+                $taxTreatment = PayrollTimeValue::string(
+                    $input['tax_treatment'] ?? null,
+                    'tax_treatment',
+                );
+                $valueKind = PayrollTimeValue::string(
+                    $input['value_kind'] ?? null,
+                    'value_kind',
+                );
+                if (in_array(
+                    $taxTreatment,
+                    ['included', 'withholding_candidate'],
+                    true,
+                )) {
+                    $other += $amount;
+                    if ($valueKind === 'non_monetary') {
+                        $nonMonetary += $amount;
+                    }
+                } elseif ($taxTreatment === 'exempt') {
+                    $excludedFromGross += $amount;
+                } else {
+                    $blockers[] = 'other_component_manual_review';
+                }
             }
         }
 
@@ -403,16 +496,42 @@ final class PayrollQuickInputRepository
                     default => null,
                 },
             };
-            if ($slot === null) {
-                continue;
-            }
-            $managed[$slot] = true;
             $calculation = $this->recurringAmounts->calculate($assignment, $periodStart);
             if ($calculation['status'] === 'supported'
                 && is_int($calculation['amount_minor'])) {
-                $managedAmounts[$slot] += $calculation['amount_minor'];
+                $amount = $calculation['amount_minor'];
+                if ($slot !== null) {
+                    $managed[$slot] = true;
+                    $managedAmounts[$slot] += $amount;
+                } else {
+                    $taxTreatment = PayrollTimeValue::string(
+                        $assignment['tax_treatment'] ?? null,
+                        'tax_treatment',
+                    );
+                    $valueKind = PayrollTimeValue::string(
+                        $assignment['value_kind'] ?? null,
+                        'value_kind',
+                    );
+                    if (in_array(
+                        $taxTreatment,
+                        ['included', 'withholding_candidate'],
+                        true,
+                    )) {
+                        $other += $amount;
+                        if ($valueKind === 'non_monetary') {
+                            $nonMonetary += $amount;
+                        }
+                    } elseif ($taxTreatment === 'exempt') {
+                        $excludedFromGross += $amount;
+                    } else {
+                        $blockers[] = 'other_component_manual_review';
+                    }
+                }
             } else {
-                $blockers[] = "{$slot}_recurring_manual_review";
+                if ($slot !== null) {
+                    $managed[$slot] = true;
+                }
+                $blockers[] = ($slot ?? 'other') . '_recurring_manual_review';
             }
         }
 
@@ -432,11 +551,22 @@ final class PayrollQuickInputRepository
         $effectiveEnd = $employment['end_date'] ?? $periodEnd;
         $partialMonth = (string) $effectiveStart > $periodStart
             || (string) $effectiveEnd < $periodEnd;
-        $baseRequiresEntry = $partialMonth
+        $effectiveStatus = PayrollTimeValue::string(
+            $employment['effective_status'] ?? null,
+            'effective_status',
+        );
+        $suspendedInMonth = $effectiveStatus === 'suspended'
+            || PayrollTimeValue::int(
+                $employment['suspended_in_month'] ?? null,
+                'suspended_in_month',
+            ) === 1;
+        $baseRequiresEntry = ($partialMonth || $suspendedInMonth)
             && !$managed['base']
             && $quick['base'] === null;
         if ($baseRequiresEntry) {
-            $blockers[] = 'partial_month_base_required';
+            $blockers[] = $suspendedInMonth
+                ? 'suspended_month_base_required'
+                : 'partial_month_base_required';
         }
 
         $base = $managed['base']
@@ -486,15 +616,30 @@ final class PayrollQuickInputRepository
         $averageVersion = $usesStoredAverage
             ? ($storedOvertimeSource['average_snapshot_row_version'] ?? null)
             : $currentAverageVersion;
+        $relationType = PayrollTimeValue::string(
+            $employment['relation_type'] ?? null,
+            'relation_type',
+        );
+        $overtimeHoursRelationSupported = in_array(
+            $relationType,
+            ['employment', 'small_scale_employment'],
+            true,
+        );
         return [
             'employee_id' => PayrollTimeValue::int($employment['employee_id'] ?? null, 'employee_id'),
             'employment_id' => PayrollTimeValue::int($employment['employment_id'] ?? null, 'employment_id'),
+            'employment_row_version' => PayrollTimeValue::int(
+                $employment['employment_row_version'] ?? null,
+                'employment_row_version',
+            ),
             'full_name' => PayrollTimeValue::string($employment['full_name'] ?? null, 'full_name'),
             'birth_number_masked' => $employment['birth_number_masked'] === null
                 ? null
                 : PayrollTimeValue::string($employment['birth_number_masked'], 'birth_number_masked'),
             'employment_code' => PayrollTimeValue::string($employment['employment_code'] ?? null, 'employment_code'),
-            'relation_type' => PayrollTimeValue::string($employment['relation_type'] ?? null, 'relation_type'),
+            'relation_type' => $relationType,
+            'effective_status' => $effectiveStatus,
+            'suspended_in_month' => $suspendedInMonth,
             'base_amount_minor' => $base,
             'base_managed_elsewhere' => $managed['base'],
             'base_conflict' => $conflicts['base'],
@@ -507,13 +652,17 @@ final class PayrollQuickInputRepository
             'overtime_average_snapshot_id' => is_int($averageId) ? $averageId : null,
             'overtime_average_snapshot_version' =>
                 is_int($averageVersion) ? $averageVersion : null,
-            'overtime_hours_available' => is_int($rate) && $rate > 0,
+            'overtime_hours_relation_supported' => $overtimeHoursRelationSupported,
+            'overtime_hours_available' =>
+                $overtimeHoursRelationSupported && is_int($rate) && $rate > 0,
             'overtime_managed_elsewhere' => $managed['overtime'],
             'overtime_conflict' => $conflicts['overtime'],
             'bonus_amount_minor' => $bonus,
             'bonus_managed_elsewhere' => $managed['bonus'],
             'bonus_conflict' => $conflicts['bonus'],
             'other_amount_minor' => $other,
+            'non_monetary_amount_minor' => $nonMonetary,
+            'excluded_from_gross_amount_minor' => $excludedFromGross,
             'gross_preview_minor' => $base + $overtime + $bonus + $other,
             'inputs' => $quick,
             'blockers' => array_values(array_unique($blockers)),
@@ -523,34 +672,26 @@ final class PayrollQuickInputRepository
     private function lockEffectiveEmployment(
         int $supplierId,
         int $employmentId,
-        string $period,
+        int $expectedVersion,
     ): void {
-        $periodStart = $period . '-01';
-        $periodEnd = (new \DateTimeImmutable($periodStart))
-            ->modify('last day of this month')
-            ->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.id
+            'SELECT employment.row_version
                FROM payroll_employments employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE employment.supplier_id = ? AND employment.id = ?
-                AND employment.status IN ("active", "suspended", "ended")
-                AND COALESCE(
-                      employment.actual_start_date,
-                      employment.start_date,
-                      CASE WHEN employment.is_legacy_projection = 1
-                           THEN "1900-01-01" ELSE NULL END
-                    ) <= ?
-                AND (employment.end_date IS NULL OR employment.end_date >= ?)
               FOR UPDATE'
         );
-        $stmt->execute([$supplierId, $employmentId, $periodEnd, $periodStart]);
-        if ($stmt->fetchColumn() === false) {
+        $stmt->execute([$supplierId, $employmentId]);
+        $currentVersion = $stmt->fetchColumn();
+        if ($currentVersion === false) {
             throw new \InvalidArgumentException(
                 'Pracovní vztah nepatří této firmě nebo není v daném měsíci účinný.'
             );
+        }
+        if ((int) $currentVersion !== $expectedVersion) {
+            throw new PayrollEmploymentConflictException((int) $currentVersion);
         }
     }
 

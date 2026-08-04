@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
+use MyInvoice\Repository\Payroll\PayrollRunDeletionException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
@@ -19,6 +20,7 @@ use PDO;
 final class PayrollRunCommandService
 {
     private const COMMAND_SAVEPOINT = 'payroll_run_command';
+    private const DELETE_SAVEPOINT = 'payroll_run_delete';
 
     public function __construct(
         private readonly Connection $db,
@@ -218,6 +220,131 @@ final class PayrollRunCommandService
             $idempotencyKey,
             $actorUserId,
         );
+    }
+
+    public function deleteRun(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        int $actorUserId,
+    ): void {
+        $this->assertActor($actorUserId);
+        if ($supplierId <= 0 || $runId <= 0 || $expectedVersion <= 0) {
+            throw new \InvalidArgumentException(
+                'Identifikace mazaného mzdového běhu není platná.',
+            );
+        }
+
+        $pdo = $this->db->pdo();
+        $nestedTransaction = $pdo->inTransaction();
+        if ($nestedTransaction) {
+            $pdo->exec('SAVEPOINT ' . self::DELETE_SAVEPOINT);
+        } else {
+            $pdo->beginTransaction();
+        }
+        try {
+            $run = $this->runs->lock($supplierId, $runId);
+            if ($run === null) {
+                throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
+            }
+            $this->assertModuleAvailable(
+                $supplierId,
+                (string) $run['period_start'],
+            );
+            $currentVersion = (int) $run['row_version'];
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollRunConflictException($currentVersion);
+            }
+
+            $decision = $this->runs->canDelete($supplierId, $runId);
+            if ($decision === null) {
+                throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
+            }
+            if (!$decision->canDelete) {
+                throw new PayrollRunDeletionException(
+                    (string) $decision->blockerCode,
+                    (string) $decision->blockerMessage,
+                );
+            }
+            $eventId = $decision->createdEventId
+                ?? throw new \LogicException('Chybí počáteční audit mzdového běhu.');
+
+            $this->runs->enableEmptyRunDeleteGuard(
+                $supplierId,
+                $runId,
+                $expectedVersion,
+                $eventId,
+                $decision->cancelEventId,
+                $decision->cancelCommandId,
+            );
+            try {
+                if ($decision->cancelEventId !== null
+                    && $decision->cancelCommandId !== null
+                ) {
+                    if (!$this->runs->deleteCanonicalCancelEvent(
+                        $supplierId,
+                        $runId,
+                        $expectedVersion,
+                        $eventId,
+                        $decision->cancelEventId,
+                        $decision->cancelCommandId,
+                    )) {
+                        throw new PayrollRunDeletionException(
+                            'payroll_run_delete_conflict',
+                            'Událost zrušení mzdového běhu se nepodařilo bezpečně odstranit.',
+                        );
+                    }
+                    if (!$this->runs->deleteCanonicalCancelCommand(
+                        $supplierId,
+                        $runId,
+                        $expectedVersion,
+                        $eventId,
+                        $decision->cancelCommandId,
+                    )) {
+                        throw new PayrollRunDeletionException(
+                            'payroll_run_delete_conflict',
+                            'Příkaz zrušení mzdového běhu se nepodařilo bezpečně odstranit.',
+                        );
+                    }
+                }
+                if (!$this->runs->deleteInitialEvent(
+                    $supplierId,
+                    $runId,
+                    $expectedVersion,
+                    $eventId,
+                )) {
+                    throw new PayrollRunDeletionException(
+                        'payroll_run_delete_conflict',
+                        'Mzdový běh se nepodařilo bezpečně připravit ke smazání.',
+                    );
+                }
+                if ($decision->ownsPeriod) {
+                    $this->runs->transferOrReleasePeriodOwnership(
+                        $supplierId,
+                        (string) $run['period_start'],
+                        $runId,
+                        $decision->replacementOwnerRunId,
+                    );
+                }
+                if (!$this->runs->deleteEmptyRunRow(
+                    $supplierId,
+                    $runId,
+                    $expectedVersion,
+                )) {
+                    throw new PayrollRunDeletionException(
+                        'payroll_run_delete_conflict',
+                        'Mzdový běh se nepodařilo bezpečně smazat.',
+                    );
+                }
+            } finally {
+                $this->runs->clearEmptyRunDeleteGuard();
+            }
+
+            $this->finishDeleteTransaction($pdo, $nestedTransaction);
+        } catch (\Throwable $e) {
+            $this->rollbackDeleteTransaction($pdo, $nestedTransaction);
+            throw $e;
+        }
     }
 
     private function execute(
@@ -725,6 +852,29 @@ final class PayrollRunCommandService
         if ($nestedTransaction) {
             $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::COMMAND_SAVEPOINT);
             $pdo->exec('RELEASE SAVEPOINT ' . self::COMMAND_SAVEPOINT);
+        } elseif ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    private function finishDeleteTransaction(
+        PDO $pdo,
+        bool $nestedTransaction,
+    ): void {
+        if ($nestedTransaction) {
+            $pdo->exec('RELEASE SAVEPOINT ' . self::DELETE_SAVEPOINT);
+        } else {
+            $pdo->commit();
+        }
+    }
+
+    private function rollbackDeleteTransaction(
+        PDO $pdo,
+        bool $nestedTransaction,
+    ): void {
+        if ($nestedTransaction) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::DELETE_SAVEPOINT);
+            $pdo->exec('RELEASE SAVEPOINT ' . self::DELETE_SAVEPOINT);
         } elseif ($pdo->inTransaction()) {
             $pdo->rollBack();
         }

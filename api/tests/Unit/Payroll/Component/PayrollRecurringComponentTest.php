@@ -49,6 +49,10 @@ final class PayrollRecurringComponentTest extends TestCase
             'valid_from' => '2026-06-16',
             'valid_to' => null,
             'maximum_amount_minor' => null,
+            'employment_start' => '2026-01-01',
+            'employment_end' => null,
+            'employment_effective_status' => 'active',
+            'employment_suspended_in_month' => false,
         ], '2026-06-01');
         self::assertSame(5001, $calendar['amount_minor']);
         self::assertSame(15, $calendar['trace']['active_days']);
@@ -62,6 +66,10 @@ final class PayrollRecurringComponentTest extends TestCase
             'valid_from' => '2026-01-01',
             'valid_to' => null,
             'maximum_amount_minor' => 300000,
+            'employment_start' => '2026-01-01',
+            'employment_end' => null,
+            'employment_effective_status' => 'active',
+            'employment_suspended_in_month' => false,
         ], '2026-06-01');
         self::assertSame(300000, $percentage['amount_minor']);
         self::assertTrue($percentage['trace']['maximum_applied']);
@@ -78,6 +86,10 @@ final class PayrollRecurringComponentTest extends TestCase
                 'valid_from' => '2026-01-01',
                 'valid_to' => null,
                 'maximum_amount_minor' => null,
+                'employment_start' => '2026-01-01',
+                'employment_end' => null,
+                'employment_effective_status' => 'active',
+                'employment_suspended_in_month' => false,
             ], '2026-06-01');
 
         self::assertSame('manual_review', $result['status']);

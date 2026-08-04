@@ -13,16 +13,18 @@ import { useToast } from '@/composables/useToast'
 import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
+import Modal from '@/components/ui/Modal.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import {
   formatPayrollMinutes,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
+import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
-const period = ref(new Date().toISOString().slice(0, 7))
+const period = ref(localPayrollPeriod())
 const incompleteOnly = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -45,6 +47,9 @@ const importContent = ref('')
 const importFileError = ref('')
 const importPreview = ref<PayrollTimeImportPreview | null>(null)
 const selectedEmploymentIds = ref<number[]>([])
+const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
+const reopenReason = ref('')
+const reopenError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.time.write'))
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
@@ -207,9 +212,23 @@ async function approveSelected() {
   saving.value = false
 }
 
-async function reopen(item: PayrollTimeOverviewItem) {
-  const reason = window.prompt(t('payroll.time.reopen_reason'))
-  if (!reason) return
+function openReopen(item: PayrollTimeOverviewItem) {
+  reopenItem.value = item
+  reopenReason.value = ''
+  reopenError.value = ''
+}
+
+function closeReopen() {
+  reopenItem.value = null
+  reopenReason.value = ''
+  reopenError.value = ''
+}
+
+async function reopen() {
+  const item = reopenItem.value
+  const reason = reopenReason.value.trim()
+  if (!item || !reason) return
+  reopenError.value = ''
   saving.value = true
   try {
     await payrollApi.reopenTimeMonth(period.value, {
@@ -218,9 +237,10 @@ async function reopen(item: PayrollTimeOverviewItem) {
       reason,
     })
     toast.success(t('payroll.time.reopened'))
+    closeReopen()
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.time.reopen_failed'))
+    reopenError.value = error?.response?.data?.error?.message || t('payroll.time.reopen_failed')
   } finally {
     saving.value = false
   }
@@ -496,7 +516,7 @@ onMounted(load)
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="approve(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
-                <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="reopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
+                <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
               </div></td>
             </tr>
           </tbody>
@@ -510,10 +530,56 @@ onMounted(load)
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="approve(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
-            <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="reopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
+            <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>
         </article>
       </div>
     </section>
+
+    <Modal
+      v-if="reopenItem"
+      :title="t('payroll.time.reopen')"
+      width-class="max-w-lg"
+      @close="closeReopen"
+    >
+      <div data-test="reopen-modal">
+        <p data-test="reopen-employee" class="mb-4 text-sm text-neutral-600">
+          {{ reopenItem.employment.full_name }} · {{ reopenItem.employment.code }}
+        </p>
+        <form data-test="reopen-form" class="space-y-4" @submit.prevent="reopen">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.time.reopen_reason') }}
+            </span>
+            <textarea
+              v-model="reopenReason"
+              data-test="reopen-reason"
+              required
+              maxlength="1000"
+              rows="4"
+              class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            />
+          </label>
+          <p
+            v-if="reopenError"
+            data-test="reopen-error"
+            role="alert"
+            class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700"
+          >
+            {{ reopenError }}
+          </p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeReopen">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button type="submit" :class="btnFilled('warning')" :disabled="saving || !reopenReason.trim()">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>
+              {{ t('payroll.time.reopen') }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </Modal>
   </div>
 </template>

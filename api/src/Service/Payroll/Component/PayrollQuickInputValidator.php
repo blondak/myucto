@@ -12,6 +12,7 @@ final class PayrollQuickInputValidator
      *   period:string,
      *   rows:list<array{
      *     employment_id:int,
+     *     employment_row_version:int,
      *     base_amount_minor:int,
      *     overtime_mode:string,
      *     overtime_hours_milli:?int,
@@ -81,6 +82,10 @@ final class PayrollQuickInputValidator
             }
             $rows[] = [
                 'employment_id' => $employmentId,
+                'employment_row_version' => $this->positiveInt(
+                    $raw['employment_row_version'] ?? null,
+                    'employment_row_version',
+                ),
                 'base_amount_minor' => $this->nonNegativeInt(
                     $raw['base_amount_minor'] ?? null,
                     'base_amount_minor',

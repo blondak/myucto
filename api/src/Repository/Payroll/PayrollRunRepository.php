@@ -160,6 +160,707 @@ final class PayrollRunRepository
         return $row === false ? null : self::castRun($row);
     }
 
+    public function canDelete(
+        int $supplierId,
+        int $runId,
+    ): ?PayrollRunDeletionDecision {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT run.status,
+                    run.row_version,
+                    run.current_revision_no,
+                    ownership.processor AS ownership_processor,
+                    ownership.source_type AS ownership_source_type,
+                    ownership.source_id AS ownership_source_id,
+                    (
+                        SELECT MIN(sibling.id)
+                          FROM payroll_runs sibling
+                         WHERE sibling.supplier_id = run.supplier_id
+                           AND sibling.period_start = run.period_start
+                           AND sibling.id <> run.id
+                    ) AS replacement_owner_run_id,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_generated_documents document
+                         WHERE document.supplier_id = run.supplier_id
+                           AND document.run_id = run.id
+                    ) AS document_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_posting_batches posting
+                         WHERE posting.supplier_id = run.supplier_id
+                           AND posting.run_id = run.id
+                    ) AS posting_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_revisions payment_revision
+                         WHERE payment_revision.supplier_id = run.supplier_id
+                           AND payment_revision.run_id = run.id
+                           AND (
+                               EXISTS (
+                                   SELECT 1
+                                     FROM payroll_payment_liabilities liability
+                                    WHERE liability.supplier_id = payment_revision.supplier_id
+                                      AND liability.revision_id = payment_revision.id
+                               )
+                               OR EXISTS (
+                                   SELECT 1
+                                     FROM payroll_payout_allocations allocation
+                                    WHERE allocation.supplier_id = payment_revision.supplier_id
+                                      AND allocation.revision_id = payment_revision.id
+                               )
+                               OR EXISTS (
+                                   SELECT 1
+                                     FROM payroll_deduction_ledger deduction
+                                    WHERE deduction.supplier_id = payment_revision.supplier_id
+                                      AND deduction.revision_id = payment_revision.id
+                               )
+                           )
+                    ) AS payment_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_submissions submission
+                          JOIN payroll_run_revisions submission_revision
+                            ON submission_revision.supplier_id = submission.supplier_id
+                           AND submission_revision.id = submission.source_revision_id
+                         WHERE submission_revision.supplier_id = run.supplier_id
+                           AND submission_revision.run_id = run.id
+                    ) AS submission_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_revisions revision
+                         WHERE revision.supplier_id = run.supplier_id
+                           AND revision.run_id = run.id
+                    ) AS revision_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_commands command_receipt
+                         WHERE command_receipt.supplier_id = run.supplier_id
+                           AND command_receipt.run_id = run.id
+                    ) AS command_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_events event
+                         WHERE event.supplier_id = run.supplier_id
+                           AND event.run_id = run.id
+                    ) AS event_count,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_events event
+                         WHERE event.supplier_id = run.supplier_id
+                           AND event.run_id = run.id
+                           AND event.event_type = "created"
+                           AND event.revision_id IS NULL
+                           AND event.from_status IS NULL
+                           AND event.to_status = "draft"
+                           AND event.reason IS NULL
+                           AND event.actor_user_id <=> run.created_by
+                    ) AS created_event_count,
+                    (
+                        SELECT MIN(event.id)
+                          FROM payroll_run_events event
+                         WHERE event.supplier_id = run.supplier_id
+                           AND event.run_id = run.id
+                           AND event.event_type = "created"
+                           AND event.revision_id IS NULL
+                           AND event.from_status IS NULL
+                           AND event.to_status = "draft"
+                           AND event.reason IS NULL
+                           AND event.actor_user_id <=> run.created_by
+                    ) AS created_event_id,
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_period_ownership stale_ownership
+                         WHERE stale_ownership.supplier_id = run.supplier_id
+                           AND stale_ownership.source_id = run.id
+                           AND (
+                               stale_ownership.period_start <> run.period_start
+                               OR stale_ownership.processor <> "payroll"
+                               OR stale_ownership.source_type <> "payroll_run"
+                           )
+                    ) AS conflicting_ownership_count
+               FROM payroll_runs run
+          LEFT JOIN payroll_period_ownership ownership
+                 ON ownership.supplier_id = run.supplier_id
+                AND ownership.period_start = run.period_start
+              WHERE run.supplier_id = ? AND run.id = ?',
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        foreach ([
+            ['document_count', 'payroll_run_has_documents', 'Mzdový běh má vygenerované dokumenty.'],
+            ['posting_count', 'payroll_run_has_posting', 'Mzdový běh má účetní stopu.'],
+            ['payment_count', 'payroll_run_has_payments', 'Mzdový běh má platební stopu.'],
+            ['submission_count', 'payroll_run_has_submissions', 'Mzdový běh je zdrojem podání.'],
+            ['revision_count', 'payroll_run_has_revision', 'Mzdový běh už obsahuje neměnnou revizi.'],
+        ] as [$field, $code, $message]) {
+            if ((int) $row[$field] > 0) {
+                return PayrollRunDeletionDecision::blocked($code, $message);
+            }
+        }
+        if ((int) $row['current_revision_no'] !== 0) {
+            return PayrollRunDeletionDecision::blocked(
+                'payroll_run_has_revision',
+                'Mzdový běh odkazuje na neměnnou revizi.',
+            );
+        }
+        $status = (string) $row['status'];
+        if (!in_array($status, ['draft', 'cancelled'], true)) {
+            return PayrollRunDeletionDecision::blocked(
+                'payroll_run_status_not_deletable',
+                'Mzdový běh v tomto stavu nelze smazat.',
+            );
+        }
+        if ((int) $row['created_event_count'] !== 1
+            || (int) $row['created_event_id'] <= 0
+        ) {
+            return PayrollRunDeletionDecision::blocked(
+                'payroll_run_has_event_history',
+                'Mzdový běh nemá platnou počáteční auditní událost.',
+            );
+        }
+
+        $cancelCommandId = null;
+        $cancelEventId = null;
+        if ($status === 'draft') {
+            if ((int) $row['row_version'] !== 1) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_command_history',
+                    'Koncept mzdového běhu nemá počáteční verzi.',
+                );
+            }
+            if ((int) $row['command_count'] !== 0) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_command_history',
+                    'Koncept mzdového běhu už obsahuje historii příkazů.',
+                );
+            }
+            if ((int) $row['event_count'] !== 1) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_event_history',
+                    'Koncept mzdového běhu nemá pouze počáteční auditní událost.',
+                );
+            }
+        } else {
+            if ((int) $row['row_version'] !== 2) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_command_history',
+                    'Zrušený mzdový běh nemá kanonickou verzi po zrušení.',
+                );
+            }
+            if ((int) $row['command_count'] !== 1) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_command_history',
+                    'Zrušený mzdový běh nemá jediný kanonický příkaz zrušení.',
+                );
+            }
+            if ((int) $row['event_count'] !== 2) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_event_history',
+                    'Zrušený mzdový běh nemá pouze počáteční událost a událost zrušení.',
+                );
+            }
+            $cancelCommandId = $this->canonicalCancelCommandId(
+                $supplierId,
+                $runId,
+                (int) $row['row_version'],
+            );
+            if ($cancelCommandId === null) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_command_history',
+                    'Příkaz zrušení mzdového běhu není kanonický.',
+                );
+            }
+            $cancelEventId = $this->canonicalCancelEventId(
+                $supplierId,
+                $runId,
+                (int) $row['row_version'],
+                $cancelCommandId,
+            );
+            if ($cancelEventId === null) {
+                return PayrollRunDeletionDecision::blocked(
+                    'payroll_run_has_event_history',
+                    'Auditní událost zrušení mzdového běhu není kanonická.',
+                );
+            }
+        }
+        if ((int) $row['conflicting_ownership_count'] > 0) {
+            return PayrollRunDeletionDecision::blocked(
+                'payroll_run_period_ownership_conflict',
+                'Rezervace mzdového období neodpovídá tomuto běhu.',
+            );
+        }
+
+        $ownsPeriod = $row['ownership_source_id'] !== null
+            && (int) $row['ownership_source_id'] === $runId;
+        if ($ownsPeriod
+            && (
+                (string) $row['ownership_processor'] !== 'payroll'
+                || (string) $row['ownership_source_type'] !== 'payroll_run'
+            )
+        ) {
+            return PayrollRunDeletionDecision::blocked(
+                'payroll_run_period_ownership_conflict',
+                'Rezervace mzdového období neodpovídá tomuto běhu.',
+            );
+        }
+
+        return PayrollRunDeletionDecision::allowed(
+            (int) $row['created_event_id'],
+            $cancelEventId,
+            $cancelCommandId,
+            $ownsPeriod,
+            $row['replacement_owner_run_id'] === null
+                ? null
+                : (int) $row['replacement_owner_run_id'],
+        );
+    }
+
+    private function canonicalCancelCommandId(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+    ): ?int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT command_receipt.id
+               FROM payroll_runs run
+               JOIN payroll_run_commands command_receipt
+                 ON command_receipt.supplier_id = run.supplier_id
+                AND command_receipt.run_id = run.id
+              WHERE run.supplier_id = ?
+                AND run.id = ?
+                AND run.status = "cancelled"
+                AND run.row_version = ?
+                AND run.row_version = 2
+                AND run.current_revision_no = 0
+                AND command_receipt.command_name = "cancel"
+                AND command_receipt.revision_id IS NULL
+                AND command_receipt.expected_row_version = 1
+                AND command_receipt.from_status = "draft"
+                AND command_receipt.to_status = "cancelled"
+                AND command_receipt.actor_user_id <=> run.updated_by
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.run_id")
+                ) = CAST(run.id AS CHAR)
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.from_status")
+                ) = "draft"
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.to_status")
+                ) = "cancelled"
+                AND CAST(JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.row_version")
+                ) AS UNSIGNED) = run.row_version',
+        );
+        $stmt->execute([$supplierId, $runId, $rowVersion]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    private function canonicalCancelEventId(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+        int $commandId,
+    ): ?int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT cancel_event.id
+               FROM payroll_runs run
+               JOIN payroll_run_commands command_receipt
+                 ON command_receipt.supplier_id = run.supplier_id
+                AND command_receipt.run_id = run.id
+                AND command_receipt.id = ?
+               JOIN payroll_run_events cancel_event
+                 ON cancel_event.supplier_id = run.supplier_id
+                AND cancel_event.run_id = run.id
+              WHERE run.supplier_id = ?
+                AND run.id = ?
+                AND run.status = "cancelled"
+                AND run.row_version = ?
+                AND run.row_version = 2
+                AND run.current_revision_no = 0
+                AND cancel_event.event_type = "cancel"
+                AND cancel_event.revision_id IS NULL
+                AND cancel_event.from_status = "draft"
+                AND cancel_event.to_status = "cancelled"
+                AND cancel_event.actor_user_id <=> command_receipt.actor_user_id
+                AND cancel_event.reason IS NOT NULL
+                AND TRIM(cancel_event.reason) <> ""
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(cancel_event.metadata_json, "$.request_hash")
+                ) = command_receipt.request_hash
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(
+                        cancel_event.metadata_json,
+                        "$.idempotency_key_hash"
+                    )
+                ) = LOWER(HEX(command_receipt.idempotency_key_hash))
+                AND CAST(JSON_UNQUOTE(
+                    JSON_EXTRACT(cancel_event.metadata_json, "$.row_version")
+                ) AS UNSIGNED) = run.row_version',
+        );
+        $stmt->execute([$commandId, $supplierId, $runId, $rowVersion]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    public function enableEmptyRunDeleteGuard(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+        int $eventId,
+        ?int $cancelEventId,
+        ?int $cancelCommandId,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SET @payroll_empty_run_delete_supplier_id = ?,
+                 @payroll_empty_run_delete_run_id = ?,
+                 @payroll_empty_run_delete_row_version = ?,
+                 @payroll_empty_run_delete_event_id = ?,
+                 @payroll_empty_run_delete_cancel_event_id = ?,
+                 @payroll_empty_run_delete_cancel_command_id = ?',
+        );
+        $stmt->execute([
+            $supplierId,
+            $runId,
+            $rowVersion,
+            $eventId,
+            $cancelEventId,
+            $cancelCommandId,
+        ]);
+    }
+
+    public function clearEmptyRunDeleteGuard(): void
+    {
+        $this->db->pdo()->exec(
+            'SET @payroll_empty_run_delete_supplier_id = NULL,
+                 @payroll_empty_run_delete_run_id = NULL,
+                 @payroll_empty_run_delete_row_version = NULL,
+                 @payroll_empty_run_delete_event_id = NULL,
+                 @payroll_empty_run_delete_cancel_event_id = NULL,
+                 @payroll_empty_run_delete_cancel_command_id = NULL',
+        );
+    }
+
+    public function deleteCanonicalCancelEvent(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+        int $createdEventId,
+        int $cancelEventId,
+        int $cancelCommandId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE cancel_event
+               FROM payroll_run_events cancel_event
+               JOIN payroll_runs run
+                 ON run.supplier_id = cancel_event.supplier_id
+                AND run.id = cancel_event.run_id
+               JOIN payroll_run_events created_event
+                 ON created_event.supplier_id = run.supplier_id
+                AND created_event.run_id = run.id
+                AND created_event.id = ?
+               JOIN payroll_run_commands command_receipt
+                 ON command_receipt.supplier_id = run.supplier_id
+                AND command_receipt.run_id = run.id
+                AND command_receipt.id = ?
+          LEFT JOIN payroll_run_events other_event
+                 ON other_event.supplier_id = run.supplier_id
+                AND other_event.run_id = run.id
+                AND other_event.id NOT IN (created_event.id, cancel_event.id)
+          LEFT JOIN payroll_run_commands other_command
+                 ON other_command.supplier_id = run.supplier_id
+                AND other_command.run_id = run.id
+                AND other_command.id <> command_receipt.id
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+          LEFT JOIN payroll_generated_documents document
+                 ON document.supplier_id = run.supplier_id
+                AND document.run_id = run.id
+          LEFT JOIN payroll_posting_batches posting
+                 ON posting.supplier_id = run.supplier_id
+                AND posting.run_id = run.id
+              WHERE run.supplier_id = ?
+                AND run.id = ?
+                AND run.status = "cancelled"
+                AND run.row_version = ?
+                AND run.row_version = 2
+                AND run.current_revision_no = 0
+                AND cancel_event.id = ?
+                AND cancel_event.event_type = "cancel"
+                AND cancel_event.revision_id IS NULL
+                AND cancel_event.from_status = "draft"
+                AND cancel_event.to_status = "cancelled"
+                AND cancel_event.actor_user_id <=> command_receipt.actor_user_id
+                AND cancel_event.reason IS NOT NULL
+                AND TRIM(cancel_event.reason) <> ""
+                AND command_receipt.command_name = "cancel"
+                AND command_receipt.revision_id IS NULL
+                AND command_receipt.expected_row_version = 1
+                AND command_receipt.from_status = "draft"
+                AND command_receipt.to_status = "cancelled"
+                AND command_receipt.actor_user_id <=> run.updated_by
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(cancel_event.metadata_json, "$.request_hash")
+                ) = command_receipt.request_hash
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(
+                        cancel_event.metadata_json,
+                        "$.idempotency_key_hash"
+                    )
+                ) = LOWER(HEX(command_receipt.idempotency_key_hash))
+                AND CAST(JSON_UNQUOTE(
+                    JSON_EXTRACT(cancel_event.metadata_json, "$.row_version")
+                ) AS UNSIGNED) = run.row_version
+                AND created_event.event_type = "created"
+                AND created_event.revision_id IS NULL
+                AND created_event.from_status IS NULL
+                AND created_event.to_status = "draft"
+                AND created_event.reason IS NULL
+                AND created_event.actor_user_id <=> run.created_by
+                AND other_event.id IS NULL
+                AND other_command.id IS NULL
+                AND revision.id IS NULL
+                AND document.id IS NULL
+                AND posting.id IS NULL',
+        );
+        $stmt->execute([
+            $createdEventId,
+            $cancelCommandId,
+            $supplierId,
+            $runId,
+            $rowVersion,
+            $cancelEventId,
+        ]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    public function deleteCanonicalCancelCommand(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+        int $createdEventId,
+        int $cancelCommandId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE command_receipt
+               FROM payroll_run_commands command_receipt
+               JOIN payroll_runs run
+                 ON run.supplier_id = command_receipt.supplier_id
+                AND run.id = command_receipt.run_id
+               JOIN payroll_run_events created_event
+                 ON created_event.supplier_id = run.supplier_id
+                AND created_event.run_id = run.id
+                AND created_event.id = ?
+          LEFT JOIN payroll_run_events other_event
+                 ON other_event.supplier_id = run.supplier_id
+                AND other_event.run_id = run.id
+                AND other_event.id <> created_event.id
+          LEFT JOIN payroll_run_commands other_command
+                 ON other_command.supplier_id = run.supplier_id
+                AND other_command.run_id = run.id
+                AND other_command.id <> command_receipt.id
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+          LEFT JOIN payroll_generated_documents document
+                 ON document.supplier_id = run.supplier_id
+                AND document.run_id = run.id
+          LEFT JOIN payroll_posting_batches posting
+                 ON posting.supplier_id = run.supplier_id
+                AND posting.run_id = run.id
+              WHERE run.supplier_id = ?
+                AND run.id = ?
+                AND run.status = "cancelled"
+                AND run.row_version = ?
+                AND run.row_version = 2
+                AND run.current_revision_no = 0
+                AND command_receipt.id = ?
+                AND command_receipt.command_name = "cancel"
+                AND command_receipt.revision_id IS NULL
+                AND command_receipt.expected_row_version = 1
+                AND command_receipt.from_status = "draft"
+                AND command_receipt.to_status = "cancelled"
+                AND command_receipt.actor_user_id <=> run.updated_by
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.run_id")
+                ) = CAST(run.id AS CHAR)
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.from_status")
+                ) = "draft"
+                AND JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.to_status")
+                ) = "cancelled"
+                AND CAST(JSON_UNQUOTE(
+                    JSON_EXTRACT(command_receipt.result_json, "$.row_version")
+                ) AS UNSIGNED) = run.row_version
+                AND created_event.event_type = "created"
+                AND created_event.revision_id IS NULL
+                AND created_event.from_status IS NULL
+                AND created_event.to_status = "draft"
+                AND created_event.reason IS NULL
+                AND created_event.actor_user_id <=> run.created_by
+                AND other_event.id IS NULL
+                AND other_command.id IS NULL
+                AND revision.id IS NULL
+                AND document.id IS NULL
+                AND posting.id IS NULL',
+        );
+        $stmt->execute([
+            $createdEventId,
+            $supplierId,
+            $runId,
+            $rowVersion,
+            $cancelCommandId,
+        ]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    public function deleteInitialEvent(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+        int $eventId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE event
+               FROM payroll_run_events event
+               JOIN payroll_runs run
+                 ON run.supplier_id = event.supplier_id
+                AND run.id = event.run_id
+          LEFT JOIN payroll_run_events other_event
+                 ON other_event.supplier_id = event.supplier_id
+                AND other_event.run_id = event.run_id
+                AND other_event.id <> event.id
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+          LEFT JOIN payroll_run_commands command_receipt
+                 ON command_receipt.supplier_id = run.supplier_id
+                AND command_receipt.run_id = run.id
+          LEFT JOIN payroll_generated_documents document
+                 ON document.supplier_id = run.supplier_id
+                AND document.run_id = run.id
+          LEFT JOIN payroll_posting_batches posting
+                 ON posting.supplier_id = run.supplier_id
+                AND posting.run_id = run.id
+              WHERE event.supplier_id = ?
+                AND event.run_id = ?
+                AND event.id = ?
+                AND run.row_version = ?
+                AND run.status IN ("draft", "cancelled")
+                AND (
+                    (run.status = "draft" AND run.row_version = 1)
+                    OR (run.status = "cancelled" AND run.row_version = 2)
+                )
+                AND run.current_revision_no = 0
+                AND event.event_type = "created"
+                AND event.revision_id IS NULL
+                AND event.from_status IS NULL
+                AND event.to_status = "draft"
+                AND event.reason IS NULL
+                AND event.actor_user_id <=> run.created_by
+                AND other_event.id IS NULL
+                AND revision.id IS NULL
+                AND command_receipt.id IS NULL
+                AND document.id IS NULL
+                AND posting.id IS NULL',
+        );
+        $stmt->execute([$supplierId, $runId, $eventId, $rowVersion]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    public function transferOrReleasePeriodOwnership(
+        int $supplierId,
+        string $periodStart,
+        int $runId,
+        ?int $replacementRunId,
+    ): void {
+        if ($replacementRunId !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE payroll_period_ownership
+                    SET source_id = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE supplier_id = ? AND period_start = ?
+                    AND processor = "payroll"
+                    AND source_type = "payroll_run"
+                    AND source_id = ?',
+            );
+            $stmt->execute([
+                $replacementRunId,
+                $supplierId,
+                $periodStart,
+                $runId,
+            ]);
+        } else {
+            $stmt = $this->db->pdo()->prepare(
+                'DELETE FROM payroll_period_ownership
+                  WHERE supplier_id = ? AND period_start = ?
+                    AND processor = "payroll"
+                    AND source_type = "payroll_run"
+                    AND source_id = ?',
+            );
+            $stmt->execute([$supplierId, $periodStart, $runId]);
+        }
+        if ($stmt->rowCount() !== 1) {
+            throw new PayrollRunDeletionException(
+                'payroll_run_period_ownership_conflict',
+                'Rezervace mzdového období se mezitím změnila.',
+            );
+        }
+    }
+
+    public function deleteEmptyRunRow(
+        int $supplierId,
+        int $runId,
+        int $rowVersion,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE run
+               FROM payroll_runs run
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+          LEFT JOIN payroll_run_commands command_receipt
+                 ON command_receipt.supplier_id = run.supplier_id
+                AND command_receipt.run_id = run.id
+          LEFT JOIN payroll_run_events event
+                 ON event.supplier_id = run.supplier_id
+                AND event.run_id = run.id
+          LEFT JOIN payroll_generated_documents document
+                 ON document.supplier_id = run.supplier_id
+                AND document.run_id = run.id
+          LEFT JOIN payroll_posting_batches posting
+                 ON posting.supplier_id = run.supplier_id
+                AND posting.run_id = run.id
+              WHERE run.supplier_id = ?
+                AND run.id = ?
+                AND run.row_version = ?
+                AND run.status IN ("draft", "cancelled")
+                AND (
+                    (run.status = "draft" AND run.row_version = 1)
+                    OR (run.status = "cancelled" AND run.row_version = 2)
+                )
+                AND run.current_revision_no = 0
+                AND revision.id IS NULL
+                AND command_receipt.id IS NULL
+                AND event.id IS NULL
+                AND document.id IS NULL
+                AND posting.id IS NULL',
+        );
+        $stmt->execute([$supplierId, $runId, $rowVersion]);
+
+        return $stmt->rowCount() === 1;
+    }
+
     /** @return array<string,mixed>|null */
     public function currentRevision(int $supplierId, int $runId): ?array
     {

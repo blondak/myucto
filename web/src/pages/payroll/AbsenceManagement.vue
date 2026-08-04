@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { apiErrorMessage } from '@/api/errors'
 import {
   payrollAbsenceApi,
   type AbsencePayload,
@@ -34,6 +35,10 @@ const decisiveTo = localDate(new Date(year, applicationQuarterStartMonth, 0))
 const loading = ref(true)
 const saving = ref(false)
 const tab = ref<'absences' | 'averages' | 'leave'>('absences')
+const absenceError = ref('')
+const averageError = ref('')
+const entitlementError = ref('')
+const entryError = ref('')
 const employments = ref<PayrollAbsenceEmployment[]>([])
 const absences = ref<PayrollAbsence[]>([])
 const averages = ref<AverageSnapshot[]>([])
@@ -43,6 +48,8 @@ const selectedEmploymentId = ref<number | null>(null)
 const filterFrom = ref(monthStart)
 const filterTo = ref(monthEnd)
 const leaveYear = ref(year)
+const minimumFormYear = year - 5
+const maximumFormYear = year + 2
 const canWrite = computed(() => auth.canWrite('payroll.time.write'))
 const fieldClass = 'mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
@@ -53,14 +60,14 @@ const absenceTypes: AbsenceType[] = [
 ]
 const leaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
 
-const absenceForm = reactive<AbsencePayload>({
+const absenceForm = reactive({
   employment_id: 0,
   absence_type: 'vacation',
   date_from: monthStart,
   date_to: monthStart,
   timezone_name: 'Europe/Prague',
-  partial_first_minutes: null,
-  partial_last_minutes: null,
+  partial_first_hours: null as number | null,
+  partial_last_hours: null as number | null,
   average_snapshot_id: null,
   note: null,
 })
@@ -70,20 +77,20 @@ const averageForm = reactive({
   applicable_quarter: applicationQuarter,
   decisive_from: decisiveFrom,
   decisive_to: decisiveTo,
-  gross_earnings_minor: 0,
-  longer_period_allocated_minor: 0,
-  worked_minutes: 0,
+  gross_earnings_czk: 0,
+  longer_period_allocated_czk: 0,
+  worked_hours: 0,
   worked_days: 0,
-  probable_hourly_minor: null as number | null,
+  probable_hourly_czk: null as number | null,
   rationale: '',
 })
 const entitlementForm = reactive({
   employment_id: 0,
   leave_year: year,
-  weekly_minutes: 2400,
+  weekly_hours: 40,
   entitlement_weeks: 4,
   continuous_calendar_days: 365,
-  worked_equivalent_minutes: 124800,
+  worked_equivalent_hours: 2080,
   rationale: '',
 })
 const entryForm = reactive({
@@ -91,7 +98,7 @@ const entryForm = reactive({
   leave_year: year,
   effective_date: `${year}-01-01`,
   entry_type: 'adjustment',
-  minutes_delta: 60,
+  hours_delta: 1,
   reason: '',
 })
 const dpnReviews = reactive<Record<number, {
@@ -126,6 +133,58 @@ const needsAverage = computed(() =>
 const canCreateAbsence = computed(() =>
   !saving.value && (!needsAverage.value || absenceForm.average_snapshot_id !== null),
 )
+
+function exactError(error: any, fallbackKey: string) {
+  return apiErrorMessage(error, t(fallbackKey))
+}
+
+function validatedNumber(value: unknown, options: {
+  nullable?: boolean
+  positive?: boolean
+  nonZero?: boolean
+  signed?: boolean
+} = {}): number | null {
+  if ((value === null || value === '') && options.nullable) return null
+  const number = Number(value)
+  if (!Number.isFinite(number)
+    || (!options.signed && (options.positive ? number <= 0 : number < 0))
+    || (options.nonZero && number === 0)
+  ) {
+    throw new Error(t('payroll_absence.validation.number'))
+  }
+  return number
+}
+
+function toMinor(value: unknown, nullable = false, positive = false): number | null {
+  const number = validatedNumber(value, { nullable, positive })
+  if (number === null) return null
+  const minor = Math.round(number * 100)
+  if (Math.abs((number * 100) - minor) > 1e-7) {
+    throw new Error(t('payroll_absence.validation.money_precision'))
+  }
+  return minor
+}
+
+function hoursToMinutes(
+  value: unknown,
+  options: { nullable?: boolean; positive?: boolean; nonZero?: boolean; signed?: boolean } = {},
+): number | null {
+  const number = validatedNumber(value, options)
+  if (number === null) return null
+  const minutes = Math.round(number * 60)
+  if (Math.abs((number * 60) - minutes) > 1e-7) {
+    throw new Error(t('payroll_absence.validation.hour_precision'))
+  }
+  return minutes
+}
+
+function wholeNumber(value: unknown, positive = false): number {
+  const number = validatedNumber(value, { positive })
+  if (number === null || !Number.isInteger(number)) {
+    throw new Error(t('payroll_absence.validation.whole_number'))
+  }
+  return number
+}
 
 async function loadContext() {
   employments.value = await payrollAbsenceApi.context()
@@ -173,16 +232,33 @@ async function createAbsence() {
     toast.error(t('payroll_absence.messages.average_required'))
     return
   }
+  absenceError.value = ''
   saving.value = true
   try {
-    await payrollAbsenceApi.createAbsence({
-      ...absenceForm,
+    const payload: AbsencePayload = {
+      employment_id: absenceForm.employment_id,
+      absence_type: absenceForm.absence_type as AbsenceType,
+      date_from: absenceForm.date_from,
+      date_to: absenceForm.date_to,
+      timezone_name: absenceForm.timezone_name,
+      partial_first_minutes: hoursToMinutes(absenceForm.partial_first_hours, {
+        nullable: true,
+        positive: true,
+      }),
+      partial_last_minutes: hoursToMinutes(absenceForm.partial_last_hours, {
+        nullable: true,
+        positive: true,
+      }),
       average_snapshot_id: needsAverage.value ? absenceForm.average_snapshot_id : null,
-    })
+      note: absenceForm.note,
+    }
+    await payrollAbsenceApi.createAbsence(payload)
     toast.success(t('payroll_absence.messages.absence_created'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    absenceError.value = error instanceof Error && !(error as any)?.response
+      ? error.message
+      : exactError(error, 'payroll_absence.messages.save_failed')
   } finally {
     saving.value = false
   }
@@ -223,13 +299,28 @@ async function cancel(item: PayrollAbsence) {
 }
 
 async function createAverage() {
+  averageError.value = ''
   saving.value = true
   try {
-    await payrollAbsenceApi.createAverage({ ...averageForm })
+    await payrollAbsenceApi.createAverage({
+      employment_id: averageForm.employment_id,
+      applicable_year: wholeNumber(averageForm.applicable_year, true),
+      applicable_quarter: wholeNumber(averageForm.applicable_quarter, true),
+      decisive_from: averageForm.decisive_from,
+      decisive_to: averageForm.decisive_to,
+      gross_earnings_minor: toMinor(averageForm.gross_earnings_czk),
+      longer_period_allocated_minor: toMinor(averageForm.longer_period_allocated_czk),
+      worked_minutes: hoursToMinutes(averageForm.worked_hours),
+      worked_days: wholeNumber(averageForm.worked_days),
+      probable_hourly_minor: toMinor(averageForm.probable_hourly_czk, true, true),
+      rationale: averageForm.rationale || null,
+    })
     toast.success(t('payroll_absence.messages.average_created'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    averageError.value = error instanceof Error && !(error as any)?.response
+      ? error.message
+      : exactError(error, 'payroll_absence.messages.save_failed')
   } finally {
     saving.value = false
   }
@@ -249,26 +340,49 @@ async function approveAverage(item: AverageSnapshot) {
 }
 
 async function createEntitlement() {
+  entitlementError.value = ''
   saving.value = true
   try {
-    await payrollAbsenceApi.createEntitlement({ ...entitlementForm })
+    await payrollAbsenceApi.createEntitlement({
+      employment_id: entitlementForm.employment_id,
+      leave_year: wholeNumber(entitlementForm.leave_year, true),
+      weekly_minutes: hoursToMinutes(entitlementForm.weekly_hours, { positive: true }),
+      entitlement_weeks: wholeNumber(entitlementForm.entitlement_weeks, true),
+      continuous_calendar_days: wholeNumber(entitlementForm.continuous_calendar_days, true),
+      worked_equivalent_minutes: hoursToMinutes(entitlementForm.worked_equivalent_hours, {
+        positive: true,
+      }),
+      rationale: entitlementForm.rationale,
+    })
     toast.success(t('payroll_absence.messages.entitlement_created'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    entitlementError.value = error instanceof Error && !(error as any)?.response
+      ? error.message
+      : exactError(error, 'payroll_absence.messages.save_failed')
   } finally {
     saving.value = false
   }
 }
 
 async function createEntry() {
+  entryError.value = ''
   saving.value = true
   try {
-    await payrollAbsenceApi.createLeaveEntry({ ...entryForm })
+    await payrollAbsenceApi.createLeaveEntry({
+      employment_id: entryForm.employment_id,
+      leave_year: wholeNumber(entryForm.leave_year, true),
+      effective_date: entryForm.effective_date,
+      entry_type: entryForm.entry_type,
+      minutes_delta: hoursToMinutes(entryForm.hours_delta, { nonZero: true, signed: true }),
+      reason: entryForm.reason,
+    })
     toast.success(t('payroll_absence.messages.entry_created'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    entryError.value = error instanceof Error && !(error as any)?.response
+      ? error.message
+      : exactError(error, 'payroll_absence.messages.save_failed')
   } finally {
     saving.value = false
   }
@@ -287,9 +401,20 @@ function minutes(value: number) {
 
 watch(selectedEmploymentId, () => {
   absenceForm.average_snapshot_id = null
+  absenceError.value = ''
+  averageError.value = ''
+  entitlementError.value = ''
+  entryError.value = ''
   void loadData()
 })
-watch(leaveYear, loadData)
+watch(leaveYear, (selectedYear, previousYear) => {
+  entitlementForm.leave_year = selectedYear
+  entryForm.leave_year = selectedYear
+  if (entryForm.effective_date === `${previousYear}-01-01`) {
+    entryForm.effective_date = `${selectedYear}-01-01`
+  }
+  void loadData()
+})
 watch(
   [() => averageForm.applicable_year, () => averageForm.applicable_quarter],
   ([selectedYear, selectedQuarter]) => {
@@ -363,6 +488,7 @@ onMounted(async () => {
         v-for="name in (['absences', 'averages', 'leave'] as const)"
         :key="name"
         type="button"
+        :data-test="`tab-${name}`"
         class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
         :class="tab === name
           ? 'border-payroll-600 text-payroll-600'
@@ -380,7 +506,7 @@ onMounted(async () => {
     <template v-else-if="tab === 'absences'">
       <section v-if="canWrite" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.absences.new') }}</h2>
-        <form class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAbsence">
+        <form data-test="absence-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAbsence">
           <div>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.type') }}</span>
             <SearchableSelect
@@ -411,11 +537,25 @@ onMounted(async () => {
           </div>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.partial_first') }}</span>
-            <input v-model.number="absenceForm.partial_first_minutes" min="1" type="number" :class="fieldClass">
+            <input
+              v-model.number="absenceForm.partial_first_hours"
+              data-test="absence-partial-first-hours"
+              min="0.25"
+              step="0.25"
+              type="number"
+              :class="fieldClass"
+            >
           </label>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.partial_last') }}</span>
-            <input v-model.number="absenceForm.partial_last_minutes" min="1" type="number" :class="fieldClass">
+            <input
+              v-model.number="absenceForm.partial_last_hours"
+              data-test="absence-partial-last-hours"
+              min="0.25"
+              step="0.25"
+              type="number"
+              :class="fieldClass"
+            >
           </label>
           <label class="sm:col-span-2">
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.note') }}</span>
@@ -429,6 +569,14 @@ onMounted(async () => {
               {{ t('payroll_absence.absences.create') }}
             </button>
           </div>
+          <p
+            v-if="absenceError"
+            data-test="absence-error"
+            role="alert"
+            class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4"
+          >
+            {{ absenceError }}
+          </p>
         </form>
       </section>
 
@@ -493,20 +641,28 @@ onMounted(async () => {
     <template v-else-if="tab === 'averages'">
       <section v-if="canWrite" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.averages.new') }}</h2>
-        <form class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
-          <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" min="2026" max="2026" type="number" :class="fieldClass"></label>
+        <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
+          <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.quarter') }}</span><input v-model.number="averageForm.applicable_quarter" min="1" max="4" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_from') }}</span><input v-model="averageForm.decisive_from" type="date" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_to') }}</span><input v-model="averageForm.decisive_to" type="date" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.gross_minor') }}</span><input v-model.number="averageForm.gross_earnings_minor" min="0" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.allocated_minor') }}</span><input v-model.number="averageForm.longer_period_allocated_minor" min="0" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span><input v-model.number="averageForm.worked_minutes" min="0" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.worked_days') }}</span><input v-model.number="averageForm.worked_days" min="0" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span><input v-model.number="averageForm.probable_hourly_minor" min="1" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.gross_minor') }}</span><input v-model.number="averageForm.gross_earnings_czk" data-test="average-gross-czk" min="0" step="0.01" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.allocated_minor') }}</span><input v-model.number="averageForm.longer_period_allocated_czk" data-test="average-allocated-czk" min="0" step="0.01" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span><input v-model.number="averageForm.worked_hours" data-test="average-worked-hours" min="0" step="0.25" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.worked_days') }}</span><input v-model.number="averageForm.worked_days" data-test="average-worked-days" min="0" step="1" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span><input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass"></label>
           <label class="sm:col-span-2 lg:col-span-3"><span class="form-label">{{ t('payroll_absence.averages.rationale') }}</span><input v-model="averageForm.rationale" maxlength="1000" type="text" :class="fieldClass"></label>
           <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
             <button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.averages.create') }}</button>
           </div>
+          <p
+            v-if="averageError"
+            data-test="average-error"
+            role="alert"
+            class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4"
+          >
+            {{ averageError }}
+          </p>
         </form>
       </section>
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -523,29 +679,31 @@ onMounted(async () => {
       <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.leave.balance') }}</h2><p class="mt-1 text-3xl font-semibold text-payroll-600">{{ minutes(leaveBalance) }}</p></div>
-          <label><span class="form-label">{{ t('payroll_absence.leave.year') }}</span><input v-model.number="leaveYear" min="2024" max="2026" type="number" :class="[fieldClass, 'w-32']"></label>
+          <label><span class="form-label">{{ t('payroll_absence.leave.year') }}</span><input v-model.number="leaveYear" data-test="leave-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="[fieldClass, 'w-32']"></label>
         </div>
       </section>
       <div v-if="canWrite" class="grid gap-4 xl:grid-cols-2">
         <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
           <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.entitlement') }}</h2>
-          <form class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntitlement">
-            <label><span class="form-label">{{ t('payroll_absence.leave.weekly_minutes') }}</span><input v-model.number="entitlementForm.weekly_minutes" min="1" type="number" :class="fieldClass"></label>
+          <form data-test="leave-entitlement-form" class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntitlement">
+            <label><span class="form-label">{{ t('payroll_absence.leave.weekly_minutes') }}</span><input v-model.number="entitlementForm.weekly_hours" data-test="leave-weekly-hours" min="0.25" step="0.25" type="number" :class="fieldClass"></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.weeks') }}</span><input v-model.number="entitlementForm.entitlement_weeks" min="1" type="number" :class="fieldClass"></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.duration_days') }}</span><input v-model.number="entitlementForm.continuous_calendar_days" min="1" type="number" :class="fieldClass"></label>
-            <label><span class="form-label">{{ t('payroll_absence.leave.worked_equivalent') }}</span><input v-model.number="entitlementForm.worked_equivalent_minutes" min="1" type="number" :class="fieldClass"></label>
-            <label class="sm:col-span-2"><span class="form-label">{{ t('payroll_absence.leave.rationale') }}</span><textarea v-model="entitlementForm.rationale" required maxlength="1000" :class="textareaClass" rows="2" /></label>
+            <label><span class="form-label">{{ t('payroll_absence.leave.worked_equivalent') }}</span><input v-model.number="entitlementForm.worked_equivalent_hours" data-test="leave-worked-hours" min="0.25" step="0.25" type="number" :class="fieldClass"></label>
+            <label class="sm:col-span-2"><span class="form-label">{{ t('payroll_absence.leave.rationale') }}</span><textarea v-model="entitlementForm.rationale" data-test="leave-rationale" required maxlength="1000" :class="textareaClass" rows="2" /></label>
             <div class="flex flex-wrap justify-end sm:col-span-2"><button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.leave.calculate') }}</button></div>
+            <p v-if="entitlementError" data-test="entitlement-error" role="alert" class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2">{{ entitlementError }}</p>
           </form>
         </section>
         <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
           <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.manual_entry') }}</h2>
-          <form class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntry">
+          <form data-test="leave-entry-form" class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntry">
             <div><span class="form-label">{{ t('payroll_absence.leave.entry_type') }}</span><SearchableSelect v-model="entryForm.entry_type" :options="leaveEntryTypeOptions" :clearable="false" accent="payroll" :aria-label="t('payroll_absence.leave.entry_type')" /></div>
             <label><span class="form-label">{{ t('payroll_absence.leave.effective_date') }}</span><input v-model="entryForm.effective_date" type="date" :class="fieldClass"></label>
-            <label><span class="form-label">{{ t('payroll_absence.leave.minutes_delta') }}</span><input v-model.number="entryForm.minutes_delta" type="number" :class="fieldClass"></label>
-            <label><span class="form-label">{{ t('payroll_absence.leave.reason') }}</span><input v-model="entryForm.reason" required maxlength="1000" :class="fieldClass"></label>
+            <label><span class="form-label">{{ t('payroll_absence.leave.minutes_delta') }}</span><input v-model.number="entryForm.hours_delta" data-test="leave-entry-hours" step="0.25" type="number" :class="fieldClass"></label>
+            <label><span class="form-label">{{ t('payroll_absence.leave.reason') }}</span><input v-model="entryForm.reason" data-test="leave-entry-reason" required maxlength="1000" :class="fieldClass"></label>
             <div class="flex flex-wrap justify-end sm:col-span-2"><button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.leave.add') }}</button></div>
+            <p v-if="entryError" data-test="entry-error" role="alert" class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2">{{ entryError }}</p>
           </form>
         </section>
       </div>

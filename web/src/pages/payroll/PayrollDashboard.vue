@@ -5,6 +5,7 @@ import { payrollApi, type PayrollCapabilitiesResponse } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -12,7 +13,8 @@ const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
-const startPeriod = ref(new Date().toISOString().slice(0, 7))
+const currentPeriod = localPayrollPeriod()
+const startPeriod = ref(currentPeriod)
 
 const state = computed(() => capabilities.value?.state ?? null)
 const canConfigure = computed(() => auth.canWrite('payroll.settings'))
@@ -152,43 +154,96 @@ onMounted(load)
             {{ t('payroll.activation.disable') }}
           </button>
         </div>
-        <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <article class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
-            <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
-              {{ t('payroll.dashboard.start_period') }}
-            </p>
-            <p class="mt-2 text-xl font-semibold text-neutral-900">{{ state.start_period }}</p>
-          </article>
-          <article class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
-            <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
-              {{ t('payroll.dashboard.supported_years') }}
-            </p>
-            <p class="mt-2 text-xl font-semibold text-neutral-900">
-              {{ capabilities.support_matrix.supported_years.join(', ') }}
-            </p>
-          </article>
-          <article class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
-            <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
-              {{ t('payroll.dashboard.available_features') }}
-            </p>
-            <p class="mt-2 text-xl font-semibold text-neutral-900">{{ availableFeatures.length }}</p>
-          </article>
-          <article class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
-            <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
-              {{ t('payroll.dashboard.matrix_version') }}
-            </p>
-            <p class="mt-2 break-all text-sm font-semibold text-neutral-900">
-              {{ capabilities.support_matrix.version }}
-            </p>
-          </article>
+        <section
+          class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+          data-test="monthly-workspace"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.dashboard.month.title') }}</h2>
+              <p class="mt-1 text-sm text-neutral-500">
+                {{ t('payroll.dashboard.month.description', { period: currentPeriod }) }}
+              </p>
+            </div>
+            <span class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-700">
+              {{ currentPeriod }}
+            </span>
+          </div>
+          <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <RouterLink
+              :to="{ name: 'payroll-quick-inputs' }"
+              class="group rounded-lg border border-payroll-500/40 bg-payroll-50 p-4 transition hover:border-payroll-500 hover:shadow-sm"
+            >
+              <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.dashboard.month.quick_inputs') }}</h3>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.dashboard.month.quick_inputs_hint') }}</p>
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-runs' }"
+              class="group rounded-lg border border-neutral-200 p-4 transition hover:border-payroll-500/60 hover:bg-payroll-50 hover:shadow-sm"
+            >
+              <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.dashboard.month.runs') }}</h3>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.dashboard.month.runs_hint') }}</p>
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-people' }"
+              class="group rounded-lg border border-neutral-200 p-4 transition hover:border-payroll-500/60 hover:bg-payroll-50 hover:shadow-sm"
+            >
+              <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+              <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.dashboard.month.people') }}</h3>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.dashboard.month.people_hint') }}</p>
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-payments' }"
+              class="group rounded-lg border border-neutral-200 p-4 transition hover:border-payroll-500/60 hover:bg-payroll-50 hover:shadow-sm"
+            >
+              <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
+              <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.dashboard.month.payments') }}</h3>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.dashboard.month.payments_hint') }}</p>
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-documents' }"
+              class="group rounded-lg border border-neutral-200 p-4 transition hover:border-payroll-500/60 hover:bg-payroll-50 hover:shadow-sm"
+            >
+              <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.dashboard.month.documents') }}</h3>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.dashboard.month.documents_hint') }}</p>
+            </RouterLink>
+          </div>
         </section>
       </div>
 
-      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.capabilities.title') }}</h2>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.capabilities.description') }}</p>
+      <details
+        class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        data-test="support-diagnostics"
+      >
+        <summary class="cursor-pointer px-4 py-4 text-sm font-medium text-neutral-700 sm:px-6">
+          {{ t('payroll.capabilities.diagnostics') }}
+        </summary>
+        <section class="border-t border-neutral-200 p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.capabilities.title') }}</h2>
+          <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.capabilities.description') }}</p>
+          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
+            <div class="rounded-lg bg-neutral-50 p-3">
+              <dt class="text-xs text-neutral-500">{{ t('payroll.dashboard.start_period') }}</dt>
+              <dd class="mt-1 font-semibold text-neutral-900">{{ state.start_period }}</dd>
+            </div>
+            <div class="rounded-lg bg-neutral-50 p-3">
+              <dt class="text-xs text-neutral-500">{{ t('payroll.dashboard.supported_years') }}</dt>
+              <dd class="mt-1 font-semibold text-neutral-900">{{ capabilities.support_matrix.supported_years.join(', ') }}</dd>
+            </div>
+            <div class="rounded-lg bg-neutral-50 p-3">
+              <dt class="text-xs text-neutral-500">{{ t('payroll.dashboard.available_features') }}</dt>
+              <dd class="mt-1 font-semibold text-neutral-900">{{ availableFeatures.length }}</dd>
+            </div>
+            <div class="rounded-lg bg-neutral-50 p-3">
+              <dt class="text-xs text-neutral-500">{{ t('payroll.dashboard.matrix_version') }}</dt>
+              <dd class="mt-1 break-all font-semibold text-neutral-900">{{ capabilities.support_matrix.version }}</dd>
+            </div>
+          </dl>
 
-        <div class="mt-4 hidden overflow-x-auto md:block">
+          <div class="mt-4 hidden overflow-x-auto md:block">
           <table class="min-w-full divide-y divide-neutral-200 text-sm">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
@@ -218,9 +273,9 @@ onMounted(load)
               </tr>
             </tbody>
           </table>
-        </div>
+          </div>
 
-        <div class="mt-4 grid grid-cols-1 gap-3 md:hidden">
+          <div class="mt-4 grid grid-cols-1 gap-3 md:hidden">
           <article
             v-for="feature in capabilities.support_matrix.features"
             :key="feature.key"
@@ -246,12 +301,13 @@ onMounted(load)
               </div>
             </dl>
           </article>
-        </div>
+          </div>
 
-        <p v-if="plannedFeatures.length" class="mt-4 text-xs text-neutral-500">
-          {{ t('payroll.capabilities.planned_hint') }}
-        </p>
-      </section>
+          <p v-if="plannedFeatures.length" class="mt-4 text-xs text-neutral-500">
+            {{ t('payroll.capabilities.planned_hint') }}
+          </p>
+        </section>
+      </details>
     </template>
   </div>
 </template>

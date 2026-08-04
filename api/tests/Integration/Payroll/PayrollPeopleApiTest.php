@@ -9,6 +9,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -251,6 +253,174 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertSame('payroll_disabled', $this->json($disabledResponse)['error']['code']);
     }
 
+    public function testCreateAtomicallyAddsSharedEmployeeProfileAndFirstEmployment(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'readonly',
+                'session',
+                [
+                    'full_name' => 'Nová Testovací',
+                    'birth_date' => '1990-04-12',
+                    'birth_number' => '9004121234',
+                    'relation_type' => 'dpp',
+                    'planned_start_on' => '2026-08-10',
+                    'monthly_gross' => 12_500,
+                ],
+                new EffectiveRole(
+                    42,
+                    'Personalista',
+                    'staff',
+                    true,
+                    ['payroll.person.write' => AccessLevel::WRITE->value],
+                ),
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $person = $this->json($response)['person'];
+        self::assertSame('Nová Testovací', $person['full_name']);
+        self::assertSame('setup', $person['profile_status']);
+        self::assertSame(1, $person['employment_count']);
+        self::assertSame(['dpp'], $person['relation_types']);
+        self::assertCount(1, $person['employments']);
+        self::assertSame('ZAM-' . $person['id'], $person['employments'][0]['code']);
+        self::assertSame(1_250_000, $person['employments'][0]['monthly_gross_minor']);
+        self::assertSame('2026-08-10', $person['employments'][0]['terms'][0]['planned_start_on']);
+        self::assertTrue($person['employments'][0]['is_primary']);
+        $this->assertNoSensitiveFields(['person' => $person]);
+
+        $employee = $this->db->pdo()->prepare(
+            'SELECT taxpayer_type, employment_type, monthly_gross
+               FROM payroll_employees
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $employee->execute([$this->supplierId, $person['id']]);
+        self::assertSame([
+            'taxpayer_type' => 'employee',
+            'employment_type' => 'dpp',
+            'monthly_gross' => 12_500,
+        ], $employee->fetch(\PDO::FETCH_ASSOC));
+    }
+
+    public function testCreateRollsBackSharedEmployeeWhenEmploymentOfficeIsForeign(): void
+    {
+        $office = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, 'FOREIGN', 'Cizí účtárna', 1)"
+        );
+        $office->execute([$this->otherSupplierId]);
+        $foreignOfficeId = (int) $this->db->pdo()->lastInsertId();
+
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    'full_name' => 'Rollback Testovací',
+                    'relation_type' => 'employment',
+                    'planned_start_on' => '2026-08-10',
+                    'office_id' => $foreignOfficeId,
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame([
+            'code' => 'validation_failed',
+            'message' => 'Mzdová účtárna neexistuje nebo není aktivní.',
+        ], $this->json($response)['error']);
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_employees
+              WHERE supplier_id = ? AND full_name = ?'
+        );
+        $count->execute([$this->supplierId, 'Rollback Testovací']);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testCreateUsesOnlyPersonWritePermissionAndReturnsExactValidationErrors(): void
+    {
+        $employmentOnly = new EffectiveRole(
+            43,
+            'Pracovní vztahy',
+            'staff',
+            true,
+            ['payroll.employment.write' => AccessLevel::WRITE->value],
+        );
+        $forbidden = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'readonly',
+                'session',
+                $this->validCreatePayload('Zakázaný Testovací'),
+                $employmentOnly,
+            ),
+            new Response(),
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+        self::assertSame('forbidden', $this->json($forbidden)['error']['code']);
+
+        $bearer = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'bearer',
+                $this->validCreatePayload('Bearer Testovací'),
+            ),
+            new Response(),
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame([
+            'code' => 'session_required',
+            'message' => 'Tento endpoint je dostupný pouze z přihlášené relace.',
+        ], $this->json($bearer)['error']);
+
+        $cases = [
+            [
+                ['full_name' => ''],
+                'Jméno a příjmení je povinné.',
+            ],
+            [
+                ['birth_date' => '31.02.1990'],
+                'Datum narození musí být ve formátu YYYY-MM-DD.',
+            ],
+            [
+                ['monthly_gross' => 12.50],
+                'Pravidelná hrubá mzda musí být celé číslo v rozsahu 0 až 10 000 000 Kč.',
+            ],
+        ];
+        foreach ($cases as [$change, $message]) {
+            $response = $this->action->create(
+                $this->request(
+                    'POST',
+                    '/api/payroll/people',
+                    'accountant',
+                    'session',
+                    [...$this->validCreatePayload('Validace Testovací'), ...$change],
+                ),
+                new Response(),
+            );
+            self::assertSame(422, $response->getStatusCode());
+            self::assertSame([
+                'code' => 'validation_failed',
+                'message' => $message,
+            ], $this->json($response)['error']);
+        }
+    }
+
     public function testDatabaseAllowsOnlyOneLegacyProjectionPerEmployee(): void
     {
         $this->expectException(\PDOException::class);
@@ -267,12 +437,32 @@ final class PayrollPeopleApiTest extends TestCase
         string $path,
         string $role,
         string $authMethod = 'session',
+        array $body = [],
+        ?EffectiveRole $effectiveRole = null,
     ): \Psr\Http\Message\ServerRequestInterface {
-        return (new ServerRequestFactory())
+        $request = (new ServerRequestFactory())
             ->createServerRequest($method, $path)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role])
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, $authMethod);
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $authMethod)
+            ->withParsedBody($body);
+        if ($effectiveRole !== null) {
+            $request = $request->withAttribute('auth.effective_role', $effectiveRole);
+        }
+        return $request;
+    }
+
+    /** @return array<string,mixed> */
+    private function validCreatePayload(string $fullName): array
+    {
+        return [
+            'full_name' => $fullName,
+            'birth_date' => null,
+            'birth_number' => null,
+            'relation_type' => 'employment',
+            'planned_start_on' => '2026-08-10',
+            'monthly_gross' => 42_000,
+        ];
     }
 
     /** @return array<string,mixed> */

@@ -8,6 +8,11 @@ const m = vi.hoisted(() => ({
   inputs: vi.fn(),
   people: vi.fn(),
   person: vi.fn(),
+  accountOptions: vi.fn(),
+  createComponent: vi.fn(),
+  createRecurringComponent: vi.fn(),
+  createInput: vi.fn(),
+  previewInput: vi.fn(),
   previewInputImport: vi.fn(),
   applyInputImport: vi.fn(),
   canWrite: vi.fn(),
@@ -23,15 +28,16 @@ vi.mock('@/api/payroll', () => ({
     inputs: m.inputs,
     people: m.people,
     person: m.person,
+    accountOptions: m.accountOptions,
     previewInputImport: m.previewInputImport,
     applyInputImport: m.applyInputImport,
-    createComponent: vi.fn(),
+    createComponent: m.createComponent,
     updateComponent: vi.fn(),
-    createRecurringComponent: vi.fn(),
+    createRecurringComponent: m.createRecurringComponent,
     updateRecurringComponent: vi.fn(),
     materializeRecurringComponents: vi.fn(),
-    previewInput: vi.fn(),
-    createInput: vi.fn(),
+    previewInput: m.previewInput,
+    createInput: m.createInput,
     updateInput: vi.fn(),
     approveInput: vi.fn(),
   },
@@ -120,6 +126,26 @@ describe('PayrollComponents', () => {
       updated_at: '2026-06-01 00:00:00',
     }])
     m.people.mockResolvedValue([{ id: 8, full_name: 'Syntetická osoba' }])
+    m.accountOptions.mockResolvedValue([
+      {
+        id: 1,
+        account_code: '521',
+        name: 'Mzdové náklady',
+        account_type: 'expense',
+        is_synthetic: false,
+        parent_id: null,
+        is_active: true,
+      },
+      {
+        id: 2,
+        account_code: '331',
+        name: 'Zaměstnanci',
+        account_type: 'liability',
+        is_synthetic: false,
+        parent_id: null,
+        is_active: true,
+      },
+    ])
     m.person.mockResolvedValue({
       id: 8,
       full_name: 'Syntetická osoba',
@@ -153,6 +179,17 @@ describe('PayrollComponents', () => {
       rows: [],
     })
     m.slugify.mockResolvedValue('ceska-odmena')
+    m.createRecurringComponent.mockResolvedValue({})
+    m.createComponent.mockResolvedValue({})
+    m.createInput.mockResolvedValue({})
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: null,
+      annual_after_minor: null,
+    })
   })
 
   it('renders matching desktop tables and mobile cards from one API contract', async () => {
@@ -282,6 +319,141 @@ describe('PayrollComponents', () => {
 
     expect((codeInput.element as HTMLInputElement).value).toBe('VLASTNI_KOD')
     vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('uses searchable selectors including account suggestions in the catalogue editor', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    expect(m.accountOptions).toHaveBeenCalledTimes(1)
+
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.catalog.add')!
+      .trigger('click')
+
+    const editor = wrapper.get('[data-testid="payroll-component-editor"]')
+    expect(editor.find('select').exists()).toBe(false)
+    expect(editor.findAll('[role="combobox"]').length).toBe(14)
+
+    const debit = editor.get('[data-testid="payroll-component-debit"]')
+    await debit.get('input').trigger('focus')
+    expect(wrapper.text()).toContain('Mzdové náklady')
+    const credit = editor.get('[data-testid="payroll-component-credit"]')
+    await credit.get('input').trigger('focus')
+    expect(wrapper.text()).toContain('Zaměstnanci')
+    wrapper.unmount()
+  })
+
+  it('converts percentages and ordinary quantities to API integer units', async () => {
+    const regularComponent = {
+      id: 6,
+      supplier_id: 1,
+      code: 'PRAVIDELNA',
+      name: 'Pravidelná složka',
+      component_kind: 'bonus',
+      value_kind: 'monetary',
+      frequency_kind: 'regular',
+      tax_treatment: 'included',
+      social_participation_treatment: 'included',
+      social_treatment: 'included',
+      health_participation_treatment: 'included',
+      health_treatment: 'included',
+      average_earning_treatment: 'included',
+      enforcement_treatment: 'included',
+      jmhz_treatment: 'included',
+      statistics_treatment: 'included',
+      accounting_debit_code: null,
+      accounting_credit_code: null,
+      annual_limit_minor: null,
+      valid_from: '2026-01-01',
+      valid_to: null,
+      is_active: true,
+      row_version: 1,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }
+    m.components.mockResolvedValue([
+      regularComponent,
+      {
+        ...regularComponent,
+        id: 7,
+        code: 'JEDNORAZOVA',
+        name: 'Jednorázová složka',
+        frequency_kind: 'one_off',
+      },
+    ])
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.recurring')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.recurring.add')!
+      .trigger('click')
+    const calculation = wrapper.get('[data-testid="payroll-recurring-calculation"]')
+    await calculation.get('input').trigger('focus')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.components.calculation.employment_gross_basis_points')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-recurring-rate"]').setValue('12.5')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+    expect(m.createRecurringComponent).toHaveBeenCalledWith(expect.objectContaining({
+      rate_basis_points: 1250,
+    }))
+
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('250')
+    await wrapper.get('[data-testid="payroll-input-quantity"]').setValue('1.75')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+    expect(m.previewInput).toHaveBeenCalledWith(expect.objectContaining({
+      quantity_milliunits: 1750,
+    }))
+    wrapper.unmount()
+  })
+
+  it('shows the exact API validation error inside the active editor', async () => {
+    m.createComponent.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            message: 'Složku nelze uložit.',
+            fields: {
+              accounting_debit_code: ['Účet 521 není aktivní.'],
+            },
+          },
+        },
+      },
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.catalog.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Syntetická složka')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_SLOZKA')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+
+    expect(m.createComponent).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[role="alert"]').text())
+      .toBe('Složku nelze uložit.: Účet 521 není aktivní.')
+    expect(m.toastError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

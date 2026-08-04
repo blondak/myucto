@@ -14,6 +14,36 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollApprovedRevisionPostingServiceTest extends TestCase
 {
+    public function testDisabledFrozenPolicySkipsAccounting(): void
+    {
+        $statutory = $this->createMock(PayrollStatutoryResultRepository::class);
+        $posting = $this->createMock(PayrollPostingAdapter::class);
+        $accountingModes = $this->createMock(AccountingModeRepository::class);
+        $statutory->expects(self::never())->method('find');
+        $posting->expects(self::never())->method('post');
+        $accountingModes->expects(self::never())->method('forYear');
+
+        self::assertNull((new PayrollApprovedRevisionPostingService(
+            $statutory,
+            $posting,
+            $accountingModes,
+        ))->post(
+            10,
+            77,
+            [
+                'schema_version' => 'payroll-run-input.v2',
+                'period_start' => '2026-06-01',
+                'employer_policy' => [
+                    'id' => 15,
+                    'row_version' => 3,
+                    'automatic_posting_enabled' => false,
+                ],
+            ],
+            ['schema_version' => 'payroll-run-result.v2'],
+            9,
+        ));
+    }
+
     public function testUsesAccountsFrozenInApprovedSnapshot(): void
     {
         $statutory = $this->createStub(PayrollStatutoryResultRepository::class);
@@ -28,6 +58,11 @@ final class PayrollApprovedRevisionPostingServiceTest extends TestCase
         $snapshot = [
             'schema_version' => 'payroll-run-input.v2',
             'period_start' => '2026-06-01',
+            'employer_policy' => [
+                'id' => 15,
+                'row_version' => 3,
+                'automatic_posting_enabled' => true,
+            ],
             'employer' => ['accounting_accounts' => $frozenAccounts],
         ];
         $posting->expects(self::once())
@@ -73,6 +108,11 @@ final class PayrollApprovedRevisionPostingServiceTest extends TestCase
         $snapshot = [
             'schema_version' => 'payroll-run-input.v2',
             'period_start' => '2026-06-01',
+            'employer_policy' => [
+                'id' => 15,
+                'row_version' => 3,
+                'automatic_posting_enabled' => true,
+            ],
             'employer' => ['accounting_accounts' => $accounts],
         ];
         $result = ['schema_version' => 'payroll-run-result.v2'];
@@ -153,6 +193,38 @@ final class PayrollApprovedRevisionPostingServiceTest extends TestCase
             [
                 'schema_version' => 'payroll-run-input.v2',
                 'period_start' => '2026-06-01',
+                'employer_policy' => [
+                    'id' => 15,
+                    'row_version' => 3,
+                    'automatic_posting_enabled' => true,
+                ],
+            ],
+            ['schema_version' => 'payroll-run-result.v2'],
+            9,
+        );
+    }
+
+    public function testMissingFrozenPolicyFailsClosedBeforeAccounting(): void
+    {
+        $statutory = $this->createMock(PayrollStatutoryResultRepository::class);
+        $posting = $this->createMock(PayrollPostingAdapter::class);
+        $accountingModes = $this->createMock(AccountingModeRepository::class);
+        $statutory->expects(self::never())->method('find');
+        $posting->expects(self::never())->method('post');
+        $accountingModes->expects(self::never())->method('forYear');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('účinnou zaměstnavatelskou politiku');
+        (new PayrollApprovedRevisionPostingService(
+            $statutory,
+            $posting,
+            $accountingModes,
+        ))->post(
+            10,
+            77,
+            [
+                'schema_version' => 'payroll-run-input.v2',
+                'period_start' => '2026-06-01',
             ],
             ['schema_version' => 'payroll-run-result.v2'],
             9,
@@ -178,6 +250,11 @@ final class PayrollApprovedRevisionPostingServiceTest extends TestCase
             [
                 'schema_version' => 'payroll-run-input.v2',
                 'period_start' => '2026-06-01',
+                'employer_policy' => [
+                    'id' => 15,
+                    'row_version' => 3,
+                    'automatic_posting_enabled' => true,
+                ],
             ],
             ['schema_version' => 'payroll-run-result.v2'],
             9,

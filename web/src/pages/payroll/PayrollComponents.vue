@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollAccountOption,
   type PayrollComponent,
   type PayrollComponentFrequency,
   type PayrollComponentInclusion,
@@ -29,6 +30,7 @@ import PayrollFileDropzone, {
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import {
   canApplyPayrollImport,
   formatPayrollMinor,
@@ -53,7 +55,7 @@ interface RecurringForm {
   component_id: number | null
   calculation_kind: PayrollRecurringCalculationKind
   amount: string
-  rate_basis_points: number | null
+  rate_percent: string
   valid_from: string
   valid_to: string
   allocation_rule: PayrollRecurringAllocationRule
@@ -68,7 +70,7 @@ interface InputForm {
   component_id: number | null
   source_period: string
   amount: string
-  quantity_milliunits: number | null
+  quantity: string
   external_id: string
 }
 
@@ -83,6 +85,11 @@ const components = ref<PayrollComponent[]>([])
 const recurring = ref<PayrollRecurringComponent[]>([])
 const inputs = ref<PayrollInput[]>([])
 const employments = ref<PayrollEmploymentOption[]>([])
+const chartAccounts = ref<PayrollAccountOption[]>([])
+const componentError = ref('')
+const recurringError = ref('')
+const inputError = ref('')
+const importApiError = ref('')
 
 const componentEditorOpen = ref(false)
 const editingComponent = ref<PayrollComponent | null>(null)
@@ -112,6 +119,22 @@ const activeRegularComponents = computed(() =>
 const activeOneOffComponents = computed(() =>
   components.value.filter(component => component.is_active && component.frequency_kind === 'one_off'),
 )
+const employmentOptions = computed(() => employments.value.map(item => ({
+  value: item.employment_id,
+  label: employmentLabel(item),
+})))
+const regularComponentOptions = computed(() => activeRegularComponents.value.map(item => ({
+  value: item.id,
+  label: item.name,
+  secondary: item.code,
+})))
+const oneOffComponentOptions = computed(() => activeOneOffComponents.value.map(item => ({
+  value: item.id,
+  label: item.name,
+  secondary: item.code,
+})))
+const debitAccountOptions = computed(() => accountOptions('expense'))
+const creditAccountOptions = computed(() => accountOptions('liability'))
 const importPayload = computed<PayrollInputImportPayload>(() => ({
   period: period.value,
   format: importFormat.value,
@@ -126,11 +149,13 @@ const importCanApply = computed(() =>
 const importIssues = computed(() => payrollImportIssues(importPreview.value))
 const manualInputPayload = computed<PayrollInputPayload | null>(() => {
   const amountMinor = parsePayrollAmountToMinor(inputForm.value.amount)
+  const quantityMilliunits = parseScaledDecimal(inputForm.value.quantity, 1000)
   if (
     inputForm.value.employee_id === null
     || inputForm.value.employment_id === null
     || inputForm.value.component_id === null
     || amountMinor === null
+    || inputForm.value.quantity.trim() !== '' && quantityMilliunits === null
   ) return null
   return {
     employee_id: inputForm.value.employee_id,
@@ -139,7 +164,7 @@ const manualInputPayload = computed<PayrollInputPayload | null>(() => {
     period: period.value,
     source_period: inputForm.value.source_period || null,
     amount_minor: amountMinor,
-    quantity_milliunits: inputForm.value.quantity_milliunits,
+    quantity_milliunits: quantityMilliunits,
     source_kind: 'manual',
     external_id: inputForm.value.external_id.trim() || null,
   }
@@ -166,6 +191,58 @@ const taxTreatments: PayrollComponentTaxTreatment[] = ['included', 'exempt', 'wi
 const inclusionTreatments: PayrollComponentInclusion[] = ['included', 'excluded', 'manual_review']
 const calculationKinds: PayrollRecurringCalculationKind[] = ['fixed_amount', 'employment_gross_basis_points', 'manual_review']
 const allocationRules: PayrollRecurringAllocationRule[] = ['full_month', 'calendar_days', 'working_days', 'hours', 'manual_review']
+
+function selectOptions<T extends string>(values: T[], prefix: string) {
+  return values.map(value => ({ value, label: t(`${prefix}.${value}`) }))
+}
+
+const componentKindOptions = computed(() => selectOptions(componentKinds, 'payroll.components.kind'))
+const valueKindOptions = computed(() => selectOptions(valueKinds, 'payroll.components.value_kind'))
+const frequencyOptions = computed(() => selectOptions(frequencies, 'payroll.components.frequency'))
+const taxTreatmentOptions = computed(() => selectOptions(taxTreatments, 'payroll.components.tax'))
+const inclusionTreatmentOptions = computed(() => selectOptions(inclusionTreatments, 'payroll.components.inclusion'))
+const calculationKindOptions = computed(() => selectOptions(calculationKinds, 'payroll.components.calculation'))
+const allocationRuleOptions = computed(() => selectOptions(allocationRules, 'payroll.components.allocation'))
+
+function parseScaledDecimal(value: string, scale: number): number | null {
+  const normalized = value.trim().replace(',', '.')
+  if (normalized === '') return null
+  if (!/^-?(?:\d+|\d*\.\d+)$/.test(normalized)) return null
+  const result = Number(normalized) * scale
+  const rounded = Math.round(result)
+  if (
+    !Number.isFinite(result)
+    || !Number.isSafeInteger(rounded)
+    || Math.abs(result - rounded) > 1e-8
+  ) return null
+  return rounded
+}
+
+function scaledDecimalToInput(value: number | null, scale: number): string {
+  return value === null ? '' : String(value / scale)
+}
+
+function accountOptions(type: PayrollAccountOption['account_type']) {
+  return chartAccounts.value
+    .filter(account => account.is_active && account.account_type === type)
+    .sort((left, right) => left.account_code.localeCompare(right.account_code))
+    .map(account => ({
+      value: account.account_code.trim().toUpperCase(),
+      label: account.account_code.trim().toUpperCase(),
+      secondary: account.name,
+    }))
+}
+
+function selectedAccountOption(code: string | null) {
+  if (!code) return null
+  const normalized = code.trim().toUpperCase()
+  const account = chartAccounts.value.find(item => item.account_code.trim().toUpperCase() === normalized)
+  return {
+    value: normalized,
+    label: normalized,
+    secondary: account?.name,
+  }
+}
 
 function newComponentForm(): ComponentForm {
   return {
@@ -199,7 +276,7 @@ function newRecurringForm(): RecurringForm {
       component.is_active && component.frequency_kind === 'regular')?.id ?? null,
     calculation_kind: 'fixed_amount',
     amount: '',
-    rate_basis_points: null,
+    rate_percent: '',
     valid_from: monthStart(period.value),
     valid_to: '',
     allocation_rule: 'full_month',
@@ -218,7 +295,7 @@ function newInputForm(): InputForm {
       component.is_active && component.frequency_kind === 'one_off')?.id ?? null,
     source_period: '',
     amount: '',
-    quantity_milliunits: null,
+    quantity: '',
     external_id: '',
   }
 }
@@ -237,6 +314,21 @@ function selectedEmploymentChanged(target: InputForm | RecurringForm) {
   target.employee_id = selected?.employee_id ?? null
 }
 
+function selectInputEmployment(value: number | null) {
+  inputForm.value.employment_id = value
+  selectedEmploymentChanged(inputForm.value)
+}
+
+function setInclusionTreatment(
+  field: 'social_participation_treatment' | 'social_treatment'
+    | 'health_participation_treatment' | 'health_treatment'
+    | 'average_earning_treatment' | 'enforcement_treatment'
+    | 'jmhz_treatment' | 'statistics_treatment',
+  value: PayrollComponentInclusion | null,
+) {
+  if (value !== null) componentForm.value[field] = value
+}
+
 async function loadEmploymentOptions() {
   const people = await payrollApi.people()
   const details = await Promise.all(people.map(person => payrollApi.person(person.id)))
@@ -246,15 +338,17 @@ async function loadEmploymentOptions() {
 async function load() {
   loading.value = true
   try {
-    const [catalog, recurringItems, periodInputs] = await Promise.all([
+    const [catalog, recurringItems, periodInputs, , accounts] = await Promise.all([
       payrollApi.components(),
       payrollApi.recurringComponents(),
       payrollApi.inputs(period.value),
       loadEmploymentOptions(),
+      payrollApi.accountOptions(),
     ])
     components.value = catalog
     recurring.value = recurringItems
     inputs.value = periodInputs
+    chartAccounts.value = accounts
   } catch (error: any) {
     toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
@@ -278,6 +372,7 @@ async function reloadPeriod() {
 function openNewComponent() {
   editingComponent.value = null
   componentForm.value = newComponentForm()
+  componentError.value = ''
   componentEditorOpen.value = true
 }
 
@@ -305,6 +400,7 @@ function editComponent(component: PayrollComponent) {
     valid_to: component.valid_to,
     is_active: component.is_active,
   }
+  componentError.value = ''
   componentEditorOpen.value = true
 }
 
@@ -348,9 +444,10 @@ function componentPayload(): PayrollComponentPayload | null {
 async function saveComponent() {
   const payload = componentPayload()
   if (!payload) {
-    toast.error(t('payroll.components.validation_failed'))
+    componentError.value = t('payroll.components.validation_failed')
     return
   }
+  componentError.value = ''
   saving.value = true
   try {
     if (editingComponent.value) {
@@ -362,7 +459,7 @@ async function saveComponent() {
     componentEditorOpen.value = false
     toast.success(t('payroll.components.catalog.saved'))
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
+    componentError.value = apiErrorMessage(error, t('payroll.components.save_failed'))
   } finally {
     saving.value = false
   }
@@ -371,6 +468,7 @@ async function saveComponent() {
 function openNewRecurring() {
   editingRecurring.value = null
   recurringForm.value = newRecurringForm()
+  recurringError.value = ''
   recurringEditorOpen.value = true
 }
 
@@ -381,7 +479,7 @@ function editRecurring(item: PayrollRecurringComponent) {
     component_id: item.component_id,
     calculation_kind: item.calculation_kind,
     amount: payrollMinorToInput(item.amount_minor),
-    rate_basis_points: item.rate_basis_points,
+    rate_percent: scaledDecimalToInput(item.rate_basis_points, 100),
     valid_from: item.valid_from,
     valid_to: item.valid_to ?? '',
     allocation_rule: item.allocation_rule,
@@ -389,6 +487,7 @@ function editRecurring(item: PayrollRecurringComponent) {
     note: item.note ?? '',
     is_active: item.is_active,
   }
+  recurringError.value = ''
   recurringEditorOpen.value = true
 }
 
@@ -399,9 +498,10 @@ function recurringPayload(): PayrollRecurringComponentPayload | null {
     ? parsePayrollAmountToMinor(form.amount)
     : null
   const maximum = form.maximum_amount === '' ? null : parsePayrollAmountToMinor(form.maximum_amount)
+  const rateBasisPoints = parseScaledDecimal(form.rate_percent, 100)
   if (
     form.calculation_kind === 'fixed_amount' && amount === null
-    || form.calculation_kind === 'employment_gross_basis_points' && (!form.rate_basis_points || form.rate_basis_points < 1 || form.rate_basis_points > 10000)
+    || form.calculation_kind === 'employment_gross_basis_points' && (rateBasisPoints === null || rateBasisPoints < 1 || rateBasisPoints > 10000)
     || maximum !== null && maximum <= 0
     || form.maximum_amount !== '' && maximum === null
   ) return null
@@ -410,7 +510,7 @@ function recurringPayload(): PayrollRecurringComponentPayload | null {
     component_id: form.component_id,
     calculation_kind: form.calculation_kind,
     amount_minor: amount,
-    rate_basis_points: form.calculation_kind === 'employment_gross_basis_points' ? form.rate_basis_points : null,
+    rate_basis_points: form.calculation_kind === 'employment_gross_basis_points' ? rateBasisPoints : null,
     valid_from: form.valid_from,
     valid_to: form.valid_to || null,
     allocation_rule: form.allocation_rule,
@@ -423,9 +523,10 @@ function recurringPayload(): PayrollRecurringComponentPayload | null {
 async function saveRecurring() {
   const payload = recurringPayload()
   if (!payload) {
-    toast.error(t('payroll.components.validation_failed'))
+    recurringError.value = t('payroll.components.validation_failed')
     return
   }
+  recurringError.value = ''
   saving.value = true
   try {
     if (editingRecurring.value) {
@@ -437,13 +538,14 @@ async function saveRecurring() {
     recurringEditorOpen.value = false
     toast.success(t('payroll.components.recurring.saved'))
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
+    recurringError.value = apiErrorMessage(error, t('payroll.components.save_failed'))
   } finally {
     saving.value = false
   }
 }
 
 async function materializeRecurring() {
+  recurringError.value = ''
   saving.value = true
   try {
     const result = await payrollApi.materializeRecurringComponents(period.value)
@@ -455,7 +557,7 @@ async function materializeRecurring() {
     inputs.value = await payrollApi.inputs(period.value)
     activeTab.value = 'inputs'
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.recurring.materialize_failed')))
+    recurringError.value = apiErrorMessage(error, t('payroll.components.recurring.materialize_failed'))
   } finally {
     saving.value = false
   }
@@ -465,6 +567,7 @@ function openNewInput() {
   editingInput.value = null
   inputForm.value = newInputForm()
   inputPreview.value = null
+  inputError.value = ''
   inputEditorOpen.value = true
 }
 
@@ -476,24 +579,26 @@ function editInput(input: PayrollInput) {
     component_id: input.component_id,
     source_period: input.source_period_start?.slice(0, 7) ?? '',
     amount: payrollMinorToInput(input.amount_minor),
-    quantity_milliunits: input.quantity_milliunits,
+    quantity: scaledDecimalToInput(input.quantity_milliunits, 1000),
     external_id: input.external_id ?? '',
   }
   inputPreview.value = null
+  inputError.value = ''
   inputEditorOpen.value = true
 }
 
 async function previewManualInput() {
   if (!manualInputPayload.value) {
-    toast.error(t('payroll.components.validation_failed'))
+    inputError.value = t('payroll.components.validation_failed')
     return
   }
+  inputError.value = ''
   saving.value = true
   try {
     inputPreview.value = await payrollApi.previewInput(manualInputPayload.value)
     inputPreviewFingerprint.value = manualInputFingerprint.value
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.inputs.preview_failed')))
+    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.preview_failed'))
   } finally {
     saving.value = false
   }
@@ -501,6 +606,7 @@ async function previewManualInput() {
 
 async function saveInput() {
   if (!manualInputPayload.value || !canSaveInput.value) return
+  inputError.value = ''
   saving.value = true
   try {
     if (editingInput.value) {
@@ -512,20 +618,21 @@ async function saveInput() {
     inputEditorOpen.value = false
     toast.success(t('payroll.components.inputs.saved'))
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.save_failed')))
+    inputError.value = apiErrorMessage(error, t('payroll.components.save_failed'))
   } finally {
     saving.value = false
   }
 }
 
 async function approveInput(input: PayrollInput) {
+  inputError.value = ''
   saving.value = true
   try {
     await payrollApi.approveInput(input.id, input.row_version)
     inputs.value = await payrollApi.inputs(period.value)
     toast.success(t('payroll.components.inputs.approved'))
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.inputs.approve_failed')))
+    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.approve_failed'))
   } finally {
     saving.value = false
   }
@@ -535,6 +642,7 @@ function resetImport() {
   importPreview.value = null
   importPreviewFingerprint.value = null
   importResult.value = null
+  importApiError.value = ''
 }
 
 function clearImportSelection() {
@@ -579,6 +687,7 @@ function rejectImportFile(reason: PayrollFileRejectReason) {
 }
 
 async function previewImport() {
+  importApiError.value = ''
   saving.value = true
   try {
     const fingerprint = importFingerprint.value
@@ -586,7 +695,7 @@ async function previewImport() {
     importPreviewFingerprint.value = fingerprint
     importResult.value = null
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.import.preview_failed')))
+    importApiError.value = apiErrorMessage(error, t('payroll.components.import.preview_failed'))
   } finally {
     saving.value = false
   }
@@ -594,13 +703,14 @@ async function previewImport() {
 
 async function applyImport() {
   if (!importCanApply.value) return
+  importApiError.value = ''
   saving.value = true
   try {
     importResult.value = await payrollApi.applyInputImport(importPayload.value)
     toast.success(t('payroll.components.import.applied', importResult.value))
     inputs.value = await payrollApi.inputs(period.value)
   } catch (error: any) {
-    toast.error(apiErrorMessage(error, t('payroll.components.import.apply_failed')))
+    importApiError.value = apiErrorMessage(error, t('payroll.components.import.apply_failed'))
   } finally {
     saving.value = false
   }
@@ -667,7 +777,7 @@ onMounted(load)
           </button>
         </div>
 
-        <section v-if="componentEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="componentEditorOpen" data-testid="payroll-component-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <h3 class="font-semibold text-neutral-900">{{ t(editingComponent ? 'payroll.components.catalog.edit' : 'payroll.components.catalog.new') }}</h3>
             <button :class="btnOutline('neutral')" @click="componentEditorOpen = false">
@@ -691,21 +801,22 @@ onMounted(load)
               @update:code="componentForm.code = $event.toUpperCase()"
               @update:name="componentForm.name = $event"
             />
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.kind') }}</span><select v-model="componentForm.component_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in componentKinds" :key="kind" :value="kind">{{ t(`payroll.components.kind.${kind}`) }}</option></select></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><select v-model="componentForm.value_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in valueKinds" :key="kind" :value="kind">{{ t(`payroll.components.value_kind.${kind}`) }}</option></select></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.frequency') }}</span><select v-model="componentForm.frequency_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="kind in frequencies" :key="kind" :value="kind">{{ t(`payroll.components.frequency.${kind}`) }}</option></select></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.tax') }}</span><select v-model="componentForm.tax_treatment" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in taxTreatments" :key="item" :value="item">{{ t(`payroll.components.tax.${item}`) }}</option></select></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.kind') }}</span><SearchableSelect :model-value="componentForm.component_kind" :options="componentKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.component_kind = $event ?? 'bonus'" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><SearchableSelect :model-value="componentForm.value_kind" :options="valueKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.value_kind = $event ?? 'monetary'" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.frequency') }}</span><SearchableSelect :model-value="componentForm.frequency_kind" :options="frequencyOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.frequency_kind = $event ?? 'one_off'" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.tax') }}</span><SearchableSelect :model-value="componentForm.tax_treatment" :options="taxTreatmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.tax_treatment = $event ?? 'included'" /></label>
             <label v-for="field in (['social_participation_treatment','social_treatment','health_participation_treatment','health_treatment','average_earning_treatment','enforcement_treatment','jmhz_treatment','statistics_treatment'] as const)" :key="field" class="block">
               <span class="mb-1 block text-xs text-neutral-600">{{ t(`payroll.components.fields.${field}`) }}</span>
-              <select v-model="componentForm[field]" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in inclusionTreatments" :key="item" :value="item">{{ t(`payroll.components.inclusion.${item}`) }}</option></select>
+              <SearchableSelect :model-value="componentForm[field]" :options="inclusionTreatmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="setInclusionTreatment(field, $event)" />
             </label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.debit') }}</span><input v-model="componentForm.accounting_debit_code" inputmode="numeric" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.credit') }}</span><input v-model="componentForm.accounting_credit_code" inputmode="numeric" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.debit') }}</span><SearchableSelect data-testid="payroll-component-debit" :model-value="componentForm.accounting_debit_code" :options="debitAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_debit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_debit_code = $event" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.credit') }}</span><SearchableSelect data-testid="payroll-component-credit" :model-value="componentForm.accounting_credit_code" :options="creditAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_credit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_credit_code = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.annual_limit') }}</span><input v-model="componentForm.annual_limit" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_from') }}</span><input v-model="componentForm.valid_from" type="date" :disabled="!!editingComponent" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm disabled:bg-neutral-100"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_to') }}</span><input v-model="componentForm.valid_to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="inline-flex items-center gap-2 self-end text-sm text-neutral-700"><input v-model="componentForm.is_active" type="checkbox" class="rounded border-neutral-300 text-payroll-600"> {{ t('payroll.components.fields.active') }}</label>
           </div>
+          <p v-if="componentError" role="alert" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ componentError }}</p>
           <div class="mt-5 flex flex-wrap justify-end gap-2">
             <button :class="btnFilled('primary')" :disabled="saving" @click="saveComponent"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
           </div>
@@ -736,16 +847,17 @@ onMounted(load)
             <button v-if="canWrite" :class="btnFilled('primary')" @click="openNewRecurring"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.recurring.add') }}</button>
           </div>
         </div>
+        <p v-if="recurringError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ recurringError }}</p>
 
         <section v-if="recurringEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><h3 class="font-semibold text-neutral-900">{{ t(editingRecurring ? 'payroll.components.recurring.edit' : 'payroll.components.recurring.new') }}</h3><button :class="btnOutline('neutral')" @click="recurringEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><select v-model="recurringForm.employment_id" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in employments" :key="item.employment_id" :value="item.employment_id">{{ employmentLabel(item) }}</option></select></label>
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><select v-model="recurringForm.component_id" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in activeRegularComponents" :key="item.id" :value="item.id">{{ item.code }} · {{ item.name }}</option></select></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.calculation') }}</span><select v-model="recurringForm.calculation_kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in calculationKinds" :key="item" :value="item">{{ t(`payroll.components.calculation.${item}`) }}</option></select></label>
+            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="recurringForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.employment_id = $event" /></label>
+            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="recurringForm.component_id" :options="regularComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.component_id = $event" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.calculation') }}</span><SearchableSelect data-testid="payroll-recurring-calculation" :model-value="recurringForm.calculation_kind" :options="calculationKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.calculation_kind = $event ?? 'fixed_amount'" /></label>
             <label v-if="recurringForm.calculation_kind === 'fixed_amount'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="recurringForm.amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
-            <label v-if="recurringForm.calculation_kind === 'employment_gross_basis_points'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.rate_basis_points') }}</span><input v-model.number="recurringForm.rate_basis_points" type="number" min="1" max="10000" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.allocation') }}</span><select v-model="recurringForm.allocation_rule" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in allocationRules" :key="item" :value="item">{{ t(`payroll.components.allocation.${item}`) }}</option></select></label>
+            <label v-if="recurringForm.calculation_kind === 'employment_gross_basis_points'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.rate_percent') }}</span><input v-model="recurringForm.rate_percent" data-testid="payroll-recurring-rate" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.allocation') }}</span><SearchableSelect :model-value="recurringForm.allocation_rule" :options="allocationRuleOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.allocation_rule = $event ?? 'full_month'" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.maximum') }}</span><input v-model="recurringForm.maximum_amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_from') }}</span><input v-model="recurringForm.valid_from" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_to') }}</span><input v-model="recurringForm.valid_to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
@@ -763,14 +875,15 @@ onMounted(load)
 
       <section v-if="activeTab === 'inputs'" class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.inputs.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.inputs.hint') }}</p></div><button v-if="canWrite" :class="btnFilled('primary')" @click="openNewInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.inputs.add') }}</button></div>
+        <p v-if="inputError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ inputError }}</p>
 
         <section v-if="inputEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold text-neutral-900">{{ t(editingInput ? 'payroll.components.inputs.edit' : 'payroll.components.inputs.new') }}</h3><p class="mt-1 text-xs text-neutral-600">{{ t('payroll.components.inputs.preview_hint') }}</p></div><button :class="btnOutline('neutral')" @click="inputEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><select v-model="inputForm.employment_id" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" @change="selectedEmploymentChanged(inputForm)"><option v-for="item in employments" :key="item.employment_id" :value="item.employment_id">{{ employmentLabel(item) }}</option></select></label>
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><select v-model="inputForm.component_id" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><option v-for="item in activeOneOffComponents" :key="item.id" :value="item.id">{{ item.code }} · {{ item.name }}</option></select></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model.number="inputForm.quantity_milliunits" type="number" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
+            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
+            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="oneOffComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" data-testid="payroll-input-amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model="inputForm.quantity" data-testid="payroll-input-quantity" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.source_period') }}</span><input v-model="inputForm.source_period" type="month" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.external_id') }}</span><input v-model="inputForm.external_id" maxlength="190" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
           </div>
@@ -810,6 +923,7 @@ onMounted(load)
             <button :class="btnOutline('neutral')" :disabled="saving || !importContent" @click="previewImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.import.preview') }}</button>
             <button data-testid="payroll-import-apply" :class="btnFilled('primary')" :disabled="saving || !importCanApply" @click="applyImport"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>{{ t('payroll.components.import.apply') }}</button>
             </div>
+            <p v-if="importApiError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ importApiError }}</p>
           </div>
           <p class="mt-3 text-xs text-neutral-500">{{ t('payroll.components.import.columns_hint') }}</p>
           <div v-if="importPreview" class="mt-4 space-y-4">

@@ -11,11 +11,14 @@ import {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
+import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import { todayIso, transitionPresentation } from './employmentLifecycleUi'
 
 const props = defineProps<{
   employment: PayrollEmployment
   canWrite: boolean
+  canReadDocuments?: boolean
+  canWriteDocuments?: boolean
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
@@ -256,5 +259,11 @@ const actions = computed<ActionItem[]>(() => [
         </ol>
       </section>
     </div>
+
+    <EmploymentExitDocumentsPanel
+      v-if="employment.end_date && canReadDocuments"
+      :employment="employment"
+      :can-write="canWriteDocuments === true"
+    />
   </article>
 </template>

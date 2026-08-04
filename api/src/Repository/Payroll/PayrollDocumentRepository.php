@@ -380,6 +380,40 @@ final class PayrollDocumentRepository
         ));
     }
 
+    /** @return list<array<string,mixed>> */
+    public function listEmploymentExitDocuments(
+        int $supplierId,
+        int $employmentId,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    exit_revision.employment_id,
+                    exit_revision.employment_end_date,
+                    exit_revision.purpose,
+                    exit_revision.revision_no
+                        AS employment_exit_revision_no,
+                    employee.full_name AS employee_name
+               FROM payroll_generated_documents document
+               JOIN payroll_employment_exit_revisions exit_revision
+                 ON exit_revision.supplier_id = document.supplier_id
+                AND exit_revision.id = document.employment_exit_revision_id
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = document.supplier_id
+                AND employee.id = document.employee_id
+              WHERE document.supplier_id = ?
+                AND exit_revision.employment_id = ?
+              ORDER BY document.document_kind,
+                       document.document_revision_no DESC,
+                       document.id DESC',
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+
+        return array_values(array_map(
+            self::cast(...),
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
     public function employeeBelongsToRevision(
         int $supplierId,
         int $revisionId,

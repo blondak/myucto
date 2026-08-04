@@ -15,6 +15,7 @@ import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
+import RegzelProfileSettings from './RegzelProfileSettings.vue'
 import {
   PAYROLL_ACCOUNT_TYPES,
   normalizedPayrollAccountCode,
@@ -33,9 +34,10 @@ const loadFailed = ref(false)
 const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
-type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies'
-const activeTab = ref<SettingsTab>('employer')
-const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies']
+type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'submissions'
+const initialTab = new URLSearchParams(window.location.search).get('tab')
+const activeTab = ref<SettingsTab>(initialTab === 'submissions' ? 'submissions' : 'employer')
+const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'submissions']
 
 type AccountKey = PayrollAccountKey
 type FormOffice = PayrollEmployerSettings['offices'][number] & { is_new?: boolean }
@@ -84,6 +86,7 @@ const form = reactive<EmployerSettingsForm>({
 const formOffices = ref<FormOffice[]>([])
 
 const canWrite = computed(() => auth.canWrite('payroll.settings'))
+const canWriteSubmissions = computed(() => auth.canWrite('payroll.submissions'))
 const activeOffices = computed(() => formOffices.value.filter(office => office.is_active))
 const officeOptions = computed(() => activeOffices.value
   .map(office => ({
@@ -705,6 +708,11 @@ onMounted(load)
       </section>
 
       <EmployerPolicies v-if="activeTab === 'policies'" :can-write="canWrite" />
+
+      <RegzelProfileSettings
+        v-if="activeTab === 'submissions'"
+        :can-write="canWriteSubmissions"
+      />
 
       <div
         v-if="!canWrite && (activeTab === 'employer' || activeTab === 'accounting')"

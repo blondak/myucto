@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
+use MyInvoice\Repository\Payroll\PayrollRunDeletionException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -74,6 +75,11 @@ final class PayrollRunsAction
                     $this->currentSupplierId($request),
                     $revisionId,
                 );
+            $deletion = $this->runs->canDelete(
+                $this->currentSupplierId($request),
+                PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
+            );
+            $item['can_delete'] = $deletion !== null && $deletion->canDelete;
         }
         unset($item);
         return Json::ok($response, ['runs' => $items]);
@@ -116,6 +122,74 @@ final class PayrollRunsAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         return Json::ok($response, ['run' => $run], 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function delete(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.inputs.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = filter_var($body['row_version'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $runId = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (!is_int($version) || !is_int($runId)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Smazání vyžaduje platné ID běhu a row_version.',
+                422,
+            );
+        }
+        try {
+            $this->commands->deleteRun(
+                $this->currentSupplierId($request),
+                $runId,
+                $version,
+                $this->requiredUserId($request),
+            );
+        } catch (PayrollRunConflictException $e) {
+            return Json::error(
+                $response,
+                'row_version_conflict',
+                $e->getMessage(),
+                409,
+                ['current_row_version' => $e->currentVersion],
+            );
+        } catch (PayrollRunDeletionException $e) {
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                409,
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, [
+            'deleted' => true,
+            'run_id' => $runId,
+        ]);
     }
 
     /** @param array<string,string> $args */

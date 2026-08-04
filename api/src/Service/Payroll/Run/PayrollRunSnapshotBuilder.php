@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
@@ -25,6 +27,7 @@ final class PayrollRunSnapshotBuilder
         private readonly ?PayrollStatutoryPeriodResolver $periods = null,
         private readonly ?PayrollStatutoryAccumulatorRepository $statutoryAccumulators = null,
         private readonly ?PayrollEmployerSettingsRepository $employerSettings = null,
+        private readonly ?PayrollEmployerPolicyRepository $employerPolicies = null,
     ) {}
 
     public function build(
@@ -63,6 +66,10 @@ final class PayrollRunSnapshotBuilder
         $provider = $this->rulesets ?? CzechPayrollRulesets2026::provider();
         $manifest = $provider->canonicalManifest();
         $manifestJson = CanonicalJson::encode(['rulesets' => $manifest]);
+        $employerPolicy = $this->employerPolicySnapshot(
+            $supplierId,
+            $periodStart,
+        );
         $employer = $this->employerSnapshot($supplierId);
 
         $employments = $this->employmentRows(
@@ -243,6 +250,7 @@ final class PayrollRunSnapshotBuilder
             'period_end' => $periodEnd,
             'payment_date' => $paymentDate,
             'statutory_period' => $statutoryPeriod->toSnapshot(),
+            'employer_policy' => $employerPolicy,
             'employer' => $employer,
             'office_id' => $officeId,
             'ruleset_manifest' => $manifest,
@@ -259,6 +267,46 @@ final class PayrollRunSnapshotBuilder
         );
     }
 
+    /**
+     * @return array{
+     *   id:int,
+     *   row_version:int,
+     *   automatic_posting_enabled:bool
+     * }
+     */
+    private function employerPolicySnapshot(
+        int $supplierId,
+        string $periodStart,
+    ): array {
+        $policy = ($this->employerPolicies
+            ?? new PayrollEmployerPolicyRepository($this->db))
+            ->findEffective($supplierId, $periodStart);
+        if ($policy === null) {
+            throw new \DomainException(
+                'Pro mzdové období chybí účinná zaměstnavatelská politika.',
+            );
+        }
+        $id = $policy['id'] ?? null;
+        $rowVersion = $policy['row_version'] ?? null;
+        $automaticPosting = $policy['automatic_posting_enabled'] ?? null;
+        if (!is_int($id)
+            || $id <= 0
+            || !is_int($rowVersion)
+            || $rowVersion <= 0
+            || !is_bool($automaticPosting)
+        ) {
+            throw new \UnexpectedValueException(
+                'Účinná zaměstnavatelská politika nemá platná data pro mzdový snapshot.',
+            );
+        }
+
+        return [
+            'id' => $id,
+            'row_version' => $rowVersion,
+            'automatic_posting_enabled' => $automaticPosting,
+        ];
+    }
+
     /** @return list<array<string,mixed>> */
     private function employmentRows(
         int $supplierId,
@@ -268,12 +316,19 @@ final class PayrollRunSnapshotBuilder
     ): array {
         $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
         $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.id AS employment_id,
+            'WITH effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status
+                      FROM payroll_employments employment
+                     WHERE employment.supplier_id = ?
+                 )
+             SELECT employment.id AS employment_id,
                     employment.employee_id,
                     employment.office_id,
                     employment.code AS employment_code,
                     employment.relation_type,
-                    employment.status AS employment_status,
+                    employment.effective_status AS employment_status,
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
@@ -294,7 +349,7 @@ final class PayrollRunSnapshotBuilder
                     term.risky_work,
                     term.foreign_legislation_country_code,
                     term.a1_certificate_until
-               FROM payroll_employments employment
+               FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
@@ -334,8 +389,8 @@ final class PayrollRunSnapshotBuilder
                      ORDER BY selected.effective_from DESC, selected.id DESC
                      LIMIT 1
                 )
-              WHERE employment.supplier_id = ?
-                AND employment.status NOT IN ("archived", "no_show")
+              WHERE employment.effective_status IS NOT NULL
+                AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
                     employment.actual_start_date,
                     employment.start_date,
@@ -360,14 +415,15 @@ final class PayrollRunSnapshotBuilder
         );
         $stmt->execute([
             $periodEnd,
-            $periodEnd,
-            $periodEnd,
-            $periodEnd,
-            $periodEnd,
-            $periodEnd,
-            $periodEnd,
-            $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
+            $periodEnd,
             $periodEnd,
             $periodStart,
             $periodStart,

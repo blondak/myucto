@@ -196,6 +196,8 @@ final class PayrollEmploymentRepository
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        bool $replaceMonthlyGross = false,
+        ?int $monthlyGrossMinor = null,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -205,6 +207,8 @@ final class PayrollEmploymentRepository
             $userId,
             $ip,
             $userAgent,
+            $replaceMonthlyGross,
+            $monthlyGrossMinor,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
@@ -253,6 +257,8 @@ final class PayrollEmploymentRepository
                 'UPDATE payroll_employments
                     SET office_id = ?, is_primary = ?, start_date = ?,
                         actual_start_date = ?, end_date = ?,
+                        monthly_gross_minor =
+                            CASE WHEN ? = 1 THEN ? ELSE monthly_gross_minor END,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?'
             );
@@ -262,6 +268,8 @@ final class PayrollEmploymentRepository
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
+                (int) $replaceMonthlyGross,
+                $monthlyGrossMinor,
                 $supplierId,
                 $employmentId,
                 $expectedVersion,
@@ -271,6 +279,14 @@ final class PayrollEmploymentRepository
             }
 
             $diff = $this->diff($previous, $data);
+            if ($replaceMonthlyGross
+                && $employment['monthly_gross_minor'] !== $monthlyGrossMinor
+            ) {
+                $diff['monthly_gross_minor'] = [
+                    'from' => $employment['monthly_gross_minor'],
+                    'to' => $monthlyGrossMinor,
+                ];
+            }
             $this->insertEvent(
                 $supplierId,
                 $employmentId,
@@ -732,7 +748,7 @@ final class PayrollEmploymentRepository
     ): array {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, employee_id, status, is_primary, start_date,
-                    actual_start_date, end_date, row_version
+                    actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
               FOR UPDATE'

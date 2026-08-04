@@ -17,6 +17,8 @@ const m = vi.hoisted(() => ({
   payrollSetupCheck: vi.fn(),
   createEmployerPolicy: vi.fn(),
   updateEmployerPolicy: vi.fn(),
+  regzelProfile: vi.fn(),
+  saveRegzelProfile: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -33,6 +35,8 @@ vi.mock('@/api/payroll', () => ({
     payrollSetupCheck: m.payrollSetupCheck,
     createEmployerPolicy: m.createEmployerPolicy,
     updateEmployerPolicy: m.updateEmployerPolicy,
+    regzelProfile: m.regzelProfile,
+    saveRegzelProfile: m.saveRegzelProfile,
   },
 }))
 
@@ -130,6 +134,7 @@ async function mountPage(value = settings()) {
     checks: [],
     blockers: ['effective_policy'],
   })
+  m.regzelProfile.mockResolvedValue(null)
   m.saveEmployerSettings.mockResolvedValue(value)
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()
@@ -259,7 +264,7 @@ describe('EmployerSettings — účtová osnova', () => {
     const wrapper = await mountPage()
     const tabs = wrapper.findAll('[role="tab"]')
 
-    expect(tabs).toHaveLength(4)
+    expect(tabs).toHaveLength(5)
     expect(tabs[0].attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).toContain('payroll.employer.registration_title')
     expect(wrapper.text()).not.toContain('payroll.employer.health_accounts.title')
@@ -279,6 +284,11 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.employerPolicies).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('payroll.employer.policies.title')
     expect(wrapper.findAll('button').filter(button => button.text() === 'common.save')).toHaveLength(1)
+
+    await tabs[4].trigger('click')
+    await flushPromises()
+    expect(m.regzelProfile).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('payroll.regzel.profile.title')
 
     wrapper.unmount()
   })

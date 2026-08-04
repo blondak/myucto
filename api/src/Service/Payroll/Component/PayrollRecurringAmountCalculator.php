@@ -67,6 +67,28 @@ final class PayrollRecurringAmountCalculator
                 'Rozpočítání podle pracovních dnů nebo hodin vyžaduje potvrzený časový podklad.'
             );
         }
+        $employmentStart = new \DateTimeImmutable(
+            $this->string($recurring, 'employment_start'),
+        );
+        $employmentEndValue = $recurring['employment_end'] ?? null;
+        $employmentEnd = $employmentEndValue === null
+            ? null
+            : new \DateTimeImmutable(
+                $this->string($recurring, 'employment_end'),
+            );
+        $employmentStatus = $this->string(
+            $recurring,
+            'employment_effective_status',
+        );
+        $suspendedInMonth = $this->bool(
+            $recurring,
+            'employment_suspended_in_month',
+        );
+        if ($employmentStatus === 'suspended' || $suspendedInMonth) {
+            return $this->manualReview(
+                'Pracovní vztah byl v měsíci pozastaven a předpis vyžaduje ruční časové posouzení.'
+            );
+        }
         $activeDays = (int) $month->format('t');
         $monthDays = $activeDays;
         if ($allocation === 'calendar_days') {
@@ -78,11 +100,26 @@ final class PayrollRecurringAmountCalculator
                 : new \DateTimeImmutable($this->string($recurring, 'valid_to'));
             $activeFrom = $validFrom > $month ? $validFrom : $month;
             $activeTo = $validTo < $monthEnd ? $validTo : $monthEnd;
+            $activeFrom = $employmentStart > $activeFrom
+                ? $employmentStart
+                : $activeFrom;
+            $activeTo = $employmentEnd !== null && $employmentEnd < $activeTo
+                ? $employmentEnd
+                : $activeTo;
             $activeDays = $activeTo < $activeFrom
                 ? 0
                 : ((int) $activeFrom->diff($activeTo)->format('%a')) + 1;
             $amount = $this->multiplyFraction($amount, $activeDays, $monthDays);
-        } elseif ($allocation !== 'full_month') {
+        } elseif ($allocation === 'full_month') {
+            $monthEnd = $month->modify('last day of this month');
+            if ($employmentStart > $month
+                || ($employmentEnd !== null && $employmentEnd < $monthEnd)
+            ) {
+                return $this->manualReview(
+                    'Pracovní vztah trvá jen část měsíce a plný měsíční předpis vyžaduje ruční posouzení.'
+                );
+            }
+        } else {
             throw new \UnexpectedValueException('Neznámé rozpočítání opakované složky.');
         }
 
@@ -166,5 +203,18 @@ final class PayrollRecurringAmountCalculator
             return (int) $value;
         }
         throw new \UnexpectedValueException("Předpis nemá číselné pole {$key}.");
+    }
+
+    /** @param array<string,mixed> $row */
+    private function bool(array $row, string $key): bool
+    {
+        $value = $row[$key] ?? null;
+        if (is_bool($value)) {
+            return $value;
+        }
+        if ($value === 0 || $value === 1 || $value === '0' || $value === '1') {
+            return (bool) $value;
+        }
+        throw new \UnexpectedValueException("Předpis nemá boolean pole {$key}.");
     }
 }

@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -46,8 +47,10 @@ final class PayrollRunPersistenceTest extends TestCase
     private PayrollRunCommandService $productionService;
     private PayrollRunRepository $runs;
     private PayrollStatutoryAccumulatorRepository $statutoryAccumulators;
+    private PayrollEmployerPolicyRepository $policies;
     private int $supplierId;
     private int $otherSupplierId;
+    private int $employerPolicyId;
     private int $employeeId;
     private int $employmentId;
     private int $inputId;
@@ -81,12 +84,14 @@ final class PayrollRunPersistenceTest extends TestCase
         $statutoryAccumulators = $container->get(
             PayrollStatutoryAccumulatorRepository::class,
         );
+        $policies = $container->get(PayrollEmployerPolicyRepository::class);
         if (!$db instanceof Connection
             || !$action instanceof PayrollRunsAction
             || !$service instanceof PayrollRunCommandService
             || !$productionService instanceof PayrollRunCommandService
             || !$runs instanceof PayrollRunRepository
             || !$statutoryAccumulators instanceof PayrollStatutoryAccumulatorRepository
+            || !$policies instanceof PayrollEmployerPolicyRepository
         ) {
             throw new \RuntimeException('Služby mzdového běhu nejsou dostupné.');
         }
@@ -96,6 +101,7 @@ final class PayrollRunPersistenceTest extends TestCase
         $this->productionService = $productionService;
         $this->runs = $runs;
         $this->statutoryAccumulators = $statutoryAccumulators;
+        $this->policies = $policies;
         foreach ([
             'payroll_runs',
             'payroll_run_revisions',
@@ -130,6 +136,12 @@ final class PayrollRunPersistenceTest extends TestCase
                  VALUES (?, "active", "2026-01-01", ?, NOW())'
             )->execute([$supplierId, $this->actors[0]]);
         }
+        $policy = $this->policies->create(
+            $this->supplierId,
+            $this->employerPolicyInput(),
+            $this->actors[0],
+        );
+        $this->employerPolicyId = (int) $policy['id'];
         [$this->employeeId, $this->employmentId] = $this->employment();
         $pdo->prepare(
             'INSERT INTO payroll_enforcement_person_month_evidence
@@ -499,6 +511,94 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(
             '2026-05-01',
             $persisted['payout_accounts'][0]['verified_on'],
+        );
+    }
+
+    public function testInputSnapshotFreezesEmployerPostingPolicy(): void
+    {
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-employer-posting-policy',
+            $this->actors[0],
+        );
+
+        self::assertSame([
+            'automatic_posting_enabled' => true,
+            'id' => $this->employerPolicyId,
+            'row_version' => 1,
+        ], $locked->revision['input_snapshot']['employer_policy']);
+
+        $this->policies->update(
+            $this->supplierId,
+            $this->employerPolicyId,
+            $this->employerPolicyInput(false),
+            1,
+            $this->actors[0],
+        );
+
+        self::assertSame([
+            'automatic_posting_enabled' => true,
+            'id' => $this->employerPolicyId,
+            'row_version' => 1,
+        ], $this->runs->revision(
+            $this->supplierId,
+            (int) $locked->revision['id'],
+        )['input_snapshot']['employer_policy']);
+    }
+
+    public function testMissingEffectiveEmployerPolicyFailsClosed(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage(
+            'chybí účinná zaměstnavatelská politika',
+        );
+        $this->container->get(PayrollRunSnapshotBuilder::class)->build(
+            $this->otherSupplierId,
+            '2026-06-01',
+            '2026-07-15',
+        );
+    }
+
+    public function testInputSnapshotKeepsEmploymentArchivedAfterPayrollPeriod(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_events
+                (supplier_id, employment_id, event_type, from_status,
+                 to_status, effective_on, created_by)
+             VALUES
+                (?, ?, "created", NULL, "active", "2026-01-01", ?),
+                (?, ?, "status_changed", "active", "archived", "2026-07-01", ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->actors[0],
+            $this->supplierId,
+            $this->employmentId,
+            $this->actors[0],
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET status = "archived"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build(
+                $this->supplierId,
+                '2026-06-01',
+                '2026-07-15',
+            );
+
+        self::assertSame(
+            $this->employmentId,
+            $snapshot->data['people'][0]['employments'][0]['employment']['id'],
+        );
+        self::assertSame(
+            'active',
+            $snapshot->data['people'][0]['employments'][0]['employment']['status'],
         );
     }
 
@@ -1465,6 +1565,30 @@ final class PayrollRunPersistenceTest extends TestCase
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchColumn();
+    }
+
+    /** @return array<string,mixed> */
+    private function employerPolicyInput(
+        bool $automaticPostingEnabled = true,
+    ): array {
+        return [
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'payday_day' => 10,
+            'payday_month_offset' => 1,
+            'payday_business_day_rule' => 'previous_business_day',
+            'balance_rounding_mode' => 'exact_minor_units',
+            'home_office_policy' => 'not_used',
+            'travel_expense_policy' => 'not_used',
+            'four_eyes_required' => true,
+            'automatic_calculation_enabled' => true,
+            'automatic_posting_enabled' => $automaticPostingEnabled,
+            'automatic_payments_enabled' => true,
+            'delivery_channel' => 'disabled',
+            'delivery_verified_on' => null,
+            'source_kind' => 'manual',
+            'source_reference' => 'synthetic:payroll-run-policy',
+        ];
     }
 
     private function apiRequest(

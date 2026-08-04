@@ -104,6 +104,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
       { path: 'accounting/accounts',      name: 'accounting-accounts',      component: () => import('@/pages/accounting/ChartOfAccounts.vue'), meta: { requiresDoubleEntry: true } },
@@ -404,6 +405,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-absences': ['payroll'],
   'payroll-enforcement': ['payroll.enforcement'],
   'payroll-documents': ['payroll.documents'],
+  'payroll-submissions': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],

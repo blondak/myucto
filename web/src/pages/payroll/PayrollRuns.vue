@@ -8,18 +8,24 @@ import {
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
 const saving = ref(false)
-const period = ref(new Date().toISOString().slice(0, 7))
+const period = ref(localPayrollPeriod())
 const paymentDate = ref(defaultPaymentDate(period.value))
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
+const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
+const pendingDelete = ref<PayrollRun | null>(null)
+const commandReason = ref('')
+const commandError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 
@@ -126,16 +132,20 @@ async function createRun() {
 }
 
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
-  let reason: string | undefined
   if (['request_correction', 'reopen', 'cancel'].includes(command)) {
-    const entered = window.prompt(t('payroll.runs.reason_prompt'))
-    if (entered === null) return
-    reason = entered.trim()
-    if (!reason) {
-      toast.warning(t('payroll.runs.reason_required'))
-      return
-    }
+    pendingCommand.value = { run, command }
+    commandReason.value = ''
+    commandError.value = ''
+    return
   }
+  await submitCommand(run, command)
+}
+
+async function submitCommand(
+  run: PayrollRun,
+  command: PayrollRunCommand,
+  reason?: string,
+) {
   saving.value = true
   try {
     await payrollApi.commandRun(
@@ -145,9 +155,50 @@ async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
       crypto.randomUUID(),
     )
     toast.success(t('payroll.runs.command_done'))
+    pendingCommand.value = null
+    commandReason.value = ''
+    commandError.value = ''
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.runs.command_failed'))
+    const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
+    if (pendingCommand.value) commandError.value = message
+    else toast.error(message)
+    if (error?.response?.status === 409) await load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function confirmCommand() {
+  if (!pendingCommand.value) return
+  const reason = commandReason.value.trim()
+  if (!reason) {
+    commandError.value = t('payroll.runs.reason_required')
+    return
+  }
+  await submitCommand(
+    pendingCommand.value.run,
+    pendingCommand.value.command,
+    reason,
+  )
+}
+
+function askDeleteRun(run: PayrollRun) {
+  if (!canWrite.value || !run.can_delete) return
+  pendingDelete.value = run
+}
+
+async function deleteRun() {
+  const run = pendingDelete.value
+  if (!run) return
+  saving.value = true
+  try {
+    await payrollApi.deleteRun(run.id, run.row_version)
+    toast.success(t('payroll.runs.deleted'))
+    pendingDelete.value = null
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('payroll.runs.delete_failed'))
     if (error?.response?.status === 409) await load()
   } finally {
     saving.value = false
@@ -187,6 +238,15 @@ onMounted(load)
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
           >
         </label>
+        <RouterLink
+          :to="{ name: 'payroll-quick-inputs' }"
+          :class="btnOutline('primary')"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.coin" />
+          </svg>
+          {{ t('payroll.runs.quick_inputs') }}
+        </RouterLink>
         <button
           v-if="canWrite"
           :class="btnFilled('primary')"
@@ -211,6 +271,15 @@ onMounted(load)
     >
       <h2 class="font-semibold text-neutral-900">{{ t('payroll.runs.empty') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.runs.empty_hint') }}</p>
+      <RouterLink
+        :to="{ name: 'payroll-quick-inputs' }"
+        :class="[btnOutline('primary'), 'mt-4']"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.coin" />
+        </svg>
+        {{ t('payroll.runs.quick_inputs') }}
+      </RouterLink>
     </section>
 
     <section v-else class="space-y-4">
@@ -234,7 +303,10 @@ onMounted(load)
               · {{ t('payroll.runs.revision', { revision: run.revision_no ?? 0 }) }}
             </p>
           </div>
-          <div v-if="visibleCommands(run).length" class="flex flex-wrap justify-end gap-2">
+          <div
+            v-if="visibleCommands(run).length || (canWrite && run.can_delete)"
+            class="flex flex-wrap justify-end gap-2"
+          >
             <button
               v-for="command in visibleCommands(run)"
               :key="command"
@@ -246,6 +318,18 @@ onMounted(load)
                 <path :d="commandIcon(command)" />
               </svg>
               {{ commandLabel(command) }}
+            </button>
+            <button
+              v-if="canWrite && run.can_delete"
+              :data-testid="`delete-payroll-run-${run.id}`"
+              :class="btnOutline('danger')"
+              :disabled="saving"
+              @click="askDeleteRun(run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path :d="ICONS.trash" />
+              </svg>
+              {{ t('payroll.runs.delete') }}
             </button>
           </div>
         </div>
@@ -289,5 +373,68 @@ onMounted(load)
         </div>
       </article>
     </section>
+
+    <Modal
+      v-if="pendingCommand"
+      :title="commandLabel(pendingCommand.command)"
+      width-class="max-w-lg"
+      @close="pendingCommand = null"
+    >
+      <form class="space-y-4" data-test="run-command-dialog" @submit.prevent="confirmCommand">
+        <label class="block text-sm font-medium text-neutral-700">
+          {{ t('payroll.runs.reason_prompt') }}
+          <textarea
+            v-model="commandReason"
+            class="mt-1 min-h-24 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            required
+            autofocus
+            data-test="run-command-reason"
+          />
+        </label>
+        <p
+          v-if="commandError"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="run-command-error"
+        >
+          {{ commandError }}
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="pendingCommand = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" :class="commandClass(pendingCommand.command)" :disabled="saving">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(pendingCommand.command)" /></svg>
+            {{ commandLabel(pendingCommand.command) }}
+          </button>
+        </div>
+      </form>
+    </Modal>
+
+    <Modal
+      v-if="pendingDelete"
+      :title="t('payroll.runs.delete')"
+      width-class="max-w-lg"
+      @close="pendingDelete = null"
+    >
+      <p class="text-sm text-neutral-700">{{ t('payroll.runs.delete_confirm') }}</p>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" @click="pendingDelete = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          :class="btnFilled('danger')"
+          :disabled="saving"
+          data-test="confirm-delete-run"
+          @click="deleteRun"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+          {{ t('payroll.runs.delete') }}
+        </button>
+      </div>
+    </Modal>
   </div>
 </template>

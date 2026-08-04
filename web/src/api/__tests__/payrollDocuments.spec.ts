@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PayrollDocument } from '@/api/payroll'
+import type {
+  PayrollDocument,
+  PayrollEmploymentCertificateEvidence,
+} from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   get: vi.fn(),
@@ -71,5 +74,57 @@ describe('payroll document downloads', () => {
       '/payroll/people/9/documents/payroll-sheet/2026',
       {},
     )
+  })
+
+  it('uses dedicated exit-document endpoints and an idempotency header', async () => {
+    m.get.mockResolvedValueOnce({
+      data: {
+        employment_id: 12,
+        readiness: {
+          employment_certificate: {
+            available: true,
+            readiness_code: null,
+            deduction_claim_ids: [91],
+          },
+          average_earnings_certificate: {
+            available: false,
+            readiness_code: 'average_earnings_ruleset_not_ready',
+          },
+        },
+        items: [],
+      },
+    })
+
+    await payrollApi.employmentExitDocuments(12)
+    expect(m.get).toHaveBeenCalledWith('/payroll/employments/12/documents/exit')
+
+    const payload: PayrollEmploymentCertificateEvidence = {
+      work_description: 'Synthetic work',
+      achieved_qualification: 'Synthetic qualification',
+      exposure_assessment_complete: true,
+      exposure_facts: [],
+      deduction_assessment_complete: true,
+      deductions: [{
+        source_claim_id: 91,
+        beneficiary: 'Synthetic beneficiary',
+        ordering_authority: 'Synthetic authority',
+        decision_reference: 'TEST-91',
+      }],
+      pension_category_assessment_complete: true,
+      pre1993_pension_category_periods: [],
+      dpp_issuance_basis: null,
+      correction_reason: null,
+    }
+    m.post.mockResolvedValueOnce({ data: { id: 88 } })
+
+    await payrollApi.generateEmploymentCertificate(12, payload, 'exit-idempotency')
+
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/employments/12/documents/exit/employment-certificate',
+      payload,
+      { headers: { 'Idempotency-Key': 'exit-idempotency' } },
+    )
+    expect(JSON.stringify(payload)).not.toContain('net_amount')
+    expect(JSON.stringify(payload)).not.toContain('average_earnings')
   })
 })

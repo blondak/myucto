@@ -45,6 +45,9 @@ final class PayrollApprovedRevisionPostingService
                 'Firma, revize a uživatel účetního můstku musí být kladná čísla.',
             );
         }
+        if (!self::automaticPostingEnabled($snapshot)) {
+            return null;
+        }
         $year = self::snapshotYear($snapshot);
         if ($this->accountingModes->forYear($supplierId, $year) !== 'double_entry') {
             return null;
@@ -97,6 +100,33 @@ final class PayrollApprovedRevisionPostingService
             $normalizedAccounts,
             ['user_id' => $actorUserId],
         );
+    }
+
+    /** @param array<string,mixed> $snapshot */
+    private static function automaticPostingEnabled(array $snapshot): bool
+    {
+        $policy = $snapshot['employer_policy'] ?? null;
+        if (!is_array($policy) || array_is_list($policy)) {
+            throw new \DomainException(
+                'Mzdový snapshot nemá zmrazenou účinnou zaměstnavatelskou politiku.',
+            );
+        }
+        foreach (['id', 'row_version'] as $field) {
+            $value = $policy[$field] ?? null;
+            if (!is_int($value) || $value <= 0) {
+                throw new \DomainException(
+                    'Mzdový snapshot nemá platnou účinnou zaměstnavatelskou politiku.',
+                );
+            }
+        }
+        $enabled = $policy['automatic_posting_enabled'] ?? null;
+        if (!is_bool($enabled)) {
+            throw new \DomainException(
+                'Mzdový snapshot nemá platnou politiku automatického zaúčtování.',
+            );
+        }
+
+        return $enabled;
     }
 
     /** @param array<string,mixed> $snapshot */

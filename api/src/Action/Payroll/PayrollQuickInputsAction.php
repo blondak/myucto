@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollInputConflictException;
 use MyInvoice\Repository\Payroll\PayrollQuickInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -59,6 +60,14 @@ final class PayrollQuickInputsAction
                 $data['period'],
                 $data['rows'],
                 $this->userId($request),
+            );
+        } catch (PayrollEmploymentConflictException $e) {
+            return Json::error(
+                $response,
+                'employment_row_version_conflict',
+                $e->getMessage(),
+                409,
+                ['current_row_version' => $e->currentVersion],
             );
         } catch (PayrollInputConflictException $e) {
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [

@@ -390,6 +390,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
         { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
+        { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey },
       ],
     } as NavSection] : []),

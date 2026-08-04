@@ -296,6 +296,9 @@
     "payroll-documents": [
       "payroll"
     ],
+    "payroll-submissions": [
+      "payroll"
+    ],
     "payroll-settings": [
       "payroll"
     ],

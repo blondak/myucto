@@ -157,6 +157,16 @@ export interface PayrollPersonResponse {
   person: PayrollPerson
 }
 
+export interface PayrollPersonCreatePayload {
+  full_name: string
+  birth_date: string | null
+  birth_number: string | null
+  relation_type: PayrollRelationType
+  planned_start_on: string
+  monthly_gross: number | null
+  office_id?: number | null
+}
+
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'
 export type PayrollPersonEditableProfileStatus = Exclude<PayrollPersonProfileStatus, 'missing'>
 export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed'
@@ -303,6 +313,23 @@ export interface PayrollPersonProfilePayload {
   contacts: PayrollPersonContactPayload[]
   identifiers: PayrollPersonIdentifierPayload[]
   accounts: PayrollPersonAccountPayload[]
+}
+
+export interface PayrollPersonQuickEditEmploymentPayload {
+  id: number
+  row_version: number
+  monthly_gross_minor: number | null
+  terms: PayrollEmploymentTermsPayload
+}
+
+export interface PayrollPersonQuickEditPayload {
+  profile: PayrollPersonProfilePayload
+  employment: PayrollPersonQuickEditEmploymentPayload | null
+}
+
+export interface PayrollPersonQuickEditResponse {
+  profile: PayrollPersonProfile
+  employment: PayrollEmployment | null
 }
 
 export interface PayrollPersonAccountVerificationPayload {
@@ -614,10 +641,13 @@ export interface PayrollQuickInputRef {
 export interface PayrollQuickInputRow {
   employee_id: number
   employment_id: number
+  employment_row_version: number
   full_name: string
   birth_number_masked: string | null
   employment_code: string
   relation_type: PayrollRelationType
+  effective_status: PayrollEmploymentStatus
+  suspended_in_month: boolean
   base_amount_minor: number
   base_managed_elsewhere: boolean
   base_conflict: boolean
@@ -630,12 +660,15 @@ export interface PayrollQuickInputRow {
   overtime_average_snapshot_id: number | null
   overtime_average_snapshot_version: number | null
   overtime_hours_available: boolean
+  overtime_hours_relation_supported: boolean
   overtime_managed_elsewhere: boolean
   overtime_conflict: boolean
   bonus_amount_minor: number
   bonus_managed_elsewhere: boolean
   bonus_conflict: boolean
   other_amount_minor: number
+  non_monetary_amount_minor: number
+  excluded_from_gross_amount_minor: number
   gross_preview_minor: number
   inputs: {
     base: PayrollQuickInputRef | null
@@ -654,6 +687,7 @@ export interface PayrollQuickInputSavePayload {
   period: string
   rows: Array<{
     employment_id: number
+    employment_row_version: number
     base_amount_minor: number
     overtime_mode: 'hours' | 'amount'
     overtime_hours_milli: number | null
@@ -838,6 +872,42 @@ export interface PayrollEmployerSettingsPayload {
   offices: PayrollOfficePayload[]
 }
 
+export type PayrollRegzelEnvironment = 'production' | 'test'
+
+export interface PayrollRegzelProfile {
+  supplier_id: number
+  social_enterprise: boolean
+  employment_agency: boolean
+  protected_labor_market: boolean
+  evidence_confirmed_at: string
+  row_version: number
+  updated_at: string
+}
+
+export interface PayrollRegzelProfilePayload {
+  row_version: number
+  social_enterprise: boolean
+  employment_agency: boolean
+  protected_labor_market: boolean
+  evidence_confirmed: boolean
+}
+
+export interface PayrollRegzelSnapshot {
+  id: number
+  environment: PayrollRegzelEnvironment
+  office_id: number
+  document_type: 'REGZELDOPL25'
+  interaction_code: 'supplemental_information'
+  mapping_version: string
+  xsd_version: string
+  source_snapshot_hash: string
+  xml_sha256: string
+  xml_byte_size: number
+  request_fingerprint?: string
+  created_at?: string
+  created?: boolean
+}
+
 export type PayrollBusinessDayRule = 'none' | 'previous_business_day' | 'next_business_day'
 export type PayrollBalanceRoundingMode = 'exact_minor_units' | 'nearest_crown' | 'up_to_crown'
 export type PayrollOptionalPolicyState = 'not_used' | 'manual_review' | 'configured'
@@ -988,6 +1058,10 @@ export interface PayrollDocument {
   office_name?: string | null
   employee_id: number | null
   employee_name?: string | null
+  employment_id?: number
+  employment_end_date?: string
+  employment_exit_revision_id?: number | null
+  employment_exit_revision_no?: number
   document_kind: PayrollDocumentKind
   document_revision_no?: number
   supersedes_document_id?: number | null
@@ -1016,6 +1090,48 @@ export interface PayrollDocumentList {
 export interface PayrollAnnualDocumentList {
   year: number
   items: PayrollDocument[]
+}
+
+export interface PayrollEmploymentExitReadinessItem {
+  available: boolean
+  readiness_code: string | null
+}
+
+export interface PayrollEmploymentExitDocumentList {
+  employment_id: number
+  readiness: {
+    employment_certificate: PayrollEmploymentExitReadinessItem & {
+      deduction_claim_ids: number[]
+    }
+    average_earnings_certificate: PayrollEmploymentExitReadinessItem
+  }
+  items: PayrollDocument[]
+}
+
+export interface PayrollEmploymentCertificateDeductionEvidence {
+  source_claim_id: number
+  beneficiary: string
+  ordering_authority: string
+  decision_reference: string
+}
+
+export interface PayrollEmploymentCertificatePensionPeriod {
+  category: 'I' | 'II'
+  from: string
+  to: string
+}
+
+export interface PayrollEmploymentCertificateEvidence {
+  work_description: string
+  achieved_qualification: string
+  exposure_assessment_complete: boolean
+  exposure_facts: string[]
+  deduction_assessment_complete: boolean
+  deductions: PayrollEmploymentCertificateDeductionEvidence[]
+  pension_category_assessment_complete: boolean
+  pre1993_pension_category_periods: PayrollEmploymentCertificatePensionPeriod[]
+  dpp_issuance_basis: null | 'wage_deductions' | 'sickness_insurance'
+  correction_reason: string | null
 }
 
 export type PayrollRunStatus =
@@ -1161,6 +1277,7 @@ export interface PayrollRun {
   revision_no: number | null
   revision_status: string | null
   payment_materialization_supported: boolean
+  can_delete: boolean
   result_snapshot: PayrollRunResultSnapshot | null
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
@@ -1184,6 +1301,9 @@ export const payrollApi = {
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
   people: () =>
     api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
+  createPerson: (payload: PayrollPersonCreatePayload) =>
+    api.post<PayrollPersonResponse>('/payroll/people', payload)
+      .then(response => response.data.person),
   person: (id: number) =>
     api.get<PayrollPersonResponse>(`/payroll/people/${id}`).then(response => response.data.person),
   personProfile: (id: number) =>
@@ -1192,6 +1312,9 @@ export const payrollApi = {
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
       .then(response => response.data.profile),
+  savePersonQuickEdit: (id: number, payload: PayrollPersonQuickEditPayload) =>
+    api.put<PayrollPersonQuickEditResponse>(`/payroll/people/${id}/quick-edit`, payload)
+      .then(response => response.data),
   verifyPersonAccount: (
     personId: number,
     accountId: number,
@@ -1234,6 +1357,44 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  regzelProfile: () =>
+    api.get<{ profile: PayrollRegzelProfile | null }>('/payroll/submissions/regzel/profile')
+      .then(response => response.data.profile),
+  saveRegzelProfile: (payload: PayrollRegzelProfilePayload) =>
+    api.put<{ profile: PayrollRegzelProfile }>('/payroll/submissions/regzel/profile', payload)
+      .then(response => response.data.profile),
+  regzelSnapshots: (environment: PayrollRegzelEnvironment) =>
+    api.get<{ items: PayrollRegzelSnapshot[] }>('/payroll/submissions/regzel/snapshots', {
+      params: { environment },
+    }).then(response => response.data.items),
+  prepareRegzel: (payload: {
+    office_id: number
+    environment: PayrollRegzelEnvironment
+    evidence_confirmed: boolean
+    idempotency_key: string
+  }) =>
+    api.post<{ snapshot: PayrollRegzelSnapshot }>('/payroll/submissions/regzel/prepare', payload)
+      .then(response => response.data.snapshot),
+  downloadRegzelSnapshot: async (snapshot: PayrollRegzelSnapshot): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/submissions/regzel/snapshots/${snapshot.id}/xml`,
+      {
+        params: { environment: snapshot.environment },
+        responseType: 'blob',
+      },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `REGZELDOPL25-${snapshot.environment === 'test' ? 'TEST' : 'PRODUKCE'}-${snapshot.id}.xml`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   employerPolicies: (effectiveOn?: string) =>
     api.get<{ policies: PayrollEmployerPolicy[] }>('/payroll/settings/policies', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,
@@ -1289,6 +1450,20 @@ export const payrollApi = {
       {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  employmentExitDocuments: (employmentId: number) =>
+    api.get<PayrollEmploymentExitDocumentList>(
+      `/payroll/employments/${employmentId}/documents/exit`,
+    ).then(response => response.data),
+  generateEmploymentCertificate: (
+    employmentId: number,
+    payload: PayrollEmploymentCertificateEvidence,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollDocument>(
+      `/payroll/employments/${employmentId}/documents/exit/employment-certificate`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
   runs: (period?: string) =>
     api.get<{ runs: PayrollRun[] }>('/payroll/runs', {
       params: period ? { period } : undefined,
@@ -1300,6 +1475,10 @@ export const payrollApi = {
   }) =>
     api.post<{ run: PayrollRun }>('/payroll/runs', payload)
       .then(response => response.data.run),
+  deleteRun: (runId: number, rowVersion: number) =>
+    api.delete<void>(`/payroll/runs/${runId}`, {
+      data: { row_version: rowVersion },
+    }).then(() => undefined),
   commandRun: (
     runId: number,
     command: PayrollRunCommand,

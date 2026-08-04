@@ -69,6 +69,7 @@ use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
@@ -79,8 +80,10 @@ use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
+use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
+use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
@@ -662,6 +665,7 @@ final class Routes
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
             $g->post('/runs', [PayrollRunsAction::class, 'create']);
+            $g->delete('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'delete']);
             $g->post(
                 '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
                 [PayrollRunsAction::class, 'command'],
@@ -680,6 +684,14 @@ final class Routes
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
                 [PayrollDocumentAction::class, 'generateBundle'],
             );
+            $g->get(
+                '/employments/{id:[0-9]+}/documents/exit',
+                [PayrollEmploymentExitDocumentAction::class, 'list'],
+            );
+            $g->post(
+                '/employments/{id:[0-9]+}/documents/exit/{kind:employment-certificate|average-earnings-certificate}',
+                [PayrollEmploymentExitDocumentAction::class, 'generate'],
+            );
             $g->post(
                 '/documents/{documentId:[0-9]+}/download-grant',
                 [PayrollDocumentAction::class, 'grant'],
@@ -689,6 +701,7 @@ final class Routes
                 [PayrollDocumentAction::class, 'download'],
             );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
+            $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
@@ -702,6 +715,10 @@ final class Routes
             );
             $g->get('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'get']);
             $g->put('/people/{id:[0-9]+}/profile', [PayrollPersonProfileAction::class, 'put']);
+            $g->put(
+                '/people/{id:[0-9]+}/quick-edit',
+                [PayrollPersonQuickEditAction::class, 'put'],
+            );
             $g->post(
                 '/people/{id:[0-9]+}/sensitive-reveal',
                 [PayrollPersonSensitiveRevealAction::class, 'post'],
@@ -709,6 +726,26 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
                 [PayrollPaymentAction::class, 'verifyPersonAccount'],
+            );
+            $g->get(
+                '/submissions/regzel/profile',
+                [PayrollRegzelAction::class, 'profile'],
+            );
+            $g->put(
+                '/submissions/regzel/profile',
+                [PayrollRegzelAction::class, 'saveProfile'],
+            );
+            $g->post(
+                '/submissions/regzel/prepare',
+                [PayrollRegzelAction::class, 'prepare'],
+            );
+            $g->get(
+                '/submissions/regzel/snapshots',
+                [PayrollRegzelAction::class, 'snapshots'],
+            );
+            $g->get(
+                '/submissions/regzel/snapshots/{id:[0-9]+}/xml',
+                [PayrollRegzelAction::class, 'download'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);

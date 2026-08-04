@@ -240,11 +240,64 @@ final class PayrollRecurringImportsApiTest extends TestCase
                 ->withParsedBody(['period' => '2026-06']),
             new Response(),
         );
+        self::assertSame(
+            200,
+            $materialized->getStatusCode(),
+            (string) $materialized->getBody(),
+        );
         $result = PayrollTimeValue::row(
             $this->json($materialized)['materialization'] ?? null,
             'materialization',
         );
         self::assertSame(1, $result['created_count']);
+    }
+
+    public function testFullMonthRecurringAmountRequiresReviewForPartialEmploymentMonth(): void
+    {
+        $created = $this->recurring->create(
+            $this->request('POST', '/api/payroll/recurring-components')
+                ->withParsedBody([
+                    ...$this->recurringPayload(),
+                    'amount_minor' => 300_000,
+                    'valid_from' => '2026-01-01',
+                    'allocation_rule' => 'full_month',
+                ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-06-15", actual_start_date = "2026-06-15"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $materialized = $this->recurring->materialize(
+            $this->request('POST', '/api/payroll/recurring-components/materialize')
+                ->withParsedBody(['period' => '2026-06']),
+            new Response(),
+        );
+        self::assertSame(
+            200,
+            $materialized->getStatusCode(),
+            (string) $materialized->getBody(),
+        );
+        $result = PayrollTimeValue::row(
+            $this->json($materialized)['materialization'] ?? null,
+            'materialization',
+        );
+
+        self::assertSame(0, $result['created_count']);
+        self::assertSame(1, $result['manual_review_count']);
+        self::assertStringContainsString(
+            'část měsíce',
+            PayrollTimeValue::string(
+                PayrollTimeValue::rows(
+                    $result['manual_review'] ?? null,
+                    'manual_review',
+                )[0]['reason'] ?? null,
+                'reason',
+            ),
+        );
     }
 
     public function testRecurringComponentRejectsOrdinaryEmploymentWithoutStartDate(): void

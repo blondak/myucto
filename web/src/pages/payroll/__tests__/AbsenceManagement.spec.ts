@@ -9,6 +9,9 @@ const m = vi.hoisted(() => ({
   leaveLedger: vi.fn(),
   decide: vi.fn(),
   createAbsence: vi.fn(),
+  createAverage: vi.fn(),
+  createEntitlement: vi.fn(),
+  createLeaveEntry: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -22,10 +25,10 @@ vi.mock('@/api/payrollAbsences', () => ({
     decide: m.decide,
     createAbsence: m.createAbsence,
     cancel: vi.fn(),
-    createAverage: vi.fn(),
+    createAverage: m.createAverage,
     approveAverage: vi.fn(),
-    createLeaveEntry: vi.fn(),
-    createEntitlement: vi.fn(),
+    createLeaveEntry: m.createLeaveEntry,
+    createEntitlement: m.createEntitlement,
   },
 }))
 
@@ -89,6 +92,10 @@ describe('AbsenceManagement', () => {
     }])
     m.leaveLedger.mockResolvedValue({ entries: [], balance_minutes: 0 })
     m.decide.mockResolvedValue({ id: 44, status: 'approved' })
+    m.createAbsence.mockResolvedValue({ id: 45 })
+    m.createAverage.mockResolvedValue({ id: 9 })
+    m.createEntitlement.mockResolvedValue({ id: 10 })
+    m.createLeaveEntry.mockResolvedValue({ id: 11 })
   })
 
   it('renders a responsive DPN card and sends explicit review flags', async () => {
@@ -168,6 +175,106 @@ describe('AbsenceManagement', () => {
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     const expected = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
     expect(m.absences.mock.calls[0][1]).toBe(expected)
+    wrapper.unmount()
+  })
+
+  it('converts human money and time units to the unchanged average API contract', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    await wrapper.find('[data-test="average-gross-czk"]').setValue('12345.67')
+    await wrapper.find('[data-test="average-allocated-czk"]').setValue('10.05')
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('160.5')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('20')
+    await wrapper.find('[data-test="average-probable-czk"]').setValue('250.25')
+    await wrapper.find('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({
+      gross_earnings_minor: 1_234_567,
+      longer_period_allocated_minor: 1_005,
+      worked_minutes: 9_630,
+      worked_days: 20,
+      probable_hourly_minor: 25_025,
+    }))
+    wrapper.unmount()
+  })
+
+  it('converts absence and leave hours to whole minutes at the API boundary', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    selectors[1].vm.$emit('update:modelValue', 8)
+    await wrapper.find('[data-test="absence-partial-first-hours"]').setValue('2.5')
+    await wrapper.find('[data-test="absence-partial-last-hours"]').setValue('1.25')
+    await wrapper.find('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAbsence).toHaveBeenCalledWith(expect.objectContaining({
+      partial_first_minutes: 150,
+      partial_last_minutes: 75,
+    }))
+
+    await wrapper.find('[data-test="tab-leave"]').trigger('click')
+    await wrapper.find('[data-test="leave-weekly-hours"]').setValue('37.5')
+    await wrapper.find('[data-test="leave-worked-hours"]').setValue('1040')
+    await wrapper.find('[data-test="leave-rationale"]').setValue('Syntetické ruční posouzení')
+    await wrapper.find('[data-test="leave-entitlement-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createEntitlement).toHaveBeenCalledWith(expect.objectContaining({
+      weekly_minutes: 2_250,
+      worked_equivalent_minutes: 62_400,
+    }))
+
+    await wrapper.find('[data-test="leave-entry-hours"]').setValue('-7.5')
+    await wrapper.find('[data-test="leave-entry-reason"]').setValue('Syntetická oprava')
+    await wrapper.find('[data-test="leave-entry-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createLeaveEntry).toHaveBeenCalledWith(expect.objectContaining({
+      minutes_delta: -450,
+    }))
+    wrapper.unmount()
+  })
+
+  it('rejects excessive precision locally and renders the exact API error inline', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    await wrapper.find('[data-test="average-gross-czk"]').setValue('1.001')
+    await wrapper.find('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="average-error"]').text())
+      .toBe('payroll_absence.validation.money_precision')
+
+    m.createAverage.mockRejectedValueOnce({
+      response: { data: { error: { message: 'Přesná zpráva validační chyby z API.' } } },
+    })
+    await wrapper.find('[data-test="average-gross-czk"]').setValue('100')
+    await wrapper.find('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[data-test="average-error"]').text())
+      .toBe('Přesná zpráva validační chyby z API.')
+    expect(m.toastError).not.toHaveBeenCalledWith('Přesná zpráva validační chyby z API.')
+    wrapper.unmount()
+  })
+
+  it('uses a rolling year range instead of freezing form controls at 2026', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    const currentYear = new Date().getFullYear()
+    const yearInput = wrapper.find('[data-test="average-year"]')
+    expect(Number(yearInput.attributes('min'))).toBeLessThanOrEqual(currentYear - 5)
+    expect(Number(yearInput.attributes('max'))).toBeGreaterThanOrEqual(currentYear + 1)
+
+    await wrapper.find('[data-test="tab-leave"]').trigger('click')
+    const leaveYearInput = wrapper.find('[data-test="leave-year"]')
+    expect(Number(leaveYearInput.attributes('min'))).toBeLessThanOrEqual(currentYear - 5)
+    expect(Number(leaveYearInput.attributes('max'))).toBeGreaterThanOrEqual(currentYear + 1)
     wrapper.unmount()
   })
 })

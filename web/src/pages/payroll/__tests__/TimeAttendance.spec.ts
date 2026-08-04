@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   timeMonth: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
+  reopenTimeMonth: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -14,6 +15,7 @@ vi.mock('@/api/payroll', () => ({
     timeMonth: m.timeMonth,
     previewTimeImport: m.previewTimeImport,
     importTime: m.importTime,
+    reopenTimeMonth: m.reopenTimeMonth,
   },
 }))
 
@@ -34,7 +36,7 @@ vi.mock('vue-i18n', () => ({
 
 import TimeAttendance from '@/pages/payroll/TimeAttendance.vue'
 
-describe('TimeAttendance import', () => {
+describe('TimeAttendance', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
@@ -48,6 +50,7 @@ describe('TimeAttendance import', () => {
       rows: [],
       errors: [],
     })
+    m.reopenTimeMonth.mockResolvedValue({})
   })
 
   it('loads attendance CSV through the shared drag-and-drop control', async () => {
@@ -103,5 +106,58 @@ describe('TimeAttendance import', () => {
       .toBe('payroll.time.import.unsupported_file')
     expect(wrapper.find('[data-testid="payroll-time-import-selected"]').exists()).toBe(false)
     expect(m.toastError).toHaveBeenCalledWith('payroll.time.import.unsupported_file')
+  })
+
+  it('reopens an approved month through a modal and keeps the exact API error inline', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'approved', row_version: 4 },
+        calendar: null,
+        summary: {
+          fund_minutes: 9_600,
+          planned_minutes: 9_600,
+          actual_minutes: 9_600,
+          difference_minutes: 0,
+          incomplete: false,
+        },
+      }],
+    })
+    m.reopenTimeMonth.mockRejectedValueOnce({
+      response: { data: { error: { message: 'Přesná konfliktní chyba z API.' } } },
+    })
+    const prompt = vi.spyOn(window, 'prompt')
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const reopen = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.reopen')
+    await reopen!.trigger('click')
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="reopen-modal"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="reopen-employee"]').text()).toContain('Syntetická osoba')
+
+    await wrapper.find('[data-test="reopen-reason"]').setValue('Oprava syntetických podkladů')
+    await wrapper.find('[data-test="reopen-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.reopenTimeMonth).toHaveBeenCalledWith(expect.any(String), {
+      employment_id: 12,
+      row_version: 4,
+      reason: 'Oprava syntetických podkladů',
+    })
+    expect(wrapper.find('[data-test="reopen-error"]').text())
+      .toBe('Přesná konfliktní chyba z API.')
+    expect(wrapper.find('[data-test="reopen-modal"]').exists()).toBe(true)
+    expect(m.toastError).not.toHaveBeenCalledWith('Přesná konfliktní chyba z API.')
+
+    await wrapper.find('[data-test="reopen-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.reopenTimeMonth).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="reopen-modal"]').exists()).toBe(false)
+    prompt.mockRestore()
   })
 })
