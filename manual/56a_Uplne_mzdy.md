@@ -274,6 +274,11 @@ srážka sníží částku k výplatě, ale neměnný výsledek a ledger
 více plátců bez ověřeného rozdělení nebo jiný stav vyžadující posouzení
 schválení zablokují.
 
+Schválení také promítne vypočtené standardní srážky do append-only ledgeru.
+Oprava nepřepíše původní pohyb: zvýšení přidá pouze rozdíl a snížení vytvoří
+reverzi navázanou na původní sražení. Opakované schválení částku nezapíše
+podruhé.
+
 Schválení zároveň automaticky vytvoří výplatní pásku každé zpracované osoby
 a v podvojném účetnictví rozdílový mzdový deník. Použijí se předkontace
 zmrazené při uzamknutí vstupů, takže pozdější změna nastavení nezmění již
@@ -303,14 +308,25 @@ vytvoř opravnou revizi z aktuálních a ověřených podkladů. Selhání jedn�
 účtárny nezastaví přípravu ostatních běhů téhož měsíce; aplikace vypíše počet
 nezpracovaných běhů a konkrétní důvod.
 
+Stejná akce připraví také zdravotní pojistné samostatně pro každou pojišťovnu
+z neměnného výsledku schválené revize. V nastavení musí mít konkrétní
+pojišťovna právě jeden účet účinný ke splatnosti, úplný ověřovací podklad a
+platební symboly. Seznam ukáže název a kód pojišťovny, maskovaný účet a stav
+ověření; celé číslo účtu ani interní reference neposílá. Splatnost se vždy
+odvodí z mzdového období, ne z dne, kdy byl historický běh vypočten nebo
+opraven.
+
 Opakované stisknutí **Připravit závazky** je bezpečné a nevytvoří duplicity.
 Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
-závazkům. Seznam ukazuje zaměstnance, druh závazku, způsob úhrady, splatnost,
-částku a odvozený stav. Nevrací číslo účtu ani interní odkaz příjemce.
+závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost,
+částku a odvozený stav. Záporný rozdíl zdravotního pojistného se zobrazí jako
+příchozí opravný závazek, ale nelze jej vložit do odchozí bankovní dávky;
+vratku je nutné doložit příchozím bankovním nebo pokladním dokladem.
 
 V záložce **Platební dávky** vybereš připravené závazky. Aplikace podle
 výplatních cílů nabídne účet plátce a formát ABO nebo SEPA, znovu ověří
-nezměněné účty příjemců a vytvoří dávku. Export se ukládá šifrovaně přesně
+nezměněné účty příjemců a vytvoří dávku. U zdravotní pojišťovny použije přesné
+zmrazené VS, SS a KS. Export se ukládá šifrovaně přesně
 v těch bajtech, které se stáhnou do banky. Opakování se stejným klíčem vrátí
 tentýž export a nevytvoří další ekonomický závazek. Stažení vyžaduje právo
 zápisu a používá krátkodobé jednorázové oprávnění.
@@ -320,6 +336,10 @@ bankovní pohyb nebo zaúčtovaný pokladní doklad. Lze zapsat i částečnou �
 Historie je neměnná: vratka nebo storno nevynuluje původní záznam, ale přidá
 samostatnou reverzní událost s vlastním důkazem. Jeden bankovní nebo pokladní
 důkaz nesmí současně převzít fakturace ani jiné párování.
+
+Filtr období patří mzdové revizi, ne datu vytvoření dávky. V nabídce důkazů
+proto zůstane i předčasná nebo opožděná platba vztahující se k otevřenému
+závazku.
 
 Skutečné datum úhrady vzniká výhradně z data zvoleného důkazu, nikdy z
 plánovaného data výplaty mzdového běhu ani ze samotné existence exportního

@@ -296,6 +296,14 @@ final class PayrollRunCommandService
                     (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
                 );
+                if ($command === PayrollRunCommand::REOPEN) {
+                    $snapshot = $this->calculationPipeline
+                        ->prepareCorrectionSnapshot(
+                            $supplierId,
+                            $runId,
+                            $snapshot,
+                        );
+                }
             }
             $counts = $revision === null
                 ? ['blockers' => 0, 'unresolved_overrides' => 0]
@@ -448,6 +456,11 @@ final class PayrollRunCommandService
                         (int) $revision['id'],
                         $actorUserId,
                     );
+                $this->calculationPipeline->storeApprovedDeductions(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $actorUserId,
+                );
                 $this->approvedPosting?->post(
                     $supplierId,
                     (int) $revision['id'],

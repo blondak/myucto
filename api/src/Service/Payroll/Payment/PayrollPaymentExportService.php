@@ -567,9 +567,9 @@ final class PayrollPaymentExportService
      *   account_number:string,
      *   bank_code:string,
      *   amount_minor:int,
-     *   variable_symbol:null,
-     *   constant_symbol:null,
-     *   specific_symbol:null,
+     *   variable_symbol:?string,
+     *   constant_symbol:?string,
+     *   specific_symbol:?string,
      *   message:string
      * }>
      */
@@ -589,10 +589,22 @@ final class PayrollPaymentExportService
                     'instrukci příjemce',
                 ),
                 'amount_minor' => $this->amountMinor($instruction),
-                'variable_symbol' => null,
-                'constant_symbol' => null,
-                'specific_symbol' => null,
-                'message' => 'Vyplata mzdy',
+                'variable_symbol' => $this->nullableString(
+                    $instruction,
+                    'variable_symbol',
+                ),
+                'constant_symbol' => $this->nullableString(
+                    $instruction,
+                    'constant_symbol',
+                ),
+                'specific_symbol' => $this->nullableString(
+                    $instruction,
+                    'specific_symbol',
+                ),
+                'message' => $this->nullableString(
+                    $instruction,
+                    'payment_message',
+                ) ?? 'Vyplata mzdy',
             ];
         }
 
@@ -606,7 +618,7 @@ final class PayrollPaymentExportService
      *   iban:string,
      *   bic:?string,
      *   amount_minor:int,
-     *   variable_symbol:null,
+     *   variable_symbol:?string,
      *   message:string
      * }>
      */
@@ -627,7 +639,10 @@ final class PayrollPaymentExportService
                 ),
                 'bic' => $this->nullableString($instruction, 'bic'),
                 'amount_minor' => $this->amountMinor($instruction),
-                'variable_symbol' => null,
+                'variable_symbol' => $this->nullableString(
+                    $instruction,
+                    'variable_symbol',
+                ),
                 'end_to_end_id' => 'MYUCTO-' . substr(
                     hash(
                         'sha256',
@@ -640,7 +655,10 @@ final class PayrollPaymentExportService
                     0,
                     28,
                 ),
-                'message' => 'Vyplata mzdy',
+                'message' => $this->nullableString(
+                    $instruction,
+                    'payment_message',
+                ) ?? 'Vyplata mzdy',
             ];
         }
 

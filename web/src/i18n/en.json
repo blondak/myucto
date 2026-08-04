@@ -587,6 +587,7 @@
       "materialize_failed": "Payment liabilities could not be prepared.",
       "materialize_partial_failed": "{count} payroll runs could not be prepared; the remaining runs were processed. {detail}",
       "load_failed": "Payroll payments could not be loaded.",
+      "readonly_hint": "You have read-only access — liability preparation, payment batches, exports and matching are disabled.",
       "tabs_label": "Payroll payment sections",
       "tabs": {
         "liabilities": "Liabilities",
@@ -597,6 +598,7 @@
       "total_batched": "Included in batches",
       "total_settled": "Actually paid",
       "employee": "Employee",
+      "recipient_label": "Recipient",
       "kind_label": "Liability kind",
       "destination": "Payment method",
       "due_on": "Due date",
@@ -604,12 +606,16 @@
       "settled": "Settled",
       "status": "Status",
       "company": "Company / institution",
+      "correction": "Correction",
       "empty": "There are no payment liabilities for this period yet",
       "empty_ready": "The approved payroll is ready. Use the button above to create exact liabilities without duplicates.",
       "empty_blocked": "Approve the current payroll run revision first.",
       "recipient": {
         "bank": "Verified bank account",
         "cash": "Cash"
+      },
+      "target": {
+        "ready": "Account verified"
       },
       "kind": {
         "net_wage": "Net wage",

@@ -651,6 +651,10 @@ final class Routes
             );
             $g->post('/payments/exports/download', [PayrollPaymentAction::class, 'downloadExport']);
             $g->post(
+                '/revisions/{revisionId:[0-9]+}/payments/liabilities',
+                [PayrollPaymentAction::class, 'materializeLiabilities'],
+            );
+            $g->post(
                 '/revisions/{revisionId:[0-9]+}/payments/net-wage-liabilities',
                 [PayrollPaymentAction::class, 'materializeNetWages'],
             );

@@ -257,8 +257,7 @@ function remainingMinor(item: PayrollPaymentLiability): number {
 
 function isSelectable(item: PayrollPaymentLiability): boolean {
   if (
-    item.direction !== 'outgoing'
-    || item.liability_kind !== 'net_wage'
+    item.batch_eligibility !== 'ready'
     || !['open', 'partially_batched'].includes(item.state)
     || remainingMinor(item) <= 0
   ) return false
@@ -391,6 +390,12 @@ function kindLabel(kind: string): string {
   const key = `payroll.payments.kind.${kind}`
   const translated = t(key)
   return translated === key ? kind : translated
+}
+
+function recipientName(item: PayrollPaymentLiability): string {
+  return item.recipient_name
+    || item.employee_name
+    || t('payroll.payments.company')
 }
 
 function stateLabel(state: PayrollPaymentLiabilityState): string {
@@ -559,8 +564,14 @@ async function materialize(): Promise<void> {
   for (const run of materializableRevisions.value) {
     if (run.revision_id === null) continue
     try {
-      created += (await payrollPaymentsApi.materializeNetWages(run.revision_id)).created_count
+      const result = await payrollPaymentsApi.materializeLiabilities(
+        run.revision_id,
+      )
+      created += result.created_count
       succeeded += 1
+      failures.push(...result.preparation_issues.map(issue =>
+        new Error(issue.message),
+      ))
     } catch (error) {
       failures.push(error)
     }
@@ -772,6 +783,13 @@ onMounted(load)
       </button>
     </nav>
 
+    <div
+      v-if="!auth.canWrite('payroll.payments')"
+      class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600"
+    >
+      {{ t('payroll.payments.readonly_hint') }}
+    </div>
+
     <template v-if="activeTab === 'liabilities'">
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <article class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
@@ -881,7 +899,7 @@ onMounted(load)
             <table class="min-w-full divide-y divide-neutral-200 text-sm">
               <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
                 <tr>
-                  <th class="w-12 px-4 py-3">
+                  <th v-if="auth.canWrite('payroll.payments')" class="w-12 px-4 py-3">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
@@ -890,7 +908,7 @@ onMounted(load)
                       @change="toggleAll"
                     >
                   </th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.employee') }}</th>
+                  <th class="px-4 py-3">{{ t('payroll.payments.recipient_label') }}</th>
                   <th class="px-4 py-3">{{ t('payroll.payments.kind_label') }}</th>
                   <th class="px-4 py-3">{{ t('payroll.payments.destination') }}</th>
                   <th class="px-4 py-3">{{ t('payroll.payments.due_on') }}</th>
@@ -901,28 +919,49 @@ onMounted(load)
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="item in items" :key="item.id">
-                  <td class="px-4 py-3">
+                  <td v-if="auth.canWrite('payroll.payments')" class="px-4 py-3">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500 disabled:cursor-not-allowed disabled:opacity-40"
                       :checked="isSelected(item.id)"
                       :disabled="!isSelected(item.id) && !isSelectable(item)"
                       :aria-label="t('payroll.payments.batch.select_employee', {
-                        name: item.employee_name || t('payroll.payments.company'),
+                        name: recipientName(item),
                       })"
                       @change="toggleSelection(item)"
                     >
                   </td>
-                  <td class="px-4 py-3 font-medium text-neutral-900">{{ item.employee_name || t('payroll.payments.company') }}</td>
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-neutral-900">{{ recipientName(item) }}</div>
+                    <div v-if="item.institution_code" class="mt-0.5 text-xs text-neutral-500">
+                      {{ item.institution_code }}
+                    </div>
+                  </td>
                   <td class="px-4 py-3 text-neutral-700">{{ kindLabel(item.liability_kind) }}</td>
-                  <td class="px-4 py-3 text-neutral-600">{{ t(`payroll.payments.recipient.${item.recipient_kind}`) }}</td>
+                  <td class="px-4 py-3 text-neutral-600">
+                    <div>{{ t(`payroll.payments.recipient.${item.recipient_kind}`) }}</div>
+                    <div v-if="item.payment_target_masked" class="mt-0.5 text-xs text-neutral-500">
+                      {{ item.payment_target_masked }}
+                    </div>
+                    <span
+                      v-if="item.recipient_kind === 'bank' && item.payment_target_status === 'ready'"
+                      class="mt-1 inline-flex rounded-full bg-success-50 px-2 py-0.5 text-xs font-medium text-success-700"
+                    >
+                      {{ t('payroll.payments.target.ready') }}
+                    </span>
+                  </td>
                   <td class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatDate(item.due_on) }}</td>
                   <td class="whitespace-nowrap px-4 py-3 text-right font-medium" :class="item.direction === 'incoming' ? 'text-success-700' : 'text-neutral-900'">
                     {{ formatMoney(signed(item, item.amount_minor), item.currency_code) }}
                   </td>
                   <td class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatMoney(signed(item, item.settled_minor), item.currency_code) }}</td>
                   <td class="px-4 py-3">
-                    <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
+                      <span v-if="item.revision_kind === 'correction'" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">
+                        {{ t('payroll.payments.correction') }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -935,26 +974,46 @@ onMounted(load)
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="flex min-w-0 items-start gap-3">
                 <input
+                  v-if="auth.canWrite('payroll.payments')"
                   type="checkbox"
                   class="mt-1 h-4 w-4 shrink-0 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500 disabled:cursor-not-allowed disabled:opacity-40"
                   :checked="isSelected(item.id)"
                   :disabled="!isSelected(item.id) && !isSelectable(item)"
                   :aria-label="t('payroll.payments.batch.select_employee', {
-                    name: item.employee_name || t('payroll.payments.company'),
+                    name: recipientName(item),
                   })"
                   @change="toggleSelection(item)"
                 >
                 <div class="min-w-0">
-                <h2 class="truncate font-semibold text-neutral-900">{{ item.employee_name || t('payroll.payments.company') }}</h2>
-                <p class="mt-1 text-sm text-neutral-600">{{ kindLabel(item.liability_kind) }}</p>
+                  <h2 class="truncate font-semibold text-neutral-900">{{ recipientName(item) }}</h2>
+                  <p class="mt-1 text-sm text-neutral-600">
+                    {{ kindLabel(item.liability_kind) }}
+                    <template v-if="item.institution_code"> · {{ item.institution_code }}</template>
+                  </p>
                 </div>
               </div>
-              <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
+              <div class="flex flex-wrap justify-end gap-1">
+                <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
+                <span v-if="item.revision_kind === 'correction'" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">
+                  {{ t('payroll.payments.correction') }}
+                </span>
+              </div>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt class="text-xs text-neutral-500">{{ t('payroll.payments.destination') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ t(`payroll.payments.recipient.${item.recipient_kind}`) }}</dd>
+                <dd class="mt-0.5 text-neutral-800">
+                  {{ t(`payroll.payments.recipient.${item.recipient_kind}`) }}
+                  <span v-if="item.payment_target_masked" class="block text-xs text-neutral-500">
+                    {{ item.payment_target_masked }}
+                  </span>
+                  <span
+                    v-if="item.recipient_kind === 'bank' && item.payment_target_status === 'ready'"
+                    class="mt-1 inline-flex rounded-full bg-success-50 px-2 py-0.5 text-xs font-medium text-success-700"
+                  >
+                    {{ t('payroll.payments.target.ready') }}
+                  </span>
+                </dd>
               </div>
               <div>
                 <dt class="text-xs text-neutral-500">{{ t('payroll.payments.due_on') }}</dt>

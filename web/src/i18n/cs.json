@@ -587,6 +587,7 @@
       "materialize_failed": "Platební závazky se nepodařilo připravit.",
       "materialize_partial_failed": "{count} mzdových běhů se nepodařilo připravit, ostatní byly zpracovány. {detail}",
       "load_failed": "Platby mezd se nepodařilo načíst.",
+      "readonly_hint": "Máte oprávnění pouze pro čtení — příprava závazků, platebních dávek, exportů a párování je vypnutá.",
       "tabs_label": "Části plateb mezd",
       "tabs": {
         "liabilities": "Závazky",
@@ -597,6 +598,7 @@
       "total_batched": "Zařazeno do dávek",
       "total_settled": "Skutečně uhrazeno",
       "employee": "Zaměstnanec",
+      "recipient_label": "Příjemce",
       "kind_label": "Druh závazku",
       "destination": "Způsob úhrady",
       "due_on": "Splatnost",
@@ -604,12 +606,16 @@
       "settled": "Uhrazeno",
       "status": "Stav",
       "company": "Firma / instituce",
+      "correction": "Oprava",
       "empty": "Pro období zatím nejsou platební závazky",
       "empty_ready": "Schválená mzda je připravena. Tlačítkem nahoře vytvoříte přesné závazky bez duplicit.",
       "empty_blocked": "Nejdřív schvalte aktuální revizi mzdového běhu.",
       "recipient": {
         "bank": "Ověřený bankovní účet",
         "cash": "Hotovost"
+      },
+      "target": {
+        "ready": "Účet ověřen"
       },
       "kind": {
         "net_wage": "Čistá mzda",

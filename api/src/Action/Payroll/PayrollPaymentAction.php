@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
@@ -38,6 +39,7 @@ final class PayrollPaymentAction
         private readonly PayrollPaymentReconciliationQueryService $reconciliationQueries,
         private readonly PayrollPaymentReconciliationService $reconciliation,
         private readonly PayrollNetWageLiabilityMaterializer $netWages,
+        private readonly PayrollHealthInsuranceLiabilityMaterializer $healthInsurance,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
@@ -918,6 +920,101 @@ final class PayrollPaymentAction
         }
 
         return Json::ok($response, $result, 201);
+    }
+
+    /** @param array{revisionId:string} $args */
+    public function materializeLiabilities(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $userId = $this->userId($request);
+        $revisionId = (int) $args['revisionId'];
+        if ($userId === null || $revisionId <= 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Požadavek na vytvoření platebních závazků není platný.',
+                422,
+            );
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $liabilityIds = [];
+        $createdCount = 0;
+        $issues = [];
+        foreach ([
+            'net_wage' => fn (): array => $this->netWages->materialize(
+                $supplierId,
+                $revisionId,
+                $userId,
+            ),
+            'health_insurance' => fn (): array =>
+                $this->healthInsurance->materialize(
+                    $supplierId,
+                    $revisionId,
+                    $userId,
+                ),
+        ] as $liabilityKind => $materialize) {
+            try {
+                $result = $this->transaction(
+                    function () use (
+                        $materialize,
+                        $liabilityKind,
+                        $supplierId,
+                        $revisionId,
+                        $userId,
+                        $request,
+                    ): array {
+                        $result = $materialize();
+                        $this->activity->log(
+                            'payroll.payment_liabilities_materialized',
+                            $userId,
+                            'payroll_run_revision',
+                            $revisionId,
+                            [
+                                'liability_kind' => $liabilityKind,
+                                'created_count' => $result['created_count'],
+                                'liability_count' =>
+                                    count($result['liability_ids']),
+                            ],
+                            $this->ipMatcher->clientIpFromRequest(
+                                $this->serverParameters($request),
+                            ),
+                            $request->getHeaderLine('User-Agent'),
+                            $supplierId,
+                        );
+
+                        return $result;
+                    },
+                );
+                $liabilityIds = [
+                    ...$liabilityIds,
+                    ...$result['liability_ids'],
+                ];
+                $createdCount += $result['created_count'];
+            } catch (\InvalidArgumentException|\DomainException $exception) {
+                $issues[] = [
+                    'liability_kind' => $liabilityKind,
+                    'reason' => 'blocked',
+                    'message' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        return Json::ok($response, [
+            'liability_ids' => $liabilityIds,
+            'created_count' => $createdCount,
+            'preparation_issues' => $issues,
+        ], $createdCount > 0 ? 201 : 200);
     }
 
     /** @param array{employeeId:string,accountId:string} $args */

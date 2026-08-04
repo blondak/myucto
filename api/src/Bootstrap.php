@@ -160,6 +160,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryAccumulatorApprover::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunDeductionLedgerApprover::class,
+                    ),
                 ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCommandService(

@@ -276,6 +276,105 @@ final class PayrollPaymentBatchRepository
     /**
      * @return array{
      *   id:int,
+     *   institution_type:string,
+     *   institution_code:string,
+     *   institution_name:string,
+     *   bank_account_ciphertext:string,
+     *   bank_account_hash:string,
+     *   currency_code:string,
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string,
+     *   valid_from:string,
+     *   valid_to:?string,
+     *   source_kind:string,
+     *   source_reference:string,
+     *   verified_on:string,
+     *   verified_by:?int,
+     *   row_version:int
+     * }|null
+     */
+    public function lockInstitutionAccount(
+        int $supplierId,
+        int $accountId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.id, institution.institution_type,
+                    institution.institution_code,
+                    account.institution_name,
+                    account.bank_account_ciphertext,
+                    LOWER(HEX(account.bank_account_hash)) AS bank_account_hash,
+                    account.currency_code, account.variable_symbol,
+                    account.specific_symbol, account.constant_symbol,
+                    account.valid_from, account.valid_to,
+                    account.source_kind, account.source_reference,
+                    account.verified_on, account.verified_by,
+                    account.row_version
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE account.supplier_id = ? AND account.id = ?
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $accountId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'účet instituce');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'institution_type' => self::string(
+                $row,
+                'institution_type',
+            ),
+            'institution_code' => self::string(
+                $row,
+                'institution_code',
+            ),
+            'institution_name' => self::string(
+                $row,
+                'institution_name',
+            ),
+            'bank_account_ciphertext' => self::string(
+                $row,
+                'bank_account_ciphertext',
+            ),
+            'bank_account_hash' => self::hash(
+                $row,
+                'bank_account_hash',
+            ),
+            'currency_code' => self::string($row, 'currency_code'),
+            'variable_symbol' => self::nullableString(
+                $row,
+                'variable_symbol',
+            ),
+            'specific_symbol' => self::nullableString(
+                $row,
+                'specific_symbol',
+            ),
+            'constant_symbol' => self::nullableString(
+                $row,
+                'constant_symbol',
+            ),
+            'valid_from' => self::string($row, 'valid_from'),
+            'valid_to' => self::nullableString($row, 'valid_to'),
+            'source_kind' => self::string($row, 'source_kind'),
+            'source_reference' => self::string(
+                $row,
+                'source_reference',
+            ),
+            'verified_on' => self::string($row, 'verified_on'),
+            'verified_by' => self::nullableInteger($row, 'verified_by'),
+            'row_version' => self::integer($row, 'row_version'),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   id:int,
      *   code:string,
      *   is_active:bool,
      *   account_number:?string,

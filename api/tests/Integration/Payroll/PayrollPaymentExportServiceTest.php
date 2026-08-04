@@ -371,6 +371,32 @@ final class PayrollPaymentExportServiceTest extends TestCase
         );
     }
 
+    public function testAboExportPreservesInstitutionPaymentSymbols(): void
+    {
+        $batchId = $this->insertBatch(
+            'abo',
+            institutionSymbols: true,
+        );
+        $result = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-institution-symbols',
+            $this->userId,
+        );
+        $bytes = $this->storage->readVerified(
+            $this->supplierId,
+            $result['storage_key'],
+        );
+
+        self::assertStringContainsString('1234567890', $bytes);
+        self::assertStringContainsString('2468', $bytes);
+        self::assertStringContainsString('0558', $bytes);
+        self::assertStringContainsString(
+            'Zdravotni pojisteni 111',
+            $bytes,
+        );
+    }
+
     public function testRejectsTamperedSnapshotAndCrossTenantBatch(): void
     {
         $tamperedBatchId = $this->insertBatch('abo', true);
@@ -718,6 +744,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
         string $format,
         bool $tampered = false,
         ?int $supplierId = null,
+        bool $institutionSymbols = false,
     ): int {
         $supplierId ??= $this->supplierId;
         $isSepa = $format === 'sepa';
@@ -755,6 +782,15 @@ final class PayrollPaymentExportServiceTest extends TestCase
                 ),
             ]],
             'recipient_name' => 'Syntetická platební osoba',
+            ...($institutionSymbols
+                ? [
+                    'variable_symbol' => '1234567890',
+                    'specific_symbol' => '2468',
+                    'constant_symbol' => '0558',
+                    'payment_message' =>
+                        'Zdravotni pojisteni 111',
+                ]
+                : []),
             ...($isSepa
                 ? ['iban' => 'CZ1801000000001000000005']
                 : [

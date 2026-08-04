@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -24,6 +25,7 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
     private Connection $connection;
     private PDO $pdo;
     private PayrollPaymentReconciliationService $service;
+    private PayrollPaymentReconciliationQueryService $queries;
     private int $supplierId;
     private int $allocationId;
     private int $statementId;
@@ -35,10 +37,18 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
         self::assertInstanceOf(Connection::class, $connection);
         $service = $container->get(PayrollPaymentReconciliationService::class);
         self::assertInstanceOf(PayrollPaymentReconciliationService::class, $service);
+        $queries = $container->get(
+            PayrollPaymentReconciliationQueryService::class,
+        );
+        self::assertInstanceOf(
+            PayrollPaymentReconciliationQueryService::class,
+            $queries,
+        );
 
         $this->connection = $connection;
         $this->pdo = $connection->pdo();
         $this->service = $service;
+        $this->queries = $queries;
         $this->pdo->beginTransaction();
 
         $sourceSupplierId = (int) $this
@@ -221,6 +231,110 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
                   WHERE supplier_id = {$this->supplierId}
                     AND allocation_id = {$this->allocationId}",
             )->fetchColumn(),
+        );
+    }
+
+    public function testQueriesPayrollPeriodAcrossNextMonthBatchAndLateEvidence(): void
+    {
+        [$revisionId, $employeeId] = $this->createApprovedRevision(
+            '2024-08-01',
+        );
+        $liabilityId = $this->insertLiability(
+            $revisionId,
+            $employeeId,
+            25_000,
+            'net-wage.period-scope.synthetic',
+            '2024-09-10',
+        );
+        $allocationId = $this->insertAllocation(
+            $liabilityId,
+            'bank',
+            25_000,
+            '2024-09-10',
+        );
+        $lateTransactionId = $this->insertBankTransaction(
+            '2025-12-15',
+            '-250.00',
+            'late-period-evidence',
+        );
+        $earlyTransactionId = $this->insertBankTransaction(
+            '2024-08-25',
+            '-250.00',
+            'early-period-evidence',
+        );
+        $otherSupplierId = $this->createIsolatedSupplier(
+            $this->pdo,
+            $this->supplierId,
+        );
+        $this->pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number,
+                 bank_code, currency, statement_date)
+             VALUES (?, "synthetic-foreign-evidence.gpc", ?,
+                     "1000000005", "0100", "CZK", "2025-12-31")',
+        )->execute([
+            $otherSupplierId,
+            hash('sha256', "foreign-evidence:{$otherSupplierId}"),
+        ]);
+        $otherStatementId = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2025-12-16", -250.00, "CZK",
+                     "Syntetická cizí platba", ?)',
+        )->execute([
+            $otherStatementId,
+            hash('sha256', "foreign-transaction:{$otherSupplierId}"),
+        ]);
+
+        $beforeMatch = $this->queries->forPeriod(
+            $this->supplierId,
+            '2024-08',
+        );
+        $allocations = $beforeMatch['allocations'] ?? null;
+        $bankEvidence = $beforeMatch['bank_evidence'] ?? null;
+        self::assertIsArray($allocations);
+        self::assertIsArray($bankEvidence);
+
+        self::assertSame(
+            [$allocationId],
+            array_column($allocations, 'id'),
+        );
+        self::assertSame(
+            [$lateTransactionId, $earlyTransactionId],
+            array_column($bankEvidence, 'bank_transaction_id'),
+        );
+
+        $match = $this->service->match(
+            new PayrollPaymentReconciliationCommand(
+                $this->supplierId,
+                $allocationId,
+                25_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $this->statementId,
+                    $lateTransactionId,
+                ),
+                'late-period-evidence',
+                null,
+            ),
+        );
+        $afterMatch = $this->queries->forPeriod(
+            $this->supplierId,
+            '2024-08',
+        );
+        $matches = $afterMatch['matches'] ?? null;
+        self::assertIsArray($matches);
+
+        self::assertSame(
+            [$match->id],
+            array_column($matches, 'id'),
+        );
+        $firstMatch = $matches[0] ?? null;
+        self::assertIsArray($firstMatch);
+        self::assertSame(
+            '2025-12-15',
+            $firstMatch['actual_payment_date'] ?? null,
         );
     }
 
@@ -680,6 +794,7 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
         int $employeeId,
         int $amountMinor,
         string $reference = 'net-wage.synthetic',
+        string $dueOn = '2099-01-10',
     ): int {
         $snapshot = '{"schema":"synthetic-liability.v1"}';
         $this->pdo->prepare(
@@ -689,13 +804,14 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
                  currency_code, amount_minor, source_snapshot_json,
                  source_snapshot_hash, idempotency_key_hash)
              VALUES (?, ?, ?, ?, "net_wage", "outgoing", ?,
-                     "2099-01-10", "CZK", ?, ?, ?, ?)',
+                     ?, "CZK", ?, ?, ?, ?)',
         )->execute([
             $this->supplierId,
             $revisionId,
             $employeeId,
             $reference,
             'recipient:synthetic',
+            $dueOn,
             $amountMinor,
             $snapshot,
             hash('sha256', $snapshot),
@@ -709,6 +825,7 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
         int $liabilityId,
         string $channel,
         int $amountMinor,
+        string $plannedPaymentDate = '2099-01-10',
     ): int {
         $reference = "{$channel}-{$liabilityId}";
         $this->pdo->prepare(
@@ -717,12 +834,13 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
                  direction, planned_payment_date, currency_code,
                  payer_reference, declared_total_minor, declared_item_count,
                  snapshot_ciphertext, snapshot_hash, idempotency_key_hash)
-             VALUES (?, ?, ?, "manual", "outgoing", "2099-01-10", "CZK",
+             VALUES (?, ?, ?, "manual", "outgoing", ?, "CZK",
                      "payer:synthetic", ?, 1, ?, ?, ?)',
         )->execute([
             $this->supplierId,
             "batch-{$reference}",
             $channel,
+            $plannedPaymentDate,
             $amountMinor,
             'enc:v2:synthetic-batch',
             hash('sha256', "batch-{$reference}"),

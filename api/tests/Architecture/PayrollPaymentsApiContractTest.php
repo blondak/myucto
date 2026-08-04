@@ -32,6 +32,10 @@ final class PayrollPaymentsApiContractTest extends TestCase
             self::assertStringContainsString($route, $routes);
         }
         self::assertStringContainsString(
+            "'/revisions/{revisionId:[0-9]+}/payments/liabilities'",
+            $routes,
+        );
+        self::assertStringContainsString(
             "'/revisions/{revisionId:[0-9]+}/payments/net-wage-liabilities'",
             $routes,
         );
@@ -52,7 +56,7 @@ final class PayrollPaymentsApiContractTest extends TestCase
 
         $materialize = $map->match(
             'POST',
-            '/api/payroll/revisions/7/payments/net-wage-liabilities',
+            '/api/payroll/revisions/7/payments/liabilities',
         );
         self::assertNotNull($materialize);
         self::assertSame('payroll.payments', $materialize->key);

@@ -14,9 +14,20 @@ export interface PayrollPaymentLiability {
   revision_no: number
   employee_id: number | null
   employee_name: string | null
+  recipient_name: string | null
+  institution_type: string | null
+  institution_code: string | null
   liability_kind: string
   direction: 'outgoing' | 'incoming'
   recipient_kind: 'bank' | 'cash'
+  payment_target_status: 'ready'
+  payment_target_masked: string | null
+  batch_eligibility: 'ready' | 'blocked'
+  batch_block_reason:
+    | 'unsupported_direction'
+    | 'unsupported_liability_kind'
+    | null
+  revision_kind: 'regular' | 'correction'
   due_on: string
   currency_code: string
   amount_minor: number
@@ -29,6 +40,18 @@ export interface PayrollPaymentLiability {
 export interface PayrollPaymentLiabilityList {
   period: string
   items: PayrollPaymentLiability[]
+}
+
+export interface PayrollPaymentPreparationIssue {
+  liability_kind: string
+  reason: 'blocked'
+  message: string
+}
+
+export interface PayrollPaymentPreparationResult {
+  liability_ids: number[]
+  created_count: number
+  preparation_issues: PayrollPaymentPreparationIssue[]
 }
 
 export interface PayrollPayerOption {
@@ -185,6 +208,10 @@ export const payrollPaymentsApi = {
   materializeNetWages: (revisionId: number) =>
     api.post<{ liability_ids: number[]; created_count: number }>(
       `/payroll/revisions/${revisionId}/payments/net-wage-liabilities`,
+    ).then(response => response.data),
+  materializeLiabilities: (revisionId: number) =>
+    api.post<PayrollPaymentPreparationResult>(
+      `/payroll/revisions/${revisionId}/payments/liabilities`,
     ).then(response => response.data),
   payerOptions: () =>
     api.get<{ items: PayrollPayerOption[] }>('/payroll/payments/payer-options')

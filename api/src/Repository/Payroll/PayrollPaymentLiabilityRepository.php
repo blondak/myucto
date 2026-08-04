@@ -59,6 +59,7 @@ final class PayrollPaymentLiabilityRepository
      *   revision_status:string,
      *   schema_version:string,
      *   current_revision_no:int,
+     *   period_start:string,
      *   payment_date:string,
      *   input_snapshot_json:string,
      *   input_snapshot_hash:string,
@@ -78,7 +79,7 @@ final class PayrollPaymentLiabilityRepository
                     revision.input_snapshot_hash,
                     revision.result_snapshot_json,
                     revision.result_snapshot_hash,
-                    run.current_revision_no, run.payment_date
+                    run.current_revision_no, run.period_start, run.payment_date
                FROM payroll_run_revisions revision
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
@@ -110,6 +111,7 @@ final class PayrollPaymentLiabilityRepository
                 $row,
                 'current_revision_no',
             ),
+            'period_start' => self::string($row, 'period_start'),
             'payment_date' => self::string($row, 'payment_date'),
             'input_snapshot_json' => self::string(
                 $row,
@@ -229,6 +231,92 @@ final class PayrollPaymentLiabilityRepository
     }
 
     /**
+     * @return list<array{
+     *   id:int,
+     *   revision_no:int,
+     *   liability_reference:string,
+     *   direction:string,
+     *   recipient_reference:string,
+     *   amount_minor:int,
+     *   source_snapshot_json:string,
+     *   source_snapshot_hash:string
+     * }>
+     */
+    public function lockEarlierInstitutionalLiabilities(
+        int $supplierId,
+        int $runId,
+        int $revisionNo,
+        string $liabilityKind,
+    ): array {
+        if (!in_array($liabilityKind, [
+            'social_insurance',
+            'health_insurance',
+            'advance_tax',
+            'withholding_tax',
+            'statutory_insurance',
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Druh institucionálního závazku není podporovaný.',
+            );
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT liability.id, revision.revision_no,
+                    liability.liability_reference, liability.direction,
+                    liability.recipient_reference, liability.amount_minor,
+                    liability.source_snapshot_json,
+                    liability.source_snapshot_hash
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+              WHERE liability.supplier_id = ?
+                AND revision.run_id = ?
+                AND revision.revision_no < ?
+                AND liability.liability_kind = ?
+              ORDER BY revision.revision_no, liability.id
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $runId,
+            $revisionNo,
+            $liabilityKind,
+        ]);
+
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow(
+                $row,
+                'dřívější institucionální závazek',
+            );
+            $result[] = [
+                'id' => self::integer($row, 'id'),
+                'revision_no' => self::integer($row, 'revision_no'),
+                'liability_reference' => self::string(
+                    $row,
+                    'liability_reference',
+                ),
+                'direction' => self::string($row, 'direction'),
+                'recipient_reference' => self::string(
+                    $row,
+                    'recipient_reference',
+                ),
+                'amount_minor' => self::integer($row, 'amount_minor'),
+                'source_snapshot_json' => self::string(
+                    $row,
+                    'source_snapshot_json',
+                ),
+                'source_snapshot_hash' => self::hash(
+                    $row,
+                    'source_snapshot_hash',
+                ),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * @return array{
      *   id:int,
      *   employee_id:int,
@@ -300,6 +388,75 @@ final class PayrollPaymentLiabilityRepository
         ];
     }
 
+    /**
+     * @return array{
+     *   id:int,
+     *   employee_id:?int,
+     *   liability_kind:string,
+     *   direction:string,
+     *   recipient_reference:string,
+     *   due_on:string,
+     *   amount_minor:int,
+     *   previous_liability_id:?int,
+     *   source_snapshot_hash:string,
+     *   idempotency_key_hash:string
+     * }|null
+     */
+    public function findAnyForUpdate(
+        int $supplierId,
+        int $revisionId,
+        string $liabilityReference,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, liability_kind, direction,
+                    recipient_reference, due_on, amount_minor,
+                    previous_liability_id, source_snapshot_hash,
+                    idempotency_key_hash
+               FROM payroll_payment_liabilities
+              WHERE supplier_id = ? AND revision_id = ?
+                AND liability_reference = ?
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $revisionId,
+            $liabilityReference,
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'platební závazek');
+        $idempotencyHash = $row['idempotency_key_hash'] ?? null;
+        if (!is_string($idempotencyHash) || strlen($idempotencyHash) !== 32) {
+            throw new \UnexpectedValueException(
+                'Platební závazek nemá platný idempotentní otisk.',
+            );
+        }
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'employee_id' => self::nullableInteger($row, 'employee_id'),
+            'liability_kind' => self::string($row, 'liability_kind'),
+            'direction' => self::string($row, 'direction'),
+            'recipient_reference' => self::string(
+                $row,
+                'recipient_reference',
+            ),
+            'due_on' => self::string($row, 'due_on'),
+            'amount_minor' => self::integer($row, 'amount_minor'),
+            'previous_liability_id' => self::nullableInteger(
+                $row,
+                'previous_liability_id',
+            ),
+            'source_snapshot_hash' => self::hash(
+                $row,
+                'source_snapshot_hash',
+            ),
+            'idempotency_key_hash' => $idempotencyHash,
+        ];
+    }
+
     public function insert(
         int $supplierId,
         int $revisionId,
@@ -329,6 +486,49 @@ final class PayrollPaymentLiabilityRepository
             $revisionId,
             $employeeId,
             $liabilityReference,
+            $direction,
+            $recipientReference,
+            $dueOn,
+            $amountMinor,
+            $previousLiabilityId,
+            $sourceSnapshotJson,
+            $sourceSnapshotHash,
+            $idempotencyKeyHash,
+            $createdBy,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    public function insertInstitutional(
+        int $supplierId,
+        int $revisionId,
+        string $liabilityReference,
+        string $liabilityKind,
+        string $direction,
+        string $recipientReference,
+        string $dueOn,
+        int $amountMinor,
+        ?int $previousLiabilityId,
+        string $sourceSnapshotJson,
+        string $sourceSnapshotHash,
+        string $idempotencyKeyHash,
+        ?int $createdBy,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id,
+                 liability_reference, liability_kind, direction,
+                 recipient_reference, due_on, currency_code, amount_minor,
+                 previous_liability_id, source_snapshot_json,
+                 source_snapshot_hash, idempotency_key_hash, created_by)
+             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)'
+        );
+        $statement->execute([
+            $supplierId,
+            $revisionId,
+            $liabilityReference,
+            $liabilityKind,
             $direction,
             $recipientReference,
             $dueOn,

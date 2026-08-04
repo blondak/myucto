@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
@@ -217,6 +218,39 @@ final class PayrollPaymentApiTest extends TestCase
         );
     }
 
+    public function testGenericMaterializationReportsBlockedKindsWithoutPartialErrorResponse(): void
+    {
+        $response = $this->action->materializeLiabilities(
+            $this->request('session', 'POST'),
+            new Response(),
+            ['revisionId' => '999999999'],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $payload = $this->json($response);
+        self::assertSame([], $payload['liability_ids'] ?? null);
+        self::assertSame(0, $payload['created_count'] ?? null);
+        self::assertSame(
+            ['net_wage', 'health_insurance'],
+            array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
+        );
+        self::assertStringNotContainsString(
+            'ciphertext',
+            json_encode($payload, JSON_THROW_ON_ERROR),
+        );
+
+        $bearer = $this->action->materializeLiabilities(
+            $this->request('bearer', 'POST'),
+            new Response(),
+            ['revisionId' => '999999999'],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame(
+            'session_required',
+            $this->json($bearer)['error']['code'] ?? null,
+        );
+    }
+
     public function testDownloadRejectsBearerBeforeReadingToken(): void
     {
         $readonly = $this->action->downloadExport(
@@ -400,6 +434,9 @@ final class PayrollPaymentApiTest extends TestCase
                 PayrollPaymentReconciliationService::class,
             ),
             $this->container->get(PayrollNetWageLiabilityMaterializer::class),
+            $this->container->get(
+                PayrollHealthInsuranceLiabilityMaterializer::class,
+            ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),
             $this->container->get(PayrollPaymentExportService::class),

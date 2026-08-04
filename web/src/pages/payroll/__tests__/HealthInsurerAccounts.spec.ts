@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { PayrollInstitutionAccount } from '@/api/payroll'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 const m = vi.hoisted(() => ({
   institutionAccounts: vi.fn(),
@@ -66,10 +67,21 @@ async function mountComponent(items: PayrollInstitutionAccount[] = [account()]) 
   return wrapper
 }
 
+async function mountReadOnly(items: PayrollInstitutionAccount[] = [account()]) {
+  m.institutionAccounts.mockResolvedValue(items)
+  const wrapper = mount(HealthInsurerAccounts, {
+    props: { canWrite: false },
+    attachTo: document.body,
+  })
+  await flushPromises()
+  return wrapper
+}
+
 describe('HealthInsurerAccounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     document.body.innerHTML = ''
+    window.history.replaceState(null, '', window.location.pathname)
   })
 
   it('zobrazuje pouze maskovaný účet a údaje o účinnosti a ověření', async () => {
@@ -91,6 +103,7 @@ describe('HealthInsurerAccounts', () => {
     const add = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.employer.health_accounts.add')
     await add!.trigger('click')
+    expect(wrapper.findAllComponents(SearchableSelect)).toHaveLength(1)
     await wrapper.get('[data-testid="health-create-code"]').setValue('synth-201')
     await wrapper.get('[data-testid="health-create-name"]').setValue('Syntetická zaměstnanecká pojišťovna')
     await wrapper.get('[data-testid="health-create-account"]').setValue('1000000005/0300')
@@ -127,6 +140,7 @@ describe('HealthInsurerAccounts', () => {
 
     const edit = wrapper.findAll('button').find(button => button.text() === 'common.edit')
     await edit!.trigger('click')
+    expect(wrapper.findAllComponents(SearchableSelect)).toHaveLength(1)
     await wrapper.get('[data-testid="health-edit-vs"]').setValue('0000000042')
     const save = wrapper.get('[data-testid="health-account-edit"]').findAll('button')
       .find(button => button.text() === 'common.save')
@@ -144,6 +158,45 @@ describe('HealthInsurerAccounts', () => {
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('bank_account_masked')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('institution_code')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('valid_from')
+
+    wrapper.unmount()
+  })
+
+  it('po asynchronním načtení respektuje přímý odkaz na účty pojišťoven', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}#health-insurer-accounts`,
+    )
+
+    const wrapper = await mountComponent()
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+    wrapper.unmount()
+  })
+
+  it('v režimu pouze pro čtení skryje přidání i editaci', async () => {
+    const wrapper = await mountReadOnly([
+      account(),
+      account({
+        id: 8,
+        institution_id: 12,
+        institution_code: 'SYNTH-222',
+        institution_name: 'Druhá syntetická pojišťovna',
+      }),
+    ])
+
+    expect(wrapper.attributes('id')).toBe('health-insurer-accounts')
+    expect(wrapper.text()).toContain('Syntetická zdravotní pojišťovna')
+    expect(wrapper.text()).toContain('Druhá syntetická pojišťovna')
+    expect(wrapper.findAll('button').some(button =>
+      button.text() === 'payroll.employer.health_accounts.add'
+      || button.text() === 'common.edit')).toBe(false)
 
     wrapper.unmount()
   })

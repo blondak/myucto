@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotMapper;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollRunCalculationPipeline
 {
@@ -17,6 +18,8 @@ final class PayrollRunCalculationPipeline
         private readonly ?PayrollRunStatutoryCalculationService $statutory = null,
         private readonly ?PayrollRunStatutoryAccumulatorApprover
             $statutoryAccumulatorApprover = null,
+        private readonly ?PayrollRunDeductionLedgerApprover
+            $deductionLedgerApprover = null,
     ) {
         $this->payslipDocuments = new PayslipDocumentSnapshotMapper();
     }
@@ -89,6 +92,42 @@ final class PayrollRunCalculationPipeline
         int $actorUserId,
     ): void {
         $this->statutoryAccumulatorApprover?->approve(
+            $supplierId,
+            $revisionId,
+            $actorUserId,
+        );
+    }
+
+    public function prepareCorrectionSnapshot(
+        int $supplierId,
+        int $runId,
+        PayrollRunInputSnapshot $snapshot,
+    ): PayrollRunInputSnapshot {
+        if ($this->deductionLedgerApprover === null) {
+            return $snapshot;
+        }
+        $data = $this->deductionLedgerApprover->prepareCorrectionSnapshot(
+            $supplierId,
+            $runId,
+            $snapshot->data,
+        );
+        $json = CanonicalJson::encode($data);
+
+        return new PayrollRunInputSnapshot(
+            $data,
+            $json,
+            hash('sha256', $json),
+            $snapshot->rulesetManifestHash,
+            $snapshot->validations,
+        );
+    }
+
+    public function storeApprovedDeductions(
+        int $supplierId,
+        int $revisionId,
+        int $actorUserId,
+    ): void {
+        $this->deductionLedgerApprover?->approve(
             $supplierId,
             $revisionId,
             $actorUserId,

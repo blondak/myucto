@@ -55,6 +55,131 @@ final class PayrollInstitutionAccountRepository
     }
 
     /**
+     * @return list<array{
+     *   id:int,
+     *   institution_id:int,
+     *   institution_type:string,
+     *   institution_code:string,
+     *   institution_name:string,
+     *   bank_account_ciphertext:string,
+     *   bank_account_hash:string,
+     *   currency_code:string,
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string,
+     *   valid_from:string,
+     *   valid_to:?string,
+     *   source_kind:string,
+     *   source_reference:string,
+     *   verified_on:string,
+     *   verified_by:?int,
+     *   row_version:int
+     * }>
+     */
+    public function lockEffectivePaymentTargets(
+        int $supplierId,
+        string $institutionType,
+        string $institutionCode,
+        string $currencyCode,
+        string $effectiveOn,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.id, account.institution_id,
+                    institution.institution_type,
+                    institution.institution_code,
+                    account.institution_name,
+                    account.bank_account_ciphertext,
+                    LOWER(HEX(account.bank_account_hash)) AS bank_account_hash,
+                    account.currency_code, account.variable_symbol,
+                    account.specific_symbol, account.constant_symbol,
+                    account.valid_from, account.valid_to,
+                    account.source_kind, account.source_reference,
+                    account.verified_on, account.verified_by,
+                    account.row_version
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE account.supplier_id = ?
+                AND institution.institution_type = ?
+                AND institution.institution_code = ?
+                AND account.currency_code = ?
+                AND account.valid_from <= ?
+                AND (account.valid_to IS NULL OR account.valid_to >= ?)
+              ORDER BY account.id
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $institutionType,
+            $institutionCode,
+            $currencyCode,
+            $effectiveOn,
+            $effectiveOn,
+        ]);
+
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $value) {
+            $row = self::databaseRow($value);
+            $result[] = [
+                'id' => self::requiredInt($row, 'id'),
+                'institution_id' => self::requiredInt(
+                    $row,
+                    'institution_id',
+                ),
+                'institution_type' => self::requiredString(
+                    $row,
+                    'institution_type',
+                ),
+                'institution_code' => self::requiredString(
+                    $row,
+                    'institution_code',
+                ),
+                'institution_name' => self::requiredString(
+                    $row,
+                    'institution_name',
+                ),
+                'bank_account_ciphertext' => self::requiredString(
+                    $row,
+                    'bank_account_ciphertext',
+                ),
+                'bank_account_hash' => self::requiredString(
+                    $row,
+                    'bank_account_hash',
+                ),
+                'currency_code' => self::requiredString(
+                    $row,
+                    'currency_code',
+                ),
+                'variable_symbol' => self::nullableString(
+                    $row,
+                    'variable_symbol',
+                ),
+                'specific_symbol' => self::nullableString(
+                    $row,
+                    'specific_symbol',
+                ),
+                'constant_symbol' => self::nullableString(
+                    $row,
+                    'constant_symbol',
+                ),
+                'valid_from' => self::requiredString($row, 'valid_from'),
+                'valid_to' => self::nullableString($row, 'valid_to'),
+                'source_kind' => self::requiredString($row, 'source_kind'),
+                'source_reference' => self::requiredString(
+                    $row,
+                    'source_reference',
+                ),
+                'verified_on' => self::requiredString($row, 'verified_on'),
+                'verified_by' => self::nullableInt($row, 'verified_by'),
+                'row_version' => self::requiredInt($row, 'row_version'),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * @param array{
      *   institution_type:string,
      *   institution_code:string,

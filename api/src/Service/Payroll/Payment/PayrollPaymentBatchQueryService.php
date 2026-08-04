@@ -148,10 +148,30 @@ final class PayrollPaymentBatchQueryService
                        WHERE payment_item.supplier_id = batch.supplier_id
                          AND payment_item.batch_id = batch.id
                     ), 0) AS settled_minor
-               FROM payroll_payment_batches batch
+              FROM payroll_payment_batches batch
               WHERE batch.supplier_id = ?
-                AND batch.planned_payment_date >= ?
-                AND batch.planned_payment_date < ?
+                AND EXISTS (
+                  SELECT 1
+                    FROM payroll_payment_items payment_item
+                    JOIN payroll_payment_allocations allocation
+                      ON allocation.supplier_id =
+                         payment_item.supplier_id
+                     AND allocation.item_id = payment_item.id
+                    JOIN payroll_payment_liabilities liability
+                      ON liability.supplier_id =
+                         allocation.supplier_id
+                     AND liability.id = allocation.liability_id
+                    JOIN payroll_run_revisions revision
+                      ON revision.supplier_id = liability.supplier_id
+                     AND revision.id = liability.revision_id
+                    JOIN payroll_runs run
+                      ON run.supplier_id = revision.supplier_id
+                     AND run.id = revision.run_id
+                   WHERE payment_item.supplier_id = batch.supplier_id
+                     AND payment_item.batch_id = batch.id
+                     AND run.period_start >= ?
+                     AND run.period_start < ?
+                )
               ORDER BY batch.planned_payment_date DESC, batch.id DESC',
         );
         $statement->execute([$supplierId, $from, $to]);

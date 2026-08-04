@@ -19,7 +19,12 @@ final class PayrollPaymentReconciliationQueryService
                 'Firma párování plateb musí být kladné číslo.',
             );
         }
-        [$from, $to, $evidenceTo] = $this->periodRange($period);
+        [$from, $to] = $this->periodRange($period);
+        $evidenceRange = $this->evidenceRange(
+            $supplierId,
+            $from,
+            $to,
+        );
 
         return [
             'period' => $period,
@@ -29,16 +34,20 @@ final class PayrollPaymentReconciliationQueryService
                 $to,
             ),
             'matches' => $this->matches($supplierId, $from, $to),
-            'bank_evidence' => $this->bankEvidence(
-                $supplierId,
-                $from,
-                $evidenceTo,
-            ),
-            'cash_evidence' => $this->cashEvidence(
-                $supplierId,
-                $from,
-                $evidenceTo,
-            ),
+            'bank_evidence' => $evidenceRange === null
+                ? []
+                : $this->bankEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                ),
+            'cash_evidence' => $evidenceRange === null
+                ? []
+                : $this->cashEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                ),
         ];
     }
 
@@ -73,6 +82,12 @@ final class PayrollPaymentReconciliationQueryService
                JOIN payroll_payment_liabilities liability
                  ON liability.supplier_id = allocation.supplier_id
                 AND liability.id = allocation.liability_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
                LEFT JOIN payroll_employees employee
                  ON employee.supplier_id = liability.supplier_id
                 AND employee.id = liability.employee_id
@@ -80,8 +95,8 @@ final class PayrollPaymentReconciliationQueryService
                  ON payment_match.supplier_id = allocation.supplier_id
                 AND payment_match.allocation_id = allocation.id
               WHERE allocation.supplier_id = ?
-                AND payment_batch.planned_payment_date >= ?
-                AND payment_batch.planned_payment_date < ?
+                AND run.period_start >= ?
+                AND run.period_start < ?
               GROUP BY allocation.id, allocation.item_id,
                        payment_item.item_reference, payment_batch.id,
                        payment_batch.batch_reference,
@@ -199,12 +214,18 @@ final class PayrollPaymentReconciliationQueryService
                JOIN payroll_payment_liabilities liability
                  ON liability.supplier_id = allocation.supplier_id
                 AND liability.id = allocation.liability_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
                LEFT JOIN payroll_employees employee
                  ON employee.supplier_id = liability.supplier_id
                 AND employee.id = liability.employee_id
               WHERE payment_match.supplier_id = ?
-                AND payment_batch.planned_payment_date >= ?
-                AND payment_batch.planned_payment_date < ?
+                AND run.period_start >= ?
+                AND run.period_start < ?
               ORDER BY payment_match.actual_payment_date DESC,
                        payment_match.id DESC',
         );
@@ -497,7 +518,7 @@ final class PayrollPaymentReconciliationQueryService
         return $result;
     }
 
-    /** @return array{string,string,string} */
+    /** @return array{string,string} */
     private function periodRange(string $period): array
     {
         if (preg_match(
@@ -509,13 +530,51 @@ final class PayrollPaymentReconciliationQueryService
             );
         }
         $from = new \DateTimeImmutable($period . '-01');
-        $to = $from->modify('first day of next month');
-
         return [
             $from->format('Y-m-d'),
-            $to->format('Y-m-d'),
-            $to->modify('+1 month')->format('Y-m-d'),
+            $from->modify('first day of next month')->format('Y-m-d'),
         ];
+    }
+
+    /**
+     * @return array{string,string}|null
+     */
+    private function evidenceRange(
+        int $supplierId,
+        string $periodFrom,
+        string $periodTo,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT MIN(liability.due_on) AS evidence_from
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE liability.supplier_id = ?
+                AND run.period_start >= ?
+                AND run.period_start < ?',
+        );
+        $statement->execute([$supplierId, $periodFrom, $periodTo]);
+        $row = self::row(
+            $statement->fetch(PDO::FETCH_ASSOC),
+            'rozsah platebních důkazů',
+        );
+        $earliestDueOn = self::nullableText($row, 'evidence_from');
+        if ($earliestDueOn === null) {
+            return null;
+        }
+        $from = new \DateTimeImmutable(
+            min($periodFrom, $earliestDueOn),
+        );
+        $to = new \DateTimeImmutable('tomorrow');
+        if ($to <= $from) {
+            return null;
+        }
+
+        return [$from->format('Y-m-d'), $to->format('Y-m-d')];
     }
 
     /** @return array<string,mixed> */

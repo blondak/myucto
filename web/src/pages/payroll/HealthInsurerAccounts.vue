@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 defineProps<{ canWrite: boolean }>()
 
@@ -32,6 +33,10 @@ const sources: PayrollInstitutionAccountSource[] = [
   'user_verified',
   'imported',
 ]
+const sourceOptions = computed(() => sources.map(source => ({
+  value: source,
+  label: sourceLabel(source),
+})))
 
 function localToday(): string {
   const now = new Date()
@@ -269,11 +274,26 @@ function sourceLabel(source: PayrollInstitutionAccountSource): string {
   return t(`payroll.employer.health_accounts.sources.${source}`)
 }
 
-onMounted(loadAccounts)
+function setCreateSource(value: PayrollInstitutionAccountSource | null) {
+  if (value !== null) createForm.source_kind = value
+}
+
+function setEditSource(value: PayrollInstitutionAccountSource | null) {
+  if (value !== null) editForm.source_kind = value
+}
+
+onMounted(async () => {
+  await loadAccounts()
+  await nextTick()
+  if (window.location.hash === '#health-insurer-accounts') {
+    document.getElementById('health-insurer-accounts')
+      ?.scrollIntoView({ block: 'start' })
+  }
+})
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+  <section id="health-insurer-accounts" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" style="scroll-margin-top: 6rem">
     <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.health_accounts.title') }}</h2>
@@ -413,9 +433,14 @@ onMounted(loadAccounts)
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}</span>
-            <select v-model="createForm.source_kind" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
-              <option v-for="source in sources" :key="source" :value="source">{{ sourceLabel(source) }}</option>
-            </select>
+            <SearchableSelect
+              :model-value="createForm.source_kind"
+              :options="sourceOptions"
+              :clearable="false"
+              :aria-label="t('payroll.employer.health_accounts.source')"
+              accent="payroll"
+              @update:model-value="setCreateSource"
+            />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source_reference') }}</span>
@@ -474,9 +499,14 @@ onMounted(loadAccounts)
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}</span>
-            <select v-model="editForm.source_kind" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
-              <option v-for="source in sources" :key="source" :value="source">{{ sourceLabel(source) }}</option>
-            </select>
+            <SearchableSelect
+              :model-value="editForm.source_kind"
+              :options="sourceOptions"
+              :clearable="false"
+              :aria-label="t('payroll.employer.health_accounts.source')"
+              accent="payroll"
+              @update:model-value="setEditSource"
+            />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source_reference') }}</span>

@@ -50,9 +50,17 @@ final class PayrollPaymentQueryService
      *   revision_no:int,
      *   employee_id:?int,
      *   employee_name:?string,
+     *   recipient_name:?string,
+     *   institution_type:?string,
+     *   institution_code:?string,
      *   liability_kind:string,
      *   direction:string,
      *   recipient_kind:string,
+     *   payment_target_status:string,
+     *   payment_target_masked:?string,
+     *   batch_eligibility:string,
+     *   batch_block_reason:?string,
+     *   revision_kind:string,
      *   due_on:string,
      *   currency_code:string,
      *   amount_minor:int,
@@ -73,14 +81,25 @@ final class PayrollPaymentQueryService
 
         $statement = $this->db->pdo()->prepare(
             'SELECT liability.id, revision.run_id, liability.revision_id,
-                    revision.revision_no, liability.employee_id,
+                    revision.revision_no, revision.revision_kind,
+                    liability.employee_id,
                     employee.full_name AS employee_name,
+                    COALESCE(
+                      employee.full_name,
+                      institution_account.institution_name
+                    ) AS recipient_name,
+                    institution.institution_type,
+                    institution.institution_code,
                     liability.liability_kind, liability.direction,
                     CASE
                       WHEN liability.recipient_reference LIKE "employee-cash:%"
                         THEN "cash"
                       ELSE "bank"
                     END AS recipient_kind,
+                    COALESCE(
+                      institution_account.bank_account_masked,
+                      employee_account.bank_account_masked
+                    ) AS payment_target_masked,
                     liability.due_on, liability.currency_code,
                     liability.amount_minor, liability.created_at,
                     (
@@ -109,6 +128,30 @@ final class PayrollPaymentQueryService
                LEFT JOIN payroll_employees employee
                  ON employee.supplier_id = liability.supplier_id
                 AND employee.id = liability.employee_id
+               LEFT JOIN payroll_person_accounts employee_account
+                 ON employee_account.supplier_id = liability.supplier_id
+                AND employee_account.id = CASE
+                  WHEN liability.recipient_reference
+                    LIKE "employee-account:%"
+                  THEN CAST(SUBSTRING_INDEX(
+                    liability.recipient_reference, ":", -1
+                  ) AS UNSIGNED)
+                  ELSE NULL
+                END
+               LEFT JOIN payroll_institution_accounts institution_account
+                 ON institution_account.supplier_id = liability.supplier_id
+                AND institution_account.id = CASE
+                  WHEN liability.recipient_reference
+                    LIKE "institution:%:account:%"
+                  THEN CAST(SUBSTRING_INDEX(
+                    liability.recipient_reference, ":", -1
+                  ) AS UNSIGNED)
+                  ELSE NULL
+                END
+               LEFT JOIN payroll_institutions institution
+                 ON institution.supplier_id =
+                    institution_account.supplier_id
+                AND institution.id = institution_account.institution_id
               WHERE liability.supplier_id = ?
                 AND run.period_start = CONCAT(?, "-01")
               ORDER BY liability.due_on, employee.full_name, liability.id'
@@ -142,9 +185,51 @@ final class PayrollPaymentQueryService
                 'revision_no' => self::integer($row, 'revision_no'),
                 'employee_id' => $employeeId,
                 'employee_name' => $employeeName,
+                'recipient_name' => self::nullableText(
+                    $row,
+                    'recipient_name',
+                ),
+                'institution_type' => self::nullableText(
+                    $row,
+                    'institution_type',
+                ),
+                'institution_code' => self::nullableText(
+                    $row,
+                    'institution_code',
+                ),
                 'liability_kind' => self::text($row, 'liability_kind'),
                 'direction' => self::text($row, 'direction'),
                 'recipient_kind' => self::text($row, 'recipient_kind'),
+                'payment_target_status' => 'ready',
+                'payment_target_masked' => self::nullableText(
+                    $row,
+                    'payment_target_masked',
+                ),
+                'batch_eligibility' =>
+                    self::text($row, 'direction') === 'outgoing'
+                    && in_array(
+                        self::text($row, 'liability_kind'),
+                        ['net_wage', 'health_insurance'],
+                        true,
+                    )
+                        ? 'ready'
+                        : 'blocked',
+                'batch_block_reason' =>
+                    self::text($row, 'direction') === 'incoming'
+                        ? 'unsupported_direction'
+                        : (
+                            in_array(
+                                self::text($row, 'liability_kind'),
+                                ['net_wage', 'health_insurance'],
+                                true,
+                            )
+                                ? null
+                                : 'unsupported_liability_kind'
+                        ),
+                'revision_kind' => self::text(
+                    $row,
+                    'revision_kind',
+                ),
                 'due_on' => self::text($row, 'due_on'),
                 'currency_code' => self::text($row, 'currency_code'),
                 'amount_minor' => $amount,
@@ -216,6 +301,22 @@ final class PayrollPaymentQueryService
     private static function nullableInteger(array $row, string $key): ?int
     {
         return ($row[$key] ?? null) === null ? null : self::integer($row, $key);
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function nullableText(array $row, string $key): ?string
+    {
+        $value = $row[$key] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || $value === '') {
+            throw new \UnexpectedValueException(
+                "Hodnota {$key} není text.",
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $row */

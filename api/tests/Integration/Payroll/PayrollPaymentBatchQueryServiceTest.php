@@ -115,12 +115,21 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
 
     public function testListsBatchesAndExportsOnlyForTenantPeriod(): void
     {
-        $batchId = $this->insertBatch($this->supplierId, '2026-08-15');
+        $batchId = $this->insertBatch(
+            $this->supplierId,
+            '2026-08-01',
+            '2026-09-15',
+        );
         $this->insertExport($this->supplierId, $batchId);
-        $this->insertBatch($this->supplierId, '2026-09-01');
+        $this->insertBatch(
+            $this->supplierId,
+            '2026-09-01',
+            '2026-09-15',
+        );
         $otherBatch = $this->insertBatch(
             $this->otherSupplierId,
-            '2026-08-15',
+            '2026-08-01',
+            '2026-09-15',
         );
         $this->insertExport($this->otherSupplierId, $otherBatch);
 
@@ -135,7 +144,7 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         self::assertSame(0, $batches[0]['settled_minor']);
         self::assertCount(1, $batches[0]['exports']);
         self::assertSame(
-            'mzdy-platby-2026-08-15.kpc',
+            'mzdy-platby-2026-09-15.kpc',
             $batches[0]['exports'][0]['suggested_filename'],
         );
         $encoded = json_encode($batches, JSON_THROW_ON_ERROR);
@@ -172,14 +181,87 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         ]);
     }
 
-    private function insertBatch(int $supplierId, string $date): int
-    {
+    private function insertBatch(
+        int $supplierId,
+        string $periodStart,
+        string $plannedPaymentDate,
+    ): int {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, ?, "employee", 1)',
+        )->execute([
+            $supplierId,
+            "Syntetická dávková osoba {$periodStart}",
+        ]);
+        $employeeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status)
+             VALUES (?, ?, ?, "approved")',
+        )->execute([$supplierId, $periodStart, $plannedPaymentDate]);
+        $runId = (int) $this->db->pdo()->lastInsertId();
+        $snapshot = '{"schema":"synthetic-query.v1"}';
+        $snapshotHash = hash('sha256', $snapshot);
+        $revisionKey = "synthetic-query-revision:{$supplierId}:{$periodStart}";
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 1, "approved", "synthetic-query.v1", ?,
+                     ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $supplierId,
+            $runId,
+            str_repeat('a', 64),
+            $snapshot,
+            $snapshotHash,
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', $revisionKey, true),
+        ]);
+        $revisionId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, result_json,
+                 result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")',
+        )->execute([
+            $supplierId,
+            $revisionId,
+            $employeeId,
+            $snapshot,
+            $snapshotHash,
+        ]);
+        $liabilityReference = "net-wage.query.{$periodStart}";
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id,
+                 liability_reference, liability_kind, direction,
+                 recipient_reference, due_on, currency_code, amount_minor,
+                 source_snapshot_json, source_snapshot_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, "net_wage", "outgoing",
+                     "recipient:synthetic", ?, "CZK", 123456, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $revisionId,
+            $employeeId,
+            $liabilityReference,
+            $plannedPaymentDate,
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', $liabilityReference, true),
+        ]);
+        $liabilityId = (int) $this->db->pdo()->lastInsertId();
         $hash = hash(
             'sha256',
-            "synthetic-query-batch:{$supplierId}:{$date}",
+            "synthetic-query-batch:{$supplierId}:{$periodStart}",
         );
         $reference = 'synthetic-query-' . $supplierId . '-'
-            . str_replace('-', '', $date);
+            . str_replace('-', '', $periodStart);
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_payment_batches
                 (supplier_id, batch_reference, channel, export_format,
@@ -192,13 +274,41 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         )->execute([
             $supplierId,
             $reference,
-            $date,
+            $plannedPaymentDate,
             'enc:v2:synthetic-query',
             $hash,
             hash('sha256', $reference, true),
         ]);
+        $batchId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_items
+                (supplier_id, batch_id, item_reference,
+                 recipient_reference, amount_minor,
+                 instruction_ciphertext, instruction_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "recipient:synthetic", 123456,
+                     "enc:v2:synthetic-query", ?, ?)',
+        )->execute([
+            $supplierId,
+            $batchId,
+            "item-{$reference}",
+            hash('sha256', "item-{$reference}"),
+            hash('sha256', "item-{$reference}", true),
+        ]);
+        $itemId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_allocations
+                (supplier_id, item_id, liability_id, amount_minor,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, 123456, ?)',
+        )->execute([
+            $supplierId,
+            $itemId,
+            $liabilityId,
+            hash('sha256', "allocation-{$reference}", true),
+        ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+        return $batchId;
     }
 
     private function insertExport(int $supplierId, int $batchId): void
@@ -211,6 +321,8 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         $batch->execute([$supplierId, $batchId]);
         $row = $batch->fetch(PDO::FETCH_ASSOC);
         self::assertIsArray($row);
+        $plannedPaymentDate = $row['planned_payment_date'] ?? null;
+        self::assertIsString($plannedPaymentDate);
         $hash = hash('sha256', "synthetic-export:{$supplierId}:{$batchId}");
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_payment_exports
@@ -227,7 +339,7 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
             $row['snapshot_hash'],
             $hash,
             $hash,
-            'mzdy-platby-' . $row['planned_payment_date'] . '.kpc',
+            'mzdy-platby-' . $plannedPaymentDate . '.kpc',
             hash('sha256', "synthetic-export-idem:{$supplierId}:{$batchId}", true),
         ]);
     }

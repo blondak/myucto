@@ -139,7 +139,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/[0-9]+/download-grants$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/download$#', 'payroll.payments', AccessLevel::WRITE],
-        ['POST', '#^/api/payroll/revisions/[0-9]+/payments/net-wage-liabilities$#', 'payroll.payments', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/revisions/[0-9]+/payments/(?:liabilities|net-wage-liabilities)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/accounts/[0-9]+/verify$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/documents$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/annual$#', 'payroll.documents', AccessLevel::READ],

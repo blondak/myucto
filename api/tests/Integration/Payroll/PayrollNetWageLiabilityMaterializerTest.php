@@ -168,6 +168,14 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         self::assertSame(['bank', 'cash'], $recipientKinds);
         foreach ($items as $item) {
             self::assertSame('open', $item['state']);
+            self::assertSame('ready', $item['payment_target_status']);
+            self::assertSame('ready', $item['batch_eligibility']);
+            self::assertNull($item['batch_block_reason']);
+            self::assertSame('regular', $item['revision_kind']);
+            self::assertSame(
+                'Syntetická platební osoba',
+                $item['recipient_name'],
+            );
             self::assertSame(0, $item['allocated_minor']);
             self::assertSame(0, $item['settled_minor']);
             self::assertArrayNotHasKey('recipient_reference', $item);

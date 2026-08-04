@@ -23,6 +23,7 @@ vi.mock('@/api/payrollPayments', () => ({
   payrollPaymentsApi: {
     liabilities: m.liabilities,
     materializeNetWages: m.materialize,
+    materializeLiabilities: m.materialize,
     payerOptions: m.payerOptions,
     batches: m.batches,
     createBatch: m.createBatch,
@@ -69,9 +70,17 @@ describe('PayrollPayments', () => {
         revision_no: 1,
         employee_id: 31,
         employee_name: 'Syntetická osoba',
+        recipient_name: 'Syntetická osoba',
+        institution_type: null,
+        institution_code: null,
         liability_kind: 'net_wage',
         direction: 'outgoing',
         recipient_kind: 'bank',
+        payment_target_status: 'ready',
+        payment_target_masked: '••••0005/0100',
+        batch_eligibility: 'ready',
+        batch_block_reason: null,
+        revision_kind: 'regular',
         due_on: '2026-08-15',
         currency_code: 'CZK',
         amount_minor: 4_250_000,
@@ -99,6 +108,7 @@ describe('PayrollPayments', () => {
     m.materialize.mockResolvedValue({
       liability_ids: [41],
       created_count: 0,
+      preparation_issues: [],
     })
     m.payerOptions.mockResolvedValue([{
       reference: 'currency:7',
@@ -235,6 +245,79 @@ describe('PayrollPayments', () => {
     expect(wrapper.findAll('nav button')).toHaveLength(3)
   })
 
+  it('shows two health insurers and blocks an incoming correction on both layouts', async () => {
+    const healthItem = {
+      id: 42,
+      run_id: 11,
+      revision_id: 12,
+      revision_no: 1,
+      employee_id: null,
+      employee_name: null,
+      recipient_name: 'Syntetická pojišťovna 111',
+      institution_type: 'health_insurer',
+      institution_code: '111',
+      liability_kind: 'health_insurance',
+      direction: 'outgoing',
+      recipient_kind: 'bank',
+      payment_target_status: 'ready',
+      payment_target_masked: '••••0005/0100',
+      batch_eligibility: 'ready',
+      batch_block_reason: null,
+      revision_kind: 'regular',
+      due_on: '2026-08-20',
+      currency_code: 'CZK',
+      amount_minor: 1_350_000,
+      allocated_minor: 0,
+      settled_minor: 0,
+      state: 'open',
+      created_at: '2026-08-03 08:00:00',
+    }
+    m.liabilities.mockResolvedValue({
+      period: '2026-08',
+      items: [
+        healthItem,
+        {
+          ...healthItem,
+          id: 43,
+          recipient_name: 'Syntetická pojišťovna 201',
+          institution_code: '201',
+          payment_target_masked: '••••1005/0100',
+          amount_minor: 650_000,
+        },
+        {
+          ...healthItem,
+          id: 44,
+          revision_id: 13,
+          revision_no: 2,
+          direction: 'incoming',
+          batch_eligibility: 'blocked',
+          batch_block_reason: 'unsupported_direction',
+          revision_kind: 'correction',
+          amount_minor: 50_000,
+        },
+      ],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    for (const selector of ['[data-layout="desktop"]', '[data-layout="mobile"]']) {
+      const layout = wrapper.get(selector)
+      expect(layout.text()).toContain('Syntetická pojišťovna 111')
+      expect(layout.text()).toContain('Syntetická pojišťovna 201')
+      expect(layout.text()).toContain('••••0005/0100')
+      expect(layout.text()).toContain('••••1005/0100')
+      expect(layout.text()).toContain('payroll.payments.target.ready')
+      expect(layout.text()).toContain('payroll.payments.correction')
+    }
+    const rowCheckboxes = wrapper.get('[data-layout="desktop"]')
+      .findAll('tbody input[type="checkbox"]')
+    expect(rowCheckboxes).toHaveLength(3)
+    expect(rowCheckboxes[0].attributes('disabled')).toBeUndefined()
+    expect(rowCheckboxes[1].attributes('disabled')).toBeUndefined()
+    expect(rowCheckboxes[2].attributes('disabled')).toBeDefined()
+  })
+
   it('materializes only the approved current revision and safely replays it', async () => {
     const wrapper = mount(PayrollPayments)
     await flushPromises()
@@ -303,7 +386,11 @@ describe('PayrollPayments', () => {
     ])
     m.materialize
       .mockRejectedValueOnce(new Error('synthetic blocked revision'))
-      .mockResolvedValueOnce({ liability_ids: [42], created_count: 1 })
+      .mockResolvedValueOnce({
+        liability_ids: [42],
+        created_count: 1,
+        preparation_issues: [],
+      })
 
     const wrapper = mount(PayrollPayments)
     await flushPromises()
@@ -501,6 +588,11 @@ describe('PayrollPayments', () => {
 
     const wrapper = mount(PayrollPayments)
     await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.payments.readonly_hint')
+    expect(wrapper.get('[data-layout="desktop"]').findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(wrapper.get('[data-layout="mobile"]').findAll('input[type="checkbox"]')).toHaveLength(0)
+
     await wrapper.findAll('nav button')[1].trigger('click')
 
     const desktop = wrapper.get('[data-layout="batch-desktop"]')

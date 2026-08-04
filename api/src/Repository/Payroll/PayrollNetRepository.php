@@ -301,6 +301,139 @@ final class PayrollNetRepository
         return $result;
     }
 
+    /**
+     * @return list<array{
+     *   agreement_id:int,
+     *   employee_id:int,
+     *   amount_minor:int
+     * }>
+     */
+    public function deductionMovementsForRun(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ledger.agreement_id, ledger.employee_id, ledger.amount_minor
+               FROM payroll_deduction_ledger ledger
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = ledger.supplier_id
+                AND revision.id = ledger.revision_id
+              WHERE ledger.supplier_id = ? AND revision.run_id = ?
+                AND ledger.agreement_id IS NOT NULL
+                AND ledger.event_kind IN ("withheld", "reversed")
+              ORDER BY ledger.id
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $result = [];
+        foreach (PayrollTimeValue::rows(
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+            'deduction_run_movements',
+        ) as $row) {
+            $result[] = [
+                'agreement_id' => self::boundedInt(
+                    $row['agreement_id'] ?? null,
+                    'agreement_id',
+                ),
+                'employee_id' => self::boundedInt(
+                    $row['employee_id'] ?? null,
+                    'employee_id',
+                ),
+                'amount_minor' => self::boundedInt(
+                    $row['amount_minor'] ?? null,
+                    'amount_minor',
+                ),
+            ];
+        }
+
+        return $result;
+    }
+
+    public function deductionNetForRevision(
+        int $supplierId,
+        int $revisionId,
+        int $employeeId,
+        int $agreementId,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT amount_minor
+               FROM payroll_deduction_ledger
+              WHERE supplier_id = ? AND revision_id = ?
+                AND employee_id = ? AND agreement_id = ?
+                AND event_kind IN ("withheld", "reversed")
+              ORDER BY id
+              FOR UPDATE'
+        );
+        $stmt->execute([
+            $supplierId,
+            $revisionId,
+            $employeeId,
+            $agreementId,
+        ]);
+        $total = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $amount) {
+            $total = self::checkedAdd(
+                $total,
+                self::boundedInt($amount, 'revision_deduction_amount'),
+                'Součet pohybů revize překročil číselný limit.',
+            );
+        }
+
+        return $total;
+    }
+
+    /**
+     * @return list<array{id:int,available_minor:int}>
+     */
+    public function availableWithholdingsForRun(
+        int $supplierId,
+        int $runId,
+        int $employeeId,
+        int $agreementId,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ledger.id, ledger.amount_minor
+               FROM payroll_deduction_ledger ledger
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = ledger.supplier_id
+                AND revision.id = ledger.revision_id
+              WHERE ledger.supplier_id = ? AND revision.run_id = ?
+                AND ledger.employee_id = ? AND ledger.agreement_id = ?
+                AND ledger.event_kind = "withheld"
+              ORDER BY ledger.id
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $runId, $employeeId, $agreementId]);
+        $result = [];
+        foreach (PayrollTimeValue::rows(
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+            'available_withholdings',
+        ) as $row) {
+            $sourceId = self::boundedInt($row['id'] ?? null, 'withholding.id');
+            $sourceAmount = self::boundedInt(
+                $row['amount_minor'] ?? null,
+                'withholding.amount_minor',
+            );
+            if ($sourceAmount <= 0) {
+                throw new \UnexpectedValueException(
+                    'Zdrojový pohyb srážky musí být kladný.',
+                );
+            }
+            $reversed = $this->reversedAmount($supplierId, $sourceId);
+            if ($reversed > $sourceAmount) {
+                throw new \DomainException(
+                    'Zdrojový pohyb srážky je obrácen nad původní částku.',
+                );
+            }
+            if ($reversed < $sourceAmount) {
+                $result[] = [
+                    'id' => $sourceId,
+                    'available_minor' => $sourceAmount - $reversed,
+                ];
+            }
+        }
+
+        return $result;
+    }
+
     private function validateLedgerShape(
         string $eventKind,
         int $amountMinor,
@@ -390,6 +523,35 @@ final class PayrollNetRepository
         if ($stmt->rowCount() !== 1) {
             throw new \DomainException('Pohyb překračuje zůstatek nebo limit dohody o srážce.');
         }
+    }
+
+    private function reversedAmount(int $supplierId, int $sourceLedgerId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT amount_minor
+               FROM payroll_deduction_ledger
+              WHERE supplier_id = ? AND source_ledger_id = ?
+                AND event_kind = "reversed"
+              ORDER BY id
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $sourceLedgerId]);
+        $total = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $amount) {
+            $value = self::boundedInt($amount, 'reversal.amount_minor');
+            if ($value >= 0 || $value === PHP_INT_MIN) {
+                throw new \UnexpectedValueException(
+                    'Reversal srážky musí být bezpečné záporné celé číslo.',
+                );
+            }
+            $total = self::checkedAdd(
+                $total,
+                abs($value),
+                'Součet reversalů překročil číselný limit.',
+            );
+        }
+
+        return $total;
     }
 
     /** @return array<string,mixed>|null */
@@ -500,5 +662,39 @@ final class PayrollNetRepository
     {
         $driverCode = $e->errorInfo[1] ?? null;
         return $driverCode === 1062 || $driverCode === '1062';
+    }
+
+    private static function boundedInt(mixed $value, string $field): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (!is_string($value)
+            || preg_match('/^-?(?:0|[1-9][0-9]*)$/D', $value) !== 1
+        ) {
+            throw new \UnexpectedValueException("{$field} musí být celé číslo.");
+        }
+        $negative = str_starts_with($value, '-');
+        $digits = $negative ? substr($value, 1) : $value;
+        $limit = (string) PHP_INT_MAX;
+        if (strlen($digits) > strlen($limit)
+            || (strlen($digits) === strlen($limit)
+                && strcmp($digits, $limit) > 0)
+        ) {
+            throw new \OverflowException("{$field} překročilo číselný limit.");
+        }
+
+        return (int) $value;
+    }
+
+    private static function checkedAdd(int $left, int $right, string $message): int
+    {
+        if (($right > 0 && $left > PHP_INT_MAX - $right)
+            || ($right < 0 && $left < PHP_INT_MIN - $right)
+        ) {
+            throw new \OverflowException($message);
+        }
+
+        return $left + $right;
     }
 }
