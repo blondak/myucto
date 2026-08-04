@@ -31,6 +31,12 @@ ověření všech šesti balíčků. Soubor `SHA256SUMS` je deterministický kat
 všech uložených XSD včetně zachovaných starších verzí. Neobsahuje čas stažení
 ani lokální cesty; cílený test kontroluje úplnost seznamu i každý hash.
 
+Protože `SHA256SUMS` připíná uložená schémata bajt po bajtu, musí je Git
+předávat beze změny — kořenový `.gitattributes` proto drží `*.xsd -text`. Bez
+toho by Windows checkout dostal CRLF, Linux LF a manifest by seděl vždy jen na
+jedné platformě. Hashe generuje downloader z rozbaleného archivu, takže se
+připínají skutečné bajty ČSSZ/MPSV, ne lokálně znormalizovaná kopie.
+
 Změna URL, verze, kontrolního součtu, počtu souborů nebo entry pointu musí být
 vědomá a musí ji doprovodit aktualizace tohoto manifestu, této tabulky a testů.
 XSD ověřuje syntaxi a strukturu; nenahrazuje verzovaná aplikační business
