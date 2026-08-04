@@ -22,12 +22,20 @@ verze, vstupní XSD, oficiální URL a SHA-256 archivů jsou v
 Aktualizace celé sady:
 
 ```powershell
-cmd\download-xsd.cmd jmhz
+pwsh -File cmd\download-jmhz-xsd.ps1
+cmd\download-jmhz-xsd.cmd
 ```
 
 ```bash
-bash cmd/download-xsd.sh jmhz
+bash cmd/download-jmhz-xsd.sh
 ```
+
+Obecný `download-xsd` s argumentem `jmhz` používá stejné wrappery. Downloader
+přijímá jen HTTPS archivy z připnuté cesty `developers.mpsv.cz/assets/documents`,
+ověřuje i každý redirect, SHA-256 celého ZIPu, bezpečnost cest, počet XSD,
+očekávaná vstupní schémata a úplnost lokálních `include`/`import`. Až poté
+atomicky nahradí verzované adresáře; při jakékoli odchylce zůstane původní sada
+beze změny.
 
 ## Zdroje EPO MFČR
 

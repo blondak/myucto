@@ -5,13 +5,30 @@ declare(strict_types=1);
 namespace MyInvoice\Tooling;
 
 use Closure;
+use DOMDocument;
+use DOMXPath;
 use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use RuntimeException;
 use ZipArchive;
 
 final class JmhzXsdDownloader
 {
-    /** @var array<string,array{target:string,version:string,url:string,sha256:string}> */
+    private const OFFICIAL_HOST = 'developers.mpsv.cz';
+    private const MAX_REDIRECTS = 5;
+    private const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
+
+    /**
+     * @var array<string,array{
+     *     target:string,
+     *     version:string,
+     *     url:string,
+     *     sha256:string,
+     *     xsd_count:int,
+     *     entry_points:list<string>
+     * }>
+     */
     private array $packages;
     private ?Closure $logger;
 
@@ -96,6 +113,7 @@ final class JmhzXsdDownloader
                 }
 
                 $count = $this->extractXsd($archives[$id], $versionTarget);
+                $this->validatePackageTree($id, $package, $versionTarget, $count);
                 $this->log("Prepared {$id} {$package['version']}: {$count} XSD file(s).");
             }
 
@@ -110,7 +128,14 @@ final class JmhzXsdDownloader
 
     /**
      * @param array<mixed> $packages
-     * @return array<string,array{target:string,version:string,url:string,sha256:string}>
+     * @return array<string,array{
+     *     target:string,
+     *     version:string,
+     *     url:string,
+     *     sha256:string,
+     *     xsd_count:int,
+     *     entry_points:list<string>
+     * }>
      */
     private function validateManifest(array $packages): array
     {
@@ -128,6 +153,8 @@ final class JmhzXsdDownloader
             $version = $package['version'] ?? null;
             $sha256 = $package['sha256'] ?? null;
             $url = $package['url'] ?? null;
+            $xsdCount = $package['xsd_count'] ?? null;
+            $entryPoints = $package['entry_points'] ?? null;
             if (
                 preg_match('/\A[a-z0-9][a-z0-9-]*\z/D', $id) !== 1
                 || !is_string($target)
@@ -137,13 +164,29 @@ final class JmhzXsdDownloader
                 || !is_string($sha256)
                 || preg_match('/\A[a-f0-9]{64}\z/D', $sha256) !== 1
                 || !is_string($url)
-                || !str_starts_with($url, 'https://')
+                || !is_int($xsdCount)
+                || $xsdCount < 1
+                || $xsdCount > 500
+                || !is_array($entryPoints)
+                || $entryPoints === []
             ) {
                 throw new RuntimeException("Invalid JMHZ package manifest entry {$id}.");
             }
+            $this->assertOfficialUrl($url, $id);
 
             if (isset($targets[$target])) {
                 throw new RuntimeException("Duplicate JMHZ package target {$target}.");
+            }
+            $validatedEntryPoints = [];
+            foreach ($entryPoints as $entryPoint) {
+                if (
+                    !is_string($entryPoint)
+                    || !$this->isSafeRelativeXsdPath($entryPoint)
+                    || isset($validatedEntryPoints[strtolower($entryPoint)])
+                ) {
+                    throw new RuntimeException("Invalid JMHZ package entry point in {$id}.");
+                }
+                $validatedEntryPoints[strtolower($entryPoint)] = $entryPoint;
             }
             $targets[$target] = true;
             $validated[$id] = [
@@ -151,6 +194,8 @@ final class JmhzXsdDownloader
                 'version' => $version,
                 'url' => $url,
                 'sha256' => $sha256,
+                'xsd_count' => $xsdCount,
+                'entry_points' => array_values($validatedEntryPoints),
             ];
         }
 
@@ -159,31 +204,197 @@ final class JmhzXsdDownloader
 
     private function download(string $url, string $target): void
     {
-        $context = stream_context_create([
-            'http' => [
-                'follow_location' => 1,
-                'max_redirects' => 5,
-                'timeout' => 60,
-                'user_agent' => 'MyUcto JMHZ XSD downloader',
-            ],
-        ]);
-        $input = @fopen($url, 'rb', false, $context);
-        if ($input === false) {
-            throw new RuntimeException("Cannot download {$url}.");
-        }
-        $output = @fopen($target, 'xb');
-        if ($output === false) {
-            fclose($input);
-            throw new RuntimeException("Cannot create temporary archive {$target}.");
+        $currentUrl = $url;
+        for ($redirects = 0; $redirects <= self::MAX_REDIRECTS; $redirects++) {
+            $this->assertOfficialUrl($currentUrl, 'download');
+            $context = stream_context_create([
+                'http' => [
+                    'follow_location' => 0,
+                    'ignore_errors' => true,
+                    'timeout' => 60,
+                    'user_agent' => 'MyUcto JMHZ XSD downloader',
+                ],
+                'ssl' => [
+                    'verify_peer' => true,
+                    'verify_peer_name' => true,
+                    'allow_self_signed' => false,
+                    'SNI_enabled' => true,
+                ],
+            ]);
+            $input = @fopen($currentUrl, 'rb', false, $context);
+            if ($input === false) {
+                throw new RuntimeException("Cannot download {$currentUrl}.");
+            }
+
+            try {
+                $headers = $this->responseHeaders($input);
+                $status = $this->responseStatus($headers);
+                if ($status >= 300 && $status < 400) {
+                    $location = $this->redirectLocation($headers);
+                    if ($location === null || $redirects === self::MAX_REDIRECTS) {
+                        throw new RuntimeException("Unsafe or excessive redirect while downloading {$currentUrl}.");
+                    }
+                    $currentUrl = $this->resolveRedirectUrl($currentUrl, $location);
+                    continue;
+                }
+                if ($status !== 200) {
+                    throw new RuntimeException("JMHZ download {$currentUrl} returned HTTP {$status}.");
+                }
+
+                $this->writeLimitedArchive($input, $target, $currentUrl);
+
+                return;
+            } finally {
+                fclose($input);
+            }
         }
 
-        try {
-            if (stream_copy_to_stream($input, $output) === false) {
-                throw new RuntimeException("Download failed for {$url}.");
+        throw new RuntimeException("Too many redirects while downloading {$url}.");
+    }
+
+    /**
+     * @param resource $stream
+     * @return list<string>
+     */
+    private function responseHeaders($stream): array
+    {
+        $metadata = stream_get_meta_data($stream);
+        $headers = $metadata['wrapper_data'] ?? [];
+        if (is_string($headers)) {
+            return [$headers];
+        }
+        if (!is_array($headers)) {
+            return [];
+        }
+        $result = [];
+        foreach ($headers as $header) {
+            if (is_string($header)) {
+                $result[] = $header;
             }
+        }
+
+        return $result;
+    }
+
+    /** @param list<string> $headers */
+    private function responseStatus(array $headers): int
+    {
+        $status = 0;
+        foreach ($headers as $header) {
+            if (preg_match('/\AHTTP\/\S+\s+([0-9]{3})(?:\s|$)/i', $header, $matches) === 1) {
+                $status = (int) $matches[1];
+            }
+        }
+
+        return $status;
+    }
+
+    /** @param list<string> $headers */
+    private function redirectLocation(array $headers): ?string
+    {
+        $locations = [];
+        foreach ($headers as $header) {
+            if (preg_match('/\ALocation:\s*(\S.*?)\s*\z/i', $header, $matches) === 1) {
+                $locations[] = $matches[1];
+            }
+        }
+
+        return count($locations) === 1 ? $locations[0] : null;
+    }
+
+    private function resolveRedirectUrl(string $currentUrl, string $location): string
+    {
+        if (str_starts_with($location, '//')) {
+            throw new RuntimeException("Protocol-relative JMHZ redirect is not allowed: {$location}.");
+        }
+        $scheme = parse_url($location, PHP_URL_SCHEME);
+        if (is_string($scheme)) {
+            $this->assertOfficialUrl($location, 'redirect');
+
+            return $location;
+        }
+
+        $host = parse_url($currentUrl, PHP_URL_HOST);
+        $path = parse_url($currentUrl, PHP_URL_PATH);
+        if (!is_string($host) || !is_string($path)) {
+            throw new RuntimeException("Cannot resolve JMHZ redirect {$location}.");
+        }
+        $redirectPath = str_starts_with($location, '/')
+            ? $location
+            : rtrim(str_replace('\\', '/', dirname($path)), '/') . '/' . $location;
+        $resolved = 'https://' . $host . $redirectPath;
+        $this->assertOfficialUrl($resolved, 'redirect');
+
+        return $resolved;
+    }
+
+    /** @param resource $input */
+    private function writeLimitedArchive($input, string $target, string $url): void
+    {
+        $output = @fopen($target, 'xb');
+        if ($output === false) {
+            throw new RuntimeException("Cannot create temporary archive {$target}.");
+        }
+        $written = 0;
+        $complete = false;
+
+        try {
+            while (!feof($input)) {
+                $chunk = fread($input, 64 * 1024);
+                if ($chunk === false) {
+                    throw new RuntimeException("Download failed for {$url}.");
+                }
+                if ($chunk === '') {
+                    $metadata = stream_get_meta_data($input);
+                    if ($metadata['timed_out']) {
+                        throw new RuntimeException("Download timed out for {$url}.");
+                    }
+                    continue;
+                }
+                $written += strlen($chunk);
+                if ($written > self::MAX_ARCHIVE_BYTES) {
+                    throw new RuntimeException("JMHZ archive {$url} exceeds the download size limit.");
+                }
+                if (fwrite($output, $chunk) !== strlen($chunk)) {
+                    throw new RuntimeException("Cannot write temporary JMHZ archive {$target}.");
+                }
+            }
+            $complete = true;
         } finally {
-            fclose($input);
             fclose($output);
+            if (!$complete && is_file($target)) {
+                unlink($target);
+            }
+        }
+
+        $signature = file_get_contents($target, false, null, 0, 4);
+        if ($written < 4 || $signature !== "PK\x03\x04") {
+            unlink($target);
+            throw new RuntimeException("Downloaded JMHZ package {$url} is not a non-empty ZIP archive.");
+        }
+    }
+
+    private function assertOfficialUrl(string $url, string $packageId): void
+    {
+        $parts = parse_url($url);
+        $path = is_array($parts) ? ($parts['path'] ?? null) : null;
+        if (
+            !is_array($parts)
+            || ($parts['scheme'] ?? null) !== 'https'
+            || strtolower((string) ($parts['host'] ?? '')) !== self::OFFICIAL_HOST
+            || isset($parts['port'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['query'])
+            || isset($parts['fragment'])
+            || !is_string($path)
+            || preg_match(
+                '/\A\/assets\/documents\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/[^\/]+\.zip\z/Di',
+                $path,
+            ) !== 1
+            || in_array('..', explode('/', rawurldecode($path)), true)
+        ) {
+            throw new RuntimeException("JMHZ package {$packageId} must use an approved MPSV archive URL.");
         }
     }
 
@@ -252,6 +463,123 @@ final class JmhzXsdDownloader
         }
     }
 
+    /**
+     * @param array{
+     *     target:string,
+     *     version:string,
+     *     url:string,
+     *     sha256:string,
+     *     xsd_count:int,
+     *     entry_points:list<string>
+     * } $package
+     */
+    private function validatePackageTree(string $id, array $package, string $target, int $extractedCount): void
+    {
+        if ($extractedCount !== $package['xsd_count']) {
+            throw new RuntimeException(
+                "JMHZ package {$id} contains {$extractedCount} XSD files; expected {$package['xsd_count']}.",
+            );
+        }
+
+        $root = realpath($target);
+        if ($root === false) {
+            throw new RuntimeException("Cannot resolve extracted JMHZ package {$id}.");
+        }
+        foreach ($package['entry_points'] as $entryPoint) {
+            $path = $target . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $entryPoint);
+            if (!is_file($path)) {
+                throw new RuntimeException("JMHZ package {$id} is missing entry point {$entryPoint}.");
+            }
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($target, FilesystemIterator::SKIP_DOTS),
+        );
+        $validatedCount = 0;
+        foreach ($iterator as $item) {
+            if (!$item instanceof \SplFileInfo || $item->isLink() || !$item->isFile()) {
+                throw new RuntimeException("JMHZ package {$id} contains an unsupported filesystem entry.");
+            }
+            if (strtolower($item->getExtension()) !== 'xsd') {
+                throw new RuntimeException("JMHZ package {$id} contains a non-XSD file.");
+            }
+            $this->validateSchemaDocument($id, $item->getPathname(), $root);
+            $validatedCount++;
+        }
+        if ($validatedCount !== $package['xsd_count']) {
+            throw new RuntimeException("JMHZ package {$id} XSD count changed during validation.");
+        }
+    }
+
+    private function validateSchemaDocument(string $id, string $path, string $packageRoot): void
+    {
+        $document = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $loaded = false;
+        $errors = [];
+        try {
+            $loaded = $document->load($path, LIBXML_NONET);
+            $errors = libxml_get_errors();
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        if (!$loaded || $document->documentElement?->namespaceURI !== 'http://www.w3.org/2001/XMLSchema') {
+            $detail = implode(
+                '; ',
+                array_map(static fn (\LibXMLError $error): string => trim($error->message), $errors),
+            );
+            throw new RuntimeException("Invalid XSD in JMHZ package {$id}: {$path}. {$detail}");
+        }
+
+        $xpath = new DOMXPath($document);
+        $xpath->registerNamespace('xs', 'http://www.w3.org/2001/XMLSchema');
+        $locations = $xpath->query(
+            '//xs:include/@schemaLocation | //xs:import/@schemaLocation | //xs:redefine/@schemaLocation',
+        );
+        if ($locations === false) {
+            throw new RuntimeException("Cannot inspect XSD dependencies in JMHZ package {$id}: {$path}.");
+        }
+        $rootPrefix = strtolower(rtrim($packageRoot, '/\\') . DIRECTORY_SEPARATOR);
+        foreach ($locations as $location) {
+            $relative = trim((string) $location->nodeValue);
+            if (!$this->isSafeRelativeXsdPath($relative)) {
+                throw new RuntimeException("JMHZ package {$id} has an unsafe XSD dependency {$relative}.");
+            }
+            $dependency = realpath(dirname($path) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative));
+            if (
+                $dependency === false
+                || !is_file($dependency)
+                || !str_starts_with(strtolower($dependency), $rootPrefix)
+            ) {
+                throw new RuntimeException("JMHZ package {$id} has a missing or external XSD dependency {$relative}.");
+            }
+        }
+    }
+
+    private function isSafeRelativeXsdPath(string $path): bool
+    {
+        if (
+            $path === ''
+            || str_contains($path, "\0")
+            || str_contains($path, '\\')
+            || str_starts_with($path, '/')
+            || str_starts_with($path, '//')
+            || parse_url($path, PHP_URL_SCHEME) !== null
+            || strtolower(pathinfo($path, PATHINFO_EXTENSION)) !== 'xsd'
+        ) {
+            return false;
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($this->isUnsafePathSegment($segment)) {
+                return false;
+            }
+        }
+
+        return preg_match('/[\x00-\x1F\x7F]/', $path) !== 1;
+    }
+
     private function isXsdDocument(string $contents): bool
     {
         if (str_starts_with($contents, "\xFF\xFE")) {
@@ -268,13 +596,36 @@ final class JmhzXsdDownloader
     private function assertSafeArchivePath(string $path): void
     {
         if (
-            str_contains($path, "\0")
+            $path === ''
+            || str_contains($path, "\0")
+            || str_contains($path, '\\')
             || str_starts_with($path, '/')
             || preg_match('/\A[A-Za-z]:\//', $path) === 1
-            || in_array('..', explode('/', $path), true)
+            || preg_match('/[\x00-\x1F\x7F]/', $path) === 1
         ) {
             throw new RuntimeException("ZIP entry has an unsafe path: {$path}.");
         }
+        foreach (explode('/', $path) as $segment) {
+            if ($this->isUnsafePathSegment($segment)) {
+                throw new RuntimeException(
+                    "ZIP entry has an unsafe path: {$path}.",
+                );
+            }
+        }
+    }
+
+    private function isUnsafePathSegment(string $segment): bool
+    {
+        return $segment === ''
+            || $segment === '.'
+            || $segment === '..'
+            || str_contains($segment, ':')
+            || str_ends_with($segment, '.')
+            || str_ends_with($segment, ' ')
+            || preg_match(
+                '/\A(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|\z)/i',
+                $segment,
+            ) === 1;
     }
 
     /** @param list<string> $paths */

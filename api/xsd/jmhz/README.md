@@ -5,7 +5,7 @@ hlášení zaměstnavatelů a související registrační datové věty. Každý
 ve vlastním verzovaném adresáři, aby se stejně pojmenované závislosti
 `baseTypes2.xsd` nemíchaly mezi různými formuláři.
 
-Staženo a ověřeno dne 3. 8. 2026 z
+Staženo a znovu ověřeno dne 4. 8. 2026 z
 [vývojářské dokumentace MPSV](https://developers.mpsv.cz/api-list/jednotne-mesicni-hlaseni-zamestnavatelu/documentation/4589f5c6-30e8-4e2b-b341-fe8481ad4e70).
 
 | Balíček | Vstupní XSD | Oficiální archiv | SHA-256 archivu |
@@ -17,8 +17,19 @@ Staženo a ověřeno dne 3. 8. 2026 z
 | DZMH 1.1 | `dzmh-1.1/DZMH25.xsd` | [DZMH25_xsd v1.1.zip](https://developers.mpsv.cz/assets/documents/85fb9c97-b3f4-40d9-98dc-1d171e21f84c/DZMH25_xsd%20v1.1.zip) | `1e89ec55b56b3e00f3f6a066e92bf3e39d29b05a5e2f0f8c7be95ead65111d06` |
 | OREZAM/ZREZAM 1.0 | `orezam-zrezam-1.0/OREZAM26.xsd`, `orezam-zrezam-1.0/ZREZAM26.xsd` | [OREZAM a ZREZAM xsd.zip](https://developers.mpsv.cz/assets/documents/22f9953d-f0db-4578-afd4-e17ed98e0df2/OREZAM%20a%20ZREZAM%20xsd.zip) | `9a153012035ac821a30bd9f5e437ea4b92b662ae058fefa319d6972dcd6c43dc` |
 
-Aktualizace se provádí přes `cmd\download-xsd.cmd jmhz` na Windows nebo
-`bash cmd/download-xsd.sh jmhz` na Linuxu. Změna URL, verze nebo kontrolního
-součtu musí být vědomá a musí ji doprovodit aktualizace tohoto manifestu a
-testů. XSD ověřuje syntaxi a strukturu; nenahrazuje verzovaná aplikační
-business pravidla ani odborné legislativní ověření.
+Aktualizace se provádí přes `pwsh -File cmd\download-jmhz-xsd.ps1` nebo
+`cmd\download-jmhz-xsd.cmd` na Windows a přes
+`bash cmd/download-jmhz-xsd.sh` na Linuxu. Nadále lze použít i obecný
+`download-xsd` s argumentem `jmhz`.
+
+Manifest `tools/jmhz-xsd-packages.php` připíná verzi, oficiální URL, SHA-256
+archivu, přesný počet XSD a vstupní schémata. Downloader fail-closed odmítne
+jiný host nebo cestu (včetně redirectu), příliš velký či ne-ZIP obsah, chybný
+hash, neočekávaný počet souborů, chybějící entry point, nevalidní XSD a síťovou,
+chybějící nebo adresář opouštějící závislost. Instalace proběhne atomicky až po
+ověření všech šesti balíčků.
+
+Změna URL, verze, kontrolního součtu, počtu souborů nebo entry pointu musí být
+vědomá a musí ji doprovodit aktualizace tohoto manifestu, této tabulky a testů.
+XSD ověřuje syntaxi a strukturu; nenahrazuje verzovaná aplikační business
+pravidla ani odborné legislativní ověření.

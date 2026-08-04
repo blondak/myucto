@@ -34,7 +34,7 @@ fi
 
 for form in "${FORMS[@]}"; do
     if [[ "$form" == "jmhz" ]]; then
-        php "$PROJECT_ROOT/tools/downloadJmhzXsd.php"
+        bash "$PROJECT_ROOT/cmd/download-jmhz-xsd.sh"
         continue
     elif [[ "$form" == "isdoc" ]]; then
         url="$ISDOC_URL"

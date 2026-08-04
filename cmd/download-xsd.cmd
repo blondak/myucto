@@ -32,7 +32,7 @@ if "%~1"=="" (
 for %%F in (%FORMS%) do (
     if /I "%%F"=="jmhz" (
         echo -^> jmhz: 6 oficialnich XSD balicku MPSV
-        php "%~dp0..\tools\downloadJmhzXsd.php"
+        call "%~dp0download-jmhz-xsd.cmd"
         if errorlevel 1 (
             endlocal
             exit /b 1
