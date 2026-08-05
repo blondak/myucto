@@ -43,8 +43,21 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
  * Mapování podle vat_rate_snapshot:
  *   21 %  → UDA5    + inland     (tuzemské plnění základní)
  *   12 %  → UDA5_12 + inland     (snížené)
+ *   10 %  → (bez ids) + inland   (3. sazba — členění je instalace-specifické)
  *    0 %  → UNX     + nonSubsume (osvobozeno)
  *   reverse_charge → PNAR + nonSubsume (přenesená daňová povinnost)
+ *
+ * SAZBA POLOŽKY — `<inv:rateVAT>` je jen ENUM sazbových ÚROVNÍ (`typ:vatRateEnum`),
+ * ne procento. Kdo čte jen enum, musí za `high` dosadit sazbu, kterou zrovna považuje
+ * za základní — a tím z 23 % udělá 21 %. Proto ke KAŽDÉ položce zapisujeme i
+ * `<inv:percentVAT>` se skutečným procentem ze snapshotu: element je v invoice.xsd
+ * hned ZA `rateVAT` (sekvence rateVAT → percentVAT → discountPercentage, jiné pořadí
+ * Pohoda odmítne) a náš vlastní import ho bere jako nejsilnější zdroj pravdy.
+ * Bez něj je náš export soubor, ze kterého sazba nejde přečíst — přesně ten tvar,
+ * kterým se cizí daň mění na českou.
+ *
+ * OSS — do Pohoda XML doklad v režimu OSS NEPATŘÍ a export ho odmítne (viz
+ * assertNotOss()). Stejně se chová StereoXmlExporter a ze stejného důvodu.
  */
 final class PohodaXmlExporter
 {
@@ -154,6 +167,8 @@ final class PohodaXmlExporter
         $isPurchase = ($cfg['direction'] ?? '') === 'purchase';
 
         foreach ($invoices as $idx => $invoice) {
+            $this->assertNotOss($invoice);
+
             $item = $dom->createElementNS(self::NS_DAT, 'dat:dataPackItem');
             $item->setAttribute('version', '2.0');
             $item->setAttribute('id', 'inv-' . $invoice['id']);
@@ -218,7 +233,7 @@ final class PohodaXmlExporter
             if (($invoice['invoice_type'] ?? '') !== 'proforma') {
                 $defaultVatClass = $this->classifyVat($invoice);
                 $classEl = $dom->createElementNS(self::NS_INV, 'inv:classificationVAT');
-                if (!$isPurchase) {
+                if (!$isPurchase && $defaultVatClass['ids'] !== null) {
                     $this->el($dom, $classEl, self::NS_TYP, 'typ:ids', $defaultVatClass['ids']);
                 }
                 $this->el($dom, $classEl, self::NS_TYP, 'typ:classificationVATType', $defaultVatClass['type']);
@@ -300,17 +315,17 @@ final class PohodaXmlExporter
                 $this->el($dom, $row, self::NS_INV, 'inv:coefficient', '1.0');
                 // payVAT: false = pricing without VAT in unit price (default)
                 $this->el($dom, $row, self::NS_INV, 'inv:payVAT', 'false');
-                // Sazba DPH
+                // Sazba DPH. `rateVAT` je enum ÚROVNÍ, `percentVAT` skutečné procento —
+                // viz docblock třídy. Pořadí elementů drží sekvenci invoice.xsd
+                // (payVAT → rateVAT → percentVAT → discountPercentage).
                 $rate = (float) ($item['vat_rate_snapshot'] ?? 0);
-                $rateCode = match (true) {
-                    $rate >= $this->highBoundary($invoice) => 'high',
-                    $rate >= 11.5 => 'low',
-                    $rate >= 9.5  => 'low2',  // 10% (Pohoda historic)
-                    default       => 'none',
-                };
                 $vatRate = $dom->createElementNS(self::NS_INV, 'inv:rateVAT');
-                $vatRate->appendChild($dom->createTextNode($rateCode));
+                $vatRate->appendChild($dom->createTextNode($this->rateCode($rate, $invoice)));
                 $row->appendChild($vatRate);
+                // percentVAT zapisujeme VŽDY, i u sazby 0 — teprve dvojice
+                // (úroveň, procento) je jednoznačná. Čtenář, který zná jen enum, by za
+                // `high` dosadil svoji vlastní základní sazbu.
+                $this->el($dom, $row, self::NS_INV, 'inv:percentVAT', $this->fmt($rate));
 
                 // CZK invoice → homeCurrency; foreign → foreignCurrency (s EUR cenami,
                 // Pohoda dopočítá CZK z kurzu uvedeného v summary)
@@ -365,9 +380,12 @@ final class PohodaXmlExporter
             $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:priceHigh',    $this->fmt($homeBuckets['high']));
             $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:priceHighVAT', $this->fmt($homeBuckets['highVat']));
             $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:priceHighSum', $this->fmt($homeBuckets['high'] + $homeBuckets['highVat']));
-            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3', '0.00');
-            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3VAT', '0.00');
-            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3Sum', '0.00');
+            // 3. přihrádka (česká 2. snížená sazba 10 % do 2023, položkově enum `third`).
+            // Dřív tu byly natvrdo nuly a základ 10% plnění spadl do priceNone, takže
+            // rekapitulace o dani na dokladu MLČELA a doklad si sám odporoval.
+            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3',    $this->fmt($homeBuckets['third']));
+            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3VAT', $this->fmt($homeBuckets['thirdVat']));
+            $this->el($dom, $homeCurrency, self::NS_TYP, 'typ:price3Sum', $this->fmt($homeBuckets['third'] + $homeBuckets['thirdVat']));
             // `round` je typ:typeRound = xsd:choice → musí obalit <typ:priceRound>, ne nést
             // prostou hodnotu. Emitujeme jen u CZK dokladu s reálným zaokrouhlením.
             // POZOR: `typeCurrencyHome` NEMÁ `priceSum` — celkovou částku si Pohoda dopočítá
@@ -420,7 +438,62 @@ final class PohodaXmlExporter
     }
 
     /**
-     * @return array{ids:string, type:string}  ids = zkratka členění v Pohodě, type = enum {inland, nonSubsume}
+     * Sazbová úroveň položky pro `<inv:rateVAT>` (`typ:vatRateEnum`).
+     *
+     * POZOR: `low2` v enumu NENÍ — invoice.xsd zná jen {none, high, low, third,
+     * historyHigh, historyLow, historyThird}. Dřív se pro 10 % emitovalo `low2`,
+     * což je hodnota, na které Pohoda celý dataPack odmítne. Česká 2. snížená sazba
+     * patří do 3. přihrádky (`third`), stejně jako do `typ:price3` v rekapitulaci.
+     * Skutečné procento nese `percentVAT`, takže úroveň nemusí nic dohadovat.
+     *
+     * @param array<string,mixed> $invoice
+     */
+    private function rateCode(float $rate, array $invoice): string
+    {
+        return match (true) {
+            $rate >= $this->highBoundary($invoice) => 'high',
+            $rate >= 11.5 => 'low',
+            $rate >= 9.5  => 'third',
+            default       => 'none',
+        };
+    }
+
+    /**
+     * Doklad v režimu OSS se do Pohoda XML nevejde: `typ:vatRateEnum` je enum sazbových
+     * úrovní bez místa pro zemi spotřeby, takže polských 23 % dorazí do Pohody jako
+     * `high` = tuzemská základní sazba a daň, která patří polskému správci daně, skončí
+     * v českém přiznání. Radši export odmítneme, než abychom vyrobili doklad, který se
+     * tváří jako tuzemský (obdoba StereoXmlExporter).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    private function assertNotOss(array $invoice): void
+    {
+        foreach (($invoice['items'] ?? []) as $item) {
+            if (is_array($item) && !empty($item['oss_applicable'])) {
+                throw new \RuntimeException(sprintf(
+                    'Pohoda XML nepodporuje OSS plnění (doklad %s). Sazba se do Pohody přenáší jen jako'
+                    . ' tuzemská úroveň (základní/snížená), takže by zahraniční sazba dorazila jako česká.'
+                    . ' Řádky v režimu OSS vykažte přes Daně → OSS přiznání a z exportu do Pohody je vyřaďte.',
+                    $this->documentLabelFor($invoice),
+                ));
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $invoice */
+    private function documentLabelFor(array $invoice): string
+    {
+        $label = trim((string) ($invoice['varsymbol'] ?? ''));
+        if ($label === '') {
+            $label = trim((string) ($invoice['id'] ?? ''));
+        }
+
+        return '#' . ($label !== '' ? $label : '?');
+    }
+
+    /**
+     * @return array{ids:?string, type:string}  ids = zkratka členění v Pohodě, type = enum {inland, nonSubsume}
      */
     private function classifyVat(array $invoice): array
     {
@@ -437,6 +510,11 @@ final class PohodaXmlExporter
         }
         if ($maxRate >= $this->highBoundary($invoice)) return ['ids' => 'UDA5',    'type' => 'inland'];
         if ($maxRate >= 11.5)                          return ['ids' => 'UDA5_12', 'type' => 'inland'];
+        // 3. sazba (10 %) je ZDANĚNÉ tuzemské plnění. Dřív propadala na UNX/nonSubsume,
+        // tedy „nezahrnovat do DPH" — doklad s daní se do Pohody importoval jako
+        // osvobozený. Kód členění pro 3. sazbu je instalace-specifický, proto ho
+        // neposíláme a necháme ho doplnit Pohodu; typ `inland` ale poslat musíme.
+        if ($maxRate >= 9.5)                           return ['ids' => null,      'type' => 'inland'];
         return ['ids' => 'UNX', 'type' => 'nonSubsume'];
     }
 
@@ -461,12 +539,15 @@ final class PohodaXmlExporter
     }
 
     /**
+     * Přihrádky rekapitulace. Hranice musí být TYTÉŽ jako v rateCode(), jinak by položka
+     * seděla v jiné přihrádce než její vlastní částky a doklad by si sám odporoval.
+     *
      * @param list<array{rate: float, base: float, vat: float}> $breakdown
-     * @return array{none: float, low: float, lowVat: float, high: float, highVat: float}
+     * @return array{none: float, low: float, lowVat: float, high: float, highVat: float, third: float, thirdVat: float}
      */
     private function bucketsFromBreakdown(array $breakdown, float $highBoundary): array
     {
-        $out = ['none' => 0.0, 'low' => 0.0, 'lowVat' => 0.0, 'high' => 0.0, 'highVat' => 0.0];
+        $out = self::emptyBuckets();
         foreach ($breakdown as $b) {
             $r = (float) $b['rate'];
             if ($r >= $highBoundary) {
@@ -475,6 +556,9 @@ final class PohodaXmlExporter
             } elseif ($r >= 11.5) {
                 $out['low']    += (float) $b['base'];
                 $out['lowVat'] += (float) $b['vat'];
+            } elseif ($r >= 9.5) {
+                $out['third']    += (float) $b['base'];
+                $out['thirdVat'] += (float) $b['vat'];
             } else {
                 $out['none'] += (float) $b['base'];
             }
@@ -484,11 +568,11 @@ final class PohodaXmlExporter
 
     /**
      * @param array{breakdown: list<array{rate: float, base_czk: float, vat_czk: float}>} $recap
-     * @return array{none: float, low: float, lowVat: float, high: float, highVat: float}
+     * @return array{none: float, low: float, lowVat: float, high: float, highVat: float, third: float, thirdVat: float}
      */
     private function bucketsFromCzkRecap(array $recap, float $highBoundary): array
     {
-        $out = ['none' => 0.0, 'low' => 0.0, 'lowVat' => 0.0, 'high' => 0.0, 'highVat' => 0.0];
+        $out = self::emptyBuckets();
         foreach ($recap['breakdown'] ?? [] as $b) {
             $r = (float) $b['rate'];
             if ($r >= $highBoundary) {
@@ -497,10 +581,26 @@ final class PohodaXmlExporter
             } elseif ($r >= 11.5) {
                 $out['low']    += (float) $b['base_czk'];
                 $out['lowVat'] += (float) $b['vat_czk'];
+            } elseif ($r >= 9.5) {
+                $out['third']    += (float) $b['base_czk'];
+                $out['thirdVat'] += (float) $b['vat_czk'];
             } else {
                 $out['none'] += (float) $b['base_czk'];
             }
         }
         return $out;
+    }
+
+    /**
+     * @return array{none: float, low: float, lowVat: float, high: float, highVat: float, third: float, thirdVat: float}
+     */
+    private static function emptyBuckets(): array
+    {
+        return [
+            'none' => 0.0,
+            'low' => 0.0, 'lowVat' => 0.0,
+            'high' => 0.0, 'highVat' => 0.0,
+            'third' => 0.0, 'thirdVat' => 0.0,
+        ];
     }
 }

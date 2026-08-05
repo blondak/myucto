@@ -62,6 +62,36 @@ final class OssXmlExporterTest extends TestCase
         $this->exporter($preview)->build(1, 2026, 3);
     }
 
+    /**
+     * Druhá půlka rozhodnutí „nezjištěný typ sazby zůstává prázdný": validace dokladu ho
+     * pustí a editor ho nepřepisuje na „standard", protože odhad by skončil v podání —
+     * do VetaR jde TYP sazby, ne procento. Řetěz proto musí končit tvrdým zámkem tady:
+     * prázdný typ nesmí do XML projít ani jako výchozí hodnota.
+     *
+     * Test hlídá právě ten zámek. Jakmile by `rateTypeCode()` dostala fallback (nebo by
+     * `aggregateRows()` řádek jen přeskočila), podá se základní sazba místo snížené
+     * a rozdíl se pozná až z výzvy státu spotřeby.
+     */
+    public function testMissingRateTypeBlocksExport(): void
+    {
+        $preview = $this->preview();
+        $preview['countries'][0]['rows'][0]['rate_type'] = null;
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/typ sazby/');
+        $this->exporter($preview)->build(1, 2026, 3);
+    }
+
+    /** Prázdný řetězec je tentýž stav jako `null` — nesmí se lišit podle toho, kdo řádek uložil. */
+    public function testEmptyRateTypeBlocksExportToo(): void
+    {
+        $preview = $this->preview();
+        $preview['countries'][0]['rows'][0]['rate_type'] = '';
+
+        $this->expectException(\RuntimeException::class);
+        $this->exporter($preview)->build(1, 2026, 3);
+    }
+
     public function testMissingCurrencyConversionBlocksExport(): void
     {
         $preview = $this->preview();

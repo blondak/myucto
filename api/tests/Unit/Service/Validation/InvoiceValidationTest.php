@@ -219,6 +219,44 @@ final class InvoiceValidationTest extends TestCase
     }
 
     /**
+     * Naimportovaný OSS řádek, u kterého číselník členských států sazbu nezná, přijde
+     * s prázdným typem sazby. Kdyby ho validace odmítla, nešel by doklad vůbec uložit
+     * a uživatel by neměl co opravovat. Do podání ho nepustí až OssXmlExporter.
+     */
+    public function testEmptyOssRateTypeIsAcceptedAsNotYetDetermined(): void
+    {
+        foreach ([null, '', '  '] as $value) {
+            $data = $this->validOssInvoice();
+            $data['items'][0]['oss_rate_type'] = $value;
+
+            $err = InvoiceValidation::invoice($data);
+
+            self::assertArrayNotHasKey('items.0.oss_rate_type', $err, var_export($value, true));
+        }
+
+        $data = $this->validOssInvoice();
+        unset($data['items'][0]['oss_rate_type']);
+        self::assertArrayNotHasKey('items.0.oss_rate_type', InvoiceValidation::invoice($data));
+    }
+
+    /**
+     * Uvolnění typu sazby se nesmí přelít na zbytek OSS bloku — země spotřeby
+     * a typ plnění zůstávají povinné, bez nich nemá řádek v podání kam patřit.
+     */
+    public function testEmptyOssRateTypeDoesNotRelaxCountryOrSupplyType(): void
+    {
+        $data = $this->validOssInvoice();
+        $data['items'][0]['oss_rate_type'] = null;
+        $data['items'][0]['oss_consumer_country'] = '';
+        $data['items'][0]['oss_supply_type'] = '';
+
+        $err = InvoiceValidation::invoice($data);
+
+        self::assertArrayHasKey('items.0.oss_consumer_country', $err);
+        self::assertArrayHasKey('items.0.oss_supply_type', $err);
+    }
+
+    /**
      * Zrcadlo PurchaseInvoiceValidationTest::testCreditNoteWithPositiveTotalWarns.
      *
      * Vydaný dobropis s kladným součtem se ve výkazech DPH/KH PŘIČTE místo odečtení

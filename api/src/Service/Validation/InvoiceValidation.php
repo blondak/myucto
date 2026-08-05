@@ -4,19 +4,43 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Validation;
 
+use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Support\PaymentMethods;
 
 final class InvoiceValidation
 {
     /**
-     * @param array<int, float>|null $vatRates
-     * @param array<int, string>|null $vatRateCountries
+     * Poslední záchrana, když volající zemi dodavatele nepředal. Není to definice
+     * tuzemska — ta je JEN v `\MyInvoice\Service\Oss\OssItemDeriver::domesticCountry()`.
+     * Hodnota je shodná s fallbackem, který tam používá `supplierSettings()`, když
+     * dodavatel zemi vyplněnou nemá; jakákoli jiná by obě vrstvy rozešla přesně
+     * u dodavatele identifikovaného mimo ČR.
+     *
+     * Obě produkční cesty (`CreateInvoiceAction`, `UpdateInvoiceAction`) zemi dodavatele
+     * PŘEDÁVAJÍ. Fallback tu tedy nezůstal jako pohodlí volajícího — je to jen chování
+     * pro volání bez kontextu dodavatele (testy, jednorázové skripty), aby se z chybějícího
+     * argumentu nestala tichá výjimka z kontroly.
+     */
+    private const FALLBACK_DOMESTIC_COUNTRY = 'CZ';
+
+    /**
+     * @param array<int, float>|null  $vatRates
+     * @param array<int, string>|null $vatRateCountries mapa `vat_rates.id` → `vat_rates.country`
+     * @param ?string                 $domesticCountry  země dodavatele; volající ji bere
+     *                                z `\MyInvoice\Service\Oss\OssItemDeriver::domesticCountry($supplierId)`,
+     *                                aby validace a derivace OSS mluvily o témž tuzemsku.
+     *                                K čemu slouží, viz komentář u kontroly cizí sazby níž
      * @return array<string, string[]>
      */
-    public static function invoice(array $data, ?array $vatRates = null, ?array $vatRateCountries = null): array
-    {
+    public static function invoice(
+        array $data,
+        ?array $vatRates = null,
+        ?array $vatRateCountries = null,
+        ?string $domesticCountry = null,
+    ): array {
         $err = [];
+        $domestic = self::normalizedCountry($domesticCountry) ?? self::FALLBACK_DOMESTIC_COUNTRY;
 
         $type = (string) ($data['invoice_type'] ?? 'invoice');
         if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation', 'tax_document', 'penalty', 'payment_calendar'], true)) {
@@ -60,9 +84,25 @@ final class InvoiceValidation
                 }
                 $err = array_merge($err, InvoiceAmountPolicy::validateItem($item, $i));
 
+                // POZOR, co tenhle test JE a co NENÍ.
+                //
+                // Je to kontrola KONZISTENCE ZADÁNÍ: uživatel vybral sazbu, kterou si sám
+                // označil jako cizí, a přitom řádek nezařadil do OSS. Nic víc.
+                //
+                // NENÍ to pojistka proti tomu, aby cizí daň spadla do českého přiznání.
+                // `vat_rates.country` je uživatelem editovatelný ŠTÍTEK s předvyplněnou CZ,
+                // ne fakt o místě plnění: zákazník z analýzy OSS má sazbu „PL-23" založenou
+                // se zemí CZ, takže na jeho konfiguraci tenhle test nezakáže vůbec nic.
+                // Kdo místo plnění rozhoduje, je {@see OssItemDeriver} proti číselníku sazeb
+                // ČLENSKÝCH STÁTŮ, který uživatel needituje — a ten na nepotvrzenou sazbu
+                // položku odmítne, místo aby ji nechal projít jako tuzemskou.
+                //
+                // „Tuzemsko" se proto bere ze země DODAVATELE, ne z natvrdo zapsané 'CZ':
+                // dvě různé definice téhož pojmu jsou přesně ta třída chyby, kvůli které
+                // se pravidlo implementuje na jedné větvi a na druhé ne.
                 if ($vatRateCountries !== null && empty($item['oss_applicable']) && !empty($item['vat_rate_id'])) {
-                    $rateCountry = $vatRateCountries[(int) $item['vat_rate_id']] ?? null;
-                    if ($rateCountry !== null && $rateCountry !== 'CZ') {
+                    $rateCountry = self::normalizedCountry($vatRateCountries[(int) $item['vat_rate_id']] ?? null);
+                    if ($rateCountry !== null && $rateCountry !== $domestic) {
                         $err["items.{$i}.vat_rate_id"][] = 'Zahraniční sazbu DPH lze použít jen na řádku v režimu OSS';
                     }
                 }
@@ -73,12 +113,20 @@ final class InvoiceValidation
                         $err["items.{$i}.oss_consumer_country"][] = 'Země spotřeby musí být dvoupísmenný ISO kód';
                     }
 
-                    $rateType = (string) ($item['oss_rate_type'] ?? '');
-                    if (!in_array($rateType, ['standard', 'reduced', 'second_reduced', 'parking'], true)) {
+                    // Prázdný typ sazby je legitimní stav „zatím nezjištěno" — import ho neumí
+                    // odvodit, když číselník členských států sazbu ve státě spotřeby nezná.
+                    // Blokovat uložení by znamenalo, že takový řádek nejde ani zaevidovat, ani
+                    // pak opravit. Do podání se stejně nedostane: OssLedgerService na něj varuje
+                    // a OssXmlExporter::rateTypeCode(null) ho do XML nepustí. Neprázdná hodnota
+                    // mimo whitelist je pořád chyba — to není nevědomost, to je překlep.
+                    $rateType = trim((string) ($item['oss_rate_type'] ?? ''));
+                    if ($rateType !== '' && !in_array($rateType, OssItemDecision::RATE_TYPES, true)) {
                         $err["items.{$i}.oss_rate_type"][] = 'Neplatný typ OSS sazby';
                     }
+                    // Typ plnění zůstává povinný — uvolnění se týká JEN typu sazby. Bez
+                    // goods/services nemá řádek v podání kam patřit a odvodit se nedá.
                     $supplyType = (string) ($item['oss_supply_type'] ?? '');
-                    if (!in_array($supplyType, ['goods', 'services'], true)) {
+                    if (!in_array($supplyType, OssItemDecision::SUPPLY_TYPES, true)) {
                         $err["items.{$i}.oss_supply_type"][] = 'Typ OSS plnění musí být zboží nebo služba';
                     }
 
@@ -193,6 +241,17 @@ final class InvoiceValidation
         }
 
         return $warn;
+    }
+
+    /**
+     * ISO2 kód země, nebo `null` u prázdné či nesmyslné hodnoty. Porovnávat neořezané
+     * řetězce by kontrolu cizí sazby uspalo na hodnotě `'cz '` z ručně editovaného
+     * číselníku — a mlčky uspaná kontrola je horší než žádná.
+     */
+    private static function normalizedCountry(mixed $value): ?string
+    {
+        $value = strtoupper(trim((string) ($value ?? '')));
+        return preg_match('/^[A-Z]{2}$/', $value) === 1 ? $value : null;
     }
 
     private static function isValidDate(string $date): bool

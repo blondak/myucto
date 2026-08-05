@@ -82,6 +82,24 @@ final class InvoiceRepository
         return $this->hasOssItemColumns;
     }
 
+    private ?bool $hasOssManualReview = null;
+
+    /**
+     * Guard pro `oss_needs_manual_review` je VLASTNÍ, ne společný se zbytkem OSS sloupců:
+     * mezi migracemi 0137 (základ OSS) a 1293 (příznak) je řada verzí, takže instance
+     * s OSS schématem a bez příznaku je běžný stav, ne teoretický. Shodně s
+     * {@see \MyInvoice\Service\Import\InvoiceImportService::insertItems()} — import
+     * i uložení dokladu zapisují do týchž sloupců a nesmí se rozejít v tom, kdy je vidí.
+     */
+    private function supportsOssManualReview(): bool
+    {
+        if ($this->hasOssManualReview === null) {
+            $this->hasOssManualReview = $this->supportsOssItemColumns()
+                && $this->db->hasColumn('invoice_items', 'oss_needs_manual_review');
+        }
+        return $this->hasOssManualReview;
+    }
+
     /**
      * Detail faktury podle PK. Vlastnictví se ověřuje v Action vrstvě
      * (SupplierGuard::owns nad vráceným řádkem) — tady jde jen o read-back.
@@ -521,6 +539,13 @@ final class InvoiceRepository
                     ii.oss_exchange_rate, ii.oss_exchange_rate_date, ii.oss_taxable_amount_return,
                     ii.oss_vat_amount_return, ii.oss_original_period'
             : '';
+        // Příznak „k ručnímu posouzení" se musí ČÍST, ne jen zapisovat: kdyby ho detail
+        // dokladu nevracel, editor by ho neměl co poslat zpět a replaceItems() (DELETE +
+        // INSERT) by ho při prvním uložení faktury zahodil — sloupec by byl mrtvý a
+        // kategorie „místo plnění neurčeno" by po zavření reportu importu zanikla.
+        if ($this->supportsOssManualReview()) {
+            $ossSelect .= ', ii.oss_needs_manual_review';
+        }
         $stmt = $this->db->pdo()->prepare(
             'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.unit,
                     ii.unit_price_without_vat, ii.vat_rate_id, ii.vat_rate_snapshot,
@@ -1210,26 +1235,34 @@ final class InvoiceRepository
         $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$invoiceId]);
 
         $supportsOss = $this->supportsOssItemColumns();
-        $stmt = $supportsOss
-            ? $pdo->prepare(
-                'INSERT INTO invoice_items
-                    (invoice_id, description, quantity, unit, unit_price_without_vat,
-                     vat_rate_id, vat_rate_snapshot,
-                     total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                     stock_item_id, warehouse_id, small_asset_id, asset_id,
-                     oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
-                     oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
-                     oss_vat_amount_return, oss_original_period)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )
-            : $pdo->prepare(
-                'INSERT INTO invoice_items
+        $supportsManualReview = $this->supportsOssManualReview();
+
+        // Sloupce se skládají místo tří ručně psaných variant SQL: guard na příznak
+        // „k ručnímu posouzení" je samostatný (viz supportsOssManualReview()), takže by
+        // ručních variant přibývalo s každým dalším OSS sloupcem a počet otazníků by se
+        // s nimi rozešel. Pořadí je zároveň pořadím hodnot z ossItemParams().
+        $ossColumns = $supportsOss
+            ? [
+                'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
+                'oss_exchange_rate', 'oss_exchange_rate_date', 'oss_taxable_amount_return',
+                'oss_vat_amount_return', 'oss_original_period',
+            ]
+            : [];
+        if ($supportsManualReview) {
+            $ossColumns[] = 'oss_needs_manual_review';
+        }
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                 stock_item_id, warehouse_id, small_asset_id, asset_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)'
-            );
+                 stock_item_id, warehouse_id, small_asset_id, asset_id'
+            . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?'
+            . str_repeat(', ?', count($ossColumns))
+            . ')'
+        );
 
         $vatRates = $this->loadVatRates();
 
@@ -1298,14 +1331,14 @@ final class InvoiceRepository
                 $assetId,
             ];
             if ($supportsOss) {
-                $params = array_merge($params, self::ossItemParams($item));
+                $params = array_merge($params, self::ossItemParams($item, $supportsManualReview));
             }
             $stmt->execute($params);
 
             $maxOrder = max($maxOrder, $orderIndex);
             if ($discountPercent > 0) {
                 $base = round((float) ($item['quantity'] ?? 1) * (float) ($item['unit_price_without_vat'] ?? 0), 2);
-                $oss = $supportsOss ? self::ossItemParams($item) : [];
+                $oss = $supportsOss ? self::ossItemParams($item, $supportsManualReview) : [];
                 $key = $vatRateId . '|' . ($code ?? '');
                 if ($supportsOss) {
                     $ossKey = $oss;
@@ -1403,12 +1436,28 @@ final class InvoiceRepository
         }
     }
 
-    /** @return list<mixed> */
-    private static function ossItemParams(array $item): array
+    /**
+     * Hodnoty OSS sloupců v pořadí, ve kterém je skládá {@see replaceItems()}.
+     *
+     * `$withManualReview` přidá na KONEC příznak „k ručnímu posouzení" (migrace 1293).
+     * Na konec schválně: indexy 6 a 7 (ruční základ a DPH do podání) se v seskupování
+     * slevových řádků adresují číslem, takže vložení kamkoli jinam by slevu rozhodilo.
+     * Slevový řádek příznak dědí po své skupině — je to táž nerozhodnutá dodávka,
+     * jen s opačným znaménkem.
+     *
+     * @return list<mixed>
+     */
+    private static function ossItemParams(array $item, bool $withManualReview): array
     {
+        // Příznak vzniká z odvození místa plnění, které dává smysl jen u OSS řádku
+        // (OssDerivationReason::needsManualReview() je true výhradně u OSS důvodů).
+        // Vypnutí OSS na položce je ROZHODNUTÍ ČLOVĚKA, čímž nejistota končí — proto
+        // se u ne-OSS řádku zapisuje 0, ne hodnota převzatá z payloadu.
+        $noReview = $withManualReview ? [0] : [];
+
         $applicable = !empty($item['oss_applicable']) ? 1 : 0;
         if ($applicable === 0) {
-            return [0, null, null, null, null, null, null, null, null];
+            return array_merge([0, null, null, null, null, null, null, null, null], $noReview);
         }
 
         $country = strtoupper(trim((string) ($item['oss_consumer_country'] ?? '')));
@@ -1428,7 +1477,10 @@ final class InvoiceRepository
             throw new \InvalidArgumentException('Původní OSS období musí mít formát RRRRQn a nesmí být před Q3 2021.');
         }
 
-        return [$applicable, $country, $rateType, $supplyType, $rate, $rateDate, $taxable, $vat, $period ?: null];
+        return array_merge(
+            [$applicable, $country, $rateType, $supplyType, $rate, $rateDate, $taxable, $vat, $period ?: null],
+            $withManualReview ? [!empty($item['oss_needs_manual_review']) ? 1 : 0] : [],
+        );
     }
 
     private static function dateOrNull(mixed $value): ?string
@@ -2097,6 +2149,11 @@ final class InvoiceRepository
             foreach (['oss_exchange_rate', 'oss_taxable_amount_return', 'oss_vat_amount_return'] as $field) {
                 $row[$field] = $row[$field] !== null ? (float) $row[$field] : null;
             }
+        }
+        // Vlastní klíč (migrace 1293 přišla o řadu verzí později než zbytek OSS sloupců),
+        // takže se testuje samostatně, ne pod oss_applicable.
+        if (array_key_exists('oss_needs_manual_review', $row)) {
+            $row['oss_needs_manual_review'] = (bool) $row['oss_needs_manual_review'];
         }
         return $row;
     }

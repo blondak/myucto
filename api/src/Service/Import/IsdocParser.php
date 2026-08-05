@@ -12,6 +12,24 @@ namespace MyInvoice\Service\Import;
  * Reverzní mapování k IsdocExporter — DocumentType, ID, Issue/TaxDate, parties, lines, totals.
  *
  * Output shape per invoice — viz PohodaXmlParser.
+ *
+ * ── Chybějící procento NENÍ nula ────────────────────────────────────────────────────
+ * `vat_rate` je `null`, když řádek sazbu NEUVÁDÍ (chybí `ClassifiedTaxCategory/Percent`
+ * nebo v něm není číslo). Dřív se tiše přetypoval na 0.0, takže ze zdaněného řádku bylo
+ * osvobozené plnění — tentýž únik cizí daně jako u Pohody, jen jinou větví: invariant
+ * proti úniku se na nulovou sazbu ZÁMĚRNĚ neuplatňuje (u plnění bez daně není co unikat),
+ * takže by cizí daň nezmizela do špatné země, ale z dokladu úplně.
+ *
+ * Od chybějícího procenta se odlišuje LEGITIMNÍ nula: doklad nebo řádek s
+ * `<VATApplicable>false</VATApplicable>` je nedaňový (ISDOC 4.1.5) a nula je tam
+ * prohlášení, ne mlčení. Stejně tak explicitní `<Percent>0</Percent>`.
+ *
+ * `vat_rate_source` říká, odkud sazba je: `percent` (řádek ji uvádí), `non_tax_document`
+ * / `non_tax_line` (nedaňové plnění, nula je prohlášení), `unresolved` (řádek sazbu
+ * neuvádí — volající to MUSÍ ošetřit jako vadu dokladu, ne jako nulu).
+ *
+ * `file_issues` nese rozpory mezi ŘÁDKY a REKAPITULACÍ téhož souboru — viz
+ * {@see self::recapConflicts()}.
  */
 final class IsdocParser
 {
@@ -21,6 +39,14 @@ final class IsdocParser
     private const NS_LEGACY = 'http://isdoc.cz/namespace/invoice';
     /** Namespace, které parser umí — prefix `i:` se navazuje na ten z kořene dokladu. */
     private const SUPPORTED_NS = [self::NS_2013, self::NS_LEGACY];
+
+    /**
+     * Odchylka křížové kontroly řádků proti rekapitulaci — shodná s
+     * {@see PohodaXmlParser}. Relativní složka je tu kvůli slevám rozpočítaným do řádků,
+     * které do součtu zanášejí haléře; sebeodporující soubor se liší o víc.
+     */
+    private const RECAP_ABS_TOLERANCE = 0.05;
+    private const RECAP_REL_TOLERANCE = 0.005;
 
     /**
      * @return array{supplier_ic:?string, invoices:list<array<string,mixed>>}
@@ -168,6 +194,8 @@ final class IsdocParser
             if (!$lineEl instanceof \DOMElement) continue;
             $items[] = $this->parseLine($xpath, $lineEl, $hasForeignCurrency, $isTaxDocument);
         }
+        // Nedaňový doklad (VATApplicable=false) DPH nepřiznává → prázdná rekapitulace.
+        $recap = $isTaxDocument ? $this->parseTaxRecap($xpath, $root) : [];
 
         return [
             'invoice_type'   => $invoiceType,
@@ -193,9 +221,106 @@ final class IsdocParser
             'payable_amount' => $this->parsePayableAmount($xpath, $root, $hasForeignCurrency),
             // Rekapitulace DPH po sazbách z <TaxTotal>/<TaxSubTotal> — pro seed
             // override (PurchaseVatRecapSeeder), aby naše evidence seděla na doklad.
-            // Nedaňový doklad (VATApplicable=false) DPH nepřiznává → prázdná rekapitulace.
-            'vat_recap'      => $isTaxDocument ? $this->parseTaxRecap($xpath, $root) : [],
+            'vat_recap'      => $recap,
+            // Rozpory MEZI řádky a rekapitulací TÉHOŽ souboru (§ G2).
+            'file_issues'    => self::recapConflicts($items, $recap),
         ];
+    }
+
+    /**
+     * Rozpory mezi ŘÁDKY a REKAPITULACÍ téhož souboru.
+     *
+     * Táž otázka a tytéž hlášky jako {@see PohodaXmlParser::recapConflicts()} — jen nad
+     * jiným tvarem souboru (`TaxTotal/TaxSubTotal` místo `invoiceSummary`). Sjednotit obě
+     * do jednoho místa by znamenalo sdílenou třídu nad oběma parsery; dokud nevznikne,
+     * platí, že se pravidlo mění na OBOU místech naráz — rozejít se smějí nanejvýš
+     * v tom, odkud čísla berou.
+     *
+     * Importují se částky a sazby z ŘÁDKŮ (výkazy sumují řádky), takže rozpor import
+     * nezastaví, ale musí se dostat uživateli před oči. Řádek s neurčenou sazbou
+     * kontrolu vypíná — doklad je pak stejně k odmítnutí s konkrétnější hláškou.
+     *
+     * @param  list<array<string,mixed>>                  $items
+     * @param  array<string,array{base:float,vat:float}>  $recap
+     * @return list<string>
+     */
+    private static function recapConflicts(array $items, array $recap): array
+    {
+        if ($items === [] || $recap === []) {
+            return [];
+        }
+
+        $itemBases = [];
+        foreach ($items as $item) {
+            if (($item['vat_rate'] ?? null) === null) {
+                return [];
+            }
+            $rate = (float) $item['vat_rate'];
+            if ($rate <= 0.0) {
+                // Nulovou sazbu rekapitulace nevede (`parseTaxRecap()` ji přeskakuje),
+                // takže by v ní chyběla vždycky.
+                continue;
+            }
+            $key = number_format($rate, 2, '.', '');
+            $itemBases[$key] = ($itemBases[$key] ?? 0.0)
+                + abs((float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0));
+        }
+        if ($itemBases === []) {
+            return [];
+        }
+
+        $issues = [];
+        $itemRates = array_keys($itemBases);
+        $recapRates = array_keys($recap);
+        sort($itemRates);
+        sort($recapRates);
+        if ($itemRates !== $recapRates) {
+            $issues[] = sprintf(
+                'Doklad si v souboru odporuje: řádky nesou sazby %s, ale rekapitulace dokladu '
+                    . '(TaxTotal) uvádí %s. Importují se sazby z řádků — zkontrolujte zdrojový '
+                    . 'soubor, obě čísla platit zároveň nemůžou.',
+                self::fmtRateList($itemRates),
+                self::fmtRateList($recapRates),
+            );
+        }
+
+        foreach ($itemBases as $key => $base) {
+            if (!isset($recap[$key])) {
+                continue;
+            }
+            $recapBase = $recap[$key]['base'];
+            $tolerance = max(self::RECAP_ABS_TOLERANCE, self::RECAP_REL_TOLERANCE * max($base, $recapBase));
+            if (abs($base - $recapBase) <= $tolerance) {
+                continue;
+            }
+            $issues[] = sprintf(
+                'Doklad si v souboru odporuje: součet řádků se sazbou %s %% je %s, ale '
+                    . 'rekapitulace dokladu uvádí základ %s. Importují se částky z řádků.',
+                self::fmtRate((float) $key),
+                self::fmtAmount($base),
+                self::fmtAmount($recapBase),
+            );
+        }
+
+        return $issues;
+    }
+
+    /** @param list<string> $keys */
+    private static function fmtRateList(array $keys): string
+    {
+        return $keys === []
+            ? 'žádnou'
+            : implode(', ', array_map(static fn (string $k): string => self::fmtRate((float) $k) . ' %', $keys));
+    }
+
+    private static function fmtRate(float $rate): string
+    {
+        return rtrim(rtrim(number_format($rate, 2, ',', ' '), '0'), ',');
+    }
+
+    private static function fmtAmount(float $value): string
+    {
+        return number_format($value, 2, ',', ' ');
     }
 
     /**
@@ -334,13 +459,23 @@ final class IsdocParser
             }
         }
 
-        $vatRate = (float) ($this->text($xpath, 'i:ClassifiedTaxCategory/i:Percent', $line) ?: '0');
         // ISDOC 4.1.5: nedaňová položka nepodléhá DPH bez ohledu na Percent. Řádek je
         // nedaňový, je-li nedaňový celý doklad (VATApplicable=false) nebo má-li vlastní
-        // <ClassifiedTaxCategory><VATApplicable>false</VATApplicable></…>.
+        // <ClassifiedTaxCategory><VATApplicable>false</VATApplicable></…>. To je
+        // PROHLÁŠENÍ o plnění bez daně, takže nula je tam správně.
         $lineVatApplicable = strtolower($this->text($xpath, 'i:ClassifiedTaxCategory/i:VATApplicable', $line));
-        if (!$isTaxDocument || $lineVatApplicable === 'false') {
-            $vatRate = 0.0;
+        if (!$isTaxDocument) {
+            [$vatRate, $rateSource] = [0.0, 'non_tax_document'];
+        } elseif ($lineVatApplicable === 'false') {
+            [$vatRate, $rateSource] = [0.0, 'non_tax_line'];
+        } else {
+            // Chybějící <Percent> naproti tomu prohlášení NENÍ — je to mlčení. Přetyp na
+            // 0.0 z něj dělal osvobozené plnění, které invariant proti úniku cizí daně
+            // vůbec neprověřuje, takže daň z dokladu tiše zmizela celá.
+            $percent = $this->text($xpath, 'i:ClassifiedTaxCategory/i:Percent', $line);
+            [$vatRate, $rateSource] = is_numeric($percent)
+                ? [(float) $percent, 'percent']
+                : [null, 'unresolved'];
         }
 
         return [
@@ -349,6 +484,7 @@ final class IsdocParser
             'unit'                   => $unit,
             'unit_price_without_vat' => $unitPrice,
             'vat_rate'               => $vatRate,
+            'vat_rate_source'        => $rateSource,
         ];
     }
 

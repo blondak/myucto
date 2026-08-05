@@ -45,12 +45,19 @@ final class OssLedgerService
         $correctionRowCount = 0;
         $invalidCorrectionCount = 0;
         $conversionMissingCount = 0;
+        $manualReviewCount = 0;
         $returnCurrency = (string) ($settings['oss_return_currency'] ?? 'EUR');
         $currentPeriod = sprintf('%04dQ%d', $year, $quarter);
 
         foreach ($rows as $r) {
             $invoiceId = (int) $r['invoice_id'];
             $invoiceIds[$invoiceId] = true;
+            // Počítá se PŘED odbočkou na opravy: řádek k ručnímu posouzení může být
+            // stejně dobře oprava minulého období jako běžné plnění, a v obou případech
+            // je to řádek, který si má člověk projít.
+            if (!empty($r['oss_needs_manual_review'])) {
+                $manualReviewCount++;
+            }
             $country = strtoupper((string) ($r['oss_consumer_country'] ?? ''));
             if ($country === '') {
                 $country = '??';
@@ -132,6 +139,21 @@ final class OssLedgerService
                 continue;
             }
 
+            // Sem se dojde jen s PRÁZDNÝM `oss_original_period`, tzn. „řádek patří do běžného
+            // čtvrtletí". U běžného plnění je to správně, u opravného dokladu skoro nikdy:
+            // dobropis obvykle opravuje starší kvartál a jeho záporné částky pak tiše sníží
+            // daň TADY místo VetaO za období původního plnění. Rozdíl je vidět až na podání,
+            // proto varování jmenuje doklad i konkrétní krok.
+            // Vědomě NEblokuje (na rozdíl od chybějícího typu sazby): oprava plnění ze
+            // STEJNÉHO kvartálu se opravdu jen nettuje do VetaR a uživatel nemá čím ji
+            // potvrdit — InvoiceValidation původní období z běžného kvartálu nepřijme.
+            // Blokace by tenhle legitimní případ zavřela do slepé uličky.
+            if (in_array((string) $r['invoice_type'], ['credit_note', 'cancellation'], true)) {
+                $warnings[] = 'Doklad ' . self::docLabel($r) . ' je opravný doklad bez původního OSS období'
+                    . ' — oprava se započte do běžného čtvrtletí Q' . $quarter . ' ' . $year . '.'
+                    . ' Pokud opravuje plnění ze staršího období, doplňte na položce původní OSS období (RRRRQn).';
+            }
+
             if (empty($r['oss_rate_type'])) {
                 $warnings[] = 'Doklad ' . self::docLabel($r) . ' má OSS řádek bez typu sazby.';
             }
@@ -176,6 +198,23 @@ final class OssLedgerService
 
             $totalBase += $baseReturn;
             $totalVat += $vatReturn;
+        }
+
+        // Příznak „k ručnímu posouzení" nese sama položka (`oss_needs_manual_review`,
+        // migrace 1293) a do teď ho nečetl nikdo — ani tenhle náhled, ani přiznání k DPH.
+        // Kategorie tím žila jen na stránce reportu importu a po jejím zavření ji nikdo
+        // neviděl, přestože právě tohle jsou řádky, u kterých je MÍSTO PLNĚNÍ SPORNÉ:
+        // sazba platí v obou zemích, číselník neuměl odpovědět, nebo si doklad protiřečí
+        // (OSS a tuzemsky zdaněný řádek na jedné faktuře). Náhled podání je poslední
+        // obrazovka před odesláním, takže patří sem.
+        //
+        // Varování je JEDNO za období, ne za doklad: u migrace 1 670 dokladů by se
+        // seznamem jednotlivých dokladů utopila všechna ostatní varování.
+        if ($manualReviewCount > 0) {
+            $warnings[] = $manualReviewCount . ' řádků v tomto období čeká na RUČNÍ POSOUZENÍ'
+                . ' — u nich nešlo spolehlivě určit místo plnění (sazba platí i v zemi dodavatele,'
+                . ' číselník neuměl odpovědět, nebo doklad míchá OSS a tuzemské plnění).'
+                . ' Projděte je na dokladech dřív, než podání odešlete.';
         }
 
         $countryRows = array_values(array_map(static function (array $country): array {
