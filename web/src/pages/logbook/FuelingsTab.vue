@@ -9,7 +9,7 @@ import {
   type FuelInvoice, type FuelInvoiceItem,
 } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -61,7 +61,28 @@ const groups = computed(() => {
 })
 
 watch(yearFilter, (y) => { if (!y) monthFilter.value = '' })
-watch([yearFilter, monthFilter], () => { reload() })
+watch([yearFilter, monthFilter, filterCar], () => { reload() })
+
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (filterCar.value !== '') {
+    const c = cars.value.find(x => x.id === filterCar.value)
+    if (c) chips.push({ key: 'car', label: t('logbook.car'), value: c.registration + (c.name ? ` — ${c.name}` : '') })
+  }
+  if (yearFilter.value !== '') chips.push({ key: 'year', label: t('common.year'), value: String(yearFilter.value) })
+  if (monthFilter.value !== '') chips.push({ key: 'month', label: t('common.month'), value: monthOptions.value[monthFilter.value - 1] })
+  return chips
+})
+function clearFilter(key: string) {
+  if (key === 'car') filterCar.value = ''
+  if (key === 'year') yearFilter.value = ''
+  if (key === 'month') monthFilter.value = ''
+}
+function resetFilters() {
+  filterCar.value = ''
+  yearFilter.value = ''
+  monthFilter.value = ''
+}
 
 async function load() {
   loading.value = true
@@ -99,12 +120,7 @@ function maybeOpenNew() {
   newFueling()
 }
 
-watch(() => props.resetToken, () => {
-  filterCar.value = ''
-  yearFilter.value = ''
-  monthFilter.value = ''
-  reload()
-})
+watch(() => props.resetToken, () => { resetFilters() })
 
 // ── Export XLSX / PDF ───────────────────────────────────────────
 const exportOpen = ref(false)
@@ -302,8 +318,8 @@ const sourceBadge: Record<string, string> = {
 
 <template>
   <section>
-    <FilterBar :active-count="activeFilterCount">
-        <select v-model="filterCar" @change="reload" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+    <FilterBar :active-count="activeFilterCount" :chips="filterChips" @clear="clearFilter" @clear-all="resetFilters">
+        <select v-model="filterCar" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('logbook.all_cars') }}</option>
           <option v-for="c in cars" :key="c.id" :value="c.id">{{ c.registration }}{{ c.name ? ` — ${c.name}` : '' }}</option>
         </select>

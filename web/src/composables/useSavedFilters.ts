@@ -40,7 +40,9 @@ export function savedFilterTone(payload: Record<string, string>): SavedFilterTon
   const on = (v: string | undefined) => v === '1' || v === 'true'
   if (on(payload.overdue)) return 'danger'
   if (on(payload.unpaid)) return 'warning'
-  if (payload.booked === '1' || payload.status === 'paid') return 'success'
+  // `posted` existuje jen v payloadu deníku (accounting.journal) — faktury tenhle
+  // klíč v query nikdy neposílají, takže tahle větev jejich tóny nemění.
+  if (payload.booked === '1' || payload.status === 'paid' || payload.posted === 'posted') return 'success'
   return 'neutral'
 }
 

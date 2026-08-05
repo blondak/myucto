@@ -27,10 +27,18 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SavedFilterAction
 {
-    /** Jediný zdroj pravdy pro page_key (§3.4); FE literály MUSÍ sedět 1:1. */
+    /**
+     * Jediný zdroj pravdy pro page_key (§3.4); FE literály MUSÍ sedět 1:1.
+     *
+     * Skladové klíče jsou s pomlčkou, zbytek s podtržítkem — nesjednocovat. Skladové
+     * stránky je odvozují od názvu routy (`stock-items`) a týmž literálem si drží
+     * i sloupcové předvolby přes useTablePrefs(); přejmenování by je rozešlo uvnitř
+     * jednoho souboru. Dokud tu chyběly, končilo uložení pohledu ve skladu na 422.
+     */
     public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger',
         'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents', 'cash_documents',
-        'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules'];
+        'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
+        'stock-items', 'stock-documents'];
 
     private const MAX_FILTERS = 30;
 

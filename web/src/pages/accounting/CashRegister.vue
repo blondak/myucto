@@ -10,7 +10,8 @@ import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { useSavedFilters } from '@/composables/useSavedFilters'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import type { SavedFilter } from '@/api/preferences'
 import CashRegisterManager from '@/components/cash/CashRegisterManager.vue'
 import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
 import CashDocumentDetail from '@/components/accounting/CashDocumentDetail.vue'
@@ -138,6 +139,24 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('cash_documents', COLUMNS)
 const saved = useSavedFilters('cash_documents', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 const visibleColCount = computed(() => 2 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+
+/**
+ * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
+ * Stejný vzor jako u vydaných faktur / deníku (InvoiceList.vue, Journal.vue).
+ */
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger:  'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(f: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(f.payload)]
+}
+function onViewClick(f: SavedFilter) {
+  if (saved.activeId.value === f.id) saved.clearActive()
+  else saved.apply(f)
+}
 
 onMounted(async () => {
   await loadRegisters()
@@ -300,6 +319,43 @@ function onManagerChanged() { loadRegisters() }
       @action="managerOpen = true" />
 
     <template v-else>
+      <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
+           osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
+      <div
+        v-if="saved.filters.value.length"
+        role="tablist"
+        :aria-label="t('common.saved_views')"
+        class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="saved.activeId.value === null"
+          @click="saved.clearActive()"
+          class="cursor-pointer shrink-0 h-8 px-3 inline-flex items-center rounded-full border text-sm transition-colors"
+          :class="saved.activeId.value === null
+            ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+            : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+        >{{ t('common.saved_view_all') }}</button>
+
+        <button
+          v-for="f in saved.filters.value"
+          :key="f.id"
+          type="button"
+          role="tab"
+          :aria-selected="saved.activeId.value === f.id"
+          :title="saved.activeId.value === f.id ? t('common.saved_view_clear') : f.name"
+          @click="onViewClick(f)"
+          class="cursor-pointer shrink-0 max-w-56 h-8 px-3 inline-flex items-center gap-1.5 rounded-full border text-sm transition-colors"
+          :class="saved.activeId.value === f.id
+            ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+            : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+        >
+          <span class="shrink-0 w-1.5 h-1.5 rounded-full" :class="viewDotClass(f)" aria-hidden="true"></span>
+          <span class="truncate">{{ f.name }}</span>
+        </button>
+      </div>
+
       <!-- Filtry -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">

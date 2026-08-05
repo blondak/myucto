@@ -11,6 +11,9 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import type { SavedFilter } from '@/api/preferences'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -126,6 +129,44 @@ function clearFilter(key: string) {
     case 'amount': amountFilter.value = ''; break
     case 'posting': postingFilter.value = ''; break
   }
+}
+
+/** Stejný tvar jako syncFiltersToUrl — sdílený se saved views (§ uložené pohledy). */
+function buildQuery(): Record<string, string> {
+  const q: Record<string, string> = {}
+  if (yearFilter.value !== '') q.year = String(yearFilter.value)
+  if (monthFilter.value !== '') q.month = String(monthFilter.value)
+  if (accountFilter.value) q.account = accountFilter.value
+  if (bankCodeFilter.value) q.bank = bankCodeFilter.value
+  if (counterpartyAccountFilter.value) q.counterparty_account = counterpartyAccountFilter.value
+  if (clientFilter.value !== '') q.client_id = String(clientFilter.value)
+  if (amountFilter.value !== '') q.amount = amountFilter.value
+  if (postingFilter.value) q.posting_status = postingFilter.value
+  return q
+}
+// Uložený pohled = přesně stejný tvar query jako v URL — znovupoužijeme parser,
+// zbytek (page reset, URL sync, debounced load) obstará watch nad filtry.
+function applyQueryToPage(q: Record<string, string>) {
+  loadFiltersFromQuery(q)
+}
+const saved = useSavedFilters('bank_statements', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+
+/**
+ * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
+ * Stejný vzor jako u vydaných faktur / deníku (InvoiceList.vue, Journal.vue).
+ */
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger:  'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(f: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(f.payload)]
+}
+function onViewClick(f: SavedFilter) {
+  if (saved.activeId.value === f.id) saved.clearActive()
+  else saved.apply(f)
 }
 const uploading = ref(false)
 const scanning = ref(false)
@@ -290,9 +331,10 @@ watch(() => route.query, (newQ) => {
   }
 })
 
-onMounted(() => {
-  loadFiltersFromQuery(route.query)
+onMounted(async () => {
   loadCounterparties()
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  loadFiltersFromQuery(route.query)
   load()
 })
 
@@ -444,6 +486,43 @@ async function onFileSelected(e: Event) {
       </div>
     </div>
 
+    <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
+         osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
+    <div
+      v-if="saved.filters.value.length"
+      role="tablist"
+      :aria-label="t('common.saved_views')"
+      class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+    >
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === null"
+        @click="saved.clearActive()"
+        class="cursor-pointer shrink-0 h-8 px-3 inline-flex items-center rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === null
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >{{ t('common.saved_view_all') }}</button>
+
+      <button
+        v-for="f in saved.filters.value"
+        :key="f.id"
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === f.id"
+        :title="saved.activeId.value === f.id ? t('common.saved_view_clear') : f.name"
+        @click="onViewClick(f)"
+        class="cursor-pointer shrink-0 max-w-56 h-8 px-3 inline-flex items-center gap-1.5 rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === f.id
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >
+        <span class="shrink-0 w-1.5 h-1.5 rounded-full" :class="viewDotClass(f)" aria-hidden="true"></span>
+        <span class="truncate">{{ f.name }}</span>
+      </button>
+    </div>
+
     <!-- Filtry hlaviček výpisů + hledání v transakcích -->
     <FilterBar
       :active-count="activeFilterCount"
@@ -496,6 +575,7 @@ async function onFileSelected(e: Event) {
         <option value="unposted">{{ t('bank.posting_filter_unposted_statements') }}</option>
       </select>
       <template #actions>
+        <SavedFiltersMenu :ctrl="saved" />
         <button v-if="filtersActive" type="button" @click="resetFilters" :class="btnOutline('neutral')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('bank.reset_filters') }}

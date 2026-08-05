@@ -8,7 +8,7 @@ import {
   type TripCategory, type TripImportReport,
 } from '@/api/logbook'
 import { useAuthStore } from '@/stores/auth'
-import FilterBar from '@/components/ui/FilterBar.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -47,6 +47,27 @@ const monthOptions = computed(() => {
   const loc = locale.value === 'en' ? 'en-US' : 'cs-CZ'
   return Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(loc, { month: 'long' }))
 })
+
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (filterCar.value !== '') {
+    const c = cars.value.find(x => x.id === filterCar.value)
+    if (c) chips.push({ key: 'car', label: t('logbook.car'), value: c.registration + (c.name ? ` — ${c.name}` : '') })
+  }
+  if (yearFilter.value !== '') chips.push({ key: 'year', label: t('common.year'), value: String(yearFilter.value) })
+  if (monthFilter.value !== '') chips.push({ key: 'month', label: t('common.month'), value: monthOptions.value[monthFilter.value - 1] })
+  return chips
+})
+function clearFilter(key: string) {
+  if (key === 'car') filterCar.value = ''
+  if (key === 'year') yearFilter.value = ''
+  if (key === 'month') monthFilter.value = ''
+}
+function resetFilters() {
+  filterCar.value = ''
+  yearFilter.value = ''
+  monthFilter.value = ''
+}
 // Součet ujetých km — jen z aktuálně zobrazené stránky (počet jízd v patičce bere meta.total);
 // autoritativní součet km za období je v SummariesTab / /logbook/summary.
 const totalKm = computed(() => trips.value.reduce((s, tr) => s + tr.distance_km, 0))
@@ -62,7 +83,7 @@ const groups = computed(() => {
 })
 
 watch(yearFilter, (y) => { if (!y) monthFilter.value = '' })
-watch([yearFilter, monthFilter], () => { reload() })
+watch([yearFilter, monthFilter, filterCar], () => { reload() })
 
 const open = ref(false)
 const saving = ref(false)
@@ -151,12 +172,7 @@ watch(() => draft.odometer_start, () => {
 })
 
 // Reset filtrů na default při kliku na menu (LogbookPage bumpne resetToken).
-watch(() => props.resetToken, () => {
-  filterCar.value = ''
-  yearFilter.value = ''
-  monthFilter.value = ''
-  reload()
-})
+watch(() => props.resetToken, () => { resetFilters() })
 
 function newTrip() {
   const defCar = cars.value.find(c => c.is_default) ?? cars.value[0]
@@ -284,8 +300,8 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
 
 <template>
   <section>
-    <FilterBar :active-count="activeFilterCount">
-        <select v-model="filterCar" @change="reload" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+    <FilterBar :active-count="activeFilterCount" :chips="filterChips" @clear="clearFilter" @clear-all="resetFilters">
+        <select v-model="filterCar" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('logbook.all_cars') }}</option>
           <option v-for="c in cars" :key="c.id" :value="c.id">{{ c.registration }}{{ c.name ? ` — ${c.name}` : '' }}</option>
         </select>

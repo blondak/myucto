@@ -12,7 +12,8 @@ import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { useSavedFilters } from '@/composables/useSavedFilters'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -146,6 +147,24 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('stock-documents', COLUMNS)
 const saved = useSavedFilters('stock-documents', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 
+/**
+ * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
+ * Stejný vzor jako u vydaných faktur / deníku (InvoiceList.vue, Journal.vue).
+ */
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger:  'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(f: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(f.payload)]
+}
+function onViewClick(f: SavedFilter) {
+  if (saved.activeId.value === f.id) saved.clearActive()
+  else saved.apply(f)
+}
+
 const STATUS_BADGE: Record<StockDocStatus, string> = {
   draft: 'bg-neutral-100 text-neutral-600',
   posted: 'bg-success-50 text-success-600',
@@ -200,6 +219,43 @@ watch(() => route.query.type, (v) => {
         class="cursor-pointer px-3 py-2 text-sm font-medium border-b-2 -mb-px"
         :class="filters.doc_type === tab.key ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'">
         {{ t(tab.labelKey) }}
+      </button>
+    </div>
+
+    <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
+         osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
+    <div
+      v-if="saved.filters.value.length"
+      role="tablist"
+      :aria-label="t('common.saved_views')"
+      class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+    >
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === null"
+        @click="saved.clearActive()"
+        class="cursor-pointer shrink-0 h-8 px-3 inline-flex items-center rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === null
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >{{ t('common.saved_view_all') }}</button>
+
+      <button
+        v-for="f in saved.filters.value"
+        :key="f.id"
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === f.id"
+        :title="saved.activeId.value === f.id ? t('common.saved_view_clear') : f.name"
+        @click="onViewClick(f)"
+        class="cursor-pointer shrink-0 max-w-56 h-8 px-3 inline-flex items-center gap-1.5 rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === f.id
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >
+        <span class="shrink-0 w-1.5 h-1.5 rounded-full" :class="viewDotClass(f)" aria-hidden="true"></span>
+        <span class="truncate">{{ f.name }}</span>
       </button>
     </div>
 

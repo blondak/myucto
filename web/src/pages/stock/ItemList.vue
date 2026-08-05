@@ -14,7 +14,8 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { useSavedFilters } from '@/composables/useSavedFilters'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -174,6 +175,24 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('stock-items', COLUMNS)
 const saved = useSavedFilters('stock-items', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 
+/**
+ * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
+ * Stejný vzor jako u vydaných faktur / deníku (InvoiceList.vue, Journal.vue).
+ */
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger:  'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(f: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(f.payload)]
+}
+function onViewClick(f: SavedFilter) {
+  if (saved.activeId.value === f.id) saved.clearActive()
+  else saved.apply(f)
+}
+
 watch(() => tbl.sort.value, () => load())
 
 function qty(i: StockItem): number { return levelsByItem.value[i.id]?.qty ?? 0 }
@@ -232,6 +251,43 @@ onMounted(async () => {
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('stock.items.new') }}
       </RouterLink>
+    </div>
+
+    <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
+         osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
+    <div
+      v-if="saved.filters.value.length"
+      role="tablist"
+      :aria-label="t('common.saved_views')"
+      class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+    >
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === null"
+        @click="saved.clearActive()"
+        class="cursor-pointer shrink-0 h-8 px-3 inline-flex items-center rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === null
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >{{ t('common.saved_view_all') }}</button>
+
+      <button
+        v-for="f in saved.filters.value"
+        :key="f.id"
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === f.id"
+        :title="saved.activeId.value === f.id ? t('common.saved_view_clear') : f.name"
+        @click="onViewClick(f)"
+        class="cursor-pointer shrink-0 max-w-56 h-8 px-3 inline-flex items-center gap-1.5 rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === f.id
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >
+        <span class="shrink-0 w-1.5 h-1.5 rounded-full" :class="viewDotClass(f)" aria-hidden="true"></span>
+        <span class="truncate">{{ f.name }}</span>
+      </button>
     </div>
 
     <!-- Filtry — stejná lišta jako u faktur a banky: hledání vpředu a nejširší,

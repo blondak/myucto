@@ -12,10 +12,12 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { useSavedFilters } from '@/composables/useSavedFilters'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import JournalEntryExtras from '@/components/accounting/JournalEntryExtras.vue'
@@ -196,6 +198,64 @@ function hasActiveFilters(): boolean {
     || sourceIdFilter.value !== '' || entryIdFilter.value !== ''
 }
 
+// Počet aktivních filtrů pro odznáček na tlačítku „Filtry" — stejný vzor jako u faktur.
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (filters.document_no) n++
+  if (filters.period_id !== '') n++
+  if (filters.date_from || filters.date_to) n++
+  if (filters.source_type) n++
+  if (filters.posted) n++
+  if (filters.automation) n++
+  if (filters.q) n++
+  if (filters.account_from || filters.account_to) n++
+  if (filters.amount_from !== '' || filters.amount_to !== '') n++
+  return n
+})
+
+/**
+ * Aktivní filtry jako odstranitelné chipy — stejný vzor jako u vydaných i přijatých
+ * faktur (FilterBar `chips`). Drill-down (`sourceIdFilter`/`entryIdFilter`) chip
+ * nedostává schválně, ruší se přes „Zrušit filtry" jako dosud.
+ */
+const filterChips = computed<FilterChip[]>(() => {
+  const chips: FilterChip[] = []
+  if (filters.document_no) chips.push({ key: 'document_no', label: t('accounting.journal.filter_document_no'), value: filters.document_no })
+  if (filters.period_id !== '') {
+    const p = periods.value.find(x => x.id === filters.period_id)
+    if (p) chips.push({ key: 'period', value: String(p.fiscal_year) })
+  }
+  if (filters.date_from || filters.date_to) {
+    chips.push({ key: 'dates', value: `${filters.date_from ? formatDate(filters.date_from) : '…'} – ${filters.date_to ? formatDate(filters.date_to) : '…'}` })
+  }
+  if (filters.source_type) chips.push({ key: 'source_type', value: sourceLabel(filters.source_type) })
+  if (filters.posted) chips.push({ key: 'posted', value: filters.posted === 'posted' ? t('accounting.journal.posted') : t('accounting.journal.draft') })
+  if (filters.automation) chips.push({ key: 'automation', value: t(`automation.origin_${filters.automation}`) })
+  if (filters.q) chips.push({ key: 'q', label: t('accounting.journal.filter_q'), value: filters.q })
+  if (filters.account_from || filters.account_to) {
+    chips.push({ key: 'account_range', label: t('accounting.journal.filter_account_from'), value: `${filters.account_from || '…'} – ${filters.account_to || '…'}` })
+  }
+  if (filters.amount_from !== '' || filters.amount_to !== '') {
+    chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
+  }
+  return chips
+})
+
+function clearFilter(key: string) {
+  switch (key) {
+    case 'document_no': filters.document_no = ''; break
+    case 'period': filters.period_id = ''; break
+    case 'dates': filters.date_from = ''; filters.date_to = ''; break
+    case 'source_type': filters.source_type = ''; break
+    case 'posted': filters.posted = ''; break
+    case 'automation': filters.automation = ''; break
+    case 'q': filters.q = ''; break
+    case 'account_range': filters.account_from = ''; filters.account_to = ''; break
+    case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
+  }
+  applyFilters()
+}
+
 // Klik na „Účetní deník" v menu vede na cestu BEZ query — a to je jediný signál,
 // podle kterého se dá poznat od navigace s drill-downem (`?entry_id=`, `?source_id=`)
 // nebo z uloženého filtru. Prázdná query tedy znamená „chci čistý deník".
@@ -232,6 +292,25 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('journal', COLUMNS)
 const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+
+/**
+ * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
+ * Stejný vzor jako u vydaných faktur (InvoiceList.vue) — tečka barvou napovídá
+ * povahu pohledu, aniž by účetní musel klikat, aby zjistil, co pohled dělá.
+ */
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger:  'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(f: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(f.payload)]
+}
+function onViewClick(f: SavedFilter) {
+  if (saved.activeId.value === f.id) saved.clearActive()
+  else saved.apply(f)
+}
 
 // ── Export PDF/XLSX (audit 2026-07) — respektuje AKTUÁLNĚ aplikované filtry ────
 const exporting = ref(false)
@@ -512,8 +591,51 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
       </div>
     </div>
 
+    <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
+         osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
+    <div
+      v-if="saved.filters.value.length"
+      role="tablist"
+      :aria-label="t('common.saved_views')"
+      class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+    >
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === null"
+        @click="saved.clearActive()"
+        class="cursor-pointer shrink-0 h-8 px-3 inline-flex items-center rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === null
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >{{ t('common.saved_view_all') }}</button>
+
+      <button
+        v-for="f in saved.filters.value"
+        :key="f.id"
+        type="button"
+        role="tab"
+        :aria-selected="saved.activeId.value === f.id"
+        :title="saved.activeId.value === f.id ? t('common.saved_view_clear') : f.name"
+        @click="onViewClick(f)"
+        class="cursor-pointer shrink-0 max-w-56 h-8 px-3 inline-flex items-center gap-1.5 rounded-full border text-sm transition-colors"
+        :class="saved.activeId.value === f.id
+          ? 'border-primary-300 bg-primary-50 text-primary-700 font-medium'
+          : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+      >
+        <span class="shrink-0 w-1.5 h-1.5 rounded-full" :class="viewDotClass(f)" aria-hidden="true"></span>
+        <span class="truncate">{{ f.name }}</span>
+      </button>
+    </div>
+
     <!-- Filtry -->
-    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+    <FilterBar
+      :active-count="activeFilterCount"
+      collapsible
+      :chips="filterChips"
+      @clear="clearFilter"
+      @clear-all="resetFilters"
+    >
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_document_no') }}</label>
@@ -593,13 +715,13 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+      <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
-      </div>
-    </div>
+      </template>
+    </FilterBar>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
