@@ -920,7 +920,11 @@ final class StatementMatcher
                     pi.exchange_rate, cur.code AS currency
                FROM purchase_invoices pi LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ? AND pi.document_kind = 'credit_note'
-                AND pi.status IN ('received','booked')
+                -- 'paid' v setu ze stejného důvodu jako v matchPurchase(): dobropis bývá
+                -- označený za uhrazený ručně dřív, než dorazí výpis. Bez něj transakce
+                -- visí ve výpisu nespárovaná a úhrada se nezaúčtuje (221/321), takže
+                -- závazek 321 zůstane v deníku otevřený. paid_at nepřepisujeme (viz UPDATE níž).
+                AND pi.status IN ('received','booked','paid')
                 AND (pi.varsymbol = ? OR pi.vendor_invoice_number = ?
                      OR (pi.varsymbol REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
                      OR (pi.vendor_invoice_number REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.vendor_invoice_number, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))"
