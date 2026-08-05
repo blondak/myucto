@@ -273,6 +273,39 @@ test('the revoke row explains which factor confirms the removal', async () => {
   assert.doesNotMatch(cs.passkeys.totp_optional, /volitelná/i)
 })
 
+test('the second-factor step hides the passwordless passkey entry point', async () => {
+  const login = await readFile(new URL('pages/Login.vue', root), 'utf8')
+
+  // Jádro stížnosti: uživatel bez passkey viděl vedle pole na TOTP kód i tlačítko
+  // „přihlásit se passkey". Je to alternativa k HESLU, ne k druhému faktoru —
+  // po ověření hesla nemá co nabízet.
+  assert.match(
+    login,
+    /const secondFactorPending = computed\(\s*\r?\n?\s*\(\) => totpRequired\.value \|\| recoveryRequired\.value \|\| emailOtpRequired\.value \|\| passkeyFlow\.value !== null,/,
+  )
+  assert.match(
+    login,
+    /v-if="auth\.setupStatus\?\.passwordless_login_enabled && !secondFactorPending"/,
+  )
+})
+
+test('the login second factor offers exactly the methods the server named', async () => {
+  const login = await readFile(new URL('pages/Login.vue', root), 'utf8')
+  const totpBranch = login.match(/code === 'totp_required'\) \{([\s\S]*?)\} else if/)?.[1] || ''
+  const invalidBranch = login.match(/code === 'invalid_totp'\) \{([\s\S]*?)\} else if/)?.[1] || ''
+
+  // Seznam metod se nikdy neodvozuje na klientovi — přebírá se z odpovědi serveru,
+  // která vzniká až po ověření hesla a jen z uloženého stavu daného účtu.
+  assert.match(totpBranch, /mfaMethods\.value = Array\.isArray\(data\?\.methods\) \? data\.methods : \['totp'\]/)
+  assert.match(invalidBranch, /mfaMethods\.value = Array\.isArray\(data\?\.methods\) \? data\.methods : \['totp'\]/)
+  // Jediná metoda → rovnou pole na kód, žádný mezikrok s výběrem.
+  assert.match(totpBranch, /totpRequired\.value = true/)
+  assert.match(totpBranch, /focusField\(totpInput\)/)
+  assert.match(login, /ref="totpInput"[\s\S]*?inputmode="numeric"[\s\S]*?autocomplete="one-time-code"/)
+  // Záložní kód má vlastní nabídku i tehdy, když passkey ani TOTP fallback není.
+  assert.match(login, /v-if="passkeyFlow \|\| canUseTotpFallback \|\| canUseRecovery"/)
+})
+
 test('a cancelled ceremony during revoke points at the TOTP alternative', async () => {
   const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
   const revoke = page.match(/async function revoke\(item: PasskeyCredential\) \{([\s\S]*?)\r?\n\}/)?.[1] || ''

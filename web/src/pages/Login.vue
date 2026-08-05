@@ -39,6 +39,8 @@ const canUseTotpFallback = computed(() => !totpRequired.value && mfaMethods.valu
 const recoveryCode = ref('')
 const recoveryRequired = ref(false)
 const canUseRecovery = computed(() => !recoveryRequired.value && mfaMethods.value.includes('recovery'))
+const totpInput = ref<HTMLInputElement | null>(null)
+const recoveryInput = ref<HTMLInputElement | null>(null)
 const passkeyBusy = ref(false)
 const passwordlessBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
@@ -55,6 +57,18 @@ const otpEmailMasked = ref('')
 const otpResendCooldown = ref(0)
 const otpInfo = ref<string>('')
 let cooldownTimer: ReturnType<typeof setInterval> | null = null
+
+// Heslo už prošlo a běží druhý faktor. Tlačítko „přihlásit se passkey" je
+// alternativa k HESLU (discoverable login), ne druhý faktor — vedle pole na kód
+// vypadá jako nabídnutá volba, kterou uživatel bez passkey nemá čím splnit.
+const secondFactorPending = computed(
+  () => totpRequired.value || recoveryRequired.value || emailOtpRequired.value || passkeyFlow.value !== null,
+)
+
+async function focusField(field: typeof totpInput) {
+  await nextTick()
+  field.value?.focus()
+}
 
 function startCooldown(seconds: number) {
   otpResendCooldown.value = Math.max(0, Math.floor(seconds))
@@ -163,6 +177,10 @@ async function submit() {
     const msg  = e?.response?.data?.error?.message
     const data = e?.response?.data?.error
     if (code === 'totp_required') {
+      // Seznam metod diktuje server podle uloženého stavu účtu. Passkey v něm
+      // není: kdyby ji uživatel měl, dorazilo by `mfa_required`. Jediná metoda
+      // = žádný mezikrok s výběrem, rovnou pole na kód.
+      mfaMethods.value = Array.isArray(data?.methods) ? data.methods : ['totp']
       passkeyFlow.value = null
       totpRequired.value = true
       error.value = ''
@@ -170,6 +188,7 @@ async function submit() {
       // Reset → fresh token pro další pokus s TOTP kódem (jinak by 2. submit
       // šel s already-consumed tokenem → captcha_failed → user musí submit 2x).
       turnstile.reset()
+      focusField(totpInput)
     } else if (code === 'mfa_required') {
       mfaMethods.value = Array.isArray(data.methods) ? data.methods : ['passkey']
       passkeyFlow.value = {
@@ -197,9 +216,11 @@ async function submit() {
       error.value = msg || t('auth.email_otp_invalid')
       turnstile.reset()
     } else if (code === 'invalid_totp') {
+      mfaMethods.value = Array.isArray(data?.methods) ? data.methods : ['totp']
       totp.value = ''
       error.value = msg || t('auth.totp_invalid')
       turnstile.reset()  // taky reset — token z předchozího pokusu už invalid
+      focusField(totpInput)
     } else if (code === 'captcha_required') {
       captchaRequired.value = true
       error.value = t('auth.captcha_required')
@@ -279,6 +300,7 @@ function useRecoveryFallback() {
   recoveryRequired.value = true
   error.value = ''
   turnstile.reset()
+  focusField(recoveryInput)
 }
 
 function useTotpFallback() {
@@ -290,6 +312,7 @@ function useTotpFallback() {
   error.value = ''
   // Teprve tady je nový captcha token potřeba — další submit půjde s heslem.
   turnstile.reset()
+  focusField(totpInput)
 }
 
 // Poslat e-mailový kód znovu. Re-submitne heslo s resend_otp=1; backend pošle
@@ -330,7 +353,7 @@ async function resendCode() {
         </div>
 
         <form @submit.prevent="submit" class="space-y-4">
-          <div v-if="auth.setupStatus?.passwordless_login_enabled" class="space-y-3">
+          <div v-if="auth.setupStatus?.passwordless_login_enabled && !secondFactorPending" class="space-y-3">
             <button
               v-if="passkeySupported"
               type="button"
@@ -380,6 +403,7 @@ async function resendCode() {
           <div v-if="totpRequired">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.totp_code') }}</label>
             <input
+              ref="totpInput"
               v-model="totp"
               type="text"
               inputmode="numeric"
@@ -396,6 +420,7 @@ async function resendCode() {
           <div v-if="recoveryRequired">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.recovery_code') }}</label>
             <input
+              ref="recoveryInput"
               v-model="recoveryCode"
               type="text"
               autocomplete="one-time-code"
@@ -407,7 +432,7 @@ async function resendCode() {
             <p class="text-xs text-neutral-500 mt-1">{{ t('auth.recovery_hint') }}</p>
           </div>
 
-          <div v-if="passkeyFlow || canUseTotpFallback"
+          <div v-if="passkeyFlow || canUseTotpFallback || canUseRecovery"
                class="rounded-md border border-primary-500/40 bg-primary-50 p-3 space-y-2">
             <template v-if="passkeyFlow">
               <button v-if="passkeySupported" type="button" @click="verifyPasskey" :disabled="passkeyBusy"

@@ -309,7 +309,9 @@ final class LoginAction
         if ($totpActive) {
             if ($totpCode === '') {
                 // Nepočítej jako fail — uživatel zadal heslo OK, jen čekáme na 2FA
-                return Json::error($response, 'totp_required', 'TOTP kód požadován.', 401);
+                return Json::error($response, 'totp_required', 'TOTP kód požadován.', 401, [
+                    'methods' => $this->totpStepMethods((int) $user['id']),
+                ]);
             }
             // Per-user TOTP lockout — chrání 10⁶ keyspace proti brute-force
             if ($this->bf->isTotpLocked((int) $user['id'])) {
@@ -325,7 +327,9 @@ final class LoginAction
                 $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
                     'email' => $email, 'reason' => 'totp_invalid',
                 ], $ip, $userAgent);
-                return Json::error($response, 'invalid_totp', 'Neplatný TOTP kód.', 401);
+                return Json::error($response, 'invalid_totp', 'Neplatný TOTP kód.', 401, [
+                    'methods' => $this->totpStepMethods((int) $user['id']),
+                ]);
             }
             $this->bf->recordTotpSuccess((int) $user['id']);
             $authContext = $totpAllowed
@@ -387,6 +391,23 @@ final class LoginAction
             $authContext,
             $issueTrustedTd,
         );
+    }
+
+    /**
+     * Metody druhého faktoru nabídnuté ve fázi „heslo prošlo, čekáme na TOTP".
+     * Seznam sestavuje výhradně server z uloženého stavu uživatele — klient si
+     * o jinou metodu říct nemůže a passkey tu chybí schválně: kdyby ji uživatel
+     * měl, skončil by dřív ve větvi `mfa_required` s vázanou ceremonií.
+     *
+     * @return list<string>
+     */
+    private function totpStepMethods(int $userId): array
+    {
+        $methods = ['totp'];
+        if ($this->recoveryCodes->hasUsable($userId)) {
+            $methods[] = 'recovery';
+        }
+        return $methods;
     }
 
     /**

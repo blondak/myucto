@@ -40,6 +40,12 @@ Systémový dialog zařízení může použít otisk prstu, obličej, PIN, gesto
 zařízení nebo externí bezpečnostní klíč. MyÚčto konkrétní metodu nevybírá a
 biometrická data nikdy nedostane.
 
+Druhý krok nabízí pouze metody, které účet skutečně má — vybírá je server až po
+ověření hesla. Účtu bez zaregistrované passkey se tedy passkey nenabídne a při
+jediné dostupné metodě se rovnou zobrazí pole pro kód, bez mezikroku s výběrem.
+Tlačítko **Přihlásit přístupovým klíčem** patří k prvnímu kroku (nahrazuje
+e-mail a heslo), takže po odeslání hesla zmizí.
+
 Má-li účet současně aktivní TOTP, můžeš místo passkey zvolit
 **Použít kód z autentikátoru** po standardním přihlášení e-mailem a heslem a
 zadat aktuální šestimístný kód. Zrušení systémového dialogu passkey TOTP samo
