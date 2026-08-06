@@ -104,7 +104,9 @@ final class IsdocToPurchaseInvoiceMapper
             'exchange_rate'         => isset($parsed['exchange_rate']) && $parsed['exchange_rate'] !== null
                 ? (float) $parsed['exchange_rate']
                 : null,
-            'exchange_rate_source'  => 'manual',
+            // Kurz přišel v ISDOCu od dodavatele, není odvozený z data (migrace 1303) →
+            // automatické přenačtení po změně DUZP ho nepřepíše.
+            'exchange_rate_source'  => 'import',
             'reverse_charge'        => !empty($parsed['reverse_charge']),
             'language'              => 'cs',
             'note_above_items'      => $parsed['note_above'] ?? null,

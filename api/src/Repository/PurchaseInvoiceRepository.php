@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 
@@ -32,6 +33,9 @@ final class PurchaseInvoiceRepository
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
     ) {}
+
+    /** @var array<int,bool> currency_id → je to CZK; viz isCzkCurrency() */
+    private array $czkCurrencyCache = [];
 
     /**
      * Najde fakturu jen pokud patří danému tenantovi.
@@ -923,6 +927,15 @@ final class PurchaseInvoiceRepository
         // volba účetní směla přepsat, ale sama nepřepsala nic silnějšího.
         [$paymentMethod, $paymentMethodSource] = $this->resolvePaymentMethodForCreate($data, $vendorId);
 
+        // Kurz (migrace 1303). Korunový doklad kurz mít nesmí — PostingService i
+        // VatLedgerService u CZK počítají s 1.0 natvrdo, takže uložená hodnota nic
+        // nemění, jen čeká na agregaci bez pojistky na CZK. Symetrie s
+        // ExchangeRateApplier::applyToInvoice() na vydané straně.
+        $isCzk = $this->isCzkCurrency($data['currency_id'] ?? null);
+        $exchangeRate = (!$isCzk && isset($data['exchange_rate'])) ? (float) $data['exchange_rate'] : null;
+        $exchangeRateDate = (!$isCzk && !empty($data['exchange_rate_date'])) ? (string) $data['exchange_rate_date'] : null;
+        $exchangeRateSource = ExchangeRateSources::normalize($data['exchange_rate_source'] ?? null);
+
         $sql = 'INSERT INTO purchase_invoices
             (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
              issue_date, tax_date, due_date, received_at, received_at_source,
@@ -952,9 +965,9 @@ final class PurchaseInvoiceRepository
             (string) ($data['received_at'] ?? $data['issue_date']),
             $receivedAtSource,
             (int) $data['currency_id'],
-            isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null,
-            empty($data['exchange_rate_date']) ? null : (string) $data['exchange_rate_date'],
-            (string) ($data['exchange_rate_source'] ?? 'cnb'),
+            $exchangeRate,
+            $exchangeRateDate,
+            $exchangeRateSource,
             !empty($data['reverse_charge']) ? 1 : 0,
             !empty($data['prices_include_vat']) ? 1 : 0,
             (string) ($data['language'] ?? 'cs'),
@@ -1382,10 +1395,36 @@ final class PurchaseInvoiceRepository
             }
         }
 
+        // Kurz (migrace 1303): píšeme jen sloupce, které volající SKUTEČNĚ poslal. Dřív se
+        // zapisovaly všechny tři při každém PUT — volající, který je vynechal, si tím kurz
+        // vynuloval (`exchange_rate = NULL`) a zdroj degradoval na výchozí hodnotu.
+        // Korunový doklad kurz mít nesmí (past pro agregace) → u CZK vždy NULL, ať pošle
+        // volající cokoliv; symetrie s ExchangeRateApplier::applyToInvoice() na vydané straně.
+        $isCzk = $this->isCzkCurrency($data['currency_id'] ?? null);
+        $rateSet = '';
+        $rateParams = [];
+        if ($isCzk) {
+            $rateSet = ', exchange_rate = NULL, exchange_rate_date = NULL';
+        } else {
+            if (array_key_exists('exchange_rate', $data)) {
+                $rateSet .= ', exchange_rate = ?';
+                $rateParams[] = isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null;
+            }
+            if (array_key_exists('exchange_rate_date', $data)) {
+                $rateSet .= ', exchange_rate_date = ?';
+                $rateParams[] = empty($data['exchange_rate_date']) ? null : (string) $data['exchange_rate_date'];
+            }
+        }
+        if (array_key_exists('exchange_rate_source', $data)) {
+            $rateSet .= ', exchange_rate_source = ?';
+            $rateParams[] = ExchangeRateSources::normalize($data['exchange_rate_source']);
+        }
+
         $sql = 'UPDATE purchase_invoices SET
                 vendor_id = ?, vendor_invoice_number = ?, document_kind = ?,
                 issue_date = ?, tax_date = ?, due_date = ?, received_at = ?,
-                currency_id = ?, exchange_rate = ?, exchange_rate_date = ?, exchange_rate_source = ?,
+                currency_id = ?'
+              . $rateSet . ',
                 reverse_charge = ?, prices_include_vat = ?, language = ?,
                 note_above_items = ?, note_below_items = ?,
                 advance_paid_amount = ?,
@@ -1410,9 +1449,7 @@ final class PurchaseInvoiceRepository
             (string) $data['due_date'],
             (string) ($data['received_at'] ?? $data['issue_date']),
             (int) $data['currency_id'],
-            isset($data['exchange_rate']) ? (float) $data['exchange_rate'] : null,
-            empty($data['exchange_rate_date']) ? null : (string) $data['exchange_rate_date'],
-            (string) ($data['exchange_rate_source'] ?? 'cnb'),
+            ...$rateParams,
             !empty($data['reverse_charge']) ? 1 : 0,
             !empty($data['prices_include_vat']) ? 1 : 0,
             (string) ($data['language'] ?? 'cs'),
@@ -1680,7 +1717,27 @@ final class PurchaseInvoiceRepository
             ->prepare('UPDATE purchase_invoices
                           SET exchange_rate = ?, exchange_rate_date = ?, exchange_rate_source = ?
                         WHERE id = ? AND supplier_id = ?')
-            ->execute([$rate, $rateDate, $source, $id, $supplierId]);
+            ->execute([$rate, $rateDate, ExchangeRateSources::normalize($source), $id, $supplierId]);
+    }
+
+    /**
+     * Je měna dokladu koruna? Rozhoduje o tom, jestli se kurz vůbec smí uložit
+     * (viz createDraft/updateDraft). Výsledek cachujeme per instanci — měny se
+     * v průběhu requestu nemění.
+     */
+    private function isCzkCurrency(mixed $currencyId): bool
+    {
+        $cid = (int) ($currencyId ?? 0);
+        if ($cid <= 0) {
+            return false;
+        }
+        if (!array_key_exists($cid, $this->czkCurrencyCache)) {
+            $stmt = $this->db->pdo()->prepare('SELECT code FROM currencies WHERE id = ?');
+            $stmt->execute([$cid]);
+            $this->czkCurrencyCache[$cid] = strtoupper((string) ($stmt->fetchColumn() ?: '')) === 'CZK';
+        }
+
+        return $this->czkCurrencyCache[$cid];
     }
 
     /**

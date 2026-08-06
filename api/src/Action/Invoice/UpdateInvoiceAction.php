@@ -30,6 +30,7 @@ use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Validation\InvoiceValidation;
+use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -338,8 +339,15 @@ final class UpdateInvoiceAction
         $userRateProvided = $userRate !== null && $userRate !== '' && is_numeric($userRate) && (float) $userRate > 0;
 
         if ($userRateProvided) {
-            // Manuální override z UI — preserve s issue_date jako rate_date
-            $this->repo->setExchangeRate($id, (float) $userRate, (string) $body['issue_date']);
+            // Manuální override z UI. `rate_date` musí být rozhodný den dokladu (DUZP
+            // s fallbackem na vystavení, SSOT ExchangeRateDate) — ne slepě issue_date.
+            // Jinak by doklad s DUZP tvrdil, že kurz platí ke dni vystavení, a kontrola
+            // odchylky od ČNB by ho porovnávala se špatným dnem.
+            $this->repo->setExchangeRate(
+                $id,
+                (float) $userRate,
+                ExchangeRateDate::forInvoice($body) ?? (string) $body['issue_date'],
+            );
         } elseif ($wasDraft && ($currencyChanged || $issueDateChanged || $taxDateChanged)) {
             $rateMeta = $this->rateApplier->applyToInvoice($id);
         } else {

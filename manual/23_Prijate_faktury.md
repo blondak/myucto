@@ -66,7 +66,7 @@ Limity:
 | **Splatnost** | Z platebních podmínek dodavatele. |
 | **Datum přijetí** | Kdy jsi to fyzicky / e-mailem dostal. Default = dnes. |
 | **Měna faktury** | Měna, ve které je doklad vystaven (USD, EUR, CZK…). |
-| **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne aktuální nebo poslední dostupný denní kurz. |
+| **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.8](#2328-kurz-cizi-meny-a-jeho-prenacitani). |
 | **Reverse charge** | Zaškrtni, pokud je doklad B2B s přenesenou daňovou povinností (pořízení zboží z EU, služby z EU/3. země, tuzemský §92a). Položkám nastav **tuzemskou sazbu** (typicky 21 %) a odpovídající klasifikační kód — daň na dokladu zůstane 0 (dodavatel ji neúčtuje), samovyměření i zrcadlový odpočet dopočítají výkazy DPH. Viz [§ 23.2.6](#2326-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba). |
 
 > [!NOTE]
@@ -302,6 +302,36 @@ dodavatele. Vazba je nepovinná, ale zajišťuje dohledatelnou návaznost v obou
 detailech a správné promítnutí vráceného drobného majetku a kontrolního hlášení.
 Jednu původní fakturu může opravovat více částečných dobropisů. Pokud vazbu
 nevyplníš, automatika ji nesmí odhadnout podle samotné podobné částky.
+
+### 23.2.8 Kurz cizí měny a jeho přenačítání
+
+Kurz na dokladu se váže k **rozhodnému dni** — tím je DUZP, a když na dokladu není,
+datum vystavení. Tentýž den používá i evidence DPH a přepočet do účetního deníku.
+
+**Když rozhodný den nebo měnu změníš, aplikace kurz sama přenačte** — ale jen tehdy,
+když ho původně sama odvodila z data. U dokladu s vyplněným DUZP se změnou data
+vystavení rozhodný den nemění, takže se v takovém případě nic nepřepočítává.
+
+Podle původu kurzu se rozhoduje takto:
+
+| Původ kurzu na dokladu | Přenačte se? |
+|---|---|
+| Denní kurz ČNB (tlačítko **„Načíst z ČNB"**) | **Ano** — objednal sis kurz k datu dokladu, takže se k novému datu načte znovu |
+| Pevný kurz období (§ 24/7 ZoÚ) | **Ano** — použije se pevný kurz nového období |
+| Ručně zadaný kurz (vepsaný do pole) | Ne |
+| Kurz z dokladu dodavatele nebo z importu (ISDOC, AI extrakce z PDF, iDoklad, Fakturoid) | Ne |
+| Doklady z doby před zavedením evidence původu kurzu | Ne (původ není známý) |
+
+Když se kurz nepřenačte, aplikace to po uložení **oznámí varováním** a napíše důvod —
+kurz si pak zkontroluj (a případně přepiš ručně nebo znovu načti z ČNB). Stejné
+varování dostaneš, když je ČNB nedostupná: doklad se uloží, kurz zůstane původní.
+
+Kurz **úhrady v jiné měně** ([§ 23.2.5](#2325-platba-v-jine-mene-multi-currency)) se
+přenačítáním nikdy nemění — rozdíl mezi kurzem předpisu a kurzem úhrady je legitimní
+kurzový rozdíl, ne chyba.
+
+U zaúčtovaného dokladu, který admin opravuje vynuceně (`?force=1`), se s novým kurzem
+**přepočte i zápis v účetním deníku**, aby korunové částky odpovídaly dokladu.
 
 ## 23.3 Detail přijaté faktury
 

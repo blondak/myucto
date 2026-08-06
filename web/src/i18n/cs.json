@@ -5590,7 +5590,19 @@
       "vendor_unreliable_payer": "Dodavatel je dle registru plátců DPH (CRPDPH) veden jako nespolehlivý plátce — při úhradě hrozí ručení za nepřiznanou DPH (§109 ZDPH). Zvaž úhradu zvláštním způsobem (§109a) nebo ověření u dodavatele.",
       "exchange_rate_cnb_deviation": "Kurz na dokladu ({used}) se liší od denního kurzu ČNB ({cnb}) k rozhodnému dni o {diff} %. Zkontroluj prosím kurz. Účetní přepočet — korunová částka DPH na dokladu (§73/6) tím není dotčena.",
       "advance_has_tax_document": "K navázané záloze už existuje daňový doklad k platbě (DDKP) — DPH z ní byla uplatněna zvlášť. Na této vyúčtovací faktuře uplatni nárok na odpočet jen z DOPLATKU DPH (rozdíl proti DDKP), jinak by se odpočet uplatnil dvakrát.",
-      "receipt_looks_like_prepayment": "Doklad je zařazený jako účtenka/paragon, ale obsahem vypadá jako daňový doklad k přijaté platbě (záloze). Účtenka zaúčtuje rovnou náklad 518 — když pak dorazí konečná faktura, náklad se zdvojí. Zvaž typ „Daňový doklad k platbě\" (DDKP → jen odpočet DPH 343/314) nebo „Záloha\"."
+      "receipt_looks_like_prepayment": "Doklad je zařazený jako účtenka/paragon, ale obsahem vypadá jako daňový doklad k přijaté platbě (záloze). Účtenka zaúčtuje rovnou náklad 518 — když pak dorazí konečná faktura, náklad se zdvojí. Zvaž typ „Daňový doklad k platbě\" (DDKP → jen odpočet DPH 343/314) nebo „Záloha\".",
+      "exchange_rate_not_reloaded": "Změnilo se rozhodné datum (DUZP) nebo měna, ale kurz zůstal původní ({rate} k {date}) — {reason} Zkontroluj prosím kurz na dokladu.",
+      "exchange_rate_not_reloaded_source_locked": "kurz na dokladu nepochází z automatického přepočtu (zadal ho člověk, přišel z importu nebo je jeho původ neznámý), takže ho automatika nepřepisuje.",
+      "exchange_rate_not_reloaded_cnb_unavailable": "kurz ČNB k novému datu se nepodařilo načíst."
+    },
+    "exchange_rate_source": {
+      "cnb": "denní kurz ČNB",
+      "fixed": "pevný kurz období (§ 24/7)",
+      "import": "z dokladu / importu",
+      "idoklad": "z importu (iDoklad)",
+      "fakturoid": "z importu (Fakturoid)",
+      "user": "zadal uživatel",
+      "manual": "neznámý / historický"
     },
     "classification": {
       "title": "Klasifikace",

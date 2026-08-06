@@ -12,6 +12,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Support\ExchangeRateSources;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -19,7 +20,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/purchase-invoices/{id}/exchange-rate
  *
  * Manuálně nastaví exchange_rate + exchange_rate_date + source.
- * Body: { rate: 23.50, rate_date: "2026-05-15", source: "cnb"|"manual"|"idoklad"|"fakturoid" }
+ * Body: { rate: 23.50, rate_date: "2026-05-15", source: … }
+ *
+ * Doména `source` je ve {@see ExchangeRateSources} a rozhoduje i o tom, jestli smí
+ * kurz přepsat automatické přenačtení po změně rozhodného data (jen 'cnb'/'fixed').
  *
  * NULL rate = reset (např. když uživatel změní currency na CZK).
  */
@@ -74,8 +78,8 @@ final class SetPurchaseInvoiceExchangeRateAction
             }
         }
 
-        $source = (string) ($body['source'] ?? 'manual');
-        if (!in_array($source, ['cnb', 'manual', 'idoklad', 'fakturoid'], true)) {
+        $source = (string) ($body['source'] ?? ExchangeRateSources::DEFAULT);
+        if (!ExchangeRateSources::isValid($source)) {
             return Json::error($response, 'validation_failed', 'Neplatný source', 400);
         }
 

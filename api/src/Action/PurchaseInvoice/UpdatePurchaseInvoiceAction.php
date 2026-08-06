@@ -21,11 +21,13 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
+use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
+use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -55,6 +57,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly SmallAssetService $smallAssets,
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly TenantReferenceGuard $tenantRefs,
+        private readonly PurchaseInvoiceRateReloader $rateReloader,
     ) {}
 
     /**
@@ -142,12 +145,6 @@ final class UpdatePurchaseInvoiceAction
                 }
             }
         }
-        $repostOpenForceEdit = $isAdmin
-            && (bool) $isForce
-            && $lock->posted
-            && !$lock->inClosedPeriod
-            && self::financialFieldsChanged($body, $existing) !== [];
-
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
@@ -212,6 +209,25 @@ final class UpdatePurchaseInvoiceAction
             );
         }
 
+        // Přenačtení kurzu po změně rozhodného dne / měny (migrace 1303). VĚDOMĚ PŘED
+        // beginTransaction(): resolve sahá na ČNB (síť/cache), a síťové volání se nesmí
+        // dostat dovnitř zápisové transakce. Výsledek se vloží do těla, takže ho zapíše
+        // existující updateDraft() jedním atomickým UPDATE.
+        $rateDecision = $this->rateReloader->resolveForUpdate($supplierId, $existing, $body);
+        foreach ($rateDecision['apply'] as $col => $value) {
+            $body[$col] = $value;
+        }
+
+        // B11 / open-period repost: kurz mění korunovou hodnotu zápisu stejně jako změna
+        // částky. `financialFieldsChanged()` ho ale nevidí — porovnává REQUEST proti DB
+        // a kurz do requestu doplnil až server, takže bez `rate_will_change` by deníku
+        // zůstaly staré korunové částky.
+        $repostOpenForceEdit = $isAdmin
+            && (bool) $isForce
+            && $lock->posted
+            && !$lock->inClosedPeriod
+            && (self::financialFieldsChanged($body, $existing) !== [] || $rateDecision['rate_will_change']);
+
         $pdo = $this->db->pdo();
         $ownTransaction = !$pdo->inTransaction();
         if ($ownTransaction) $pdo->beginTransaction();
@@ -272,6 +288,30 @@ final class UpdatePurchaseInvoiceAction
         // B11: zvolený režim force-editu do auditní stopy.
         $auditPayload = $forceMode !== null ? ['force_mode' => $forceMode] : null;
         $this->logger->log($action, $user['id'] ?? null, 'purchase_invoice', $id, $auditPayload, $ip, $request->getHeaderLine('User-Agent'));
+        // Kurz přepsal SERVER, ne uživatel — do auditní stopy patří samostatně, ať je
+        // v historii dokladu vidět, proč se změnila korunová hodnota.
+        if (in_array($rateDecision['reason'], [
+            PurchaseInvoiceRateReloader::REASON_RELOADED,
+            PurchaseInvoiceRateReloader::REASON_CZK_RESET,
+        ], true)) {
+            $this->logger->log(
+                'purchase_invoice.exchange_rate_reloaded',
+                $user['id'] ?? null,
+                'purchase_invoice',
+                $id,
+                [
+                    'reason' => $rateDecision['reason'],
+                    'previous_rate' => $rateDecision['kept_rate'],
+                    'previous_rate_date' => $rateDecision['kept_rate_date'],
+                    'previous_source' => $rateDecision['kept_source'],
+                    'rate' => $rateDecision['apply']['exchange_rate'] ?? null,
+                    'rate_date' => $rateDecision['apply']['exchange_rate_date'] ?? null,
+                    'source' => $rateDecision['apply']['exchange_rate_source'] ?? null,
+                ],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
         if ($existing['status'] === 'draft') {
             try {
                 $this->aiSuggestions->invalidatePurchase($supplierId, $id);
@@ -336,6 +376,9 @@ final class UpdatePurchaseInvoiceAction
         if ($repostedEntryId !== null && $invoice !== null) {
             $invoice['_repost'] = ['entry_id' => $repostedEntryId];
         }
+        if ($rateDecision['meta'] !== null && $invoice !== null) {
+            $invoice['_meta']['exchange_rate'] = $rateDecision['meta'];
+        }
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
@@ -345,13 +388,28 @@ final class UpdatePurchaseInvoiceAction
         if ($vendorNonPayer && !PurchaseInvoiceValidation::isReverseCharge($invoice) && ($invoice['vat_deduction'] ?? 'full') !== 'none') {
             $warnings[] = 'vendor_non_payer_deduction';
         }
+        // Rozhodný den nebo měna se změnily, ale kurz zůstal starý — buď ho drží silnější
+        // zdroj (uživatel / import / historický zápis neznámého původu), nebo se nepovedlo
+        // sáhnout na ČNB. U legacy 'manual' dat je tohle jediná viditelná část featury.
+        if (is_array($invoice) && $rateDecision['blocked']) {
+            $warnings[] = 'exchange_rate_not_reloaded';
+            $invoice['_warning_meta']['exchange_rate_not_reloaded'] = [
+                'reason' => $rateDecision['reason'],
+                'rate' => $rateDecision['kept_rate'],
+                'rate_date' => $rateDecision['kept_rate_date'],
+                'source' => $rateDecision['kept_source'],
+            ];
+        }
         // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k rozhodnému dni.
         // NEBLOKUJE (§24/7 pevný kurz legitimní); §73/6 se netýká — jen účetní přepočet.
+        // Rozhodný den bere ze SSOT (ExchangeRateDate), ne z `effective_cost_date` —
+        // to je GREATEST(...) pro uznání nákladu (migrace 1010) a u dokladu s DUZP dřív
+        // než vystavení by se ČNB ptalo na jiný den → falešná odchylka.
         if (is_array($invoice)) {
             $dev = $this->rateChecker->deviationWarning(
                 $supplierId,
                 (string) ($invoice['currency'] ?? ''),
-                (string) ($invoice['effective_cost_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ExchangeRateDate::forPurchase($invoice),
                 ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
             );
             if ($dev !== null) {

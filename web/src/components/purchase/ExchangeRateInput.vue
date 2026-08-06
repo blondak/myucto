@@ -16,8 +16,12 @@ const emit = defineEmits<{
   'update:modelValue': [value: number | null]
   /** Emit po načtení z ČNB — kompozit (rate + rate_date jak ho ČNB vrátila). */
   'cnb-loaded': [value: { rate: number; rate_date: string }]
-  /** Když user změní rate ručně, parent dostane signal source = 'manual' */
-  'source-change': [source: 'manual' | 'cnb']
+  /**
+   * Kdo kurz nastavil (migrace 1303). 'user' = člověk vepsal hodnotu do inputu →
+   * automatické přenačtení po změně DUZP ho už nepřepíše. 'cnb' = uživatel si
+   * objednal denní kurz k datu dokladu, takže přenačtení k novému datu je žádoucí.
+   */
+  'source-change': [source: 'user' | 'cnb']
 }>()
 
 const { t } = useI18n()
@@ -28,7 +32,7 @@ function onInput(e: Event) {
   const v = (e.target as HTMLInputElement).value
   const num = v === '' ? null : Number(v)
   emit('update:modelValue', num)
-  emit('source-change', 'manual')
+  emit('source-change', 'user')
 }
 
 async function loadFromCnb() {

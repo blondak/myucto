@@ -1120,6 +1120,15 @@ async function submit() {
           cnb: m ? m.cnb_rate.toFixed(3) : '',
           diff: m ? m.diff_percent.toFixed(2) : '',
         }))
+      } else if (code === 'exchange_rate_not_reloaded') {
+        // Rozhodné datum / měna se změnily, ale kurz drží silnější zdroj (uživatel, import,
+        // historický zápis) nebo se nepodařilo sáhnout na ČNB — důvod je v meta.
+        const m = inv._warning_meta?.exchange_rate_not_reloaded
+        toast.warning(t('purchase_invoice.warning.exchange_rate_not_reloaded', {
+          rate: m?.rate != null ? Number(m.rate).toFixed(3) : '—',
+          date: m?.rate_date ?? '—',
+          reason: t(`purchase_invoice.warning.exchange_rate_not_reloaded_${m?.reason ?? 'source_locked'}`),
+        }))
       } else {
         toast.warning(t(`purchase_invoice.warning.${code}`))
       }

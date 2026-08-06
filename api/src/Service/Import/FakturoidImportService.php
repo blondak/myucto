@@ -495,7 +495,10 @@ final class FakturoidImportService
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) ($e['currency'] ?? 'CZK'), $supplierId, isActive: false),
             'exchange_rate'         => isset($e['exchange_rate']) ? (float) $e['exchange_rate'] : null,
-            'exchange_rate_source'  => 'manual',
+            // Kurz přinesl cizí systém, není odvozený z data (migrace 1303) → automatické
+            // přenačtení po změně DUZP ho nepřepíše. ('fakturoid' zůstává jen pro historii —
+            // nikdy se nezapsal a chová se stejně jako 'import'.)
+            'exchange_rate_source'  => 'import',
             'reverse_charge'        => !empty($e['transferred_tax_liability']),
             'language'              => 'cs',
             'items'                 => $items,

@@ -1599,6 +1599,19 @@ function onAttachmentDrop(e: DragEvent) {
   if (e.dataTransfer?.files) addAttachmentFiles(Array.from(e.dataTransfer.files))
 }
 
+/**
+ * Změnil uživatel kurz proti hodnotě, kterou jsme z faktury načetli? Jen tehdy ho smíme
+ * poslat — backend poslaný kurz chápe jako vědomý manuální override a přeskočí přepočet
+ * z ČNB. `loadedRate` drží hodnotu z načtené faktury (u nové faktury je null).
+ */
+function userChangedExchangeRate(): boolean {
+  const rate = form.value.exchange_rate
+  if (form.value.currency === 'CZK' || !rate || rate <= 0) return false
+  const loaded = loadedRate.value
+  if (!loaded || loaded.currency !== form.value.currency) return true
+  return Math.abs(loaded.rate - rate) > 1e-9
+}
+
 async function submit() {
   if (blockDemoMutation()) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
@@ -1647,10 +1660,12 @@ async function submit() {
       discount_percent: form.value.discount_percent || 0,
       payment_method: form.value.payment_method,
       auto_send_reminders: form.value.auto_send_reminders,
-      // Pošli kurz jen pokud uživatel ho má nastavený a měna není CZK — backend bere
-      // explicit hodnotu jako manuální override (nepřepočítá z ČNB).
-      exchange_rate: (form.value.currency !== 'CZK' && form.value.exchange_rate && form.value.exchange_rate > 0)
-        ? form.value.exchange_rate : undefined,
+      // Kurz posíláme JEN když ho uživatel opravdu změnil proti načtené hodnotě. Backend
+      // bere jakoukoli poslanou hodnotu jako manuální override a přeskočí přepočet z ČNB —
+      // takže hydratovaný kurz odeslaný zpátky beze změny zablokoval přenačtení po změně
+      // DUZP a doklad si nechal starý kurz. Nová faktura kurz nemá načtený, tam je každá
+      // vyplněná hodnota uživatelská.
+      exchange_rate: userChangedExchangeRate() ? form.value.exchange_rate : undefined,
       // Volitelný ruční varsymbol — backend ho akceptuje jen u draftu;
       // prázdný řetězec → backend uloží NULL a vygeneruje při issue automaticky.
       varsymbol: form.value.varsymbol.trim(),

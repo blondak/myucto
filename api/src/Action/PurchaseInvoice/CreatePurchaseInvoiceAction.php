@@ -22,6 +22,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
+use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -225,11 +226,14 @@ final class CreatePurchaseInvoiceAction
         // §C/K4: účetní kurz na dokladu odchýlen od denního ČNB kurzu k rozhodnému dni.
         // NEBLOKUJE (§24/7 pevný kurz je legitimní); §73/6 se netýká — kontroluje se JEN
         // účetní přepočet z hlavičky, korunová částka DPH z dokladu zůstává nedotčená.
+        // Rozhodný den ze SSOT (ExchangeRateDate), ne `effective_cost_date` — to je
+        // GREATEST(DUZP, vystavení) pro uznání nákladu (migrace 1010) a u dokladu s DUZP
+        // dřív než vystavení by se ČNB ptalo na jiný den → falešná odchylka.
         if (is_array($invoice)) {
             $dev = $this->rateChecker->deviationWarning(
                 $supplierId,
                 (string) ($invoice['currency'] ?? ''),
-                (string) ($invoice['effective_cost_date'] ?? $invoice['tax_date'] ?? $invoice['issue_date'] ?? ''),
+                ExchangeRateDate::forPurchase($invoice),
                 ($invoice['exchange_rate'] ?? null) !== null ? (float) $invoice['exchange_rate'] : null,
             );
             if ($dev !== null) {

@@ -262,4 +262,49 @@ final class CnbRateDeviationCheckerTest extends TestCase
 
         self::assertSame([], $result['items'], 'Koncepty (draft) se do auditu kurzu nesmí zahrnout.');
     }
+
+    /**
+     * Přijatá faktura s DUZP DŘÍVĚJŠÍM než datum vystavení (běžné: dodavatel plnil na
+     * konci měsíce a fakturuje až v dalším). Rozhodný den kurzu je DUZP; kontrola se
+     * dřív ptala ČNB na `effective_cost_date`, což je GREATEST(DUZP, vystavení) pro
+     * uznání nákladu — tedy na datum vystavení. Kurz správně vedený k DUZP se pak
+     * porovnal s kurzem jiného dne a doklad se označil za vadný.
+     */
+    public function testDoesNotFlagPurchaseWithTaxDateEarlierThanIssueDate(): void
+    {
+        $taxDate = self::YEAR . '-06-30';
+        $issueDate = self::YEAR . '-07-05';
+        $rateAtTaxDate = 25.000;
+        $rateAtIssueDate = 26.000; // 4 % odchylka — nad prahem, kdyby se ptalo na špatný den
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, exchange_rate,
+                 vat_classification_code, vat_deduction, created_by)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", 1000, 0, 1000, "received", ?, "1", "full", ?)'
+        )->execute([
+            $this->supplierId, $this->clientId, 'CNBDUZP-' . random_int(100000, 999999),
+            $issueDate, $taxDate, $issueDate, $issueDate, $this->eurId, $rateAtTaxDate, $this->userId,
+        ]);
+
+        // ČNB vrací pro každý den jiný kurz — test tak pozná, na který den se ptalo.
+        $cnb = $this->createStub(CnbExchangeRateClient::class);
+        $cnb->method('getRate')->willReturnCallback(
+            static fn (string $code, DateTimeImmutable $date): array => [
+                'rate' => $date->format('Y-m-d') === $taxDate ? $rateAtTaxDate : $rateAtIssueDate,
+                'rate_date' => $date->format('Y-m-d'),
+                'fallback_used' => false,
+                'source' => 'fresh',
+            ]
+        );
+
+        $checker = new CnbRateDeviationChecker($this->db, $cnb, $this->settings);
+        $result = $checker->findDeviations($this->supplierId, self::YEAR . '-01-01', self::YEAR . '-12-31');
+
+        self::assertSame([], $result['items'],
+            'Kurz vedený k DUZP nesmí být hlášen jen proto, že doklad byl vystaven jindy.');
+    }
 }

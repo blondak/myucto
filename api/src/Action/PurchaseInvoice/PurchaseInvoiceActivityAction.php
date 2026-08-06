@@ -16,7 +16,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Activity log pro přijatou fakturu — všechny purchase_invoice.* události
  * (created, updated, transitioned, pdf_uploaded, pdf_downloaded, pdf_deleted,
- *  exchange_rate_set, items_updated).
+ *  exchange_rate_set, exchange_rate_reloaded, items_updated).
  *
  * Mirror invoice activity action — stejný response tvar pro frontend reuse komponenty.
  */

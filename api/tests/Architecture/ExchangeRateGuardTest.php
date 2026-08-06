@@ -80,6 +80,72 @@ final class ExchangeRateGuardTest extends TestCase
     }
 
     /**
+     * Přiřazení literálu do `exchange_rate_source` — hledá `'exchange_rate_source' => '…'`
+     * i `exchange_rate_source = '…'`. Zajímá nás jen hodnota, guard ji vytáhne do skupiny.
+     */
+    private const RATE_SOURCE_LITERAL = "/exchange_rate_source'?\s*(?:=>|=)\s*'([a-z_]+)'/i";
+
+    /**
+     * 'manual' u zdroje kurzu je DEPRECATED = „neznámý / historický zápis" (migrace 1303).
+     * Nově ho nesmí zapsat nikdo: importy píšou 'import', formulář 'user', automatika
+     * 'cnb'/'fixed'. Kdyby ho nový kód zapsal, smíchal by se s legacy daty a informace
+     * o původu kurzu by se znovu ztratila — a už by nešla rekonstruovat.
+     */
+    public function testManualIsNeverAssignedAsExchangeRateSource(): void
+    {
+        $srcDir = dirname(__DIR__, 2) . '/src';
+        $offenders = [];
+
+        foreach ($this->phpFiles($srcDir) as $path) {
+            $rel = str_replace('\\', '/', substr($path, strlen($srcDir) + 1));
+            $lines = explode("\n", (string) file_get_contents($path));
+            foreach ($lines as $i => $line) {
+                if (preg_match(self::RATE_SOURCE_LITERAL, $line, $m) !== 1) {
+                    continue;
+                }
+                if (strtolower($m[1]) !== 'manual') {
+                    continue;
+                }
+                $trimmed = ltrim($line);
+                if (str_starts_with($trimmed, '//') || str_starts_with($trimmed, '*')
+                    || str_starts_with($trimmed, '--') || str_starts_with($trimmed, '/*')) {
+                    continue;
+                }
+                $offenders[] = sprintf('%s:%d — %s', $rel, $i + 1, trim($line));
+            }
+        }
+
+        self::assertSame([], $offenders, sprintf(
+            "'manual' jako exchange_rate_source je DEPRECATED (migrace 1303) — znamená\n"
+                . "„neznámý / historický zápis\" a nový kód ho nesmí zapsat. Použij 'import'\n"
+                . "(cizí systém / doklad dodavatele), 'user' (člověk ve formuláři) nebo\n"
+                . "'cnb'/'fixed' (odvozeno z data) — viz MyInvoice\\Support\\ExchangeRateSources:\n  %s",
+            implode("\n  ", $offenders),
+        ));
+    }
+
+    /**
+     * Pojistka proti tichému guardu: regex výš musí chytat kanonický tvar přiřazení
+     * a SSOT musí 'manual' dál znát jako DB default. Bez toho by guard hlídal vzorec,
+     * který nikdo nepíše, a zezelenal by i nad kódem, který pravidlo porušuje.
+     */
+    public function testManualLiteralGuardMatchesTheCanonicalForm(): void
+    {
+        $ssot = dirname(__DIR__, 2) . '/src/Support/ExchangeRateSources.php';
+        self::assertFileExists($ssot);
+        self::assertMatchesRegularExpression(
+            self::RATE_SOURCE_LITERAL,
+            "exchange_rate_source' => 'manual'",
+            'Regex guardu přestal chytat kanonický tvar přiřazení.',
+        );
+        self::assertStringContainsString(
+            "const DEFAULT = 'manual'",
+            (string) file_get_contents($ssot),
+            'SSOT už DEFAULT nedeklaruje jako manual — aktualizuj guard i migraci 1303.',
+        );
+    }
+
+    /**
      * Pojistka proti tomu, že guard zezelená kvůli vadnému regexu: kanonický tvar
      * musí v kódu existovat, jinak se hlídá vzorec, který nikdo nepoužívá.
      */

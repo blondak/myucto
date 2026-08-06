@@ -5590,7 +5590,19 @@
       "vendor_non_payer_deduction": "The vendor is not a VAT payer, yet a VAT deduction is claimed. VAT cannot be deducted from a non-payer — please check the deduction setting.",
       "vendor_unreliable_payer": "According to the VAT payer registry (CRPDPH), the vendor is listed as an unreliable VAT payer — paying them carries liability risk for unpaid VAT (§109 VAT Act). Consider special-mode payment (§109a) or verifying with the vendor.",
       "advance_has_tax_document": "The linked advance already has a tax document for payment (DDKP) — its VAT was claimed separately. On this final invoice claim the deduction only from the VAT TOP-UP (the difference against the DDKP), otherwise the deduction would be taken twice.",
-      "receipt_looks_like_prepayment": "This document is classified as a receipt, but its content looks like a tax document for a received payment (advance). A receipt books the cost (518) immediately — when the final invoice later arrives, the cost is double-counted. Consider the type \"Tax document for payment\" (DDKP → VAT deduction only, 343/314) or \"Advance\"."
+      "receipt_looks_like_prepayment": "This document is classified as a receipt, but its content looks like a tax document for a received payment (advance). A receipt books the cost (518) immediately — when the final invoice later arrives, the cost is double-counted. Consider the type \"Tax document for payment\" (DDKP → VAT deduction only, 343/314) or \"Advance\".",
+      "exchange_rate_not_reloaded": "The relevant date (tax point) or the currency changed, but the exchange rate stayed as it was ({rate} as of {date}) — {reason} Please check the rate on the document.",
+      "exchange_rate_not_reloaded_source_locked": "the rate on the document does not come from an automatic conversion (a person entered it, it came from an import, or its origin is unknown), so automation does not overwrite it.",
+      "exchange_rate_not_reloaded_cnb_unavailable": "the CNB rate for the new date could not be fetched."
+    },
+    "exchange_rate_source": {
+      "cnb": "daily CNB rate",
+      "fixed": "fixed period rate (§ 24/7)",
+      "import": "from document / import",
+      "idoklad": "from import (iDoklad)",
+      "fakturoid": "from import (Fakturoid)",
+      "user": "entered by user",
+      "manual": "unknown / historical"
     },
     "classification": {
       "title": "Classification",

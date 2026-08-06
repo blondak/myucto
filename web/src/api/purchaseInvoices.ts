@@ -14,7 +14,33 @@ export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'adva
  */
 export const PURCHASE_DOCUMENT_KINDS: PurchaseDocumentKind[] =
   ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document']
-export type ExchangeRateSource = 'cnb' | 'manual' | 'idoklad' | 'fakturoid'
+/**
+ * Kdo kurz na dokladu nastavil (migrace 1303). Rozhoduje o tom, jestli ho smí přepsat
+ * automatické přenačtení po změně rozhodného data (DUZP) nebo měny:
+ *   - `cnb`, `fixed` = odvozeno z data (denní kurz ČNB / pevný kurz §24/7) → přepíše se
+ *   - `import`, `idoklad`, `fakturoid` = přinesl cizí systém nebo doklad dodavatele → nepřepíše
+ *   - `manual` = DEPRECATED, „neznámý / historický zápis" → nepřepíše
+ *   - `user` = člověk vepsal kurz do formuláře → nepřepíše nikdy
+ */
+export type ExchangeRateSource = 'cnb' | 'manual' | 'idoklad' | 'fakturoid' | 'fixed' | 'import' | 'user'
+
+/** Kurz, který server po změně rozhodného data / měny sám dosadil. */
+export interface ResolvedExchangeRateMeta {
+  currency: string
+  rate: number
+  rate_date: string
+  fallback_used: boolean
+  source: 'cache' | 'fresh' | 'last_known' | 'fixed'
+  fixed_missing: boolean
+}
+
+/** Proč se kurz po změně rozhodného data / měny NEpřenačetl. */
+export interface ExchangeRateNotReloadedMeta {
+  reason: 'source_locked' | 'cnb_unavailable'
+  rate: number | null
+  rate_date: string | null
+  source: ExchangeRateSource
+}
 /** Provenience platebního účtu pro QR platbu (viz migrace 0107). */
 export type PaymentAccountSource = 'isdoc' | 'ai' | 'ai_reextract' | 'qr_image' | 'manual'
 
@@ -366,6 +392,11 @@ export interface PurchaseInvoice {
   /** Detaily k vybraným `_warnings` kódům pro interpolaci v UI (§C kurz vs ČNB). */
   _warning_meta?: {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
+    exchange_rate_not_reloaded?: ExchangeRateNotReloadedMeta
+  }
+  /** Metadata k serverem provedenému přenačtení kurzu (migrace 1303). */
+  _meta?: {
+    exchange_rate?: ResolvedExchangeRateMeta
   }
   // Joined fields
   vendor_company_name?: string
@@ -628,7 +659,7 @@ export const purchaseInvoicesApi = {
   setItems: (id: number, items: PurchaseInvoicePayload['items']) =>
     api.put<PurchaseInvoice>(`/purchase-invoices/${id}/items`, { items }).then(r => r.data),
 
-  setExchangeRate: (id: number, rate: number | null, rateDate: string | null, source: ExchangeRateSource = 'manual') =>
+  setExchangeRate: (id: number, rate: number | null, rateDate: string | null, source: ExchangeRateSource = 'user') =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/exchange-rate`, {
       rate, rate_date: rateDate, source,
     }).then(r => r.data),

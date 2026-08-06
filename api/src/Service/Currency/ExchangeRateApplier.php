@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Support\ExchangeRateDate;
 
 /**
  * Po každém Create/Update faktury: pokud měna ≠ CZK, zjistí kurz CNB pro issue_date
@@ -38,12 +39,13 @@ final class ExchangeRateApplier
     public function applyToInvoice(int $invoiceId): ?array
     {
         // Kurz se váže k DUZP (§ 4 odst. 5 / § 8 ZDPH — den vzniku daňové povinnosti),
-        // ne k datu vystavení. Fallback na issue_date, když DUZP chybí.
+        // ne k datu vystavení. Fallback na issue_date řeší SSOT ExchangeRateDate.
+        $rateDate = ExchangeRateDate::invoiceSql('i');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.supplier_id, COALESCE(i.tax_date, i.issue_date) AS rate_date, cur.code AS currency
+            "SELECT i.supplier_id, {$rateDate} AS rate_date, cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.id = ?'
+              WHERE i.id = ?"
         );
         $stmt->execute([$invoiceId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -154,13 +156,14 @@ final class ExchangeRateApplier
      */
     public function ensureRate(int $invoiceId, bool $persist = true): ?array
     {
+        $rateDate = ExchangeRateDate::invoiceSql('i');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.supplier_id, i.exchange_rate,
-                    COALESCE(i.tax_date, i.issue_date) AS rate_date,
+            "SELECT i.supplier_id, i.exchange_rate,
+                    {$rateDate} AS rate_date,
                     cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.id = ?'
+              WHERE i.id = ?"
         );
         $stmt->execute([$invoiceId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);

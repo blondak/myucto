@@ -689,7 +689,10 @@ final class IdokladImportService
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId($currencyCode, $supplierId, isActive: false),
             'exchange_rate'         => self::idokladExchangeRate($i),
-            'exchange_rate_source'  => 'manual',
+            // Kurz přinesl cizí systém, není odvozený z data (migrace 1303) → automatické
+            // přenačtení po změně DUZP ho nepřepíše. ('idoklad' zůstává jen pro historii —
+            // nikdy se nezapsal a chová se stejně jako 'import'.)
+            'exchange_rate_source'  => 'import',
             'reverse_charge'        => $reverseCharge,
             'language'              => 'cs',
             'items'                 => $items,
@@ -886,7 +889,8 @@ final class IdokladImportService
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId($currencyCode, $supplierId, isActive: false),
             'exchange_rate'         => self::idokladExchangeRate($i),
-            'exchange_rate_source'  => 'manual',
+            // Kurz přinesl cizí systém, není odvozený z data (migrace 1303).
+            'exchange_rate_source'  => 'import',
             'reverse_charge'        => $reverseCharge,
             // Neznámý dodavatel (hotovostní účtenka) → bez nároku na odpočet DPH. Import jde přes
             // createDraft(), který NEuplatňuje auto-none z CreatePurchaseInvoiceAction, proto explicitně.

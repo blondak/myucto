@@ -18248,7 +18248,17 @@ components:
         currency_symbol: { type: string }
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
-        exchange_rate_source: { type: string, enum: [cnb, manual, idoklad, fakturoid] }
+        exchange_rate_source:
+          type: string
+          enum: [cnb, manual, idoklad, fakturoid, fixed, import, user]
+          description: |
+            Kdo kurz nastavil. Rozhoduje o tom, jestli ho smí přepsat automatické
+            přenačtení po změně rozhodného data (DUZP, s fallbackem na vystavení) nebo měny:
+            `cnb` a `fixed` (pevný kurz období § 24/7) jsou odvozené z data → přenačtou se;
+            `import` (kurz z dokladu dodavatele nebo cizího systému) a `user` (člověk zadal
+            kurz ve formuláři) se nepřepisují. `manual` je DEPRECATED — znamená „neznámý /
+            historický zápis" a chová se jako `import`; `idoklad`/`fakturoid` jsou
+            DEPRECATED a nikdy se nezapsaly.
         reverse_charge: { type: boolean }
         vat_deduction:
           type: string
@@ -18407,7 +18417,16 @@ components:
         currency_id: { type: integer }
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
-        exchange_rate_source: { type: string, enum: [cnb, manual, idoklad, fakturoid], default: cnb }
+        exchange_rate_source:
+          type: string
+          enum: [cnb, manual, idoklad, fakturoid, fixed, import, user]
+          default: manual
+          description: |
+            Kdo kurz nastavil — viz `PurchaseInvoice.exchange_rate_source`. Když pole
+            nepošlete, uloží se `manual` („neznámý původ"), takže automatické přenačtení
+            kurzu po změně rozhodného data doklad NEpřepíše. Chcete-li přenačítání povolit,
+            pošlete `cnb`. Při aktualizaci dokladu (PUT) se sloupec zapisuje jen tehdy,
+            když je pole v těle přítomné — jinak zůstává uložená hodnota.
         reverse_charge: { type: boolean, default: false }
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
         expense_category_id: { type: [integer, "null"], description: "Kategorie nákladu. Když chybí, na create se odvodí z default kategorie dodavatele." }

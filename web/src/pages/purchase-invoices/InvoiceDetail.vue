@@ -888,7 +888,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
         <dl class="space-y-2 text-sm">
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
           <div v-if="invoice.exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }}</dt><dd class="font-mono">{{ invoice.exchange_rate }}</dd></div>
-          <div v-if="invoice.exchange_rate_date" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ invoice.exchange_rate_source }}</dd></div>
+          <div v-if="invoice.exchange_rate_date" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ t(`purchase_invoice.exchange_rate_source.${invoice.exchange_rate_source}`) }}</dd></div>
           <div v-if="invoice.reverse_charge" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.reverse_charge') }}</dt><dd class="text-warning-600 font-medium">✓</dd></div>
           <div class="flex justify-between pt-2 border-t border-neutral-100">
             <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>

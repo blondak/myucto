@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Currency;
 use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
+use MyInvoice\Support\ExchangeRateDate;
 use PDO;
 use Throwable;
 
@@ -187,11 +188,19 @@ final class CnbRateDeviationChecker
      * {@see \MyInvoice\Repository\ClosingRepository::unpostedInvoices()}/`unpostedPurchases()`
      * (draft/cancelled a proforma/advance nedávají smysl pro účetní audit).
      *
+     * Rozhodný den kurzu bere ze SSOT {@see ExchangeRateDate}. U přijatých faktur se dřív
+     * používal `effective_cost_date` — to je ale GREATEST(DUZP, vystavení) z migrace 1010,
+     * tedy datum uznání NÁKLADU. U dokladu s DUZP dřívějším než vystavení se ptal ČNB na
+     * jiný den, než ke kterému kurz na dokladu patří, a hlásil falešnou odchylku. Větev
+     * `invoices` používá `effective_tax_date` (migrace 1009) — to je týž výraz jako SSOT,
+     * jen sargovatelný, takže zůstává (rozsahový filtr běží po indexu).
+     *
      * @return list<array{doc_type:'invoice'|'purchase_invoice', id:int, doc_no:?string,
      *                     currency:string, exchange_rate:float, rate_date:string, total_with_vat:float}>
      */
     private function candidateDocs(int $supplierId, string $from, string $to): array
     {
+        $purchaseRateDate = ExchangeRateDate::purchaseSql('pi');
         $stmt = $this->db->pdo()->prepare(
             "SELECT 'invoice' AS doc_type, i.id AS id, i.varsymbol AS doc_no, cur.code AS currency,
                     i.exchange_rate AS exchange_rate, i.effective_tax_date AS rate_date,
@@ -205,7 +214,7 @@ final class CnbRateDeviationChecker
                 AND i.effective_tax_date BETWEEN ? AND ?
              UNION ALL
              SELECT 'purchase_invoice' AS doc_type, pi.id AS id, pi.varsymbol AS doc_no, cur2.code AS currency,
-                    pi.exchange_rate AS exchange_rate, pi.effective_cost_date AS rate_date,
+                    pi.exchange_rate AS exchange_rate, {$purchaseRateDate} AS rate_date,
                     pi.total_with_vat AS total_with_vat
                FROM purchase_invoices pi
                JOIN currencies cur2 ON cur2.id = pi.currency_id
@@ -213,7 +222,7 @@ final class CnbRateDeviationChecker
                 AND pi.exchange_rate IS NOT NULL AND pi.exchange_rate > 0
                 AND pi.status NOT IN ('draft','cancelled')
                 AND pi.document_kind <> 'advance'
-                AND pi.effective_cost_date BETWEEN ? AND ?
+                AND {$purchaseRateDate} BETWEEN ? AND ?
               ORDER BY doc_type, id"
         );
         $stmt->execute([$supplierId, $from, $to, $supplierId, $from, $to]);

@@ -805,7 +805,9 @@ final class AiPdfExtractor
             'received_at_source'    => 'import',
             'currency_id'           => $this->resolveCurrencyId((string) $data['currency'], $supplierId),
             'exchange_rate'         => null,
-            'exchange_rate_source'  => 'manual',
+            // Kurz nese doklad dodavatele, ne odvození z data (migrace 1303) → automatické
+            // přenačtení po změně DUZP ho nepřepíše.
+            'exchange_rate_source'  => 'import',
             'reverse_charge'        => $reverseCharge,
             // Explicitní klasifikace RC dokladu (issue #116) — hlavička jako default,
             // řádky mají tentýž kód nastavený výše.
