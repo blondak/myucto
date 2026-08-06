@@ -22,6 +22,7 @@ use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
+use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\IpMatcher;
@@ -150,6 +151,20 @@ final class UpdatePurchaseInvoiceAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
+        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
+        // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
+        // a `financial_change_not_allowed` níž. 400 `validation_failed` je v téhle codebase
+        // vyhrazené pro schéma pole po poli (nese mapu `fields`).
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+            return Json::error(
+                $response,
+                DocumentItemsPayload::EMPTY_ERROR_CODE,
+                DocumentItemsPayload::emptyErrorMessage(),
+                422,
+            );
+        }
+
         // BOLA guard (security report 2026-08, R2 #5 / sweep F5) — vendor_id má vlastní
         // kontrolu hned pod tím, zbylé tři FK z těla se dosud zapisovaly nevázané
         // (PurchaseInvoiceValidation kontroluje jen `> 0`).
@@ -244,7 +259,11 @@ final class UpdatePurchaseInvoiceAction
                     409,
                 );
             }
-            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+            // Jen když tělo položky opravdu poslalo — jinak by částečný PUT (samotné DUZP,
+            // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
+            if (DocumentItemsPayload::replaces($body)) {
+                $this->repo->replaceItems($id, (array) $body['items']);
+            }
             // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
             // kalkulátor zapekl do řádkových totálů.
             if (array_key_exists('vat_overrides', $body)) {
@@ -435,8 +454,10 @@ final class UpdatePurchaseInvoiceAction
 
     /**
      * B11: účetní pole PF, která se v requestu reálně mění proti uloženému dokladu.
-     * Porovnává hodnotu (ne přítomnost). Položky, ruční rekapitulace DPH (vat_overrides)
-     * i ruční rounding jsou vždy účetní změny.
+     * Porovnává hodnotu (ne přítomnost) — a to včetně POLOŽEK ({@see DocumentItemsPayload::changed()}).
+     * Ruční rekapitulace DPH (`vat_overrides`) a alokace (`vat_allocations`) zůstávají
+     * účetní změnou už svou přítomností: jsou to vědomé ruční zásahy, které přijdou jen
+     * tehdy, když s nimi někdo hýbe, takže konzervativní čtení tu nic neblokuje.
      *
      * @return list<string>
      */
@@ -460,7 +481,12 @@ final class UpdatePurchaseInvoiceAction
         ) {
             $changed[] = 'exchange_rate';
         }
-        if (array_key_exists('items', $body)) {
+        // Položky se porovnávají OBSAHEM, ne přítomností klíče. Dřív tu stálo pouhé
+        // `array_key_exists`, takže editor — který položky posílá vždycky — vyráběl
+        // „finanční pole se změnila" u každého force-editu, i když se nezměnilo nic.
+        if (DocumentItemsPayload::replaces($body)
+            && DocumentItemsPayload::changed((array) ($existing['items'] ?? []), (array) $body['items'])
+        ) {
             $changed[] = 'items';
         }
         if (array_key_exists('vat_overrides', $body)) {

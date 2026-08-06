@@ -58,7 +58,16 @@ final class SetPurchaseInvoiceItemsAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $items = $body['items'] ?? [];
+        // Tady je `items` CELÝ obsah požadavku, takže chybějící klíč není „položky neměň"
+        // (jak ho čte hlavičkový PUT — {@see \MyInvoice\Service\Invoice\DocumentItemsPayload}),
+        // ale vada požadavku. Bez toho by `{}` tiše smazalo všechny řádky. Explicitní
+        // prázdné pole naopak PROJDE: je to jednoznačný pokyn a endpoint jede jen nad
+        // draftem, kde je doklad bez řádků pracovní stav, ne tichá nula v účetnictví.
+        if (!array_key_exists('items', $body) || $body['items'] === null) {
+            return Json::error($response, 'validation_failed', 'Validace selhala', 400,
+                ['fields' => ['items' => ['items je povinné']]]);
+        }
+        $items = $body['items'];
         if (!is_array($items)) {
             return Json::error($response, 'validation_failed', 'items musí být pole', 400, ['fields' => ['items' => ['items musí být pole']]]);
         }

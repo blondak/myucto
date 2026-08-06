@@ -148,9 +148,122 @@ final class PurchaseRateRepostForceEditTest extends TestCase
             'Korunové částky v deníku musí odpovídat novému kurzu.');
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: `financialFieldsChanged()` počítala `items` jako změnu už podle
+     * PŘÍTOMNOSTI klíče, takže každý force-edit z editoru (ten položky posílá vždycky)
+     * vypadal jako změna účetních polí a deník se přeúčtovával, i když se nezměnilo nic.
+     * Vedlejším efektem bylo, že druhý operand v rozhodování o přeúčtování
+     * (`|| $rateDecision['rate_will_change']`) nešlo v testu izolovat — první byl vždy true.
+     */
+    public function testForceEditWithUnchangedItemsDoesNotRepost(): void
+    {
+        $id = $this->postedEurPurchase();
+        $entryBefore = $this->journal->findBySource($this->supplierId, 'purchase_invoice', $id);
+        self::assertNotNull($entryBefore, 'Doklad musí být zaúčtovaný, jinak test netestuje nic.');
+
+        // Tělo z editoru: všechna účetní pole v uložené podobě, mění se jen poznámka.
+        $body = $this->storedBody($id) + [];
+        $body['note_above_items'] = 'Jen poznámka — účetně se nemění nic.';
+
+        $result = $this->invokeForce($id, $body);
+        self::assertSame(200, $result['status'], json_encode($result['body'], JSON_UNESCAPED_UNICODE));
+
+        self::assertArrayNotHasKey('_repost', $result['body'],
+            'Nezměnilo se žádné účetní pole ani kurz — deník se přeúčtovávat nemá.');
+        self::assertSame(
+            (int) $entryBefore['id'],
+            (int) ($this->journal->findBySource($this->supplierId, 'purchase_invoice', $id)['id'] ?? 0),
+            'Zápis v deníku musí zůstat týž.',
+        );
+    }
+
+    /**
+     * Izoluje DRUHÝ operand rozhodnutí o přeúčtování: `|| $rateDecision['rate_will_change']`.
+     *
+     * Korunový doklad si nese kurz (legacy řádek před migrací 1304). Force-edit nemění
+     * jediné účetní pole — kurzové sloupce ale přepíše SERVER, takže o přeúčtování musí
+     * rozhodnout právě `rate_will_change`. Odstraň ten operand a test padne.
+     *
+     * Takový stav šlo nastavit teprve po opravě porovnávání položek: dokud `items` platily
+     * za změnu už svou přítomností, byl první operand vždy true a druhý nešlo izolovat.
+     */
+    public function testRateResetAloneRepostsEvenWithoutAnyFieldChange(): void
+    {
+        $id = $this->postedCzkPurchaseWithStrayRate();
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'purchase_invoice', $id));
+
+        $body = $this->storedBody($id);
+
+        $result = $this->invokeForce($id, $body);
+        self::assertSame(200, $result['status'], json_encode($result['body'], JSON_UNESCAPED_UNICODE));
+
+        self::assertNull($this->rateRow($id)['exchange_rate'],
+            'Korunový doklad kurz mít nesmí — server ho vynuloval, jinak test netestuje nic.');
+        self::assertArrayHasKey('_repost', $result['body'],
+            'Kurzový zásah SERVERU musí zachytit `rate_will_change` — v těle requestu není.');
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────────
 
+    /**
+     * Tělo requestu složené z ULOŽENÉHO dokladu — přesně to, co pošle editor, když
+     * uživatel na účetních polích nic nezměnil.
+     *
+     * @return array<string,mixed>
+     */
+    private function storedBody(int $id): array
+    {
+        $row = $this->container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class)
+            ->find($id, $this->supplierId);
+        self::assertNotNull($row);
+
+        return [
+            'vendor_id' => (int) $row['vendor_id'],
+            'vendor_invoice_number' => (string) $row['vendor_invoice_number'],
+            'document_kind' => (string) $row['document_kind'],
+            'issue_date' => (string) $row['issue_date'],
+            'tax_date' => (string) $row['tax_date'],
+            'due_date' => (string) $row['due_date'],
+            'received_at' => (string) $row['received_at'],
+            'currency_id' => (int) $row['currency_id'],
+            'exchange_rate' => $row['exchange_rate'],
+            'exchange_rate_date' => $row['exchange_rate_date'],
+            'exchange_rate_source' => (string) $row['exchange_rate_source'],
+            'vat_classification_code' => (string) $row['vat_classification_code'],
+            'items' => array_map(static fn (array $it): array => [
+                'description' => $it['description'],
+                'quantity' => $it['quantity'],
+                'unit' => $it['unit'],
+                'unit_price_without_vat' => $it['unit_price_without_vat'],
+                'vat_rate_id' => $it['vat_rate_id'],
+                'vat_classification_code' => $it['vat_classification_code'],
+            ], $row['items']),
+        ];
+    }
+
     private function postedEurPurchase(): int
+    {
+        return $this->postedPurchase($this->eurId);
+    }
+
+    /**
+     * Korunový doklad, který si (jako legacy řádky před migrací 1304) nese kurz.
+     * Přenačtení kurzu ho MUSÍ vynulovat, i když se v požadavku nezmění vůbec nic —
+     * a korunová hodnota zápisu se tím dotkne, takže se deník má přeúčtovat.
+     */
+    private function postedCzkPurchaseWithStrayRate(): int
+    {
+        $czkId = (int) ($this->db->pdo()->query(
+            "SELECT id FROM currencies WHERE supplier_id = {$this->supplierId} AND code = 'CZK' LIMIT 1"
+        )->fetchColumn() ?: 0);
+        if ($czkId === 0) {
+            self::markTestSkipped('Dodavatel nemá měnu CZK.');
+        }
+
+        return $this->postedPurchase($czkId);
+    }
+
+    private function postedPurchase(int $currencyId): int
     {
         $pdo = $this->db->pdo();
         $with = self::BASE_EUR;
@@ -165,7 +278,8 @@ final class PurchaseRateRepostForceEditTest extends TestCase
         )->execute([
             $this->supplierId, $this->vendorId, 'REPOST-' . bin2hex(random_bytes(3)),
             $this->oldTaxDate, $this->oldTaxDate, $this->oldTaxDate, $this->oldTaxDate,
-            $this->eurId, self::OLD_RATE, $this->oldTaxDate, $with, $with, $this->userId,
+            $currencyId, self::OLD_RATE, $this->oldTaxDate,
+            $with, $with, $this->userId,
         ]);
         $id = (int) $pdo->lastInsertId();
 
@@ -191,19 +305,9 @@ final class PurchaseRateRepostForceEditTest extends TestCase
     /** @return array{status:int, body:array<string,mixed>} */
     private function forceUpdate(int $id, string $taxDate): array
     {
-        $cnb = $this->createStub(CnbExchangeRateClient::class);
-        $cnb->method('getRate')->willReturnCallback(
-            static fn (string $code, DateTimeImmutable $date): array => [
-                'rate' => self::NEW_RATE, 'rate_date' => $date->format('Y-m-d'),
-                'fallback_used' => false, 'source' => 'fresh',
-            ]
-        );
-        $this->container->set(CnbExchangeRateClient::class, $cnb);
-        $action = $this->container->get(UpdatePurchaseInvoiceAction::class);
-
         // Tělo přesně jako z editoru: kurzová pole nese, ale se STAROU hodnotou —
         // novou dosadí až server.
-        $body = [
+        return $this->invokeForce($id, [
             'vendor_id' => $this->vendorId,
             'vendor_invoice_number' => 'REPOST-UPDATED',
             'document_kind' => 'invoice',
@@ -220,7 +324,24 @@ final class PurchaseRateRepostForceEditTest extends TestCase
                 'unit_price_without_vat' => self::BASE_EUR, 'vat_rate_id' => $this->vatRateId,
                 'vat_classification_code' => '40',
             ]],
-        ];
+        ]);
+    }
+
+    /**
+     * @param  array<string,mixed> $body
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function invokeForce(int $id, array $body): array
+    {
+        $cnb = $this->createStub(CnbExchangeRateClient::class);
+        $cnb->method('getRate')->willReturnCallback(
+            static fn (string $code, DateTimeImmutable $date): array => [
+                'rate' => self::NEW_RATE, 'rate_date' => $date->format('Y-m-d'),
+                'fallback_used' => false, 'source' => 'fresh',
+            ]
+        );
+        $this->container->set(CnbExchangeRateClient::class, $cnb);
+        $action = $this->container->get(UpdatePurchaseInvoiceAction::class);
 
         $req = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/purchase-invoices/' . $id)

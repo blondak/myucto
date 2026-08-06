@@ -135,6 +135,10 @@ final class CreateInvoiceAction
             throw $e;
         }
         try {
+            // ZÁMĚRNĚ bezpodmínečně, na rozdíl od PUT ({@see \MyInvoice\Service\Invoice\DocumentItemsPayload}):
+            // založení nemá co smazat a vzniká `draft`, kde je doklad bez řádků pracovní
+            // stav. Doklad bez jediné položky se zastaví až tam, kde by se stal účetním
+            // faktem — při vystavení, a u migrace dat rovnou v importu.
             $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
         } catch (\InvalidArgumentException $e) {
             // Neplatná vazba řádku na kartu majetku (1177). Rozdělaný draft po sobě uklidíme —

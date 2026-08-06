@@ -19,6 +19,7 @@ use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
+use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
@@ -117,6 +118,21 @@ final class UpdateInvoiceAction
             if (in_array($existing['invoice_type'], ['cancellation'], true)) {
                 return Json::error($response, 'not_editable', 'Storno doklad nelze editovat.', 409);
             }
+        }
+
+        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
+        // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
+        // níž. 400 `validation_failed` je tu vyhrazené pro schéma pole po poli (mapa `fields`).
+        // Musí to být PŘED přečíslováním při změně typu: to už sahá na čítač řady, takže
+        // pozdější odmítnutí by po sobě nechalo spálené číslo.
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+            return Json::error(
+                $response,
+                DocumentItemsPayload::EMPTY_ERROR_CODE,
+                DocumentItemsPayload::emptyErrorMessage(),
+                422,
+            );
         }
 
         // B11 (audit 2026-07): force-edit dokladu s AKTIVNÍM zaúčtovaným zápisem v UZAVŘENÉM
@@ -286,9 +302,16 @@ final class UpdateInvoiceAction
         // z téhož SSOT ({@see OssDocumentCoherence}). Počítá se při KAŽDÉM uložení, takže
         // příznak vzniká i zaniká podle toho, jak doklad vypadá teď: opravou sazby rozpor
         // zmizí a tuzemský řádek se odznačí sám (`replaceItems()` je DELETE + INSERT).
-        $items = (array) ($body['items'] ?? []);
-        $contradiction = OssDocumentCoherence::flagItems($items, $this->repo->vatRateMap());
-        $body['items'] = $items;
+        //
+        // Jen když tělo položky opravdu poslalo: bezpodmínečné `$body['items'] = $items`
+        // dosadilo prázdné pole i do těla, které klíč vůbec nemělo, a `replaceItems()` níž
+        // pak doklad vyprázdnil ({@see DocumentItemsPayload}).
+        $contradiction = null;
+        if (DocumentItemsPayload::replaces($body)) {
+            $items = (array) $body['items'];
+            $contradiction = OssDocumentCoherence::flagItems($items, $this->repo->vatRateMap());
+            $body['items'] = $items;
+        }
 
         try {
             // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
@@ -311,7 +334,9 @@ final class UpdateInvoiceAction
             throw $e;
         }
         try {
-            $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+            if (DocumentItemsPayload::replaces($body)) {
+                $this->repo->replaceItems($id, (array) $body['items']);
+            }
         } catch (\InvalidArgumentException $e) {
             // Neplatná vazba řádku na kartu majetku (1177) — hlavička je už uložená, ale položky
             // zůstaly nedotčené (validace běží před DELETE), takže doklad je konzistentní.
@@ -536,7 +561,7 @@ final class UpdateInvoiceAction
                 $changed[] = preg_replace('/_id$/', '', $col); // client_id → client
             }
         }
-        if (self::itemsChanged((array) ($old['items'] ?? []), (array) ($new['items'] ?? []))) {
+        if (DocumentItemsPayload::changed((array) ($old['items'] ?? []), (array) ($new['items'] ?? []))) {
             $changed[] = 'items';
         }
         return $changed;
@@ -569,26 +594,12 @@ final class UpdateInvoiceAction
         ) {
             $changed[] = 'exchange_rate';
         }
-        if (array_key_exists('items', $body)
-            && self::itemsChanged((array) ($existing['items'] ?? []), (array) $body['items'])
+        if (DocumentItemsPayload::replaces($body)
+            && DocumentItemsPayload::changed((array) ($existing['items'] ?? []), (array) $body['items'])
         ) {
             $changed[] = 'items';
         }
         return $changed;
-    }
-
-    /** Porovná položky podle uživatelsky viditelných polí (popis/množství/cena/sazba). */
-    private static function itemsChanged(array $old, array $new): bool
-    {
-        $project = static fn (array $it): array => [
-            (string) ($it['description'] ?? ''),
-            (string) ($it['quantity'] ?? ''),
-            (string) ($it['unit'] ?? ''),
-            (string) ($it['unit_price_without_vat'] ?? ''),
-            (string) ($it['vat_rate_id'] ?? ''),
-        ];
-
-        return array_map($project, array_values($old)) !== array_map($project, array_values($new));
     }
 
     /**

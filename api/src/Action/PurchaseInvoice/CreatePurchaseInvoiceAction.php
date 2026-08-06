@@ -159,6 +159,10 @@ final class CreatePurchaseInvoiceAction
         if ($ownTransaction) $pdo->beginTransaction();
         try {
             $id = $this->repo->createDraft($body, $userId, $supplierId);
+            // ZÁMĚRNĚ bezpodmínečně, na rozdíl od PUT ({@see \MyInvoice\Service\Invoice\DocumentItemsPayload}):
+            // založení nemá co smazat a vzniká `draft`, kde je doklad bez řádků pracovní
+            // stav — týž výklad, jaký import používá pro přijaté faktury. Ostatně u přijaté
+            // faktury se hlavička často pořizuje z PDF dřív než řádky.
             $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
             if (array_key_exists('vat_overrides', $body)) {
                 $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);

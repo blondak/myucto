@@ -823,6 +823,12 @@ paths:
     put:
       tags: [Invoices]
       summary: Aktualizace draftu
+      description: |
+        Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
+        jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
+        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
+        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
+        (DELETE + INSERT), takže payload musí nést kompletní seznam.
       requestBody:
         required: true
         content:
@@ -836,6 +842,11 @@ paths:
               schema: { $ref: '#/components/schemas/Invoice' }
         '409':
           description: Faktura už není draft (vystavená/storno) — nelze editovat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4809,6 +4820,13 @@ paths:
     put:
       tags: [Purchase invoices]
       summary: Update přijaté faktury (jen draft)
+      description: |
+        Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
+        jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
+        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
+        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
+        (DELETE + INSERT), takže payload musí nést kompletní seznam. Vyprázdnit řádky
+        draftu lze dedikovaným `PUT /api/v1/purchase-invoices/{id}/items`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
@@ -4827,6 +4845,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseInvoice' }
         '409': { description: Not editable }
+        '422':
+          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     delete:
       tags: [Purchase invoices]
       summary: Smaže draft (vystavené faktury použij transition cancel)
@@ -4839,6 +4862,11 @@ paths:
     put:
       tags: [Purchase invoices]
       summary: Přepíše položky a přepočte sumy
+      description: |
+        Klíč `items` je povinný — na rozdíl od hlavičkového `PUT /purchase-invoices/{id}`
+        tu není „nepošlu = neměň", takže jeho vynechání vrátí 400. Prázdné pole `items: []`
+        naopak projde a řádky draftu smaže; je to jednoznačný pokyn a doklad bez řádků je
+        u konceptu pracovní stav.
       parameters:
         - in: path
           name: id
@@ -4851,6 +4879,7 @@ paths:
           application/json:
             schema:
               type: object
+              required: [items]
               properties:
                 items:
                   type: array
@@ -4861,6 +4890,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+        '400':
+          description: Chybí klíč `items`, nebo neplatné řádky
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { description: Položky lze upravovat jen u konceptu }
 
   /api/v1/purchase-invoices/{id}/exchange-rate:
     post:
@@ -5356,6 +5391,9 @@ paths:
         na konfiguraci zkušebního prostředí přímého podepsaného API.
         Pokud klient odkaz ztratí, může vědomě zrušit aktivní pokus a vytvořit
         nový pomocí `replace_active`.
+        OSS přiznání (`ossei1`) se touto cestou podat nedá — podává se
+        v samostatné aplikaci MOSS/OSS daňového portálu, do které se uživatel
+        musí přihlásit. Operace ho odmítne s chybou `moss_oss_only` (422).
       requestBody:
         required: false
         content:
@@ -5398,6 +5436,10 @@ paths:
         a není dostupný ke stažení. Typy S, K a E test blokují; propustné N/P se
         vracejí jako upozornění. Operace nečiní daňové podání a vyžaduje
         session step-up heslem a případně TOTP.
+        OSS přiznání (`ossei1`) touto cestou projít nemůže — přímé podání míří
+        na týž endpoint jako asistované předání a portál písemnost odmítne
+        s tím, že uživatel musí být přihlášený v aplikaci MOSS/OSS. Operace ho
+        proto odmítne s chybou `moss_oss_only` (422) dřív, než sáhne na klíč.
       requestBody:
         required: true
         content:
@@ -5435,6 +5477,8 @@ paths:
         `uncertain` a nikdy automaticky neopakuje POST. Při `epo_test=true`
         odešle pouze do zkušebního prostředí a snapshot neoznačí jako právně
         podaný.
+        OSS přiznání (`ossei1`) se ani touto cestou podat nedá — odmítne se
+        s chybou `moss_oss_only` (422), viz `epo-test`.
       requestBody:
         required: true
         content:
@@ -17983,6 +18027,12 @@ components:
               vat_rate_id: { type: integer }
               vat_rate_percent: { type: number, format: float }
               order_index: { type: integer }
+              oss_applicable:
+                type: boolean
+                description: "Uložené rozhodnutí „tenhle řádek se na vygenerované faktuře vykáže v OSS\". Chybí-li na instanci migrace 1297, pole se nevrací."
+              oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
+              oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
+              oss_supply_type: { type: [string, "null"], enum: [goods, services, null] }
 
     RecurringTemplateInput:
       type: object
@@ -18056,6 +18106,23 @@ components:
               unit_price_without_vat: { type: number, format: float, description: "Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
               vat_rate_id: { type: integer }
               order_index: { type: integer }
+              oss_applicable:
+                type: boolean
+                default: false
+                description: "Uložené OSS rozhodnutí pro řádek generované faktury. Při generování má přednost před automatickým odvozením — s jedinou výjimkou: nemá-li dodavatel k datu plnění generovaného dokladu platnou registraci do OSS, rozhodnutí se nepoužije, řádek zůstane tuzemský a dostane `oss_needs_manual_review`. Uložení položek je DELETE + INSERT, takže co se nepošle, to se ztratí."
+              oss_consumer_country:
+                type: [string, "null"]
+                minLength: 2
+                maxLength: 2
+                description: "Stát spotřeby (ISO2). Povinný pro `oss_applicable: true` — bez něj server řádek uloží jako NE-OSS (`oss_applicable: false`), protože takovou položku by cron při každém běhu vyrobil neplatnou."
+              oss_rate_type:
+                type: [string, "null"]
+                enum: [standard, reduced, second_reduced, parking, null]
+                description: "NULL je legitimní stav; při generování se ho pokusí doplnit odvození, ale jedině když mluví o TÉŽE zemi spotřeby."
+              oss_supply_type:
+                type: [string, "null"]
+                enum: [goods, services, null]
+                description: "NULL = doplní se při generování (odvození, jinak „services\")."
 
     # ========================================================================
     # Purchase invoices (přijaté faktury) — fáze 1 integrace forku

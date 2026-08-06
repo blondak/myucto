@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
@@ -42,6 +43,7 @@ final class ForceEditReconcileTest extends TestCase
     private PostingService $posting;
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
+    private InvoiceRepository $invoices;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -67,6 +69,7 @@ final class ForceEditReconcileTest extends TestCase
             $this->posting       = $container->get(PostingService::class);
             $this->journal       = $container->get(JournalEntryRepository::class);
             $this->periods       = $container->get(AccountingPeriodRepository::class);
+            $this->invoices      = $container->get(InvoiceRepository::class);
             $seeder              = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -143,6 +146,41 @@ final class ForceEditReconcileTest extends TestCase
 
         self::assertSame(422, $res['status'], 'notes_only se změnou částky → 422.');
         self::assertSame('financial_change_not_allowed', $res['body']['error']['code'] ?? null);
+    }
+
+    /**
+     * Změna JEN země spotřeby na OSS řádku je účetní změna, i když se částka nehnula:
+     * plnění se přesune do jiného řádku OSS podání a DPH se zaúčtuje jinam (345.100,
+     * migrace 1295). Otisk položek to musí zachytit
+     * ({@see \MyInvoice\Service\Invoice\DocumentItemsPayload}) — jinak by notes_only
+     * doklad rozešel s deníkem i s hlášením a nikdo by se to nedozvěděl.
+     */
+    public function testNotesOnlyWithOssCountryChangeReturns422(): void
+    {
+        if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
+            $this->markTestSkipped('Instance bez OSS sloupců (migrace 0137).');
+        }
+        $invoiceId = $this->postedOssInvoiceInClosedPeriod('FV-B11-OSS1');
+        $existing = $this->invoices->find($invoiceId, $this->supplierId);
+        self::assertNotNull($existing);
+
+        // Tělo je s uloženým řádkem shodné ve VŠEM kromě země spotřeby — kdyby otisk OSS
+        // pole neznal, prošlo by to jako čistě poznámková editace.
+        $moved = ['items' => [$this->ossItemPayload('AT')]];
+        $same  = ['items' => [$this->ossItemPayload('DE')]];
+
+        // Rozhodovací funkce nad SKUTEČNĚ uloženým dokladem — bez šumu schéma validace.
+        $ref = new \ReflectionMethod(UpdateInvoiceAction::class, 'financialFieldsChanged');
+        self::assertContains('items', $ref->invoke(null, $moved, $existing),
+            'Změna země spotřeby na OSS řádku je účetní změna (jiný řádek podání, jiné zaúčtování).');
+        self::assertNotContains('items', $ref->invoke(null, $same, $existing),
+            'Týž řádek jen z formuláře (stringy) není změna — jinak by notes_only nešel použít nikdy.');
+
+        $res = $this->invoke($invoiceId, $moved, ['force' => '1', 'force_mode' => 'notes_only']);
+
+        self::assertSame(422, $res['status'], 'notes_only se změnou země spotřeby → 422.');
+        self::assertSame('financial_change_not_allowed', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('items', (string) ($res['body']['error']['message'] ?? ''));
     }
 
     public function testFinancialFieldsChangedDecision(): void
@@ -260,6 +298,52 @@ final class ForceEditReconcileTest extends TestCase
         // Zamkni rok dokladu — pro Action brány (posted zápis v closed období).
         $this->periods->setStatus($this->closedPeriodId, $this->supplierId, 'closed');
         return $invoiceId;
+    }
+
+    /** Týž doklad, ale s OSS řádkem do Německa — pro bránu nad otiskem OSS polí. */
+    private function postedOssInvoiceInClosedPeriod(string $varsymbol): int
+    {
+        $client = $this->client('OSS odběratel ' . $varsymbol);
+        $invoiceId = $this->sale($varsymbol, $client, 1000.00, 210.00, 21.00, $this->closedYear . '-06-15');
+        // OSS řádek nemá tuzemskou klasifikaci — plnění se vykazuje v podání, ne v přiznání
+        // ({@see \MyInvoice\Repository\InvoiceRepository::replaceItems()}).
+        $this->db->pdo()->prepare(
+            'UPDATE invoice_items
+                SET oss_applicable = 1, oss_consumer_country = ?, oss_rate_type = ?,
+                    oss_supply_type = ?, vat_classification_code = NULL
+              WHERE invoice_id = ?'
+        )->execute(['DE', 'standard', 'services', $invoiceId]);
+
+        $lines = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, [
+            'entry_date' => $this->closedYear . '-06-15', 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $this->periods->setStatus($this->closedPeriodId, $this->supplierId, 'closed');
+        return $invoiceId;
+    }
+
+    /**
+     * Řádek tak, jak ho pošle editor: stringy z formuláře a všechna OSS pole, protože
+     * `replaceItems()` je DELETE + INSERT. Liší se jedině země spotřeby.
+     *
+     * @return array<string,mixed>
+     */
+    private function ossItemPayload(string $country): array
+    {
+        return [
+            'description' => 'Test položka', 'quantity' => '1', 'unit' => 'ks',
+            'unit_price_without_vat' => '1000.00', 'vat_rate_id' => (string) $this->vatRateId,
+            'oss_applicable' => true,
+            'oss_consumer_country' => $country,
+            'oss_rate_type' => 'standard',
+            'oss_supply_type' => 'services',
+            'oss_exchange_rate' => null,
+            'oss_exchange_rate_date' => null,
+            'oss_taxable_amount_return' => null,
+            'oss_vat_amount_return' => null,
+            'oss_original_period' => null,
+            'oss_needs_manual_review' => false,
+        ];
     }
 
     /**
