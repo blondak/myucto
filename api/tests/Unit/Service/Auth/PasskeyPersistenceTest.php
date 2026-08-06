@@ -118,6 +118,35 @@ final class PasskeyPersistenceTest extends TestCase
         self::assertNotNull($this->credentials->findAllForUser($this->userId, true)[0]->revokedAt);
     }
 
+    /**
+     * Regrese #4: `WHERE sign_count = ?` je optimistický zámek nad hodnotou z DB.
+     * Autentikátor, který counter zvyšuje (Windows Hello, bezpečnostní klíč), musí
+     * projít; a výsledek assertion, který je TÝŽ objekt jako uložený záznam (tedy
+     * s už přepsaným counterem), musí spadnout nahlas místo tichého `false`.
+     */
+    public function testAssertionUpdateLocksOnCounterFromDatabase(): void
+    {
+        $handle = $this->credentials->userHandle($this->userId);
+        $record = $this->credentialRecord($handle);
+        $this->credentials->save($this->userId, $record, 'Windows Hello');
+
+        $stored = $this->credentials->findActiveByCredentialId($record->publicKeyCredentialId);
+        self::assertNotNull($stored);
+        self::assertSame(0, $stored->record->counter);
+
+        // Přesně to, co vrací PasskeyService: samostatný záznam s novým counterem.
+        $verified = clone $stored->record;
+        $verified->counter = 1;
+        self::assertTrue($this->credentials->updateAfterAssertion($stored, $verified));
+        self::assertSame(
+            1,
+            $this->credentials->findActiveByCredentialId($record->publicKeyCredentialId)?->record->counter,
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->credentials->updateAfterAssertion($stored, $stored->record);
+    }
+
     public function testCredentialLimitIsEnforcedTransactionally(): void
     {
         $handle = $this->credentials->userHandle($this->userId);

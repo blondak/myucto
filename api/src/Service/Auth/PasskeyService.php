@@ -263,12 +263,26 @@ final class PasskeyService
             }
 
             $options = $this->deserializeOptions($storedOptions, PublicKeyCredentialRequestOptions::class);
+            // Knihovna ověřovaný CredentialRecord MUTUJE na místě — přepíše mu
+            // counter, backup bity i uvInitialized. Kdyby dostala přímo uložený
+            // záznam, měl by volající po návratu už NOVÝ counter i tam, kde drží
+            // obraz DB řádku, a optimistický zámek `WHERE sign_count = ?` by
+            // porovnával nový counter sám se sebou. UPDATE pak nesedne na žádný
+            // řádek a přihlášení skončí jako counter anomálie u každého
+            // autentikátoru, který counter reálně zvyšuje (#4).
+            //
+            // Kontrolu proti klonované credential to nijak neoslabuje: tu dělá
+            // CheckCounter nad hodnotou uloženou v záznamu, a ta je tady pořád
+            // ta z databáze. Podle specifikace (ověření assertion, krok se
+            // signature counterem) se kontrola přeskakuje jen tehdy, když je
+            // přijatý i uložený counter nula — autentikátor ho pak nepodporuje.
+            $verified = clone $storedCredential;
             return $this->assertionValidator->check(
-                $storedCredential,
+                $verified,
                 $credential->response,
                 $options,
                 $config->rpId(),
-                $discoverable ? null : $storedCredential->userHandle,
+                $discoverable ? null : $verified->userHandle,
             );
         } catch (\Throwable) {
             throw new PasskeyVerificationException('Ověření passkey selhalo.');

@@ -279,11 +279,7 @@ final class PasskeyCredentialRepository
         StoredPasskeyCredential $stored,
         CredentialRecord $record,
     ): bool {
-        if (!hash_equals($stored->record->publicKeyCredentialId, $record->publicKeyCredentialId)
-            || !hash_equals($stored->record->userHandle, $record->userHandle)
-        ) {
-            throw new \InvalidArgumentException('Výsledek assertion nepatří uložené credential.');
-        }
+        self::assertDistinctAssertionResult($stored, $record);
 
         $stmt = $this->db->pdo()->prepare(
             'UPDATE webauthn_credentials
@@ -311,11 +307,7 @@ final class PasskeyCredentialRepository
         CredentialRecord $record,
         SecurityTime $cutoff,
     ): bool {
-        if (!hash_equals($stored->record->publicKeyCredentialId, $record->publicKeyCredentialId)
-            || !hash_equals($stored->record->userHandle, $record->userHandle)
-        ) {
-            throw new \InvalidArgumentException('Výsledek assertion nepatří uložené credential.');
-        }
+        self::assertDistinctAssertionResult($stored, $record);
         $stmt = $pdo->prepare(
             'UPDATE webauthn_credentials
                 SET sign_count = ?,
@@ -370,6 +362,30 @@ final class PasskeyCredentialRepository
             throw new \InvalidArgumentException('Název passkey musí mít 1 až 100 znaků.');
         }
         return $label;
+    }
+
+    /**
+     * `WHERE sign_count = ?` je optimistický zámek nad hodnotou z DB, takže výsledek
+     * assertion musí být SAMOSTATNÝ záznam. Kdyby to byl tentýž objekt, knihovna by
+     * do něj nový counter zapsala už během ověření a zámek by porovnával novou
+     * hodnotu sama se sebou — UPDATE by nesedl na žádný řádek a přihlášení by
+     * skončilo jako counter anomálie u každého autentikátoru, který counter zvyšuje
+     * (#4). Ať to příště spadne nahlas, ne tiše.
+     */
+    private static function assertDistinctAssertionResult(
+        StoredPasskeyCredential $stored,
+        CredentialRecord $record,
+    ): void {
+        if ($record === $stored->record) {
+            throw new \InvalidArgumentException(
+                'Výsledek assertion musí být samostatný záznam, ne zmutovaná uložená credential.',
+            );
+        }
+        if (!hash_equals($stored->record->publicKeyCredentialId, $record->publicKeyCredentialId)
+            || !hash_equals($stored->record->userHandle, $record->userHandle)
+        ) {
+            throw new \InvalidArgumentException('Výsledek assertion nepatří uložené credential.');
+        }
     }
 
     /**

@@ -153,6 +153,68 @@ final class PasskeyServiceTest extends TestCase
         );
     }
 
+    /**
+     * Regrese #4: knihovna ověřovaný záznam mutuje na místě. Když dostala rovnou
+     * uloženou credential, přepsala jí counter dřív, než ho volající použil jako
+     * klíč optimistického zámku `WHERE sign_count = ?` — UPDATE pak nesedl na
+     * žádný řádek a přihlášení skončilo jako counter anomálie u KAŽDÉHO
+     * autentikátoru, který counter reálně zvyšuje.
+     */
+    public function testAssertionLeavesStoredRecordAtDatabaseState(): void
+    {
+        [$credential, $options, $payload] = $this->signedAssertion(storedCounter: 4, responseCounter: 9);
+
+        $verified = $this->service->verifyAssertion($payload, $options, $credential);
+
+        self::assertNotSame($credential, $verified);
+        self::assertSame(4, $credential->counter, 'Uložený záznam musí zůstat obrazem DB řádku.');
+        self::assertSame(9, $verified->counter);
+    }
+
+    /**
+     * Autentikátor bez podpory counteru (Microsoft Password Manager i další
+     * synchronizované passkeys) posílá vždy 0. Podle WebAuthn L3 se kontrola
+     * counteru přeskakuje, právě když je přijatá i uložená hodnota nula.
+     */
+    public function testZeroSignCountAuthenticatorIsAccepted(): void
+    {
+        [$credential, $options, $payload] = $this->signedAssertion(
+            storedCounter: 0,
+            responseCounter: 0,
+            credentialIdBytes: 16,
+            transports: ['hybrid', 'internal'],
+            backedUp: true,
+        );
+
+        $verified = $this->service->verifyAssertion($payload, $options, $credential);
+
+        self::assertSame(0, $verified->counter);
+        self::assertTrue($verified->backupEligible);
+        self::assertTrue($verified->backupStatus);
+    }
+
+    /**
+     * Ochrana proti klonované credential: jakmile je uložený counter nenulový,
+     * musí přijatá hodnota růst. Stejná i nižší je odmítnutí, ne přihlášení.
+     */
+    public function testNonZeroSignCountMustIncrease(): void
+    {
+        foreach ([5, 3, 0] as $responseCounter) {
+            [$credential, $options, $payload] = $this->signedAssertion(
+                storedCounter: 5,
+                responseCounter: $responseCounter,
+            );
+
+            try {
+                $this->service->verifyAssertion($payload, $options, $credential);
+                self::fail("Counter {$responseCounter} proti uloženému 5 musí být odmítnut.");
+            } catch (PasskeyVerificationException $e) {
+                self::assertSame('Ověření passkey selhalo.', $e->getMessage());
+            }
+            self::assertSame(5, $credential->counter);
+        }
+    }
+
     public function testCredentialIdDecodesUnpaddedBase64Url(): void
     {
         $rawId = random_bytes(32);
@@ -251,6 +313,87 @@ final class PasskeyServiceTest extends TestCase
         $authenticatorData = hash('sha256', 'invoice.example.cz', true)
             . "\x05"
             . pack('N', 1);
+        self::assertTrue(openssl_sign(
+            $authenticatorData . hash('sha256', $clientDataJson, true),
+            $signature,
+            $privateKey,
+            OPENSSL_ALGO_SHA256,
+        ));
+
+        return [
+            $credential,
+            $options,
+            [
+                'id' => self::base64url($credentialId),
+                'rawId' => self::base64url($credentialId),
+                'type' => 'public-key',
+                'authenticatorAttachment' => 'platform',
+                'clientExtensionResults' => [],
+                'response' => [
+                    'clientDataJSON' => self::base64url($clientDataJson),
+                    'authenticatorData' => self::base64url($authenticatorData),
+                    'signature' => self::base64url($signature),
+                    'userHandle' => self::base64url($userHandle),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Podepsaná non-discoverable assertion nad čerstvým P-256 klíčem.
+     *
+     * @param list<string> $transports
+     * @return array{CredentialRecord,array<string,mixed>,array<string,mixed>}
+     */
+    private function signedAssertion(
+        int $storedCounter,
+        int $responseCounter,
+        int $credentialIdBytes = 32,
+        array $transports = ['internal'],
+        bool $backedUp = false,
+    ): array {
+        $privateKey = openssl_pkey_new([
+            'private_key_type' => OPENSSL_KEYTYPE_EC,
+            'curve_name' => 'prime256v1',
+        ] + self::opensslConfigArgs());
+        self::assertInstanceOf(\OpenSSLAsymmetricKey::class, $privateKey);
+        $details = openssl_pkey_get_details($privateKey);
+        self::assertIsArray($details);
+        // Doplnění na 32 bajtů zleva — viz komentář v discoverableAssertion().
+        $x = str_pad((string) ($details['ec']['x'] ?? ''), 32, "\x00", STR_PAD_LEFT);
+        $y = str_pad((string) ($details['ec']['y'] ?? ''), 32, "\x00", STR_PAD_LEFT);
+
+        $credentialId = random_bytes($credentialIdBytes);
+        $userHandle = random_bytes(32);
+        $credential = CredentialRecord::create(
+            $credentialId,
+            PublicKeyCredentialDescriptor::CREDENTIAL_TYPE_PUBLIC_KEY,
+            $transports,
+            'none',
+            EmptyTrustPath::create(),
+            Uuid::fromBinary(str_repeat("\0", 16)),
+            "\xA5\x01\x02\x03\x26\x20\x01\x21\x58\x20" . $x . "\x22\x58\x20" . $y,
+            $userHandle,
+            $storedCounter,
+            null,
+            $backedUp,
+            $backedUp,
+            true,
+        );
+
+        $challenge = random_bytes(32);
+        $options = $this->service->assertionOptions([$credential], $challenge);
+        $clientDataJson = json_encode([
+            'type' => 'webauthn.get',
+            'challenge' => self::base64url($challenge),
+            'origin' => 'https://invoice.example.cz',
+            'crossOrigin' => false,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        // UP|UV, plus BE|BS u zálohovaných (synchronizovaných) passkeys.
+        $flags = 0x05 | ($backedUp ? 0x18 : 0x00);
+        $authenticatorData = hash('sha256', 'invoice.example.cz', true)
+            . chr($flags)
+            . pack('N', $responseCounter);
         self::assertTrue(openssl_sign(
             $authenticatorData . hash('sha256', $clientDataJson, true),
             $signature,
