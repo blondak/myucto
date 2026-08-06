@@ -13,7 +13,7 @@
 //
 // Spouští se z `npm run build`; samostatně `npm run check:manual`.
 
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,6 +21,18 @@ const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = join(webRoot, '..')
 const manualDir = join(repoRoot, 'manual')
 const srcDir = join(webRoot, 'src')
+
+// Docker image se staví jen z `web/` (`COPY web/ ./` v Dockerfile.alpine), takže tam
+// adresář manuálu vůbec není a kontrola nemá co porovnávat. Bez téhle větve build
+// image spadl na ENOENT — což se stalo hned při prvním vydání po zavedení guardu.
+//
+// Chybějící adresář se tedy přeskakuje, PRÁZDNÝ ale ne (o pár řádků níž): v repozitáři
+// znamená nula kapitol rozbitý sken, kdežto tady jde o legitimní stav. Kontrola takhle
+// nepřichází o smysl — vývojář i CI ji pouštějí nad celým repozitářem.
+if (!existsSync(manualDir)) {
+  console.log('check-manual-links: manual/ není v tomhle kontextu (build image) — přeskočeno.')
+  process.exit(0)
+}
 
 // Řetězce, které vypadají jako název kapitoly, ale nejsou jí — hodnoty číselníků
 // apod. Whitelist je záměrně na přesnou hodnotu, ne na soubor: jinak by v tom
