@@ -460,6 +460,50 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         self::assertFalse($mismatch->autoAllowed);
     }
 
+    /**
+     * Opačný pól k {@see testLegalPersonPersonalIdentifierIsNotEmployerFallback()}: dokud
+     * mzdový modul běží, je legacy pole na firmě zastaralá kopie a ignoruje se. S vypnutými
+     * Mzdami ale žádný kanonický záznam neexistuje — pole v Nastavení firmy je jediná
+     * evidence VS zaměstnavatele a odvod se bez něj nedá poznat (skončil by jako neurčený).
+     */
+    public function testDisabledPayrollFallsBackToCompanySettingsIdentifiers(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_employer_settings WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_offices WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET payroll_enabled = 0,
+                    taxpayer_type = 'po',
+                    cssz_vsdp = '87654321',
+                    health_insurance_number = '555666777'
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        // Předčíslí 21012 sráží platbu na sociální odvod samo o sobě, takže druh operace
+        // vyjde i bez znalosti VS — jenže jen s jistotou 0,70. Plná jistota (a s ní
+        // automatické zaúčtování) vzniká teprve tím, že se VS pozná jako VS TÉTO firmy.
+        $social = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '21012-7928311', vs: '87654321'),
+        );
+        self::assertNotNull($social);
+        self::assertSame(OperationType::REMITTANCE_SOCIAL_EMPLOYER, $social->operationType);
+        self::assertSame(0.90, $social->confidence);
+        self::assertTrue($social->autoAllowed);
+
+        $health = $this->detector->detect(
+            $this->supplierId,
+            $this->tx(account: '1111006311', vs: '555666777'),
+        );
+        self::assertNotNull($health);
+        self::assertSame(OperationType::REMITTANCE_HEALTH_EMPLOYER, $health->operationType);
+        self::assertSame(0.90, $health->confidence);
+    }
+
     public function testLegalPersonPersonalIdentifierIsNotEmployerFallback(): void
     {
         $this->db->pdo()->prepare(

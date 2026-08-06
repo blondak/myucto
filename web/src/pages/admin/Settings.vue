@@ -147,6 +147,12 @@ const creditNoteFormatError = computed(() => validateAndPreview(supplier.value?.
 const purchasePreview       = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).preview)
 const purchaseFormatError   = computed(() => validateAndPreview(supplier.value?.purchase_invoice_number_format ?? null).error)
 
+// MZ-03: identifikátory odvodů zaměstnavatele drží mzdový modul jen tehdy, když je
+// zapnutý. U vypnutých Mezd (i u OSVČ) zůstávají legacy pole na firmě jediným zdrojem —
+// čte je detekce odvodů v bance a šablony bankovních pravidel.
+const employerIdentifiersInPayroll = computed(() =>
+  supplier.value?.taxpayer_type === 'po' && supplier.value?.payroll_enabled === true)
+
 // Featura G (private/REAL_data_followup_UX.md) — preventivní varování na kolizi VS
 // mezi číselnými řadami. Dva zdroje:
 //   1) ŽIVÁ kontrola supplier-wide šablon (invoice/proforma/credit_note) nad AKTUÁLNĚ
@@ -1237,9 +1243,15 @@ function vatCollisionLabel(c: VatStatusCollision): string {
               <input v-model="supplier.workplace_code" type="text" maxlength="8"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
-            <template v-if="supplier.taxpayer_type !== 'po'">
+            <!-- U OSVČ jsou to osobní identifikátory a patří sem vždy. U právnické osoby je
+                 kanonickým zdrojem mzdový modul — ale jen dokud běží: s vypnutými Mzdami by
+                 VS zaměstnavatele neměl kde bydlet, a detekce odvodů v bance i šablony
+                 pravidel pak čtou zpátky tahle pole. -->
+            <template v-if="!employerIdentifiersInPayroll">
               <div>
-                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.cssz_vsdp') }}</label>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">
+                  {{ supplier.taxpayer_type === 'po' ? t('settings.cssz_vsdp_employer') : t('settings.cssz_vsdp') }}
+                </label>
                 <input v-model="supplier.cssz_vsdp" type="text" maxlength="20"
                   class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               </div>
@@ -1249,10 +1261,16 @@ function vatCollisionLabel(c: VatStatusCollision): string {
                   class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               </div>
               <div>
-                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.health_insurance_number') }}</label>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">
+                  {{ supplier.taxpayer_type === 'po' ? t('settings.health_insurance_number_employer') : t('settings.health_insurance_number') }}
+                </label>
                 <input v-model="supplier.health_insurance_number" type="text" maxlength="20"
                   class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               </div>
+              <p v-if="supplier.taxpayer_type === 'po'"
+                class="md:col-span-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+                {{ t('settings.payroll_employer_identifiers_legacy_hint') }}
+              </p>
             </template>
             <p v-else class="md:col-span-2 rounded-md border border-payroll-500/30 bg-payroll-50 px-3 py-2 text-xs text-neutral-600">
               {{ t('settings.payroll_employer_identifiers_hint') }}

@@ -54,6 +54,9 @@ final class SettingsAction
         // VH-01: sdílená zápisová cesta do supplier_vat_status_history.
         private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \MyInvoice\Service\Vat\VatStatusGuard $vatStatusGuard,
+        // MZ-03: legacy identifikátory odvodů se u PO nulují jen proti zapnutému mzdovému
+        // modulu — s vypnutými Mzdami jsou jediným zdrojem (viz updateSupplier()).
+        private readonly \MyInvoice\Service\Payroll\PayrollModuleAccess $payrollAccess,
     ) {}
 
     /**
@@ -639,6 +642,12 @@ final class SettingsAction
                 $body[$f] = null;
             }
         }
+        // Identifikátory odvodů: u OSVČ jsou to VŽDY osobní údaje na supplier. U právnické
+        // osoby je kanonickým zdrojem mzdový modul (migrace 1189/1221) — ale jen když je
+        // zapnutý. S vypnutými Mzdami (payroll_enabled = 0) není kam VS ČSSZ / VS zdravotní
+        // pojišťovny uložit, a tahle legacy pole zůstávají jediným zdrojem pro detekci
+        // odvodů v bance i pro šablony pravidel. Nulovat je tedy smíme pouze proti běžícímu
+        // mzdovému modulu, jinak by je každé uložení Nastavení firmy tiše smazalo.
         $personalInsuranceFields = [
             'cssz_vsdp',
             'cssz_ossz_code',
@@ -655,7 +664,10 @@ final class SettingsAction
                 $stmt->execute([$id]);
                 $effectiveTaxpayerType = $stmt->fetchColumn();
             }
-            if ($effectiveTaxpayerType === 'po') {
+            $payrollEnabled = array_key_exists('payroll_enabled', $body)
+                ? (bool) $body['payroll_enabled']
+                : $this->payrollAccess->isEnabled($id);
+            if ($effectiveTaxpayerType === 'po' && $payrollEnabled) {
                 foreach ($personalInsuranceFields as $field) {
                     $body[$field] = null;
                 }

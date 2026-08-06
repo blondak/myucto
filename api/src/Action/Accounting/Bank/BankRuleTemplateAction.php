@@ -12,6 +12,7 @@ use MyInvoice\Repository\BankPostingRuleRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPaymentIdentifierResolver;
 use PDO;
 use PDOException;
@@ -30,6 +31,7 @@ final class BankRuleTemplateAction
         private readonly PostingRuleRepository $postingRules,
         private readonly BankPostingRuleRepository $rules,
         private readonly PayrollPaymentIdentifierResolver $payrollIdentifiers,
+        private readonly PayrollModuleAccess $payrollAccess,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -95,12 +97,16 @@ final class BankRuleTemplateAction
             ? VariableSymbolNormalizer::digits((string) $body['variable_symbol']) : null;
         $variableSymbol = $override !== null && $override !== '' ? $override : $placeholder;
         if ($template['vs_placeholder'] !== null && ($variableSymbol === null || $variableSymbol === '')) {
+            // Kam uživatele poslat doplnit údaj: do Mzdy → Nastavení zaměstnavatele jen
+            // tehdy, když modul opravdu běží. Jinak je i u zaměstnavatelských odvodů
+            // správnou adresou legacy pole v Nastavení firmy.
+            $employerInPayroll = $this->payrollAccess->isEnabled($supplierId);
             $field = match ((string) $template['vs_placeholder']) {
-                '{cssz_vsdp}' => (string) $template['operation_type']
+                '{cssz_vsdp}' => $employerInPayroll && (string) $template['operation_type']
                     === 'bank.remittance.social.employer'
                     ? 'payroll_office.social_security_variable_symbol'
                     : 'cssz_vsdp',
-                '{health_insurance_number}' => (string) $template['operation_type']
+                '{health_insurance_number}' => $employerInPayroll && (string) $template['operation_type']
                     === 'bank.remittance.health.employer'
                     ? 'payroll_institution_account.variable_symbol'
                     : 'health_insurance_number',
@@ -172,11 +178,19 @@ final class BankRuleTemplateAction
             'bank.remittance.social.employer',
             'bank.remittance.health.employer',
         ], true)) {
+            $supplierId = (int) ($supplier['id'] ?? 0);
             $resolved = $this->payrollIdentifiers->defaultForOperation(
-                (int) ($supplier['id'] ?? 0),
+                $supplierId,
                 $operationType,
             );
-            return $resolved['value'] ?? null;
+            if ($resolved !== null) {
+                return $resolved['value'];
+            }
+            // S vypnutými Mzdami mzdový modul žádnou hodnotu nedrží (resolver vrací null
+            // rovnou na přepínači) — VS zaměstnavatele je pak zpátky v Nastavení firmy.
+            if ($this->payrollAccess->isEnabled($supplierId)) {
+                return null;
+            }
         }
 
         return match ((string) $placeholder) {

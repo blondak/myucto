@@ -10,6 +10,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPaymentIdentifierResolver;
 use PDO;
 
@@ -19,6 +20,7 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         private readonly Connection $db,
         private readonly PostingRuleRepository $postingRules,
         private readonly PayrollPaymentIdentifierResolver $payrollIdentifiers,
+        private readonly PayrollModuleAccess $payrollAccess,
     ) {}
 
     public function key(): string
@@ -114,7 +116,7 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             );
         }
         $vsType = $employerIdentifier === null
-            ? $this->vsType($vs, $supplier)
+            ? $this->vsType($vs, $supplier, $this->payrollAccess->isEnabled($supplierId))
             : match ($employerIdentifier['operation_type']) {
                 OperationType::REMITTANCE_SOCIAL_EMPLOYER => 'cssz_vsdp',
                 OperationType::REMITTANCE_HEALTH_EMPLOYER => 'health_insurance_number',
@@ -240,18 +242,28 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         return $row === false ? null : $row;
     }
 
-    /** @param array<string,mixed> $supplier */
-    private function vsType(string $vs, array $supplier): string
+    /**
+     * @param array<string,mixed> $supplier
+     *
+     * U OSVČ jsou `cssz_vsdp`/`health_insurance_number` osobní identifikátory a platí vždy.
+     * U právnické osoby je nese mzdový modul (MZ-03) — dokud běží, legacy pole se ignorují,
+     * ať se detekce neopírá o zastaralou kopii. S vypnutými Mzdami ale kanonický zdroj
+     * neexistuje: legacy pole jsou jedinou evidencí VS zaměstnavatele a mapa odvodů pro ně
+     * má vlastní PO řádky (migrace 1082), takže se sem musí dostat, jinak odvod skončí
+     * jako neurčený.
+     */
+    private function vsType(string $vs, array $supplier, bool $payrollEnabled): string
     {
         if ($vs === '') {
             return 'other';
         }
         $dic = preg_replace('/\D/', '', strtoupper((string) ($supplier['dic'] ?? ''))) ?? '';
-        $isNaturalPerson = (string) ($supplier['taxpayer_type'] ?? 'fo') === 'fo';
-        $cssz = $isNaturalPerson
+        $legacyApplies = (string) ($supplier['taxpayer_type'] ?? 'fo') === 'fo'
+            || !$payrollEnabled;
+        $cssz = $legacyApplies
             ? VariableSymbolNormalizer::forMatching((string) ($supplier['cssz_vsdp'] ?? ''))
             : '';
-        $health = $isNaturalPerson
+        $health = $legacyApplies
             ? VariableSymbolNormalizer::forMatching(
                 (string) ($supplier['health_insurance_number'] ?? '')
             )
