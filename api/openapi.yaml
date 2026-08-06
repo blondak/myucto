@@ -586,6 +586,13 @@ paths:
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
           schema: { type: string, enum: ['1', '0'] }
         - in: query
+          name: filter[oss_review]
+          description: >
+            Pouze doklady s řádkem, u kterého se nepodařilo určit místo plnění
+            (`oss_applicable = 0` a `oss_needs_manual_review = 1`). Takové řádky vstupují
+            do tuzemského přiznání k DPH na ř. 1/2 a do OSS podání nepatří.
+          schema: { type: boolean }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1, default: 1 }
         - in: query
@@ -2092,6 +2099,130 @@ paths:
                       properties:
                         invoice_id: { type: integer }
                         reason: { type: string }
+
+  /api/v1/invoices/bulk-oss/preview:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [InvoiceOps]
+      summary: Náhled hromadné změny OSS parametrů (nic nezapisuje)
+      description: |
+        Spočítá, co by hromadná změna udělala, a vrátí to per doklad — bez zápisu.
+        Náhled je POVINNÝ: `/invoices/bulk-oss` bez `confirm: true` vrátí 428.
+
+        `oss_applicable` rozhoduje, jestli řádek jde do ČESKÉHO přiznání k DPH, nebo
+        do OSS podání. Doklad, který je zaúčtovaný, uzamčený, v už podaném období nebo
+        pod zadržením podle § 32 ZoÚ, se proto NEPŘEPISUJE — přeskočí se a v `documents[]`
+        je uvedený i s důvodem. Akce nemá „force".
+
+        Vypnutí OSS je hlídané stejně jako zapnutí: řádek smí OSS opustit jedině tehdy,
+        když číselník členských států POZITIVNĚ potvrdí jeho sazbu v zemi dodavatele
+        k rozhodnému datu — jinak by se cizí daň (např. PL 23 %) přesunula na ř. 1
+        českého přiznání. „Nevím" (chybí číselník / stát k datu nevede) blokuje stejně
+        jako „neplatí" (`skip_reason = unverified_domestic_rate`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OssBulkUpdateInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OssBulkUpdateResult' }
+        '400': { description: 'Prázdný výběr, neznámý `scope`, nebo nic k nastavení' }
+        '403': { description: Chybí oprávnění `invoices.create` (WRITE), nebo jde o klientský účet }
+        '409': { description: OSS režim není v nastavení firmy aktivní }
+        '422': { description: Víc než 200 dokladů najednou }
+
+  /api/v1/invoices/bulk-oss:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [InvoiceOps]
+      summary: Provede hromadnou změnu OSS parametrů (vyžaduje potvrzený náhled)
+      description: |
+        Tělo i odpověď jsou shodné s `/invoices/bulk-oss/preview`, navíc je povinné
+        `confirm: true` a odpověď nese `completed_invoice_ids`.
+
+        **Přes API token to nejde** — provedení vrací 403 `token_write_forbidden`.
+        Přeřazení řádků mezi českým přiznáním a OSS je úkon s daňovou odpovědností,
+        takže ho dělá člověk v aplikaci, kde vidí, co se přeskočilo a proč. Náhled
+        tokenem projde.
+
+        Každý doklad má vlastní transakci, takže rozepsaný zůstat nemůže. Při chybě se
+        dávka ZASTAVÍ u prvního selhání (zbytek se ani nezkusí) a vrací 500
+        `bulk_update_failed` se seznamem hotových i nezpracovaných dokladů — bez toho
+        by uživatel u 200 dokladů nevěděl, kde má pokračovat.
+
+        Po zásahu se přepočítá soudržnost dokladu: kde rozpor trvá, zůstane
+        `oss_needs_manual_review` rozsvícený navzdory `clear_needs_review`
+        (dotčené položky jsou v `documents[].keep_review`). Cache PDF se zahazuje;
+        doklady, u nichž se to nepovedlo, jsou v `pdf_not_invalidated` — zápis
+        je hotový, jen vytištěné PDF je potřeba obnovit ručně.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OssBulkUpdateInput'
+                - type: object
+                  required: [confirm]
+                  properties:
+                    confirm:
+                      type: boolean
+                      enum: [true]
+                      description: Potvrzení náhledu. Bez něj 428.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/OssBulkUpdateResult'
+                  - type: object
+                    properties:
+                      completed_invoice_ids:
+                        type: array
+                        items: { type: integer, format: int64 }
+                      pdf_not_invalidated:
+                        type: array
+                        items: { type: integer, format: int64 }
+        '400': { description: 'Prázdný výběr, neznámý `scope`, nebo nic k nastavení' }
+        '403': { description: 'Chybí oprávnění, klientský účet, nebo `token_write_forbidden` (bearer)' }
+        '409': { description: OSS režim není v nastavení firmy aktivní }
+        '422': { description: Víc než 200 dokladů najednou }
+        '428':
+          description: '`preview_required` — chybí `confirm: true`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: '`bulk_update_failed` — dávka se zastavila; `meta` nese, co je hotové'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      completed_invoice_ids:
+                        type: array
+                        items: { type: integer, format: int64 }
+                      failed_invoice:
+                        type: object
+                        properties:
+                          invoice_id: { type: integer, format: int64 }
+                          varsymbol: { type: string, nullable: true }
+                      not_attempted_invoice_ids:
+                        type: array
+                        items: { type: integer, format: int64 }
+                      pdf_not_invalidated:
+                        type: array
+                        items: { type: integer, format: int64 }
 
   /api/v1/invoices/bulk-reminder:
     parameters:
@@ -5727,6 +5858,47 @@ paths:
                   data:        { type: object }
         '403': { description: Pouze admin }
 
+  /api/v1/codebooks/oss-member-state-rates:
+    get:
+      tags: [Codebooks]
+      summary: Sazby DPH členských států pro OSS (kontrolní číselník)
+      description: |
+        GLOBÁLNÍ číselník (ne per-supplier), proti kterému se ověřuje sazba na OSS řádku
+        dokladu — není to nabídka sazeb PRO doklad (ta je v `/codebooks/vat-rates`).
+        Vrací i vyřazené a uživatelem doplněné řádky; rozlišuje je `is_custom` a `disabled`.
+        `effective_valid_to` = `COALESCE(valid_to_override, valid_to)`, tedy konec platnosti,
+        se kterým se skutečně počítá.
+
+        `available = false` znamená, že tabulka v databázi není (chybí migrace 1152) —
+        v tom stavu se neověřuje ŽÁDNÝ stát, což je jiná situace než prázdný číselník.
+        `manageable = false` znamená chybějící migraci 1296, tedy číselník jen ke čtení.
+
+        Zápis (doplnění vlastní sazby, zkrácení platnosti, vyřazení) je záměrně mimo
+        veřejné API: mění autoritu společnou pro všechny firmy v instanci, takže je
+        dostupný jen správci instance z webového rozhraní.
+      parameters:
+        - in: query
+          name: country
+          required: false
+          schema: { type: string, minLength: 2, maxLength: 2, example: PL }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available:  { type: boolean, example: true }
+                  manageable: { type: boolean, example: true }
+                  can_write:  { type: boolean, example: false }
+                  rate_types:
+                    type: array
+                    items: { type: string, enum: [standard, reduced, second_reduced, parking] }
+                  rates:
+                    type: array
+                    items: { $ref: '#/components/schemas/OssMemberStateRate' }
+
   # ── Purchase invoices — chybějící endpointy ──────────────────────────────
   /api/v1/purchase-invoices/export:
     get:
@@ -6879,6 +7051,114 @@ paths:
           description: XML download
           content:
             application/xml: {}
+        '409': { description: OSS režim není v nastavení firmy aktivní (`oss_disabled`) }
+
+  /api/v1/reports/oss/threshold:
+    get:
+      tags: [Reports]
+      summary: Práh 10 000 EUR pro OSS (§ 8 odst. 3 ZDPH)
+      description: |
+        Sleduje překročení celoevropského prahu pro přeshraniční prodej zboží na dálku
+        a poskytnutí TBE služeb koncovým spotřebitelům. Jako jediný OSS endpoint běží
+        i s vypnutým OSS režimem — potřebuje ho právě ten, kdo registrovaný ještě není.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+      responses:
+        '200':
+          description: Stav prahu za rok
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v1/reports/oss/submissions:
+    get:
+      tags: [Reports]
+      summary: Archiv OSS podání
+      description: |
+        Archivované OSS snapshoty (form_code `ossei1`) téhož supplier-a, nejnovější první,
+        max 200 řádků. Detail, stažení archivovaného XML, EPO předání i označení „podáno"
+        obsluhuje sdílené `/api/v1/reports/submissions/{id}` — OSS snapshoty leží v téže
+        tabulce jako DPH a KH a druhý životní cyklus nad týmž záznamem by se rozešel.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: Seznam archivovaných OSS podání
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OssArchive' }
+        '409': { description: OSS režim není v nastavení firmy aktivní (`oss_disabled`) }
+
+  /api/v1/reports/oss/reconciliation:
+    get:
+      tags: [Reports]
+      summary: Rekonciliace archivovaného OSS podání proti dnešnímu náhledu
+      description: |
+        Porovná snapshot posledního archivovaného podání za období s tím, co by se za
+        totéž období podávalo dnes — odhalí doklady opravené zpětně PO podání.
+        `snapshot_available: false` (archiv starší než snapshotování) NEZNAMENÁ shodu:
+        `in_sync` v takovém případě zůstává `null`, protože porovnat nebylo s čím.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: quarter, schema: { type: integer, minimum: 1, maximum: 4 } }
+      responses:
+        '200':
+          description: Výsledek rekonciliace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OssReconciliation' }
+        '400': { description: Neplatný rok/čtvrtletí (`validation_failed`) }
+        '409': { description: OSS režim není v nastavení firmy aktivní (`oss_disabled`) }
+        '500': { description: Náhled období se nepodařilo sestavit (`build_failed`) }
+
+  /api/v1/reports/oss/evidence:
+    get:
+      tags: [Reports]
+      summary: Evidence OSS podle § 110f ZDPH / čl. 63c
+      description: |
+        Evidenční záznamy období tak, jak je vyžaduje čl. 63c prováděcího nařízení
+        (EU) 282/2011. Záznamy jsou write-once a uchovávají se 10 let od konce roku
+        PLNĚNÍ (`retain_until`). `completeness` u záznamu vyjmenovává body čl. 63c,
+        které se z dostupných dat naplnit nepodařilo — mlčet o nich by bylo horší.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: quarter, schema: { type: integer, minimum: 1, maximum: 4 } }
+      responses:
+        '200':
+          description: Evidenční záznamy období
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OssEvidence' }
+        '400': { description: Neplatný rok/čtvrtletí (`validation_failed`) }
+        '409': { description: OSS režim není v nastavení firmy aktivní (`oss_disabled`) }
+
+  /api/v1/reports/oss/evidence/export:
+    get:
+      tags: [Reports]
+      summary: Export evidence § 110f pro správce daně
+      description: |
+        Poskytnutí evidence správci daně elektronicky (§ 110f odst. 2 písm. b), čl. 63c
+        odst. 3). CSV je výchozí formát; JSON drží strukturu včetně vnořených úhrad
+        a podkladu o místě plnění. Export se zapisuje do provozního deníku
+        (`report.oss_evidence_exported`) — komu a kdy jsme evidenci vydali je při
+        kontrole stejně podstatné jako její obsah. Vyžaduje `reports.export`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: quarter, schema: { type: integer, minimum: 1, maximum: 4 } }
+        - { in: query, name: format, schema: { type: string, enum: [csv, json], default: csv } }
+      responses:
+        '200':
+          description: Soubor s evidencí (Content-Disposition attachment)
+          content:
+            text/csv:
+              schema: { type: string }
+            application/json:
+              schema: { $ref: '#/components/schemas/OssEvidence' }
+        '400': { description: Neplatný rok/čtvrtletí nebo formát (`validation_failed`) }
         '409': { description: OSS režim není v nastavení firmy aktivní (`oss_disabled`) }
 
   /api/v1/logbook/cars:
@@ -14587,6 +14867,303 @@ components:
           type: array
           items: { type: string }
 
+    OssArchive:
+      type: object
+      required: [form_code, submissions]
+      description: "Archiv OSS podání — filtrovaný na `ossei1`; snapshoty DPH a KH na OSS obrazovku nepatří, i když leží v téže tabulce."
+      properties:
+        form_code: { type: string, enum: [ossei1] }
+        submissions:
+          type: array
+          items: { $ref: '#/components/schemas/TaxSubmission' }
+
+    OssReconciliationBasis:
+      type: object
+      description: "Podklad rekonciliace = konkrétní archivované podání, proti kterému se porovnává."
+      required: [submission_id, status, is_proven_filing, xml_sha256, totals]
+      properties:
+        submission_id: { type: integer }
+        status: { type: string, enum: [draft, generated, downloaded, submitted, accepted, rejected] }
+        is_proven_filing:
+          type: boolean
+          description: "false = jen vygenerovaný nebo stažený snapshot. Stažení XML NENÍ podání; rekonciliace to nesmí zaměňovat."
+        form_variant: { type: string }
+        validation_status: { type: string, enum: [passed, failed, skipped] }
+        generated_at: { type: string, format: date-time }
+        submitted_at: { type: [string, "null"], format: date-time }
+        submission_ref: { type: [string, "null"] }
+        xml_sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        fingerprint: { type: string, description: "Otisk snapshotu — shoda s dnešním `current.fingerprint` znamená nedotčené období." }
+        totals:
+          type: object
+          properties:
+            base: { type: [number, "null"] }
+            vat: { type: [number, "null"] }
+            corrections: { type: [number, "null"] }
+            payable: { type: [number, "null"] }
+
+    OssTotalDifference:
+      type: object
+      required: [key, filed, current, delta]
+      properties:
+        key: { type: string, enum: [base, vat, corrections, payable] }
+        filed: { type: number }
+        current: { type: number }
+        delta: { type: number }
+
+    OssKeyedDifference:
+      type: object
+      description: "Rozdíl na agregovaném řádku (stát + sazba) nebo na opravě minulého období."
+      required: [change, key]
+      properties:
+        change: { type: string, enum: [added, removed, changed] }
+        key: { type: string }
+        filed: { type: [object, "null"], additionalProperties: true }
+        current: { type: [object, "null"], additionalProperties: true }
+        amounts:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              filed: { type: number }
+              current: { type: number }
+              delta: { type: number }
+
+    OssDocumentDifference:
+      type: object
+      description: "Konkrétní doklad, který se od podání změnil — bez něj by účetní neměl kde začít."
+      required: [change, invoice_id, item_id, country, rate, base, vat]
+      properties:
+        change: { type: string, enum: [added, removed, changed] }
+        invoice_id: { type: integer }
+        item_id: { type: integer }
+        doc_number: { type: [string, "null"] }
+        country: { type: string, minLength: 2, maxLength: 2 }
+        tax_date: { type: [string, "null"], format: date }
+        rate: { type: number }
+        base: { type: number }
+        vat: { type: number }
+        adjusted_period: { type: [string, "null"], pattern: '^[0-9]{4}Q[1-4]$' }
+        status: { type: [string, "null"] }
+        updated_at: { type: [string, "null"], format: date-time }
+        filed: { type: object, additionalProperties: true }
+
+    OssReconciliation:
+      type: object
+      required: [period, has_filing, snapshot_available, in_sync, differences]
+      properties:
+        period:
+          type: object
+          properties:
+            year: { type: integer }
+            quarter: { type: integer, minimum: 1, maximum: 4 }
+            start: { type: string, format: date }
+            end: { type: string, format: date }
+            label: { type: string }
+        has_filing: { type: boolean, description: "false = za období není archivované žádné OSS podání." }
+        snapshot_available:
+          type: boolean
+          description: "false = archiv je starší než snapshotování podání → porovnat NELZE. Není to shoda."
+        basis: { $ref: '#/components/schemas/OssReconciliationBasis' }
+        current:
+          type: object
+          properties:
+            return_currency: { type: string, example: EUR }
+            totals:
+              type: object
+              properties:
+                base: { type: number }
+                vat: { type: number }
+                corrections: { type: number }
+                payable: { type: number }
+            fingerprint: { type: string }
+        in_sync:
+          type: [boolean, "null"]
+          description: "null = nebylo s čím porovnávat (chybí podání nebo snapshot). Přiznaná neznalost, ne shoda."
+        differences:
+          type: object
+          properties:
+            totals: { type: array, items: { $ref: '#/components/schemas/OssTotalDifference' } }
+            rows: { type: array, items: { $ref: '#/components/schemas/OssKeyedDifference' } }
+            corrections: { type: array, items: { $ref: '#/components/schemas/OssKeyedDifference' } }
+            documents: { type: array, items: { $ref: '#/components/schemas/OssDocumentDifference' } }
+
+    OssEvidenceRecord:
+      type: object
+      description: "Jeden evidenční záznam čl. 63c — write-once, po zápisu už ho UPDATE ani DELETE nezmění (databázový trigger)."
+      required: [id, seq, consumption_country, supply_date, taxable_amount, vat_amount, retain_until]
+      properties:
+        id: { type: integer }
+        seq: { type: integer }
+        consumption_country: { type: string, minLength: 2, maxLength: 2, description: "63c(1)(a) stát spotřeby" }
+        supply_type: { type: [string, "null"], enum: [goods, services, null] }
+        supply_description: { type: string, description: "63c(1)(b) druh plnění" }
+        supply_quantity: { type: [string, "null"] }
+        supply_unit: { type: [string, "null"] }
+        supply_date: { type: string, format: date, description: "63c(1)(c) datum uskutečnění plnění" }
+        taxable_amount: { type: string, description: "63c(1)(d) základ v měně dokladu" }
+        taxable_currency: { type: string, minLength: 3, maxLength: 3 }
+        taxable_amount_return: { type: string, description: "Základ přepočtený do měny podání" }
+        return_currency: { type: string, minLength: 3, maxLength: 3 }
+        exchange_rate: { type: [string, "null"] }
+        exchange_rate_date: { type: [string, "null"], format: date }
+        adjusted_period: { type: [string, "null"], pattern: '^[0-9]{4}Q[1-4]$' }
+        vat_rate: { type: string, description: "63c(1)(f) sazba státu spotřeby" }
+        vat_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
+        vat_amount: { type: string }
+        vat_amount_return: { type: string }
+        payments:
+          type: array
+          description: "63c(1)(h) přijaté úhrady"
+          items:
+            type: object
+            properties:
+              paid_on: { type: string, format: date }
+              amount: { type: number }
+              currency: { type: string, minLength: 3, maxLength: 3 }
+        invoice_id: { type: [integer, "null"] }
+        invoice_item_id: { type: [integer, "null"] }
+        invoice_snapshot: { type: object, additionalProperties: true }
+        customer_name: { type: [string, "null"] }
+        place_evidence: { type: object, additionalProperties: true, description: "63c(1)(j) podklad pro určení místa plnění" }
+        completeness:
+          type: object
+          additionalProperties: { type: string }
+          description: "Body čl. 63c, které se naplnit nepodařilo (kód → důvod). Prázdný objekt = kompletní."
+        retain_until: { type: string, format: date, description: "§ 110f odst. 2 písm. a) — konec roku plnění + 10 let." }
+        captured_at: { type: string, format: date-time }
+
+    OssEvidence:
+      type: object
+      required: [legal_basis, retention_years, available, records]
+      properties:
+        legal_basis: { type: string, example: "§ 110f ZDPH / čl. 63c nařízení (EU) 282/2011" }
+        retention_years: { type: integer, example: 10 }
+        unsupported:
+          type: object
+          additionalProperties: { type: string }
+          description: "Body evidence, které aplikace obecně naplnit neumí (kód → důvod)."
+        available: { type: boolean, description: "false = chybí migrace evidenční tabulky; záznamy se nezachytávaly." }
+        submission_id: { type: integer, description: "Podání, ke kterému byla evidence zachycena." }
+        records:
+          type: array
+          items: { $ref: '#/components/schemas/OssEvidenceRecord' }
+
+    OssBulkUpdateInput:
+      type: object
+      required: [invoice_ids]
+      properties:
+        invoice_ids:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { type: integer, format: int64 }
+          description: "Nad 200 dokladů vrací 422 `too_many`."
+        scope:
+          type: string
+          enum: [needs_review, missing_rate_type, oss, all]
+          default: needs_review
+          description: |
+            Které POLOŽKY dokladu akce bere:
+            `needs_review` = jen řádky s `oss_needs_manual_review`,
+            `missing_rate_type` = OSS řádky bez typu sazby (ty exportér do podání nepustí),
+            `oss` = všechny OSS řádky, `all` = všechny řádky dokladu.
+        set:
+          type: object
+          description: |
+            Co se má nastavit — posílají se jen klíče, které se mají změnit. Prázdný `set`
+            vrací 400 `nothing_to_set`. Peněžní OSS sloupce (kurz, částky v měně podání)
+            akce ZÁMĚRNĚ nemění; dopočítává je náhled OSS podání.
+          properties:
+            oss_applicable:
+              type: boolean
+              description: Zařazení řádku do OSS. Zapnout lze jen se zemí spotřeby, vypnout jen s potvrzenou tuzemskou sazbou.
+            oss_consumer_country:
+              type: string
+              minLength: 2
+              maxLength: 2
+              example: PL
+              description: ISO2 členského státu EU. Nesmí se rovnat státu identifikace dodavatele (to je tuzemské plnění).
+            oss_rate_type: { type: string, enum: [standard, reduced, second_reduced, parking] }
+            oss_supply_type: { type: string, enum: [goods, services] }
+            clear_needs_review:
+              type: boolean
+              default: true
+              description: |
+                Zhasne „k ručnímu posouzení" na dotčených řádcích — potvrzení místa plnění
+                je rozhodnutí člověka a tahle akce je jediné místo, kde ho dělá. Tam, kde
+                příznak drží ROZPOR celého dokladu, zůstane rozsvícený i tak
+                (viz `documents[].keep_review`).
+
+    OssBulkUpdateDocument:
+      type: object
+      properties:
+        invoice_id: { type: integer, format: int64 }
+        varsymbol: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        tax_date: { type: string, format: date, nullable: true, description: Rozhodné datum, proti kterému se ověřuje zámek i sazba. }
+        action: { type: string, enum: [update, skip] }
+        skip_reason:
+          type: string
+          nullable: true
+          enum: [not_found, cancelled, locked, date_locked, period_filed, retention_hold, outside_oss_registration, missing_consumer_country, unverified_domestic_rate, no_matching_items, no_change]
+          description: |
+            Proč se doklad přeskočil. Skip je vždy PER DOKLAD — nezapsat nic je lepší
+            než doklad v půli cesty. `unverified_domestic_rate` = číselník členských států
+            nepotvrdil sazbu řádku v zemi dodavatele, takže OSS opustit nesmí.
+        skip_detail: { type: string, nullable: true, description: Věta pro uživatele včetně návodu, co s tím. }
+        items_matched: { type: integer }
+        changes:
+          type: array
+          description: Změny per položka; `from`/`to` nesou OSS sloupce před a po.
+          items:
+            type: object
+            properties:
+              item_id: { type: integer, format: int64 }
+              description: { type: string, maxLength: 80 }
+              from: { $ref: '#/components/schemas/OssBulkItemState' }
+              to: { $ref: '#/components/schemas/OssBulkItemState' }
+        warnings:
+          type: array
+          items: { type: string }
+          description: Doklad se provede, ale něco na něm nesedí (nepotvrzená sazba, rozpor v dokladu).
+        keep_review:
+          type: array
+          items: { type: string }
+          description: Položky, kterým `oss_needs_manual_review` zůstane rozsvícený navzdory `clear_needs_review`.
+
+    OssBulkItemState:
+      type: object
+      properties:
+        oss_applicable: { type: boolean }
+        oss_consumer_country: { type: string, nullable: true }
+        oss_rate_type: { type: string, nullable: true }
+        oss_supply_type: { type: string, nullable: true }
+        oss_needs_manual_review: { type: boolean }
+
+    OssBulkUpdateResult:
+      type: object
+      required: [applied, scope, set, documents, summary]
+      properties:
+        applied: { type: boolean, description: "false = náhled, nic se nezapsalo." }
+        scope: { type: string, enum: [needs_review, missing_rate_type, oss, all] }
+        set: { type: object, description: Normalizovaná podoba požadavku, jak jí akce rozuměla. }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/OssBulkUpdateDocument' }
+        summary:
+          type: object
+          properties:
+            documents_total: { type: integer }
+            documents_to_change: { type: integer }
+            documents_skipped: { type: integer }
+            items_to_change: { type: integer }
+            warnings: { type: integer }
+            skipped_by_reason:
+              type: object
+              additionalProperties: { type: integer }
+              description: "Počet přeskočených dokladů podle `skip_reason`."
+
     TaxEvidenceNonCashAdjustment:
       type: object
       required: [adjustment_on, kind, direction, amount, description]
@@ -15686,6 +16263,29 @@ components:
         name_en: { type: string }
         in_eu: { type: boolean }
 
+    OssMemberStateRate:
+      type: object
+      description: |
+        Řádek kontrolního číselníku sazeb členských států pro OSS. `is_custom = false`
+        znamená řádek ze seedu migrace — ten se needituje ani nemaže, jen se mu překrývá
+        platnost (`valid_to_override`) nebo se vyřadí (`disabled`), aby ho příští spuštění
+        migrace pořád poznalo jako svůj.
+      properties:
+        id:                 { type: integer }
+        country:            { type: string, example: PL }
+        rate_type:          { type: string, enum: [standard, reduced, second_reduced, parking] }
+        rate_percent:       { type: number, format: float, example: 23 }
+        valid_from:         { type: string, format: date }
+        valid_to:           { type: string, format: date, nullable: true }
+        valid_to_override:  { type: string, format: date, nullable: true }
+        effective_valid_to: { type: string, format: date, nullable: true }
+        is_custom:          { type: boolean, example: false }
+        disabled:           { type: boolean, example: false }
+        disabled_at:        { type: string, format: date-time, nullable: true }
+        note:               { type: string, nullable: true }
+        created_at:         { type: string, format: date-time }
+        updated_at:         { type: string, format: date-time, nullable: true }
+
     Currency:
       type: object
       properties:
@@ -15746,6 +16346,15 @@ components:
         vat_rate_default_id: { type: [integer, "null"], description: "Legacy výchozí sazba DPH" }
         hourly_rate: { type: [number, "null"], format: float, description: "Default hodinová sazba (CZK / hod) pro projekty klienta" }
         reverse_charge: { type: boolean, description: "Přenesená daňová povinnost — propisuje se do nových faktur." }
+        oss_mode:
+          type: string
+          enum: [auto, never]
+          default: auto
+          description: "Uplatnění OSS u tohoto odběratele. `auto` = rozhoduje derivace z číselníku sazeb členských států; `never` OSS jen UBERE (vynutit ho nelze — o místě plnění rozhoduje výhradně derivace)."
+        oss_default_supply_type:
+          type: [string, "null"]
+          enum: [goods, services, null]
+          description: "Výchozí typ plnění pro OSS. NULL = odvodit z měrné jednotky položky / CZ-NACE. Uplatní se AŽ POD jednotkou položky — jednotka je důkaz z řádku, karta jen default."
         is_customer: { type: boolean, description: "Role odběratele (vystavujeme mu faktury)" }
         is_vendor: { type: boolean, description: "Role dodavatele (evidujeme přijaté faktury)" }
         is_vat_payer: { type: boolean, description: "Plátce DPH — aktuální stav karty (ověřitelné online přes /clients/{id}/vat-status). Klienti historii plátcovství nevedou; doklady nesou per-doklad snapshot k datu vystavení." }
@@ -15885,6 +16494,15 @@ components:
         currency_default: { type: string, description: "Legacy — kód měny (CZK…). Použij currency_default_id." }
         hourly_rate: { type: [number, "null"], format: float, description: "Default hodinová sazba pro nové projekty (≥ 0)" }
         reverse_charge: { type: boolean, default: false }
+        oss_mode:
+          type: string
+          enum: [auto, never]
+          default: auto
+          description: "Uplatnění OSS u tohoto odběratele. `auto` = rozhoduje derivace; `never` OSS jen UBERE — vynutit ho nelze."
+        oss_default_supply_type:
+          type: [string, "null"]
+          enum: [goods, services, null]
+          description: "Výchozí typ plnění pro OSS; NULL = odvodit z měrné jednotky položky / CZ-NACE. Při PUT se `null` uloží jako vymazání defaultu."
         is_customer: { type: boolean, default: true, description: "Role odběratele. Aspoň jedna z is_customer/is_vendor musí zůstat true." }
         is_vendor: { type: boolean, default: false, description: "Role dodavatele." }
         is_vat_payer: { type: boolean, default: true }
@@ -17233,6 +17851,9 @@ components:
         oss_taxable_amount_return: { type: [number, "null"] }
         oss_vat_amount_return: { type: [number, "null"] }
         oss_original_period: { type: [string, "null"], pattern: '^[0-9]{4}Q[1-4]$' }
+        oss_needs_manual_review:
+          type: boolean
+          description: "Odvození při importu nedokázalo určit místo plnění (sazba platí v zemi dodavatele i ve státě spotřeby, nebo se číselník sazeb členských států nedal zeptat). Řádek JE v OSS, ale čeká na potvrzení člověkem. Chybí-li na instanci migrace 1293, pole se nevrací."
 
     InvoiceItemInput:
       type: object
@@ -17266,6 +17887,10 @@ components:
         oss_taxable_amount_return: { type: [number, "null"] }
         oss_vat_amount_return: { type: [number, "null"] }
         oss_original_period: { type: [string, "null"], pattern: '^[0-9]{4}Q[1-4]$' }
+        oss_needs_manual_review:
+          type: boolean
+          default: false
+          description: "Round-trip příznaku „místo plnění systém neurčil\". Klient ho má poslat zpět v té podobě, v jaké ho dostal z detailu dokladu — uložení položek je DELETE + INSERT, takže co se nepošle, to se ztratí. Se sazbou nesouvisí a needituje se: server ho ignoruje (zapíše 0) u řádku s `oss_applicable: false`, protože vypnutí OSS je rozhodnutí člověka a nejistota tím končí."
 
     RecurringTemplate:
       type: object

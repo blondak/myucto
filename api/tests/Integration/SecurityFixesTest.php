@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Import\PohodaXmlParser;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -105,14 +106,49 @@ final class SecurityFixesTest extends TestCase
 
     /**
      * #3 — InvoiceImportService musí validovat charset varsymbolu (gateway fix)
+     *
+     * Pravidlo se přestěhovalo do {@see PohodaXmlParser::VARSYMBOL_PATTERN}: parser podle
+     * něj pozná, kdy sáhnout po náhradě VS (GUID ze SuperFaktury), a import podle TÉHOŽ
+     * pravidla validuje. Guard proto hlídá obojí — že SSOT je pořád ten allowlist a že
+     * ho volající skutečně volá. Druhá kopie regexu v importu je zakázaná: rozešly by se
+     * a parser by nabízel náhradu za hodnoty, které import bere (nebo naopak).
      */
     public function testImportServiceValidatesVarsymbolCharset(): void
     {
+        // Chování SSOT — silnější než grep: allowlist musí reálně odmítnout injection
+        // vektory, kvůli kterým omezení vzniklo (varsymbol teče do e-mailů, PDF/ZIP
+        // názvů a CSV buněk).
+        foreach (['FA2026001', 'a', 'A-b_9', '12345678901234567890'] as $ok) {
+            self::assertTrue(PohodaXmlParser::isAcceptableVarsymbol($ok), "Legitimní VS '{$ok}' musí projít");
+        }
+        foreach ([
+            '',
+            '123456789012345678901',                // 21 znaků = přes limit DB sloupce
+            '<a href=//evil>x</a>',
+            '=cmd|\' /C calc\'!A0',
+            "FA\n2026",
+            'FA 2026',
+            'FA/2026',
+            '3f2a91c4-7b1d-4e52-9a08-2c6f5d0b1e77',  // GUID (36 znaků)
+        ] as $bad) {
+            self::assertFalse(PohodaXmlParser::isAcceptableVarsymbol($bad),
+                'Allowlist musí odmítnout ' . var_export($bad, true) . ' (security #3)');
+        }
+
+        // SSOT je pořád TEN allowlist (A-Z, a-z, 0-9, _, -, max 20) — ne uvolněný regex,
+        // který by testům výše vyhověl jinou cestou.
+        $parser = file_get_contents(dirname(__DIR__, 3) . '/api/src/Service/Import/PohodaXmlParser.php');
+        self::assertIsString($parser);
+        self::assertStringContainsString("'/^[A-Za-z0-9_-]{1,20}\$/'", $parser,
+            'VARSYMBOL_PATTERN musí zůstat allowlistem A-Z, a-z, 0-9, _, - (security #3)');
+
+        // A brána ho musí volat — import bez validace by SSOT obešel.
         $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Service/Import/InvoiceImportService.php');
         self::assertIsString($code);
-        // Hledáme allowlist regex `^[A-Za-z0-9_-]{1,20}$` + použití na $varsymbol
-        self::assertStringContainsString("'/^[A-Za-z0-9_-]{1,20}\$/'", $code,
-            'processOne() musí mít allowlist regex pro varsymbol (security #3)');
+        self::assertStringContainsString('PohodaXmlParser::isAcceptableVarsymbol($varsymbol)', $code,
+            'processOne() musí validovat varsymbol přes sdílený allowlist (security #3)');
+        self::assertStringNotContainsString("preg_match('/^[A-Za-z0-9_-]{1,20}\$/'", $code,
+            'Import nesmí mít vlastní kopii regexu — dvě kopie pravidla se rozejdou (SSOT)');
     }
 
     /**

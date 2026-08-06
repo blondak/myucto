@@ -37,8 +37,9 @@ use PHPUnit\Framework\TestCase;
  * („doklad na ř. 1 není") a přes skutečný {@see OssLedgerService} („doklad je v OSS
  * podkladu v sekci PL se správným základem a daní").
  *
- * Data jsou syntetická (fiktivní firmy, rok 2096, kurzy nasazené do `exchange_rates`,
- * ať test nesahá na feed ČNB) a všechno běží v transakci, která se v tearDown rollbackne.
+ * Data jsou syntetická (fiktivní firmy, rok 2096, kurzy nasazené do `exchange_rates`
+ * i `ecb_exchange_rates`, ať test nesahá na feed ČNB ani ECB) a všechno běží v transakci,
+ * která se v tearDown rollbackne.
  */
 #[Group('integration')]
 final class OssInvoiceImportTest extends TestCase
@@ -52,6 +53,9 @@ final class OssInvoiceImportTest extends TestCase
     private const QUARTER     = 2;
     private const PERIOD_FROM = '2096-05-01';
     private const PERIOD_TO   = '2096-05-31';
+
+    /** Poslední den kvartálu Q2/2096 — rozhodný den kurzu ECB pro celé OSS podání. */
+    private const ECB_RATE_DATE = '2096-06-30';
 
     /** Kurzy ČNB k DUZP — 1 PLN = 6 Kč, 1 EUR = 25 Kč, tedy PLN→EUR přesně 0,24. */
     private const PLN_CZK = 6.0;
@@ -119,6 +123,7 @@ final class OssInvoiceImportTest extends TestCase
         // na síť a test by na fiktivním roce 2096 selhal nebo se stal nedeterministickým.
         $this->exchangeRate('PLN', self::PLN_CZK);
         $this->exchangeRate('EUR', self::EUR_CZK);
+        $this->ecbPeriodEndRates();
     }
 
     protected function tearDown(): void
@@ -394,7 +399,7 @@ final class OssInvoiceImportTest extends TestCase
         $preview = $this->oss->preview($this->supplierId, self::YEAR, self::QUARTER);
         $nl = $this->ossCountry($preview, 'NL');
         self::assertEqualsWithDelta(40.0, $nl['base'], 0.01,
-            'Doklad je v korunách, podání v EUR — 1 000 Kč kurzem 25 Kč/EUR k DUZP = 40 EUR.');
+            'Doklad je v korunách, podání v EUR — 1 000 Kč kurzem ECB 25 Kč/EUR ke konci období = 40 EUR.');
     }
 
     /**
@@ -1617,6 +1622,28 @@ final class OssInvoiceImportTest extends TestCase
             'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
         )->execute([$date, $code, $rate]);
+    }
+
+    /**
+     * Kurzy ECB pro POSLEDNÍ DEN kvartálu — jediný kurz, kterým se přepočítává OSS podání
+     * (kurz ČNB k DUZP výše zůstává, protože z něj žije tuzemský základ daně na kontrolním
+     * dokladu). ECB má opačnou orientaci než ČNB (jednotky měny za 1 EUR), takže poměry
+     * 1 PLN = 6 Kč a 1 EUR = 25 Kč se sem přepíšou jako 25 Kč, resp. 25/6 zlotého za euro;
+     * křížový kurz PLN→EUR pak vyjde na týchž 0,24 a tvrzení testů zůstávají beze změny.
+     */
+    private function ecbPeriodEndRates(): void
+    {
+        $pdo = $this->db->pdo();
+        $rate = $pdo->prepare(
+            'INSERT INTO ecb_exchange_rates (rate_date, currency_code, units_per_eur) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE units_per_eur = VALUES(units_per_eur)'
+        );
+        $rate->execute([self::ECB_RATE_DATE, 'CZK', self::EUR_CZK]);
+        $rate->execute([self::ECB_RATE_DATE, 'PLN', self::EUR_CZK / self::PLN_CZK]);
+        $pdo->prepare(
+            'INSERT INTO ecb_exchange_rate_days (rate_date, published) VALUES (?, 1)
+             ON DUPLICATE KEY UPDATE published = 1'
+        )->execute([self::ECB_RATE_DATE]);
     }
 
     /**

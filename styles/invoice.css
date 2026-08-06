@@ -382,6 +382,14 @@ table.czk-recap tr.grand td {
     color: #8B6420;
     font-weight: 600;
 }
+/* OSS doložka — vlastní sémantická barva (modrá „informace o místě plnění"), aby se
+   nepletla s amber RC doložkou a nepřebarvil ji per-supplier branding accent. */
+.oss-note {
+    background: #EEF4FB;
+    border-left: 2pt solid #2F6FA8;
+    color: #1F4E79;
+    font-weight: 600;
+}
 
 /* Rozpis plateb platebního kalendáře (§ 31a ZDPH).
    mPDF kvirky: padding patří do <td>, ne do <div>; žádné nested selectory. */

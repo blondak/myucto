@@ -291,12 +291,25 @@ final class VatLedgerService
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Řádky pro náhled OSS podání.
+     *
+     * `oss_needs_manual_review` (migrace 1293) má guard VLASTNÍ, ne společný se zbytkem
+     * OSS sloupců: mezi migracemi 0137 a 1293 je řada verzí, takže instance s OSS
+     * schématem a bez příznaku je běžný stav. Sloupec se veze s TÍMTO dotazem schválně —
+     * náhled ho potřebuje ({@see \MyInvoice\Service\Oss\OssLedgerService::preview()})
+     * a vlastní dotaz nad týmiž řádky by byl druhá definice toho, co je „řádek podání".
+     *
+     * @return list<array<string,mixed>>
+     */
     public function ossRows(int $supplierId, string $start, string $end): array
     {
         if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
             return [];
         }
+        $manualReview = $this->db->hasColumn('invoice_items', 'oss_needs_manual_review')
+            ? 'ii.oss_needs_manual_review'
+            : '0 AS oss_needs_manual_review';
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.invoice_type, i.status,
@@ -307,7 +320,7 @@ final class VatLedgerService
                     ii.oss_consumer_country, ii.oss_rate_type, ii.oss_supply_type,
                     ii.oss_exchange_rate, ii.oss_exchange_rate_date,
                     ii.oss_taxable_amount_return, ii.oss_vat_amount_return,
-                    ii.oss_original_period
+                    ii.oss_original_period, {$manualReview}
                FROM invoice_items ii
                JOIN invoices i ON i.id = ii.invoice_id
                JOIN clients c ON c.id = i.client_id
@@ -321,6 +334,89 @@ final class VatLedgerService
         );
         $stmt->execute([$supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * SQL predikát „řádek, u kterého systém sám neví, kam patří" — bez `WHERE`, k připojení.
+     *
+     * `oss_applicable = 0` + `oss_needs_manual_review = 1` je JEDINÉ povolené „nevím"
+     * nových kanálů (cron opakovaných faktur, iDoklad, Fakturoid, AI extrakce, API bez
+     * OSS klíčů): číselník členských států sazbu v zemi dodavatele nepotvrdil, doklad ale
+     * vzniknout musel, tak řádek zůstal mimo OSS a nejistota se uložila k položce
+     * ({@see \MyInvoice\Service\Oss\OssItemPlanner}).
+     *
+     * Důsledek je nepříjemný a tichý: `oss_applicable = 0` znamená, že ho {@see fetchSales()}
+     * pustí na ř. 1/2 tuzemského přiznání jako každé jiné plnění. Do OSS podání přitom
+     * NEPATŘÍ ({@see ossRows()} bere jen `oss_applicable = 1`) — a to je správně, protože
+     * OSS řádkem není. Nesmí ale zůstat neviditelný: uživatel by odeslal přiznání s řádky,
+     * o kterých systém sám ví, že si jimi není jistý.
+     *
+     * Definice bydlí TADY a je jedna, protože ji potřebují dvě různá místa: varování
+     * v přiznání k DPH ({@see DphPriznaniBuilder::appendSalesDataWarnings()}) a filtr
+     * v seznamu faktur ({@see \MyInvoice\Repository\InvoiceRepository::listGroupedByMonth()},
+     * `filter[oss_review]`). Dvě kopie podmínky by se rozešly hned, jak se změní jedna.
+     *
+     * Vrací `null`, když schéma příznak nezná (mezi migracemi 0137 a 1293 je řada verzí) —
+     * volající pak kontrolu vynechá, místo aby spadl na neexistujícím sloupci.
+     *
+     * STATICKÁ a s `Connection` v parametru schválně — stejně jako
+     * {@see saleCounterpartyDicExpr()}. Predikát potřebuje i `InvoiceRepository`, a ten
+     * na reportovací službu záviset nemá (repozitář pod službou, ne naopak). Fragment,
+     * který si volající vloží do svého `WHERE`, tuhle vazbu nepotřebuje.
+     *
+     * @param  string  $itemAlias alias tabulky invoice_items (např. 'ii')
+     * @return ?string SQL fragment, nebo null když příznak ve schématu není
+     */
+    public static function uncertainOssPredicate(Connection $db, string $itemAlias = 'ii'): ?string
+    {
+        if (!$db->hasColumn('invoice_items', 'oss_applicable')
+            || !$db->hasColumn('invoice_items', 'oss_needs_manual_review')
+        ) {
+            return null;
+        }
+
+        return "COALESCE({$itemAlias}.oss_applicable, 0) = 0
+                AND COALESCE({$itemAlias}.oss_needs_manual_review, 0) = 1";
+    }
+
+    /**
+     * Doklady s nejistým řádkem ({@see uncertainOssPredicate()}) v období — podklad pro
+     * varování v přiznání k DPH.
+     *
+     * Filtry stavu a typu jsou ZÁMĚRNĚ tytéž jako ve {@see fetchSales()}: varovat se má
+     * právě u dokladů, které do přiznání skutečně vstupují. Doklad, který se nevykazuje,
+     * uživatele jen zaplaví šumem.
+     *
+     * @return list<array{doc_number:?string, invoice_id:int, items:int}> seřazeno podle DUZP
+     */
+    public function uncertainOssDocuments(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
+    {
+        $predicate = self::uncertainOssPredicate($this->db, 'ii');
+        if ($predicate === null) {
+            return [];
+        }
+        $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+
+        $stmt = $this->db->pdo()->prepare("
+            SELECT i.id AS invoice_id, i.varsymbol AS doc_number, COUNT(*) AS items,
+                   MIN(i.effective_tax_date) AS tax_date
+              FROM invoices i
+              JOIN invoice_items ii ON ii.invoice_id = i.id
+             WHERE i.supplier_id = ?
+               AND {$statusFilter}
+               AND i.invoice_type NOT IN ('proforma', 'penalty')
+               AND {$predicate}
+               AND i.effective_tax_date BETWEEN ? AND ?
+          GROUP BY i.id, i.varsymbol
+          ORDER BY MIN(i.effective_tax_date), i.id
+        ");
+        $stmt->execute([$supplierId, $start, $end]);
+
+        return array_map(static fn (array $r): array => [
+            'invoice_id' => (int) $r['invoice_id'],
+            'doc_number' => $r['doc_number'] !== null ? (string) $r['doc_number'] : null,
+            'items'      => (int) $r['items'],
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []);
     }
 
     /**

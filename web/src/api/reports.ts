@@ -202,6 +202,14 @@ export interface OssPreview {
   }
   summary: {
     return_currency: string
+    /**
+     * Rozhodný kurzový den ECB. Liší se od konce období, když ECB pro poslední den
+     * nezveřejnila (víkend, svátek TARGET) — účetní přesně tohle kontroluje proti
+     * tabulce ECB, takže se to musí zobrazit, ne jen přenést.
+     */
+    return_rate_date: string | null
+    /** Měna dokladu → kolik jejích jednotek za 1 jednotku měny podání (24,195 Kč za 1 €). */
+    return_rates: Record<string, number>
     total_base: number
     total_vat: number
     total_corrections: number

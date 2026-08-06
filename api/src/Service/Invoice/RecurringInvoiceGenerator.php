@@ -10,6 +10,9 @@ use MyInvoice\Repository\RecurringTemplateRepository;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
+use MyInvoice\Service\Oss\OssClientContext;
+use MyInvoice\Service\Oss\OssItemDeriver;
+use MyInvoice\Service\Oss\OssTemplateItemPolicy;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
@@ -60,6 +63,11 @@ final class RecurringInvoiceGenerator
         private readonly StockIssueService $stockIssue,
         private readonly RecurringPriceListService $priceList,
         private readonly DocumentAutoPoster $autoPoster,
+        // Derivace OSS, ne {@see \MyInvoice\Service\Oss\OssItemPlanner}: planner ke
+        // každému řádku dohledává i `vat_rate_id`, kdežto šablona ho má PŘIŠPENDLENÝ
+        // uživatelem (a jeho platnost k DUZP hlídá VatRateValidityGuard). Přepárovat
+        // sazbu tady by uživateli tiše vyměnilo jeho volbu za jinou.
+        private readonly OssItemDeriver $ossDeriver,
     ) {}
 
     /**
@@ -493,6 +501,11 @@ final class RecurringInvoiceGenerator
             // i zmaterializuje slevovou položku z header discount_percent. Tím se recurring
             // chová stejně jako běžná faktura (dřív se vkládal snapshot=0 → DPH vycházela 0
             // a kódy byly NULL).
+            // Kontext odběratele se načte JEDNOU za doklad — derivace si ho jinak vyžádá
+            // za každý řádek a cron generuje šablony po stovkách.
+            $ossClient = $this->ossDeriver->clientContext((int) $template['client_id']);
+            $vatRateMap = $this->invoices->vatRateMap();
+
             $items = [];
             foreach ($template['items'] as $item) {
                 // Pořadí: 1) placeholdery, 2) M/YYYY sync. Obojí míří na stejné ref.
@@ -512,7 +525,14 @@ final class RecurringInvoiceGenerator
                     // stock_item_id/warehouse_id ze šablony, aby auto-výdejka fungovala.
                     'stock_item_id'          => $item['stock_item_id'] ?? null,
                     'warehouse_id'           => $item['warehouse_id'] ?? null,
-                ];
+                ] + $this->ossColumnsFor(
+                    $item,
+                    (int) $template['supplier_id'],
+                    $ossClient,
+                    (float) ($vatRateMap[(int) $item['vat_rate_id']] ?? 0.0),
+                    $taxDate ?? $issueDate,
+                    !empty($template['reverse_charge']),
+                );
             }
             $this->invoices->replaceItems($newId, $items);
 
@@ -522,6 +542,55 @@ final class RecurringInvoiceGenerator
             $pdo->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * OSS sloupce pro JEDEN řádek generované faktury.
+     *
+     * ── Dva zdroje odpovědi, a jejich pořadí je věcné ───────────────────────────────
+     * 1. ULOŽENÉ ROZHODNUTÍ ŠABLONY (migrace 1297) má přednost. Je to rozhodnutí
+     *    ČLOVĚKA — účetní dohledala typ sazby, který číselník nepotvrdil, nebo určila
+     *    typ plnění, který se z jednotky odvodit nedá. Kdyby ho derivace při každém
+     *    generování přebila, byla by šablona k ničemu: totéž rozhodnutí by se muselo
+     *    dělat na každé vygenerované faktuře znovu. Příznak „k ručnímu posouzení"
+     *    proto u téhle větve NEVZNIKÁ — nejistota skončila tím, že se člověk rozhodl.
+     * 2. DERIVACE ({@see OssItemDeriver}) tam, kde šablona mlčí. Šablony založené před
+     *    migrací 1297 mlčí všechny, takže tohle je cesta, kterou zákazník s e-shopem
+     *    dostane OSS bez ručního zásahu.
+     *
+     * ── Odmítnutí NESMÍ zastavit cron ───────────────────────────────────────────────
+     * Invariant proti úniku cizí daně umí řádek ODMÍTNOUT (číselník nepotvrdil sazbu
+     * v zemi dodavatele a OSS být nemůže). U importu to shodí doklad, protože zdroj
+     * pravdy je venku a po opravě se import zopakuje. Tady zdroj pravdy JSME MY a
+     * doklad musí vzniknout: chybějící číselník (neproběhlá migrace 1152) by jinak
+     * zastavil zákazníkovi celou fakturaci, u KAŽDÉ šablony s nenulovou sazbou včetně
+     * ryze české. Řádek proto zůstane mimo OSS, ale dostane příznak K RUČNÍMU
+     * POSOUZENÍ — nejistota se uloží k položce, kde ji hromadná editace najde, místo
+     * aby zmizela v logu cronu. Tohle je jediné povolené „nevím" a NENÍ to tiché
+     * zařazení: bez příznaku by řádek vypadal jako rozhodnutý.
+     *
+     * @param  array<string,mixed> $item řádek šablony
+     * @return array{oss_applicable:int, oss_consumer_country:?string, oss_rate_type:?string,
+     *               oss_supply_type:?string, oss_needs_manual_review:int}
+     */
+    private function ossColumnsFor(
+        array $item,
+        int $supplierId,
+        OssClientContext $client,
+        float $ratePercent,
+        string $taxDate,
+        bool $reverseCharge,
+    ): array {
+        $decision = $this->ossDeriver->derive(
+            $supplierId,
+            $client,
+            $ratePercent,
+            (string) ($item['unit'] ?? ''),
+            $taxDate,
+            $reverseCharge,
+        );
+
+        return OssTemplateItemPolicy::generatedColumns($item, $decision);
     }
 
     /**

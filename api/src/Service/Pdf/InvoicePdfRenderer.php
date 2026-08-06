@@ -14,6 +14,7 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Oss\OssInvoiceClause;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -361,6 +362,10 @@ final class InvoicePdfRenderer
             // reálně je — bez loga se název ukazuje vždy (textový brand-name fallback).
             'logo_show_name'    => $logoPath !== null && !empty($supplierData['pdf_logo_show_name']),
             'isdoc_attachment'  => $hasIsdocAttachment, // bool — badge gate
+            // Doložka o odvodu daně v režimu OSS (§ 110a a násl. ZDPH). Doklad s cizí
+            // sazbou musí říct, PROČ ta sazba na něm je — jinak ji příjemce i účetní
+            // čtou jako českou daň ve špatné sazbě. Protějšek RC doložky výše.
+            'oss_clause'        => $this->ossClause($invoice),
             // § 31a ZDPH — rozpis plateb na předem stanovené období. Právě ten dělá
             // z platebního kalendáře daňový doklad; bez něj se doklad tiskl jako běžná
             // faktura s jediným datem splatnosti, tedy bez toho jediného, kvůli čemu
@@ -370,6 +375,36 @@ final class InvoicePdfRenderer
                 : [],
         ];
         return $twig->render('invoice.twig', $vars);
+    }
+
+    /**
+     * Podklad pro OSS doložku na dokladu — public stejně jako resolve*(), protože
+     * ho vedle PDF potřebuje i veřejný HTML náhled (PublicInvoiceGetAction).
+     * Rozhodnutí samo dělá {@see OssInvoiceClause}, tady se k němu jen doplní
+     * názvy států z číselníku zemí.
+     *
+     * @param array<string,mixed> $invoice
+     * @return array{all_items:bool, countries:list<array{iso2:string,name_cs:string,name_en:string}>}|null
+     */
+    public function ossClause(array $invoice): ?array
+    {
+        $items = (array) ($invoice['items'] ?? []);
+        $codes = OssInvoiceClause::consumerCountryCodes($items);
+        $names = [];
+        if ($codes !== []) {
+            $in = implode(',', array_fill(0, count($codes), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT iso2, name_cs, name_en FROM countries WHERE iso2 IN ($in)"
+            );
+            $stmt->execute($codes);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $row) {
+                $names[strtoupper((string) $row['iso2'])] = [
+                    'name_cs' => $row['name_cs'] ?? null,
+                    'name_en' => $row['name_en'] ?? null,
+                ];
+            }
+        }
+        return OssInvoiceClause::build($items, $names);
     }
 
     private function newMpdf(string $tmpDir): Mpdf

@@ -179,8 +179,9 @@ final readonly class OssItemDecision
      *
      * `oss_exchange_rate*`, `oss_taxable_amount_return`, `oss_vat_amount_return` ani
      * `oss_original_period` se ZÁMĚRNĚ nevyplňují: přepočet do měny podání dělá až
-     * {@see OssLedgerService::returnAmount()} kurzem ČNB k DUZP a předvyplnění při
-     * importu by kurz zafixovalo a znemožnilo pozdější opravu.
+     * {@see OssLedgerService} kurzem ECB zveřejněným pro POSLEDNÍ DEN zdaňovacího období.
+     * Ten se v době importu ještě nemusí znát a je jednotný pro celý kvartál, takže
+     * předvyplnit ho na položce nejde — zafixoval by kurz data plnění, tedy jiný.
      *
      * @return array{oss_applicable:int, oss_consumer_country:?string,
      *               oss_rate_type:?string, oss_supply_type:?string,

@@ -68,16 +68,13 @@ final class BankPostingServiceTest extends TestCase
         if ($this->supplierId === 0 || $this->currencyId === 0 || $this->userId === 0 || $this->czId === 0) {
             $this->markTestSkipped('Chybí základní data (supplier double_entry/currency/user/country).');
         }
-        // Účet výpisu musí patřit tomuto supplierovi (tenant resolution).
-        $ownsAccount = (int) $pdo->query(
-            "SELECT COUNT(*) FROM currencies WHERE supplier_id={$this->supplierId} AND account_number='" . self::ACCOUNT . "'"
-        )->fetchColumn();
-        if ($ownsAccount === 0) {
-            $this->markTestSkipped('Testovací účet ' . self::ACCOUNT . ' nepatří supplierovi ' . $this->supplierId . '.');
-        }
-
         $pdo->beginTransaction();
         $this->inTx = true;
+        // Účet výpisu musí patřit tomuto supplierovi (tenant resolution). Na
+        // sanitizovaném klonu produkce jsou čísla účtů anonymizovaná, takže dřívější
+        // markTestSkipped() tuhle třídu vypínal natrvalo — doplníme si účet sami,
+        // v transakci, kterou tearDown roluje zpět.
+        $this->ensureAccountOwnership($pdo);
         $seeder->seedForSupplier($this->supplierId);
         $this->periodId = $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
         $pdo->prepare(
@@ -85,6 +82,33 @@ final class BankPostingServiceTest extends TestCase
              VALUES (?, 'bank.payment.matched', 'auto', ?)
              ON DUPLICATE KEY UPDATE level = 'auto', updated_by = VALUES(updated_by)"
         )->execute([$this->supplierId, $this->userId]);
+    }
+
+    /** Viz {@see BankPostingTestCase::ensureAccountOwnership()} — tahle třída základ nedědí. */
+    private function ensureAccountOwnership(PDO $pdo): void
+    {
+        $owns = (int) $pdo->query(
+            "SELECT COUNT(*) FROM currencies WHERE supplier_id={$this->supplierId} AND account_number='" . self::ACCOUNT . "'"
+        )->fetchColumn();
+        if ($owns > 0) {
+            return;
+        }
+
+        $spare = (int) ($pdo->query(
+            "SELECT id FROM currencies
+              WHERE supplier_id={$this->supplierId} AND (account_number IS NULL OR account_number = '')
+              ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        if ($spare > 0) {
+            $pdo->prepare('UPDATE currencies SET account_number = ?, bank_code = ? WHERE id = ?')
+                ->execute([self::ACCOUNT, self::BANK_CODE, $spare]);
+            return;
+        }
+
+        $pdo->prepare(
+            'INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, account_number, bank_code)
+             VALUES (?, "CZK", "Kč", "Kč", "koruna česká", "Czech koruna", ?, ?)'
+        )->execute([$this->supplierId, self::ACCOUNT, self::BANK_CODE]);
     }
 
     protected function tearDown(): void

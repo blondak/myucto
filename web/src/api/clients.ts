@@ -55,6 +55,14 @@ export interface Client {
   currency_default_id: number
   currency_default: string
   reverse_charge: boolean
+  /**
+   * Režim OSS u odběratele (migrace 1298). 'auto' = rozhoduje derivace ze sazby, země
+   * a DIČ; 'never' = OSS se u něj neuplatňuje. Hodnota „vždy OSS" neexistuje záměrně —
+   * karta smí OSS vyloučit, ne vynutit.
+   */
+  oss_mode?: 'auto' | 'never'
+  /** Výchozí typ plnění pro OSS; null = odvodit z měrné jednotky / CZ-NACE dodavatele. */
+  oss_default_supply_type?: 'goods' | 'services' | null
   /** § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba (označuje uživatel, z dat to nejde). */
   related_party?: boolean
   related_party_type?: 'capital' | 'otherwise' | 'close_person' | 'employment' | null
@@ -215,6 +223,14 @@ export interface ClientPayload {
   language: 'cs' | 'en'
   currency_default_id: number
   reverse_charge: boolean
+  /**
+   * Režim OSS u odběratele (migrace 1298). 'auto' = rozhoduje derivace ze sazby, země
+   * a DIČ; 'never' = OSS se u něj neuplatňuje. Hodnota „vždy OSS" neexistuje záměrně —
+   * karta smí OSS vyloučit, ne vynutit.
+   */
+  oss_mode?: 'auto' | 'never'
+  /** Výchozí typ plnění pro OSS; null = odvodit z měrné jednotky / CZ-NACE dodavatele. */
+  oss_default_supply_type?: 'goods' | 'services' | null
   /** § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba (označuje uživatel, z dat to nejde). */
   related_party?: boolean
   related_party_type?: 'capital' | 'otherwise' | 'close_person' | 'employment' | null

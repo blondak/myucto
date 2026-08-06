@@ -7,6 +7,7 @@
     "common",
     "crm",
     "demo",
+    "invoice",
     "keyboard_shortcuts",
     "license",
     "nav",
@@ -49,12 +50,12 @@
     "export",
     "imports",
     "integrations",
-    "invoice",
     "lock",
     "logbook",
     "manualQueue",
     "mfa_setup",
     "monthly_report",
+    "oss_rates",
     "payment_method",
     "payment_order",
     "payroll",
@@ -94,7 +95,6 @@
       "bank",
       "dashboard",
       "errors",
-      "invoice",
       "taxReturn"
     ],
     "portal": [
@@ -115,7 +115,6 @@
     ],
     "client-detail": [
       "documents",
-      "invoice",
       "project",
       "purchase_invoice",
       "recurring",
@@ -127,29 +126,25 @@
       "purchase_invoice"
     ],
     "projects": [
-      "invoice",
       "project"
     ],
     "project-new": [
       "errors",
-      "invoice",
       "project"
     ],
     "project-detail": [
       "documents",
-      "invoice",
       "project",
       "workReportTracking"
     ],
     "project-edit": [
       "errors",
-      "invoice",
       "project"
     ],
     "invoices": [
       "accounting",
-      "invoice",
       "lock",
+      "oss_rates",
       "payment_method",
       "project"
     ],
@@ -159,7 +154,6 @@
     ],
     "invoice-new": [
       "errors",
-      "invoice",
       "lock",
       "payment_method",
       "price_list",
@@ -171,7 +165,6 @@
       "accounting",
       "cash",
       "documents",
-      "invoice",
       "lock",
       "payment_method",
       "recurring",
@@ -181,7 +174,6 @@
     ],
     "invoice-edit": [
       "errors",
-      "invoice",
       "lock",
       "payment_method",
       "price_list",
@@ -201,7 +193,6 @@
     ],
     "purchase-invoices": [
       "accounting",
-      "invoice",
       "lock",
       "purchase_invoice"
     ],
@@ -229,7 +220,6 @@
       "accounting",
       "automation",
       "errors",
-      "invoice",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -240,7 +230,6 @@
       "automation",
       "cash",
       "documents",
-      "invoice",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -250,7 +239,6 @@
       "accounting",
       "automation",
       "errors",
-      "invoice",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -499,7 +487,6 @@
       "document_requests",
       "documents",
       "errors",
-      "invoice",
       "payment_method",
       "purchase_invoice",
       "vendor"
@@ -508,7 +495,6 @@
       "activity_log"
     ],
     "sent-emails": [
-      "invoice",
       "sent_emails"
     ],
     "cron-jobs": [
@@ -540,11 +526,13 @@
     ],
     "admin-codebooks": [
       "expense_categories",
+      "oss_rates",
       "revenue_categories",
       "vat_classifications"
     ],
     "admin-tax-constants": [
       "expense_categories",
+      "oss_rates",
       "revenue_categories",
       "vat_classifications"
     ],
@@ -636,7 +624,6 @@
     ],
     "admin-emails": [
       "electronic_signatures",
-      "invoice",
       "profile_signing",
       "reports",
       "sent_emails",
@@ -646,8 +633,7 @@
     ],
     "admin-approvals": [
       "approval_inbox",
-      "errors",
-      "invoice"
+      "errors"
     ],
     "admin-price-list": [
       "price_list"
@@ -663,20 +649,17 @@
     ],
     "recurring-new": [
       "errors",
-      "invoice",
       "payment_method",
       "project",
       "purchase_invoice",
       "recurring"
     ],
     "recurring-detail": [
-      "invoice",
       "payment_method",
       "recurring"
     ],
     "recurring-edit": [
       "errors",
-      "invoice",
       "payment_method",
       "project",
       "purchase_invoice",
@@ -716,12 +699,12 @@
       "export",
       "imports",
       "integrations",
-      "invoice",
       "lock",
       "logbook",
       "manualQueue",
       "mfa_setup",
       "monthly_report",
+      "oss_rates",
       "payment_method",
       "payment_order",
       "payroll",

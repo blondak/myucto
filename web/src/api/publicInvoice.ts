@@ -107,6 +107,17 @@ export interface PublicInvoiceAttachment {
   size_bytes: number
 }
 
+/**
+ * Podklad pro doložku o odvodu daně v režimu OSS. `all_items` = celý doklad je v OSS
+ * (jinak jen část plnění); prázdné `countries` = některý řádek nemá zemi spotřeby,
+ * takže se státy nejmenují. Staví ho backend (OssInvoiceClause), aby náhled zněl
+ * stejně jako PDF.
+ */
+export interface PublicInvoiceOssClause {
+  all_items: boolean
+  countries: { iso2: string; name_cs: string; name_en: string }[]
+}
+
 export interface PublicInvoiceData {
   invoice: PublicInvoiceHeader
   supplier: PublicInvoiceParty
@@ -114,6 +125,7 @@ export interface PublicInvoiceData {
   bank: PublicInvoiceBank | null
   qr_data_uri: string | null
   attachments: PublicInvoiceAttachment[]
+  oss_clause: PublicInvoiceOssClause | null
 }
 
 export const publicInvoiceApi = {

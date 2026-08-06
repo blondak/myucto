@@ -62,6 +62,9 @@ final class OssDocumentCoherenceTest extends TestCase
     private const PERIOD_FROM = '2096-05-01';
     private const PERIOD_TO   = '2096-05-31';
 
+    /** Poslední den kvartálu Q2/2096 — rozhodný den kurzu ECB pro celé OSS podání. */
+    private const ECB_RATE_DATE = '2096-06-30';
+
     /** Kurzy ČNB k DUZP — 1 PLN = 6 Kč, 1 EUR = 25 Kč, tedy PLN→EUR přesně 0,24. */
     private const PLN_CZK = 6.0;
     private const EUR_CZK = 25.0;
@@ -120,6 +123,7 @@ final class OssDocumentCoherenceTest extends TestCase
 
         $this->exchangeRate('PLN', self::PLN_CZK);
         $this->exchangeRate('EUR', self::EUR_CZK);
+        $this->ecbPeriodEndRates();
     }
 
     protected function tearDown(): void
@@ -629,6 +633,28 @@ final class OssDocumentCoherenceTest extends TestCase
             'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
         )->execute([$date, $code, $rate]);
+    }
+
+    /**
+     * Kurzy ECB pro POSLEDNÍ DEN kvartálu — jediný kurz, kterým se přepočítává OSS podání
+     * (kurz ČNB k DUZP výše zůstává, protože z něj žije tuzemský základ daně na kontrolním
+     * dokladu). ECB má opačnou orientaci než ČNB (jednotky měny za 1 EUR), takže poměry
+     * 1 PLN = 6 Kč a 1 EUR = 25 Kč se sem přepíšou jako 25 Kč, resp. 25/6 zlotého za euro;
+     * křížový kurz PLN→EUR pak vyjde na týchž 0,24 a tvrzení testů zůstávají beze změny.
+     */
+    private function ecbPeriodEndRates(): void
+    {
+        $pdo = $this->db->pdo();
+        $rate = $pdo->prepare(
+            'INSERT INTO ecb_exchange_rates (rate_date, currency_code, units_per_eur) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE units_per_eur = VALUES(units_per_eur)'
+        );
+        $rate->execute([self::ECB_RATE_DATE, 'CZK', self::EUR_CZK]);
+        $rate->execute([self::ECB_RATE_DATE, 'PLN', self::EUR_CZK / self::PLN_CZK]);
+        $pdo->prepare(
+            'INSERT INTO ecb_exchange_rate_days (rate_date, published) VALUES (?, 1)
+             ON DUPLICATE KEY UPDATE published = 1'
+        )->execute([self::ECB_RATE_DATE]);
     }
 
     /**

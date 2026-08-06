@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
+use MyInvoice\Service\Oss\OssItemCarryOver;
 use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
@@ -29,6 +30,15 @@ use PDO;
  * (u RC vzniká povinnost přiznat daň až k DUZP plnění, záloha se nedaní — § 24/§ 92a).
  *
  * Idempotence: pokud k platbě už existuje nestornovaný doklad, vrátí jeho id.
+ *
+ * ── OSS se PŘENÁŠÍ z proformy ───────────────────────────────────────────────────────
+ * Úplata na OSS plnění zakládá povinnost přiznat daň ve STÁTĚ SPOTŘEBY, ne v tuzemsku.
+ * Do sjednocení se doklad zakládal bez OSS sloupců, takže záloha na polské plnění
+ * skončila na ř. 1 českého přiznání. Místo plnění se přijetím platby změnit nemůže —
+ * přebírá se proto z položky proformy ({@see OssItemCarryOver}), která už derivací
+ * i případnou ruční opravou prošla. Doklad vzniká z bankovního párování, tedy BEZ
+ * DOZORU: druhá derivace by tu uměla ruční opravu tiše zahodit a při nedostupném
+ * číselníku razítkovat příznak „k ručnímu posouzení" i na běžné české zálohy.
  */
 final class PaymentTaxDocumentCreator
 {
@@ -38,13 +48,21 @@ final class PaymentTaxDocumentCreator
         private readonly InvoiceCalculator $calc,
         private readonly ExchangeRateApplier $rateApplier,
         private readonly VatStatusService $vatStatus,
+        private readonly OssItemCarryOver $ossCarry,
     ) {}
 
     /**
      * Poměrné rozdělení brutto platby mezi sazby DPH dle brutto vah (largest remainder).
      *
-     * @param list<array{rate: float, vat_rate_id: int, gross: float}> $buckets váhy (gross > 0 celkem)
-     * @return list<array{rate: float, vat_rate_id: int, amount: float}> součet amount = $payment
+     * `carry` je NEPRŮHLEDNÝ průvodní údaj kbelíku, který alokátor jen propouští na
+     * výstup — nese zdrojovou položku proformy, ze které se pak přenese OSS profil.
+     * Nést ho musí právě tudy: alokátor kbelíky s nulovou vahou vyhazuje a přeindexuje,
+     * takže párování výstupu se vstupem podle pozice by se tiše rozešlo.
+     *
+     * @param list<array{rate: float, vat_rate_id: int, gross: float, carry?: array<string,mixed>}> $buckets
+     *        váhy (gross > 0 celkem)
+     * @return list<array{rate: float, vat_rate_id: int, amount: float, carry: array<string,mixed>}>
+     *         součet amount = $payment
      */
     public static function allocateAcrossRates(array $buckets, float $payment): array
     {
@@ -66,7 +84,12 @@ final class PaymentTaxDocumentCreator
         $maxGross = -1.0;
         foreach ($buckets as $i => $b) {
             $share = round($payment * (float) $b['gross'] / $total, 2);
-            $out[] = ['rate' => (float) $b['rate'], 'vat_rate_id' => (int) $b['vat_rate_id'], 'amount' => $share];
+            $out[] = [
+                'rate' => (float) $b['rate'],
+                'vat_rate_id' => (int) $b['vat_rate_id'],
+                'amount' => $share,
+                'carry' => (array) ($b['carry'] ?? []),
+            ];
             $allocated += $share;
             if ((float) $b['gross'] > $maxGross) {
                 $maxGross = (float) $b['gross'];
@@ -155,14 +178,23 @@ final class PaymentTaxDocumentCreator
         }
 
         // Brutto váhy per sazba ze stored řádkových totálů proformy (vč. slevových řádků).
+        //
+        // Kbelík je per sazba A ZÁROVEŇ per MÍSTO PLNĚNÍ. Samotná sazba na rozlišení
+        // nestačí: u zákazníkovy konfigurace je polská 23% sazba ve `vat_rates` vedená
+        // se zemí CZ, takže OSS řádek do PL a tuzemský řádek můžou mít totéž procento
+        // i totéž `vat_rate_id`. Sloučené do jednoho kbelíku by dostaly JEDEN OSS profil
+        // a polovina úplaty by se přiznala ve špatné zemi.
         $buckets = [];
         foreach ($proforma['items'] as $item) {
-            $key = number_format((float) $item['vat_rate_snapshot'], 2, '.', '');
+            $key = number_format((float) $item['vat_rate_snapshot'], 2, '.', '')
+                . '#' . $this->ossCarry->fingerprint($item);
             if (!isset($buckets[$key])) {
                 $buckets[$key] = [
                     'rate'        => (float) $item['vat_rate_snapshot'],
                     'vat_rate_id' => (int) $item['vat_rate_id'],
                     'gross'       => 0.0,
+                    // Zdrojová položka putuje alokátorem až k zápisu — viz jeho docblock.
+                    'carry'       => $item,
                 ];
             }
             $buckets[$key]['gross'] += (float) $item['total_with_vat'];
@@ -228,17 +260,30 @@ final class PaymentTaxDocumentCreator
             $taxDocId = (int) $pdo->lastInsertId();
 
             // Položky per sazba — režim SHORA (prices_include_vat=1): unit_price = brutto podíl.
+            // OSS sloupce se skládají místo ručně psaných variant SQL (shodně
+            // s `InvoiceRepository::replaceItems()`); na instanci bez migrace 0137 je
+            // seznam prázdný a dotaz vypadá přesně jako dřív.
+            $ossColumns = $this->ossCarry->columns();
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
-                    total_without_vat, total_vat, total_with_vat, order_index, item_kind)
-                 VALUES (?, ?, 1, "", ?, ?, ?, 0, 0, 0, ?, "standard")'
+                    total_without_vat, total_vat, total_with_vat, order_index, item_kind'
+                . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
+                . ') VALUES (?, ?, 1, "", ?, ?, ?, 0, 0, 0, ?, "standard"'
+                . $this->ossCarry->placeholders()
+                . ')'
             );
             $multiRate = count($allocation) > 1;
             foreach ($allocation as $i => $line) {
+                // Rozlišovací přívlastek nese i STÁT SPOTŘEBY: po rozdělení kbelíků podle
+                // místa plnění můžou dva řádky sdílet procento, a dva identické popisy na
+                // jednom dokladu nejde přiřadit k plnění ani při kontrole podání.
+                $country = OssItemCarryOver::consumerCountryOf($line['carry']);
                 $desc = $multiRate
-                    ? $lineDesc . ($isEn ? " — VAT rate {$line['rate']} %" : " — sazba DPH {$line['rate']} %")
+                    ? $lineDesc
+                        . ($isEn ? " — VAT rate {$line['rate']} %" : " — sazba DPH {$line['rate']} %")
+                        . ($country !== null ? " ({$country})" : '')
                     : $lineDesc;
                 $itemStmt->execute([
                     $taxDocId,
@@ -247,6 +292,8 @@ final class PaymentTaxDocumentCreator
                     $line['vat_rate_id'],
                     $line['rate'],
                     $i,
+                    // Místo plnění z proformy — přijetím úplaty se nemění (viz docblock třídy).
+                    ...$this->ossCarry->values($line['carry']),
                 ]);
             }
 

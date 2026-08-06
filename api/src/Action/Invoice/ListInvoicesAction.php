@@ -39,6 +39,10 @@ final class ListInvoicesAction
             'unpaid_only' => !empty($filter['unpaid_only']),
             'overdue'     => !empty($filter['overdue']),
             'booked'      => $filter['booked']      ?? null,
+            // Doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS). Jinak
+            // je uživatel nemá jak najít — do OSS podání nepatří a v přiznání vypadají
+            // jako běžné tuzemské plnění (viz VatLedgerService::uncertainOssPredicate()).
+            'oss_review'  => !empty($filter['oss_review']),
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
 

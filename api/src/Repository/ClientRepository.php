@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 
@@ -245,12 +246,13 @@ final class ClientRepository
         $sql = 'INSERT INTO clients
             (supplier_id, company_name, first_name, last_name, ic, dic, tax_number, street, city, zip, country_id,
              main_email, phone, language, currency_default_id, reverse_charge, is_vat_payer,
+             oss_mode, oss_default_supply_type,
              is_customer, is_vendor, is_fuel_station,
              auto_send_reminders, payment_due_default, payment_due_unit, default_payment_method, hourly_rate, note,
              default_expense_category_id, default_revenue_category_id,
              invoice_number_format, proforma_number_format, credit_note_number_format, invoice_number_period,
              default_branding_profile_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
             $supplierId,
@@ -274,6 +276,10 @@ final class ClientRepository
             // Plátcovství DPH — default 1 (BC); import doplní z ARES/VIES (neplátce = 0).
             // isset() → null (nezjištěno) spadne na default 1; VendorVatPayerResolver opraví.
             isset($data['is_vat_payer']) ? ((int) (bool) $data['is_vat_payer']) : 1,
+            // Výchozí nastavení OSS (migrace 1298). Karta smí OSS jedině VYLOUČIT
+            // ('never'), nikdy vynutit — o místě plnění rozhoduje výhradně derivace.
+            self::normalizeOssMode($data['oss_mode'] ?? null),
+            OssClientContext::supplyTypeOrNull($data['oss_default_supply_type'] ?? null),
             $isCustomer,
             $isVendor,
             array_key_exists('is_fuel_station', $data) ? ((int) (bool) $data['is_fuel_station']) : 0,
@@ -438,7 +444,13 @@ final class ClientRepository
                 company_name = ?, first_name = ?, last_name = ?, ic = ?, dic = ?, tax_number = ?,
                 street = ?, city = ?, zip = ?, country_id = ?,
                 main_email = ?, phone = ?, language = ?, currency_default_id = ?,
-                reverse_charge = ?, is_vat_payer = COALESCE(?, is_vat_payer), is_customer = ?, is_vendor = ?,
+                reverse_charge = ?, is_vat_payer = COALESCE(?, is_vat_payer),
+                -- COALESCE ze stejného důvodu jako u is_vat_payer: integrace posílají
+                -- částečný payload a ten nesmí shodit nastavení OSS. Vyčistit výchozí typ
+                -- plnění jde explicitním prázdným řetězcem (řeší se pod tímhle UPDATE).
+                oss_mode = COALESCE(?, oss_mode),
+                oss_default_supply_type = COALESCE(?, oss_default_supply_type),
+                is_customer = ?, is_vendor = ?,
                 is_fuel_station = COALESCE(?, is_fuel_station),
                 auto_send_reminders = ?, payment_due_default = ?, payment_due_unit = ?,
                 default_payment_method = ?,
@@ -470,6 +482,10 @@ final class ClientRepository
             !empty($data['reverse_charge']) ? 1 : 0,
             // COALESCE: null (klíč chybí) → zachová stávající is_vat_payer; jinak nastav.
             array_key_exists('is_vat_payer', $data) ? ((int) (bool) $data['is_vat_payer']) : null,
+            array_key_exists('oss_mode', $data) ? self::normalizeOssMode($data['oss_mode']) : null,
+            array_key_exists('oss_default_supply_type', $data)
+                ? OssClientContext::supplyTypeOrNull($data['oss_default_supply_type'])
+                : null,
             $newIsCustomer,
             $newIsVendor,
             array_key_exists('is_fuel_station', $data) ? ((int) (bool) $data['is_fuel_station']) : null,
@@ -498,6 +514,14 @@ final class ClientRepository
         if (array_key_exists('related_party', $data) && !$data['related_party']) {
             $pdo->prepare('UPDATE clients SET related_party_type = NULL, related_party_note = NULL WHERE id = ?')
                 ->execute([$id]);
+        }
+
+        // Vyčištění výchozího typu plnění: COALESCE výš rozliší „klíč nepřišel" od
+        // „přišel prázdný" neumí, a bez tohohle by šlo default nastavit, ale ne zrušit.
+        if (array_key_exists('oss_default_supply_type', $data)
+            && OssClientContext::supplyTypeOrNull($data['oss_default_supply_type']) === null
+        ) {
+            $pdo->prepare('UPDATE clients SET oss_default_supply_type = NULL WHERE id = ?')->execute([$id]);
         }
 
         // Backfill: pokud byla nastavena/změněna výchozí kategorie, doplnit ji do všech
@@ -641,6 +665,17 @@ final class ClientRepository
             $id = $stmt->fetchColumn();
         }
         return (int) $id;
+    }
+
+    /**
+     * Režim OSS karty odběratele (migrace 1298). Cokoli jiného než doslovné 'never' je
+     * 'auto': vypnutí OSS musí být vědomé rozhodnutí, ne důsledek překlepu v payloadu.
+     * Hodnota 'always' NEEXISTUJE — karta smí OSS vyloučit, ne vynutit; jinak by vznikla
+     * druhá autorita nad místem plnění vedle {@see \MyInvoice\Service\Oss\OssItemDeriver}.
+     */
+    private static function normalizeOssMode(mixed $value): string
+    {
+        return strtolower(trim((string) ($value ?? ''))) === 'never' ? 'never' : 'auto';
     }
 
     private function cast(array $row): array

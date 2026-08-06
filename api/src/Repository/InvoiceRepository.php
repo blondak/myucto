@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 
@@ -710,6 +711,20 @@ final class InvoiceRepository
                 }
             }
         }
+        // Nejisté místo plnění (OSS): řádek, u kterého kanál nedokázal určit, jestli jde
+        // o OSS plnění, a nechal ho mimo OSS s příznakem k ručnímu posouzení. Bez tohohle
+        // filtru je takový doklad NEDOHLEDATELNÝ: v OSS podání není (a být nemá — OSS řádek
+        // to není), v seznamu vypadá jako každý jiný, a přitom tiše vstupuje na ř. 1/2
+        // přiznání. Definici vlastní VatLedgerService, ať se filtr a varování v přiznání
+        // nemůžou rozejít; `null` = schéma příznak nezná, filtr je pak no-op (nefiltrovat
+        // je lepší než vrátit prázdno a tvrdit, že nic takového není).
+        if (!empty($filters['oss_review'])) {
+            $uncertain = VatLedgerService::uncertainOssPredicate($this->db, 'ossii');
+            if ($uncertain !== null) {
+                $where[] = 'EXISTS (SELECT 1 FROM invoice_items ossii'
+                    . ' WHERE ossii.invoice_id = i.id AND ' . $uncertain . ')';
+            }
+        }
         if (!empty($filters['q'])) {
             // Escape % a _ wildcards aby uživatelský input nedělal slow-query DoS / nečekanou shodu
             $q = addcslashes((string) $filters['q'], '%_\\');
@@ -1297,10 +1312,24 @@ final class InvoiceRepository
             $rate = $vatRates[$vatRateId] ?? 0.0;
             // Auto-klasifikace pro DPH přiznání / KH — bez ní by faktura nedorazila
             // do výkazů (VatClassificationMapper SKIPNE řádky s code=NULL).
+            //
+            // U OSS řádku se ale TUZEMSKÝ default NEDOSAZUJE. Plnění se vykazuje v OSS
+            // podání, ne v českém přiznání ani v KH, takže by kód byl mrtvá metadata —
+            // a v okamžiku, kdy někdo `oss_applicable` zhasne, přestane řádek filtr
+            // `VatLedgerService` držet a s dosazenou '1' by cizí daň dopadla na ř. 1.
+            // Shodně s importem ({@see \MyInvoice\Service\Import\InvoiceImportService}),
+            // který tuhle větev řeší stejně; ručně zadaný kód má přednost i tady.
             $explicitCode = ($item['vat_classification_code'] ?? null) !== null;
-            $code = $explicitCode
-                ? $item['vat_classification_code']
-                : self::defaultSaleClassificationCode($rate, $reverseCharge, $countryIso, (string) ($item['unit'] ?? '') ?: null);
+            $code = match (true) {
+                $explicitCode                   => $item['vat_classification_code'],
+                !empty($item['oss_applicable']) => null,
+                default                         => self::defaultSaleClassificationCode(
+                    $rate,
+                    $reverseCharge,
+                    $countryIso,
+                    (string) ($item['unit'] ?? '') ?: null,
+                ),
+            };
             $assetId = self::positiveIdOrNull($item['asset_id'] ?? null);
             // § 76/4 ZDPH: prodej DLOUHODOBÉHO majetku se vylučuje z výpočtu koeficientu —
             // číselník na to má varianty '1m'/'2m' (tatáž řádka přiznání i sekce KH jako
@@ -1449,15 +1478,36 @@ final class InvoiceRepository
      */
     private static function ossItemParams(array $item, bool $withManualReview): array
     {
-        // Příznak vzniká z odvození místa plnění, které dává smysl jen u OSS řádku
-        // (OssDerivationReason::needsManualReview() je true výhradně u OSS důvodů).
-        // Vypnutí OSS na položce je ROZHODNUTÍ ČLOVĚKA, čímž nejistota končí — proto
-        // se u ne-OSS řádku zapisuje 0, ne hodnota převzatá z payloadu.
-        $noReview = $withManualReview ? [0] : [];
-
         $applicable = !empty($item['oss_applicable']) ? 1 : 0;
+
+        // Příznak „k ručnímu posouzení" má DVA legitimní zdroje a oba se respektují:
+        //
+        //  1. `oss_needs_manual_review` z payloadu = kanál, který doklad zakládá, NEDOKÁZAL
+        //     určit místo plnění. Platí NEZÁVISLE na `oss_applicable`, a to je podstatné:
+        //     u cronu opakovaných faktur, iDokladu, Fakturoidu i AI extrakce je řádek
+        //     s `oss_applicable = 0` a rozsvíceným příznakem JEDINÉ povolené „nevím"
+        //     ({@see \MyInvoice\Service\Invoice\RecurringInvoiceGenerator::ossColumnsFor()} —
+        //     odmítnutí nesmí zastavit cron, tak řádek zůstane mimo OSS, ale označený).
+        //     Dřívější podmínka `$applicable === 1 && …` přesně tohle „nevím" při zápisu
+        //     zahazovala, takže z nerozhodnutého řádku byl v datech řádek rozhodnutý —
+        //     a hromadná editace, která ho má najít, o něm nevěděla.
+        //
+        //     Zhasnout příznak proto musí ten, kdo se ROZHODL: editor posílá
+        //     `oss_needs_manual_review: false` sám, jakmile uživatel OSS na položce vypne
+        //     (InvoiceEditor.vue, hlídá {@see \MyInvoice\Tests\Architecture\InvoiceEditorOssPayloadContractTest}),
+        //     a hromadná akce má na totéž `clear_needs_review`. Repozitář si rozhodnutí
+        //     nedomýšlí za ně.
+        //  2. `oss_document_contradiction` = kontrola soudržnosti CELÉHO dokladu
+        //     ({@see \MyInvoice\Service\Oss\OssDocumentCoherence}), která označuje i řádek
+        //     TUZEMSKÝ — právě ten má člověk prověřit, a import ho tak značí od začátku.
+        //     Nese ji vlastní klíč, protože ji nepočítá payload, ale server při KAŽDÉM
+        //     uložení znovu: opravou sazby rozpor zmizí a příznak s ním.
+        $review = $withManualReview
+            ? [!empty($item['oss_needs_manual_review']) || !empty($item['oss_document_contradiction']) ? 1 : 0]
+            : [];
+
         if ($applicable === 0) {
-            return array_merge([0, null, null, null, null, null, null, null, null], $noReview);
+            return array_merge([0, null, null, null, null, null, null, null, null], $review);
         }
 
         $country = strtoupper(trim((string) ($item['oss_consumer_country'] ?? '')));
@@ -1479,7 +1529,7 @@ final class InvoiceRepository
 
         return array_merge(
             [$applicable, $country, $rateType, $supplyType, $rate, $rateDate, $taxable, $vat, $period ?: null],
-            $withManualReview ? [!empty($item['oss_needs_manual_review']) ? 1 : 0] : [],
+            $review,
         );
     }
 

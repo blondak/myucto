@@ -52,6 +52,60 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         self::assertSame(0.70, $foreignIdentifier->confidence, 'VS ČSSZ nesmí zvýšit jistotu mapy DPH.');
     }
 
+    /**
+     * Daň v režimu OSS má vlastní analytiku (345.100, migrace 1295), ale úhrada se do
+     * migrace 1301 účtovala jako obyčejná platba DPH — snížila 343 a 345.100 nechala
+     * viset. Platí se navíc v EURECH, takže ji korunová podmínka detektoru vyřadila
+     * dřív, než se dala poznat, a končila jako neurčený odvod.
+     *
+     * Účet 34534-177653621/0710 identifikuje příjemce sám: referenční číslo platby má
+     * tvar „CZ/CZ<DIČ>/Qn.RRRR", tedy není číselný VS. Musí to platit v národním
+     * i v nulami vycpaném GPC zápisu.
+     */
+    public function testOssRemittanceInEurosPostsToItsOwnAnalyticAccount(): void
+    {
+        foreach (['34534-177653621', '0345340177653621'] as $account) {
+            $detected = $this->detector->detect($this->supplierId, $this->tx(
+                currency: 'EUR',
+                account: $account,
+                vs: 'CZ/CZ12345678/Q3.2026',
+            ));
+
+            self::assertNotNull($detected, $account);
+            self::assertSame(OperationType::REMITTANCE_OSS, $detected->operationType, $account);
+            self::assertSame('345.100', $detected->debitAccountCode, $account);
+            self::assertSame('221', $detected->creditAccountCode, $account);
+            self::assertSame(0.90, $detected->confidence, $account);
+            self::assertTrue($detected->autoAllowed, $account);
+            self::assertNull($detected->note, $account);
+        }
+    }
+
+    /**
+     * Výjimka pro cizí měnu se váže na PŘÍJEMCE, ne na měnu: eurová platba na běžný účet
+     * finančního úřadu odvod není a nesmí se z ní stát ani „jiný odvod" s ruční kontrolou.
+     */
+    public function testForeignCurrencyStaysRejectedOnNonOssTaxOfficeAccount(): void
+    {
+        self::assertNull($this->detector->detect(
+            $this->supplierId,
+            $this->tx(currency: 'EUR', account: '705-77628031'),
+        ));
+    }
+
+    /** Korunová platba na OSS účet se nesmí stát platbou DPH jen proto, že je v CZK. */
+    public function testCrownPaymentToOssAccountIsStillClassifiedAsOss(): void
+    {
+        $detected = $this->detector->detect($this->supplierId, $this->tx(
+            account: '34534-177653621',
+            vs: '12345678',
+        ));
+
+        self::assertNotNull($detected);
+        self::assertSame(OperationType::REMITTANCE_OSS, $detected->operationType);
+        self::assertSame('345.100', $detected->debitAccountCode);
+    }
+
     public function testUnknownPaymentFallsBackToManualSuggestion(): void
     {
         $detected = $this->detector->detect($this->supplierId, $this->tx(account: '77628031', vs: '999999'));

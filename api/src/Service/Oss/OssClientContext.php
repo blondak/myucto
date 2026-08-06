@@ -19,19 +19,48 @@ namespace MyInvoice\Service\Oss;
  * kde doklad žádnou zemi nenesl — a derivace by z toho udělala tuzemské plnění a poslala
  * cizí daň na ř. 1. Země z IMPORTOVANÉHO DOKLADU proto uloženou přebíjí a
  * `$countryFromDocument` to nese do reportu, aby bylo vidět, který údaj rozhodl.
+ *
+ * ── Výchozí nastavení OSS v kartě odběratele (migrace 1298) ─────────────────────────
+ * Karta odběratele umí ke dvěma otázkám říct svoje, ale ani jedna z nich nesmí přebít
+ * rozhodnutí o MÍSTĚ PLNĚNÍ — to zůstává výhradně na {@see OssItemDeriver}:
+ *
+ *  - `$ossExcluded` (režim „u tohohle odběratele OSS neuplatňovat") umí OSS jedině UBRAT,
+ *    nikdy přidat. Přidat by znamenalo druhou autoritu nad místem plnění, a ta by uměla
+ *    poslat do OSS i plnění, které tam nepatří (odběratel s DIČ, tuzemská dodávka).
+ *    Ubrat je bezpečné, protože invariant proti úniku cizí daně platí dál: řádek s cizí
+ *    sazbou se do tuzemské větve ani po vyloučení nedostane, jen se odmítne s hláškou.
+ *  - `$defaultSupplyType` odpovídá na otázku, kterou deriver dnes DOHADUJE (zboží vs.
+ *    služba, fallback „služba"). Uživatelská znalost je vždy lepší než fallback a o místě
+ *    plnění nevypovídá nic — proto se uplatní automaticky, ale až POD měrnou jednotkou
+ *    položky: jednotka je důkaz z konkrétního řádku, kdežto default je vlastnost karty.
+ *
+ * ZÁMĚRNĚ tu NENÍ „výchozí země spotřeby". Země spotřeby se bere z adresy odběratele
+ * (nebo z dokladu) a je to týž údaj, proti kterému se rozhoduje o tuzemsku; default
+ * v kartě by uměl daň poslat do jiného státu, než jaký doklad uvádí, a rozpor by nebyl
+ * nikde vidět. Chybí-li země, je to vada karty s vlastní hláškou
+ * ({@see OssDerivationReason::ClientCountryUnknown}) — druhé místo, kam ji vyplnit,
+ * by problém neřešilo, jen rozdvojilo.
  */
 final readonly class OssClientContext
 {
+    /**
+     * @param bool     $ossExcluded       karta odběratele říká „OSS se u něj neuplatňuje";
+     *                                    smí OSS jedině vyloučit, nikdy vynutit
+     * @param ?string  $defaultSupplyType 'goods'|'services' z karty odběratele, nebo `null`
+     */
     public function __construct(
         public ?string $countryIso2,
         public bool $isEu,
         public ?string $dic,
         public bool $countryFromDocument = false,
+        public bool $ossExcluded = false,
+        public ?string $defaultSupplyType = null,
     ) {}
 
     /**
      * @param array<string,mixed> $row akceptuje `country_iso2` i `iso2` (tvar z JOINu
-     *                                 i z parseru importu), `is_eu`, `dic`
+     *                                 i z parseru importu), `is_eu`, `dic`,
+     *                                 `oss_mode`, `oss_default_supply_type`
      */
     public static function fromArray(array $row, bool $countryFromDocument = false): self
     {
@@ -40,7 +69,25 @@ final readonly class OssClientContext
         $country = self::iso2OrNull($row['country_iso2'] ?? $row['iso2'] ?? null);
         $dic = trim((string) ($row['dic'] ?? ''));
 
-        return new self($country, !empty($row['is_eu']), $dic === '' ? null : $dic, $countryFromDocument);
+        return new self(
+            $country,
+            !empty($row['is_eu']),
+            $dic === '' ? null : $dic,
+            $countryFromDocument,
+            // Jen doslovné 'never' vylučuje. Neznámá hodnota (starší instalace bez migrace
+            // 1298, ručně upravený ENUM) znamená „automaticky", protože vypnutí OSS musí
+            // být vědomé rozhodnutí, ne důsledek prázdného sloupce.
+            ($row['oss_mode'] ?? 'auto') === 'never',
+            self::supplyTypeOrNull($row['oss_default_supply_type'] ?? null),
+        );
+    }
+
+    /** Jediná interpretace „je tohle použitelný typ plnění" — shodná s `OssItemDecision::SUPPLY_TYPES`. */
+    public static function supplyTypeOrNull(mixed $value): ?string
+    {
+        $type = strtolower(trim((string) ($value ?? '')));
+
+        return in_array($type, OssItemDecision::SUPPLY_TYPES, true) ? $type : null;
     }
 
     /** Jediná interpretace „je tohle použitelný ISO2 kód země" pro celou OSS větev. */

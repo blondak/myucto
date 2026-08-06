@@ -71,6 +71,37 @@ final class PaymentTaxDocumentAllocationTest extends TestCase
         self::assertSame(1200.0, round($out[0]['amount'] + $out[1]['amount'], 2));
     }
 
+    /**
+     * `carry` (zdrojová položka proformy, ze které se přenese OSS profil) musí zůstat
+     * u SVÉHO kbelíku i poté, co alokátor vyhodí nulové váhy a přeindexuje. Kdyby si
+     * volající pároval výstup se vstupem podle pozice, přiřadil by po vyhození nulového
+     * kbelíku OSS profil sousednímu řádku — tedy přiznal daň v jiné zemi, tiše.
+     */
+    public function testCarryStaysWithItsBucketAcrossFilteringAndReindexing(): void
+    {
+        $out = PaymentTaxDocumentCreator::allocateAcrossRates(
+            [
+                ['rate' => 23.0, 'vat_rate_id' => 1, 'gross' => 0.0, 'carry' => ['tag' => 'vyhozeny']],
+                ['rate' => 23.0, 'vat_rate_id' => 1, 'gross' => 1230.0, 'carry' => ['tag' => 'oss-pl']],
+                ['rate' => 23.0, 'vat_rate_id' => 1, 'gross' => 1230.0, 'carry' => ['tag' => 'tuzemsko']],
+            ],
+            2460.0,
+        );
+
+        self::assertSame(['oss-pl', 'tuzemsko'], array_column(array_column($out, 'carry'), 'tag'));
+    }
+
+    /** Chybějící `carry` je prázdné pole, ne chybějící klíč — volající se nemá čeho chytat. */
+    public function testCarryDefaultsToEmptyArray(): void
+    {
+        $out = PaymentTaxDocumentCreator::allocateAcrossRates(
+            [['rate' => 21.0, 'vat_rate_id' => 1, 'gross' => 1210.0]],
+            1210.0,
+        );
+
+        self::assertSame([], $out[0]['carry']);
+    }
+
     public function testZeroBucketsRejected(): void
     {
         $this->expectException(\RuntimeException::class);

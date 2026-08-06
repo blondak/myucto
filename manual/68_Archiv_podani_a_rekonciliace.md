@@ -338,6 +338,26 @@ Praktický postup:
    která nastala až po podání.
 5. Neshodu nikdy neodstraňuj mechanickým dorovnávacím zápisem bez účetního případu.
 
+### OSS
+
+U OSS porovnává **Daně → OSS přiznání → Rekonciliace** archivované podání s tím, co
+by se za totéž období podalo dnes. Nejde o import cizího XML: srovnává se uložený
+podklad podání s aktuálním náhledem, takže se pozná doklad opravený zpětně, doklad,
+který z období zmizel (storno, přesun data plnění), i přesun daně do jiného státu
+spotřeby při nezměněném součtu.
+
+Referencí není prostě poslední archivovaný snímek, ale ten s nejvyšší důkazní silou:
+**doložené podání** (odeslané nebo přijaté finanční správou), a pokud žádné není, tak
+**první stažení** období — tedy první podoba výkazu, která opustila systém. Opakované
+stažení už referencí nepohne, takže rekonciliaci nelze omylem „srovnat" tím, že si
+výkaz stáhnete znovu. Snímek pouze vygenerovaný k náhledu se za referenci nebere nikdy.
+Archiv, který ještě nemá uložený podklad, se neporovnává a hlásí to — nikdy se nevydává
+za shodu. Rozhodnutí o opravném podání zůstává na účetní.
+
+Tamtéž je i evidence podle § 110f ZDPH (struktura dle čl. 63c nařízení (EU)
+č. 282/2011), která vzniká write-once při archivaci podání, uchovává se 10 let od
+konce roku plnění a exportuje se do CSV nebo JSON.
+
 ### DPH, KH, DPFO a pojistné
 
 MyÚčto provádí interní křížové kontroly DPHDP3 proti KH, souhrnnému hlášení, knize

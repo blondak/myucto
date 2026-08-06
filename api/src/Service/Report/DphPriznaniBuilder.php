@@ -726,6 +726,25 @@ final class DphPriznaniBuilder
         foreach ($unclassifiedZero->fetchAll(\PDO::FETCH_COLUMN) as $number) {
             $warnings[] = "Doklad {$number} obsahuje neklasifikovaný řádek se sazbou 0 %. Řádek nebyl zahrnut na ř. 50; zvolte výslovnou klasifikaci DPH.";
         }
+
+        // Řádky s povoleným „nevím" (mimo OSS, ale označené k ručnímu posouzení). Do
+        // přiznání vstupují jako tuzemské plnění — což je zatím jediná možnost, protože
+        // OSS řádkem prokazatelně nejsou. Varování je poslední brána před odesláním na
+        // EPO: systém sám ví, že si jimi není jistý, a nesmí to zamlčet. Definici „co je
+        // nejistý řádek" vlastní VatLedgerService, aby ji filtr v seznamu faktur
+        // (`filter[oss_review]`) a tohle varování nemohly vidět jinak.
+        $uncertain = $this->ledger->uncertainOssDocuments($supplierId, $start, $end);
+        foreach ($uncertain as $doc) {
+            $number = $doc['doc_number'] ?? ('#' . $doc['invoice_id']);
+            $warnings[] = sprintf(
+                'Doklad %s obsahuje %d řádk%s, u kterých se nepodařilo určit místo plnění (OSS). '
+                    . 'Vstupují do tuzemského přiznání na ř. 1/2 — ověřte, jestli tam patří. '
+                    . 'Najdete je v seznamu faktur pod filtrem „Nejisté místo plnění (OSS)".',
+                $number,
+                $doc['items'],
+                $doc['items'] === 1 ? '' : ($doc['items'] < 5 ? 'y' : 'ů'),
+            );
+        }
     }
 
     /**

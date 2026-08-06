@@ -51,11 +51,16 @@ use MyInvoice\Infrastructure\Database\Connection;
  * Vrátí-li se `id === null`, musí volající odmítnout CELÝ doklad, ne jen položku: doklad
  * s vynechaným řádkem má špatné součty. Žádné `?: 0`, žádné „nejbližší".
  *
- * ── Známý drift ─────────────────────────────────────────────────────────────────────
- * Vlastní `matchVatRateId()` mají i `AiPdfExtractor`, `IdokladImportService`
- * a `FakturoidImportService`; všechny tři párují bez země i bez `is_reverse_charge`.
- * Tahle služba je psaná tak, aby je šlo nahradit beze změny signatury — proto je
- * `$countryIso2` povinný parametr, ne OSS-specifický přívažek.
+ * ── Drift je uzavřený: tahle služba je JEDINÁ cesta k `vat_rate_id` ─────────────────
+ * Vlastní „nejbližší procento napříč tabulkou" míval `AiPdfExtractor`,
+ * `IdokladImportService` i `FakturoidImportService` — všechny tři bez země i bez
+ * `is_reverse_charge`. Po sjednocení už žádný z nich vlastní párování NEMÁ:
+ * `FakturoidImportService` a `IdokladImportService` se ptají přímo přes
+ * {@see \MyInvoice\Service\Oss\OssItemPlanner}, `AiPdfExtractor` si nechal jen
+ * stejnojmenný jednořádkový obal nad `OssItemPlanner::resolveDomesticRate()`.
+ * Proto je `$countryIso2` POVINNÝ parametr, ne OSS-specifický přívažek: kdyby byl
+ * volitelný, vrátí se dotaz bez země zadními vrátky a s ním i chyba, kvůli které se
+ * polských 23 % navázalo na českou sazbu.
  */
 final class VatRateResolver
 {

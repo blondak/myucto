@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\PeriodicityCalculator;
+use MyInvoice\Service\Oss\OssTemplateItemPolicy;
 use PDO;
 
 /**
@@ -68,6 +69,39 @@ final class RecurringTemplateRepository
         return $this->itemsForTemplates([$templateId])[$templateId] ?? [];
     }
 
+    /**
+     * Sloupce OSS na položkách šablony (migrace 1297) — pořadí je závazné, používá ho
+     * i {@see replaceItems()}.
+     *
+     * @var list<string>
+     */
+    private const OSS_ITEM_COLUMNS = [
+        'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
+    ];
+
+    /**
+     * Umí tahle instalace OSS na šabloně? Guard je tu ze stejného důvodu jako u
+     * `invoice_items` (migrace 0137/1293): kód musí běžet i tam, kde migrace nedoběhla,
+     * jen se pak šablona k OSS nevyjádří a rozhodne sama derivace při generování.
+     */
+    private function supportsOssItemColumns(): bool
+    {
+        return $this->db->hasColumn('recurring_invoice_template_items', 'oss_applicable');
+    }
+
+    /** Výčet OSS sloupců do SELECTu (s prefixem aliasu), nebo prázdný řetězec. */
+    private function ossItemSelect(string $alias): string
+    {
+        if (!$this->supportsOssItemColumns()) {
+            return '';
+        }
+
+        return ', ' . implode(', ', array_map(
+            static fn (string $c): string => $alias . '.' . $c,
+            self::OSS_ITEM_COLUMNS,
+        ));
+    }
+
     /** @param list<int> $templateIds @return array<int,list<array<string,mixed>>> */
     public function itemsForTemplates(array $templateIds): array
     {
@@ -84,7 +118,8 @@ final class RecurringTemplateRepository
                     i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
                     pli.code AS price_list_item_code, pli.name AS price_list_item_name,
-                    pli.archived AS price_list_item_archived
+                    pli.archived AS price_list_item_archived'
+            . $this->ossItemSelect('i') . '
                FROM recurring_invoice_template_items i
                JOIN vat_rates vr ON vr.id = i.vat_rate_id
           LEFT JOIN price_list_items pli ON pli.id = i.price_list_item_id
@@ -436,7 +471,8 @@ final class RecurringTemplateRepository
             'SELECT i.id, i.template_id, i.description, i.quantity, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.order_index,
                     i.stock_item_id, i.warehouse_id,
-                    vr.code AS vat_code, vr.rate_percent AS vat_rate_percent
+                    vr.code AS vat_code, vr.rate_percent AS vat_rate_percent'
+            . $this->ossItemSelect('i') . '
                FROM recurring_invoice_template_items i
                JOIN vat_rates vr ON vr.id = i.vat_rate_id
               WHERE i.template_id IN (' . $place . ')
@@ -683,17 +719,21 @@ final class RecurringTemplateRepository
         $pdo->prepare('DELETE FROM recurring_invoice_template_items WHERE template_id = ?')
             ->execute([$templateId]);
 
+        $supportsOss = $this->supportsOssItemColumns();
+        $ossColumns = $supportsOss ? ', ' . implode(', ', self::OSS_ITEM_COLUMNS) : '';
+        $ossPlaceholders = $supportsOss ? str_repeat(', ?', count(self::OSS_ITEM_COLUMNS)) : '';
+
         $stmt = $pdo->prepare(
             'INSERT INTO recurring_invoice_template_items
                 (template_id, price_list_item_id, catalog_policy, description_source,
                  catalog_price_source, catalog_source_currency_code,
                  catalog_source_unit_price, catalog_exchange_rate,
                  catalog_exchange_rate_date, description, quantity, unit,
-                 unit_price_without_vat, vat_rate_id, order_index)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 unit_price_without_vat, vat_rate_id, order_index' . $ossColumns . ')
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
         );
         foreach (array_values($items) as $i => $item) {
-            $stmt->execute([
+            $params = [
                 $templateId,
                 !empty($item['price_list_item_id']) ? (int) $item['price_list_item_id'] : null,
                 (string) ($item['catalog_policy'] ?? 'fixed'),
@@ -709,9 +749,17 @@ final class RecurringTemplateRepository
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 (int) ($item['vat_rate_id'] ?? 0),
                 (int) ($item['order_index'] ?? $i),
-            ]);
+            ];
+            if ($supportsOss) {
+                // Pravidlo „co je platný OSS řádek šablony" je sdílené s generátorem
+                // ({@see OssTemplateItemPolicy}) — dvě kopie by se rozešly a šablona by
+                // přijala kombinaci, kterou pak cron neumí vygenerovat.
+                $params = array_merge($params, OssTemplateItemPolicy::storedColumns($item));
+            }
+            $stmt->execute($params);
         }
     }
+
 
     /** Posun next_run_date + last_run_date po úspěšném vygenerování faktury. */
     public function advanceSchedule(int $id, string $newNextRunDate, string $lastRunDate, string $newStatus): void
@@ -828,6 +876,9 @@ final class RecurringTemplateRepository
             $row['price_list_item_archived'] = $row['price_list_item_archived'] !== null
                 ? (bool) $row['price_list_item_archived']
                 : null;
+        }
+        if (array_key_exists('oss_applicable', $row)) {
+            $row['oss_applicable'] = (bool) $row['oss_applicable'];
         }
         return $row;
     }

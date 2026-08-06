@@ -15,6 +15,7 @@ use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Oss\OssItemPlanner;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -55,7 +56,17 @@ final class IdokladImportService
         private readonly ImageToPdfConverter $imageToPdf,
         private readonly IdokladBankTransactionImporter $bankTransactions,
         private readonly ExchangeRateApplier $exchangeRateApplier,
+        private readonly OssItemPlanner $planner,
     ) {}
+
+    /**
+     * Varování k OSS / párování sazby za PRÁVĚ ZPRACOVÁVANÝ doklad. Sbírá se do vlastnosti,
+     * protože `createIssuedFromIdoklad()` job ID nezná — volající je vysype do logu jobu
+     * hned po dokladu, takže se u hlášky pozná, ke které faktuře patří.
+     *
+     * @var list<string>
+     */
+    private array $ossWarnings = [];
 
     /**
      * #238: přenes měnový kurz na čerstvě importovaný VYSTAVENÝ doklad (faktura/dobropis).
@@ -349,6 +360,16 @@ final class IdokladImportService
         $this->jobs->updateProgress($jobId, ['current_step' => 'Importing issued invoices…', 'processed' => 0]);
         $this->jobs->appendLog($jobId, 'Stahuji vydané faktury z iDoklad…');
 
+        // Pre-flight číselníku sazeb členských států. Bez něj nepotvrdí invariant proti
+        // úniku cizí daně tuzemskou sazbu u ŽÁDNÉHO řádku, takže by se odmítla i běžná
+        // česká faktura českému odběrateli — a to na každém dokladu zvlášť. Jedna věta
+        // před prvním stažením je jediný užitečný výstup.
+        $codebookProblem = $this->planner->codebookProblem($supplierId, 'Import vydaných faktur se nespustil.');
+        if ($codebookProblem !== null) {
+            $this->jobs->appendLog($jobId, $codebookProblem);
+            throw new \RuntimeException($codebookProblem);
+        }
+
         $query = self::incrementalFilter($bookmarkSince);
 
         $created = 0; $skipped = 0; $failed = 0; $processed = 0;
@@ -385,6 +406,12 @@ final class IdokladImportService
                 $failed++;
                 $this->jobs->appendLog($jobId, "Vydaná #{$idokladId}: " . $e->getMessage());
             }
+            // I úspěšný doklad může mít co říct (nejednoznačné místo plnění, sazba mimo
+            // platnost) — bez logu by o tom uživatel nevěděl, protože sync nemá report.
+            foreach ($this->ossWarnings as $warning) {
+                $this->jobs->appendLog($jobId, "Vydaná #{$idokladId}: " . $warning);
+            }
+            $this->ossWarnings = [];
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
         $this->jobs->appendLog($jobId, "Vydané faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
@@ -428,23 +455,35 @@ final class IdokladImportService
             'discount_percent' => $docDiscountPercent,
         ];
 
-        $invoiceId = $this->invoices->createDraft($payload, $userId);
-
-        // Items
-        $vatRates = $this->loadVatRateMap();
-        $items = [];
+        $lines = [];
         foreach (($i['Items'] ?? []) as $idx => $line) {
             $rate = (float) ($line['VatRate'] ?? 0);
-            $vatRateId = $this->matchVatRateId($vatRates, $rate);
-            $items[] = [
+            $lines[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => (float) ($line['Amount'] ?? 1),
                 'unit'                   => (string) ($line['Unit'] ?? 'ks'),
                 'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
-                'vat_rate_id'            => $vatRateId,
+                'vat_rate'               => $rate,
                 'order_index'            => $idx,
             ];
         }
+
+        // Sazba i OSS jdou přes SDÍLENÝ plánovač: iDoklad si dřív pároval sazbu vlastním
+        // „nejbližší procento" napříč celou tabulkou (bez země, bez platnosti k datu,
+        // bez is_reverse_charge) a o OSS nevěděl vůbec nic, takže polský doklad
+        // z iDokladu skončil v českém přiznání. Plánuje se JEŠTĚ PŘED createDraft() —
+        // odmítnutý řádek pak nenechá v DB doklad bez položek se spáleným číslem.
+        $items = $this->planner->planIssuedItems(
+            $supplierId,
+            $clientId,
+            (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
+            false,
+            $lines,
+            $this->ossWarnings,
+        );
+
+        $invoiceId = $this->invoices->createDraft($payload, $userId);
+
         if (!empty($items)) {
             $this->invoices->replaceItems($invoiceId, $items);
         }
@@ -579,8 +618,7 @@ final class IdokladImportService
         $taxDate   = (string) ($i['DateOfTaxing'] ?? $issueDate);
         $dueDate   = (string) ($i['DateOfMaturity'] ?? $issueDate);
 
-        $vatRates = $this->loadVatRateMap();
-        $defaultVatRateId = $this->matchVatRateId($vatRates, 21.0) ?? $this->matchVatRateId($vatRates, 0.0) ?? 0;
+        $defaultVatRateId = $this->fallbackVatRateId($supplierId, $taxDate);
 
         // Sleva (issue #48): přijaté faktury nemají header discount_percent — slevu
         // z iDokladu (DiscountType=OnDocument) materializujeme rovnou jako zápornou
@@ -593,7 +631,7 @@ final class IdokladImportService
         $discountBaseByRate = []; // vat_rate_id => ['rate_id' => int, 'base' => float]
         foreach (($i['Items'] ?? []) as $idx => $line) {
             $rate = (float) ($line['VatRate'] ?? 0);
-            $vatRateId = $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId;
+            $vatRateId = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id ?? $defaultVatRateId;
             $qty = (float) ($line['Amount'] ?? 1);
             $unitPrice = self::idokladNetUnitPrice($line, $rate);
             $items[] = [
@@ -814,15 +852,14 @@ final class IdokladImportService
         $taxDate   = $hdr['tax_date'];
         $dueDate   = $hdr['due_date'];
 
-        $vatRates = $this->loadVatRateMap();
-        $defaultVatRateId = $this->matchVatRateId($vatRates, 21.0) ?? $this->matchVatRateId($vatRates, 0.0) ?? 0;
+        $defaultVatRateId = $this->fallbackVatRateId($supplierId, $taxDate);
 
         // Položky — stejný tvar jako ReceivedInvoices (Amount/Name/Unit/VatRate + per-řádek Prices).
         // idokladNetUnitPrice() řeší i PriceType=WithVat (účtenky bývají ceny s DPH).
         $items = [];
         foreach (($i['Items'] ?? []) as $idx => $line) {
             $rate = (float) ($line['VatRate'] ?? 0);
-            $vatRateId = $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId;
+            $vatRateId = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id ?? $defaultVatRateId;
             $items[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => (float) ($line['Amount'] ?? 1),
@@ -1153,12 +1190,24 @@ final class IdokladImportService
         return $map;
     }
 
-    private function matchVatRateId(array $vatRates, float $rate): ?int
+    /**
+     * Náhradní sazba pro PŘIJATOU stranu, když se sazba z dokladu nenajde.
+     *
+     * Fallback tu zůstává (bez `vat_rate_id` by řádek porušil FK a celý doklad by
+     * spadl), ale hledá se přes SDÍLENÝ {@see \MyInvoice\Service\Vat\VatRateResolver},
+     * takže i on respektuje zemi dodavatele, platnost k datu a `is_reverse_charge` —
+     * dřív mohla „nula" trefit reverse-charge sazbu, protože obě mají 0,00 a rozlišilo
+     * je jen pořadí řádků v tabulce.
+     *
+     * VYDANÁ strana fallback NEMÁ a mít nesmí: tam je nenalezená sazba tvrdá chyba
+     * dokladu ({@see OssItemPlanner::planIssuedItems()}), protože dosazená cizí sazba
+     * by změnila odvedenou daň.
+     */
+    private function fallbackVatRateId(int $supplierId, string $onDate): int
     {
-        foreach ($vatRates as $id => $r) {
-            if (abs($r - $rate) < 0.01) return $id;
-        }
-        return null;
+        return $this->planner->resolveDomesticRate($supplierId, 21.0, $onDate)->id
+            ?? $this->planner->resolveDomesticRate($supplierId, 0.0, $onDate)->id
+            ?? 0;
     }
 
     /**
@@ -1269,6 +1318,13 @@ final class IdokladImportService
         $this->jobs->updateProgress($jobId, ['current_step' => 'Importing credit notes…']);
         $this->jobs->appendLog($jobId, 'Stahuji dobropisy z iDoklad…');
 
+        // Týž pre-flight jako u vydaných faktur — dobropis prochází derivací stejně.
+        $codebookProblem = $this->planner->codebookProblem($supplierId, 'Import dobropisů se nespustil.');
+        if ($codebookProblem !== null) {
+            $this->jobs->appendLog($jobId, $codebookProblem);
+            throw new \RuntimeException($codebookProblem);
+        }
+
         $query = self::incrementalFilter($bookmarkSince);
         $created = 0; $skipped = 0; $failed = 0;
 
@@ -1323,27 +1379,47 @@ final class IdokladImportService
                     'payment_method'    => 'bank_transfer',
                     'discount_percent'  => $docDiscountPercent,
                 ];
+                $lines = [];
+                foreach (($i['Items'] ?? []) as $idx => $line) {
+                    $rate = (float) ($line['VatRate'] ?? 0);
+                    $lines[] = [
+                        'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
+                        'quantity'               => (float) ($line['Amount'] ?? 1),
+                        'unit'                   => (string) ($line['Unit'] ?? 'ks'),
+                        'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
+                        'vat_rate'               => $rate,
+                        'order_index'            => $idx,
+                    ];
+                }
+                // Dobropis prochází derivací stejně jako faktura — oprava plnění
+                // vykázaného v OSS se do OSS podání musí vrátit taky, jinak by šla
+                // do tuzemského přiznání a snížila českou daň místo polské.
+                $items = $this->planner->planIssuedItems(
+                    $supplierId,
+                    $clientId,
+                    (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
+                    false,
+                    $lines,
+                    $this->ossWarnings,
+                );
+
                 $invoiceId = $this->invoices->createDraft($payload, $userId);
                 $this->db->pdo()->prepare(
                     'UPDATE invoices SET idoklad_id = ? WHERE id = ?'
                 )->execute([$idokladId, $invoiceId]);
 
-                // Items
-                $vatRates = $this->loadVatRateMap();
-                $items = [];
-                foreach (($i['Items'] ?? []) as $idx => $line) {
-                    $rate = (float) ($line['VatRate'] ?? 0);
-                    $items[] = [
-                        'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
-                        'quantity'               => (float) ($line['Amount'] ?? 1),
-                        'unit'                   => (string) ($line['Unit'] ?? 'ks'),
-                        'unit_price_without_vat' => self::idokladNetUnitPrice($line, $rate),
-                        'vat_rate_id'            => $this->matchVatRateId($vatRates, $rate),
-                        'order_index'            => $idx,
-                    ];
-                }
                 if (!empty($items)) {
                     $this->invoices->replaceItems($invoiceId, $items);
+                }
+                // `oss_original_period` se ZÁMĚRNĚ nedoplňuje — iDoklad neříká, do kterého
+                // OSS období patřil původní doklad, a odhad „předchozí kvartál" by opravu
+                // vykázal do cizího období. Řádek to hlásí varováním.
+                foreach ($items as $item) {
+                    if ((int) ($item['oss_applicable'] ?? 0) === 1) {
+                        $this->ossWarnings[] = 'OSS řádek na dobropisu vyžaduje doplnění PŮVODNÍHO OSS období '
+                            . '(RRRRQn) — import ho nedoplňuje a bez něj se oprava vykáže do běžného období';
+                        break;
+                    }
                 }
                 // #238: kurz z iDokladu (ExchangeRate) → jinak ČNB fallback k DUZP.
                 $this->applyIssuedExchangeRate($invoiceId, $i, $supplierId);
@@ -1366,6 +1442,10 @@ final class IdokladImportService
                 $failed++;
                 $this->jobs->appendLog($jobId, "Dobropis #{$idokladId}: " . $e->getMessage());
             }
+            foreach ($this->ossWarnings as $warning) {
+                $this->jobs->appendLog($jobId, "Dobropis #{$idokladId}: " . $warning);
+            }
+            $this->ossWarnings = [];
         }
         $this->jobs->updateProgress($jobId, ['created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
         $this->jobs->appendLog($jobId, "Dobropisy: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed}.");

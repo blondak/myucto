@@ -66,6 +66,7 @@ enum OssDerivationReason: string
     case ClientDomestic = 'client_domestic';
     case ClientNotEu = 'client_not_eu';
     case ClientHasVatId = 'client_has_vat_id';
+    case ClientOssExcluded = 'client_oss_excluded';
     case ZeroRate = 'zero_rate';
     case RateMatchesDomesticOnly = 'rate_matches_domestic_only';
 
@@ -84,6 +85,7 @@ enum OssDerivationReason: string
     case CodebookUnavailable = 'codebook_unavailable';
     case ClientCountryFromDocument = 'client_country_from_document';
     case SupplyTypeFromUnit = 'supply_type_from_unit';
+    case SupplyTypeFromClientDefault = 'supply_type_from_client_default';
     case SupplyTypeFromSupplierNace = 'supply_type_from_supplier_nace';
     case SupplyTypeDefaultServices = 'supply_type_default_services';
 
@@ -101,6 +103,8 @@ enum OssDerivationReason: string
             self::ClientDomestic => 'Odběratel je ze země dodavatele, jde o tuzemské plnění',
             self::ClientNotEu => 'Odběratel není ze státu EU, OSS se nepoužije',
             self::ClientHasVatId => 'Odběratel má DIČ, jde o B2B plnění (reverse charge / dodání do JČS), ne o OSS',
+            self::ClientOssExcluded => 'Odběratel má v kartě nastaveno, že se u něj OSS neuplatňuje '
+                . '(Klient → DPH a OSS → režim OSS)',
             self::ZeroRate => 'Řádek má nulovou sazbu — OSS se týká jen plnění zdaněného sazbou státu spotřeby',
             self::RateMatchesDomesticOnly => 'Sazba podle číselníku členských států platí v zemi dodavatele a ve státě '
                 . 'spotřeby neplatí — jde o tuzemské plnění',
@@ -128,6 +132,7 @@ enum OssDerivationReason: string
             self::CodebookUnavailable => 'Chybí číselník sazeb členských států (migrace 1152) — spusťte php api/bin/migrate.php',
             self::ClientCountryFromDocument => 'Země spotřeby převzata z importovaného dokladu, ne z uloženého odběratele',
             self::SupplyTypeFromUnit => 'Typ plnění odvozen z měrné jednotky položky',
+            self::SupplyTypeFromClientDefault => 'Typ plnění převzat z výchozího nastavení OSS v kartě odběratele',
             self::SupplyTypeFromSupplierNace => 'Typ plnění odvozen z převažující činnosti dodavatele (CZ-NACE)',
             self::SupplyTypeDefaultServices => 'Typ plnění nebylo z čeho odvodit, použita výchozí „služba"',
         };
@@ -226,6 +231,8 @@ enum OssDerivationReason: string
                 . 'na dokladu nebo v jeho kartě, jinak opravte sazbu na dokladu',
             self::ClientHasVatId => 'odběratel má DIČ, takže jde o B2B plnění — odeberte DIČ, jde-li o spotřebitele, '
                 . 'jinak opravte sazbu na dokladu',
+            self::ClientOssExcluded => 'odběratel má v kartě vypnutý režim OSS — přepněte ho v kartě odběratele '
+                . 'zpět na automatický, jde-li o plnění do jiného členského státu, jinak opravte sazbu na dokladu',
             default => 'opravte sazbu na dokladu, nebo zemi odběratele',
         };
     }

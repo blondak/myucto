@@ -152,6 +152,11 @@ final class BulkReissueAction
         // zapnuté). Guard na existenci sloupce kvůli instalacím pozadu s migrací.
         $hasReminders = $this->db->hasColumn('invoices', 'auto_send_reminders');
         $supportsOss = $this->db->hasColumn('invoice_items', 'oss_applicable');
+        // Vlastní guard, ne společný s ostatními OSS sloupci: mezi migracemi 0137 a 1293
+        // je řada verzí, takže instance s OSS schématem a bez příznaku je běžný stav
+        // (shodně s InvoiceRepository::supportsOssManualReview() a importem).
+        $supportsManualReview = $supportsOss
+            && $this->db->hasColumn('invoice_items', 'oss_needs_manual_review');
 
         $pdo->beginTransaction();
         try {
@@ -199,24 +204,26 @@ final class BulkReissueAction
             // Zkopíruj položky s případným inkrementem měsíce
             // Zachovává vat_classification_code ze source položky pokud existuje,
             // jinak auto-derive (typicky pro legacy faktury vystavené před fixem).
-            $itemStmt = $supportsOss
-                ? $pdo->prepare(
-                    'INSERT INTO invoice_items
-                       (invoice_id, description, quantity, unit, unit_price_without_vat,
-                        vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                        stock_item_id, warehouse_id,
-                        oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-                )
-                : $pdo->prepare(
-                    'INSERT INTO invoice_items
-                       (invoice_id, description, quantity, unit, unit_price_without_vat,
-                        vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                        stock_item_id, warehouse_id)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)'
-                );
+            // Sloupce se skládají místo dvou ručně psaných variant SQL: guard na příznak
+            // „k ručnímu posouzení" je samostatný, takže variant by jinak byly tři a počet
+            // otazníků by se s nimi rozešel.
+            $ossColumns = $supportsOss
+                ? ['oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type']
+                : [];
+            if ($supportsManualReview) {
+                $ossColumns[] = 'oss_needs_manual_review';
+            }
+            $itemStmt = $pdo->prepare(
+                'INSERT INTO invoice_items
+                   (invoice_id, description, quantity, unit, unit_price_without_vat,
+                    vat_rate_id, vat_rate_snapshot,
+                    total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
+                    stock_item_id, warehouse_id'
+                . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?'
+                . str_repeat(', ?', count($ossColumns))
+                . ')'
+            );
             foreach ($source['items'] as $item) {
                 $kind = (string) ($item['item_kind'] ?? 'standard');
                 // Slevovou položku needitujeme přes MonthIncrementer (popis "Sleva X %").
@@ -253,6 +260,16 @@ final class BulkReissueAction
                         $ossApplicable ? ($item['oss_rate_type'] ?? null) : null,
                         $ossApplicable ? ($item['oss_supply_type'] ?? null) : null,
                     );
+                }
+                if ($supportsManualReview) {
+                    // Klon je KOPIE dokladu i s jeho nejistotou: sporné místo plnění ani
+                    // rozpor mezi OSS a tuzemským přiznáním se přeúčtováním do dalšího
+                    // měsíce nevyřeší. Bez přenosu příznaku by se z označeného dokladu
+                    // stal tichý klon a kontrola by po prvním hromadném klonování zmizela
+                    // — tichý přesně u těch dokladů, které se opakují každý měsíc.
+                    // Nese ho i tuzemský řádek smíšeného dokladu (proto bez vazby na
+                    // `$ossApplicable`) — viz InvoiceRepository::ossItemParams().
+                    $params[] = !empty($item['oss_needs_manual_review']) ? 1 : 0;
                 }
                 $itemStmt->execute($params);
             }

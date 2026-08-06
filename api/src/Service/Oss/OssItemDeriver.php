@@ -98,6 +98,14 @@ use MyInvoice\Service\Report\VatClassificationDefaulter;
  * ({@see domesticCountry()}); zadrátovaná 'CZ' by nasazení mimo ČR tiše rozbila a
  * u importu by se rozešla s tím, proti čemu se páruje `vat_rate_id`.
  *
+ * ── Karta odběratele je DATA, ne druhá autorita (migrace 1298) ─────────────────────
+ * Výchozí nastavení OSS v kartě ({@see OssClientContext}) smí ovlivnit jen dvě věci:
+ * OSS VYLOUČIT ({@see OssDerivationReason::ClientOssExcluded}) a doplnit TYP PLNĚNÍ,
+ * který by se jinak dohadoval. Vynutit OSS nesmí — to by byla druhá autorita nad místem
+ * plnění a uměla by do OSS poslat i doklad, který tam nepatří (odběratel s DIČ, tuzemská
+ * dodávka). Vyloučení je bezpečné, protože invariant proti úniku platí dál: cizí sazba se
+ * ani u vyloučeného odběratele nestane tuzemskou, jen se položka odmítne s hláškou.
+ *
  * ── Typ sazby se nedomýšlí ──────────────────────────────────────────────────────────
  * Do podání jde TYP sazby, ne procento ({@see OssXmlExporter::rateTypeCode()}), takže
  * „když nevíme, dej standard" není výchozí hodnota, ale nesprávně odvedená daň. Nezjištěný
@@ -249,7 +257,12 @@ final class OssItemDeriver
         if ($consumerRateType === null) {
             $notes[] = OssDerivationReason::RateTypeUnknown;
         }
-        $supplyType = $this->deriveSupplyType($unit, (string) ($supplier['cz_nace_code'] ?? ''), $notes);
+        $supplyType = $this->deriveSupplyType(
+            $unit,
+            $client->defaultSupplyType,
+            (string) ($supplier['cz_nace_code'] ?? ''),
+            $notes,
+        );
 
         return OssItemDecision::oss($country, $consumerRateType, $supplyType, $notes, $reason);
     }
@@ -287,10 +300,27 @@ final class OssItemDeriver
 
         $docCountry = OssClientContext::iso2OrNull($documentClient['country_iso2'] ?? $documentClient['iso2'] ?? null);
         if ($docCountry === null) {
-            return new OssClientContext($stored->countryIso2, $stored->isEu, $dic);
+            return new OssClientContext(
+                $stored->countryIso2,
+                $stored->isEu,
+                $dic,
+                false,
+                $stored->ossExcluded,
+                $stored->defaultSupplyType,
+            );
         }
 
-        return new OssClientContext($docCountry, $this->isEuCountry($docCountry), $dic, true);
+        // Výchozí nastavení OSS je vlastnost KARTY odběratele, ne dokladu — doklad ho
+        // nenese a přebít nemůže, takže se přenáší z uloženého klienta i tehdy, když
+        // zemi rozhodl doklad.
+        return new OssClientContext(
+            $docCountry,
+            $this->isEuCountry($docCountry),
+            $dic,
+            true,
+            $stored->ossExcluded,
+            $stored->defaultSupplyType,
+        );
     }
 
     /**
@@ -346,6 +376,13 @@ final class OssItemDeriver
         }
         if ($client->hasVatId()) {
             return OssDerivationReason::ClientHasVatId;
+        }
+        // Výchozí nastavení karty odběratele (migrace 1298) se čte AŽ TADY, za všemi
+        // věcnými podmínkami: jinak by report u odběratele s DIČ nebo mimo EU tvrdil
+        // „vypnuli jste OSS v kartě", ačkoli by řádek OSS nebyl tak jako tak. Nastavení
+        // umí OSS jedině VYLOUČIT — vynutit ho nesmí, viz docblock OssClientContext.
+        if ($client->ossExcluded) {
+            return OssDerivationReason::ClientOssExcluded;
         }
         // Osvobozené / RC / vývozní plnění řeší tuzemská klasifikace ('20', '22', '26');
         // OSS je vždy plnění zdaněné sazbou státu spotřeby.
@@ -411,6 +448,13 @@ final class OssItemDeriver
 
         $country = OssClientContext::iso2OrNull($client->countryIso2);
         if ($country === null || $country === $supplier['country_iso2'] || !$client->isEu || $client->hasVatId()) {
+            return null;
+        }
+        // Odběratel s vypnutým OSS v kartě (migrace 1298) rozpor netvoří: tuzemská sazba
+        // na jeho dokladu je PŘESNĚ TO, co uživatel nastavil. Varovat u něj znamená
+        // označit k ručnímu posouzení každou jeho fakturu — tedy udělat z příznaku šum
+        // a znehodnotit ho i tam, kde o něco jde.
+        if ($client->ossExcluded) {
             return null;
         }
 
@@ -623,17 +667,33 @@ final class OssItemDeriver
     }
 
     /**
-     * Zboží vs. služba třístupňovým žebříkem, celý ze SDÍLENÉ existující logiky — žádná
+     * Zboží vs. služba čtyřstupňovým žebříkem, celý ze SDÍLENÉ existující logiky — žádná
      * nová heuristika, aby se OSS nerozešlo s klasifikací tuzemských plnění.
      *
+     * Pořadí příček není libovolné, jde od NEJKONKRÉTNĚJŠÍHO důkazu k nejobecnějšímu:
+     *   1. měrná jednotka — údaj z TOHOTO řádku, jediný, který zná konkrétní dodávku
+     *   2. výchozí typ v kartě odběratele (migrace 1298) — uživatelská znalost o tom,
+     *      co se tomuhle odběrateli fakturuje; k dispozici je až od migrace, proto se
+     *      vkládá pod jednotku, ne nad ni: e-shop s jednotkou „hod" na jednom řádku by
+     *      jinak dostal „zboží" jen proto, že to má v kartě
+     *   3. převažující činnost dodavatele (CZ-NACE) — vlastnost firmy, ne dodávky
+     *   4. „služba" jako dosazení, které se hlásí jako varování
+     *
+     * @param ?string                   $clientDefault výchozí typ z karty odběratele
      * @param list<OssDerivationReason> $notes
      */
-    private function deriveSupplyType(?string $unit, string $nace, array &$notes): string
+    private function deriveSupplyType(?string $unit, ?string $clientDefault, string $nace, array &$notes): string
     {
         $fromUnit = VatClassificationDefaulter::classifyUnitsGoodsVsServices([(string) ($unit ?? '')]);
         if ($fromUnit !== null) {
             $notes[] = OssDerivationReason::SupplyTypeFromUnit;
             return $fromUnit;
+        }
+
+        $fromClient = OssClientContext::supplyTypeOrNull($clientDefault);
+        if ($fromClient !== null) {
+            $notes[] = OssDerivationReason::SupplyTypeFromClientDefault;
+            return $fromClient;
         }
 
         // 'ks' i neznámá jednotka jsou bez signálu — rozhodne převažující činnost
@@ -656,10 +716,16 @@ final class OssItemDeriver
             return $this->clientCache[$clientId] = new OssClientContext(null, false, null);
         }
 
+        // Výchozí nastavení OSS (migrace 1298) se vybírá jen tam, kde sloupce existují —
+        // týž `hasColumn()` pattern jako zbytek OSS kódu, aby derivace běžela i na
+        // instanci, kde migrace nedoběhla (tam se karta prostě nevyjadřuje).
+        $hasDefaults = $this->db->hasColumn('clients', 'oss_mode');
+        $defaults = $hasDefaults ? ', c.oss_mode, c.oss_default_supply_type' : '';
+
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(UPPER(TRIM(co.iso2)), '') AS country_iso2,
                     COALESCE(co.is_eu, 0) AS is_eu,
-                    c.dic
+                    c.dic{$defaults}
                FROM clients c
           LEFT JOIN countries co ON co.id = c.country_id
               WHERE c.id = ?

@@ -46,6 +46,7 @@ use MyInvoice\Action\Report\KontrolniHlaseniAction;
 use MyInvoice\Action\Report\DphBookAction;
 use MyInvoice\Action\Report\MonthlyExportAction;
 use MyInvoice\Action\Report\ClosingPackageAction;
+use MyInvoice\Action\Oss\OssFilingArchiveAction;
 use MyInvoice\Action\Report\OssReportAction;
 use MyInvoice\Action\Report\SouhrnneHlaseniAction;
 use MyInvoice\Action\Admin\InvoicesZipAction;
@@ -403,6 +404,12 @@ final class Routes
         $app->put   ('/api/codebooks/tax-constants/{year:[0-9]+}',  [\MyInvoice\Action\Codebook\TaxConstantsAction::class, 'update']);
         $app->delete('/api/codebooks/tax-constants/{year:[0-9]+}',  [\MyInvoice\Action\Codebook\TaxConstantsAction::class, 'reset']);
 
+        // Sazby DPH členských států pro OSS (globální číselník; zápis jen superadmin — OSS-9)
+        $app->get   ('/api/codebooks/oss-member-state-rates',                [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'list']);
+        $app->post  ('/api/codebooks/oss-member-state-rates',                [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'create']);
+        $app->put   ('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'update']);
+        $app->delete('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'delete']);
+
         // VAT klasifikační kódy (pro DPHDP3 + KH)
         $app->get   ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'list']);
         $app->post  ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'create']);
@@ -496,6 +503,10 @@ final class Routes
         $app->delete ('/api/invoices/{id:[0-9]+}/link-advance',       UnlinkInvoiceAdvanceAction::class);
         $app->post   ('/api/invoices/bulk-reissue',          BulkReissueAction::class);
         $app->post   ('/api/invoices/bulk-reminder',         BulkSendRemindersAction::class);
+        // Hromadné nastavení OSS nad výběrem dokladů (OSS-7). Náhled je povinný, proto
+        // jsou to dvě routy — provedení bez předchozího potvrzení vrátí 428.
+        $app->post   ('/api/invoices/bulk-oss/preview',      [\MyInvoice\Action\Invoice\BulkOssUpdateAction::class, 'preview']);
+        $app->post   ('/api/invoices/bulk-oss',              [\MyInvoice\Action\Invoice\BulkOssUpdateAction::class, 'apply']);
         $app->post   ('/api/invoices/{id:[0-9]+}/clone',     CloneInvoiceAction::class);
         $app->get    ('/api/documents/{entity_type:invoice|work_report}/{id:[0-9]+}/signature-selection', [SignatureDocumentSelectionAction::class, 'get']);
         $app->put    ('/api/documents/{entity_type:invoice|work_report}/{id:[0-9]+}/signature-selection', [SignatureDocumentSelectionAction::class, 'put']);
@@ -1274,6 +1285,14 @@ final class Routes
         // Práh 10 000 EUR (§ 8 odst. 3 ZDPH) — bez guardu oss_disabled, protože ho
         // potřebuje znát právě ten, kdo ještě registrovaný není.
         $app->get    ('/api/reports/oss/threshold',    [OssReportAction::class, 'threshold']);
+        // Archiv OSS podání, rekonciliace a evidence § 110f. Vlastní Action, ale POD
+        // /api/reports/oss — díky tomu je chytí modulový fallback `reports` READ
+        // v RoutePermissionMap a export navíc pravidlo `reports.export` (klíč `export`
+        // v cestě). Detail snapshotu a stažení XML sdílí /api/reports/submissions/{id}.
+        $app->get    ('/api/reports/oss/submissions',      [OssFilingArchiveAction::class, 'archive']);
+        $app->get    ('/api/reports/oss/reconciliation',   [OssFilingArchiveAction::class, 'reconciliation']);
+        $app->get    ('/api/reports/oss/evidence',         [OssFilingArchiveAction::class, 'evidence']);
+        $app->get    ('/api/reports/oss/evidence/export',  [OssFilingArchiveAction::class, 'evidenceExport']);
         $app->get    ('/api/reports/oss',              [OssReportAction::class, 'download']);
         // Audit kurzů vs. ČNB (§C / K4) — cizoměnové doklady s odchylkou účetního kurzu od ČNB
         $app->get    ('/api/reports/cnb-rate-audit',   \MyInvoice\Action\Report\CnbRateAuditAction::class);

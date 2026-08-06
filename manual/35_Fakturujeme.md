@@ -161,15 +161,26 @@ neplátci nad OSS prahem, faktura má mít:
 2. V editoru faktury vyber tuto sazbu na položkách, zapni u řádku **OSS**
    a vyplň zemi spotřeby, typ sazby a typ plnění. Opravu období ponech jako
    **Běžné plnění**, pokud nejde o opravu dřívějšího čtvrtletí.
-3. PDF doklad bude číselně správný (23 % SK DPH), klient ho dostane.
+3. PDF doklad bude číselně správný (23 % SK DPH), klient ho dostane. Doklad
+   s OSS řádky navíc nese doložku „Daň je přiznána a odvedena ve státě spotřeby
+   v režimu jednoho správního místa (One Stop Shop) podle § 110a a násl. zákona
+   o DPH." se jmenovitým výčtem států spotřeby — v češtině i angličtině podle
+   jazyka dokladu, stejně v PDF i ve veřejném náhledu („web faktura"). Když je
+   část plnění tuzemská, doložka to řekne (týká se jen OSS položek).
 4. V **Nastavení → Daňové nastavení** zapni OSS režim a vyplň zemi
    identifikace, měnu podání a dobu platnosti registrace.
 5. V **Daně → OSS přiznání** zkontroluj čtvrtletní souhrn a případně stáhni
    EPO XML `OSSEI1`. Označené řádky se nezahrnou do českého přiznání k DPH,
    kontrolního hlášení ani Knihy DPH.
 
-Částky v jiné měně se do měny podání přepočtou kurzem ČNB k DUZP. Opravu
-staršího období označ původním čtvrtletím; export ji zapíše odděleně jako
+Částky v jiné měně se do měny podání přepočtou **kurzem Evropské centrální banky
+zveřejněným pro poslední den čtvrtletí** — jedním kurzem pro celé období. Když ECB pro
+poslední den kurz nezveřejnila (víkend, svátek), použije se nejbližší následující den;
+použité datum kurzu vidíš v souhrnu náhledu. Kurz ČNB k DUZP se tu **nepoužívá** — ten
+platí pro tuzemský základ daně, ne pro OSS podání. Dokud kurz ECB pro dané čtvrtletí
+neexistuje (období ještě neskončilo, výpadek), zůstanou řádky nepřepočtené, náhled to
+oznámí a XML nejde vytvořit; ruční kurz i ruční částky zadané na položce mají přednost
+vždy. Opravu staršího období označ původním čtvrtletím; export ji zapíše odděleně jako
 opravu. Dobropis k OSS faktuře převezme OSS údaje a částky obrátí.
 
 **Práh 10 000 EUR** MyÚčto **sleduje** — na stránce OSS přiznání uvidíš čerpání prahu za
@@ -179,6 +190,18 @@ kalendářní rok, rozpad po zemích a upozornění od 80 % i po překročení. 
 ČNB), takže u hodnot těsně u prahu rozhodne účetní. Sazbu porovnává systém s číselníkem
 sazeb členských států k datu plnění a při neshodě **varuje** — číselník ale může zestárnout,
 proto nejde o blokaci.
+
+**Řádky s nejistým místem plnění.** Doklady zakládané automaticky (pravidelná fakturace,
+synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API) občas
+nedokážou určit, jestli je řádek OSS plnění, nebo tuzemský. Takový řádek MyÚčto **nezařadí
+do OSS podání** — tam nepatří, dokud to není potvrzené — ale označí ho k ručnímu posouzení
+a nechá ho v českém přiznání na ř. 1 a 2. Aby ti neproklouzl:
+
+- v **seznamu faktur** je najdeš filtrem **Nejisté místo plnění (OSS)**,
+- v **přiznání k DPH** na ně upozorní varování se seznamem dokladů.
+
+Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně přes hromadnou
+úpravu OSS. Dokud nerozhodneš, zůstává plnění v tuzemském přiznání.
 
 > ⚠️ MyÚčto neurčuje samo B2C režim, neuzavírá období a XML automaticky nepodává.
 > Sledování prahu i kontrola sazeb jsou **upozornění**, ne závazné určení povinnosti;

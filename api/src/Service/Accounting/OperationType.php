@@ -23,6 +23,14 @@ final class OperationType
     public const REMITTANCE_SOCIAL_EMPLOYER = 'bank.remittance.social.employer';
     public const REMITTANCE_HEALTH_EMPLOYER = 'bank.remittance.health.employer';
     public const REMITTANCE_VAT = 'bank.remittance.vat';
+    /**
+     * Daň v režimu jednoho správního místa (OSS, § 110 a násl. ZDPH). Vlastní typ, protože
+     * má vlastní ÚČET: předpis jde na 345.100 (migrace 1295), ne na 343 — patří státu
+     * spotřeby a do českého přiznání nevstupuje. Dokud se úhrada účtovala jako
+     * {@see REMITTANCE_VAT}, snižovala 343, a nevynulovala se ani jedna strana:
+     * na 343 vznikl přeplatek a na 345.100 zůstal závazek napořád.
+     */
+    public const REMITTANCE_OSS = 'bank.remittance.oss';
     public const REMITTANCE_INCOME = 'bank.remittance.income';
     public const REMITTANCE_WITHHOLDING = 'bank.remittance.withholding';
     public const REMITTANCE_PAYROLL = 'bank.remittance.payroll';
@@ -52,6 +60,7 @@ final class OperationType
             self::REMITTANCE_SOCIAL_EMPLOYER,
             self::REMITTANCE_HEALTH_EMPLOYER,
             self::REMITTANCE_VAT,
+            self::REMITTANCE_OSS,
             self::REMITTANCE_INCOME,
             self::REMITTANCE_WITHHOLDING,
             self::REMITTANCE_PAYROLL,

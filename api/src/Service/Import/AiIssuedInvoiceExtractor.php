@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Oss\OssItemPlanner;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -30,6 +31,15 @@ final class AiIssuedInvoiceExtractor
 {
     private readonly LoggerInterface $logger;
 
+    /**
+     * Varování k derivaci OSS a k párování sazby za právě zakládaný doklad. Vrací se
+     * volajícímu v odpovědi — u AI extrakce je to jediné místo, kde je uživatel uvidí,
+     * a „místo plnění je sporné" nesmí zmizet jen proto, že import proběhl úspěšně.
+     *
+     * @var list<string>
+     */
+    private array $ossWarnings = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly LlmGatewayInterface $llm,
@@ -39,6 +49,7 @@ final class AiIssuedInvoiceExtractor
         private readonly InvoiceExtractionRouter $router,
         private readonly IsdocParser $isdoc,
         private readonly ImageToPdfConverter $imageToPdf,
+        private readonly OssItemPlanner $planner,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -58,10 +69,14 @@ final class AiIssuedInvoiceExtractor
      *
      * @return array{ok:bool, invoice_id?:int, client_id?:int, source:string,
      *               error?:string, ai_data?:array<string,mixed>, model?:string,
-     *               usage?:array<string,int>, provider?:string, region?:string}
+     *               usage?:array<string,int>, provider?:string, region?:string,
+     *               warnings?:list<string>}
      */
     public function extractAndCreate(int $supplierId, int $userId, string $bytes, ?string $modelOverride = null, ?string $originalFilename = null): array
     {
+        // Služba může v jednom requestu obsloužit víc souborů — bez resetu by druhý
+        // doklad zdědil varování prvního.
+        $this->ossWarnings = [];
         $tenantIc = $this->fetchTenantIc($supplierId);
 
         // ISDOC-first rozhodnutí (sdílený router se stejnou sémantikou jako přijatá strana).
@@ -131,7 +146,7 @@ final class AiIssuedInvoiceExtractor
 
         try {
             $resolved = $this->clientResolver->resolve($customerData, $supplierId);
-            $invoiceId = $this->createDraft($this->mapAiToDraft($data, $resolved['id'], $supplierId), $userId);
+            $invoiceId = $this->createDraft($this->mapAiToDraft($data, $resolved['id'], $supplierId), $userId, $supplierId);
             return [
                 'ok'         => true,
                 'invoice_id' => $invoiceId,
@@ -142,6 +157,7 @@ final class AiIssuedInvoiceExtractor
                 'provider'   => $extracted['provider'] ?? null,
                 'region'     => $extracted['region'] ?? null,
                 'ai_data'    => $data,
+                'warnings'   => $this->ossWarnings,
             ];
         } catch (\Throwable $e) {
             return [
@@ -203,11 +219,17 @@ final class AiIssuedInvoiceExtractor
             'prices_include_vat' => false,
             'language'           => 'cs',
             'varsymbol'          => $varsymbol,
-            'items'              => $this->mapItems((array) ($inv['items'] ?? []), $supplierId),
+            'items'              => $this->mapItems((array) ($inv['items'] ?? [])),
         ];
 
-        $invoiceId = $this->createDraft($draft, $userId);
-        return ['ok' => true, 'invoice_id' => $invoiceId, 'client_id' => $resolved['id'], 'source' => $source];
+        $invoiceId = $this->createDraft($draft, $userId, $supplierId);
+        return [
+            'ok' => true,
+            'invoice_id' => $invoiceId,
+            'client_id' => $resolved['id'],
+            'source' => $source,
+            'warnings' => $this->ossWarnings,
+        ];
     }
 
     /**
@@ -236,17 +258,32 @@ final class AiIssuedInvoiceExtractor
             'prices_include_vat' => !empty($data['unit_prices_include_vat']),
             'language'           => 'cs',
             'varsymbol'          => $varsymbol,
-            'items'              => $this->mapItems((array) ($data['items'] ?? []), $supplierId),
+            'items'              => $this->mapItems((array) ($data['items'] ?? [])),
         ];
     }
 
     /**
      * Společné založení draftu vydané faktury (stejná cesta jako CreateInvoiceAction).
      *
+     * Tady — a ne v {@see mapItems()} — se řádky dostávají k derivaci OSS a k párování
+     * sazby: rozhodnutí potřebuje odběratele, datum plnění i hlavičkový příznak
+     * přenesené daňové povinnosti, tedy údaje, které existují až na hotovém draftu.
+     * Plánuje se PŘED `createDraft()`, aby odmítnutý řádek nenechal v databázi
+     * prázdnou fakturu.
+     *
      * @param array<string,mixed> $draft
      */
-    private function createDraft(array $draft, int $userId): int
+    private function createDraft(array $draft, int $userId, int $supplierId): int
     {
+        $draft['items'] = $this->planner->planIssuedItems(
+            $supplierId,
+            (int) $draft['client_id'],
+            (string) ($draft['tax_date'] ?? '') ?: (string) $draft['issue_date'],
+            !empty($draft['reverse_charge']),
+            (array) $draft['items'],
+            $this->ossWarnings,
+        );
+
         $id = $this->repo->createDraft($draft, $userId);
         $this->repo->replaceItems($id, (array) $draft['items']);
         $this->calc->recompute($id);
@@ -254,14 +291,20 @@ final class AiIssuedInvoiceExtractor
     }
 
     /**
-     * Řádky z AI/ISDOC → item payload pro replaceItems (vat_rate percent → vat_rate_id).
+     * Řádky z AI/ISDOC → surový item payload. Procento sazby zůstává jako `vat_rate`;
+     * na `vat_rate_id` (a na OSS sloupce) ho převede až {@see createDraft()} přes
+     * sdílený plánovač.
+     *
+     * Dřívější vlastní párování hledalo NEJBLIŽŠÍ procento napříč celou tabulkou
+     * `vat_rates`, takže polských 23 % se navázalo na českých 21 % — a doklad tím tiše
+     * změnil odvedenou daň. Nenalezená sazba je od sjednocení chyba dokladu s návodem,
+     * ne tichá náhrada.
      *
      * @param list<array<string,mixed>> $lines
-     * @return list<array{description:string, quantity:float, unit:string, unit_price_without_vat:float, vat_rate_id:int, order_index:int}>
+     * @return list<array{description:string, quantity:float, unit:string, unit_price_without_vat:float, vat_rate:float, order_index:int}>
      */
-    private function mapItems(array $lines, int $supplierId): array
+    private function mapItems(array $lines): array
     {
-        $vatRates = $this->repo->vatRateMap(); // id => percent
         $items = [];
         foreach (array_values($lines) as $idx => $line) {
             $line = (array) $line;
@@ -270,7 +313,7 @@ final class AiIssuedInvoiceExtractor
                 'quantity'               => (float) ($line['quantity'] ?? 1),
                 'unit'                   => (string) ($line['unit'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price_without_vat'] ?? 0),
-                'vat_rate_id'            => $this->matchVatRateId($vatRates, (float) ($line['vat_rate'] ?? 0)),
+                'vat_rate'               => (float) ($line['vat_rate'] ?? 0),
                 'order_index'            => $idx,
             ];
         }
@@ -308,21 +351,6 @@ final class AiIssuedInvoiceExtractor
             'proforma', 'advance'       => 'proforma',
             default                     => 'invoice',
         };
-    }
-
-    /** @param array<int,float> $rates id => percent */
-    private function matchVatRateId(array $rates, float $rate): int
-    {
-        $bestId = 0;
-        $bestDiff = INF;
-        foreach ($rates as $id => $r) {
-            $diff = abs($r - $rate);
-            if ($diff < $bestDiff) {
-                $bestDiff = $diff;
-                $bestId = (int) $id;
-            }
-        }
-        return $bestId;
     }
 
     private function resolveCurrencyId(string $code, int $supplierId): int

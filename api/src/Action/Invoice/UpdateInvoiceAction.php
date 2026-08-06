@@ -23,6 +23,9 @@ use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Oss\OssDocumentCoherence;
+use MyInvoice\Service\Oss\OssItemDeriver;
+use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -34,6 +37,9 @@ final class UpdateInvoiceAction
 {
     use HandlesVarsymbolDuplicate;
     use GuardsDocumentLock;
+    // Táž derivace jako u POST, ze stejného souboru — viz docblock traitu. PUT ji dlouho
+    // neměl a payload integrátora bez `oss_*` klíčů tím OSS na dokladu tiše mazal.
+    use DerivesMissingOssColumns;
 
     public function __construct(
         private readonly InvoiceRepository $repo,
@@ -52,6 +58,8 @@ final class UpdateInvoiceAction
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
         private readonly TenantReferenceGuard $tenantRefs,
+        private readonly OssItemDeriver $ossDeriver,
+        private readonly OssItemPlanner $ossPlanner,
     ) {}
 
     /**
@@ -245,13 +253,41 @@ final class UpdateInvoiceAction
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         }
 
-        $errors = InvoiceValidation::invoice($body, $this->repo->vatRateMap(), $this->repo->vatRateCountryMap());
+        // Derivace OSS pro API klienty — TOTÉŽ místo v pořadí jako u POST (viz
+        // {@see DerivesMissingOssColumns}): před validací, protože kontrola „zahraniční
+        // sazbu jen na OSS řádku" čte `oss_applicable` a musí posuzovat řádek v podobě,
+        // ve které se opravdu uloží.
+        //
+        // Bez tohohle kroku PUT OSS na dokladu MAZAL: `replaceItems()` je DELETE + INSERT,
+        // takže payload bez `oss_*` klíčů vyrobil z OSS řádku tuzemský. Že to nespadlo na
+        // validaci, není záruka — guard „zahraniční sazba jen v OSS" stojí na
+        // `vat_rates.country`, a ten je u zákazníkovy „PL-23" sazby vyplněný jako CZ.
+        $ossNotes = $this->deriveMissingOssColumns($body, SupplierGuard::currentId($request));
+
+        // Tuzemsko se bere ze země DODAVATELE, ne z natvrdo zapsané 'CZ' — táž definice,
+        // se kterou pracuje derivace OSS ({@see OssItemDeriver::domesticCountry()}).
+        // Dvě různá tuzemska by u dodavatele identifikovaného mimo ČR znamenala, že
+        // validace zakáže sazbu, kterou import a výkazy považují za domácí.
+        $errors = InvoiceValidation::invoice(
+            $body,
+            $this->repo->vatRateMap(),
+            $this->repo->vatRateCountryMap(),
+            $this->ossDeriver->domesticCountry(SupplierGuard::currentId($request)),
+        );
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
         // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
         $this->applyVatClassificationDefaults($body, \MyInvoice\Http\SupplierGuard::currentId($request));
+
+        // SOUDRŽNOST DOKLADU (§ H1) — táž kontrola jako u importu a u založení dokladu,
+        // z téhož SSOT ({@see OssDocumentCoherence}). Počítá se při KAŽDÉM uložení, takže
+        // příznak vzniká i zaniká podle toho, jak doklad vypadá teď: opravou sazby rozpor
+        // zmizí a tuzemský řádek se odznačí sám (`replaceItems()` je DELETE + INSERT).
+        $items = (array) ($body['items'] ?? []);
+        $contradiction = OssDocumentCoherence::flagItems($items, $this->repo->vatRateMap());
+        $body['items'] = $items;
 
         try {
             // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
@@ -433,6 +469,29 @@ final class UpdateInvoiceAction
             if ($dev !== null) {
                 $warnings[] = 'exchange_rate_cnb_deviation';
                 $invoice['_warning_meta'] = ['exchange_rate_cnb_deviation' => $dev];
+            }
+            // Až ZA kurzem: ten `_warning_meta` přiřazuje celé, takže dřív zapsaný detail
+            // by přepsal. Zápis přes klíč pole se s ním snese v obou pořadích.
+            //
+            // Zemi dodavatele si říkáme znovu, místo abychom si ji uložili do proměnné
+            // nahoře: `domesticCountry()` cachuje nastavení dodavatele v rámci instance,
+            // takže druhé volání nic nestojí — a hoisted proměnná by oslepila guard
+            // {@see \MyInvoice\Tests\Architecture\InvoiceValidationDomesticCountryWiringTest},
+            // který u volání validace hledá doslovný zdroj tuzemska.
+            if ($contradiction !== null) {
+                $warnings[] = 'oss_document_contradiction';
+                $invoice['_warning_meta']['oss_document_contradiction'] = $contradiction->meta(
+                    $this->ossDeriver->domesticCountry(SupplierGuard::currentId($request)),
+                );
+            }
+            // Poznámky z derivace OSS — shodně s POST. Do `_warnings` jde KÓD, ne věta:
+            // pole je smluvně seznam kódů, které si UI překládá (`invoice.warning.<kód>`),
+            // takže vložená česká věta by se v editoru zobrazila jako chybějící překlad.
+            // Celé znění patří do `_warning_meta`, kam sahá integrátor — a ten je i jediný,
+            // kdo se sem dostane (editor OSS sloupce posílá, takže derivace u něj neběží).
+            if ($ossNotes !== []) {
+                $warnings[] = 'oss_derived_notes';
+                $invoice['_warning_meta']['oss_derived_notes'] = ['items' => $ossNotes];
             }
             if ($warnings !== []) {
                 $invoice['_warnings'] = $warnings;

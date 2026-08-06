@@ -35,6 +35,15 @@ use MyInvoice\Service\Currency\CurrencyConversionService;
  * blízko prahu musí rozhodnout účetní. Tvrdit tvrdý verdikt na denním kurzu by bylo
  * horší než nehlídat nic, protože by to budilo falešnou jistotu.
  *
+ * ── NENÍ to kurz přepočtu podání ────────────────────────────────────────────────────
+ * {@see OssLedgerService} přepočítává částky DO PODÁNÍ kurzem ECB zveřejněným pro poslední
+ * den zdaňovacího období (čl. 369h odst. 3 směrnice 2006/112/ES). Tady je řeč o jiném
+ * pravidle: práh podle § 8 odst. 3 se přepočítává PEVNÝM kurzem stanoveným k datu přijetí
+ * směrnice (EU) 2017/2455, ne kurzem konce čtvrtletí. Obě čísla se proto počítají různě
+ * ZÁMĚRNĚ a sjednotit je na jeden kurz by znamenalo zaměnit dvě různá pravidla. Že se
+ * tady zatím používá denní kurz ČNB místo toho pevného, je přiznaná nepřesnost výše —
+ * ne to, co dělá {@see OssLedgerService}.
+ *
  * Nic nemění na dokladech ani nezapíná OSS — jen měří a upozorňuje.
  */
 final class OssThresholdService
@@ -172,7 +181,11 @@ final class OssThresholdService
      *
      * U řádků už označených jako OSS má přednost `oss_taxable_amount_return`, pokud je
      * podání v EUR — to je hodnota, kterou systém do podání skutečně posílá, takže
-     * dvojí přepočet by ji zbytečně rozešel.
+     * dvojí přepočet by ji zbytečně rozešel. Pozor, tahle hodnota je RUČNÍ (automatický
+     * přepočet kurzem ECB se na položku nezapisuje, počítá ho až náhled podání), takže
+     * ročnímu součtu prahu tím vzniká míchání dvou kurzových základů. Vzhledem k tomu,
+     * že celý práh je tu jen upozornění s přiznanou nepřesností (viz docblock třídy),
+     * je to menší zlo než rozejít se s číslem, které uživatel na dokladu sám zadal.
      *
      * @return list<array<string,mixed>>
      */

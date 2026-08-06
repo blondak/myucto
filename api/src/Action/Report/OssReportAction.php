@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Oss\OssEvidenceService;
 use MyInvoice\Service\Oss\OssLedgerService;
 use MyInvoice\Service\Oss\OssThresholdService;
 use MyInvoice\Service\Oss\OssXmlExporter;
@@ -27,6 +28,7 @@ final class OssReportAction
         private readonly IpMatcher $ipMatcher,
         private readonly TaxSubmissionArchiver $archiver,
         private readonly OssThresholdService $threshold,
+        private readonly OssEvidenceService $evidence,
     ) {}
 
     public function preview(Request $request, Response $response): Response
@@ -117,12 +119,33 @@ final class OssReportAction
             $userId ?: null,
         );
 
+        // Evidence § 110f ZDPH (čl. 63c nařízení 282/2011) z TÉHOŽ náhledu, ze kterého
+        // vzniklo XML. Selhání evidence nesmí zablokovat stažení podání — lhůta k podání
+        // je tvrdá, kdežto evidenci lze doplnit dalším stažením. Tiché to ale být nesmí:
+        // chyba jde do activity logu vedle samotného podání.
+        $evidenceCount = 0;
+        $evidenceError = null;
+        try {
+            $evidenceCount = $this->evidence->capture(
+                $supplierId,
+                (int) $archived['submission_id'],
+                $year,
+                $quarter,
+                $result['preview'],
+                $userId ?: null,
+            );
+        } catch (\Throwable $e) {
+            $evidenceError = $e->getMessage();
+        }
+
         $this->logger->log('report.ossei1_downloaded', $userId, null, null, [
             'period' => sprintf('%04d-Q%d', $year, $quarter),
             'rows' => $result['summary']['rows_count'] ?? 0,
             'corrections' => $result['summary']['corrections_count'] ?? 0,
             'submission_id' => $archived['submission_id'],
             'validation_status' => $archived['validation_status'],
+            'evidence_records' => $evidenceCount,
+            'evidence_error' => $evidenceError,
         ], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         $filename = sprintf('ossei1-%04d-Q%d.xml', $year, $quarter);

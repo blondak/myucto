@@ -55,6 +55,15 @@ final class PostingService
      */
     private const ROUNDING_TOLERANCE_CENTS = 200;
 
+    /**
+     * Fallback účtu pro daň v režimu OSS, když kontace `oss.output.vat` chybí (instance,
+     * která ještě nemá migraci 1295). Analytika k 345 (ostatní daně) — daň v režimu
+     * jednoho správního místa NENÍ česká daň na výstupu: patří státu spotřeby, do
+     * přiznání k DPH ani do KH nevstupuje a odvádí se samostatně. Na 343 by trvale
+     * rozbíjela vazbu „zůstatek účtu = přiznání".
+     */
+    private const OSS_OUTPUT_VAT_ACCOUNT = '345.100';
+
     /** @var array<int, ?string> per-request cache supplier_id => locked_until (B8). */
     private array $lockedUntilCache = [];
 
@@ -581,12 +590,21 @@ final class PostingService
             (string) ($inv['tax_date'] ?? $inv['issue_date']),
             (string) $inv['issue_date'],
         );
-        if ($net + $vat === 0.0) {
-            throw new PostingException('document_not_postable', 'Faktura #' . $invoiceId . ' nemá DPH řádky k zaúčtování (proforma/storno?).');
-        }
 
         $rate    = $this->fxRate($inv);
         $totalCzk = round((float) $inv['total_with_vat'] * $rate, 2);
+
+        // OSS (§110 a násl. ZDPH) — VatLedgerService OSS řádky z DPH evidence VYLUČUJE
+        // (patří do přiznání státu spotřeby, ne do českého), takže do $net/$vat vůbec
+        // nepřitečou a doklad se o ně musí doplnit ZVLÁŠŤ. Bez toho hlavička (která OSS
+        // obsahuje) neseděla na základ+daň a doklad končil na 'totals_mismatch',
+        // resp. u čistě OSS dokladu rovnou na 'document_not_postable'.
+        [$ossNet, $ossVat] = $this->ossItemTotals($invoiceId, $rate);
+
+        if ($net + $vat + $ossNet + $ossVat === 0.0) {
+            throw new PostingException('document_not_postable', 'Faktura #' . $invoiceId . ' nemá DPH řádky k zaúčtování (proforma/storno?).');
+        }
+
         $isCreditNote = ((string) ($inv['invoice_type'] ?? 'invoice') === 'credit_note') || $totalCzk < 0.0;
 
         // Výnosový účet: explicitní opts['rule_key'] vyhrává; jinak volitelný příznak na
@@ -620,11 +638,21 @@ final class PostingService
         $lines = [];
         // Saldokonto 311 nese i cizí měnu/kurz/částku (§4/12 — přecenění §24/6).
         $lines[] = $this->withForeign($this->line($receivable, $receivableSide, abs($totalCzk), $cc), $inv, $rate);
-        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net, $cc);
+        // Výnos je výnos bez ohledu na to, kterému státu patří daň — OSS základ jde na
+        // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
+        // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
+        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet, $cc);
         if ($vat !== 0.0) {
             $lines[] = $this->line('343', $otherSide, abs($vat), $cc);
         }
-        $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $isCreditNote);
+        // Daň odváděná do jiného členského státu na vlastní účet (kontace oss.output.vat,
+        // default analytika 345.100). Tohle je celý smysl rozdělení: na 343 zůstane přesně
+        // to, co jde do přiznání k DPH, takže zůstatek účtu jde s přiznáním srovnat.
+        if ($ossVat !== 0.0) {
+            $ossAccount = $this->ruleCode($supplierId, 'oss.output.vat', 'credit', self::OSS_OUTPUT_VAT_ACCOUNT);
+            $lines[] = $this->line($ossAccount, $otherSide, abs($ossVat), $cc);
+        }
+        $this->appendRounding($lines, $totalCzk, $net + $vat + $ossNet + $ossVat, $cc, $isCreditNote);
 
         // Vyúčtovací faktura z proformy (parent_invoice_id → proforma): DOPLŇ zúčtování
         // skutečně přijaté zálohy 324 MD / 311 D (self-balanced pár — nemění vyváženost
@@ -642,6 +670,12 @@ final class PostingService
      * z {@see VatLedgerService} (jediný zdroj DPH; tax_document je v evidenci, na rozdíl
      * od proformy). Žádné haléřové dorovnání — pár je vyvážený z konstrukce (obě strany
      * = daň), hlavička DDKP (total_with_vat = brutto úplaty) se záměrně nedorovnává.
+     *
+     * OSS se tady VĚDOMĚ neřeší (na rozdíl od {@see buildFromInvoice}): DDKP se vystavuje
+     * k přijaté záloze na tuzemské plnění, kdežto v režimu OSS se daň přiznává ke dni
+     * přijetí úplaty přímo v OSS přiznání a samostatný daňový doklad k záloze se nevydává.
+     * Kdyby přesto DDKP nesl jen OSS řádky, ledger nevrátí žádnou daň a doklad skončí
+     * HLASITĚ na 'document_not_postable' — nikdy tiše bez daňové nohy.
      *
      * @param array<string,mixed> $inv
      * @param array{rule_key?:string, cost_center?:?string, debit_account_code?:string} $opts
@@ -1755,6 +1789,46 @@ final class PostingService
             'SELECT total_without_vat, total_vat FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
         );
         $stmt->execute([$purchaseInvoiceId]);
+        $net = 0.0;
+        $vat = 0.0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $net += round((float) $row['total_without_vat'] * $rate, 2);
+            $vat += round((float) $row['total_vat'] * $rate, 2);
+        }
+        return [round($net, 2), round($vat, 2)];
+    }
+
+    /**
+     * Základ a daň OSS řádků vydané faktury (CZK) — pro daň v režimu jednoho správního
+     * místa (§110 a násl. ZDPH). Zdrojem jsou POLOŽKY, ne hlavička: OSS je příznak na
+     * řádku, takže jeden doklad běžně míchá tuzemské plnění s plněním do jiného
+     * členského státu a hlavičkový `total_vat` obojí slévá dohromady.
+     *
+     * Proč zvlášť a ne přes {@see VatLedgerService}: ledger je jediný zdroj ČESKÉ DPH
+     * evidence a OSS řádky z ní vědomě vyřazuje (nepatří do přiznání ani do KH). Pro
+     * účetní zápis ale doklad potřebujeme CELÝ, jinak neodpovídá hlavičce — stejná
+     * situace jako {@see purchaseItemTotals} u §75.
+     *
+     * Zaokrouhlení je per řádek (ne až ze součtu), aby součet seděl s váhami
+     * z {@see revenueWeights}, které se počítají stejně — jinak by rozpad výnosu
+     * vyšel o haléře jinak než základ, který se rozděluje.
+     *
+     * Instance bez OSS schématu (chybí migrace 0137) vrací [0,0] → zápis vypadá
+     * přesně jako dřív.
+     *
+     * @return array{0:float,1:float} [ossNet, ossVat]
+     */
+    private function ossItemTotals(int $invoiceId, float $rate): array
+    {
+        if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
+            return [0.0, 0.0];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT total_without_vat, total_vat
+               FROM invoice_items
+              WHERE invoice_id = ? AND COALESCE(oss_applicable, 0) = 1'
+        );
+        $stmt->execute([$invoiceId]);
         $net = 0.0;
         $vat = 0.0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {

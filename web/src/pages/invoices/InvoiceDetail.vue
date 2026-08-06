@@ -261,6 +261,19 @@ const taxDocApplicable = computed(() =>
   isProforma.value && supplierIsVatPayer.value && !invoice.value?.reverse_charge
   && !invoice.value?.final_invoice)
 
+// Státy spotřeby OSS řádků dokladu: null = doklad OSS plnění nemá (řádek se nezobrazí),
+// prázdný řetězec = má, ale bez vyplněné země. Kódy stačí — detail je interní obrazovka,
+// plné názvy států nese doložka na dokladu (PDF i veřejný náhled).
+const ossConsumerCountries = computed<string | null>(() => {
+  const items = invoice.value?.items ?? []
+  const oss = items.filter(it => it.oss_applicable)
+  if (!oss.length) return null
+  const codes = [...new Set(oss
+    .map(it => (it.oss_consumer_country ?? '').trim().toUpperCase())
+    .filter(c => c.length === 2))].sort()
+  return codes.join(', ')
+})
+
 const canPartialPayment = computed(() =>
   !!invoice.value
   && ['invoice', 'proforma'].includes(invoice.value.invoice_type)
@@ -1927,6 +1940,13 @@ const invoiceActions = computed<ActionItem[]>(() => {
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.language') }}</dt><dd>{{ invoice.language.toUpperCase() }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.reverse_charge') }}</dt><dd>{{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}</dd></div>
+          <!-- OSS řádek se ukazuje jen na dokladu, který OSS plnění opravdu má — jinak by
+               u drtivé většiny faktur jen přibyl prázdný řádek. Doklad v tomhle režimu nese
+               v PDF i ve veřejném náhledu doložku o odvodu daně ve státě spotřeby. -->
+          <div v-if="ossConsumerCountries !== null" class="flex justify-between gap-3" :title="t('invoice.oss.clause_hint')">
+            <dt class="text-neutral-500">{{ t('invoice.oss.clause_row') }}</dt>
+            <dd class="text-right">{{ ossConsumerCountries || t('invoice.oss.clause_countries_unknown') }}</dd>
+          </div>
           <div class="flex justify-between">
             <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
             <dd>{{ t('payment_method.' + (invoice.payment_method ?? 'bank_transfer')) }}</dd>

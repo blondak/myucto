@@ -595,7 +595,10 @@ function blankItem(): InvoiceItem {
     asset_id: null,
     oss_applicable: false,
     oss_consumer_country: null,
-    oss_rate_type: 'standard',
+    // Typ sazby se NEpředvyplňuje: do OSS podání jde typ, ne procento, a „základní"
+    // dosazené za uživatele je tichá záměna sazby ve státě spotřeby. Prázdno znamená
+    // „zatím nezjištěno" a UI na něj upozorní.
+    oss_rate_type: null,
     oss_supply_type: 'goods',
     oss_original_period: null,
   }
@@ -1669,13 +1672,26 @@ async function submit() {
         asset_id: it.asset_id ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
-        oss_rate_type: it.oss_applicable ? (it.oss_rate_type || 'standard') : null,
+        // Prázdný typ sazby se posílá jako null, ne jako „standard" — dosazení základní
+        // sazby za uživatele by naimportovaný řádek s nezjištěným typem tiše vykázalo
+        // v základní sazbě státu spotřeby. Backend null bere jako „zatím nezjištěno“
+        // a do OSS podání takový řádek stejně nepustí.
+        oss_rate_type: it.oss_applicable ? (it.oss_rate_type || null) : null,
         oss_supply_type: it.oss_applicable ? (it.oss_supply_type || 'goods') : null,
         oss_exchange_rate: it.oss_applicable ? (it.oss_exchange_rate ?? null) : null,
         oss_exchange_rate_date: it.oss_applicable ? (it.oss_exchange_rate_date ?? null) : null,
         oss_taxable_amount_return: it.oss_applicable ? (it.oss_taxable_amount_return ?? null) : null,
         oss_vat_amount_return: it.oss_applicable ? (it.oss_vat_amount_return ?? null) : null,
         oss_original_period: it.oss_applicable ? (it.oss_original_period ?? null) : null,
+        // Skrytý round-trip, ne pole k odškrtnutí: příznak je ZÁZNAM O ODVOZENÍ („místo
+        // plnění nešlo z čeho určit"), ne uživatelské rozhodnutí, takže dokud řádek
+        // zůstává OSS, je pořád pravdivý. Zhasnout ho jde tím, co už systém umí — vypnutím
+        // OSS na položce, které backend bere jako rozhodnutí člověka a zapíše 0
+        // (InvoiceRepository::ossItemParams). Bez tohohle řádku by ho ale první uložení
+        // faktury z UI ztratilo úplně: replaceItems je DELETE + INSERT, takže co editor
+        // nepošle, to v databázi není — a kategorie „k ručnímu posouzení" z importu
+        // 1 670 dokladů by zanikla, aniž by se na ni kdokoli podíval.
+        oss_needs_manual_review: it.oss_applicable ? (it.oss_needs_manual_review ?? false) : false,
       })),
     }
 
@@ -2208,13 +2224,22 @@ async function deleteDraft() {
                   <input v-model="item.oss_consumer_country" type="text" maxlength="2"
                     :placeholder="t('invoice.oss.country')" :title="t('invoice.oss.country')"
                     class="w-11 h-7 shrink-0 px-1 border border-neutral-300 rounded text-xs text-center font-mono uppercase" />
-                  <select v-model="item.oss_rate_type" :title="t('invoice.oss.rate_type')"
-                    class="h-7 shrink-0 px-1 border border-neutral-300 rounded text-xs bg-surface">
+                  <select v-model="item.oss_rate_type"
+                    :title="item.oss_rate_type ? t('invoice.oss.rate_type') : t('invoice.oss.rate_type_missing_hint')"
+                    :class="['h-7 shrink-0 px-1 border rounded text-xs bg-surface',
+                             item.oss_rate_type ? 'border-neutral-300' : 'border-warning-500 text-warning-700']">
+                    <option :value="null">{{ t('invoice.oss.rate_unknown') }}</option>
                     <option value="standard">{{ t('invoice.oss.rate_standard') }}</option>
                     <option value="reduced">{{ t('invoice.oss.rate_reduced') }}</option>
                     <option value="second_reduced">{{ t('invoice.oss.rate_second_reduced') }}</option>
                     <option value="parking">{{ t('invoice.oss.rate_parking') }}</option>
                   </select>
+                  <!-- Prázdný typ sazby není kosmetika: řádek se do OSS podání nedostane.
+                       Proto vedle pole i důvod, ne jen prázdný select. -->
+                  <span v-if="!item.oss_rate_type" :title="t('invoice.oss.rate_type_missing_hint')"
+                    class="shrink-0 px-1.5 py-0.5 rounded border bg-warning-50 text-warning-700 border-warning-500/40 whitespace-nowrap">
+                    {{ t('invoice.oss.rate_type_missing') }}
+                  </span>
                   <select v-model="item.oss_supply_type" :title="t('invoice.oss.supply_type')"
                     class="h-7 shrink-0 px-1 border border-neutral-300 rounded text-xs bg-surface">
                     <option value="goods">{{ t('invoice.oss.goods') }}</option>
@@ -2307,12 +2332,18 @@ async function deleteDraft() {
                 </div>
                 <div class="col-span-2">
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.rate_type') }}</label>
-                  <select v-model="item.oss_rate_type" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
+                  <select v-model="item.oss_rate_type"
+                    :class="['w-full h-10 px-2 border rounded text-sm bg-surface',
+                             item.oss_rate_type ? 'border-neutral-300' : 'border-warning-500 text-warning-700']">
+                    <option :value="null">{{ t('invoice.oss.rate_unknown') }}</option>
                     <option value="standard">{{ t('invoice.oss.rate_standard') }}</option>
                     <option value="reduced">{{ t('invoice.oss.rate_reduced') }}</option>
                     <option value="second_reduced">{{ t('invoice.oss.rate_second_reduced') }}</option>
                     <option value="parking">{{ t('invoice.oss.rate_parking') }}</option>
                   </select>
+                  <p v-if="!item.oss_rate_type" class="mt-1 text-xs text-warning-700">
+                    {{ t('invoice.oss.rate_type_missing_hint') }}
+                  </p>
                 </div>
                 <div class="col-span-2">
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.original_period') }}</label>

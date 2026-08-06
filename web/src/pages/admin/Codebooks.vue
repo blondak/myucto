@@ -6,6 +6,7 @@ import { settingsApi, type VatRate, type Country, type Unit } from '@/api/settin
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
+import { ossRatesApi, type OssMemberStateRate, type OssRateType } from '@/api/ossRates'
 import { taxConstantsApi, type TaxConstantsYear } from '@/api/taxConstants'
 import type { TaxConstantsData } from '@/api/tax'
 import { useAuthStore } from '@/stores/auth'
@@ -29,10 +30,10 @@ const props = withDefaults(defineProps<{
 // Firma → Číselníky (?scope=company): jen firemní číselníky (kategorie CRM rozpadu).
 // Globální nastavení → Sazby a číselníky (?scope=global): sdílené systémové číselníky.
 // Dodavatelé (multi-tenant firmy) mají od Fáze F vlastní stránku /admin/suppliers.
-type Tab = 'currencies' | 'vat' | 'countries' | 'units' | 'expense_categories' | 'revenue_categories' | 'vat_classifications' | 'tax_constants'
+type Tab = 'currencies' | 'vat' | 'countries' | 'units' | 'expense_categories' | 'revenue_categories' | 'vat_classifications' | 'oss_rates' | 'tax_constants'
 type Scope = 'company' | 'global'
 const COMPANY_TABS: Tab[] = ['expense_categories', 'revenue_categories']
-const GLOBAL_TABS: Tab[] = ['vat', 'vat_classifications', 'countries', 'units']
+const GLOBAL_TABS: Tab[] = ['vat', 'vat_classifications', 'oss_rates', 'countries', 'units']
 const scope = computed<Scope>(() => route.query.scope === 'company' ? 'company' : 'global')
 const visibleTabs = computed<Tab[]>(() => scope.value === 'company' ? COMPANY_TABS : GLOBAL_TABS)
 const tab = ref<Tab>('vat')
@@ -51,7 +52,7 @@ async function loadAll() {
     ])
   } finally { loading.value = false }
 }
-const TABS: Tab[] = ['currencies', 'vat', 'countries', 'units', 'expense_categories', 'revenue_categories', 'vat_classifications']
+const TABS: Tab[] = ['currencies', 'vat', 'countries', 'units', 'expense_categories', 'revenue_categories', 'vat_classifications', 'oss_rates']
 
 function resolveTab() {
   if (props.taxConstantsOnly) {
@@ -366,7 +367,10 @@ const vatClsSlug = useAutoSlug((s) => { vatClsDraft.code = s }, { maxLen: 8 })
  * by přestavělo jejich strukturu a riskovalo vizuální regrese, tak jen chybějící
  * chování doplňujeme.
  */
-const codebookDialogs = [vatOpen, countryOpen, unitOpen, expenseOpen, revenueOpen, vatClsOpen]
+// Deklarace patří sem, ne k sekci OSS níž — seznam dialogů se vyhodnocuje hned
+// a `const` z pozdější sekce by v něm skončil v temporal dead zone.
+const ossOpen = ref(false)
+const codebookDialogs = [vatOpen, countryOpen, unitOpen, expenseOpen, revenueOpen, vatClsOpen, ossOpen]
 
 function onDialogEscape(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
@@ -455,6 +459,121 @@ async function removeVatCls(c: VatClassification) {
     await vatClassificationsApi.delete(c.id)
     toast.success(t('common.deleted'))
     await loadVatClassifications()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+// ─── Sazby DPH členských států pro OSS (OSS-9) ──────────────────────────
+//
+// Číselník je GLOBÁLNÍ a je to autorita, proti které se ověřuje sazba na dokladu —
+// proto ho čte kdokoli s přístupem k číselníkům, ale mění jen správce instance
+// (`can_write` z API). Seedované řádky se needitují ani nemažou: jejich identitu
+// používá migrace k idempotenci, takže jdou jen zkrátit v platnosti nebo vyřadit.
+const ossRates = ref<OssMemberStateRate[]>([])
+const ossAvailable = ref(true)
+const ossManageable = ref(true)
+const ossCanWrite = ref(false)
+const ossRateTypes = ref<OssRateType[]>(['standard', 'reduced', 'second_reduced', 'parking'])
+const ossCountryFilter = ref('')
+const ossShowDisabled = ref(false)
+const ossEditMode = ref<'create' | 'edit' | 'override'>('create')
+const ossDraft = reactive({
+  id: 0,
+  country: '',
+  rate_type: 'standard' as OssRateType,
+  rate_percent: null as number | null,
+  valid_from: '',
+  valid_to: '',
+  valid_to_override: '',
+  note: '',
+})
+
+const ossRatesFiltered = computed(() => {
+  const needle = ossCountryFilter.value.trim().toUpperCase()
+  return ossRates.value.filter(r =>
+    (ossShowDisabled.value || !r.disabled) && (needle === '' || r.country.startsWith(needle)))
+})
+
+async function loadOssRates() {
+  try {
+    const r = await ossRatesApi.list()
+    ossRates.value = r.rates
+    ossAvailable.value = r.available
+    ossManageable.value = r.manageable
+    ossCanWrite.value = r.can_write
+    if (r.rate_types.length > 0) ossRateTypes.value = r.rate_types
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+function newOssRate() {
+  Object.assign(ossDraft, { id: 0, country: ossCountryFilter.value.trim().toUpperCase(),
+    rate_type: 'standard', rate_percent: null, valid_from: '', valid_to: '',
+    valid_to_override: '', note: '' })
+  ossEditMode.value = 'create'
+  ossOpen.value = true
+}
+
+function editOssRate(r: OssMemberStateRate) {
+  Object.assign(ossDraft, {
+    id: r.id, country: r.country, rate_type: r.rate_type, rate_percent: r.rate_percent,
+    valid_from: r.valid_from, valid_to: r.valid_to ?? '',
+    valid_to_override: r.valid_to_override ?? '', note: r.note ?? '',
+  })
+  // Seed má vlastní sloupce nedotknutelné — dialog nabídne jen překryv platnosti.
+  ossEditMode.value = r.is_custom ? 'edit' : 'override'
+  ossOpen.value = true
+}
+
+async function saveOssRate() {
+  try {
+    if (ossEditMode.value === 'create') {
+      await ossRatesApi.create({
+        country: ossDraft.country,
+        rate_type: ossDraft.rate_type,
+        rate_percent: Number(ossDraft.rate_percent ?? 0),
+        valid_from: ossDraft.valid_from,
+        valid_to: ossDraft.valid_to || null,
+        note: ossDraft.note || null,
+      })
+    } else if (ossEditMode.value === 'edit') {
+      await ossRatesApi.update(ossDraft.id, {
+        country: ossDraft.country,
+        rate_type: ossDraft.rate_type,
+        rate_percent: Number(ossDraft.rate_percent ?? 0),
+        valid_from: ossDraft.valid_from,
+        valid_to: ossDraft.valid_to || null,
+        note: ossDraft.note || null,
+      })
+    } else {
+      await ossRatesApi.update(ossDraft.id, { valid_to_override: ossDraft.valid_to_override || null })
+    }
+    ossOpen.value = false
+    toast.success(t('common.saved'))
+    await loadOssRates()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+async function toggleOssRateDisabled(r: OssMemberStateRate) {
+  try {
+    await ossRatesApi.update(r.id, { disabled: !r.disabled })
+    toast.success(t('common.saved'))
+    await loadOssRates()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+async function removeOssRate(r: OssMemberStateRate) {
+  if (!confirm(t('oss_rates.delete_confirm', { country: r.country, rate: r.rate_percent }))) return
+  try {
+    await ossRatesApi.remove(r.id)
+    toast.success(t('common.deleted'))
+    await loadOssRates()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
@@ -653,6 +772,7 @@ watch(tab, (newTab) => {
   if (newTab === 'expense_categories') loadExpenseCategories()
   if (newTab === 'revenue_categories') loadRevenueCategories()
   if (newTab === 'vat_classifications') loadVatClassifications()
+  if (newTab === 'oss_rates') loadOssRates()
 })
 </script>
 
@@ -674,6 +794,7 @@ watch(tab, (newTab) => {
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ tt === 'vat' ? t('codebooks.tab_vat')
           : tt === 'vat_classifications' ? t('codebooks.tab_vat_classifications')
+          : tt === 'oss_rates' ? t('codebooks.tab_oss_rates')
           : tt === 'expense_categories' ? t('codebooks.tab_expense_categories')
           : tt === 'revenue_categories' ? t('codebooks.tab_revenue_categories')
           : tt === 'countries' ? t('codebooks.tab_countries')
@@ -1074,6 +1195,96 @@ watch(tab, (newTab) => {
       </div>
     </section>
 
+    <!-- ====== OSS — sazby DPH členských států ====== -->
+    <section v-else-if="tab === 'oss_rates'">
+      <div class="flex flex-col gap-3 mb-3">
+        <p class="text-sm text-neutral-500">{{ t('oss_rates.hint') }}</p>
+
+        <div v-if="!ossAvailable" class="rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-600">
+          {{ t('oss_rates.missing_migration') }}
+        </div>
+        <div v-else-if="!ossManageable" class="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-600">
+          {{ t('oss_rates.missing_management_migration') }}
+        </div>
+        <div v-else-if="!ossCanWrite" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+          {{ t('oss_rates.readonly_for_role') }}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <input v-model="ossCountryFilter" maxlength="2" :placeholder="t('oss_rates.filter_country')"
+            class="h-9 w-28 px-3 border border-neutral-300 rounded-md bg-surface text-sm uppercase" />
+          <label class="inline-flex items-center gap-2 text-sm text-neutral-600 cursor-pointer">
+            <input v-model="ossShowDisabled" type="checkbox"
+              class="w-4 h-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
+            {{ t('oss_rates.show_disabled') }}
+          </label>
+          <span class="text-xs text-neutral-500">{{ t('oss_rates.count', { n: ossRatesFiltered.length }) }}</span>
+          <button v-if="ossCanWrite && ossManageable" @click="newOssRate"
+            :class="[btnFilled('primary'), 'ml-auto shrink-0 whitespace-nowrap']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('oss_rates.new') }}
+          </button>
+        </div>
+      </div>
+
+      <EmptyState v-if="ossRatesFiltered.length === 0" boxed icon="clipboardCheck" :title="t('oss_rates.empty')" />
+
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium w-16">{{ t('oss_rates.country') }}</th>
+                <th class="px-3 py-2 text-left font-medium w-36">{{ t('oss_rates.rate_type') }}</th>
+                <th class="px-3 py-2 text-right font-medium w-20">{{ t('oss_rates.rate_percent') }}</th>
+                <th class="px-3 py-2 text-center font-medium w-28">{{ t('oss_rates.valid_from') }}</th>
+                <th class="px-3 py-2 text-center font-medium w-28">{{ t('oss_rates.valid_to') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('oss_rates.origin') }}</th>
+                <th class="px-3 py-2 w-56"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="r in ossRatesFiltered" :key="r.id" :class="['hover:bg-neutral-50', r.disabled ? 'opacity-50' : '']">
+                <td class="px-3 py-2 font-mono text-xs font-medium">{{ r.country }}</td>
+                <td class="px-3 py-2 text-xs">{{ t('oss_rates.type_' + r.rate_type) }}</td>
+                <td class="px-3 py-2 text-right font-mono text-xs">{{ r.rate_percent }} %</td>
+                <td class="px-3 py-2 text-center font-mono text-xs">{{ r.valid_from }}</td>
+                <td class="px-3 py-2 text-center font-mono text-xs">
+                  {{ r.effective_valid_to ?? '—' }}
+                  <span v-if="r.valid_to_override" class="ml-1 text-xs px-1 py-0.5 rounded bg-warning-50 text-warning-600">
+                    {{ t('oss_rates.shortened') }}
+                  </span>
+                </td>
+                <td class="px-3 py-2 text-xs">
+                  <span v-if="r.is_custom" class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('oss_rates.custom') }}</span>
+                  <span v-else class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t('oss_rates.seeded') }}</span>
+                  <span v-if="r.disabled" class="ml-2 text-xs px-1.5 py-0.5 rounded bg-danger-50 text-danger-600">{{ t('oss_rates.disabled') }}</span>
+                  <span v-if="r.note" class="ml-2 text-neutral-500">{{ r.note }}</span>
+                </td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                    <button @click="editOssRate(r)" :disabled="!ossCanWrite || !ossManageable"
+                      :title="r.is_custom ? t('common.edit') : t('oss_rates.shorten_title')"
+                      :class="btnOutlineSm('primary')">
+                      {{ r.is_custom ? t('common.edit') : t('oss_rates.shorten') }}
+                    </button>
+                    <button @click="toggleOssRateDisabled(r)" :disabled="!ossCanWrite || !ossManageable"
+                      :class="btnOutlineSm('warning')">
+                      {{ r.disabled ? t('oss_rates.enable') : t('oss_rates.disable') }}
+                    </button>
+                    <button v-if="r.is_custom" @click="removeOssRate(r)" :disabled="!ossCanWrite || !ossManageable"
+                      :class="btnOutlineSm('danger')">
+                      {{ t('common.delete') }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ====== TAX CONSTANTS (roční daňové konstanty) ====== -->
     <section v-else-if="tab === 'tax_constants'">
       <div class="flex flex-wrap items-center gap-3 mb-3">
@@ -1340,6 +1551,79 @@ watch(tab, (newTab) => {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}</button>
           <button @click="saveVatCls" :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OSS member-state rate modal — u seedu jen překryv platnosti, viz migrace 1296 -->
+    <div v-if="ossOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-lg w-full p-5">
+        <h3 class="text-lg font-semibold mb-1">
+          {{ ossEditMode === 'override' ? t('oss_rates.shorten_title')
+            : ossEditMode === 'edit' ? t('oss_rates.edit_title') : t('oss_rates.new_title') }}
+        </h3>
+        <p class="text-sm text-neutral-500 mb-3">
+          {{ ossEditMode === 'override' ? t('oss_rates.shorten_hint') : t('oss_rates.new_hint') }}
+        </p>
+
+        <div v-if="ossEditMode === 'override'" class="space-y-3">
+          <div class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+            {{ ossDraft.country }} · {{ t('oss_rates.type_' + ossDraft.rate_type) }} ·
+            {{ ossDraft.rate_percent }} % · {{ t('oss_rates.valid_from') }} {{ ossDraft.valid_from }}
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_to_override') }}</label>
+            <input v-model="ossDraft.valid_to_override" type="date"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+          </div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.country') }} *</label>
+              <input v-model="ossDraft.country" maxlength="2"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm uppercase" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.rate_type') }} *</label>
+              <select v-model="ossDraft.rate_type"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option v-for="rt in ossRateTypes" :key="rt" :value="rt">{{ t('oss_rates.type_' + rt) }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.rate_percent') }} *</label>
+              <input v-model.number="ossDraft.rate_percent" type="number" step="0.01" min="0" max="99.99"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_from') }} *</label>
+              <input v-model="ossDraft.valid_from" type="date"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_to') }}</label>
+              <input v-model="ossDraft.valid_to" type="date"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.note') }}</label>
+            <input v-model="ossDraft.note" maxlength="190"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-4 mt-3 border-t border-neutral-200">
+          <button @click="ossOpen = false" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}</button>
+          <button @click="saveOssRate" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('common.save') }}</button>
         </div>

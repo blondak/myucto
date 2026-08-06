@@ -11,8 +11,10 @@ use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\Oss\OssClientContext;
+use MyInvoice\Service\Oss\OssDocumentCoherence;
 use MyInvoice\Service\Oss\OssItemDecision;
 use MyInvoice\Service\Oss\OssItemDeriver;
+use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Oss\OssRateCodebook;
 use MyInvoice\Service\Vat\VatRateResolver;
 use ZipArchive;
@@ -109,14 +111,6 @@ final class InvoiceImportService
     private const MAX_SINGLE_ENTRY_BYTES = 10 * 1024 * 1024;       // 10 MiB
 
     /**
-     * Memoizace pre-flightu číselníku: vede pro danou zemi vůbec nějakou sazbu? Seed se
-     * během běhu nemění, cachuje se proto odpověď číselníku, ne výsledek kontroly.
-     *
-     * @var array<string, bool>
-     */
-    private array $domesticRatePresence = [];
-
-    /**
      * Memoizace sazeb země dodavatele k datu pro překlad sazbové ÚROVNĚ na procento
      * ({@see itemRate()}). Import 1 670 dokladů se nesmí ptát číselníku za každý řádek;
      * klíč je „země|datum plnění", protože odpověď na obojí závisí.
@@ -141,6 +135,7 @@ final class InvoiceImportService
         private readonly OssItemDeriver $ossDeriver,
         private readonly VatRateResolver $vatRateResolver,
         private readonly OssRateCodebook $codebook,
+        private readonly OssItemPlanner $planner,
     ) {}
 
     /**
@@ -565,46 +560,13 @@ final class InvoiceImportService
      */
     private function rateCodebookProblem(int $supplierId): ?string
     {
-        if (!$this->codebook->isAvailable()) {
-            return 'Chybí číselník sazeb členských států (tabulka oss_member_state_rates, migrace 1152). '
-                . 'Bez něj nelze u žádného řádku ověřit, ve které zemi jeho sazba platí, takže by se '
-                . 'odmítl každý doklad se sazbou vyšší než 0 %. Spusťte php api/bin/migrate.php '
-                . 'a import opakujte — zatím se neuložilo nic.';
-        }
-
-        $domestic = $this->ossDeriver->domesticCountry($supplierId);
-        if (!$this->hasAnyDomesticRate($domestic)) {
-            return sprintf(
-                'Číselník sazeb členských států nevede pro zemi dodavatele (%s) ani jednu sazbu, takže '
-                    . 'u žádného řádku nejde ověřit, jestli je jeho sazba tuzemská — odmítl by se každý '
-                    . 'doklad se sazbou vyšší než 0 %%. Spusťte php api/bin/migrate.php; je-li firma '
-                    . 'identifikovaná mimo pokryté státy, doplňte její sazby do číselníku. '
-                    . 'Zatím se neuložilo nic.',
-                $domestic,
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * Vede číselník pro zemi ASPOŇ JEDNU sazbu, tedy kdykoli v historii? Otázka je
-     * schválně bez data: „k datu plnění zemi nezná" je vada jednotlivých dokladů (řeší ji
-     * derivace vlastní hláškou), kdežto tady se hledá jediný důvod ZASTAVIT CELÝ BĚH —
-     * číselník, ze kterého nepadne použitelná odpověď nikdy.
-     */
-    private function hasAnyDomesticRate(string $country): bool
-    {
-        if (array_key_exists($country, $this->domesticRatePresence)) {
-            return $this->domesticRatePresence[$country];
-        }
-
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM oss_member_state_rates WHERE country = ? LIMIT 1'
-        );
-        $stmt->execute([$country]);
-
-        return $this->domesticRatePresence[$country] = $stmt->fetchColumn() !== false;
+        // Text i obě podmínky žijí v {@see OssItemPlanner::codebookProblem()}, protože
+        // TOTÉŽ pre-flight potřebuje každý kanál, který zakládá vydanou fakturu
+        // (iDoklad, Fakturoid, AI extrakce) — bez číselníku by se u něj odmítlo úplně
+        // všechno, včetně běžné české faktury českému odběrateli. Dvě kopie by se
+        // rozešly a jedna instalace by pak dostala radu, kterou druhá nedostane.
+        // Liší se jedině NÁSLEDEK, a ten je parametrem.
+        return $this->planner->codebookProblem($supplierId, 'Zatím se neuložilo nic, import opakujte.');
     }
 
     private static function fmtDate(string $date): string
@@ -1419,79 +1381,37 @@ final class InvoiceImportService
     /**
      * SOUDRŽNOST DOKLADU: leží týž doklad zároveň v OSS podání i v tuzemském přiznání?
      *
-     * ── Proč to musí být tady ───────────────────────────────────────────────────────
-     * {@see OssItemDeriver} rozhoduje o ŘÁDKU a o jiných řádcích téhož dokladu nic neví —
-     * z jeho pohledu je každé z obou rozhodnutí samo o sobě správné. Rozpor je vlastnost
-     * DOKLADU a vidět je až tam, kde jsou pohromadě všechny jeho položky: to je konec
-     * smyčky {@see planItems()}. Zároveň je to poslední místo PŘED insertem hlavičky,
-     * takže případ „doklad se nevytvoří" (kdyby se sem někdy přidal) i případ „doklad
-     * se vytvoří označený" mají jedno místo. Volající ({@see processOne()}) už dostane
+     * Samotné pravidlo (kdy je doklad rozporný, které řádky se označí a jak zní hláška)
+     * bydlí v {@see OssDocumentCoherence} — stejný rozpor totiž umí vyrobit i editor
+     * a API, ne jen import. Tady zůstává jen napojení na PLÁN položek: rozpor je
+     * vlastnost DOKLADU a vidět je až tam, kde jsou pohromadě všechny jeho položky,
+     * to je konec smyčky {@see planItems()}. Volající ({@see processOne()}) už dostane
      * jen hotový plán a per-doklad čítače, takže výš by se rozpor musel rekonstruovat
      * ze součtů — a mezi „dvě položky, každá jinam" a „dva doklady po jedné položce"
      * by se z čísel nedalo rozhodnout.
-     *
-     * ── Nezamítá se ────────────────────────────────────────────────────────────────
-     * Smíšený doklad umí vzniknout legitimně: plnění s místem plnění v tuzemsku
-     * a zásilka do jiného členského státu se dají vyfakturovat na jedné faktuře.
-     * Odmítnutí by tenhle případ zavřelo do slepé uličky (uživatel nemá jak doklad
-     * v cizím exportu rozdělit), kdežto varování ho jen pošle na kontrolu.
-     *
-     * ── Příznak dostanou ZDANĚNÉ řádky OBOU stran, ne jen tuzemské ──────────────────
-     * Tuzemský řádek je sice podezřelejší, ale sám o sobě neviditelný: náhled OSS podání
-     * čte VÝHRADNĚ řádky s `oss_applicable = 1` ({@see \MyInvoice\Service\Report\VatLedgerService::ossRows()}),
-     * takže označení jen tuzemské strany by po zavření reportu nikde nesvítilo — a to je
-     * přesně vada, kterou příznak řeší. Označí se proto obě strany rozporu: OSS řádek
-     * jako ta polovina, kterou uživatel uvidí před odesláním podání, tuzemský jako ta,
-     * kterou má opravdu prověřit. Řádky s NULOVOU sazbou (zaokrouhlení, poštovné,
-     * osvobozené plnění) se vynechávají — rozpor netvoří a označit je znamená hlásit
-     * ho na každé druhé faktuře.
      *
      * @param array{rows:list<array<string,mixed>>, warnings:list<string>,
      *              oss_manual_review:int, ...} $plan
      */
     private function flagContradictoryDocument(array &$plan, string $domestic): void
     {
-        $ossCountries = [];
-        $domesticRates = [];
-        $affected = [];
-
-        foreach ($plan['rows'] as $index => $row) {
-            if ((int) ($row['oss']['oss_applicable'] ?? 0) === 1) {
+        $contradiction = OssDocumentCoherence::detect(array_map(
+            static fn (array $row): array => [
+                'applicable' => (int) ($row['oss']['oss_applicable'] ?? 0) === 1,
                 // OSS řádek je vždy zdaněný (nulovou sazbu deriver do OSS nepustí).
-                $ossCountries[(string) $row['oss']['oss_consumer_country']] = true;
-                $affected[] = $index;
-                continue;
-            }
-            if ((float) $row['vat_rate_snapshot'] <= OssItemDeriver::EPSILON) {
-                continue;
-            }
-            $domesticRates[self::fmtPercent((float) $row['vat_rate_snapshot'])] = true;
-            $affected[] = $index;
-        }
+                'country' => (string) ($row['oss']['oss_consumer_country'] ?? ''),
+                'rate' => (float) $row['vat_rate_snapshot'],
+            ],
+            $plan['rows'],
+        ));
 
-        if ($ossCountries === [] || $domesticRates === []) {
+        if ($contradiction === null) {
             return;
         }
 
-        $countries = array_keys($ossCountries);
-        $rates = array_keys($domesticRates);
-        sort($countries);
-        sort($rates);
+        $plan['warnings'][] = $contradiction->warning($domestic);
 
-        $plan['warnings'][] = sprintf(
-            'Doklad si protiřečí: část řádků je zařazená do OSS (stát spotřeby %s) a část zůstala '
-                . 'zdaněná tuzemsky sazbou %s %% (země dodavatele %s), takže jeden a týž doklad leží '
-                . 've dvou různých přiznáních. Vytvořili jsme ho — na jedné faktuře můžou obě věci stát '
-                . 'legitimně (plnění s místem plnění v tuzemsku a zásilka do jiného členského státu) —, '
-                . 'ale je to výjimka, ne běžný stav. Dotčené řádky jsme označili K RUČNÍMU POSOUZENÍ; '
-                . 'zkontrolujte na dokladu sazby: patří-li tuzemské řádky taky do OSS, mají nést sazbu '
-                . 'státu spotřeby.',
-            implode(', ', $countries),
-            implode(', ', $rates),
-            $domestic,
-        );
-
-        foreach ($affected as $index) {
+        foreach ($contradiction->affectedKeys as $index) {
             if ((int) ($plan['rows'][$index]['oss']['oss_needs_manual_review'] ?? 0) === 1) {
                 continue;
             }
@@ -1752,7 +1672,8 @@ final class InvoiceImportService
      *
      * `oss_exchange_rate*`, `oss_taxable_amount_return`, `oss_vat_amount_return`
      * a `oss_original_period` se ZÁMĚRNĚ nevyplňují: přepočet do měny podání dělá až
-     * OssLedgerService kurzem ČNB k DUZP a předvyplnění při importu by kurz zafixovalo.
+     * OssLedgerService kurzem ECB zveřejněným pro POSLEDNÍ DEN zdaňovacího období —
+     * ten je jednotný pro celý kvartál a při importu se ještě nemusí znát.
      *
      * `oss_needs_manual_review` (migrace 1293) má guard VLASTNÍ, ne společný se zbytkem
      * OSS sloupců: mezi migracemi 0137 a 1293 je řada verzí, takže instance s OSS

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Oss\OssItemCarryOver;
 
 /**
  * Vytvoří DRAFT finální faktury (typu `invoice`) k zaplacené proformě.
@@ -20,6 +21,17 @@ use MyInvoice\Repository\InvoiceRepository;
  *
  * Bezpečné vůči vnořeným transakcím — pokud caller už má otevřenou transakci,
  * neotevírá vlastní a neflushuje.
+ *
+ * ── OSS se PŘENÁŠÍ ze zdrojových dokladů, nederivuje se znovu ───────────────────────
+ * Vyúčtovací faktura je TOTÉŽ plnění TÉMUŽ odběrateli jako proforma, jen zapsané
+ * daňovým dokladem — místo plnění se změnit nemůže. Do sjednocení se ale OSS sloupce
+ * nekopírovaly vůbec, takže se OSS řádek proformy stal na vyúčtování TUZEMSKÝM a cizí
+ * daň skončila na ř. 1 českého přiznání. Přenos (a proč ne derivace) řeší
+ * {@see OssItemCarryOver}; platí pro OBOJE řádky dokladu:
+ *   - zkopírované položky proformy → OSS profil položky proformy,
+ *   - záporné odpočtové řádky § 37a → OSS profil řádku daňového dokladu, který
+ *     odečítají. Bez toho by kladná polovina opravy ležela v OSS podání a záporná
+ *     v tuzemském přiznání.
  */
 final class FinalFromProformaCreator
 {
@@ -28,6 +40,7 @@ final class FinalFromProformaCreator
         private readonly InvoiceRepository $repo,
         private readonly InvoiceCalculator $calc,
         private readonly AdvanceCycleLock $cycleLock,
+        private readonly OssItemCarryOver $ossCarry,
     ) {}
 
     /**
@@ -102,8 +115,13 @@ final class FinalFromProformaCreator
         // storna se nepočítají (nejsou daňovým dokladem).
         // Doklady hledáme přes parent_invoice_id I přes vazbu plateb — kdyby vazba
         // parent chyběla (historicky rozpojený doklad), odpočet nesmí vypadnout.
+        // OSS profil vstupuje do SELECT i do GROUP BY: dva řádky daňového dokladu se
+        // stejnou sazbou, ale různým místem plnění (OSS do PL × tuzemský), se nesmí
+        // slít do jednoho odpočtového řádku — u zákazníkovy konfigurace mají i totéž
+        // `vat_rate_id`, protože polská 23% sazba je ve `vat_rates` vedená se zemí CZ.
+        $ossSelect = $this->ossCarry->selectList('ii');
         $tdStmt = $pdo->prepare(
-            "SELECT td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot,
+            "SELECT td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot{$ossSelect},
                     SUM(ii.total_without_vat) AS base, SUM(ii.total_vat) AS vat,
                     SUM(ii.total_with_vat) AS gross
                FROM invoices td
@@ -113,7 +131,7 @@ final class FinalFromProformaCreator
                 AND (td.parent_invoice_id = ?
                      OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
                                    WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
-           GROUP BY td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot
+           GROUP BY td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot{$ossSelect}
            ORDER BY td.id, ii.vat_rate_snapshot DESC"
         );
         $tdStmt->execute([$proformaId, $proformaId]);
@@ -190,13 +208,20 @@ final class FinalFromProformaCreator
 
             // Položky kopírujeme včetně případné slevové (item_kind='discount') —
             // zachová částku po slevě. Marker item_kind umožní pozdější re-save přepočítat.
+            // OSS sloupce se skládají místo ručně psaných variant SQL — guard na příznak
+            // „k ručnímu posouzení" je samostatný, takže variant by jinak byly tři a počet
+            // otazníků by se s nimi rozešel (shodně s `InvoiceRepository::replaceItems()`).
+            $ossColumns = $this->ossCarry->columns();
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
-                    stock_item_id, warehouse_id, small_asset_id, asset_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?)'
+                    stock_item_id, warehouse_id, small_asset_id, asset_id'
+                . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
+                . $this->ossCarry->placeholders()
+                . ')'
             );
             $maxOrder = 0;
             foreach ($proforma['items'] as $item) {
@@ -218,6 +243,9 @@ final class FinalFromProformaCreator
                     // faktura (proforma není doklad o prodeji), takže vazba musí přejít s ní.
                     $item['small_asset_id'] ?? null,
                     $item['asset_id'] ?? null,
+                    // Místo plnění se vyúčtováním nemění — přenáší se z proformy, protože
+                    // ta už derivací i případnou ruční opravou prošla (viz OssItemCarryOver).
+                    ...$this->ossCarry->values($item),
                 ]);
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
@@ -251,6 +279,12 @@ final class FinalFromProformaCreator
                     null,
                     null,
                     null,
+                    // Zato OSS profil nese: odpočet ruší přesně tu daň, kterou přiznal
+                    // daňový doklad k platbě, takže musí jít do TÉŽE evidence. Jinak by
+                    // kladná polovina zůstala v OSS podání a záporná spadla na ř. 1
+                    // tuzemského přiznání — daň by se odečetla dvakrát v jedné zemi
+                    // a vůbec ve druhé.
+                    ...$this->ossCarry->values($r),
                 ]);
             }
 

@@ -2,7 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, RouterLink } from 'vue-router'
-import { uploadImport, type ImportReport, type ImportResultRow } from '@/api/imports'
+import { uploadImport, type ImportReport } from '@/api/imports'
+import ImportReportPanel from '@/components/exchange/ImportReportPanel.vue'
 import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoices'
 import { integrationsApi, type AnthropicCredentialsStatus } from '@/api/integrations'
 import { useToast } from '@/composables/useToast'
@@ -42,7 +43,9 @@ async function submit() {
   try {
     report.value = await uploadImport(files.value, 'purchase')
   } catch (e: any) {
-    error.value = e?.message || t('imports.upload_failed')
+    // Viz ImportIssued.vue: `e.message` u axiosu nese jen HTTP status, kdežto hláška
+    // s návodem (chybějící číselník / migrace) je v `response.data.error.message`.
+    error.value = apiErrorMessage(e, t('imports.upload_failed'))
   } finally {
     uploading.value = false
   }
@@ -52,7 +55,6 @@ function clear() {
   report.value = null
   error.value = ''
 }
-const rows = computed<ImportResultRow[]>(() => report.value?.results ?? [])
 const statusBadge = (s: string) => {
   if (s === 'created') return 'bg-success-50 text-success-600 border-success-500/40'
   if (s === 'skipped') return 'bg-warning-50 text-warning-600 border-warning-500/40'
@@ -269,66 +271,6 @@ async function runScan() {
     </div>
 
     <!-- Report -->
-    <div v-if="report" class="mt-6 bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-w-3xl">
-      <div class="flex items-center gap-4 mb-4 text-sm">
-        <div><span class="font-semibold text-success-600">{{ report.summary.created }}</span> {{ t('imports.summary_created') }}</div>
-        <div><span class="font-semibold text-warning-600">{{ report.summary.skipped }}</span> {{ t('imports.summary_skipped') }}</div>
-        <div><span class="font-semibold text-danger-500">{{ report.summary.failed }}</span> {{ t('imports.summary_failed') }}</div>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm table-sticky-first">
-          <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-200">
-              <th class="py-2 pr-3">{{ t('imports.col_file') }}</th>
-              <th class="py-2 pr-3">{{ t('imports.col_status') }}</th>
-              <th class="py-2 pr-3">{{ t('imports.col_varsymbol') }}</th>
-              <th class="py-2">{{ t('imports.col_detail') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(r, i) in rows" :key="i" class="border-b border-neutral-100">
-              <td class="py-2 pr-3 font-mono text-xs truncate max-w-xs">{{ r.file }}</td>
-              <td class="py-2 pr-3">
-                <span class="inline-block px-2 py-0.5 text-xs rounded border" :class="statusBadge(r.status)">
-                  {{ t('imports.status_' + r.status) }}
-                </span>
-              </td>
-              <td class="py-2 pr-3 font-mono">{{ r.varsymbol || '—' }}</td>
-              <td class="py-2 text-neutral-600">
-                <span v-if="r.status === 'created'">
-                  <!-- Vystavená faktura -->
-                  <a v-if="r.invoice_id" :href="`/invoices/${r.invoice_id}`" class="text-primary-700 hover:underline">#{{ r.invoice_id }}</a>
-                  <!-- Přijatá faktura (purchase route) -->
-                  <a v-if="r.purchase_invoice_id" :href="`/purchase-invoices/${r.purchase_invoice_id}`" class="text-primary-700 hover:underline">
-                    #{{ r.purchase_invoice_id }}
-                  </a>
-                  <!-- Kind badge — vystavená vs přijatá -->
-                  <span
-                    v-if="r.kind"
-                    class="ml-2 text-xs px-1.5 py-0.5 rounded border"
-                    :class="r.kind === 'purchase'
-                      ? 'bg-warning-50 text-warning-600 border-warning-500/40'
-                      : 'bg-primary-50 text-primary-700 border-primary-500/40'"
-                  >
-                    {{ t('imports.kind_' + r.kind) }}
-                  </span>
-                  <span
-                    v-if="r.imported_status"
-                    class="ml-2 text-xs px-1.5 py-0.5 rounded border"
-                    :class="r.imported_status === 'paid' ? 'bg-success-50 text-success-600 border-success-500/40' : 'bg-neutral-50 text-neutral-600 border-neutral-200'"
-                  >
-                    {{ t('imports.imported_as_' + r.imported_status) }}
-                  </span>
-                  <span v-if="r.client_created" class="ml-2 text-xs text-success-600">{{ t('imports.new_client') }}</span>
-                  <span v-if="r.project_id" class="ml-2 text-xs text-primary-700">{{ t('imports.new_project') }}</span>
-                </span>
-                <span v-else class="text-xs">{{ r.reason || '—' }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <ImportReportPanel v-if="report" :report="report" />
   </div>
 </template>

@@ -18,6 +18,12 @@ function tt(cs: string, en: string): string {
   return lang.value === 'en' ? en : cs
 }
 
+// Státy spotřeby OSS doložky v jazyce DOKLADU (ne aplikace) — stejně jako zbytek náhledu.
+const ossCountryNames = computed(() =>
+  (data.value?.oss_clause?.countries ?? [])
+    .map(c => (lang.value === 'en' ? c.name_en : c.name_cs))
+    .join(', '))
+
 const typeLabel = computed(() => {
   switch (inv.value?.invoice_type) {
     case 'proforma':     return tt('Zálohová faktura', 'Proforma invoice')
@@ -340,6 +346,22 @@ onMounted(async () => {
                        'Reverse charge — VAT to be accounted for by the customer.')
                   : tt('Daň odvede zákazník (přenesení daňové povinnosti dle čl. 196 směrnice 2006/112/ES).',
                        'Reverse charge — VAT to be accounted for by the customer pursuant to Article 196 of Council Directive 2006/112/EC.') }}
+            </div>
+
+            <!-- OSS doložka — musí znít stejně jako v PDF (api/templates/invoice/invoice.twig),
+                 podklad staví stejný SSOT na backendu (OssInvoiceClause). -->
+            <div v-if="data.oss_clause" class="px-6 py-3 text-xs text-neutral-600 border-t border-neutral-100">
+              {{ data.oss_clause.all_items
+                  ? tt('Daň je přiznána a odvedena ve státě spotřeby v režimu jednoho správního místa (One Stop Shop) podle § 110a a násl. zákona o DPH.',
+                       'VAT is declared and paid in the Member State of consumption under the One Stop Shop scheme pursuant to Articles 369a et seq. of Council Directive 2006/112/EC.')
+                  : tt('U položek v režimu jednoho správního místa (One Stop Shop) je daň přiznána a odvedena ve státě spotřeby podle § 110a a násl. zákona o DPH.',
+                       'For the items covered by the One Stop Shop scheme, VAT is declared and paid in the Member State of consumption pursuant to Articles 369a et seq. of Council Directive 2006/112/EC.') }}
+              <template v-if="data.oss_clause.countries.length">
+                {{ data.oss_clause.countries.length > 1
+                    ? tt('Státy spotřeby', 'Member States of consumption')
+                    : tt('Stát spotřeby', 'Member State of consumption') }}:
+                {{ ossCountryNames }}.
+              </template>
             </div>
 
             <!-- Součty -->

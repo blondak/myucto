@@ -218,6 +218,19 @@ shodu sazby na dokladu s číselníkem a údaje potřebné pro opravy minulých 
 OSS řádky jsou současně vyřazeny z českého přiznání k DPH, kontrolního hlášení
 a Knihy DPH.
 
+### Zaúčtování OSS daně
+
+Daň v režimu OSS se neúčtuje na účet 343. Patří jinému členskému státu, do českého
+přiznání nevstupuje a odvádí se samostatně, proto má vlastní účet **345.100 — DPH
+v režimu OSS (jiný členský stát)**. Na 343 tak zůstává přesně to, co jde do přiznání
+k DPH, a zůstatek účtu jde s přiznáním srovnat; v rozvaze je 345.100 součástí téže
+položky „Stát — daňové závazky a dotace" jako 343.
+
+Faktura, která míchá tuzemské plnění s plněním v režimu OSS, rozdělí daň mezi oba
+účty; základ jde celý na výnosový účet dokladu. Dobropis i storno obracejí obě
+daňové nohy. Účet lze změnit v předkontacích u pravidla `oss.output.vat` (například
+na vlastní analytiku k 343) — pak se ale zůstatek 343 s přiznáním neshoduje.
+
 ### Orientační sledování prahu 10 000 EUR
 
 Blok prahu sleduje za kalendářní rok přeshraniční B2C plnění zákazníkům v EU
@@ -241,6 +254,55 @@ Stažení vytvoří XML `OSSEI1` ve měně nastavené pro OSS. Export vyžaduje
 oprávnění exportovat daňové výkazy, uloží neměnný snapshot zdrojových dat do
 archivu daňových podání a zapíše akci do activity logu. Aplikace XML sama
 neodesílá; před předáním ověř varování, součty, registraci a výsledek v EPO.
+
+Záložka **Archiv podání** vypisuje všechny archivované OSS snapshoty s časem
+vzniku, stavem, výsledkem validace, SHA-256 otiskem a odkazem na stažení uloženého
+souboru. Stejné snapshoty leží ve společném archivu v **Nástroje → EPO podání
+a archiv**, kde se k nim připojují EPO pokusy, doručenky a označení „podáno".
+Archivovaný soubor prokazuje, co vzniklo — ne že bylo podáno; rozdíl vysvětluje
+[Archiv podání a daňová rekonciliace](68_Archiv_podani_a_rekonciliace.md).
+
+### Rekonciliace „podáno vs. účetnictví"
+
+Záložka **Rekonciliace** porovná archivované podání za zvolený kvartál s tím, co
+by se za totéž období podalo dnes. Slouží hlavně k odhalení dokladu opraveného
+zpětně po podání — bez ní se taková oprava v aplikaci nikde neprojeví a rozdíl se
+najde až při kontrole ve státě spotřeby.
+
+Porovnává se na třech úrovních: součty přiznání, řádky podání (stát spotřeby × typ
+plnění × typ sazby × sazba) a jednotlivé doklady. U dokladů rozliší, co přibylo,
+co zmizelo (storno, přesun data plnění) a co se změnilo; přesun daně do jiného státu
+spotřeby se pozná i tehdy, když se součty nezmění.
+
+Referencí je poslední archivované podání období; doložené podání má přednost před
+pouhým stažením. Pokud reference není doložené podání, stránka to výslovně uvede —
+stažení XML podáním není. Archiv vzniklý dříve, než aplikace začala ukládat podklad
+podání, porovnat nelze; v takovém případě stránka hlásí, že chybí podklad, a nikoli
+že se výkaz shoduje.
+
+Rozdíl sám o sobě neznamená chybu — může jít o legitimní změnu po podání. Rozhodnutí,
+zda podat opravné přiznání za původní období, zůstává na účetní.
+
+### Evidence podle § 110f ZDPH
+
+Záložka **Evidence § 110f** ukazuje záznamy o vybraných plněních, které zákon
+o DPH k režimu jednoho správního místa vyžaduje. Strukturu údajů stanoví čl. 63c
+prováděcího nařízení Rady (EU) č. 282/2011: stát spotřeby, druh, popis a množství
+plnění, datum plnění, základ daně s uvedením měny, následné zvýšení či snížení
+základu, sazbu, daň, přijaté úhrady, údaje z dokladu a podklad, ze kterého se
+určilo místo plnění.
+
+Záznamy vznikají automaticky při archivaci podání, a to z týchž dat, ze kterých
+vzniklo XML. Jsou **write-once** — nelze je změnit ani smazat, protože jinak by po
+opravě dokladu ukazovaly jiný stav, než jaký se podal. Uchovávají se 10 let od konce
+kalendářního roku, ve kterém bylo plnění uskutečněno; u opravy staršího období se
+lhůta počítá od roku původního plnění. Tlačítka **Export CSV** a **Export JSON**
+poskytnou evidenci elektronicky, jak zákon i nařízení požadují; export se loguje.
+
+Body čl. 63c, které aplikace z dnešních dat doložit neumí, stránka i export výslovně
+vyjmenovávají — netváří se tedy, že je evidence úplná. Jde o zálohy přijaté před
+uskutečněním plnění, místo zahájení a ukončení přepravy u zboží a doklad o vrácení
+zboží; ty je nutné doložit mimo aplikaci.
 
 ## DPH přiznání (DPHDP3)
 

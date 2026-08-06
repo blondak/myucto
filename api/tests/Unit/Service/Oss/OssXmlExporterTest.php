@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Oss;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Oss\OssFilingSnapshot;
 use MyInvoice\Service\Oss\OssLedgerService;
 use MyInvoice\Service\Oss\OssXmlExporter;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
@@ -114,6 +115,22 @@ final class OssXmlExporterTest extends TestCase
         self::assertSame(24.46, $result['summary']['total_payable']);
     }
 
+    /**
+     * Do archivu musí jít i porovnatelný snapshot podání — bez něj umí rekonciliace
+     * jen „liší se součet" a neřekne, který doklad se po podání změnil. Sem se to
+     * hlídá proto, že archiv plní právě tenhle `summary`.
+     */
+    public function testArchivedSummaryCarriesComparableSnapshot(): void
+    {
+        $result = $this->exporter($this->preview())->build(1, 2026, 3);
+
+        self::assertTrue(
+            OssFilingSnapshot::isUsable($result['summary']['snapshot'] ?? null),
+            'Archiv bez použitelného snapshotu znemožní rekonciliaci celého období.',
+        );
+        self::assertArrayHasKey('preview', $result, 'Evidence § 110f musí vzniknout z TÉHOŽ čtení dat.');
+    }
+
     /** @param array<string,mixed> $preview */
     private function exporter(array $preview): OssXmlExporter
     {
@@ -133,11 +150,20 @@ final class OssXmlExporterTest extends TestCase
             'bic' => null,
         ]);
 
+        // Snapshot podání do archivu si dotahuje `updated_at`/`status` dokladů; na obsah
+        // XML to vliv nemá, takže stačí prázdná odpověď. Vlastní chování snapshotu
+        // hlídá OssFilingSnapshotDiffTest.
+        $invoiceStatement = $this->createStub(\PDOStatement::class);
+        $invoiceStatement->method('execute')->willReturn(true);
+        $invoiceStatement->method('fetchAll')->willReturn([]);
+
         $pdo = $this->createStub(\PDO::class);
         $pdo->method('prepare')->willReturnCallback(
-            static fn (string $sql): \PDOStatement => str_contains($sql, 'FROM supplier')
-                ? $supplierStatement
-                : $bankStatement
+            static fn (string $sql): \PDOStatement => match (true) {
+                str_contains($sql, 'FROM supplier') => $supplierStatement,
+                str_contains($sql, 'FROM invoices') => $invoiceStatement,
+                default => $bankStatement,
+            }
         );
 
         $connection = $this->createStub(Connection::class);
@@ -146,7 +172,7 @@ final class OssXmlExporterTest extends TestCase
         $ledger = $this->createStub(OssLedgerService::class);
         $ledger->method('preview')->willReturn($preview);
 
-        return new OssXmlExporter($connection, $ledger);
+        return new OssXmlExporter($connection, $ledger, new OssFilingSnapshot($connection));
     }
 
     /** @return array<string,mixed> */

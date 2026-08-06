@@ -5,18 +5,69 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Oss;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Currency\CurrencyConversionService;
+use MyInvoice\Service\Currency\EcbExchangeRateClient;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Report\VatLedgerService;
+use Psr\Clock\ClockInterface;
 
+/**
+ * Podklad pro OSS přiznání (režim EU) za kalendářní čtvrtletí.
+ *
+ * ── Přepočet do měny podání: kurz ECB pro POSLEDNÍ DEN OBDOBÍ ────────────────────────
+ * Do konce roku 2026 se tady přepočítávalo DENNÍM kurzem ČNB k datu plnění každého
+ * dokladu — tedy stejným kurzem, jakým se počítá tuzemský základ daně (§ 4 odst. 8 ZDPH).
+ * To je pro OSS špatně a dopadá to přímo na částky, které zákazník podá: Finanční správa
+ * k režimu EU uvádí, že „pro přepočet u plnění v jiné měně než euro se použije směnný
+ * kurz Evropské centrální banky zveřejněný pro poslední den zdaňovacího období, nebo
+ * nejbližší následující den, pokud pro poslední den zdaňovacího období není kurz
+ * zveřejněn" (shodně čl. 369h odst. 3 směrnice 2006/112/ES). Jsou to tři rozdíly
+ * najednou: jiná banka (ECB, ne ČNB), jeden JEDNOTNÝ kurz na celé čtvrtletí a rozhodné
+ * datum konce období místo data plnění.
+ *
+ * Kurz se proto zjišťuje JEDNOU za období ({@see EcbExchangeRateClient::ratesForPeriodEnd()})
+ * a použije se na všechny řádky. Přednost si drží ruční hodnoty na položce — ruční částky
+ * (`oss_taxable_amount_return`, `oss_vat_amount_return`) i ruční kurz (`oss_exchange_rate`):
+ * to jsou vědomá rozhodnutí účetního nad konkrétním dokladem a systém je nepřepisuje.
+ *
+ * Když kurz ECB k dispozici NENÍ (nedostupný feed, demo režim, období, které ještě
+ * neskončilo), řádek zůstane nepřepočtený a náhled hlásí varování. Tichý návrat k ČNB by
+ * dal číslo, které vypadá hotově a do podání nepatří; `conversion_missing_count` navíc
+ * drží {@see OssXmlExporter} od vytvoření XML, dokud se to nevyřeší.
+ *
+ * ── Oprava minulého období jde proti kurzu TOHO období ──────────────────────────────
+ * Řádek s vyplněným `oss_original_period` je oprava staršího kvartálu (VetaO) a NESMÍ se
+ * přepočítat kurzem běžného čtvrtletí. Původní podání za opravované období použilo kurz
+ * ECB pro poslední den TAMTOHO kvartálu; kdyby se oprava přepočetla dnešním kurzem,
+ * částka v eurech by se od té podané nikdy neodečetla a v podání by natrvalo zůstal
+ * kurzový rozdíl, který nikdy neexistoval. Na kurzu 24 Kč/€ udělá vrácených 100 000 Kč
+ * 4 166,67 €, na kurzu 25 Kč/€ 4 000,00 € — a 166,67 € se v žádném dalším přiznání
+ * nesrovná.
+ *
+ * Kurz opravovaného období se hledá ve dvou krocích:
+ *   1. ARCHIV — write-once evidence § 110f zapsaná k podání opravovaného kvartálu
+ *      ({@see OssEvidenceService::ratesForPeriod()}). Nese kurz, kterým se tehdy
+ *      SKUTEČNĚ počítalo, včetně případného ručního kurzu účetního.
+ *   2. Kurz ECB pro poslední den opravovaného kvartálu — když archiv kurz nenese
+ *      (podání z doby před evidencí, nezapsaná evidence). Je to týž kurz, jaký zákon
+ *      pro původní podání předepisoval, takže rozdíl vychází taky.
+ * Když neuspěje ani jeden, řádek se NEPŘEPOČTE a oprava se počítá jako neplatná —
+ * export XML pak stojí. Číslo z běžného kvartálu by vypadalo hotově a bylo by špatně.
+ *
+ * ── Práh 10 000 EUR je JINÁ otázka ──────────────────────────────────────────────────
+ * {@see OssThresholdService} pracuje s prahem podle § 8 odst. 3 ZDPH, který se přepočítává
+ * pevným kurzem stanoveným k datu přijetí směrnice (EU) 2017/2455, ne kurzem konce období.
+ * Sjednotit obojí na kurz ECB ke konci čtvrtletí by bylo zaměnění dvou různých pravidel.
+ */
 final class OssLedgerService
 {
     public function __construct(
         private readonly Connection $db,
-        private readonly CurrencyConversionService $currencyConverter,
+        private readonly EcbExchangeRateClient $ecb,
         private readonly VatLedgerService $vatLedger,
         private readonly OssThresholdService $threshold,
         private readonly OssRateCodebook $rateCodebook,
+        private readonly ClockInterface $clock,
+        private readonly OssEvidenceService $evidence,
     ) {}
 
     /** @return array<string,mixed> */
@@ -46,8 +97,32 @@ final class OssLedgerService
         $invalidCorrectionCount = 0;
         $conversionMissingCount = 0;
         $manualReviewCount = 0;
-        $returnCurrency = (string) ($settings['oss_return_currency'] ?? 'EUR');
+        $returnCurrency = strtoupper((string) ($settings['oss_return_currency'] ?? 'EUR'));
         $currentPeriod = sprintf('%04dQ%d', $year, $quarter);
+
+        // Kurz se zjišťuje JEDNOU za období, ne per doklad — viz docblock třídy.
+        $conversion = $this->periodConversion($rows, $returnCurrency, $end, null, $supplierId, $currentPeriod, $warnings);
+
+        // …a pro každé opravované období JEDNOU jeho vlastní kurz. Opravy z jednoho
+        // kvartálu sdílejí kurz, takže se hledá per období, ne per řádek.
+        $correctionConversions = [];
+        foreach ($rows as $r) {
+            $rowPeriod = self::correctionPeriod($r, $currentPeriod);
+            if ($rowPeriod === null || isset($correctionConversions[$rowPeriod])) {
+                continue;
+            }
+            [, $correctedEnd] = OssPeriod::range((int) substr($rowPeriod, 0, 4), (int) substr($rowPeriod, 5, 1));
+            $correctionConversions[$rowPeriod] = $this->periodConversion(
+                $rows,
+                $returnCurrency,
+                $correctedEnd,
+                $rowPeriod,
+                $supplierId,
+                $currentPeriod,
+                $warnings,
+            );
+        }
+        ksort($correctionConversions);
 
         foreach ($rows as $r) {
             $invoiceId = (int) $r['invoice_id'];
@@ -66,8 +141,15 @@ final class OssLedgerService
 
             $rate = (float) $r['vat_rate_snapshot'];
             $rateKey = number_format($rate, 2, '.', '');
-            $baseReturn = $this->returnAmount($r, 'oss_taxable_amount_return', 'total_without_vat', $returnCurrency);
-            $vatReturn = $this->returnAmount($r, 'oss_vat_amount_return', 'total_vat', $returnCurrency);
+            // Oprava minulého období se přepočítává kurzem TOHO období, ne běžného
+            // kvartálu — viz docblock třídy.
+            $rowPeriod = self::correctionPeriod($r, $currentPeriod);
+            $rowConversion = $rowPeriod === null ? $conversion : $correctionConversions[$rowPeriod];
+            $conversionEntry = $rowConversion['cross'][self::rowCurrency($r)] ?? null;
+            $periodRate = $conversionEntry['rate'] ?? null;
+            $baseReturn = self::returnAmount($r, 'oss_taxable_amount_return', 'total_without_vat', $returnCurrency, $periodRate);
+            $vatReturn = self::returnAmount($r, 'oss_vat_amount_return', 'total_vat', $returnCurrency, $periodRate);
+            $rowRate = self::rowRate($r, $returnCurrency, $conversionEntry);
             $conversionMissing = $baseReturn === null || $vatReturn === null;
 
             if ($conversionMissing) {
@@ -98,26 +180,30 @@ final class OssLedgerService
                     $invalidCorrectionCount++;
                     continue;
                 }
-                if (!preg_match('/^(\d{4})Q([1-4])$/', $originalPeriod, $periodMatch)) {
-                    $warnings[] = 'Doklad ' . self::docLabel($r) . ' má neplatné původní OSS období.';
-                    $invalidCorrectionCount++;
-                    continue;
-                }
-                if ($originalPeriod < '2021Q3' || $originalPeriod >= $currentPeriod) {
-                    $warnings[] = 'Doklad ' . self::docLabel($r) . ' musí mít jako opravu OSS období od Q3 2021, které předchází aktuálnímu přiznání.';
+                // Co je platná oprava, rozhoduje JEDINÁ funkce ({@see correctionPeriod()}) —
+                // ta, podle které se vybral i kurz. Kdyby tady bylo pravidlo napsané podruhé,
+                // rozešlo by se s ní a řádek by se přepočetl podle jednoho pravidla a vykázal
+                // podle druhého. Tady se jen pojmenuje, PROČ oprava neprošla.
+                if ($rowPeriod === null) {
+                    $warnings[] = preg_match('/^\d{4}Q[1-4]$/', $originalPeriod) === 1
+                        ? 'Doklad ' . self::docLabel($r) . ' musí mít jako opravu OSS období od Q3 2021, které předchází aktuálnímu přiznání.'
+                        : 'Doklad ' . self::docLabel($r) . ' má neplatné původní OSS období.';
                     $invalidCorrectionCount++;
                     continue;
                 }
 
-                $key = $originalPeriod . '|' . $country;
+                $key = $rowPeriod . '|' . $country;
                 $corrections[$key] ??= [
-                    'period' => $originalPeriod,
-                    'year' => (int) $periodMatch[1],
-                    'quarter' => (int) $periodMatch[2],
+                    'period' => $rowPeriod,
+                    'year' => (int) substr($rowPeriod, 0, 4),
+                    'quarter' => (int) substr($rowPeriod, 5, 1),
                     'state_consumption' => $country,
                     'correction' => 0.0,
                     'count' => 0,
                     'rows' => [],
+                    // Kurz, kterým se oprava přepočetla — účetní ho kontroluje proti
+                    // původnímu podání, ne proti aktuální tabulce ECB.
+                    'rate_date' => $rowConversion['rate_date'],
                 ];
                 $corrections[$key]['correction'] += $vatReturn;
                 $corrections[$key]['count']++;
@@ -132,7 +218,10 @@ final class OssLedgerService
                     'currency' => (string) $r['currency'],
                     'base_return' => round($baseReturn, 2),
                     'vat_return' => round($vatReturn, 2),
-                    'original_period' => $originalPeriod,
+                    'original_period' => $rowPeriod,
+                    'exchange_rate' => $rowRate['rate'],
+                    'exchange_rate_date' => $rowRate['date'],
+                    'exchange_rate_source' => $rowRate['source'],
                 ];
                 $totalCorrections += $vatReturn;
                 $correctionRowCount++;
@@ -194,6 +283,11 @@ final class OssLedgerService
                 'vat_rate' => $rate,
                 'rate_type' => $r['oss_rate_type'] ?? null,
                 'supply_type' => $r['oss_supply_type'] ?? null,
+                // Kurz, kterým řádek do měny podání skutečně přešel. Evidence § 110f ho
+                // opisuje jako doklad k bodu 63c(1)(d) — nesmí si ho počítat podruhé.
+                'exchange_rate' => $rowRate['rate'],
+                'exchange_rate_date' => $rowRate['date'],
+                'exchange_rate_source' => $rowRate['source'],
             ];
 
             $totalBase += $baseReturn;
@@ -253,6 +347,16 @@ final class OssLedgerService
             'settings' => $settings,
             'summary' => [
                 'return_currency' => $returnCurrency,
+                // Rozhodný kurzový den ECB. Liší se od konce období, když ECB pro poslední
+                // den nezveřejnila (víkend, svátek TARGET) a použil se nejbližší následující
+                // den — účetní to musí vidět, protože přesně tohle kontroluje proti tabulce ECB.
+                'return_rate_date' => $conversion['rate_date'],
+                // Kolik jednotek měny DOKLADU za 1 jednotku měny podání (24,195 Kč za 1 €).
+                'return_rates' => $conversion['rates'],
+                // Kurzy opravovaných období (VetaO) — jiné než kurz běžného kvartálu.
+                // Účetní je kontroluje proti PŮVODNÍMU podání, takže musí vidět i to,
+                // odkud se vzaly (`archive` = evidence § 110f, `ecb` = dopočet z kurzů ECB).
+                'correction_rates' => self::correctionRateSummary($correctionConversions),
                 'total_base' => round($totalBase, 2),
                 'total_vat' => round($totalVat, 2),
                 'total_corrections' => round($totalCorrections, 2),
@@ -316,12 +420,292 @@ final class OssLedgerService
         ];
     }
 
-    private function returnAmount(array $row, string $field, string $sourceField, string $returnCurrency): ?float
+    /**
+     * Kurz období pro každou měnu, která se v něm objevila a nemá ruční přepočet.
+     *
+     * `$forPeriod` říká, ČÍ kurz se hledá: `null` = běžné čtvrtletí, `RRRRQn` = opravované
+     * období (VetaO). Obě větve berou jen řádky, které do daného období patří — jinak by
+     * chybějící kurz opravovaného kvartálu vyvolal varování i u běžných plnění a naopak.
+     *
+     * U opravovaného období má přednost ARCHIV (evidence § 110f) před dopočtem z kurzů
+     * ECB: nese kurz, kterým se tehdy skutečně počítalo. Podrobně viz docblock třídy.
+     *
+     * Vrací `cross[MĚNA]` = kolik jednotek MĚNY PODÁNÍ za 1 jednotku měny dokladu —
+     * tedy táž orientace, jakou má ruční pole `oss_exchange_rate` na položce. Kdyby se
+     * orientace mezi ruční a automatickou cestou lišila, obě by daly stejně věrohodně
+     * vypadající, ale řádově jiné podání.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @param list<string>              $warnings
+     * @return array{rate_date:?string,
+     *               cross:array<string,array{rate:float, date:?string, source:string}>,
+     *               rates:array<string,float>}
+     */
+    private function periodConversion(
+        array $rows,
+        string $returnCurrency,
+        string $end,
+        ?string $forPeriod,
+        int $supplierId,
+        string $currentPeriod,
+        array &$warnings,
+    ): array {
+        $empty = ['rate_date' => null, 'cross' => [], 'rates' => []];
+        $label = $forPeriod !== null ? self::periodLabel($forPeriod) : null;
+
+        $needed = [];
+        foreach ($rows as $r) {
+            if (self::correctionPeriod($r, $currentPeriod) !== $forPeriod) {
+                continue;
+            }
+            // Ruční částky i ruční kurz mají přednost — takový řádek kurz období nepotřebuje
+            // a nesmí kvůli němu vzniknout varování o nedostupném kurzu.
+            if ($r['oss_taxable_amount_return'] !== null && $r['oss_vat_amount_return'] !== null) {
+                continue;
+            }
+            if ($r['oss_exchange_rate'] !== null) {
+                continue;
+            }
+            $currency = self::rowCurrency($r);
+            if ($currency !== $returnCurrency && $currency !== '') {
+                $needed[$currency] = true;
+            }
+        }
+        if ($needed === []) {
+            return $empty;
+        }
+
+        $cross = [];
+
+        // 1) Archiv opravovaného období. Kurz, který se za to období opravdu podal, má
+        //    přednost před dopočtem — i kdyby se od kurzu ECB o setiny lišil, oprava se
+        //    musí vyrovnat proti tomu, co v podání JE, ne proti tomu, co tam být mělo.
+        if ($forPeriod !== null) {
+            $archived = $this->evidence->ratesForPeriod(
+                $supplierId,
+                (int) substr($forPeriod, 0, 4),
+                (int) substr($forPeriod, 5, 1),
+                $returnCurrency,
+            );
+            foreach (array_keys($needed) as $currency) {
+                $hit = $archived[$currency] ?? null;
+                if ($hit === null || $hit['rate'] <= 0.0) {
+                    continue;
+                }
+                $cross[$currency] = ['rate' => $hit['rate'], 'date' => $hit['rate_date'], 'source' => 'archive'];
+                unset($needed[$currency]);
+            }
+        }
+
+        // 2) Kurz ECB pro poslední den (opravovaného) období.
+        $set = null;
+        if ($needed !== []) {
+            try {
+                $set = $this->ecb->ratesForPeriodEnd(new \DateTimeImmutable($end));
+            } catch (\Exception) {
+                $set = null;
+            }
+        }
+
+        if ($needed !== [] && $set === null) {
+            // NEPŘEPÍNÁ se tiše na ČNB ani na kurz běžného kvartálu. Denní kurz ČNB k datu
+            // plnění je pro tuzemský základ daně správný, pro OSS podání ale dá jiné částky —
+            // a chyba by se projevila až po odeslání. Raději prázdno a varování, které
+            // pojmenuje, co s tím.
+            $warnings[] = match (true) {
+                $forPeriod !== null => sprintf(
+                    'Opravu období %s nelze přepočíst: archiv podání za %s kurz nenese a kurz ECB pro'
+                        . ' poslední den opravovaného období (%s) se nepodařilo získat. Kurzem běžného'
+                        . ' čtvrtletí se oprava přepočíst NESMÍ — rozdíl v %s by se od částky, která se'
+                        . ' za %s skutečně podala, nikdy neodečetl. Doplňte na položce ruční kurz nebo'
+                        . ' ruční částky pro OSS.',
+                    $label,
+                    $label,
+                    self::fmtDate($end),
+                    $returnCurrency,
+                    $label,
+                ),
+                $end > $this->clock->now()->format('Y-m-d') => sprintf(
+                    'Kurz ECB pro poslední den období (%s) zatím nebyl zveřejněn — období ještě neskončilo.'
+                        . ' Řádky v jiné měně než %s proto nejsou přepočtené. ECB kurzy vydává v pracovní den'
+                        . ' kolem 16:00; náhled načtěte znovu po skončení období.',
+                    self::fmtDate($end),
+                    $returnCurrency,
+                ),
+                default => sprintf(
+                    'Kurz ECB pro poslední den období (%s) se nepodařilo získat, takže řádky v jiné měně než %s'
+                        . ' nejsou přepočtené. Zkuste náhled načíst znovu (feed ECB může být dočasně nedostupný);'
+                        . ' pokud to nepomůže, doplňte na položkách ruční kurz nebo ruční částky pro OSS.'
+                        . ' Kurz ČNB se místo něj vědomě nepoužije — podání se přepočítává kurzem ECB'
+                        . ' zveřejněným pro poslední den zdaňovacího období.',
+                    self::fmtDate($end),
+                    $returnCurrency,
+                ),
+            };
+        }
+
+        if ($set !== null) {
+            foreach (array_keys($needed) as $currency) {
+                $rate = EcbExchangeRateClient::crossRate($set['rates'], $currency, $returnCurrency);
+                if ($rate === null || $rate <= 0.0) {
+                    $warnings[] = sprintf(
+                        'Kurz ECB pro měnu %s ke dni %s neexistuje — ECB tuhle měnu nekótuje.%s'
+                            . ' Doplňte na položkách dokladů v této měně ruční kurz nebo ruční částky pro OSS.',
+                        $currency,
+                        self::fmtDate($set['rate_date']),
+                        $label !== null ? ' Jde o opravu období ' . $label . '.' : '',
+                    );
+                    continue;
+                }
+                $cross[$currency] = ['rate' => $rate, 'date' => $set['rate_date'], 'source' => 'ecb'];
+            }
+        }
+
+        if ($cross === []) {
+            // `rate_date` z prázdného přepočtu by tvrdil, že se něčím počítalo.
+            return $set === null ? $empty : ['rate_date' => $set['rate_date'], 'cross' => [], 'rates' => []];
+        }
+
+        // Do odpovědi jde kurz v podobě, ve které ho člověk kontroluje proti tabulce ECB
+        // (resp. proti původnímu podání): kolik jednotek měny DOKLADU za 1 jednotku měny
+        // podání (24,195 Kč za 1 €).
+        $rates = [];
+        $rateDate = null;
+        foreach ($cross as $currency => $entry) {
+            $rates[$currency] = round(1 / $entry['rate'], 6);
+            $rateDate ??= $entry['date'];
+        }
+
+        return ['rate_date' => $rateDate ?? ($set['rate_date'] ?? null), 'cross' => $cross, 'rates' => $rates];
+    }
+
+    /**
+     * Období, PROTI KTERÉMU se řádek přepočítává: opravovaný kvartál (`RRRRQn`) u opravy
+     * minulého období, `null` u běžného plnění.
+     *
+     * Jediná definice toho, co je platná oprava — používá ji jak výběr kurzu, tak hlavní
+     * smyčka náhledu. Řádek s vyplněným, ale neplatným původním obdobím tady vyjde jako
+     * běžný a smyčka ho vzápětí odmítne jako neplatnou opravu; do součtů běžného kvartálu
+     * se tedy nedostane.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function correctionPeriod(array $row, string $currentPeriod): ?string
     {
+        $period = strtoupper(trim((string) ($row['oss_original_period'] ?? '')));
+        if ($period === '' || preg_match('/^\d{4}Q[1-4]$/', $period) !== 1) {
+            return null;
+        }
+        // Režim EU běží od Q3 2021 a opravovat lze jen období, které aktuálnímu přiznání
+        // PŘEDCHÁZÍ — oprava plnění z téhož kvartálu se nettuje do VetaR, ne do VetaO.
+        if ($period < '2021Q3' || $period >= $currentPeriod) {
+            return null;
+        }
+
+        return $period;
+    }
+
+    /**
+     * Kurz, kterým řádek do měny podání SKUTEČNĚ přešel, v téže orientaci jako ruční pole
+     * `oss_exchange_rate` (kolik jednotek měny podání za 1 jednotku měny dokladu).
+     *
+     * Pořadí přednosti musí sedět s {@see returnAmount()} — evidence § 110f tenhle kurz
+     * opisuje jako doklad k bodu 63c(1)(d). Kdyby se rozešly, evidence by tvrdila, že se
+     * počítalo kurzem, kterým se nepočítalo.
+     *
+     * `rate = null` znamená „kurz nelze doložit": buď se řádek nepřepočetl vůbec, nebo obě
+     * částky v měně podání zadal ručně účetní a systém neví, jakým kurzem. Zpětný dopočet
+     * z podílu částek by vypadal jako doklad o kurzu, a nebyl by jím — evidence tuhle mezeru
+     * radši přizná.
+     *
+     * @param array<string,mixed> $row
+     * @param array{rate:float, date:?string, source:string}|null $periodRate
+     * @return array{rate:?float, date:?string, source:?string}
+     */
+    private static function rowRate(array $row, string $returnCurrency, ?array $periodRate): array
+    {
+        if ($row['oss_exchange_rate'] !== null) {
+            return [
+                'rate' => (float) $row['oss_exchange_rate'],
+                'date' => $row['oss_exchange_rate_date'] !== null ? (string) $row['oss_exchange_rate_date'] : null,
+                'source' => 'manual',
+            ];
+        }
+        if (self::rowCurrency($row) === $returnCurrency) {
+            // Doklad je rovnou v měně podání — nepřepočítávalo se, kurz je 1 a žádný
+            // kurzový den k němu neexistuje.
+            return ['rate' => 1.0, 'date' => null, 'source' => 'identity'];
+        }
+        if ($row['oss_taxable_amount_return'] !== null && $row['oss_vat_amount_return'] !== null) {
+            return ['rate' => null, 'date' => null, 'source' => 'manual_amount'];
+        }
+        if ($periodRate === null) {
+            return ['rate' => null, 'date' => null, 'source' => null];
+        }
+
+        return ['rate' => $periodRate['rate'], 'date' => $periodRate['date'], 'source' => $periodRate['source']];
+    }
+
+    /**
+     * Kurzy opravovaných období do `summary`. Vedle kurzu se vydává i jeho ZDROJ: kurz
+     * z archivu a kurz dopočtený z ECB se můžou o setiny lišit a účetní musí vědět, proti
+     * čemu své číslo kontroluje.
+     *
+     * @param array<string, array{rate_date:?string, cross:array<string,array{rate:float, date:?string, source:string}>, rates:array<string,float>}> $conversions
+     * @return list<array{period:string, label:string, rate_date:?string, rates:array<string,float>, sources:array<string,string>}>
+     */
+    private static function correctionRateSummary(array $conversions): array
+    {
+        $out = [];
+        foreach ($conversions as $period => $conversion) {
+            $out[] = [
+                'period' => $period,
+                'label' => self::periodLabel($period),
+                'rate_date' => $conversion['rate_date'],
+                'rates' => $conversion['rates'],
+                'sources' => array_map(
+                    static fn (array $entry): string => $entry['source'],
+                    $conversion['cross'],
+                ),
+            ];
+        }
+
+        return $out;
+    }
+
+    /** `2026Q1` → `Q1 2026`. Do hlášek pro uživatele, který kvartály čte takhle. */
+    private static function periodLabel(string $period): string
+    {
+        return 'Q' . substr($period, 5, 1) . ' ' . substr($period, 0, 4);
+    }
+
+    /**
+     * Částka v měně podání. Pořadí přednosti je závazné: ruční částka → shodná měna →
+     * ruční kurz → kurz OBDOBÍ. Ruční hodnoty jsou vědomé rozhodnutí účetního nad
+     * konkrétním dokladem, takže je automatika nikdy nepřebíjí.
+     *
+     * „Kurz období" je u běžného plnění kurz ECB pro poslední den vykazovaného čtvrtletí,
+     * u opravy minulého období kurz OPRAVOVANÉHO kvartálu — volající ho vybírá přes
+     * {@see periodConversion()} a sem posílá už hotový.
+     *
+     * `null` = přepočet chybí. Volající to počítá do `conversion_missing_count`, kterým
+     * {@see OssXmlExporter} export XML zastaví — nula místo chybějícího přepočtu by
+     * vypadala jako hotové číslo.
+     *
+     * @param array<string,mixed> $row
+     * @param ?float $periodRate kolik jednotek měny podání za 1 jednotku měny dokladu
+     */
+    private static function returnAmount(
+        array $row,
+        string $field,
+        string $sourceField,
+        string $returnCurrency,
+        ?float $periodRate,
+    ): ?float {
         if ($row[$field] !== null) {
             return (float) $row[$field];
         }
-        if ((string) $row['currency'] === $returnCurrency) {
+        if (self::rowCurrency($row) === $returnCurrency) {
             return (float) $row[$sourceField];
         }
         if ($row['oss_exchange_rate'] !== null) {
@@ -331,22 +715,29 @@ final class OssLedgerService
             // kombinací částek a reálných kurzů ČNB. SSOT je CzkRecap::multiplyHalfUp().
             return CzkRecap::multiplyHalfUp((float) $row[$sourceField], (float) $row['oss_exchange_rate']);
         }
-        $date = (string) ($row['tax_date'] ?? $row['issue_date'] ?? '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        if ($periodRate === null) {
             return null;
         }
+
+        // Přes CzkRecap se nejde schválně: ten formátuje kurz na šest desetinných míst,
+        // což u kurzu 0,0413… (CZK→EUR) uřízne relativní rozdíl ~2e-6. Na čtvrtletním
+        // základu jsou to koruny navíc v částce, která se podává. Zaokrouhlení je stejné.
+        return EcbExchangeRateClient::applyRate((float) $row[$sourceField], $periodRate);
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function rowCurrency(array $row): string
+    {
+        return strtoupper(trim((string) ($row['currency'] ?? '')));
+    }
+
+    private static function fmtDate(string $date): string
+    {
         try {
-            $dateValue = new \DateTimeImmutable($date);
-        } catch (\Throwable) {
-            return null;
+            return (new \DateTimeImmutable($date))->format('j. n. Y');
+        } catch (\Exception) {
+            return $date;
         }
-        $converted = $this->currencyConverter->convert(
-            (float) $row[$sourceField],
-            (string) $row['currency'],
-            $returnCurrency,
-            $dateValue,
-        );
-        return $converted['amount'] ?? null;
     }
 
     private static function deadline(int $year, int $quarter): string
@@ -370,6 +761,9 @@ final class OssLedgerService
             'settings' => $settings,
             'summary' => [
                 'return_currency' => $settings['oss_return_currency'] ?? 'EUR',
+                'return_rate_date' => null,
+                'return_rates' => [],
+                'correction_rates' => [],
                 'total_base' => 0.0,
                 'total_vat' => 0.0,
                 'total_corrections' => 0.0,

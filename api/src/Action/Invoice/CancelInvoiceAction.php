@@ -291,6 +291,10 @@ final class CancelInvoiceAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
         $supportsOss = $this->db->hasColumn('invoice_items', 'oss_applicable');
+        // Vlastní guard, ne společný se zbytkem OSS sloupců: mezi migracemi 0137 a 1293
+        // je řada verzí (shodně s InvoiceRepository::supportsOssManualReview()).
+        $supportsManualReview = $supportsOss
+            && $this->db->hasColumn('invoice_items', 'oss_needs_manual_review');
         $sourcePeriod = OssPeriod::quarterCode((string) ($invoice['tax_date'] ?? $invoice['issue_date'] ?? ''));
         $creditPeriod = OssPeriod::quarterCode(date('Y-m-d'));
         $defaultOriginalPeriod = $sourcePeriod !== null && $creditPeriod !== null && $sourcePeriod < $creditPeriod
@@ -327,26 +331,29 @@ final class CancelInvoiceAction
 
             // Zkopíruj položky se zápornými quantities — zachovává vat_classification_code
             // (dobropis má jít na stejné DPH řádky jako originální faktura, ale se zápornými hodnotami)
-            $itemStmt = $supportsOss
-                ? $pdo->prepare(
-                    'INSERT INTO invoice_items
-                       (invoice_id, description, quantity, unit, unit_price_without_vat,
-                        vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
-                        stock_item_id, warehouse_id,
-                        oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
-                        oss_exchange_rate, oss_exchange_rate_date, oss_taxable_amount_return,
-                        oss_vat_amount_return, oss_original_period)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-                )
-                : $pdo->prepare(
-                    'INSERT INTO invoice_items
-                       (invoice_id, description, quantity, unit, unit_price_without_vat,
-                        vat_rate_id, vat_rate_snapshot,
-                        total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
-                        stock_item_id, warehouse_id)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)'
-                );
+            // Sloupce se skládají místo ručně psaných variant SQL — guard na příznak
+            // „k ručnímu posouzení" je samostatný, takže variant by jinak byly tři.
+            $ossColumns = $supportsOss
+                ? [
+                    'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
+                    'oss_exchange_rate', 'oss_exchange_rate_date', 'oss_taxable_amount_return',
+                    'oss_vat_amount_return', 'oss_original_period',
+                ]
+                : [];
+            if ($supportsManualReview) {
+                $ossColumns[] = 'oss_needs_manual_review';
+            }
+            $itemStmt = $pdo->prepare(
+                'INSERT INTO invoice_items
+                   (invoice_id, description, quantity, unit, unit_price_without_vat,
+                    vat_rate_id, vat_rate_snapshot,
+                    total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
+                    stock_item_id, warehouse_id'
+                . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?'
+                . str_repeat(', ?', count($ossColumns))
+                . ')'
+            );
             foreach ($invoice['items'] as $item) {
                 $code = $item['vat_classification_code']
                     ?? \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode(
@@ -390,6 +397,16 @@ final class CancelInvoiceAction
                             : null,
                         $ossApplicable ? $originalPeriod : null,
                     );
+                }
+                if ($supportsManualReview) {
+                    // Opravný doklad dědí nejistotu původního: dobropis jde do TÉHOŽ
+                    // přiznání jako opravovaná faktura, takže je-li sporné místo plnění
+                    // u ní, je sporné i u něj — a se záporným znaménkem je chyba stejně
+                    // velká. Bez přenosu by příznak na opravném dokladu zhasl a v náhledu
+                    // podání by zůstala označená jen kladná polovina opravy.
+                    // Nese ho i tuzemský řádek smíšeného dokladu (proto bez vazby na
+                    // `$ossApplicable`) — viz InvoiceRepository::ossItemParams().
+                    $params[] = !empty($item['oss_needs_manual_review']) ? 1 : 0;
                 }
                 $itemStmt->execute($params);
             }

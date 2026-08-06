@@ -118,6 +118,46 @@ final class PohodaExporterSchemaTest extends TestCase
             'summary homeCurrency nemá priceSum');
     }
 
+    public function testItemPercentVatIsSchemaValidAndSitsRightAfterRateVat(): void
+    {
+        // invoice.xsd má u položky sekvenci payVAT → rateVAT → percentVAT →
+        // discountPercentage; při jiném pořadí je doklad nevalidní, i když jsou
+        // všechny elementy přítomné.
+        $xml = $this->exporter->buildXml([$this->issuedInvoice()], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('high', $this->xpathOne($xml, '//inv:invoiceItem/inv:rateVAT'));
+        self::assertSame('21.00', $this->xpathOne($xml, '//inv:invoiceItem/inv:percentVAT'));
+    }
+
+    public function testThirdRateItemIsSchemaValidBecauseLow2IsNotInTheEnum(): void
+    {
+        // `typ:vatRateEnum` = {none, high, low, third, historyHigh, historyLow,
+        // historyThird}. Dřív se pro 10 % emitovalo `low2` — na tom Pohoda odmítne
+        // CELÝ dataPack, a žádný test to nechytal, protože 10% položku nikdo neexportoval.
+        $xml = $this->exporter->buildXml([$this->issuedInvoice([
+            'issue_date'    => '2023-05-04',
+            'tax_date'      => '2023-05-04',
+            'items'         => [$this->item([
+                'vat_rate_snapshot' => 10.0,
+                'total_vat'         => 252.0,
+                'total_with_vat'    => 2772.0,
+            ])],
+            'vat_breakdown' => [['rate' => 10.0, 'base' => 2520.0, 'vat' => 252.0]],
+            'totals'        => ['without_vat' => 2520.0, 'with_vat' => 2772.0, 'rounding' => 0.0],
+        ])], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('third', $this->xpathOne($xml, '//inv:invoiceItem/inv:rateVAT'));
+        self::assertSame('10.00', $this->xpathOne($xml, '//inv:invoiceItem/inv:percentVAT'));
+        // Daň 3. sazby se dostane do rekapitulace (dřív tam byly natvrdo nuly).
+        self::assertSame('252.00', $this->xpathOne(
+            $xml, '//inv:invoiceSummary/inv:homeCurrency/typ:price3VAT'));
+        // classificationVAT bez `typ:ids` musí zůstat validní vůči XSD.
+        self::assertSame('inland', $this->xpathOne(
+            $xml, '//inv:invoiceHeader/inv:classificationVAT/typ:classificationVATType'));
+    }
+
     // ─── Přijaté faktury (purchase) ───
 
     public function testReceivedInvoiceIsSchemaValid(): void

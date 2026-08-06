@@ -47,6 +47,8 @@ final class RecurringGeneratorTest extends TestCase
     private array $createdInvoiceIds = [];
     /** Původní plátcovství supplier-a — test ho vynucuje na plátce (viz setUp). */
     private ?array $origVatFlags = null;
+    /** Původní registrace do OSS — nastavuje ji jen část testů (viz setSupplierOss()). */
+    private ?array $origOssFlags = null;
 
     protected function setUp(): void
     {
@@ -132,8 +134,35 @@ final class RecurringGeneratorTest extends TestCase
         )->execute([$this->supplierId, $isVatPayer ? 1 : 0]);
     }
 
+    /**
+     * Registrace dodavatele do OSS na dobu určitou. Původní hodnoty se snímkují při prvním
+     * volání a vrací je tearDown — dev DB se nesmí testem trvale přepnout do OSS.
+     */
+    private function setSupplierOss(bool $enabled, ?string $validFrom, ?string $validTo): void
+    {
+        $pdo = $this->db->pdo();
+        if ($this->origOssFlags === null) {
+            $this->origOssFlags = $pdo->query(
+                "SELECT oss_enabled, oss_valid_from, oss_valid_to FROM supplier WHERE id = {$this->supplierId}"
+            )->fetch(PDO::FETCH_ASSOC) ?: [];
+        }
+        $pdo->prepare(
+            'UPDATE supplier SET oss_enabled = ?, oss_valid_from = ?, oss_valid_to = ? WHERE id = ?'
+        )->execute([$enabled ? 1 : 0, $validFrom, $validTo, $this->supplierId]);
+    }
+
     protected function tearDown(): void
     {
+        if (isset($this->db) && $this->origOssFlags !== null && $this->supplierId > 0) {
+            $this->db->pdo()->prepare(
+                'UPDATE supplier SET oss_enabled = ?, oss_valid_from = ?, oss_valid_to = ? WHERE id = ?'
+            )->execute([
+                (int) ($this->origOssFlags['oss_enabled'] ?? 0),
+                $this->origOssFlags['oss_valid_from'] ?? null,
+                $this->origOssFlags['oss_valid_to'] ?? null,
+                $this->supplierId,
+            ]);
+        }
         if (isset($this->db) && $this->origVatFlags !== null && $this->supplierId > 0) {
             $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ? WHERE id = ?')
                 ->execute([
@@ -1078,6 +1107,108 @@ final class RecurringGeneratorTest extends TestCase
         );
     }
 
+    /**
+     * OSS ze šablony se musí přenést na vygenerovanou fakturu (OSS-11, migrace 1297).
+     *
+     * Do téhle chvíle šablona OSS sloupce vůbec neměla, takže KAŽDÁ vygenerovaná faktura
+     * vznikla bez OSS — u zákazníka, který polským spotřebitelům fakturuje měsíčně ze
+     * šablony, by cron vyráběl doklady, které `VatLedgerService` pustí do TUZEMSKÉHO
+     * přiznání, i po vyčištění historických dat.
+     */
+    public function testOssOnTemplateItemIsCarriedToGeneratedInvoice(): void
+    {
+        if (!$this->db->hasColumn('recurring_invoice_template_items', 'oss_applicable')) {
+            $this->markTestSkipped('Migrace 1297 na téhle DB neproběhla.');
+        }
+        // Rozhodnutí šablony platí jen v rámci REGISTRACE do OSS — bez ní by řádek
+        // nespadl do žádného přiznání (viz testExpiredOssRegistrationStopsTemplateDecision).
+        $this->setSupplierOss(true, '2020-01-01', null);
+
+        $tplId = $this->createPeriodTemplate((new \DateTimeImmutable('today'))->format('Y-m-d'));
+        $this->repo->replaceItems($tplId, [[
+            'description' => 'Zásilka do PL',
+            'quantity' => 1.0,
+            'unit' => 'ks',
+            'unit_price_without_vat' => 1000.00,
+            'vat_rate_id' => $this->vatRateId,
+            'order_index' => 0,
+            'oss_applicable' => 1,
+            'oss_consumer_country' => 'PL',
+            'oss_rate_type' => 'standard',
+            'oss_supply_type' => 'goods',
+        ]]);
+
+        // Round-trip přes repozitář: bez čtecí strany by se rozhodnutí uložilo a zmizelo.
+        $tpl = $this->repo->find($tplId);
+        self::assertTrue($tpl['items'][0]['oss_applicable']);
+        self::assertSame('PL', $tpl['items'][0]['oss_consumer_country']);
+
+        $res = $this->generator->generate($tplId, null, $this->userId, '127.0.0.1', 'phpunit');
+        $this->createdInvoiceIds[] = $res['invoice_id'];
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type
+               FROM invoice_items WHERE invoice_id = ? ORDER BY order_index LIMIT 1'
+        );
+        $stmt->execute([$res['invoice_id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        self::assertSame(1, (int) $row['oss_applicable'], 'OSS ze šablony se na fakturu nepřeneslo');
+        self::assertSame('PL', $row['oss_consumer_country']);
+        self::assertSame('standard', $row['oss_rate_type']);
+        self::assertSame('goods', $row['oss_supply_type']);
+    }
+
+    /**
+     * Šablona se zakládá jednou a generuje roky — registrace do OSS mezitím může skončit.
+     * Uložené rozhodnutí je pak rozhodnutím o JINÉM období a řádek s `oss_applicable = 1`
+     * by nespadl do žádného přiznání: z OSS podání ho vyřadí platnost registrace,
+     * z tuzemského ho vyřadí OSS příznak. Cron generuje bez dozoru, takže by si toho
+     * nikdo nevšiml.
+     */
+    public function testExpiredOssRegistrationStopsTemplateDecision(): void
+    {
+        if (!$this->db->hasColumn('recurring_invoice_template_items', 'oss_applicable')
+            || !$this->db->hasColumn('invoice_items', 'oss_needs_manual_review')
+        ) {
+            $this->markTestSkipped('Migrace 1293/1297 na téhle DB neproběhly.');
+        }
+        // Registrace skončila loni — dnešní generovaný doklad je už mimo ni.
+        $this->setSupplierOss(true, '2020-01-01', (new \DateTimeImmutable('-1 year'))->format('Y-m-d'));
+
+        $tplId = $this->createPeriodTemplate((new \DateTimeImmutable('today'))->format('Y-m-d'));
+        $this->repo->replaceItems($tplId, [[
+            'description' => 'Zásilka do PL',
+            'quantity' => 1.0,
+            'unit' => 'ks',
+            'unit_price_without_vat' => 1000.00,
+            'vat_rate_id' => $this->vatRateId,
+            'order_index' => 0,
+            'oss_applicable' => 1,
+            'oss_consumer_country' => 'PL',
+            'oss_rate_type' => 'standard',
+            'oss_supply_type' => 'goods',
+        ]]);
+
+        $res = $this->generator->generate($tplId, null, $this->userId, '127.0.0.1', 'phpunit');
+        $this->createdInvoiceIds[] = $res['invoice_id'];
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oss_applicable, oss_consumer_country, oss_needs_manual_review
+               FROM invoice_items WHERE invoice_id = ? ORDER BY order_index LIMIT 1'
+        );
+        $stmt->execute([$res['invoice_id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        self::assertSame(0, (int) $row['oss_applicable'], 'řádek mimo registraci nesmí nést OSS');
+        self::assertNull($row['oss_consumer_country']);
+        self::assertSame(
+            1,
+            (int) $row['oss_needs_manual_review'],
+            'přebití rozhodnutí ze šablony musí být vidět v datech, ne jen v logu cronu',
+        );
+    }
+
     private function createPeriodTemplate(string $nextRun, array $overrides = []): int
     {
         $base = [
@@ -1242,6 +1373,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\Stock\StockIssueService::class),
             $container->get(\MyInvoice\Service\Invoice\RecurringPriceListService::class),
             $container->get(\MyInvoice\Service\Accounting\DocumentAutoPoster::class),
+            $container->get(\MyInvoice\Service\Oss\OssItemDeriver::class),
         );
 
         $tplId = $this->createPeriodTemplate(
@@ -1284,6 +1416,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\Stock\StockIssueService::class),
             $container->get(\MyInvoice\Service\Invoice\RecurringPriceListService::class),
             $autoPoster,
+            $container->get(\MyInvoice\Service\Oss\OssItemDeriver::class),
         );
 
         // auto_issue=true, auto_send_email=false → větev issueOnlyWithoutSend()

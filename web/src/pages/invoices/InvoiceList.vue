@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
-import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem } from '@/api/invoices'
+import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
+  type OssBulkResult, type OssBulkScope, type OssBulkSet } from '@/api/invoices'
 import { formatMoney, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
@@ -10,7 +11,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { clientsApi, type Client } from '@/api/clients'
-import { codebooksApi, type Currency } from '@/api/codebooks'
+import { codebooksApi, type Currency, type Country } from '@/api/codebooks'
 import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -73,6 +74,11 @@ const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
+// Doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS). Záměrně NENÍ
+// podmíněné zapnutým OSS: příznak vzniká i u firmy, která OSS nepoužívá (číselník
+// členských států nepotvrdí sazbu → řádek zůstane mimo OSS, ale označený). Kdyby byl
+// filtr schovaný za `oss_enabled`, byly by ty doklady u takové firmy nedohledatelné.
+const ossReviewOnly = ref(false)
 const currencyFilter = ref<string>('')
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
@@ -89,6 +95,7 @@ const activeFilterCount = computed(() => {
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   if (bookedFilter.value) n++
+  if (ossReviewOnly.value) n++
   return n
 })
 
@@ -122,6 +129,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: bookedFilter.value === '1' ? t('common.booked_badge') : t('common.unbooked_badge') })
   }
+  if (ossReviewOnly.value) chips.push({ key: 'oss_review', value: t('invoice.oss_review_only') })
   return chips
 })
 
@@ -136,6 +144,7 @@ function clearFilter(key: string) {
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
     case 'booked': bookedFilter.value = ''; break
+    case 'oss_review': ossReviewOnly.value = false; break
   }
 }
 
@@ -351,6 +360,86 @@ async function bulkReissue() {
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('invoice.bulk_reissue_failed'))
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+// ─── Hromadné nastavení OSS (OSS-7) ──────────────────────────────────────────
+//
+// Mění to daňové zařazení řádku (české přiznání vs. OSS podání), takže se nikdy
+// nespouští naslepo: nejdřív se povinně načte náhled ze serveru, teprve potvrzený
+// náhled se odesílá k provedení. Doklady, které backend odmítl (zaúčtované,
+// v podaném období, stornované), zůstávají v seznamu i s důvodem — schovat je by
+// budilo dojem, že se změnily.
+const ossBulkOpen = ref(false)
+const ossBulkPreview = ref<OssBulkResult | null>(null)
+const ossBulkForm = reactive({
+  scope: 'needs_review' as OssBulkScope,
+  mode: 'on' as 'on' | 'off' | 'keep',
+  country: '',
+  rate_type: '' as '' | 'standard' | 'reduced' | 'second_reduced' | 'parking',
+  supply_type: '' as '' | 'goods' | 'services',
+  clear_needs_review: true,
+})
+const euCountries = ref<Country[]>([])
+
+function ossBulkSet(): OssBulkSet {
+  const set: OssBulkSet = { clear_needs_review: ossBulkForm.clear_needs_review }
+  if (ossBulkForm.mode === 'on') set.oss_applicable = true
+  if (ossBulkForm.mode === 'off') set.oss_applicable = false
+  // Vypnutí OSS ostatní pole stejně vynuluje na serveru — posílat je by jen mátlo.
+  if (ossBulkForm.mode !== 'off') {
+    if (ossBulkForm.country) set.oss_consumer_country = ossBulkForm.country
+    if (ossBulkForm.rate_type) set.oss_rate_type = ossBulkForm.rate_type
+    if (ossBulkForm.supply_type) set.oss_supply_type = ossBulkForm.supply_type
+  }
+  return set
+}
+
+async function openBulkOss() {
+  if (selectedIds.value.length === 0) return
+  ossBulkPreview.value = null
+  ossBulkOpen.value = true
+  if (euCountries.value.length === 0) {
+    try {
+      euCountries.value = (await codebooksApi.countries()).filter(c => c.is_eu)
+    } catch { /* výběr země zůstane prázdný, ISO2 jde napsat ručně */ }
+  }
+}
+
+async function runBulkOssPreview() {
+  bulkBusy.value = true
+  try {
+    ossBulkPreview.value = await invoicesApi.bulkOssPreview(
+      selectedIds.value, ossBulkForm.scope, ossBulkSet())
+  } catch (e: any) {
+    ossBulkPreview.value = null
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+async function applyBulkOss() {
+  if (!ossBulkPreview.value) return
+  bulkBusy.value = true
+  try {
+    const r = await invoicesApi.bulkOssApply(selectedIds.value, ossBulkForm.scope, ossBulkSet())
+    markRowsTouched('invoice', r.documents.filter(d => d.action === 'update').map(d => d.invoice_id))
+    ossBulkOpen.value = false
+    ossBulkPreview.value = null
+    selectedIds.value = []
+    if (r.summary.documents_skipped > 0) {
+      toast.warning(t('invoice.bulk_oss_partial', {
+        ok: r.summary.documents_to_change, err: r.summary.documents_skipped,
+      }))
+    } else {
+      toast.success(t('invoice.bulk_oss_done', { n: r.summary.documents_to_change }))
+    }
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
     bulkBusy.value = false
   }
@@ -638,6 +727,7 @@ async function load(reset = true) {
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
       booked: bookedFilter.value || undefined,
+      oss_review: ossReviewOnly.value || undefined,
       page: page.value,
     })
     if (reset) {
@@ -728,9 +818,13 @@ function loadFiltersFromQuery(q: typeof route.query) {
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
+  ossReviewOnly.value = q.oss_review === '1' || q.oss_review === 'true'
+  // Nejisté řádky jsou typicky staré (přišly importem nebo cronem kdykoli v minulosti),
+  // takže výchozí rok by je schoval a filtr by vypadal, že žádné nejsou — stejný důvod
+  // jako u „nezaúčtováno".
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0' || ossReviewOnly.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -752,6 +846,7 @@ function buildQuery(): Record<string, string> {
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
   if (bookedFilter.value) q.booked = bookedFilter.value
+  if (ossReviewOnly.value) q.oss_review = '1'
   if (search.value) q.q = search.value
   return q
 }
@@ -771,7 +866,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, bookedFilter, currencyFilter], () => {
+       overdueOnly, unpaidOnly, bookedFilter, ossReviewOnly, currencyFilter], () => {
   syncFiltersToUrl()
   load(true)
 })
@@ -797,6 +892,7 @@ watch(() => route.query, (newQ) => {
     overdueOnly.value = false
     unpaidOnly.value = false
     bookedFilter.value = ''
+    ossReviewOnly.value = false
     currencyFilter.value = ''
     search.value = ''
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -929,6 +1025,13 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_reminder', { n: reminderSelected.length }) }}
         </button>
+        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.create') && !auth.isClientRole"
+          @click="openBulkOss"
+          :disabled="bulkBusy"
+          :class="btnOutline('warning')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
+        </button>
         <button v-if="(postableSelected.length > 0) && auth.canWrite('accounting.journal.post') && !auth.isClientRole"
           @click="bulkPost"
           :disabled="bulkBusy"
@@ -1021,6 +1124,11 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <option value="1">{{ t('common.booked_badge') }}</option>
           <option value="0">{{ t('common.unbooked_badge') }}</option>
         </select>
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2"
+          :title="t('invoice.oss_review_only_hint')">
+          <input v-model="ossReviewOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          {{ t('invoice.oss_review_only') }}
+        </label>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
@@ -1363,6 +1471,134 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
             :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
             {{ bulkBusy ? t('common.loading') : t('invoice.bulk_pdf_download') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hromadné nastavení OSS — dvoufázové: náhled, teprve pak provedení (OSS-7) -->
+    <div v-if="ossBulkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+      @click.self="ossBulkOpen = false">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold">{{ t('invoice.bulk_oss_title') }}</h2>
+          <p class="text-sm text-neutral-500 mt-1">{{ t('invoice.bulk_oss_hint', { n: selectedIds.length }) }}</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('invoice.bulk_oss_scope') }}</label>
+            <select v-model="ossBulkForm.scope" @change="ossBulkPreview = null"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="needs_review">{{ t('invoice.bulk_oss_scope_needs_review') }}</option>
+              <option value="missing_rate_type">{{ t('invoice.bulk_oss_scope_missing_rate_type') }}</option>
+              <option value="oss">{{ t('invoice.bulk_oss_scope_oss') }}</option>
+              <option value="all">{{ t('invoice.bulk_oss_scope_all') }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('invoice.bulk_oss_mode') }}</label>
+            <select v-model="ossBulkForm.mode" @change="ossBulkPreview = null"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="on">{{ t('invoice.bulk_oss_mode_on') }}</option>
+              <option value="off">{{ t('invoice.bulk_oss_mode_off') }}</option>
+              <option value="keep">{{ t('invoice.bulk_oss_mode_keep') }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div v-if="ossBulkForm.mode !== 'off'" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('invoice.bulk_oss_country') }}</label>
+            <select v-model="ossBulkForm.country" @change="ossBulkPreview = null"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="">{{ t('invoice.bulk_oss_keep_value') }}</option>
+              <option v-for="c in euCountries" :key="c.id" :value="c.iso2">{{ c.iso2 }} — {{ c.name_cs }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('invoice.bulk_oss_rate_type') }}</label>
+            <select v-model="ossBulkForm.rate_type" @change="ossBulkPreview = null"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="">{{ t('invoice.bulk_oss_keep_value') }}</option>
+              <option value="standard">{{ t('oss_rates.type_standard') }}</option>
+              <option value="reduced">{{ t('oss_rates.type_reduced') }}</option>
+              <option value="second_reduced">{{ t('oss_rates.type_second_reduced') }}</option>
+              <option value="parking">{{ t('oss_rates.type_parking') }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('invoice.bulk_oss_supply_type') }}</label>
+            <select v-model="ossBulkForm.supply_type" @change="ossBulkPreview = null"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option value="">{{ t('invoice.bulk_oss_keep_value') }}</option>
+              <option value="goods">{{ t('invoice.bulk_oss_supply_goods') }}</option>
+              <option value="services">{{ t('invoice.bulk_oss_supply_services') }}</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="flex items-start gap-3 cursor-pointer rounded-md border border-neutral-200 bg-neutral-50 p-3">
+          <input v-model="ossBulkForm.clear_needs_review" type="checkbox" @change="ossBulkPreview = null"
+            class="mt-0.5 w-4 h-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
+          <span>
+            <span class="block text-sm font-medium text-neutral-800">{{ t('invoice.bulk_oss_clear_review') }}</span>
+            <span class="block text-xs text-neutral-500 mt-0.5">{{ t('invoice.bulk_oss_clear_review_hint') }}</span>
+          </span>
+        </label>
+
+        <!-- Náhled -->
+        <div v-if="ossBulkPreview" class="space-y-3">
+          <div class="flex flex-wrap gap-4 text-sm rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <span><strong>{{ ossBulkPreview.summary.documents_to_change }}</strong> {{ t('invoice.bulk_oss_will_change') }}</span>
+            <span><strong>{{ ossBulkPreview.summary.items_to_change }}</strong> {{ t('invoice.bulk_oss_items') }}</span>
+            <span :class="ossBulkPreview.summary.documents_skipped > 0 ? 'text-warning-600' : ''">
+              <strong>{{ ossBulkPreview.summary.documents_skipped }}</strong> {{ t('invoice.bulk_oss_skipped') }}
+            </span>
+            <span v-if="ossBulkPreview.summary.warnings > 0" class="text-warning-600">
+              <strong>{{ ossBulkPreview.summary.warnings }}</strong> {{ t('invoice.bulk_oss_warnings') }}
+            </span>
+          </div>
+
+          <div class="border border-neutral-200 rounded-md overflow-x-auto max-h-72 overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('invoice.varsymbol') }}</th>
+                  <th class="px-3 py-2 text-left font-medium w-28">{{ t('invoice.tax_date') }}</th>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('invoice.bulk_oss_result') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="d in ossBulkPreview.documents" :key="d.invoice_id"
+                  :class="d.action === 'skip' ? 'bg-warning-50/40' : ''">
+                  <td class="px-3 py-2 font-mono text-xs">{{ d.varsymbol ?? ('#' + d.invoice_id) }}</td>
+                  <td class="px-3 py-2 font-mono text-xs">{{ d.tax_date ?? '—' }}</td>
+                  <td class="px-3 py-2 text-xs">
+                    <template v-if="d.action === 'update'">
+                      <span class="text-success-600">{{ t('invoice.bulk_oss_change_count', { n: d.changes.length }) }}</span>
+                      <div v-for="(w, i) in d.warnings" :key="i" class="text-warning-600 mt-0.5">{{ w }}</div>
+                    </template>
+                    <span v-else class="text-warning-600">{{ d.skip_detail }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap justify-end gap-2 pt-1 border-t border-neutral-200">
+          <button type="button" @click="ossBulkOpen = false" :disabled="bulkBusy" :class="btnOutline('neutral')">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" @click="runBulkOssPreview" :disabled="bulkBusy" :class="btnOutline('primary')">
+            {{ bulkBusy ? t('common.loading') : t('invoice.bulk_oss_preview') }}
+          </button>
+          <button type="button" @click="applyBulkOss"
+            :disabled="bulkBusy || !ossBulkPreview || ossBulkPreview.summary.documents_to_change === 0"
+            :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('invoice.bulk_oss_apply') }}
           </button>
         </div>
       </div>

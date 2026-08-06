@@ -75,6 +75,7 @@ final class PublicInvoiceGetAction
             $this->renderer->resolveBank($invoice),
             $this->emailVars->paymentQrDataUri($invoice),
             $this->attachments->listForInvoice((int) $invoice['id']),
+            $this->renderer->ossClause($invoice),
         ));
     }
 
@@ -98,6 +99,7 @@ final class PublicInvoiceGetAction
         ?array $bank,
         ?string $qrDataUri,
         array $attachments = [],
+        ?array $ossClause = null,
     ): array {
         $pick = static fn (array $src, array $keys): array =>
             array_intersect_key($src, array_flip($keys));
@@ -136,6 +138,10 @@ final class PublicInvoiceGetAction
                 'account_number', 'bank_code', 'bank_name', 'iban', 'bic',
             ]),
             'qr_data_uri' => $qrDataUri,
+            // OSS doložka — náhled musí říct totéž co PDF (InvoicePdfRenderer::ossClause).
+            // Jen odvozená metadata (státy spotřeby, celý/smíšený doklad), žádné částky
+            // ani per-řádkové OSS sloupce navíc.
+            'oss_clause'  => $ossClause,
             // Přílohy e-mailu ke stažení — id slouží jen jako klíč pro download
             // URL (gated tokenem faktury); NIKDY filename (název na disku),
             // sha256 ani uploaded_by.

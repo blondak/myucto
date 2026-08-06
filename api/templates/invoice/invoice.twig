@@ -268,6 +268,35 @@
 </div>
 {% endif %}
 
+{# ─── OSS DOLOŽKA ───
+   Doklad s řádky v režimu jednoho správního místa nese sazbu státu spotřeby. Bez téhle
+   věty ji příjemce ani jeho účetní nemá jak odlišit od české daně ve špatné sazbě —
+   doložka je protějškem RC klauzule výše. Podklad staví OssInvoiceClause (SSOT sdílený
+   s veřejným HTML náhledem).
+   Doklad se smíšeným plněním (část tuzemská, část OSS) dostane opatrnější formulaci —
+   tvrdit u něj, že daň je odvedena ve státě spotřeby, by platilo jen o části řádků.
+   Státy spotřeby se vypisují všechny; seznam je buď úplný, nebo (u řádku bez země)
+   prázdný a věta státy nejmenuje — neúplný výčet by na dokladu lhal. #}
+{% if oss_clause %}
+<div class="note oss-note">
+  {% if oss_clause.all_items %}
+  {{ t('Daň je přiznána a odvedena ve státě spotřeby v režimu jednoho správního místa (One Stop Shop) podle § 110a a násl. zákona o DPH.',
+       'VAT is declared and paid in the Member State of consumption under the One Stop Shop scheme pursuant to Articles 369a et seq. of Council Directive 2006/112/EC.') }}
+  {% else %}
+  {{ t('U položek v režimu jednoho správního místa (One Stop Shop) je daň přiznána a odvedena ve státě spotřeby podle § 110a a násl. zákona o DPH.',
+       'For the items covered by the One Stop Shop scheme, VAT is declared and paid in the Member State of consumption pursuant to Articles 369a et seq. of Council Directive 2006/112/EC.') }}
+  {% endif %}
+  {% if oss_clause.countries is not empty %}
+    {#- Řízení bílých znaků (`{%-`) drží popisek a výčet států na jednom řádku —
+        bez něj mPDF vysází „Stát spotřeby:" a název státu s mezerou navíc. -#}
+    {%- if oss_clause.countries|length > 1 %} {{ t('Státy spotřeby', 'Member States of consumption') }}:
+    {%- else %} {{ t('Stát spotřeby', 'Member State of consumption') }}:
+    {%- endif %}
+    {%- for c in oss_clause.countries %} {{ locale == 'en' ? c.name_en : c.name_cs }}{{ loop.last ? '.' : ',' }}{% endfor %}
+  {% endif %}
+</div>
+{% endif %}
+
 {# ─── SUMACE + QR/BANK ─── #}
 <table class="totals">
   <tr>

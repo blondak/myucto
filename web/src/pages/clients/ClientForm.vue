@@ -112,6 +112,11 @@ const form = ref<ClientPayload>({
   language: 'cs',
   currency_default_id: 0,
   reverse_charge: false,
+  // OSS (migrace 1298). Režim umí OSS jedině VYLOUČIT — o tom, jestli řádek do OSS
+  // patří, rozhoduje derivace ze sazby, země a DIČ, ne karta odběratele.
+  oss_mode: 'auto' as 'auto' | 'never',
+  // null = odvodit z měrné jednotky / převažující činnosti dodavatele.
+  oss_default_supply_type: null,
   // § 36a ZDPH / § 23 odst. 7 ZDP — spojení osob je právní vztah, z faktur ani z DIČ
   // ho odvodit nelze; označí ho uživatel.
   related_party: false,
@@ -294,6 +299,8 @@ function sanitize(c: Client): Partial<ClientPayload> {
     language: c.language,
     currency_default_id: c.currency_default_id,
     reverse_charge: c.reverse_charge,
+    oss_mode: c.oss_mode === 'never' ? 'never' : 'auto',
+    oss_default_supply_type: c.oss_default_supply_type ?? null,
     related_party: c.related_party === true,
     related_party_type: c.related_party_type ?? 'otherwise',
     related_party_note: c.related_party_note ?? '',
@@ -803,6 +810,34 @@ async function submit() {
               <span>{{ t('client.auto_send_reminders') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('client.auto_send_reminders_hint') }}</p>
+          </div>
+
+          <!-- OSS: výchozí nastavení pro odběratele. Vědomě tu NENÍ „vždy OSS" ani
+               výchozí země spotřeby — obojí by přebilo rozhodnutí o místě plnění,
+               které stojí na sazbě, zemi odběratele a číselníku členských států. -->
+          <div class="pt-3 border-t border-neutral-100">
+            <p class="text-xs text-neutral-500 mb-2">{{ t('client.oss_section_hint') }}</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.oss_mode') }}</label>
+                <select v-model="form.oss_mode"
+                        class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                  <option value="auto">{{ t('client.oss_modes.auto') }}</option>
+                  <option value="never">{{ t('client.oss_modes.never') }}</option>
+                </select>
+                <p class="text-xs text-neutral-500 mt-1">{{ t('client.oss_mode_hint') }}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.oss_default_supply_type') }}</label>
+                <select v-model="form.oss_default_supply_type"
+                        class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                  <option :value="null">{{ t('client.oss_supply_types.auto') }}</option>
+                  <option value="goods">{{ t('client.oss_supply_types.goods') }}</option>
+                  <option value="services">{{ t('client.oss_supply_types.services') }}</option>
+                </select>
+                <p class="text-xs text-neutral-500 mt-1">{{ t('client.oss_default_supply_type_hint') }}</p>
+              </div>
+            </div>
           </div>
         </div>
 

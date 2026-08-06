@@ -11,6 +11,14 @@ use MyInvoice\Infrastructure\Database\Connection;
  *
  * Asistované předání pouze otevře formulář EPO; konečné podání provádí uživatel.
  * Tabulka drží neměnný snapshot, na který navazují pokusy a důkazní dokumenty.
+ *
+ * ── Write-once vůči tomu, co odešlo ────────────────────────────────────────────────
+ * Snapshot se po založení nikdy nepřepisuje: {@see archive()} vždy VKLÁDÁ nový řádek
+ * a jediné, co se na existujícím mění, jsou metadata podání ({@see markSubmitted()}) —
+ * `xml_content`, `xml_sha256` ani `summary_json` se nedotkne nic. Nová podoba období
+ * tedy vzniká vedle té staré, ne místo ní, a {@see delete()} odmítá zahodit řádek,
+ * který systém opustil. Na tom stojí rekonciliace: bez toho by ji šlo umlčet prostým
+ * opakovaným stažením (viz {@see findLatestArchivedForPeriod()}).
  */
 final class TaxSubmissionRepository
 {
@@ -132,6 +140,111 @@ final class TaxSubmissionRepository
     }
 
     /**
+     * REFERENCE PRO REKONCILIACI — „proti čemu porovnat dnešní náhled".
+     *
+     * Odlišná otázka než {@see findLatestForPeriod()}, proto vlastní metoda a ne parametr:
+     * ta hledá ZÁKLADNU DALŠÍHO TVRZENÍ, a tou smí být jen prokazatelně podaný snapshot
+     * (audit §2.4). Tahle hledá referenci pro srovnání. U OSS je to nutné rozlišit, protože
+     * OSS podání se dnes jen stahuje (status `downloaded`) a jinak by rekonciliace neměla
+     * co porovnat vůbec nikdy. Volající si stav vrátí v řádku a MUSÍ ho zobrazit — stažený
+     * soubor podáním není.
+     *
+     * ── Reference se NESMÍ dát přepsat dalším stažením ─────────────────────────────────
+     * Do konce roku 2026 se tady bralo POSLEDNÍ archivované XML období. Tím se rekonciliace
+     * sama „vyléčila": účetní opravila doklad zpětně, rekonciliace rozdíl ukázala, účetní
+     * si stáhla XML znovu — a protože nový snapshot vznikl ze stavu PO opravě, stal se
+     * referencí a rozdíl proti tomu, co se za období SKUTEČNĚ odeslalo, zmizel. Kontrola,
+     * kterou lze umlčet tím, že se spustí znovu, není kontrola.
+     *
+     * Pořadí je proto dané důkazní silou, ne časem:
+     *   1. DOLOŽENÉ PODÁNÍ (`submitted`/`accepted`) — přesně jak to dělají DPH a KH
+     *      ({@see findLatestForPeriod()}), kterým jiný než podaný snapshot za referenci
+     *      neprojde vůbec. Z nich poslední: opravné/dodatečné tvrzení referenci posouvá
+     *      právem.
+     *   2. Není-li žádné, PRVNÍ POUŽITELNÉ STAŽENÍ období (`downloaded`, nejstarší, které
+     *      prošlo XSD) — první podoba výkazu, která opustila systém a dala se podat, a tedy
+     *      nejbližší tomu, co drží správce daně. Další stažení už referencí nepohne; kdo
+     *      chce referenci posunout legitimně, označí skutečně podaný snapshot přes
+     *      {@see markSubmitted()}.
+     * Pouhé `generated` (vygenerováno k náhledu) se za referenci nebere NIKDY — nic
+     * neopustilo systém, takže není proti čemu se poměřovat.
+     *
+     * Na `validation_status` se tady — na rozdíl od {@see findLatestForPeriod()} — NEfiltruje.
+     * Tam jde o daňový řetězec, do kterého nevalidní výkaz nepatří; tady jde o otázku „co
+     * jsme odeslali", a na tu je uživatelovo doložené podání silnější odpověď než verdikt
+     * našeho XSD (které může být zastaralé). U pouhých stažení se nevalidní snapshot aspoň
+     * zařadí ZA platné. Slepá rekonciliace je horší než rekonciliace nad horším podkladem.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findLatestArchivedForPeriod(
+        int $supplierId,
+        string $formCode,
+        int $year,
+        ?int $month,
+        ?int $quarter,
+    ): ?array {
+        $periodSql = $month !== null
+            ? 'period_month = ? AND period_quarter IS NULL'
+            : 'period_month IS NULL AND period_quarter = ?';
+        $params = [$supplierId, $formCode, $year, $month !== null ? $month : $quarter];
+
+        // 1) Doložené podání — poslední z nich.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM tax_submissions
+              WHERE supplier_id = ? AND form_code = ? AND period_year = ?
+                AND {$periodSql}
+                AND status IN ('submitted','accepted')
+           ORDER BY submitted_at DESC, generated_at DESC, id DESC
+              LIMIT 1"
+        );
+        $stmt->execute($params);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row !== false) {
+            return $this->normalize($row);
+        }
+
+        // 2) Jinak PRVNÍ stažení — ASC, ať ho opakované stažení nepřepíše.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM tax_submissions
+              WHERE supplier_id = ? AND form_code = ? AND period_year = ?
+                AND {$periodSql}
+                AND status = 'downloaded'
+           ORDER BY (validation_status = 'failed') ASC, generated_at ASC, id ASC
+              LIMIT 1"
+        );
+        $stmt->execute($params);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row !== false ? $this->normalize($row) : null;
+    }
+
+    /**
+     * Seznam archivovaných snapshotů JEDNOHO druhu výkazu (bez `xml_content`).
+     *
+     * Bez tohohle filtru by se stránka OSS musela ptát na celý archiv a druh výkazu
+     * dofiltrovat v PHP — u firmy, která podává DPH i KH měsíčně, by přitom limit
+     * seznamu utnul OSS podání dřív, než se k němu dojde.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listForForm(int $supplierId, string $formCode, int $limit = 100): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, supplier_id, form_code, period_year, period_month, period_quarter, form_variant,
+                    xml_size_bytes, xml_sha256, validation_status,
+                    status, submitted_at, submission_ref, submitted_by,
+                    validation_errors, summary_json, generated_by, generated_at, notes
+               FROM tax_submissions
+              WHERE supplier_id = ? AND form_code = ?
+           ORDER BY period_year DESC, period_quarter DESC, period_month DESC, generated_at DESC
+              LIMIT ?"
+        );
+        $stmt->execute([$supplierId, $formCode, $limit]);
+        return array_map(fn ($r) => $this->normalize($r), $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Všechna DODATEČNÁ přiznání (druhy D/E) téhož období, chronologicky (generated_at ASC) —
      * pro rekonstrukci kumulativní „poslední známé daně" u 2.+ dodatečného přiznání (C7').
      * Vrací i `xml_content` (nese ROZDÍLY oproti předchozímu stavu). Vynechává neplatná
@@ -195,9 +308,23 @@ final class TaxSubmissionRepository
         return $row !== false ? $this->normalize($row) : null;
     }
 
+    /**
+     * Smazat archivovaný snapshot. Co OPUSTILO systém, se smazat nedá.
+     *
+     * Archiv je write-once vůči odeslanému výkazu: `xml_content` ani `summary_json` nikdo
+     * nepřepisuje (nová podoba období = nový řádek) a doložené podání (`submitted`/
+     * `accepted`) navíc nejde ani zahodit — je to důkaz pro správce daně, základna
+     * opravného tvrzení a reference rekonciliace zároveň. Smazatelné zůstává jen to, co
+     * se nikam neodeslalo (`draft`, `generated`) nebo bylo odmítnuto (`rejected`).
+     * Stažené (`downloaded`) se drží taky: je to jediná reference, kterou u OSS máme.
+     */
     public function delete(int $id, int $supplierId): bool
     {
-        $stmt = $this->db->pdo()->prepare('DELETE FROM tax_submissions WHERE id = ? AND supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            "DELETE FROM tax_submissions
+              WHERE id = ? AND supplier_id = ?
+                AND status NOT IN ('downloaded','submitted','accepted')"
+        );
         $stmt->execute([$id, $supplierId]);
         return $stmt->rowCount() > 0;
     }

@@ -65,8 +65,18 @@ final class AiPdfExtractorUnitTest extends TestCase
         $this->isdocMapper = $this->createMock(IsdocToPurchaseInvoiceMapper::class);
         $router = new InvoiceExtractionRouter($this->pdfIsdoc, $this->isdocParser, new NullLogger());
 
+        // Plánovač je `final` (nejde doubleovat) — složíme reálný nad mockovaným
+        // spojením. Testované privátní metody na něj nesahají, takže se nikdy nezeptá DB.
+        $conn = $this->createMock(Connection::class);
+        $planner = new \MyInvoice\Service\Oss\OssItemPlanner(
+            $conn,
+            new \MyInvoice\Service\Oss\OssItemDeriver($conn, new \MyInvoice\Service\Oss\OssRateCodebook($conn)),
+            new \MyInvoice\Service\Oss\OssRateCodebook($conn),
+            new \MyInvoice\Service\Vat\VatRateResolver($conn),
+        );
+
         $this->extractor = new AiPdfExtractor(
-            $this->createMock(Connection::class),
+            $conn,
             $this->anthropic,
             $this->createMock(ClientResolver::class),
             $this->repo,
@@ -79,6 +89,7 @@ final class AiPdfExtractorUnitTest extends TestCase
             $this->createMock(\MyInvoice\Repository\TaxConstantsRepository::class),
             $this->createMock(PurchaseInvoicePdfArchiver::class),
             new ExpenseKindClassifier(), // pure, bez DB — mock by nic nepřidal
+            $planner,
             new NullLogger(),
         );
     }

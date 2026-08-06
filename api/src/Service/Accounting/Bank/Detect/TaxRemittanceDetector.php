@@ -40,7 +40,19 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             isset($tx['counterparty_bank']) ? (string) $tx['counterparty_bank'] : null,
             isset($tx['counterparty_account']) ? (string) $tx['counterparty_account'] : null,
         );
-        if ($bank !== '0710' || strtoupper((string) ($tx['currency'] ?? $tx['statement_currency'] ?? 'CZK')) !== 'CZK') {
+        if ($bank !== '0710') {
+            return null;
+        }
+        $account = (string) ($tx['counterparty_account'] ?? '');
+        // Nekorunová platba na účet u ČNB je u ostatních odvodů signál „tohle není odvod",
+        // ale daň v režimu jednoho správního místa se odvádí v EURECH (přiznání i platba
+        // jsou v měně podání), takže korunová podmínka ji vyřazovala dřív, než se vůbec
+        // dala poznat — a platba pak končila jako neurčená. Výjimka se neváže na měnu,
+        // ale na PŘÍJEMCE, a bere se z mapy odvodů, aby číslo účtu nebylo zadrátované
+        // ve dvou různých vrstvách.
+        if (strtoupper((string) ($tx['currency'] ?? $tx['statement_currency'] ?? 'CZK')) !== 'CZK'
+            && !$this->isForeignCurrencyRemittanceAccount($account)
+        ) {
             return null;
         }
 
@@ -81,7 +93,6 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         if ($supplier === null) {
             return null;
         }
-        $account = (string) ($tx['counterparty_account'] ?? '');
         $employerIdentifier = $this->payrollIdentifiers->matchEmployerRemittance(
             $supplierId,
             $vs,
@@ -185,6 +196,39 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         return $row === false ? null : $row;
     }
 
+    /**
+     * Vede mapa odvodů pro tenhle účet druh odvodu, který se platí v CIZÍ MĚNĚ?
+     *
+     * Dnes je takový jediný — daň v režimu jednoho správního místa (§ 110 a násl. ZDPH),
+     * kterou Finanční správa přijímá v eurech. Ptá se ale MAPY, ne konstanty v kódu:
+     * číslo účtu je data (migrace 1301) a druhá kopie v PHP by se s ním rozešla, jakmile
+     * se účet změní nebo přibude další režim. Dotaz se dělá jen u nekorunové platby,
+     * takže na běžný běh nemá vliv.
+     *
+     * `account_prefix`/`account_number` se porovnávají v téže podobě jako v {@see map()}
+     * (bez vodicích nul, předčíslí zvlášť od matrikové části), aby národní i GPC zápis
+     * účtu vyšly stejně.
+     */
+    private function isForeignCurrencyRemittanceAccount(string $account): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM remittance_map
+              WHERE bank_code = '0710'
+                AND operation_type = ?
+                AND ((account_prefix IS NOT NULL AND account_prefix = ?)
+                     OR (account_number IS NOT NULL AND account_number = ?))
+              LIMIT 1"
+        );
+        $stmt->execute([
+            OperationType::REMITTANCE_OSS,
+            (string) AccountNumberNormalizer::czechAccountPrefix($account),
+            (string) AccountNumberNormalizer::czechAccountBase($account),
+        ]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return array<string,mixed>|null */
     private function supplierIdentifiers(int $supplierId): ?array
     {
@@ -264,6 +308,11 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             OperationType::REMITTANCE_INCOME, OperationType::REMITTANCE_FLAT => '341',
             OperationType::REMITTANCE_WITHHOLDING, OperationType::REMITTANCE_PAYROLL => '342',
             OperationType::REMITTANCE_VAT => '343',
+            // Daň v režimu OSS má vlastní ANALYTIKU, ne jen vlastní syntetický účet:
+            // předpis ji účtuje na 345.100 ({@see \MyInvoice\Service\Accounting\PostingService}),
+            // takže úhrada svedená na holé 345 (kde sedí daň z nemovitostí a silniční)
+            // by závazek nevynulovala o nic líp než dosavadní 343.
+            OperationType::REMITTANCE_OSS => '345.100',
             OperationType::REMITTANCE_PROPERTY, OperationType::REMITTANCE_ROAD => '345',
             OperationType::REMITTANCE_OTHER => '336',
             default => null,

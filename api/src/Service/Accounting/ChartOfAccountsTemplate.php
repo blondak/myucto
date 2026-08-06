@@ -122,6 +122,12 @@ final class ChartOfAccountsTemplate
         ['code' => '342', 'name' => 'Ostatní přímé daně', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '343', 'name' => 'Daň z přidané hodnoty', 'type' => 'liability', 'normal_side' => null],
         ['code' => '345', 'name' => 'Ostatní daně a poplatky', 'type' => 'liability', 'normal_side' => 'credit'],
+        // OSS (§ 110 a násl. ZDPH): daň patří státu spotřeby, ne českému rozpočtu — do
+        // přiznání k DPH ani do KH nevstupuje, platí se zvlášť a v jiné měně. Kdyby seděla
+        // na 343, zůstatek 343 by se s přiznáním z principu nemohl srovnat. Analytika k 345
+        // (ostatní daně) drží 343 čisté; v rozvaze je to táž položka „Stát — daňové závazky"
+        // (mapa výkazů matchuje na prefix, takže 345.100 padne pod 345 bez dalšího zásahu).
+        ['code' => '345.100', 'name' => 'DPH v režimu OSS — jiný členský stát', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '345'],
         ['code' => '346', 'name' => 'Dotace ze státního rozpočtu', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '351', 'name' => 'Pohledávky — ovládaná nebo ovládající osoba', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '353', 'name' => 'Pohledávky za upsaný základní kapitál', 'type' => 'asset', 'normal_side' => 'debit'],

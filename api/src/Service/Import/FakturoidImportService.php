@@ -14,6 +14,7 @@ use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Oss\OssItemPlanner;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -57,7 +58,16 @@ final class FakturoidImportService
         private readonly PurchaseInvoiceCnbApplier $cnbApplier,
         private readonly SnapshotBuilder $snapshots,
         private readonly ExchangeRateApplier $exchangeRateApplier,
+        private readonly OssItemPlanner $planner,
     ) {}
+
+    /**
+     * Varování k OSS / párování sazby za PRÁVĚ ZPRACOVÁVANÝ doklad — `createIssued()`
+     * job ID nezná, takže je do logu vysype volající hned po dokladu.
+     *
+     * @var list<string>
+     */
+    private array $ossWarnings = [];
 
     public function run(int $jobId): void
     {
@@ -187,6 +197,14 @@ final class FakturoidImportService
         $this->jobs->updateProgress($jobId, ['current_step' => 'Importing issued invoices…', 'processed' => 0]);
         $this->jobs->appendLog($jobId, 'Stahuji vydané faktury z Fakturoid…');
 
+        // Pre-flight číselníku sazeb členských států — bez něj by invariant proti úniku
+        // cizí daně odmítl každý řádek se sazbou > 0 %, tedy i běžnou českou fakturu.
+        $codebookProblem = $this->planner->codebookProblem($supplierId, 'Import vydaných faktur se nespustil.');
+        if ($codebookProblem !== null) {
+            $this->jobs->appendLog($jobId, $codebookProblem);
+            throw new \RuntimeException($codebookProblem);
+        }
+
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
         $created = 0; $skipped = 0; $failed = 0; $processed = 0;
 
@@ -220,6 +238,12 @@ final class FakturoidImportService
                 $failed++;
                 $this->jobs->appendLog($jobId, "Faktura {$fakturoidId}: " . $e->getMessage());
             }
+            // Fakturoid sync nemá report jako file import — varování o nejednoznačném
+            // místě plnění by jinak nebylo vidět nikde.
+            foreach ($this->ossWarnings as $warning) {
+                $this->jobs->appendLog($jobId, "Faktura {$fakturoidId}: " . $warning);
+            }
+            $this->ossWarnings = [];
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
         $this->jobs->appendLog($jobId, "Vydané faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
@@ -253,22 +277,35 @@ final class FakturoidImportService
             'varsymbol'      => $this->uniqueVarsymbol((string) ($i['variable_symbol'] ?? $i['number'] ?? ''), $supplierId),
             'payment_method' => 'bank_transfer',
         ];
-        $invoiceId = $this->invoices->createDraft($payload, $userId);
-
-        $vatRates = $this->loadVatRateMap();
-        $defaultVatRateId = $this->matchVatRateId($vatRates, 21.0) ?? $this->matchVatRateId($vatRates, 0.0) ?? 0;
-        $items = [];
+        $lines = [];
         foreach (($i['lines'] ?? []) as $idx => $line) {
-            $rate = (float) ($line['vat_rate'] ?? 0);
-            $items[] = [
+            $lines[] = [
                 'description'            => (string) ($line['name'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
-                'vat_rate_id'            => $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId,
+                'vat_rate'               => (float) ($line['vat_rate'] ?? 0),
                 'order_index'            => $idx,
             ];
         }
+
+        // Sazba i OSS přes SDÍLENÝ plánovač. Fakturoid si dřív sazbu pároval vlastním
+        // hledáním přes celou tabulku `vat_rates` (bez země, bez platnosti k datu,
+        // bez is_reverse_charge) a při neúspěchu dosadil 21 % — cizí sazba se tak tiše
+        // změnila na českou. Na VYDANÉ straně žádný takový fallback být nesmí: dosazená
+        // sazba mění odvedenou daň, takže nenalezená sazba shodí doklad s hláškou.
+        // Plánuje se PŘED createDraft(), ať po odmítnutí nezůstane prázdná faktura.
+        $items = $this->planner->planIssuedItems(
+            $supplierId,
+            $clientId,
+            (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
+            !empty($payload['reverse_charge']),
+            $lines,
+            $this->ossWarnings,
+        );
+
+        $invoiceId = $this->invoices->createDraft($payload, $userId);
+
         if (!empty($items)) $this->invoices->replaceItems($invoiceId, $items);
 
         // #238: přenes měnový kurz. Fakturoid vrací pole `exchange_rate` (kurz, jímž
@@ -417,8 +454,13 @@ final class FakturoidImportService
         $taxDate   = (string) ($e['taxable_fulfillment_due'] ?? $issueDate);
         $dueDate   = (string) ($e['due_on'] ?? $issueDate);
 
-        $vatRates = $this->loadVatRateMap();
-        $defaultVatRateId = $this->matchVatRateId($vatRates, 21.0) ?? $this->matchVatRateId($vatRates, 0.0) ?? 0;
+        // Přijatá strana OSS nemá (OSS je režim pro plnění, které POSKYTUJEME), ale sazbu
+        // páruje týmž resolverem — filtr na zemi, platnost k datu a `is_reverse_charge`
+        // se jí týká stejně: nula mohla dřív trefit reverse-charge sazbu, protože obě
+        // mají 0,00 a rozlišilo je jen pořadí řádků.
+        $defaultVatRateId = $this->planner->resolveDomesticRate($supplierId, 21.0, $taxDate)->id
+            ?? $this->planner->resolveDomesticRate($supplierId, 0.0, $taxDate)->id
+            ?? 0;
 
         $items = [];
         foreach (($e['lines'] ?? []) as $idx => $line) {
@@ -428,7 +470,8 @@ final class FakturoidImportService
                 'quantity'               => (float) ($line['quantity'] ?? 1),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
-                'vat_rate_id'            => $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId,
+                'vat_rate_id'            => $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id
+                    ?? $defaultVatRateId,
                 'order_index'            => $idx,
             ];
         }
@@ -519,27 +562,13 @@ final class FakturoidImportService
         return (int) $pdo->lastInsertId();
     }
 
-    private function loadVatRateMap(): array
-    {
-        // Bereme VŠECHNY sazby bez ohledu na valid_from/valid_to — importujeme
-        // historické doklady (2019+), kde platí dobové sazby (CZ-15 %, CZ-10 %,
-        // valid_to 2023-12-31, viz migrace 0049). Filtr k dnešku by je vyřadil →
-        // matchVatRateId by vrátil null → vat_rate_id=0 → fk_ii_vat violation.
-        // Konkrétní % se snapshotuje do invoice_items.vat_rate_snapshot, takže
-        // výpočty/výkazy zůstávají korektní.
-        $rows = $this->db->pdo()->query(
-            'SELECT id, rate_percent FROM vat_rates'
-        )->fetchAll(\PDO::FETCH_ASSOC);
-        $map = [];
-        foreach ($rows as $r) $map[(int) $r['id']] = (float) $r['rate_percent'];
-        return $map;
-    }
-
-    private function matchVatRateId(array $vatRates, float $rate): ?int
-    {
-        foreach ($vatRates as $id => $r) if (abs($r - $rate) < 0.01) return $id;
-        return null;
-    }
+    // Vlastní `loadVatRateMap()` + `matchVatRateId()` tu byly do sjednocení na
+    // {@see \MyInvoice\Service\Vat\VatRateResolver}. Braly VŠECHNY sazby bez ohledu na
+    // platnost (kvůli historickým dokladům 2019+ s dobovými sazbami CZ-15 / CZ-10) a
+    // hledaly první shodné procento napříč tabulkou — tedy bez země i bez
+    // `is_reverse_charge`. Resolver tentýž požadavek plní krokem 2 své kaskády (shoda
+    // mimo platnost s varováním), ale k procentu se ptá i na zemi, takže polských 23 %
+    // se nenaváže na českou sazbu.
 
     private function sanitizeVarsymbol(string $vs): string
     {

@@ -52,6 +52,8 @@ final class AiPdfExtractor
         // tenanta se sem záměrně netahají — ta se vyhodnotí až v editoru nad uloženým
         // dokladem (endpoint expense-suggestions), kde je uživatel potvrzuje.
         private readonly ExpenseKindClassifier $expenseClassifier,
+        // Jen kvůli párování sazby (`resolveDomesticRate`) — přijatá strana OSS nemá.
+        private readonly \MyInvoice\Service\Oss\OssItemPlanner $planner,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -444,8 +446,10 @@ final class AiPdfExtractor
 
     private function createDraft(array $data, int $supplierId, int $userId, int $vendorId, ?bool $vendorIsVatPayer = null): int
     {
-        $vatRates = $this->loadVatRateMap();
-        $defaultVatRateId = $this->matchVatRateId($vatRates, 0.0);
+        // Datum, ke kterému se páruje sazba — DUZP s fallbackem na vystavení, tedy
+        // stejná definice „rozhodného data", jakou používá zbytek importní vrstvy.
+        $rateDate = (string) ($data['tax_date'] ?? '') ?: (string) ($data['issue_date'] ?? date('Y-m-d'));
+        $defaultVatRateId = $this->matchVatRateId($supplierId, 0.0, $rateDate);
 
         // Sanity guard na prohozené datumy z AI extrakce (issue ↔ due). AI občas
         // zamění „Datum vystavení" a „Datum splatnosti"; na běžné faktuře ale splatnost
@@ -569,7 +573,7 @@ final class AiPdfExtractor
                 'quantity'               => $qty,
                 'unit'                   => (string) ($line['unit'] ?? 'ks'),
                 'unit_price_without_vat' => $price,
-                'vat_rate_id'            => $this->matchVatRateId($vatRates, $rate) ?? $defaultVatRateId,
+                'vat_rate_id'            => $this->matchVatRateId($supplierId, $rate, $rateDate) ?? $defaultVatRateId,
                 'order_index'            => $idx,
                 // vat_classification_code tady nesetujeme — PurchaseInvoiceRepository::replaceItems()
                 // auto-derive based on rate + RC + vendor country (lookup z DB). Výjimka:
@@ -582,7 +586,7 @@ final class AiPdfExtractor
         // Vynulujeme sazby (kdyby AI halucinovala 21 %) a níže vynutíme vat_deduction='none'.
         $vendorNonPayer = self::isVendorNonPayer($vendorIsVatPayer, (array) ($data['vendor'] ?? []));
         if ($vendorNonPayer) {
-            $zeroRateId = $this->matchVatRateId($vatRates, 0.0) ?? $defaultVatRateId;
+            $zeroRateId = $this->matchVatRateId($supplierId, 0.0, $rateDate) ?? $defaultVatRateId;
             foreach ($items as &$it) {
                 $it['vat_rate_id'] = $zeroRateId;
             }
@@ -709,7 +713,7 @@ final class AiPdfExtractor
             $rcDate = (string) ($data['tax_date'] ?? $data['issue_date'] ?? '');
             $rcYear = $rcDate !== '' ? (int) substr($rcDate, 0, 4) : (int) date('Y');
             $rcRate = $this->taxConstants->vatRateStandard($rcYear);
-            $rcRateId = $this->matchVatRateId($vatRates, $rcRate);
+            $rcRateId = $this->matchVatRateId($supplierId, $rcRate, $rateDate);
             foreach ($items as &$it) {
                 if ($rcRateId !== null) {
                     $it['vat_rate_id'] = $rcRateId;
@@ -1594,10 +1598,23 @@ final class AiPdfExtractor
         return $map;
     }
 
-    private function matchVatRateId(array $vatRates, float $rate): ?int
+    /**
+     * Napárování sazby přes SDÍLENÝ {@see \MyInvoice\Service\Vat\VatRateResolver}.
+     *
+     * Vlastní hledání „první shodné procento v mapě" tu bylo do sjednocení. Nefiltrovalo
+     * na zemi ani na `is_reverse_charge`, takže nula mohla trefit reverse-charge sazbu
+     * (CZ-0 i CZ-RC mají 0,00 a rozlišilo je jen pořadí řádků v tabulce) — a to je na
+     * PŘIJATÉ straně přímo nárok na odpočet. Sazby se navíc načítaly k DNEŠKU, takže
+     * doklad z roku 2022 se sazbou 15 % nenašel nic a spadl na náhradní nulu; resolver
+     * má na to krok 2 (shoda mimo platnost) a procento se stejně snapshotuje na řádek.
+     *
+     * OSS se tu ZÁMĚRNĚ neřeší: je to režim pro plnění, které POSKYTUJEME, kdežto tenhle
+     * extraktor zakládá PŘIJATOU fakturu. Prodejní stranu obsluhuje
+     * {@see AiIssuedInvoiceExtractor}, a ta derivací prochází.
+     */
+    private function matchVatRateId(int $supplierId, float $rate, string $onDate): ?int
     {
-        foreach ($vatRates as $id => $r) if (abs($r - $rate) < 0.01) return $id;
-        return null;
+        return $this->planner->resolveDomesticRate($supplierId, $rate, $onDate)->id;
     }
 
     /**

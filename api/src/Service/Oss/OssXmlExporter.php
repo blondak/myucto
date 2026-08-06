@@ -17,10 +17,17 @@ final class OssXmlExporter
     public function __construct(
         private readonly Connection $db,
         private readonly OssLedgerService $ledger,
+        private readonly OssFilingSnapshot $snapshot,
     ) {}
 
     /**
-     * @return array{xml:string, summary:array<string,mixed>, warnings:list<string>}
+     * `preview` se vrací spolu s XML schválně: archiv i evidence § 110f musí vzniknout
+     * z TÉHOŽ čtení dat jako podání. Druhé zavolání `preview()` na straně volajícího by
+     * kromě zbytečné práce otevřelo okno, ve kterém se doklad mezi oběma čteními změní
+     * a evidence pak popisuje jiný stav, než jaký se podal.
+     *
+     * @return array{xml:string, summary:array<string,mixed>, warnings:list<string>,
+     *               preview:array<string,mixed>}
      */
     public function build(int $supplierId, int $year, int $quarter): array
     {
@@ -124,11 +131,16 @@ final class OssXmlExporter
             'warnings' => array_values(array_unique($warnings)),
         ];
         $summary['total_payable'] = round($summary['total_vat'] + $summary['total_corrections'], 2);
+        // Porovnatelný obraz podání do archivu. Bez něj umí rekonciliace jen „liší se
+        // součet" — a to je u opravy dokladu zpětně k ničemu, protože neřekne KTERÝ
+        // doklad se změnil. Agregáty v XML na tuhle otázku odpovědět nemohou.
+        $summary['snapshot'] = $this->snapshot->fromPreview($supplierId, $preview);
 
         return [
             'xml' => $xml,
             'summary' => $summary,
             'warnings' => $summary['warnings'],
+            'preview' => $preview,
         ];
     }
 

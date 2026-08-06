@@ -132,6 +132,12 @@ export interface InvoiceItem {
   oss_taxable_amount_return?: number | null
   oss_vat_amount_return?: number | null
   oss_original_period?: string | null
+  /**
+   * „Místo plnění systém neurčil" (migrace 1293) — nastavuje odvození při importu.
+   * FE ho MUSÍ posílat zpět v round-tripu, jinak ho replaceItems (DELETE+INSERT) tiše
+   * smaže; není to editovatelné pole, uživatel ho zhasíná vypnutím OSS na položce.
+   */
+  oss_needs_manual_review?: boolean
 }
 
 export interface VatBreakdownRow {
@@ -314,7 +320,21 @@ export interface Invoice {
   /** Detaily k `_warnings` kódům pro interpolaci v UI (§C kurz vs ČNB). */
   _warning_meta?: {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
+    oss_document_contradiction?: OssDocumentContradictionMeta
   }
+}
+
+/**
+ * Doklad rozpadlý mezi OSS podání a tuzemské přiznání. Hláška v UI je bez parametrů
+ * (`invoice.warning.oss_document_contradiction`), tohle je strojově čitelný detail
+ * pro klienty API a pro budoucí adresnější zobrazení.
+ */
+export interface OssDocumentContradictionMeta {
+  consumer_countries: string[]
+  domestic_rates: string[]
+  domestic_country: string
+  affected_items: number
+  message: string
 }
 
 /** Detail odchylky účetního kurzu na dokladu od denního ČNB kurzu (§C / K4). */
@@ -458,6 +478,8 @@ export interface InvoicePayload {
     oss_taxable_amount_return?: number | null
     oss_vat_amount_return?: number | null
     oss_original_period?: string | null
+    /** Round-trip příznaku „místo plnění systém neurčil" — viz InvoiceItem. */
+    oss_needs_manual_review?: boolean
   }>
 }
 
@@ -475,6 +497,12 @@ export interface ListFilters {
   overdue?: boolean
   /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
   booked?: '1' | '0'
+  /**
+   * Jen doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS).
+   * Takové řádky jdou do tuzemského přiznání na ř. 1/2 a do OSS podání nepatří —
+   * bez tohohle filtru je uživatel nemá kde najít.
+   */
+  oss_review?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -485,6 +513,77 @@ export interface InvoiceListMeta {
   page?: number
   per_page?: number
   pages?: number
+}
+
+// ── Hromadné nastavení OSS (OSS-7) ────────────────────────────────────────────
+
+/** Které položky vybraných dokladů se berou. */
+export type OssBulkScope = 'needs_review' | 'missing_rate_type' | 'oss' | 'all'
+
+export interface OssBulkSet {
+  oss_applicable?: boolean | null
+  oss_consumer_country?: string | null
+  oss_rate_type?: string | null
+  oss_supply_type?: 'goods' | 'services' | null
+  clear_needs_review?: boolean
+}
+
+export interface OssBulkItemChange {
+  item_id: number
+  description: string
+  from: Record<string, unknown>
+  to: Record<string, unknown>
+}
+
+export interface OssBulkDocument {
+  invoice_id: number
+  varsymbol: string | null
+  status: string | null
+  tax_date: string | null
+  action: 'update' | 'skip'
+  /** null u `action = 'update'`; jinak strojový důvod pro překlad hlášky. */
+  skip_reason: string | null
+  skip_detail: string | null
+  items_matched: number
+  changes: OssBulkItemChange[]
+  /** Varování z číselníku sazeb členských států — nebrání zápisu. */
+  warnings: string[]
+  /**
+   * Položky, kterým „k ručnímu posouzení" zůstane rozsvícené i přes `clear_needs_review`
+   * — příznak tam drží ROZPOR celého dokladu, který hromadná akce nezhojí.
+   */
+  keep_review: string[]
+}
+
+export interface OssBulkResult {
+  applied: boolean
+  scope: OssBulkScope
+  set: OssBulkSet
+  documents: OssBulkDocument[]
+  summary: {
+    documents_total: number
+    documents_to_change: number
+    documents_skipped: number
+    items_to_change: number
+    warnings: number
+    skipped_by_reason: Record<string, number>
+  }
+  /** Jen u provedení (`applied`), ne u náhledu. */
+  completed_invoice_ids?: number[]
+  /** Doklady, u kterých se nepovedlo zahodit cache PDF — data jsou zapsaná, PDF je stará. */
+  pdf_not_invalidated?: number[]
+}
+
+/**
+ * Tělo chyby `bulk_update_failed` (HTTP 500). Dávka se u první chyby zastaví, takže
+ * uživatel potřebuje vědět, co je hotové a co se ani nezkusilo — bez toho je u 200
+ * dokladů opakování akce sázka do loterie.
+ */
+export interface OssBulkFailure {
+  completed_invoice_ids: number[]
+  failed_invoice: { invoice_id: number; varsymbol: string | null }
+  not_attempted_invoice_ids: number[]
+  pdf_not_invalidated: number[]
 }
 
 export const invoicesApi = {
@@ -507,6 +606,7 @@ export const invoicesApi = {
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
     if (filters.booked)      params['filter[booked]']      = filters.booked
+    if (filters.oss_review)  params['filter[oss_review]']  = 1
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
@@ -642,6 +742,17 @@ export const invoicesApi = {
       '/invoices/bulk-reissue',
       { invoice_ids: invoiceIds, ...opts },
     ).then(r => r.data),
+
+  /**
+   * Hromadné nastavení OSS (OSS-7). Náhled je povinný — provedení bez `confirm: true`
+   * backend odmítne (428), takže UI nesmí volat `bulkOssApply` bez předchozího náhledu.
+   */
+  bulkOssPreview: (invoiceIds: number[], scope: OssBulkScope, set: OssBulkSet) =>
+    api.post<OssBulkResult>('/invoices/bulk-oss/preview',
+      { invoice_ids: invoiceIds, scope, set }).then(r => r.data),
+  bulkOssApply: (invoiceIds: number[], scope: OssBulkScope, set: OssBulkSet) =>
+    api.post<OssBulkResult>('/invoices/bulk-oss',
+      { invoice_ids: invoiceIds, scope, set, confirm: true }).then(r => r.data),
 
   pdfUrl: (id: number, download: boolean = false) => {
     // Přímá navigace v prohlížeči neposílá X-Supplier-Id header (na rozdíl od axios) —
