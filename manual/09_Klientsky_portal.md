@@ -8,7 +8,7 @@ se přihlašuje do stejného MyÚčto.cz, jen s výrazně užší nabídkou menu
 které se po zaúčtování uzamknou proti dalším úpravám.
 
 > [!NOTE]
-> Role **client** je jiná kategorie než **readonly** (viz [§ 72.2.2 Role](72_Nastaveni.md#7222-role-a-opravneni)).
+> Role **client** je jiná kategorie než **readonly** (viz [§ 73.2.2 Role](73_Nastaveni.md#7322-role-a-opravneni)).
 > Readonly je interní pracovník firmy, který smí jen číst a exportovat cokoliv.
 > Client je naopak externí osoba (majitel firmy, na kterou účetní vede agendu),
 > která **smí vystavovat a upravovat vlastní doklady**, ale nevidí nic z účetnictví,
@@ -18,7 +18,7 @@ které se po zaúčtování uzamknou proti dalším úpravám.
 ## 9.1 Kdo roli client dostane a jak
 
 Uživatele s klientskou rolí zakládá výhradně **superadmin** v **Systém →
-Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 72.2 Uživatelé](72_Nastaveni.md#722-uzivatele)):
+Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 73.2 Uživatelé](73_Nastaveni.md#732-uzivatele)):
 
 1. V poli **Role** se zvolí aktivní role typu **client**.
 2. V sekci přiřazení firem se našeptávačem přidají firmy, ke kterým má klient
@@ -34,7 +34,7 @@ Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 72.2 Uživate
 
 > [!TIP]
 > Heslo, 2FA a **Můj profil** fungují pro klienta stejně jako pro ostatní role
-> (viz [§ 72.3](72_Nastaveni.md#723-muj-profil)) — klient si po prvním přihlášení
+> (viz [§ 73.3](73_Nastaveni.md#733-muj-profil)) — klient si po prvním přihlášení
 > může nastavit vlastní 2FA, pokud to instalace vyžaduje.
 
 ## 9.2 Menu klienta — jen zlomek aplikace
@@ -171,7 +171,7 @@ doklad nezamyká — přeznačení „zaplaceno" není účetní úkon), ale př
 Pro účetní a admina funguje zámek jinak — otevřené období smí upravovat vždy,
 u uzavřeného období dostanou informativní chybu místo tichého zamítnutí a admin
 si může úpravu vynutit (s automatickým záznamem do historie akcí). Detaily
-vynucené editace řeší [§ 55 Bezpečnost — RBAC](75_Bezpecnost.md).
+vynucené editace řeší [§ 55 Bezpečnost — RBAC](76_Bezpecnost.md).
 
 ## 9.6 Náhled portálu pro účetní a admina
 

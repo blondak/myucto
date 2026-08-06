@@ -191,7 +191,7 @@ Widget kombinuje až deset typů položek, každá se zobrazí jen když má co 
 | Zaplať dodavatelům | Přijaté faktury po splatnosti | `Přijaté faktury` (filtr po splatnosti) |
 | Zkontroluj koncepty přijatých faktur | Rozpracované koncepty PF | [Přijaté faktury](23_Prijate_faktury.md) (filtr koncept) |
 | **Zaúčtuj doklady** | Jen podvojné účetnictví — viz [§ 10.10.1](#10101-zauctuj-doklady) | Filtrovaný seznam FV/PF/banka |
-| **Zkontroluj integritu deníku** | Jen podvojné účetnictví — viz [§ 10.10.2](#10102-zkontroluj-integritu-deniku) | [Účetní deník](44_Ucetni_denik.md) |
+| **Zkontroluj integritu deníku** | Jen podvojné účetnictví — viz [§ 10.10.2](#10102-zkontroluj-integritu-deniku) | [Účetní deník](45_Ucetni_denik.md) |
 | Termín DPH / KH | Blíží se nebo uplynul termín podání | [Výkazy DPH](36_Vykazy_DPH.md) |
 | Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](39_Souhrnne_hlaseni.md) |
 | Kontaktuj neaktivní klienty | Klienti bez aktivity delší dobu (churn risk) | [Zisk](11_Zisk.md) |
@@ -226,9 +226,9 @@ funguje, popisují kapitoly [Faktury](14_Faktury.md) a
 
 Taky jen podvojné účetnictví. Na rozdíl od ostatních položek nepočítá nic
 naživo — čte poslední uložený běh **nočního kontrolního jobu** (viz
-[§ 44.10 Kontrola integrity deníku](44_Ucetni_denik.md#4410-kontrola-integrity-deniku-nocni-job)),
+[§ 45.10 Kontrola integrity deníku](45_Ucetni_denik.md#4510-kontrola-integrity-deniku-nocni-job)),
 aby dotaz na dashboard zůstal levný. Pokud job našel nesrovnalost mezi doklady
 a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů v
 popisku. Klik — na hlavním řádku i na kterémkoli štítku rozpadu — vede vždy na
-[Účetní deník](44_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
+[Účetní deník](45_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
 jednotlivých nálezů, ty najdeš jen přes CLI (viz § 41.11).

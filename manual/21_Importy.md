@@ -84,31 +84,32 @@ Import to řeší takto:
 
 ## 21.4b Zahraniční doklady a režim OSS
 
-Import vydaných faktur umí sám poznat plnění v režimu
-[OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss) a vyplnit na položce
-příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je proklikávat ručně.
+Import vydaných faktur umí sám poznat plnění v [režimu OSS](40_OSS.md) a vyplnit
+na položce příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je
+proklikávat ručně.
 
 ### Než spustíš import
 
 1. **Spusť databázové migrace** (`php api/bin/migrate.php`). Bez číselníku
-   [sazeb států OSS](72_Nastaveni.md#7212b-sazby-statu-oss) se import zahraničních
+   [sazeb států OSS](73_Nastaveni.md#7312b-sazby-statu-oss) se import zahraničních
    dokladů **vůbec nerozběhne** — raději neudělá nic, než aby doklady zařadil naslepo.
 2. **Zkontroluj zemi u zahraničních sazeb** v `Nastavení → Číselníky → DPH sazby`.
    Formulář zemi předvyplňuje na `CZ`, takže sazba `PL-23` bývá založená se zemí `CZ`.
    Import ji v takovém stavu nepřijme.
-3. **Zapni OSS** v `Nastavení → Daňové nastavení` a vyplň platnost registrace. Doklady
+3. **Zapni OSS** na kartě `Nastavení → Daně a účetnictví → Režim OSS (One Stop Shop)`
+   a vyplň platnost registrace. Doklady
    s datem plnění před začátkem registrace zůstanou tuzemské — to je správně.
 
 ### Jak se import rozhoduje
 
-Autoritou pro místo plnění je **číselník sazeb států OSS**, nikoli tvoje tabulka sazeb
-DPH. Ta je uživatelsky editovatelná a běžně v ní bývá zahraniční sazba vedená se zemí
-`CZ`; kdyby se ptalo jí, potvrdila by jako tuzemské přesně to plnění, které tuzemské není.
+Rozhodovací pravidlo je společné všem vstupním kanálům a popisuje ho
+[§ 40.3](40_OSS.md#403-jak-vznika-oss-radek). Ve zkratce: **autoritou pro místo
+plnění je číselník sazeb států OSS, ne tvoje tabulka DPH sazeb** — a do tuzemského
+přiznání smí jen řádek, u kterého číselník potvrdí, že sazba v zemi dodavatele
+k datu plnění opravdu platí. Každá jiná odpověď znamená buď zařazení do OSS, nebo
+odmítnutí dokladu s hláškou, co doplnit.
 
-Pravidlo je proto přísné: **do tuzemského přiznání smí jen řádek, u kterého číselník
-potvrdí, že sazba v zemi dodavatele k datu plnění opravdu platí.** Každá jiná odpověď —
-neplatí, nevím, chybějící nebo nečitelné datum plnění — znamená, že se řádek do tuzemska
-nepustí. Buď se zařadí do OSS, nebo se doklad odmítne s hláškou, co doplnit.
+Specifika importu ze souboru:
 
 - **Procento sazby se nikdy nedosazuje odhadem.** Bere se v tomto pořadí: hodnota
   `percentVAT` z Pohoda XML nebo `Percent` z ISDOC, číselná hodnota v atributu sazby,
@@ -120,62 +121,37 @@ nepustí. Buď se zařadí do OSS, nebo se doklad odmítne s hláškou, co dopln
   Hláška řekne, u které sazby a na jaký stát opravit zemi.
 - **Země spotřeby se bere z odběratele na importovaném dokladu**, ne z uložené karty
   klienta a ne z měny. Doklad v eurech pro slovenského odběratele jde do SK.
-- **Typ sazby** (základní / snížená / …) dohledá číselník podle země a procenta. Když
-  ho neurčí jednoznačně, řádek OSS příznak dostane, ale typ sazby zůstane prázdný —
-  a bez něj se do podání nedostane. Doplň ho hromadnou úpravou.
-- **Typ plnění** se odvozuje z měrné jednotky. Když ji soubor nenese, import dosadí
-  výchozí **„služba"** a nahlas to hlásí. Pro prodej zboží je to špatně — viz níže.
-
-### Plnění k ručnímu posouzení
-
-Některé sazby platí ve víc státech najednou: 21 % zná ČR i Nizozemsko, Belgie, Španělsko,
-Litva a Lotyšsko. U takového dokladu import z čísel nepozná, kam plnění patří. **Zařadí
-ho do OSS a označí k ručnímu posouzení** — ne naopak. Důvod je praktický: chybně zařazený
-OSS řádek uvidíš v krátkém náhledu podání, kdežto chybně zařazený tuzemský řádek zmizí
-mezi stovkami řádků přiznání k DPH.
-
-Kolik takových řádků vzniklo, říká souhrn importu, a upozorní na ně i **varování v náhledu
-OSS podání** za dané období — odtud na ně vede přímý proklik do seznamu faktur.
-Rozhodnutí uděláš v editoru faktury nebo hromadně přes
-[hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) — výběr **Jen řádky
-k ručnímu posouzení**.
-
-> [!NOTE]
-> Souhrn importu po zavření stránky zmizí, filtr **Místo plnění (OSS)** v seznamu faktur
-> ne. Volba **Nejisté — v OSS podání** vypíše přesně tyhle řádky; **Nejisté — v tuzemsku**
-> tu druhou skupinu, kterou zakládají automatické kanály (pravidelná fakturace, iDoklad,
-> Fakturoid, čtení PDF, API). Rozdíl vysvětluje
-> [§ 36 — Plnění k ručnímu posouzení](36_Vykazy_DPH.md#plneni-k-rucnimu-posouzeni).
-
-Zvlášť se hlásí **doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání. Import
-ho neodmítá (smíšená faktura umí vzniknout legitimně), ale dá o něm hlasitě vědět
-a jeho řádky označí k posouzení.
-
-### Dobropisy v režimu OSS
-
-Oprava plnění za dřívější čtvrtletí patří v OSS podání do samostatného oddílu s uvedením
-opravovaného období. Import **původní OSS období nedoplňuje** — v souboru není z čeho ho
-poznat — a na každý takový dobropis upozorní. Dokud období nedoplníš (`RRRRQn` v editoru
-položky), vykáže se oprava do běžného čtvrtletí, tedy do jiného, než kam patří.
+- **Odmítnutý řádek znamená, že se doklad nevytvoří.** Zdroj pravdy je v souboru,
+  takže po opravě stačí import zopakovat — už naimportované doklady se přeskočí
+  jako duplicity.
+- **Nejednoznačnou sazbu import zařadí do OSS** a označí k ručnímu posouzení, ne
+  naopak. Proč právě tímto směrem, vysvětluje
+  [§ 40.4.1](40_OSS.md#4041-dva-stavy-ktere-vypadaji-podobne).
+- **Doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání, se neodmítá
+  (smíšená faktura umí vzniknout legitimně), ale hlásí se zvlášť a jeho řádky se
+  označí k posouzení.
+- **Původní období u dobropisů import nedoplňuje** — v souboru není z čeho ho
+  poznat — a na každý takový doklad upozorní. Dokud období nedoplníš (`RRRRQn`
+  v editoru položky), vykáže se oprava do běžného čtvrtletí.
 
 ### Co po importu zkontrolovat
 
-1. **Typ plnění zboží / služba** u položek, kde soubor jednotku neuvedl. V podání se
-   výchozí „služba" projeví jako typ plnění `S`; u e-shopu se zbožím tam patří `G`.
-   Oprav to [hromadnou úpravou](14_Faktury.md#1432-hromadne-nastaveni-oss), nebo si
-   nastav výchozí typ plnění na kartě odběratele, aby se to u nových dokladů neopakovalo.
-2. **Řádky k ručnímu posouzení** — kolik jich je, říká souhrn importu i varování v náhledu
-   OSS podání; hromadná úprava má na ně vlastní výběr.
-3. **OSS řádky bez typu sazby** — bez typu sazby se řádek do podání nedostane; hromadná
-   úprava má i na ně vlastní výběr.
-4. **Náhled OSS podání** před stažením XML. Je krátký (řádek na kombinaci stát × sazba)
-   a je to poslední místo, kde se chyba dá chytit.
+1. **Typ plnění zboží / služba** u položek, kde soubor jednotku neuvedl — dosadí se
+   výchozí „služba" a v podání to vyjde jako `S`, kdežto u zboží tam patří `G`.
+2. **Řádky k ručnímu posouzení.**
+3. **OSS řádky bez typu sazby** — bez typu sazby se řádek do podání nedostane.
+4. **Náhled OSS podání** před stažením XML — poslední místo, kde se chyba dá chytit.
+
+Kolik čeho vzniklo, říká souhrn importu ([§ 21.5](#215-report)); souhrn ale po
+zavření stránky zmizí, kdežto filtr **Místo plnění (OSS)** v seznamu faktur ne.
+Všechny tři první body má [hromadná úprava OSS](40_OSS.md#405-hromadna-editace-oss)
+jako samostatný výběr položek — nemusíš je hledat po jednom.
 
 > [!TIP]
-> Doklady, které do systému natekly **ještě před** touto verzí, mají příznak OSS prázdný
-> a jejich zahraniční daň může být vykázaná v českém přiznání. Než podáš přiznání za
-> období, do kterého import spadl, projdi si zahraniční doklady v tom období a ověř,
-> že v přiznání k DPH nefigurují.
+> Doklady, které do systému natekly dřív, než byl OSS správně nastavený, mají
+> příznak OSS prázdný a jejich zahraniční daň může být vykázaná v českém přiznání.
+> Než podáš přiznání za období, do kterého import spadl, projdi si zahraniční
+> doklady v tom období a ověř, že v přiznání k DPH nefigurují.
 
 ## 21.5 Report
 

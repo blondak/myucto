@@ -5,7 +5,7 @@ podporovaný PDF výpis** z banky. Systém pohyby deduplikuje, nabídne jejich
 párování s doklady a v podvojném účetnictví připraví bezpečné zaúčtování.
 
 Návrhy zaúčtování, položky vyžadující zásah a historii automatických rozhodnutí
-najdete souhrnně v kapitole [Automat účtování](45_Automat.md).
+najdete souhrnně v kapitole [Automat účtování](46_Automat.md).
 
 GPC (ABO) je standardní český formát pro elektronickou výměnu výpisů. Umí ho
 exportovat: **KB**, **Fio Bank**, **ČSOB**, **Raiffeisenbank**, **Česká
@@ -265,7 +265,7 @@ Setup:
 ## 28.7 Automatické zaúčtování spárovaných plateb (jen podvojné účetnictví)
 
 Firmám vedoucím **podvojné účetnictví** MyÚčto po každém spárování/importu rovnou
-nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](44_Ucetni_denik.md).
+nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](45_Ucetni_denik.md).
 Daňová evidence žádný deník nemá — u ní se tato sekce, záložky ani tlačítka
 vůbec nezobrazují a bankovní modul funguje jen jako párování plateb popsané
 výše.
@@ -291,7 +291,7 @@ filtr se kombinuje s filtrem stavu párování.
 Automaticky zaúčtovanou transakci od ručního zápisu odliší odznak **Automaticky**.
 U návrhů je v přehledu vidět také stručné **Proč** — například název pravidla nebo
 informace, že návrh vznikl ze shody platby. Podrobné auditní vysvětlení hotového zápisu
-najdete po jeho rozbalení v [Účetním deníku](44_Ucetni_denik.md).
+najdete po jeho rozbalení v [Účetním deníku](45_Ucetni_denik.md).
 
 ### 28.7.1 Spárované platby faktur — přímý zápis
 
@@ -300,7 +300,7 @@ sloučená úhrada — [§ 28.4](#284-detail-vypisu)), MyÚčto se ji hned pokus
 zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 
 - **běžná vydaná faktura** → **MD 221 Bankovní účty / D 311 Odběratelé**
-  (skutečné účty bere z [předkontace](68_Ucetni_nastroje.md#683-predkontace)
+  (skutečné účty bere z [předkontace](69_Ucetni_nastroje.md#693-predkontace)
   `payment.receivable.bank`, pokud ji máš upravenou),
 - **běžná přijatá faktura** → **MD 321 Dodavatelé / D 221** (`payment.payable.bank`),
 - **zálohová (proforma) faktura** → **MD 221 / D 324 Přijaté zálohy** (inkaso zálohy)
@@ -322,7 +322,7 @@ Než se zápis vytvoří, MyÚčto ověří:
 - transakce je buď v **CZK**, nebo — u spárované platby — ve **stejné cizí měně jako
   faktura** (viz [cizoměnové spárované platby](#28711-cizomenove-sparovane-platby-kurzovy-rozdil) níže),
 - **běžná** faktura/přijatá faktura má svůj **vlastní zaúčtovaný předpis** v
-  [Účetním deníku](44_Ucetni_denik.md) (a ten není stornovaný) — bez
+  [Účetním deníku](45_Ucetni_denik.md) (a ten není stornovaný) — bez
   zaúčtovaného předpisu se platba jen spáruje, ale nezaúčtuje. **Zálohová (proforma)
   faktura ani zálohová přijatá faktura** tuto podmínku nemají — nejsou daňový doklad,
   takže žádný „svůj" předpis v deníku ani nemají, a účtují se rovnou podle výše,
@@ -371,7 +371,7 @@ nemusí být variabilní symbol a CZK částka se může lišit podle kurzu kare
   přepočtená pevným měsíčním/ročním kurzem firmy, pokud je zvolený, jinak kurzem
   ČNB ke dni bankovní transakce,
 - rozdíl mezi oběma jde na **563** (kurzová ztráta) nebo **663** (kurzový zisk) —
-  stejné účty jako u ročního [kurzového přecenění](44_Ucetni_denik.md).
+  stejné účty jako u ročního [kurzového přecenění](45_Ucetni_denik.md).
 
 U platby stejnou cizí měnou fungují i částečné a sloučené úhrady (poměrná část na
 alokaci). CZK karetní platba za cizoměnový doklad se automaticky účtuje jen při

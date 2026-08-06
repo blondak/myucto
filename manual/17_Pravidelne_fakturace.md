@@ -123,6 +123,33 @@ snapshotu uložit bez jeho výslovného obnovení.
 > založené dřív s nominální sazbou — generátor sazbu při vystavení sám sjednotí
 > na 0 %.
 
+#### Režim OSS na položce šablony
+
+Má-li firma [zapnutý režim OSS](40_OSS.md#4021-zapnuti-rezimu-a-platnost-registrace),
+je u každého řádku šablony zaškrtávátko **OSS**. Po zaškrtnutí se pod řádkem otevře
+proužek se **státem spotřeby**, **typem sazby** a **typem plnění** — přesně jako na
+řádku faktury. Sazba DPH pak nabízí i sazby cizích států, aby OSS řádek mohl nést
+sazbu státu spotřeby; tuzemský řádek zůstává u českých sazeb.
+
+Co šablona **záměrně nemá**: kurz, přepočtené částky ani „opravu období". To jsou
+vlastnosti konkrétního dokladu k jeho datu plnění a dopočítá je až generátor.
+
+- **Stát spotřeby je povinný.** Bez něj se řádek uloží jako tuzemský — položku
+  s OSS a bez země by cron při každém běhu vyrobil neplatnou. Formulář to zachytí
+  ještě před uložením.
+- **Prázdný typ sazby** je legitimní stav. Při generování se ho systém pokusí
+  doplnit z číselníku, ale jen tehdy, když odvození mluví o **témže státu spotřeby**.
+  Jinak řádek do OSS přiznání nepůjde.
+
+> ⚠️ **Šablona žije roky, registrace do OSS ne.** Uložené OSS rozhodnutí má při
+> generování přednost před automatickým odvozením, ale **jen pokud má firma
+> k datu plnění vygenerované faktury platnou registraci do OSS**. Jakmile
+> registrace skončí (nebo se režim vypne), řádek se vystaví jako **tuzemský**
+> a povinně dostane příznak **k ručnímu posouzení** — přeřazení proti rozhodnutí
+> člověka nesmí být tiché. Bez toho by řádek nespadl do žádného přiznání: z OSS
+> podání by ho vyřadila platnost registrace, z tuzemského přiznání OSS příznak.
+> Podrobně [§ 40.3.5](40_OSS.md#4035-rozdily-mezi-kanaly).
+
 **Placeholdery období** — do popisu položky (a do poznámek nad/pod
 položkami šablony) lze vložit tokeny, které se při **každém vygenerování** faktury
 nahradí podle **DUZP** (u proformy podle data vystavení). Šablona se nikdy nemění,

@@ -93,7 +93,7 @@ php api/bin/reset-mfa.php tvuj@email.cz
 
 Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení a čekající
 ověřovací flow a invaliduje všechny session. Kompatibilní alias
-`reset-2fa.php` lze dál použít. Detail viz [§ 75.2.3](75_Bezpecnost.md).
+`reset-2fa.php` lze dál použít. Detail viz [§ 76.2.3](76_Bezpecnost.md).
 
 Pokud nemáš shell přístup ke kontejneru/serveru, použij legacy SQL fallback —
 ten ale vypne jen TOTP, passkeys je nutné odvolat zvlášť:
@@ -189,7 +189,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ### DKIM podpis se nedaří aktivovat
 
-1. Vygeneruj klíče: viz [75. Bezpečnost § 55.8](75_Bezpecnost.md).
+1. Vygeneruj klíče: viz [76. Bezpečnost § 55.8](76_Bezpecnost.md).
 2. Publikuj DNS TXT — počkej 5–60 minut na propagaci.
 3. Ověř DKIM přes [mxtoolbox.com](https://mxtoolbox.com/dkim.aspx).
 4. Až DNS funguje, zapni v `cfg.php → smtp.dkim.enabled => true`.

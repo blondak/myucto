@@ -40,7 +40,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
-filtrů](72_Nastaveni.md#729-ulozene-filtry-a-predvolby-zobrazeni); promítne se
+filtrů](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
 
@@ -49,15 +49,18 @@ příznak zaúčtování).
 Sporné řádky končí na **dvou různých místech** a každé se řeší jinou otázkou. Proto má
 filtr tři hodnoty, ne zaškrtávátko:
 
-| Volba | Co vypíše | Co s tím |
-|---|---|---|
-| **Nejisté místo plnění (OSS)** | Obojí najednou | Rozliš je podle štítku u varsymbolu |
-| **Nejisté — v OSS podání** | Řádek se do OSS zařadil, ale s otazníkem — sazba platí i v ČR (21 % zná Nizozemsko, Belgie, Španělsko, Litva i Lotyšsko), číselník neuměl odpovědět, nebo doklad míchá OSS s tuzemským plněním | Ověř zemi spotřeby a typ sazby; pokud plnění patří do tuzemska, vypni na položce OSS |
-| **Nejisté — v tuzemsku** | Řádek zůstal mimo OSS a vstupuje do přiznání k DPH na ř. 1 a 2, aniž to kdo potvrdil | Ověř, jestli tam patří; pokud jde o plnění do jiného členského státu, zapni na položce OSS |
+| Volba | Co vypíše |
+|---|---|
+| **Nejisté místo plnění (OSS)** | Obojí najednou — rozliš je podle štítku u varsymbolu |
+| **Nejisté — v OSS podání** | Řádek se do OSS zařadil, ale s otazníkem |
+| **Nejisté — v tuzemsku** | Řádek zůstal mimo OSS a vstupuje do přiznání k DPH na ř. 1 a 2 |
 
 U dokladu v seznamu je vidět, který otazník nese: štítek **OSS ?** u varsymbolu značí
 řádek v OSS podání, štítek **ČR ?** řádek v tuzemsku. Doklad rozpadlý mezi obojí nese
 oba štítky.
+
+Jak oba stavy vznikají a co s každým z nich dělat, popisuje
+[§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
 
 Filtr jde do URL i do uložených filtrů. Starší odkazy a filtry uložené dřív, než měl
 filtr tři hodnoty, se otevřou jako **Nejisté místo plnění (OSS)**, tedy s obojím — nic
@@ -123,9 +126,8 @@ Typický měsíc:
 ### 14.3.2 Hromadné nastavení OSS
 
 Po migraci nebo po importu zůstanou desítky až stovky řádků, u kterých je potřeba
-doplnit nebo opravit údaje k režimu [OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss).
-Proklikat je po jednom není reálné, proto má seznam faktur hromadnou akci
-**Nastavit OSS (N)**.
+doplnit nebo opravit údaje k [režimu OSS](40_OSS.md). Proklikat je po jednom není
+reálné, proto má seznam faktur hromadnou akci **Nastavit OSS (N)**.
 
 Nejdřív si vyber doklady (typicky přes filtr **Místo plnění (OSS)** —
 [§ 14.1.1](#1411-filtry-vlevo)), pak v dialogu nastav:
@@ -147,36 +149,15 @@ se změní, u každého dokladu konkrétní změnu z původní hodnoty na novou,
 varování ze sazebníku a doklady, které se přeskočí i s důvodem. Teprve pak jde
 kliknout **Provést změnu**. Na dávku je limit 200 dokladů.
 
-**Co se přeskočí a proč.** Akce nemá „provést i tak" — příznak OSS rozhoduje, jestli
-řádek jde do českého přiznání, nebo do OSS podání, takže na dokladu, který už je
-odevzdaný nebo zamčený, se nepřepisuje:
+**Akce nemá „provést i tak."** Příznak OSS rozhoduje, jestli řádek jde do českého
+přiznání, nebo do OSS podání, takže doklad, který je stornovaný, uzamčený, pod
+retenčním holdem, v podaném období nebo mimo platnost registrace, se celý přeskočí
+s uvedeným důvodem. Stejně přísně je hlídané **vypnutí OSS** jako jeho zapnutí —
+zhasnutí příznaku přesouvá daň na ř. 1 českého přiznání, takže projde jen tam, kde
+číselník sazeb států OSS sazbu v zemi dodavatele potvrdí.
 
-| Důvod | Vysvětlení |
-|---|---|
-| Stornovaný doklad | Storno se needituje. |
-| Doklad je uzamčen / období uzavřené daňovým zámkem | Odemkni období, nebo změnu neprováděj. |
-| Období už bylo podáno | Řeší se opravným nebo dodatečným tvrzením, ne přepsáním dokladu. |
-| Záznamy roku jsou zadržené podle § 32 ZoÚ | Retenční hold. |
-| Datum plnění leží mimo platnost registrace k OSS | Zapnout OSS na dokladu z doby, kdy registrace neplatila, by ho odstranilo z českého přiznání, aniž by se objevil v OSS podání. |
-| Bez země spotřeby by OSS řádek nešel podat | Doplň zemi spotřeby ve stejném dialogu. |
-| Sazba řádku v tuzemsku nepotvrzena | Viz varování níže. |
-| Doklad nemá položku, která by do výběru spadala / položky už požadované hodnoty mají | Není co měnit. |
-
-> [!WARNING]
-> **Vypnout OSS je hlídané stejně jako zapnout.** Kdyby šlo zhasnout příznak OSS na
-> řádku se zahraniční sazbou, přesunula by se cizí daň na ř. 1 českého přiznání. Vypnout
-> OSS jde proto jen tam, kde číselník [sazeb států OSS](72_Nastaveni.md#7212b-sazby-statu-oss)
-> **potvrdí**, že sazba řádku v zemi dodavatele k datu plnění opravdu platí. Odpověď
-> „nevím" (chybí číselník, stát k datu nezná, nečitelné datum plnění) se bere stejně jako
-> „neplatí" a doklad se přeskočí.
-
-Příznak „místo plnění k ručnímu posouzení" se po zásahu **přepočítá**. Pokud doklad
-i po změně leží zároveň v OSS podání a v tuzemském přiznání, příznak se vrátí — volba
-„Označit řádky jako posouzené" ho nedokáže odklikat pryč, dokud rozpor trvá.
-
-Pokud dávka narazí na chybu, **zastaví se u prvního dokladu, který neprošel**, a výsledek
-vypíše, které doklady jsou už změněné a které se ani nezkusily. Změněným dokladům se
-zahodí PDF cache, protože doklad nese OSS doložku.
+Úplný seznam důvodů přeskočení, pravidla pro vypnutí OSS a chování dávky při chybě
+popisuje [§ 40.5](40_OSS.md#405-hromadna-editace-oss).
 
 ## 14.4 Ikony stavu (legenda)
 

@@ -107,7 +107,7 @@ php api/bin/migrate.php
 > které příkazy pro stažení bundlu zobrazí jako copy-paste box. Patička
 > aplikace ukazuje aktuální verzi + badge, pokud je dostupná novější (denně
 > refreshuje `cron-version-check.php`). Detail v kapitole
-> [Aktualizace](76_Aktualizace.md).
+> [Aktualizace](77_Aktualizace.md).
 
 ## 4.7 Aktualizace
 
@@ -143,5 +143,5 @@ Migrace jsou idempotentní, takže `migrate.php` se po každém upgradu spustí 
 Konfiguraci (`cfg.php`) ani data (`storage`, `private`, `log`) upgrade nemaže.
 
 > 🛈 Plný postup, zachování dat, rollback a řešení selhání upgradu najdeš
-> v kapitole [Aktualizace — § 56.6 Nativní instalace](76_Aktualizace.md#766-aktualizace-v-ui-nativni-instalace)
-> a [§ 76.7 Co když upgrade selže](76_Aktualizace.md#767-co-kdyz-upgrade-selze).
+> v kapitole [Aktualizace — § 56.6 Nativní instalace](77_Aktualizace.md#776-aktualizace-v-ui-nativni-instalace)
+> a [§ 77.7 Co když upgrade selže](77_Aktualizace.md#777-co-kdyz-upgrade-selze).

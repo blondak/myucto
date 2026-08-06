@@ -8,7 +8,7 @@ formátů hromadného exportu **vystavených faktur** a per-faktura export
 > Pokud chceš účetní za daný měsíc předat **vše najednou v jednom ZIP** (vystavené
 > i přijaté faktury, výpisy z účtu a knihu DPH, roztříděné do složek a s daňově
 > korektním zařazením do období), použij **Hromadný export** v sekci Daně — viz
-> [Hromadný export (ZIP)](41_Hromadny_export.md). Exporty níže
+> [Hromadný export (ZIP)](42_Hromadny_export.md). Exporty níže
 > jsou cílené na jeden formát / jeden typ dokladu.
 
 | Formát | Pro koho | Co obsahuje |
@@ -235,8 +235,7 @@ Pokud klient potřebuje přesně tvoji PDF verzi, použij paralelně **PDF ZIP**
 ### 20.4.7 Doklad v režimu OSS se do Pohody neexportuje
 
 Pohoda vede sazbu DPH jako výčet českých sazeb (základní / snížená / nulová), zahraniční
-sazbu ani příznak [OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss) v datovém
-formátu nemá kam zapsat. Export takový doklad proto **odmítne a řekne to**, místo aby polskou
+sazbu ani příznak [OSS](40_OSS.md) v datovém formátu nemá kam zapsat. Export takový doklad proto **odmítne a řekne to**, místo aby polskou
 sazbu 23 % tiše vydával za českou 21 %.
 
 Řádky v režimu OSS vykaž přes **Daně → OSS přiznání** a z exportu do Pohody doklady s nimi
@@ -367,7 +366,7 @@ z globálního kurzu.
   měsíc.
 - **Vše v jednom balíčku** — když účetní chce za měsíc kompletní podklad
   (vystavené + přijaté faktury + výpisy + kniha DPH najednou), použij raději
-  [Hromadný export (ZIP)](41_Hromadny_export.md) v sekci Daně —
+  [Hromadný export (ZIP)](42_Hromadny_export.md) v sekci Daně —
   vyřeší zařazení do období daňově korektně a roztřídí vše do pojmenovaných
   složek.
 - **ISDOC, Pohoda, Stereo, Money S3** — pokud si nejsi jistý, který formát použít,

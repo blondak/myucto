@@ -146,7 +146,7 @@ Oba příznaky jsou vidět i v **detailu** přijaté faktury (box Měna/DPH).
 
 > [!NOTE]
 > **Zaúčtování i u „Bez nároku", „Krácený (§75)" a „Krácený (§76)".** Zaúčtování
-> přijaté faktury do [Účetního deníku](44_Ucetni_denik.md) nově umí zpracovat i doklady
+> přijaté faktury do [Účetního deníku](45_Ucetni_denik.md) nově umí zpracovat i doklady
 > s nárokem **Bez nároku** (celá částka včetně DPH jde na nákladový účet, žádné 343) a
 > **Krácený (§75)** (na účet 343 jde jen poměrná uplatněná část DPH, zbytek DPH jde
 > spolu se základem do nákladu). U **Krácený (§76)** se do deníku zaúčtuje **celá** DPH
@@ -291,7 +291,7 @@ Klíčové principy:
 ### 23.2.7 Zaúčtování dobropisu
 
 Přijatý dobropis (typ dokladu **Dobropis**, viz [§ 23.2.2](#2322-povinna-pole)) se dnes
-umí zaúčtovat do [Účetního deníku](44_Ucetni_denik.md) automaticky stejně jako běžná
+umí zaúčtovat do [Účetního deníku](45_Ucetni_denik.md) automaticky stejně jako běžná
 faktura — systém pozná opravný doklad (typ Dobropis, nebo záporná celková částka) a
 zápis automaticky **otočí strany MD/Dal** a použije absolutní částku, takže výsledný
 zápis v deníku je čitelný (kladné částky na správné straně), ne matoucí záporná čísla.
@@ -374,7 +374,7 @@ Jedna záloha může být navázaná **jen na jednu** finální fakturu.
 
 > [!NOTE]
 > **Zaúčtování zálohového cyklu.** Zaplacení zálohové přijaté faktury se do
-> [Účetního deníku](44_Ucetni_denik.md) zaúčtuje jako **poskytnutá záloha** (MD 314
+> [Účetního deníku](45_Ucetni_denik.md) zaúčtuje jako **poskytnutá záloha** (MD 314
 > Poskytnuté zálohy / D 221 banka nebo 211 pokladna) — ne jako běžný závazek 321,
 > protože záloha není daňový doklad. Když pak zaúčtuješ finální (vyúčtovací) fakturu
 > navázanou na tuto zálohu, zápis automaticky doplní i **zúčtovací řádek zálohy**
@@ -432,7 +432,7 @@ zkusí najít odpovídající zálohu a v detailu nabídne **návrh propojení**
 > **Stav „Zaúčtovaná" (§ 23.1) a zaúčtování do deníku jsou dvě různé věci.**
 > Přechod na status **Zaúčtovaná** je jen pracovní workflow značka (visuálně
 > říká „doklad je hotový, předán dál"). Skutečné **zaúčtování do podvojného
-> účetnictví** — vznik zápisu v [Účetním deníku](44_Ucetni_denik.md) — je
+> účetnictví** — vznik zápisu v [Účetním deníku](45_Ucetni_denik.md) — je
 > samostatný krok popsaný tady a řídí se vlastním příznakem `booked_at`, ne
 > statusem dokladu. Klidně tak můžeš mít fakturu ve stavu **Přijatá**, ale už
 > zaúčtovanou, nebo naopak ve stavu **Zaúčtovaná**, a v deníku zatím nic.
@@ -442,7 +442,7 @@ Tlačítko **Zaúčtovat** se zobrazí v hlavičce detailu jen firmám v režimu
 doklad nemá účetní ikonu **Zaúčtováno** ani aktivní zápis v deníku. U dokladu typu
 **Záloha** se tlačítko nezobrazuje: zálohová výzva není účetní předpis závazku;
 účtuje se až její skutečná úhrada z banky nebo pokladny na účet 314. Funguje stejně jako u [vydaných faktur](16_Faktura_PDF.md#1613-zauctovani-do-deniku)
-— potvrzovací dialog, zápis podle [předkontace](68_Ucetni_nastroje.md#683-predkontace),
+— potvrzovací dialog, zápis podle [předkontace](69_Ucetni_nastroje.md#693-predkontace),
 po úspěchu účetní ikona **Zaúčtováno** (s datem v tooltipu) + proklik **Zobrazit v deníku**. Stejná
 tabulka chybových hlášek (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově…) platí i tady — viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku).
@@ -462,7 +462,7 @@ Doklady se účtují jeden po druhém (chyba jednoho neblokuje ostatní), na kon
 souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Max 500 dokladů na dávku.
 
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje admin — spustí se
-při přechodu na stav Přijatá) — viz [§ 72.11](72_Nastaveni.md#7211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
+při přechodu na stav Přijatá) — viz [§ 73.11](73_Nastaveni.md#7311-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

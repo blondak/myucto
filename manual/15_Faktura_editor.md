@@ -71,7 +71,7 @@ V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové fa
 > znovu pod jiným číslem.
 
 Šablonu pro automatické generování nastavuješ v **Systém → Dodavatelé →
-[tvůj dodavatel] → Číslování faktur** — viz [§ 71.5.3](71_Multi_supplier.md#7153-islovani-faktur).
+[tvůj dodavatel] → Číslování faktur** — viz [§ 72.5.3](72_Multi_supplier.md#7253-islovani-faktur).
 
 ### 15.2.6 Ceny „s DPH" vs „bez DPH" (brutto / netto režim)
 
@@ -98,7 +98,7 @@ DPH výkazy (přiznání, kontrolní hlášení, kniha DPH) ukazují stejné č�
   vždy ukazuje jako **netto** (bez DPH) — i v režimu „s DPH", kde se netto dopočítá z
   řádkového základu.
 - **Předvyplnění per dodavatel:** výchozí režim nové faktury nastavíš v
-  **Nastavení → Můj dodavatel → Ceny s DPH** (viz [§ 71.3](71_Multi_supplier.md#713-co-je-per-dodavatel-izolovane)).
+  **Nastavení → Můj dodavatel → Ceny s DPH** (viz [§ 72.3](72_Multi_supplier.md#723-co-je-per-dodavatel-izolovane)).
 - **Zpětná kompatibilita:** výchozí stav je „bez DPH" a všechny existující
   faktury zůstávají beze změny.
 
@@ -124,13 +124,13 @@ cena a její zdroj; u kurzového přepočtu také datum použitého kurzovního 
 
 Vložený řádek je samostatný snapshot. Lze jej dále upravit a pozdější změna
 ceníku, zákazníka nebo kurzu jej automaticky nepřecení. Správa ceníku je popsána
-v [§ 72.1.5](72_Nastaveni.md#7215-cenikove-polozky).
+v [§ 73.1.5](73_Nastaveni.md#7315-cenikove-polozky).
 
 | Sloupec | Význam |
 |---|---|
 | Popis | Co fakturuješ. Lze multiline. **Tip:** pokud je v popisu měsíc (`Konzultace 3/2026`), klonování faktury automaticky inkrementuje. |
 | Množství | Počet jednotek (kusy / hodiny / …) |
-| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 72.1.4](72_Nastaveni.md#7214-jednotky). |
+| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 73.1.4](73_Nastaveni.md#7314-jednotky). |
 | Cena/jed. | Jednotková cena (v režimu „bez DPH" netto, v režimu „s DPH" brutto — viz [§ 15.2.6](#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)) |
 | DPH | Sazba — `21 %`, `12 %`, `0 %` (osvobozeno), `RC` (reverse charge) |
 | Celkem | Auto-počítáno (množství × cena/jed.) |
@@ -173,7 +173,7 @@ Pokud se karta uzavřít nepodaří — zavřené účetní období, nebo u dlou
 rok, který nemá potvrzený ani přerušený daňový odpis — **faktura se přesto vystaví
 a zaúčtuje** a systém hned po vystavení upozorní, která karta zůstala v užívání
 a proč (např. „rok 2025 nemá potvrzený ani přerušený daňový odpis"). Doděláš odpisy
-(viz [§ 58.6](58_Majetek.md#586-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
+(viz [§ 59.6](59_Majetek.md#596-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
 z její vlastní stránky.
 
 Jednu kartu lze prodat jen jednou: pokud už ji prodal jiný doklad nebo je
@@ -415,7 +415,7 @@ Zaplacení se nemění. Propojená záloha (proforma) zároveň vypadne z pohled
 
 ### 15.8.2 Zaúčtování zálohového cyklu (proforma → DDKP → vyúčtování)
 
-Z pohledu [Účetního deníku](44_Ucetni_denik.md) fungují tři doklady zálohového cyklu
+Z pohledu [Účetního deníku](45_Ucetni_denik.md) fungují tři doklady zálohového cyklu
 takto:
 
 - **Zaplacení zálohové (proforma) faktury** — zaúčtuje se jako přijetí zálohy (MD 221
@@ -448,7 +448,7 @@ Pokud zjistíš, že vystavená faktura je špatně:
   vyžaduje, abys měl s klientem komunikaci o tom, co a proč.
 
 > [!NOTE]
-> **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](44_Ucetni_denik.md)
+> **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](45_Ucetni_denik.md)
 > zaúčtuje automaticky stejně jako běžná faktura — systém pozná opravný doklad (typ
 > Dobropis, nebo záporná celková částka) a zápis automaticky **otočí strany MD/Dal** a
 > použije absolutní částku, takže výsledný zápis je čitelný (kladné částky na správné

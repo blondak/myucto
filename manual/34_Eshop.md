@@ -1,7 +1,7 @@
 # 34. E-shop
 
 **Cesta: `Zboží → E-shop`** *(poslední položka sekce Zboží, viditelná jen když je
-v [Nastavení](72_Nastaveni.md) zapnutý modul **Sklad**)*
+v [Nastavení](73_Nastaveni.md) zapnutý modul **Sklad**)*
 
 Modul **E-shop** rozšiřuje skladovou kartu zboží (`Zboží → Skladové karty`) o vše,
 co potřebuješ pro **prodej přes e-shop**: vícejazyčný popis a SEO, zařazení do
@@ -225,7 +225,7 @@ to **výsledek výpočtu**, který systém přepočítává z nákupní ceny.
 
 > [!IMPORTANT]
 > **MyÚčto má dva oddělené cenové subsystémy a nemíchají se.** Jednoduchý
-> **Ceník** ([§ 72.1.5](72_Nastaveni.md)) je určený pro fakturaci služeb a umí
+> **Ceník** ([§ 73.1.5](73_Nastaveni.md)) je určený pro fakturaci služeb a umí
 > ceny per zákazník. **Sklad + E-shop** má vlastní cenotvorbu odvozenou z
 > nákupní ceny, popsanou zde. Po zapnutí modulu Sklad **Ceník z menu zmizí** —
 > ceny se mezi nimi nepřenášejí.
@@ -558,7 +558,7 @@ zboží ani v exportu na e-shop.
 ### 34.12.1 Číselníky a import
 
 - Modul E-shop je **dostupný jen se zapnutým Skladem** — bez něj se položka v
-  menu vůbec nezobrazí (nastavuje se v [§ 53. Nastavení](72_Nastaveni.md)).
+  menu vůbec nezobrazí (nastavuje se v [§ 53. Nastavení](73_Nastaveni.md)).
 - Kódy (výrobce, kategorie, atribut, tag, poplatek) jsou jedinečné **v rámci
   firmy** — při kolizi vrátí formulář chybu „…s tímto kódem už existuje".
 - Kategorie nelze přesunout do vlastního podstromu (ochrana proti zacyklení
@@ -582,7 +582,7 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 
 | Chybějící funkce | Náhradní řešení |
 |---|---|
-| **Cenové hladiny / skupiny zákazníků** | Ceny per zákazník existují jen v jednoduchém **Ceníku** pro fakturaci ([§ 72.1.5](72_Nastaveni.md)), který se se skladem nekombinuje |
+| **Cenové hladiny / skupiny zákazníků** | Ceny per zákazník existují jen v jednoduchém **Ceníku** pro fakturaci ([§ 73.1.5](73_Nastaveni.md)), který se se skladem nekombinuje |
 | **Časově omezené akční ceny** | Ruční přepis + tag, ručně vrátit ([§ 34.10.5](#34105-akce-a-vyprodej)) |
 | **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu |
 | **Sleva na produkt** | Jen procentní sleva na úrovni faktury |

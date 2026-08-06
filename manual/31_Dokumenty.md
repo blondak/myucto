@@ -131,7 +131,7 @@ Kromě obecného úložiště popsaného v této kapitole má MyÚčto ještě *
 oddělenou evidenci příloh přímo u jednotlivých zápisů v účetním deníku** — sken
 faktury, dodacího listu nebo jiného průkazného dokladu, který dokládá konkrétní
 účetní zápis podle **§ 33a zákona o účetnictví**. Tahle příloha se **nenahrává
-zde v sekci Dokumenty**, ale přímo v detailu zápisu v [Účetním deníku](44_Ucetni_denik.md) —
+zde v sekci Dokumenty**, ale přímo v detailu zápisu v [Účetním deníku](45_Ucetni_denik.md) —
 tady popisujeme jen princip, protože jde o technicky příbuzné, ale oddělené
 úložiště.
 

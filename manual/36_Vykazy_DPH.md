@@ -7,9 +7,9 @@ MyÚčto.cz generuje XML pro EPO portál MFČR:
 
 Související výkazy a exporty mají v manuálu vlastní kapitoly: [Kniha DPH](37_Kniha_DPH.md)
 (interní žurnál), [Souhrnné hlášení](39_Souhrnne_hlaseni.md) (EU dodání B2B) a
-[Hromadný export](41_Hromadny_export.md) (ZIP balíček pro účetní). Rozdíl mezi
+[Hromadný export](42_Hromadny_export.md) (ZIP balíček pro účetní). Rozdíl mezi
 staženým a skutečně podaným XML vysvětluje [Archiv podání a daňová
-rekonciliace](69_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
+rekonciliace](70_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
 **Daně**, archiv podání jako poslední bod menu **Nástroje**.
 
 OSS má samostatnou stránku **Daně → OSS přiznání**, která se objeví až po
@@ -202,141 +202,45 @@ nebo v ARES. Builder ho normalizuje (odstraní `CZ-NACE ` prefix, padne na 6
 
 ## OSS přiznání (OSSEI1)
 
-**Cesta: `Daně → OSS přiznání`**. Stránka připravuje podklad a EPO XML za
-zvolený kalendářní kvartál. Objeví se až po zapnutí OSS v daňovém nastavení
-firmy.
+**Cesta: `Daně → OSS přiznání`**. Stránka připravuje podklad a XML formuláře
+`OSSEI1` za zvolený kalendářní kvartál. Objeví se až po zapnutí OSS v daňovém
+nastavení firmy.
 
-Do přiznání vstupují jednotlivé řádky vydaných faktur označené jako OSS, jejichž
-datum zdanitelného plnění patří do vybraného kvartálu. Aplikace je seskupí podle
-státu spotřeby, typu sazby a sazby DPH a oddělí běžná plnění od oprav vztahujících
-se k dřívějším obdobím. Výpočet vychází z řádkových základů a daně v daňovém
-ledgeru, nikoli jen z celkové částky hlavičky faktury.
+Hotové XML se **podává v aplikaci MOSS/OSS na Daňovém portálu**, do které se
+musíš přihlásit — obecnou cestou EPO to nejde, viz
+[§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava).
 
-Náhled zobrazuje základy a daň, součty, termín podání a varování. Kontroluje
-zejména vyplněnou zemi spotřeby, existenci sazby platné pro danou zemi a datum,
-shodu sazby na dokladu s číselníkem a údaje potřebné pro opravy minulých období.
-OSS řádky jsou současně vyřazeny z českého přiznání k DPH, kontrolního hlášení
-a Knihy DPH.
+Do přiznání vstupují jednotlivé OSS řádky vydaných faktur, jejichž datum
+zdanitelného plnění patří do vybraného kvartálu. Aplikace je seskupí podle státu
+spotřeby, typu plnění, typu sazby a sazby DPH a oddělí běžná plnění od oprav
+vztahujících se k dřívějším obdobím. Výpočet vychází z řádkových základů a daně
+v daňovém ledgeru, nikoli jen z celkové částky hlavičky faktury.
 
-Zbytek OSS je popsaný jinde v manuálu:
+**OSS řádky jsou vyřazené z českého přiznání k DPH, z kontrolního hlášení
+i z Knihy DPH.** Zařazení do OSS se odvozuje automaticky ve všech vstupních
+kanálech — ruční označování řádků není potřeba.
 
-- **Zapnutí režimu a registrace** — [§ 72.1.2a](72_Nastaveni.md#7212a-oss-a-danove-nastaveni)
-- **Sazby pro doklad** (`PL-23`, `SK-23`, …) — [§ 72.1.2](72_Nastaveni.md#7212-sazby-dph)
-- **Kontrolní číselník sazeb členských států** — [§ 72.1.2b](72_Nastaveni.md#7212b-sazby-statu-oss)
-- **Vystavení faktury, doložka na PDF, práh 10 000 EUR** — [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss)
-- **Import zahraničních dokladů** — [§ 21.4b](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss)
-- **Hromadná oprava po importu** — [§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss)
+> **Celý režim OSS popisuje samostatná kapitola [40. Režim OSS (One Stop
+> Shop)](40_OSS.md)**: nastavení a registrace, odvození řádku, plnění k ručnímu
+> posouzení, hromadná úprava, doložka na dokladu, účtování na 345.100, sledování
+> prahu 10 000 EUR, přepočet kurzem ECB, opravy minulých období, XML `OSSEI1`,
+> archiv podání, rekonciliace a evidence § 110f.
 
-### Plnění k ručnímu posouzení
+### Co se z OSS promítne do přiznání k DPH
 
-Náhled hlásí jedním varováním, kolik řádků za období čeká na ruční posouzení. Jde
-o plnění, u kterých se nepodařilo spolehlivě určit místo plnění — táž sazba platí i v zemi
-dodavatele (21 % zná ČR, Nizozemsko, Belgie, Španělsko, Litva i Lotyšsko), číselník neuměl
-odpovědět, nebo si doklad protiřečí, protože míchá plnění v režimu OSS s tuzemským.
+Přiznání k DPH hlásí varování se seznamem dokladů u řádků, které zůstaly **mimo
+OSS s příznakem „k ručnímu posouzení"** — vstupují na **ř. 1 a 2**, aniž to kdo
+potvrdil. Zakládají je kanály běžící bez lidského zásahu (pravidelná fakturace,
+synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API).
+Projdi je dřív, než přiznání podáš — najdeš je filtrem **Místo plnění (OSS)**
+v seznamu faktur, volbou **Nejisté — v tuzemsku**
+([§ 14.1.1](14_Faktury.md#nejiste-misto-plneni-oss)). Druhou skupinu, tedy řádky
+zařazené do OSS s týmž otazníkem, hlásí náhled OSS podání; rozdíl mezi nimi
+vysvětluje [§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
 
-Označené řádky mohou skončit na dvou různých místech a každé se řeší jinou otázkou:
-
-| Kde řádek leží | Kdo ho tak založí | Na co se ptát |
-|---|---|---|
-| **V OSS podání**, s příznakem k posouzení | Import vydaných faktur — u nejednoznačné sazby se rozhodne ve prospěch OSS, protože chybný OSS řádek je v krátkém náhledu podání vidět, kdežto chybný tuzemský zmizí mezi stovkami řádků přiznání | Sedí země spotřeby a typ sazby? Nepatří plnění do tuzemska? |
-| **V tuzemském přiznání** na ř. 1 a 2, s příznakem k posouzení | Doklady zakládané automaticky bez lidského zásahu — pravidelná fakturace, synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API. Doklad vzniknout musel, ale do OSS podání řádek nepatří, dokud to nikdo nepotvrdí | Patří plnění do tuzemského přiznání? Nemá jít do OSS? |
-
-**Obojí najdeš filtrem Místo plnění (OSS)** v seznamu faktur
-([§ 14.1.1](14_Faktury.md#nejiste-misto-plneni-oss)) — buď najednou volbou
-**Nejisté místo plnění (OSS)**, nebo každou větev zvlášť. Doklad v seznamu nese štítek
-**OSS ?**, resp. **ČR ?** podle toho, který otazník na něm visí. Varování v náhledu OSS
-podání navíc nabízí přímý proklik na řádky té první skupiny za zobrazené čtvrtletí;
-řádky té druhé hlásí i přiznání k DPH.
-
-Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně —
-[§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss); volba **Jen řádky k ručnímu
-posouzení** tam zabírá oba případy.
-
-### Zaúčtování OSS daně
-
-Daň v režimu OSS se neúčtuje na účet 343. Patří jinému členskému státu, do českého
-přiznání nevstupuje a odvádí se samostatně, proto má vlastní účet **345.100 — DPH
-v režimu OSS (jiný členský stát)**. Na 343 tak zůstává přesně to, co jde do přiznání
-k DPH, a zůstatek účtu jde s přiznáním srovnat; v rozvaze je 345.100 součástí téže
-položky „Stát — daňové závazky a dotace" jako 343.
-
-Faktura, která míchá tuzemské plnění s plněním v režimu OSS, rozdělí daň mezi oba
-účty; základ jde celý na výnosový účet dokladu. Dobropis i storno obracejí obě
-daňové nohy. Účet lze změnit v předkontacích u pravidla `oss.output.vat` (například
-na vlastní analytiku k 343) — pak se ale zůstatek 343 s přiznáním neshoduje.
-
-### Orientační sledování prahu 10 000 EUR
-
-Blok prahu sleduje za kalendářní rok přeshraniční B2C plnění zákazníkům v EU
-mimo ČR bez DIČ. Záměrně zahrnuje i řádky, které zatím nejsou označené jako
-OSS, aby ruční označení nemohlo čerpání prahu skrýt. Ukazuje součet v EUR,
-procento vyčerpání, rozpad podle zemí a případné datum překročení; od 80 %
-upozorňuje na blížící se limit.
-
-Přepočet používá denní kurz ČNB. Doklad bez dostupného kurzu do součtu nevstoupí
-a stránka na něj upozorní. Jde o orientační pomůcku: zákonný přepočet prahu může
-vyžadovat jiný pevný kurz, proto hodnotu blízko limitu ověř účetně.
-
-> [!WARNING]
-> Sledování prahu samo nezapne OSS, nezmění klasifikaci dokladu a nerozhodne,
-> jaký daňový režim se na plnění právně vztahuje. Řádky pro přiznání musí
-> uživatel označit a doplnit jejich zemi spotřeby, typ sazby a typ plnění.
-
-### XML a archiv podání
-
-Stažení vytvoří XML `OSSEI1` ve měně nastavené pro OSS. Export vyžaduje
-oprávnění exportovat daňové výkazy, uloží neměnný snapshot zdrojových dat do
-archivu daňových podání a zapíše akci do activity logu. Aplikace XML sama
-neodesílá; před předáním ověř varování, součty, registraci a výsledek v EPO.
-
-Záložka **Archiv podání** vypisuje všechny archivované OSS snapshoty s časem
-vzniku, stavem, výsledkem validace, SHA-256 otiskem a odkazem na stažení uloženého
-souboru. Stejné snapshoty leží ve společném archivu v **Nástroje → EPO podání
-a archiv**, kde se k nim připojují EPO pokusy, doručenky a označení „podáno".
-Archivovaný soubor prokazuje, co vzniklo — ne že bylo podáno; rozdíl vysvětluje
-[Archiv podání a daňová rekonciliace](69_Archiv_podani_a_rekonciliace.md).
-
-### Rekonciliace „podáno vs. účetnictví"
-
-Záložka **Rekonciliace** porovná archivované podání za zvolený kvartál s tím, co
-by se za totéž období podalo dnes. Slouží hlavně k odhalení dokladu opraveného
-zpětně po podání — bez ní se taková oprava v aplikaci nikde neprojeví a rozdíl se
-najde až při kontrole ve státě spotřeby.
-
-Porovnává se na třech úrovních: součty přiznání, řádky podání (stát spotřeby × typ
-plnění × typ sazby × sazba) a jednotlivé doklady. U dokladů rozliší, co přibylo,
-co zmizelo (storno, přesun data plnění) a co se změnilo; přesun daně do jiného státu
-spotřeby se pozná i tehdy, když se součty nezmění.
-
-Referencí je poslední archivované podání období; doložené podání má přednost před
-pouhým stažením. Pokud reference není doložené podání, stránka to výslovně uvede —
-stažení XML podáním není. Archiv vzniklý dříve, než aplikace začala ukládat podklad
-podání, porovnat nelze; v takovém případě stránka hlásí, že chybí podklad, a nikoli
-že se výkaz shoduje.
-
-Rozdíl sám o sobě neznamená chybu — může jít o legitimní změnu po podání. Rozhodnutí,
-zda podat opravné přiznání za původní období, zůstává na účetní.
-
-### Evidence podle § 110f ZDPH
-
-Záložka **Evidence § 110f** ukazuje záznamy o vybraných plněních, které zákon
-o DPH k režimu jednoho správního místa vyžaduje. Strukturu údajů stanoví čl. 63c
-prováděcího nařízení Rady (EU) č. 282/2011: stát spotřeby, druh, popis a množství
-plnění, datum plnění, základ daně s uvedením měny, následné zvýšení či snížení
-základu, sazbu, daň, přijaté úhrady, údaje z dokladu a podklad, ze kterého se
-určilo místo plnění.
-
-Záznamy vznikají automaticky při archivaci podání, a to z týchž dat, ze kterých
-vzniklo XML. Jsou **write-once** — nelze je změnit ani smazat, protože jinak by po
-opravě dokladu ukazovaly jiný stav, než jaký se podal. Uchovávají se 10 let od konce
-kalendářního roku, ve kterém bylo plnění uskutečněno; u opravy staršího období se
-lhůta počítá od roku původního plnění. Tlačítka **Export CSV** a **Export JSON**
-poskytnou evidenci elektronicky, jak zákon i nařízení požadují; export se loguje.
-
-Body čl. 63c, které aplikace z dnešních dat doložit neumí, stránka i export výslovně
-vyjmenovávají — netváří se tedy, že je evidence úplná. Jde o zálohy přijaté před
-uskutečněním plnění, místo zahájení a ukončení přepravy u zboží a doklad o vrácení
-zboží; ty je nutné doložit mimo aplikaci.
+Účtování OSS daně na vlastní účet **345.100** je důvod, proč **zůstatek 343 jde
+s přiznáním k DPH srovnat** — podrobně
+[§ 40.7](40_OSS.md#407-uctovani-oss-dane).
 
 ## DPH přiznání (DPHDP3)
 
@@ -585,7 +489,7 @@ jednotlivém dokladu — kráti se **jedním koeficientem za celou firmu a rok**
 nejde doklad s kráceným nárokem §76 **ani zaúčtovat, ani zahrnout do přiznání** —
 systém vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení
 zálohového koeficientu i roční vypořádání je **v tuto chvíli dostupné jen přes
-administrátorské API** — obdobně jako [zámek účtování k datu](44_Ucetni_denik.md#449-zamek-uctovani-k-datu),
+administrátorské API** — obdobně jako [zámek účtování k datu](45_Ucetni_denik.md#459-zamek-uctovani-k-datu),
 samostatná obrazovka v administraci pro tuto akci zatím není:
 
 | Endpoint | Kdo smí | Co dělá |
@@ -603,7 +507,7 @@ vypořádací koeficient ho odečte z čitatele nebo jmenovatele.
 **Omezení, o kterých je dobré vědět:**
 - Samotné **účetní zaúčtování ročního vypořádání** (na účty 548/343) systém **nedělá
   automaticky** — jen spočte a zobrazí částku na ř. 53 v přiznání; do
-  [Účetního deníku](44_Ucetni_denik.md) ji zapiš ručním zápisem.
+  [Účetního deníku](45_Ucetni_denik.md) ji zapiš ručním zápisem.
 - Kombinace **reverse charge** (samovyměření) a **Krácený (§76)** na jednom dokladu
   **není podporovaná** (řádek 43, kam se zrcadlí odpočet u samovyměření, nemá krácený
   protějšek) — takový doklad systém odmítne zaúčtovat i zahrnout do přiznání

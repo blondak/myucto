@@ -4,7 +4,7 @@ Pokladna slouží k evidenci hotovostních příjmů a výdajů — příjmové 
 pokladní doklady, pokladní knihu a zaúčtování hotovostních pohybů na účet 211. Modul je dostupný
 firmám v **obou** účetních režimech — podvojném účetnictví i daňové evidenci; v daňové evidenci
 běží pokladna bez účetního deníku (kasová báze), zatímco u podvojného účetnictví se každý doklad
-promítá do [Účetního deníku](44_Ucetni_denik.md).
+promítá do [Účetního deníku](45_Ucetni_denik.md).
 
 Najdete ji v menu **Peníze → Pokladna** (hned za položkou Bankovní účty).
 
@@ -252,7 +252,7 @@ vhodné jako podklad k roční uzávěrce nebo pro kontrolu.
 ## 30.6 Zaúčtování a vazba na deník
 
 V podvojném účetnictví se každý zaúčtovaný pokladní doklad promítá standardním způsobem do
-[Účetního deníku](44_Ucetni_denik.md) — konkrétní účtovací předpis (MD/D) se liší podle účelu
+[Účetního deníku](45_Ucetni_denik.md) — konkrétní účtovací předpis (MD/D) se liší podle účelu
 dokladu:
 
 | Účel | Zaúčtování (zjednodušeně) |
