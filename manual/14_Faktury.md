@@ -36,6 +36,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Měna | CZK / EUR / … |
 | Období | Tento měsíc / minulý měsíc / tento rok / minulý rok / vlastní rozsah |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
+| Nejisté místo plnění (OSS) | Zaškrtávátko. Vypíše doklady s řádkem, u kterého se nepodařilo určit, jestli jde o plnění v režimu OSS, nebo o tuzemské. Takové řádky vstupují do tuzemského přiznání na ř. 1 a 2, do OSS podání ne — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
@@ -76,6 +77,7 @@ Zaškrtni více faktur (checkbox). Nahoře se objeví lišta s akcemi:
 | **Stáhnout ISDOC ZIP** | ISDOC 6.0.2 XML pro každou + ZIP | Vystavené |
 | **Stáhnout Pohoda XML** | Sloučený dataPack pro import do Pohody | Vystavené |
 | **Zaúčtovat (N)** | Zaúčtuje vybrané do deníku, jednu po druhé (chyba jedné neblokuje ostatní); na konci souhrn ok/chyby. Max 500 dokladů na dávku. | Vystavené a dosud nezaúčtované — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
+| **Nastavit OSS (N)** | Hromadně nastaví režim OSS, zemi spotřeby, typ sazby a typ plnění na položkách. Náhled je povinný. Max 200 dokladů na dávku — viz [§ 14.3.2](#1432-hromadne-nastaveni-oss) | Doklady, které nejsou stornované, zamčené ani v podaném období |
 
 > ⚠️ **Vystavit znovu** vždy vytvoří **nové koncepty** — nepřevede automaticky
 > klony do `issued`. Tím tě chrání před omylem; po klonování si v každé nové
@@ -98,6 +100,64 @@ Typický měsíc:
    PDF se vygeneruje).
 5. **Označím všechny → Odeslat klientovi**.
 6. **Hotovo** za 5 minut.
+
+### 14.3.2 Hromadné nastavení OSS
+
+Po migraci nebo po importu zůstanou desítky až stovky řádků, u kterých je potřeba
+doplnit nebo opravit údaje k režimu [OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss).
+Proklikat je po jednom není reálné, proto má seznam faktur hromadnou akci
+**Nastavit OSS (N)**.
+
+Nejdřív si vyber doklady (typicky přes filtr **Nejisté místo plnění (OSS)**), pak
+v dialogu nastav:
+
+| Pole | Význam |
+|---|---|
+| **Které položky** | Jen řádky k ručnímu posouzení / jen OSS řádky bez typu sazby / všechny OSS řádky / všechny položky dokladu |
+| **Režim OSS** | Zapnout OSS / Vypnout OSS (plnění je tuzemské) / Ponechat beze změny |
+| **Země spotřeby** | Členský stát, do kterého plnění patří |
+| **Typ sazby** | Základní / Snížená / Druhá snížená / Parkovací |
+| **Typ plnění** | Zboží / Služby |
+| **Označit řádky jako posouzené** | Zhasne příznak „místo plnění k ručnímu posouzení" |
+
+Každé pole má volbu **— ponechat —**, takže lze nastavit třeba jen typ plnění
+a všeho ostatního se nedotknout.
+
+**Náhled je povinný.** Tlačítko **Zobrazit náhled** vypíše, kolik dokladů a položek
+se změní, u každého dokladu konkrétní změnu z původní hodnoty na novou, případná
+varování ze sazebníku a doklady, které se přeskočí i s důvodem. Teprve pak jde
+kliknout **Provést změnu**. Na dávku je limit 200 dokladů.
+
+**Co se přeskočí a proč.** Akce nemá „provést i tak" — příznak OSS rozhoduje, jestli
+řádek jde do českého přiznání, nebo do OSS podání, takže na dokladu, který už je
+odevzdaný nebo zamčený, se nepřepisuje:
+
+| Důvod | Vysvětlení |
+|---|---|
+| Stornovaný doklad | Storno se needituje. |
+| Doklad je uzamčen / období uzavřené daňovým zámkem | Odemkni období, nebo změnu neprováděj. |
+| Období už bylo podáno | Řeší se opravným nebo dodatečným tvrzením, ne přepsáním dokladu. |
+| Záznamy roku jsou zadržené podle § 32 ZoÚ | Retenční hold. |
+| Datum plnění leží mimo platnost registrace k OSS | Zapnout OSS na dokladu z doby, kdy registrace neplatila, by ho odstranilo z českého přiznání, aniž by se objevil v OSS podání. |
+| Bez země spotřeby by OSS řádek nešel podat | Doplň zemi spotřeby ve stejném dialogu. |
+| Sazba řádku v tuzemsku nepotvrzena | Viz varování níže. |
+| Doklad nemá položku, která by do výběru spadala / položky už požadované hodnoty mají | Není co měnit. |
+
+> [!WARNING]
+> **Vypnout OSS je hlídané stejně jako zapnout.** Kdyby šlo zhasnout příznak OSS na
+> řádku se zahraniční sazbou, přesunula by se cizí daň na ř. 1 českého přiznání. Vypnout
+> OSS jde proto jen tam, kde číselník [sazeb států OSS](71_Nastaveni.md#7112b-sazby-statu-oss)
+> **potvrdí**, že sazba řádku v zemi dodavatele k datu plnění opravdu platí. Odpověď
+> „nevím" (chybí číselník, stát k datu nezná, nečitelné datum plnění) se bere stejně jako
+> „neplatí" a doklad se přeskočí.
+
+Příznak „místo plnění k ručnímu posouzení" se po zásahu **přepočítá**. Pokud doklad
+i po změně leží zároveň v OSS podání a v tuzemském přiznání, příznak se vrátí — volba
+„Označit řádky jako posouzené" ho nedokáže odklikat pryč, dokud rozpor trvá.
+
+Pokud dávka narazí na chybu, **zastaví se u prvního dokladu, který neprošel**, a výsledek
+vypíše, které doklady jsou už změněné a které se ani nezkusily. Změněným dokladům se
+zahodí PDF cache, protože doklad nese OSS doložku.
 
 ## 14.4 Ikony stavu (legenda)
 

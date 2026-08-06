@@ -82,6 +82,100 @@ Import to řeší takto:
   i ten obsazený, doklad se přeskočí s hláškou, ať mu zadáš jiný variabilní
   symbol a naimportuješ ho znovu.
 
+## 21.4b Zahraniční doklady a režim OSS
+
+Import vydaných faktur umí sám poznat plnění v režimu
+[OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss) a vyplnit na položce
+příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je proklikávat ručně.
+
+### Než spustíš import
+
+1. **Spusť databázové migrace** (`php api/bin/migrate.php`). Bez číselníku
+   [sazeb států OSS](71_Nastaveni.md#7112b-sazby-statu-oss) se import zahraničních
+   dokladů **vůbec nerozběhne** — raději neudělá nic, než aby doklady zařadil naslepo.
+2. **Zkontroluj zemi u zahraničních sazeb** v `Nastavení → Číselníky → DPH sazby`.
+   Formulář zemi předvyplňuje na `CZ`, takže sazba `PL-23` bývá založená se zemí `CZ`.
+   Import ji v takovém stavu nepřijme.
+3. **Zapni OSS** v `Nastavení → Daňové nastavení` a vyplň platnost registrace. Doklady
+   s datem plnění před začátkem registrace zůstanou tuzemské — to je správně.
+
+### Jak se import rozhoduje
+
+Autoritou pro místo plnění je **číselník sazeb států OSS**, nikoli tvoje tabulka sazeb
+DPH. Ta je uživatelsky editovatelná a běžně v ní bývá zahraniční sazba vedená se zemí
+`CZ`; kdyby se ptalo jí, potvrdila by jako tuzemské přesně to plnění, které tuzemské není.
+
+Pravidlo je proto přísné: **do tuzemského přiznání smí jen řádek, u kterého číselník
+potvrdí, že sazba v zemi dodavatele k datu plnění opravdu platí.** Každá jiná odpověď —
+neplatí, nevím, chybějící nebo nečitelné datum plnění — znamená, že se řádek do tuzemska
+nepustí. Buď se zařadí do OSS, nebo se doklad odmítne s hláškou, co doplnit.
+
+- **Procento sazby se nikdy nedosazuje odhadem.** Bere se v tomto pořadí: hodnota
+  `percentVAT` z Pohoda XML nebo `Percent` z ISDOC, číselná hodnota v atributu sazby,
+  dopočet z rekapitulace v témže souboru (daň ÷ základ), a teprve u tuzemského odběratele
+  převod slovního označení sazby („základní", „snížená") na sazbu platnou k datu plnění.
+  Když ani to nevyjde, je sazba neznámá a rozhodne pravidlo výše.
+- **Sazba se páruje na zemi a platnost k datu**, ne na nejbližší procento. Když se
+  nenajde, odmítne se **celý doklad** — doklad s vynechaným řádkem má špatné součty.
+  Hláška řekne, u které sazby a na jaký stát opravit zemi.
+- **Země spotřeby se bere z odběratele na importovaném dokladu**, ne z uložené karty
+  klienta a ne z měny. Doklad v eurech pro slovenského odběratele jde do SK.
+- **Typ sazby** (základní / snížená / …) dohledá číselník podle země a procenta. Když
+  ho neurčí jednoznačně, řádek OSS příznak dostane, ale typ sazby zůstane prázdný —
+  a bez něj se do podání nedostane. Doplň ho hromadnou úpravou.
+- **Typ plnění** se odvozuje z měrné jednotky. Když ji soubor nenese, import dosadí
+  výchozí **„služba"** a nahlas to hlásí. Pro prodej zboží je to špatně — viz níže.
+
+### Plnění k ručnímu posouzení
+
+Některé sazby platí ve víc státech najednou: 21 % zná ČR i Nizozemsko, Belgie, Španělsko,
+Litva a Lotyšsko. U takového dokladu import z čísel nepozná, kam plnění patří. **Zařadí
+ho do OSS a označí k ručnímu posouzení** — ne naopak. Důvod je praktický: chybně zařazený
+OSS řádek uvidíš v krátkém náhledu podání, kdežto chybně zařazený tuzemský řádek zmizí
+mezi stovkami řádků přiznání k DPH.
+
+Kolik takových řádků vzniklo, říká souhrn importu, a upozorní na ně i **varování v náhledu
+OSS podání** za dané období. Rozhodnutí uděláš v editoru faktury nebo hromadně přes
+[hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) — výběr **Jen řádky
+k ručnímu posouzení**.
+
+> [!NOTE]
+> Filtr **Nejisté místo plnění (OSS)** v seznamu faktur je na něco jiného: ukazuje řádky,
+> které zůstaly v **tuzemském** přiznání a systém si jimi není jistý. Takové zakládají
+> automatické kanály (pravidelná fakturace, iDoklad, Fakturoid, čtení PDF, API), ne import
+> vydaných faktur. Rozdíl vysvětluje
+> [§ 36 — Plnění k ručnímu posouzení](36_Vykazy_DPH.md#plneni-k-rucnimu-posouzeni).
+
+Zvlášť se hlásí **doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání. Import
+ho neodmítá (smíšená faktura umí vzniknout legitimně), ale dá o něm hlasitě vědět
+a jeho řádky označí k posouzení.
+
+### Dobropisy v režimu OSS
+
+Oprava plnění za dřívější čtvrtletí patří v OSS podání do samostatného oddílu s uvedením
+opravovaného období. Import **původní OSS období nedoplňuje** — v souboru není z čeho ho
+poznat — a na každý takový dobropis upozorní. Dokud období nedoplníš (`RRRRQn` v editoru
+položky), vykáže se oprava do běžného čtvrtletí, tedy do jiného, než kam patří.
+
+### Co po importu zkontrolovat
+
+1. **Typ plnění zboží / služba** u položek, kde soubor jednotku neuvedl. V podání se
+   výchozí „služba" projeví jako typ plnění `S`; u e-shopu se zbožím tam patří `G`.
+   Oprav to [hromadnou úpravou](14_Faktury.md#1432-hromadne-nastaveni-oss), nebo si
+   nastav výchozí typ plnění na kartě odběratele, aby se to u nových dokladů neopakovalo.
+2. **Řádky k ručnímu posouzení** — kolik jich je, říká souhrn importu i varování v náhledu
+   OSS podání; hromadná úprava má na ně vlastní výběr.
+3. **OSS řádky bez typu sazby** — bez typu sazby se řádek do podání nedostane; hromadná
+   úprava má i na ně vlastní výběr.
+4. **Náhled OSS podání** před stažením XML. Je krátký (řádek na kombinaci stát × sazba)
+   a je to poslední místo, kde se chyba dá chytit.
+
+> [!TIP]
+> Doklady, které do systému natekly **ještě před** touto verzí, mají příznak OSS prázdný
+> a jejich zahraniční daň může být vykázaná v českém přiznání. Než podáš přiznání za
+> období, do kterého import spadl, projdi si zahraniční doklady v tom období a ověř,
+> že v přiznání k DPH nefigurují.
+
 ## 21.5 Report
 
 Po importu vidíš tabulku:
@@ -92,6 +186,29 @@ Po importu vidíš tabulku:
 | Stav | `vytvořeno` / `přeskočeno` / `chyba` |
 | Var. symbol | Z faktury |
 | Detail | Link na vytvořenou fakturu, badge `paid`/`issued`, štítky `+ klient` / `+ zakázka` (pokud něco vzniklo). U přeskočených/chybných: důvod. |
+
+Doklad může projít a přesto mít poznámku — typicky když se **nahradil variabilní symbol**
+(§ 21.4a) nebo když se **odvodilo něco, co v souboru nebylo**. Poznámka se u dokladu
+objeví jen jednou, i když se týká víc položek, aby dvacetipoložková faktura nevyrobila
+dvacet stejných vět.
+
+Nad tabulkou je souhrn za celý běh. U zahraničních dokladů v něm najdeš:
+
+| Údaj | Význam |
+|---|---|
+| **položek v režimu OSS** | Kolik řádků se zařadilo do OSS |
+| **položek bez typu sazby OSS** | Řádky, které se do podání nedostanou, dokud typ sazby nedoplníš |
+| **položek k ručnímu posouzení** | Řádky s nejistým místem plnění (viz § 21.4b) |
+| **dobropisů bez období opravy** | Opravné doklady, kterým chybí původní OSS čtvrtletí |
+| **dokladů s nahrazeným variabilním symbolem** | Kolik dokladů dostalo symbol odvozený z čísla dokladu |
+| **dokladů s varováním** | Kolik dokladů prošlo, ale nese poznámku ke kontrole |
+
+Jednotlivé doklady mají v seznamu odpovídající štítky (`OSS: n`, `neurčený typ sazby`,
+`k ručnímu posouzení`, `dobropis bez období opravy`, `VS nahrazen`), takže se dá
+z tisícovky řádků rychle vyfiltrovat to, co potřebuje pozornost.
+
+Souhrn existuje právě proto, aby se při tisícovce dokladů dalo přečíst jedno číslo místo
+tisícovky hlášek.
 
 ## 21.6 PDF/A-3 a ISDOCX import (embedded i samostatný ISDOC)
 

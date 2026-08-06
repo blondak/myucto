@@ -232,6 +232,16 @@ MyÚčto mapuje DPH sazby na **Pohoda kódy klasifikace**:
 
 Pokud klient potřebuje přesně tvoji PDF verzi, použij paralelně **PDF ZIP**.
 
+### 20.4.7 Doklad v režimu OSS se do Pohody neexportuje
+
+Pohoda vede sazbu DPH jako výčet českých sazeb (základní / snížená / nulová), zahraniční
+sazbu ani příznak [OSS](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss) v datovém
+formátu nemá kam zapsat. Export takový doklad proto **odmítne a řekne to**, místo aby polskou
+sazbu 23 % tiše vydával za českou 21 %.
+
+Řádky v režimu OSS vykaž přes **Daně → OSS přiznání** a z exportu do Pohody doklady s nimi
+vyřaď.
+
 ## 20.5 Stereo XML
 
 Stereo XML export vytváří jeden `DocumentPack` soubor pro vydané faktury za

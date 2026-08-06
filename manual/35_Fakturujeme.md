@@ -187,9 +187,14 @@ opravu. Dobropis k OSS faktuře převezme OSS údaje a částky obrátí.
 kalendářní rok, rozpad po zemích a upozornění od 80 % i po překročení. Do prahu se počítají
 **všechna** přeshraniční B2C plnění do EU, tedy i ta, která zatím fakturuješ s českou daní
 (jinak by práh nikdy nemohl být překročen). Přepočet do EUR je **orientační** (denní kurz
-ČNB), takže u hodnot těsně u prahu rozhodne účetní. Sazbu porovnává systém s číselníkem
-sazeb členských států k datu plnění a při neshodě **varuje** — číselník ale může zestárnout,
-proto nejde o blokaci.
+ČNB), takže u hodnot těsně u prahu rozhodne účetní. Sazbu porovnává systém s
+[číselníkem sazeb členských států](71_Nastaveni.md#7112b-sazby-statu-oss) k datu plnění
+a při neshodě **varuje** — číselník ale může zestárnout, proto nejde o blokaci.
+
+**Historické doklady nemusíš zadávat ručně.** Import vydaných faktur (Pohoda XML, ISDOC)
+umí režim OSS odvodit sám — příznak, zemi spotřeby, typ sazby i typ plnění. Postup
+a co po importu zkontrolovat je v
+[§ 21.4b](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss).
 
 **Řádky s nejistým místem plnění.** Doklady zakládané automaticky (pravidelná fakturace,
 synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API) občas
@@ -200,8 +205,13 @@ a nechá ho v českém přiznání na ř. 1 a 2. Aby ti neproklouzl:
 - v **seznamu faktur** je najdeš filtrem **Nejisté místo plnění (OSS)**,
 - v **přiznání k DPH** na ně upozorní varování se seznamem dokladů.
 
-Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně přes hromadnou
-úpravu OSS. Dokud nerozhodneš, zůstává plnění v tuzemském přiznání.
+Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně přes
+[hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss). Dokud nerozhodneš,
+zůstává plnění v tuzemském přiznání.
+
+U **importu vydaných faktur** je to obráceně: nejednoznačný řádek se zařadí do OSS
+a označí k posouzení. Proč, vysvětluje
+[§ 36 — Plnění k ručnímu posouzení](36_Vykazy_DPH.md#plneni-k-rucnimu-posouzeni).
 
 > ⚠️ MyÚčto neurčuje samo B2C režim, neuzavírá období a XML automaticky nepodává.
 > Sledování prahu i kontrola sazeb jsou **upozornění**, ne závazné určení povinnosti;

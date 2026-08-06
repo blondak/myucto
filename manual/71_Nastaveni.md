@@ -55,9 +55,9 @@ zpracovaných e-mailů. Detail je v [§ 28.7 Bankovní e-mailová avíza](28_Ban
 
 | Pole | Význam |
 |---|---|
-| Kód | `CZ-21`, `CZ-12`, `CZ-0`, `CZ-RC` |
+| Kód | `CZ-21`, `CZ-12`, `CZ-0`, `CZ-RC`, pro OSS např. `PL-23` |
 | Sazba | `21`, `12`, `0`, `0` |
-| Stát | `CZ` (zatím) |
+| Stát | Kód země, ve které sazba platí — `CZ` u tuzemských, `PL` / `SK` / `HU` … u sazeb členských států |
 | Popisek CS / EN | Pro UI / PDF |
 | Default | Která sazba se předvyplní v editoru |
 | Reverse charge | Zatrhneme pro `CZ-RC` |
@@ -66,6 +66,15 @@ zpracovaných e-mailů. Detail je v [§ 28.7 Bankovní e-mailová avíza](28_Ban
 Pro OSS založ sazby jednotlivých členských států se správným kódem země,
 například `SK-23`. V editoru faktury se zahraniční sazby nabídnou na řádku
 označeném jako OSS; běžný tuzemský řádek dál používá domácí sazby.
+
+> [!WARNING]
+> **Pole Stát formulář předvyplňuje na `CZ`.** U zahraniční sazby ho musíš přepsat.
+> Sazba pojmenovaná `PL-23`, která má ve sloupci Stát `CZ`, je pro systém česká
+> sazba 23 % — a takovou ČR nezná. Import zahraničních dokladů se v takovém případě
+> **zastaví** a v reportu řekne, u které sazby a na jaký stát zemi opravit. Je to
+> záměrná pojistka: kdyby se sazba se špatnou zemí použila, skončila by cizí daň
+> v českém přiznání k DPH. Zemi zkontroluj dřív, než spustíš import nebo hromadnou
+> úpravu OSS.
 
 ### 71.1.2a OSS a daňové nastavení
 
@@ -81,6 +90,49 @@ celounijní práh 10 000 EUR sleduje orientačně a upozorní na jeho blížíc�
 překročení, ale režim sama nezapne ani doklady automaticky nepřeklasifikuje.
 Podrobnosti jsou v [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss)
 a [OSS přiznání](36_Vykazy_DPH.md#oss-priznani-ossei1).
+
+### 71.1.2b Sazby států OSS
+
+**Cesta: `Nastavení → Číselníky → Sazby států OSS`.**
+
+Tenhle číselník obsahuje **sazby DPH členských států, proti kterým se OSS doklady
+ověřují**. Je to kontrolní číselník, ne sazby pro doklad — ty se zakládají o kartu
+vedle v [Sazbách DPH](#7112-sazby-dph). Rozdíl je podstatný: sazby DPH si zakládáš ty
+(a můžeš v nich mít překlep), kdežto tenhle číselník je společný pro celou instanci
+a slouží jako nezávislá autorita při rozhodování, jestli plnění patří do tuzemska,
+nebo do OSS. Právě proto se ho aplikace ptá při importu, v editoru i při hromadné
+úpravě.
+
+| Sloupec | Význam |
+|---|---|
+| **Stát** | Dvoupísmenný kód členského státu |
+| **Typ sazby** | Základní / Snížená / Druhá snížená / Parkovací |
+| **Sazba** | Procento |
+| **Platí od** / **Platí do** | Historie sazby; prázdné „Platí do" znamená, že sazba platí dosud |
+| **Poznámka** | Volný text |
+| **Původ** | `systémová` (dodaná s aplikací) nebo `vlastní` (přidal uživatel) |
+
+Nahoře je filtr podle státu a zaškrtávátko **Zobrazit vyřazené**.
+
+**Systémovou sazbu nelze přepsat.** Její data používá aktualizační migrace k rozpoznání,
+co je vlastní záznam a co ne — přepsáním by se vlastní úprava při dalším upgradu ztratila.
+Systémové sazbě jde jen **Zkrátit** platnost k datu a vedle ní založit novou. Vlastní
+sazbu lze plnou měrou editovat i smazat. Obojí jde **Vyřadit** (schová se z výběru)
+a zase **Vrátit**.
+
+Číselník smí měnit jen správce instance, protože je společný pro všechny firmy v ní.
+
+**Kdy do něj sáhnout.** Sazby dodané s aplikací nevyhnutelně stárnou — když některý
+členský stát sazbu změní dřív, než vyjde nová verze MyÚčta, zkrať platnost systémové
+sazby ke dni před účinností a založ vedle ní vlastní s novým procentem. Dokud to
+neuděláš, bude aplikace u dokladů s novou sazbou hlásit, že sazba v číselníku k datu
+plnění není.
+
+> [!NOTE]
+> Hláška **„Číselník v databázi není — chybí migrace"** znamená, že se po aktualizaci
+> nespustily databázové migrace. Spusť je (`php api/bin/migrate.php`) — do té doby se
+> neověřuje žádný stát a import zahraničních dokladů se vůbec nerozběhne. Není to totéž
+> jako „stát v číselníku chybí"; aplikace ty dva stavy rozlišuje a hlásí každý zvlášť.
 
 Ve stejném bloku zůstává vedle ID datové schránky také **typ datové schránky**
 (`FO`, `PFO`, `PO`, `OVM`). Tento údaj MyÚčto zachovává pro EPO a další

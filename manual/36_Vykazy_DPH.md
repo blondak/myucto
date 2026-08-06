@@ -218,6 +218,33 @@ shodu sazby na dokladu s číselníkem a údaje potřebné pro opravy minulých 
 OSS řádky jsou současně vyřazeny z českého přiznání k DPH, kontrolního hlášení
 a Knihy DPH.
 
+Zbytek OSS je popsaný jinde v manuálu:
+
+- **Zapnutí režimu a registrace** — [§ 71.1.2a](71_Nastaveni.md#7112a-oss-a-danove-nastaveni)
+- **Sazby pro doklad** (`PL-23`, `SK-23`, …) — [§ 71.1.2](71_Nastaveni.md#7112-sazby-dph)
+- **Kontrolní číselník sazeb členských států** — [§ 71.1.2b](71_Nastaveni.md#7112b-sazby-statu-oss)
+- **Vystavení faktury, doložka na PDF, práh 10 000 EUR** — [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss)
+- **Import zahraničních dokladů** — [§ 21.4b](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss)
+- **Hromadná oprava po importu** — [§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss)
+
+### Plnění k ručnímu posouzení
+
+Náhled hlásí jedním varováním, kolik řádků za období čeká na ruční posouzení. Jde
+o plnění, u kterých se nepodařilo spolehlivě určit místo plnění — táž sazba platí i v zemi
+dodavatele (21 % zná ČR, Nizozemsko, Belgie, Španělsko, Litva i Lotyšsko), číselník neuměl
+odpovědět, nebo si doklad protiřečí, protože míchá plnění v režimu OSS s tuzemským.
+
+Označené řádky mohou skončit na dvou různých místech a hledají se každý jinak:
+
+| Kde řádek leží | Kdo ho tak založí | Kde ho najdeš |
+|---|---|---|
+| **V OSS podání**, s příznakem k posouzení | Import vydaných faktur — u nejednoznačné sazby se rozhodne ve prospěch OSS, protože chybný OSS řádek je v krátkém náhledu podání vidět, kdežto chybný tuzemský zmizí mezi stovkami řádků přiznání | Varování v náhledu OSS podání a report importu |
+| **V tuzemském přiznání** na ř. 1 a 2, s příznakem k posouzení | Doklady zakládané automaticky bez lidského zásahu — pravidelná fakturace, synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API. Doklad vzniknout musel, ale do OSS podání řádek nepatří, dokud to nikdo nepotvrdí | Filtr **Nejisté místo plnění (OSS)** v seznamu faktur a varování v přiznání k DPH |
+
+Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně —
+[§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss); volba **Jen řádky k ručnímu
+posouzení** tam zabírá oba případy.
+
 ### Zaúčtování OSS daně
 
 Daň v režimu OSS se neúčtuje na účet 343. Patří jinému členskému státu, do českého
