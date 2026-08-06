@@ -1,4 +1,10 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouteLocationNormalized,
+  type RouteLocationRaw,
+  type RouteRecordRaw,
+} from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
@@ -447,6 +453,12 @@ const superadminRouteNames = new Set([
 
 // Routy, které projdou deny-by-default guardem (:361) bez permission meta jinak než
 // přes routePermissions — musí být zrcadleny se `selfServiceRoute` v beforeEach.
+//
+// Vynucené nastavení MFA (`meta.mfaSetupOnly`) tady ZÁMĚRNĚ není jménem: výjimku
+// nese meta, ne seznam, aby druhá taková routa nezopakovala smyčku
+// home → setup-mfa → home (#5). Deny-by-default to neoslabuje — routa je pořád za
+// `requiresAuth` a `mfaSetupOnly` je sama gate: koho MFA nečeká, toho guard níž
+// pošle z té stránky pryč.
 const selfServiceRouteNames = new Set(['profile-password', 'setup-totp'])
 const demoCreateRouteNames = new Set(['invoice-new', 'purchase-invoice-new', 'client-new', 'accounting-journal-new'])
 const demoReadOnlyRouteNames = new Set(['admin-settings', 'admin-branding', 'admin-codebooks', 'admin-tax-constants'])
@@ -480,6 +492,7 @@ function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequiresAuth
     // bez logu. Upozorni na to hned při startu, ne až po hodině hledání v produkci.
     if (import.meta.env.DEV && name && requiresAuth && !rule
       && !superadminRouteNames.has(name) && !selfServiceRouteNames.has(name)
+      && !record.meta?.mfaSetupOnly
       && !record.meta?.public && !record.redirect) {
       console.warn(`[router] Route "${name}" nemá záznam v routePermissions ani superadminOnly/self-service výjimku — deny-by-default guard ji bude tiše přesměrovávat na homepage/portal.`)
     }
@@ -568,7 +581,7 @@ export function clearLoginBounces(): void {
   }
 }
 
-router.beforeEach(async (to) => {
+export async function authorizationGuard(to: RouteLocationNormalized): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
 
   if (auth.setupStatus === null) {
@@ -608,11 +621,15 @@ router.beforeEach(async (to) => {
   }
 
   // Setup session nemá přístup k business routám, dokud uživatel nedokončí MFA.
+  // Cíl se pozná podle `meta.mfaSetupOnly`, ne podle jména: jméno by muselo být
+  // udržované na třech místech (redirect sem, výjimka z deny-by-default, odchod
+  // pryč) a právě jejich rozejití vyrobilo smyčku home → setup-mfa → home (#5).
+  const mfaSetupRoute = to.matched.some((r) => r.meta.mfaSetupOnly)
   const mustSetupMfa = auth.mustSetupMfa || auth.mustSetupTotp
-  if (auth.isAuthenticated && mustSetupMfa && to.name !== 'setup-mfa' && requiresAuth) {
+  if (auth.isAuthenticated && mustSetupMfa && !mfaSetupRoute && requiresAuth) {
     return { name: 'setup-mfa' }
   }
-  if (auth.isAuthenticated && !mustSetupMfa && to.name === 'setup-mfa') {
+  if (auth.isAuthenticated && !mustSetupMfa && mfaSetupRoute) {
     return { name: 'home' }
   }
 
@@ -632,7 +649,8 @@ router.beforeEach(async (to) => {
     const demoReadOnlyRoute = auth.isDemo && typeof to.name === 'string' && demoReadOnlyRouteNames.has(to.name)
     if (!demoCreateRoute && !demoReadOnlyRoute) return denyFallback(to.name, auth)
   }
-  const selfServiceRoute = typeof to.name === 'string' && selfServiceRouteNames.has(to.name)
+  const selfServiceRoute = mfaSetupRoute
+    || (typeof to.name === 'string' && selfServiceRouteNames.has(to.name))
   if (requiresAuth && !permissionMeta?.permission && !superadminOnly && !selfServiceRoute) {
     return denyFallback(to.name, auth)
   }
@@ -702,7 +720,9 @@ router.beforeEach(async (to) => {
   }
 
   return true
-})
+}
+
+router.beforeEach(authorizationGuard)
 
 /**
  * Dotáhne překlady, které daná routa potřebuje nad rámec jádra (viz i18n/index.ts).

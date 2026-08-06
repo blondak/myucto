@@ -73,7 +73,9 @@ function topLevelObjects(text) {
 function blockAfter(marker) {
   const at = src.indexOf(marker)
   if (at < 0) { console.error(`route-check: nenašel jsem "${marker}"`); process.exit(2) }
-  const open = src.indexOf('[', at)
+  // Od KONCE markeru — `const routes: RouteRecordRaw[] =` má vlastní `[]` v typu
+  // a hledání od začátku by otevřelo prázdný blok.
+  const open = src.indexOf('[', at + marker.length)
   const close = matchBracket(src, open)
   return src.slice(open + 1, close)
 }
@@ -90,20 +92,31 @@ const quoted = (block) => new Set([...block.matchAll(/'([\w-]+)'/g)].map((m) => 
 const superadminRouteNames = quoted(blockAfter('const superadminRouteNames = new Set('))
 const selfServiceRouteNames = quoted(blockAfter('const selfServiceRouteNames = new Set('))
 
-// Children routy `/` — jediná větev s requiresAuth: true.
+// Children routy `/` — hlavní větev s requiresAuth: true.
 const childrenBlock = blockAfter('children:')
+// Top-level routy: většina je `public: true`, ale `/setup-mfa` má vlastní
+// requiresAuth — a přesně tu brána dřív neviděla, takže smyčka
+// home → setup-mfa → home (#5) prošla až do vydání.
+const rootBlock = blockAfter('const routes: RouteRecordRaw[] =')
 
-const missing = []
-for (const obj of topLevelObjects(childrenBlock)) {
-  const name = obj.match(/\bname:\s*(['"])([\w-]+)\1/)?.[2]
-  if (!name) continue
-  if (/\bredirect\b/.test(obj)) continue          // pure redirect — guard ji nezahodí
-  if (!/\bcomponent:/.test(obj)) continue          // nerenderuje stránku
-  if (routePermissions.has(name)) continue
-  if (superadminRouteNames.has(name)) continue
-  if (selfServiceRouteNames.has(name)) continue
-  missing.push(name)
+function offenders(block, requireAuthMeta) {
+  const found = []
+  for (const obj of topLevelObjects(block)) {
+    const name = obj.match(/\bname:\s*(['"])([\w-]+)\1/)?.[2]
+    if (!name) continue
+    if (requireAuthMeta && !/\brequiresAuth:\s*true/.test(obj)) continue
+    if (/\bredirect\b/.test(obj)) continue          // pure redirect — guard ji nezahodí
+    if (!/\bcomponent:/.test(obj)) continue          // nerenderuje stránku
+    if (/\bmfaSetupOnly:\s*true/.test(obj)) continue // výjimku nese meta, viz beforeEach
+    if (routePermissions.has(name)) continue
+    if (superadminRouteNames.has(name)) continue
+    if (selfServiceRouteNames.has(name)) continue
+    found.push(name)
+  }
+  return found
 }
+
+const missing = [...offenders(childrenBlock, false), ...offenders(rootBlock, true)]
 
 if (missing.length) {
   console.error(`\nroutes: ${missing.length} autentizovan${missing.length === 1 ? 'á route' : 'ých rout'} bez záznamu v routePermissions\n`)
