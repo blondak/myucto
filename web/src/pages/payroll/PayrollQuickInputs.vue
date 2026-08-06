@@ -343,11 +343,11 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="mx-auto max-w-[1600px] space-y-5 p-4 sm:p-6">
+  <div class="space-y-6">
     <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 class="page-title">{{ t('payroll.quick_inputs.title') }}</h1>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.subtitle') }}</p>
+        <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.quick_inputs.title') }}</h1>
+        <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.quick_inputs.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-end gap-2">
         <label class="block">
