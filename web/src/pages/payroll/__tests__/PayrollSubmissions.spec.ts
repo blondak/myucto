@@ -15,6 +15,9 @@ const m = vi.hoisted(() => ({
   downloadJmhzPreview: vi.fn(),
   healthOverviews: vi.fn(),
   downloadHealthOverview: vi.fn(),
+  submissionInbox: vi.fn(),
+  acknowledgeInboxItem: vi.fn(),
+  snoozeInboxItem: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -32,6 +35,9 @@ vi.mock('@/api/payroll', () => ({
     downloadJmhzPvpojPreview: m.downloadJmhzPreview,
     healthPaymentOverviews: m.healthOverviews,
     downloadHealthPaymentOverview: m.downloadHealthOverview,
+    submissionInbox: m.submissionInbox,
+    acknowledgeSubmissionInboxItem: m.acknowledgeInboxItem,
+    snoozeSubmissionInboxItem: m.snoozeInboxItem,
   },
 }))
 
@@ -72,6 +78,11 @@ function setup() {
     updated_at: '2026-08-04 12:00:00',
   })
   m.snapshots.mockResolvedValue([])
+  m.submissionInbox.mockResolvedValue({
+    environment: 'production',
+    summary: { total: 0, open: 0, acknowledged: 0, snoozed: 0 },
+    items: [],
+  })
   m.overview.mockResolvedValue({
     environment: 'production',
     period: '2026-08',
@@ -306,7 +317,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
     expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
 
@@ -486,5 +497,80 @@ describe('PayrollSubmissions', () => {
 
     expect(wrapper.get('[data-test="submission-deadline-phase"]').text())
       .toContain('payroll.submissions.overview.deadline_phase.not_open')
+  })
+
+  it('zobrazí odznak inboxu a umožní položku potvrdit i odložit s důvodem', async () => {
+    const inboxItem = {
+      id: 101,
+      obligation_id: 7,
+      submission_id: null,
+      agenda_code: 'JMHZ',
+      subject_type: 'office',
+      subject_reference: 'office:synthetic',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+      due_on: '2026-09-13',
+      problem_kind: 'due_soon',
+      escalation_level: 'due_soon',
+      status: 'open',
+      snoozed_until: null,
+      snooze_reason: null,
+      acknowledged_at: null,
+      resolved_at: null,
+      row_version: 1,
+      created_at: '2026-09-01 08:00:00',
+      updated_at: '2026-09-01 08:00:00',
+    }
+    m.submissionInbox.mockResolvedValue({
+      environment: 'production',
+      summary: { total: 1, open: 1, acknowledged: 0, snoozed: 0 },
+      items: [inboxItem],
+    })
+    m.acknowledgeInboxItem.mockResolvedValue({ id: 101, status: 'acknowledged', row_version: 2 })
+    m.snoozeInboxItem.mockResolvedValue({
+      id: 101,
+      status: 'snoozed',
+      row_version: 3,
+      snoozed_until: '2026-09-05T10:00:00Z',
+    })
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submissions-inbox-badge"]').text()).toBe('1')
+
+    await wrapper.findAll('[role="tab"]')[3]!.trigger('click')
+    await flushPromises()
+
+    expect(m.submissionInbox).toHaveBeenCalledWith('production')
+    expect(wrapper.get('[data-test="inbox-row"]').text()).toContain('JMHZ')
+
+    await wrapper.get('[data-test="inbox-acknowledge"]').trigger('click')
+    await flushPromises()
+    expect(m.acknowledgeInboxItem).toHaveBeenCalledWith(101, 1)
+
+    // Modal se teleportuje mimo strom wrapperu, hledá se proto v document.body.
+    await wrapper.get('[data-test="inbox-snooze"]').trigger('click')
+    const confirmButton = () =>
+      document.body.querySelector<HTMLButtonElement>('[data-test="snooze-confirm"]')
+    expect(confirmButton()).not.toBeNull()
+    confirmButton()!.click()
+    await flushPromises()
+    expect(m.snoozeInboxItem).not.toHaveBeenCalled()
+
+    const reasonInput = document.body
+      .querySelector<HTMLTextAreaElement>('[data-test="snooze-reason-input"]')
+    expect(reasonInput).not.toBeNull()
+    reasonInput!.value = 'Čekáme na doklad od klienta.'
+    reasonInput!.dispatchEvent(new Event('input'))
+    await flushPromises()
+    confirmButton()!.click()
+    await flushPromises()
+    expect(m.snoozeInboxItem).toHaveBeenCalledWith(
+      101,
+      1,
+      expect.any(String),
+      'Čekáme na doklad od klienta.',
+    )
   })
 })

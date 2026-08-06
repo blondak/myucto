@@ -27,7 +27,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
-    te: (key: string) => key.includes('average_earnings_ruleset_not_ready'),
+    te: (key: string) => key.includes('average_earnings_snapshot_missing'),
   }),
 }))
 
@@ -75,7 +75,9 @@ function readiness() {
       },
       average_earnings_certificate: {
         available: false,
-        readiness_code: 'average_earnings_ruleset_not_ready',
+        readiness_code: 'average_earnings_snapshot_missing',
+        decisive_year: 2026,
+        decisive_quarter: 3,
       },
     },
     items: [],
@@ -99,7 +101,7 @@ describe('EmploymentExitDocumentsPanel', () => {
     await wrapper.get('[data-test="exit-tab-average"]').trigger('click')
 
     expect(wrapper.get('[data-test="average-certificate-unavailable"]').text())
-      .toContain('average_earnings_ruleset_not_ready')
+      .toContain('average_earnings_snapshot_missing')
     expect(wrapper.find('input[type="number"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('payroll.people.exit_documents.generate')
   })

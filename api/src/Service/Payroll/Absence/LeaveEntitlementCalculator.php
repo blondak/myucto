@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Absence;
 
 use InvalidArgumentException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
 final class LeaveEntitlementCalculator
 {
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
+
     public function calculate(
+        string $applicationDate,
         string $relationType,
         int $weeklyMinutes,
         int $entitlementWeeks,
@@ -33,9 +37,22 @@ final class LeaveEntitlementCalculator
         if ($weeklyMinutes <= 0 || $entitlementWeeks <= 0 || $workedEquivalentMinutes <= 0) {
             throw new InvalidArgumentException('Výpočet dovolené vyžaduje kladné časové vstupy.');
         }
-        if ($continuousCalendarDays < 28) {
+
+        $rules = AbsenceRuleset::forDate($this->rulesets, $applicationDate);
+        $statutoryMinimumWeeks = $rules->leaveStatutoryMinimumWeeks();
+        $minimumCalendarDays = $rules->leaveMinimumContinuousCalendarDays();
+        $minimumWeekMultiples = $rules->leaveMinimumWorkedWeekMultiples();
+        $weeksPerYear = $rules->leaveWeeksPerYear();
+
+        if ($entitlementWeeks < $statutoryMinimumWeeks) {
             throw new InvalidArgumentException(
-                'Pracovněprávní vztah musí pro vznik nároku trvat nepřetržitě alespoň 4 týdny.'
+                "Výměra dovolené nesmí být nižší než zákonné minimum {$statutoryMinimumWeeks} týdny."
+            );
+        }
+        if ($continuousCalendarDays < $minimumCalendarDays) {
+            throw new InvalidArgumentException(
+                'Pracovněprávní vztah musí pro vznik nároku trvat nepřetržitě alespoň'
+                . " {$minimumCalendarDays} kalendářních dnů."
             );
         }
         if (trim($rationale) === '') {
@@ -45,13 +62,14 @@ final class LeaveEntitlementCalculator
         }
 
         $effectiveWeeklyMinutes = in_array($relationType, ['dpp', 'dpc'], true)
-            ? 1_200
+            ? $rules->leaveAgreementWeeklyMinutes()
             : $weeklyMinutes;
         $uncappedWorkedWeekMultiples = intdiv($workedEquivalentMinutes, $effectiveWeeklyMinutes);
-        $workedWeekMultiples = min($uncappedWorkedWeekMultiples, 52);
-        if ($workedWeekMultiples < 4) {
+        $workedWeekMultiples = min($uncappedWorkedWeekMultiples, $weeksPerYear);
+        if ($workedWeekMultiples < $minimumWeekMultiples) {
             throw new InvalidArgumentException(
-                'Pro vznik nároku musí být započten alespoň čtyřnásobek týdenní pracovní doby.'
+                'Pro vznik nároku musí být započten alespoň'
+                . " {$minimumWeekMultiples}násobek týdenní pracovní doby."
             );
         }
 
@@ -60,7 +78,7 @@ final class LeaveEntitlementCalculator
             throw new \OverflowException('Výpočet nároku dovolené překročil celočíselný rozsah.');
         }
         $numerator *= $workedWeekMultiples;
-        $denominator = 52 * 60;
+        $denominator = $weeksPerYear * 60;
         $entitlementHours = intdiv($numerator, $denominator);
         if ($numerator % $denominator !== 0) {
             $entitlementHours++;
@@ -77,10 +95,13 @@ final class LeaveEntitlementCalculator
                 'input_weekly_minutes' => $weeklyMinutes,
                 'effective_weekly_minutes' => $effectiveWeeklyMinutes,
                 'entitlement_weeks' => $entitlementWeeks,
+                'statutory_minimum_weeks' => $statutoryMinimumWeeks,
                 'continuous_calendar_days' => $continuousCalendarDays,
+                'minimum_continuous_calendar_days' => $minimumCalendarDays,
                 'worked_equivalent_minutes' => $workedEquivalentMinutes,
                 'uncapped_worked_week_multiples' => $uncappedWorkedWeekMultiples,
                 'worked_week_multiples' => $workedWeekMultiples,
+                'weeks_per_year' => $weeksPerYear,
                 'entitlement_minutes' => $entitlementMinutes,
                 'rounding' => 'ceil-to-whole-hour',
                 'review_reason' => trim($rationale),

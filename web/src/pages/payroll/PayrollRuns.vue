@@ -7,6 +7,7 @@ import {
   type PayrollRunCommand,
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
+import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -357,6 +358,14 @@ onMounted(load)
 
         <PayrollIncomeTaxBreakdown
           v-if="run.result_snapshot?.people"
+          :people="run.result_snapshot.people"
+          :person-names="personNames"
+        />
+
+        <PayrollNetPayBreakdown
+          v-if="run.result_snapshot?.people"
+          :revision-id="run.revision_id"
+          :approved="run.revision_status === 'approved'"
           :people="run.result_snapshot.people"
           :person-names="personNames"
         />

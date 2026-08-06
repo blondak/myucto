@@ -95,9 +95,12 @@ final class EmploymentExitDocumentActionTest extends TestCase
             ],
         );
 
+        // Zdejší izolovaná firma nemá žádný pracovní vztah s id 1, takže
+        // fail-closed kontrola zdroje skončí dřív, než se vůbec dostane k
+        // ověření podkladu průměrného výdělku.
         self::assertSame(422, $response->getStatusCode());
         self::assertSame(
-            'average_earnings_ruleset_not_ready',
+            'employment_not_found',
             $this->json($response)['error']['code'] ?? null,
         );
         self::assertSame(

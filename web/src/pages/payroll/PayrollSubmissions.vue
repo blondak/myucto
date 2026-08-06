@@ -12,14 +12,16 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 
-type SubmissionTab = 'regzel' | 'jmhz' | 'health'
+type SubmissionTab = 'regzel' | 'jmhz' | 'health' | 'inbox'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const activeTab = ref<SubmissionTab>('regzel')
-const tabs: SubmissionTab[] = ['regzel', 'jmhz', 'health']
+const tabs: SubmissionTab[] = ['regzel', 'jmhz', 'health', 'inbox']
+const inboxOpenCount = ref(0)
 const loading = ref(true)
 const preparing = ref(false)
 const downloadingId = ref<number | null>(null)
@@ -170,7 +172,17 @@ watch(environment, async () => {
   }
 })
 
+async function loadInboxBadge() {
+  try {
+    const response = await payrollApi.submissionInbox('production')
+    inboxOpenCount.value = response.summary.total
+  } catch {
+    // Odznak je jen orientační — chybu zobrazí až samotná záložka Inbox.
+  }
+}
+
 onMounted(load)
+onMounted(loadInboxBadge)
 </script>
 
 <template>
@@ -210,6 +222,13 @@ onMounted(load)
         @click="activeTab = tab"
       >
         {{ t(`payroll.submissions.tabs.${tab}`) }}
+        <span
+          v-if="tab === 'inbox' && inboxOpenCount > 0"
+          class="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+          data-test="submissions-inbox-badge"
+        >
+          {{ inboxOpenCount }}
+        </span>
       </button>
     </nav>
 
@@ -460,6 +479,11 @@ onMounted(load)
         </div>
       </section>
     </template>
+
+    <PayrollSubmissionInboxPanel
+      v-else-if="activeTab === 'inbox'"
+      @update:open-count="inboxOpenCount = $event"
+    />
 
     <PayrollSubmissionOverviewPanel
       v-else

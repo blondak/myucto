@@ -264,7 +264,8 @@ describe('EmployerSettings — účtová osnova', () => {
     const wrapper = await mountPage()
     const tabs = wrapper.findAll('[role="tab"]')
 
-    expect(tabs).toHaveLength(5)
+    // Šestá záložka je Dimenze (MZ-03-W05, střediska/zakázky/činnosti).
+    expect(tabs).toHaveLength(6)
     expect(tabs[0].attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).toContain('payroll.employer.registration_title')
     expect(wrapper.text()).not.toContain('payroll.employer.health_accounts.title')
@@ -285,7 +286,12 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(wrapper.text()).toContain('payroll.employer.policies.title')
     expect(wrapper.findAll('button').filter(button => button.text() === 'common.save')).toHaveLength(1)
 
+    // Pořadí záložek: employer, institutions, accounting, policies, dimensions, submissions.
     await tabs[4].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('payroll.employer.dimensions.title')
+
+    await tabs[5].trigger('click')
     await flushPromises()
     expect(m.regzelProfile).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('payroll.regzel.profile.title')

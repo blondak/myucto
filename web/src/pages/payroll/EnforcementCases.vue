@@ -2,7 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { documentsApi, type DocItem } from '@/api/documents'
-import { payrollApi, type PayrollPersonListItem } from '@/api/payroll'
+import {
+  payrollApi,
+  type PayrollInstitutionAccount,
+  type PayrollPersonListItem,
+} from '@/api/payroll'
 import {
   payrollEnforcementApi,
   pensionEvidenceValues,
@@ -40,6 +44,16 @@ const canWrite = computed(() => auth.canWrite('payroll.enforcement'))
 const canReadDocuments = computed(() => auth.canRead('documents'))
 const canReadPeople = computed(() => auth.canRead('payroll'))
 const canManageInsolvency = computed(() => auth.canWrite('payroll.insolvency'))
+const canReadPayrollSettings = computed(() => auth.canRead('payroll.settings'))
+const recipientAccounts = ref<PayrollInstitutionAccount[]>([])
+const recipientOptions = computed(() => {
+  const seen = new Map<number, PayrollInstitutionAccount>()
+  for (const account of recipientAccounts.value) {
+    if (account.institution_type !== 'other_recipient') continue
+    if (!seen.has(account.institution_id)) seen.set(account.institution_id, account)
+  }
+  return [...seen.values()]
+})
 function localIsoDate(date = new Date()): string {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
   return local.toISOString().slice(0, 10)
@@ -184,6 +198,13 @@ async function load() {
         people.value = []
       }
     }
+    if (canReadPayrollSettings.value) {
+      try {
+        recipientAccounts.value = await payrollApi.institutionAccounts()
+      } catch {
+        recipientAccounts.value = []
+      }
+    }
   } catch {
     toast.error(t('payroll.enforcement.load_failed'))
   } finally {
@@ -291,6 +312,7 @@ async function saveEvidence() {
       evidence_complete: current.evidence_complete,
       recipient_verified: current.recipient_verified,
       row_version: current.row_version,
+      recipient_institution_id: current.recipient_institution_id,
     })
     detail.value = updated
     updateSummary(updated)
@@ -577,6 +599,14 @@ onMounted(load)
           <section class="rounded-lg border border-neutral-200 bg-surface p-4">
             <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.evidence_title') }}</h3><p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.evidence_hint') }}</p></div><button v-if="canWrite" :class="btnOutline('success')" :disabled="saving" @click="saveEvidence"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
             <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3"><label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="detail.evidence_complete" :disabled="!canWrite" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.evidence_complete') }}</label><label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="detail.recipient_verified" :disabled="!canWrite" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.recipient_verified') }}</label></div>
+            <label v-if="canReadPayrollSettings" class="mt-3 block text-xs font-medium text-neutral-600">
+              {{ t('payroll.enforcement.recipient_account') }}
+              <select v-model="detail.recipient_institution_id" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                <option :value="null">{{ t('payroll.enforcement.recipient_account_none') }}</option>
+                <option v-for="account in recipientOptions" :key="account.institution_id" :value="account.institution_id">{{ account.institution_name }} · {{ account.bank_account_masked }}</option>
+              </select>
+              <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.enforcement.recipient_account_hint') }}</span>
+            </label>
           </section>
           <section class="rounded-lg border border-neutral-200 bg-surface p-4">
             <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.ledger') }}</h3>
@@ -584,6 +614,37 @@ onMounted(load)
             <p v-else class="mt-3 text-sm text-neutral-500">{{ t('payroll.enforcement.no_ledger') }}</p>
           </section>
         </div>
+
+        <section v-if="detail.settlement" class="rounded-lg border border-neutral-200 bg-surface p-4">
+          <div>
+            <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.settlement.title') }}</h3>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.hint') }}</p>
+          </div>
+          <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.withheld_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-700">{{ money(detail.settlement.held_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.liability') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.liability_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="mt-1 font-medium text-success-700">{{ money(detail.settlement.settled_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_minor) }}</dd></div>
+          </dl>
+          <p v-if="detail.settlement.held_minor > 0" class="mt-3 text-xs text-warning-700">{{ t('payroll.enforcement.settlement.held_hint') }}</p>
+          <h4 class="mt-4 text-sm font-medium text-neutral-900">{{ t('payroll.enforcement.settlement.per_claim') }}</h4>
+          <ul v-if="detail.settlement.claims.length" class="mt-2 space-y-2">
+            <li v-for="claim in detail.settlement.claims" :key="claim.claim_id" class="rounded-md border border-neutral-200 px-3 py-2">
+              <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <span class="text-sm font-medium text-neutral-900">{{ t(`payroll.enforcement.categories.${claim.category}`) }}</span>
+                <span class="text-xs text-neutral-500">{{ claim.priority_date || '—' }}<span v-if="!claim.is_active"> · {{ t('payroll.enforcement.settlement.inactive') }}</span></span>
+              </div>
+              <dl class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.withheld_minor) }}</dd></div>
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="font-medium text-warning-700">{{ money(claim.held_minor) }}</dd></div>
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="font-medium text-success-700">{{ money(claim.settled_minor) }}</dd></div>
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.remaining_minor) }}</dd></div>
+              </dl>
+            </li>
+          </ul>
+          <p v-else class="mt-2 text-sm text-neutral-500">{{ t('payroll.enforcement.settlement.empty') }}</p>
+        </section>
 
         <section v-if="canManageInsolvency && monthEvidence" class="rounded-lg border border-neutral-200 bg-surface p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">

@@ -230,8 +230,20 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         );
     }
 
-    public function testAverageEarningsCertificateIsExplicitlyBlocked(): void
+    public function testAverageEarningsCertificateBlockedWhenApprovedSnapshotIsMissing(): void
     {
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_certificate'];
+        self::assertFalse($readiness['available']);
+        self::assertSame(
+            'average_earnings_snapshot_missing',
+            $readiness['readiness_code'],
+        );
+        self::assertSame(2026, $readiness['decisive_year']);
+        self::assertSame(3, $readiness['decisive_quarter']);
+
         try {
             $this->service->generateAverageEarningsCertificate(
                 $this->supplierId,
@@ -239,13 +251,73 @@ final class EmploymentExitDocumentServiceTest extends TestCase
                 'synthetic-average-exit',
                 $this->userId,
             );
-            self::fail('Potvrzení pro ÚP nesmí vzniknout bez ověřeného rulesetu.');
+            self::fail('Potvrzení pro ÚP nesmí vzniknout bez schváleného podkladu MZ-07.');
         } catch (EmploymentExitReadinessException $exception) {
             self::assertSame(
-                'average_earnings_ruleset_not_ready',
+                'average_earnings_snapshot_missing',
                 $exception->readinessCode,
             );
+            self::assertStringContainsString('2026/Q3', $exception->getMessage());
         }
+    }
+
+    public function testAverageEarningsCertificateBlockedByUnverifiedNetConversionWhenSnapshotApproved(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_certificate'];
+        self::assertFalse($readiness['available']);
+        self::assertSame(
+            'average_earnings_net_conversion_not_verified',
+            $readiness['readiness_code'],
+        );
+
+        try {
+            $this->service->generateAverageEarningsCertificate(
+                $this->supplierId,
+                $this->employmentId,
+                'synthetic-average-exit-with-snapshot',
+                $this->userId,
+            );
+            self::fail(
+                'Potvrzení pro ÚP nesmí vzniknout bez ověřeného přepočtu na čistý výdělek.',
+            );
+        } catch (EmploymentExitReadinessException $exception) {
+            self::assertSame(
+                'average_earnings_net_conversion_not_verified',
+                $exception->readinessCode,
+            );
+            self::assertStringContainsString('2026/Q3', $exception->getMessage());
+        }
+    }
+
+    private function insertApprovedAverageEarningSnapshot(int $year, int $quarter): void
+    {
+        $trace = json_encode(['rule' => 'synthetic-test-fixture'], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year, applicable_quarter,
+                 revision_no, source_kind, decisive_from, decisive_to,
+                 gross_earnings_minor, longer_period_allocated_minor,
+                 worked_minutes, worked_days, average_hourly_minor,
+                 support_status, status, ruleset_id, ruleset_hash,
+                 input_hash, input_trace, approved_by, approved_at)
+             VALUES (?, ?, ?, ?, 1, "actual", "2026-04-01", "2026-06-30",
+                     6000000, 0, 60000, 63, 10000,
+                     "supported", "approved", "cz-2026-average-earning", ?,
+                     UNHEX(SHA2("synthetic", 256)), ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $year,
+            $quarter,
+            str_repeat('b', 64),
+            $trace,
+            $this->userId,
+        ]);
     }
 
     public function testArchivedEmploymentWithEndedLifecycleEvidenceAllowsCorrection(): void

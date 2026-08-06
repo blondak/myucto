@@ -32,6 +32,12 @@ final class PayrollComponentRepository
         ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
         ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
         ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included'],
+        // MZ-08-W07 — klasifikovaný rozpad vyúčtování pracovní cesty. Do zákonného
+        // limitu (§ 6 odst. 7 písm. a) ZDP) není náhrada předmětem daně, pojistného,
+        // průměrného výdělku ani exekučních srážek; nadlimitní část je běžný
+        // zdanitelný příjem ze závislé činnosti a vstupuje do vyměřovacích základů.
+        ['CESTOVNI_NAHRADA_LIMIT', 'Cestovní náhrada do zákonného limitu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included'],
+        ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
     ];
 
     public function __construct(private readonly Connection $db) {}

@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
@@ -238,6 +239,7 @@ final class PayrollPaymentApiTest extends TestCase
                 'health_insurance',
                 'social_insurance',
                 'income_tax',
+                'enforcement',
             ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
@@ -449,6 +451,9 @@ final class PayrollPaymentApiTest extends TestCase
             ),
             $this->container->get(
                 PayrollIncomeTaxLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollEnforcementLiabilityMaterializer::class,
             ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),

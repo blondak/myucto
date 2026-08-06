@@ -1017,6 +1017,51 @@ export interface PayrollSubmissionDetail {
   }>
 }
 
+export type PayrollSubmissionInboxProblemKind =
+  | 'due_soon'
+  | 'due_today'
+  | 'overdue'
+  | 'rejected'
+  | 'waiting_for_identity'
+  | 'manual_review'
+
+export type PayrollSubmissionInboxEscalationLevel = 'due_soon' | 'due_today' | 'overdue'
+
+export type PayrollSubmissionInboxStatus = 'open' | 'acknowledged' | 'snoozed' | 'resolved'
+
+export interface PayrollSubmissionInboxItem {
+  id: number
+  obligation_id: number
+  submission_id: number | null
+  agenda_code: string
+  subject_type: string
+  subject_reference: string
+  period_start: string
+  period_end: string
+  due_on: string
+  problem_kind: PayrollSubmissionInboxProblemKind
+  escalation_level: PayrollSubmissionInboxEscalationLevel
+  status: PayrollSubmissionInboxStatus
+  snoozed_until: string | null
+  snooze_reason: string | null
+  acknowledged_at: string | null
+  resolved_at: string | null
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollSubmissionInboxResponse {
+  environment: PayrollRegzelEnvironment
+  summary: {
+    total: number
+    open: number
+    acknowledged: number
+    snoozed: number
+  }
+  items: PayrollSubmissionInboxItem[]
+}
+
 export interface PayrollHealthPaymentOverview {
   schema_reference: 'payroll-health-payment-overview.v1'
   document_kind: 'internal_health_payment_overview'
@@ -1190,6 +1235,54 @@ export type PayrollEmployerPolicyPayload = Omit<
   'id' | 'supplier_id' | 'created_by' | 'updated_by' | 'created_at' | 'updated_at'
 >
 
+export type PayrollDimensionType = 'cost_center' | 'project' | 'activity'
+
+export interface PayrollDimension {
+  id: number
+  supplier_id: number
+  dimension_type: PayrollDimensionType
+  code: string
+  name: string
+  valid_from: string
+  valid_to: string | null
+  is_active: boolean
+  default_account_code: string | null
+  created_by: number | null
+  updated_by: number | null
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export type PayrollDimensionPayload = Omit<
+  PayrollDimension,
+  'id' | 'supplier_id' | 'created_by' | 'updated_by' | 'created_at' | 'updated_at'
+>
+
+export interface PayrollEmploymentDimension {
+  id: number
+  supplier_id: number
+  employment_id: number
+  dimension_id: number
+  dimension_type: PayrollDimensionType
+  dimension_code: string
+  dimension_name: string
+  valid_from: string
+  valid_to: string | null
+  created_by: number | null
+  updated_by: number | null
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollEmploymentDimensionPayload {
+  dimension_id: number
+  valid_from: string
+  valid_to: string | null
+  row_version?: number
+}
+
 export interface PayrollSetupCheckItem {
   code: string
   status: 'ok' | 'blocked'
@@ -1348,7 +1441,10 @@ export interface PayrollEmploymentExitDocumentList {
     employment_certificate: PayrollEmploymentExitReadinessItem & {
       deduction_claim_ids: number[]
     }
-    average_earnings_certificate: PayrollEmploymentExitReadinessItem
+    average_earnings_certificate: PayrollEmploymentExitReadinessItem & {
+      decisive_year: number | null
+      decisive_quarter: number | null
+    }
   }
   items: PayrollDocument[]
 }
@@ -1537,6 +1633,108 @@ export interface PayrollRunCommandResponse {
   idempotent_replay: boolean
 }
 
+export type PayrollDependantRelation =
+  | 'child_own'
+  | 'child_adopted'
+  | 'child_in_care'
+  | 'child_of_spouse'
+  | 'grandchild'
+  | 'spouse'
+  | 'partner'
+
+export type PayrollDependantClaimReason =
+  | 'own_household'
+  | 'shared_custody'
+  | 'adoption'
+  | 'foster_care'
+  | 'study_continues'
+  | 'other'
+
+export type PayrollDependantBlocker =
+  | 'relation_not_child'
+  | 'evidence_unverified'
+  | 'shared_household_unconfirmed'
+  | 'other_claimant_not_excluded'
+  | 'declaration_missing'
+  | 'outside_existence'
+  | 'superseded'
+
+export interface PayrollDependantCredit {
+  status: 'calculated' | 'manual_review'
+  rate_key: string | null
+  monthly_credit_minor_units: number | null
+  manual_review_reason: string | null
+}
+
+export interface PayrollDependantClaim {
+  id: number
+  child_reference: string
+  child_order: number
+  claim_reason: PayrollDependantClaimReason | null
+  ztp_p: boolean
+  evidence_status: 'verified' | 'unverified'
+  evidence_reference: string | null
+  shared_household_confirmed: boolean
+  other_claimant_excluded: boolean
+  effective_from: string
+  effective_to: string | null
+  superseded_by_id: number | null
+  is_frozen: boolean
+  blockers: PayrollDependantBlocker[]
+  credit: PayrollDependantCredit
+  row_version: number
+}
+
+export interface PayrollDependant {
+  id: number
+  relation: PayrollDependantRelation
+  full_name: string
+  birth_date: string
+  birth_number_masked: string | null
+  has_birth_number: boolean
+  ztp_p: boolean
+  student: boolean
+  existence_from: string
+  existence_to: string | null
+  note: string | null
+  can_claim_monthly: boolean
+  row_version: number
+  claims: PayrollDependantClaim[]
+}
+
+export interface PayrollDependantsResponse {
+  employee_id: number
+  effective_on: string
+  frozen_through: string | null
+  dependants: PayrollDependant[]
+}
+
+export interface PayrollDependantPayload {
+  relation: PayrollDependantRelation
+  full_name: string
+  birth_date: string
+  birth_number?: string | null
+  ztp_p: boolean
+  student: boolean
+  existence_from: string
+  existence_to: string | null
+  note: string | null
+  row_version?: number
+}
+
+export interface PayrollDependantClaimPayload {
+  child_order: number
+  claim_reason: PayrollDependantClaimReason | null
+  evidence_status: 'verified' | 'unverified'
+  evidence_reference: string | null
+  shared_household_confirmed: boolean
+  other_claimant_excluded: boolean
+  ztp_p: boolean
+  effective_from: string
+  effective_to: string | null
+  row_version?: number
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -1557,6 +1755,36 @@ export const payrollApi = {
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
       .then(response => response.data.profile),
+  personDependants: (id: number) =>
+    api.get<PayrollDependantsResponse>(`/payroll/people/${id}/dependants`)
+      .then(response => response.data),
+  createPersonDependant: (id: number, payload: PayrollDependantPayload) =>
+    api.post<PayrollDependantsResponse>(`/payroll/people/${id}/dependants`, payload)
+      .then(response => response.data),
+  savePersonDependant: (id: number, dependantId: number, payload: PayrollDependantPayload) =>
+    api.put<PayrollDependantsResponse>(
+      `/payroll/people/${id}/dependants/${dependantId}`,
+      payload,
+    ).then(response => response.data),
+  createPersonDependantClaim: (
+    id: number,
+    dependantId: number,
+    payload: PayrollDependantClaimPayload,
+  ) =>
+    api.post<PayrollDependantsResponse>(
+      `/payroll/people/${id}/dependants/${dependantId}/claims`,
+      payload,
+    ).then(response => response.data),
+  savePersonDependantClaim: (
+    id: number,
+    dependantId: number,
+    claimId: number,
+    payload: PayrollDependantClaimPayload,
+  ) =>
+    api.put<PayrollDependantsResponse>(
+      `/payroll/people/${id}/dependants/${dependantId}/claims/${claimId}`,
+      payload,
+    ).then(response => response.data),
   savePersonQuickEdit: (id: number, payload: PayrollPersonQuickEditPayload) =>
     api.put<PayrollPersonQuickEditResponse>(`/payroll/people/${id}/quick-edit`, payload)
       .then(response => response.data),
@@ -1612,6 +1840,25 @@ export const payrollApi = {
   submissionDetail: (submissionId: number) =>
     api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
       .then(response => response.data),
+  submissionInbox: (environment: PayrollRegzelEnvironment) =>
+    api.get<PayrollSubmissionInboxResponse>('/payroll/submissions/inbox', {
+      params: { environment },
+    }).then(response => response.data),
+  acknowledgeSubmissionInboxItem: (itemId: number, rowVersion: number) =>
+    api.post<{ id: number; status: string; row_version: number }>(
+      `/payroll/submissions/inbox/${itemId}/acknowledge`,
+      { row_version: rowVersion },
+    ).then(response => response.data),
+  snoozeSubmissionInboxItem: (
+    itemId: number,
+    rowVersion: number,
+    snoozedUntil: string,
+    reason: string,
+  ) =>
+    api.post<{ id: number; status: string; row_version: number; snoozed_until: string }>(
+      `/payroll/submissions/inbox/${itemId}/snooze`,
+      { row_version: rowVersion, snoozed_until: snoozedUntil, reason },
+    ).then(response => response.data),
   downloadSubmissionArtifact: async (
     submissionId: number,
     artifact: PayrollSubmissionDetail['artifacts'][number],
@@ -1775,6 +2022,36 @@ export const payrollApi = {
   updateInstitutionAccount: (id: number, payload: PayrollInstitutionAccountUpdatePayload) =>
     api.put<{ account: PayrollInstitutionAccount }>(`/payroll/settings/institution-accounts/${id}`, payload)
       .then(response => response.data.account),
+  payrollDimensions: (dimensionType?: PayrollDimensionType) =>
+    api.get<{ dimensions: PayrollDimension[] }>('/payroll/settings/dimensions', {
+      params: dimensionType ? { type: dimensionType } : undefined,
+    }).then(response => response.data.dimensions),
+  createPayrollDimension: (payload: PayrollDimensionPayload) =>
+    api.post<{ dimension: PayrollDimension }>('/payroll/settings/dimensions', payload)
+      .then(response => response.data.dimension),
+  updatePayrollDimension: (id: number, payload: PayrollDimensionPayload) =>
+    api.put<{ dimension: PayrollDimension }>(`/payroll/settings/dimensions/${id}`, payload)
+      .then(response => response.data.dimension),
+  deletePayrollDimension: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/payroll/settings/dimensions/${id}`)
+      .then(response => response.data.deleted),
+  employmentDimensions: (employmentId: number) =>
+    api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
+      .then(response => response.data.dimensions),
+  createEmploymentDimension: (employmentId: number, payload: PayrollEmploymentDimensionPayload) =>
+    api.post<{ dimension: PayrollEmploymentDimension }>(
+      `/payroll/employments/${employmentId}/dimensions`,
+      payload,
+    ).then(response => response.data.dimension),
+  updateEmploymentDimension: (
+    employmentId: number,
+    assignmentId: number,
+    payload: PayrollEmploymentDimensionPayload,
+  ) =>
+    api.put<{ dimension: PayrollEmploymentDimension }>(
+      `/payroll/employments/${employmentId}/dimensions/${assignmentId}`,
+      payload,
+    ).then(response => response.data.dimension),
   listDocuments: (period: string) =>
     api.get<PayrollDocumentList>('/payroll/documents', { params: { period } })
       .then(response => response.data),

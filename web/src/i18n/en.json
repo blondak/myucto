@@ -418,14 +418,17 @@
     "payroll_overview": "Payroll overview",
     "payroll_runs": "Payroll runs",
     "payroll_payments": "Payments and settlement",
+    "payroll_posting_reconciliation": "Payroll posting reconciliation",
     "payroll_people": "Employees",
     "payroll_quick_inputs": "Quick monthly input",
     "payroll_components": "Payroll components and inputs",
     "payroll_time": "Time and shifts",
     "payroll_absences": "Absence and leave",
+    "payroll_travel": "Travel allowances",
     "payroll_documents": "Documents and outputs",
     "payroll_submissions": "Submissions and reports",
     "payroll_enforcement": "Deductions and enforcement",
+    "payroll_deduction_agreements": "Deduction agreements",
     "payroll_settings": "Payroll settings",
     "settings": "Settings",
     "branding": "Branding",
@@ -573,6 +576,100 @@
     "mcp_server": "MCP server"
   },
   "payroll": {
+    "rulesets": {
+      "title": "Payroll legislation rules",
+      "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships with the application; here it can be overridden and put into service without a new release. Values are national and apply to every company.",
+      "load_failed": "Legislation rules could not be loaded.",
+      "save_failed": "The change could not be saved.",
+      "command_failed": "The status change could not be applied.",
+      "saved": "Change saved.",
+      "nothing_changed": "No value has changed.",
+      "reason_required": "Fill in the reason for the change.",
+      "reason_label": "Reason for the change",
+      "reason_placeholder": "E.g. amendment No. …/2027 Coll. effective 1 January",
+      "read_only_hint": "The rules are shared by every company, so only a superadmin may change them. You have read-only access.",
+      "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
+      "degraded": "The stored override is inconsistent, so the calculation runs on the verified built-in set: {reason}",
+      "version_count": "Versions: {count}",
+      "ready": "Calculation enabled",
+      "blocked": "Calculation blocked",
+      "open": "Open",
+      "reset": "Restore verified value",
+      "reset_confirm": "Really discard the manual override and return to the verified built-in set?",
+      "reset_done": "Restored to the verified set.",
+      "reset_default_reason": "Return to the verified built-in set.",
+      "checksum_invalid": "Invalid checksum",
+      "blocked_because": "Blocked by:",
+      "command_noop": "The status was already set, nothing changed.",
+      "diff_hint": "Parameters left unchanged: {unchanged}",
+      "diff_identical": "No difference against the verified set.",
+      "diff_unavailable": "This version has no verified baseline to compare against.",
+      "diff_added": "New parameter",
+      "diff_removed": "Removed",
+      "audit_empty": "No change recorded yet.",
+      "audit_actor": "User: {user}",
+      "unit": { "czk": "CZK" },
+      "tab": {
+        "parameters": "Parameters",
+        "diff": "Difference from verified set",
+        "audit": "Change history"
+      },
+      "column": {
+        "version": "Version",
+        "effective": "Effective",
+        "lifecycle": "Status",
+        "source": "Value source",
+        "parameter": "Parameter",
+        "value": "Value",
+        "note": "Note",
+        "before": "Before",
+        "after": "After"
+      },
+      "source": {
+        "builtin": "Verified built-in set",
+        "override": "Manual override"
+      },
+      "lifecycle": {
+        "draft": "Draft",
+        "reviewed": "Technically checked",
+        "approved": "Professionally approved",
+        "active": "Effective",
+        "superseded": "Superseded"
+      },
+      "command": {
+        "review": "Mark as checked",
+        "approve": "Approve professionally",
+        "activate": "Put into service",
+        "supersede": "Supersede with a newer version"
+      },
+      "command_done": {
+        "review": "The version is marked as checked.",
+        "approve": "The version has been approved.",
+        "activate": "The version is effective — the calculation will start using it.",
+        "supersede": "The version has been superseded."
+      },
+      "action": {
+        "created": "Created",
+        "updated": "Updated",
+        "reset": "Restored to verified set",
+        "review": "Checked",
+        "approve": "Approved",
+        "activate": "Put into service",
+        "supersede": "Superseded"
+      },
+      "domain": {
+        "income_tax": "Employment income tax",
+        "social_insurance": "Social insurance",
+        "health_insurance": "Health insurance",
+        "employment_thresholds": "Thresholds and minimum wage",
+        "compensation_averages": "Averages and compensation",
+        "travel_allowances": "Travel allowances",
+        "enforcement_deductions": "Enforcement deductions",
+        "deadlines": "Deadlines",
+        "codebooks": "Code lists",
+        "submissions": "Submission versions"
+      }
+    },
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
     "load_failed": "The payroll module could not be loaded.",
@@ -724,6 +821,57 @@
         }
       }
     },
+    "posting_reconciliation": {
+      "title": "Payroll posting reconciliation",
+      "subtitle": "Compares the approved payroll revision, the actually posted journal and payment liabilities, category by category.",
+      "period": "Payroll period",
+      "reload": "Refresh",
+      "retry": "Try again",
+      "load_failed": "The payroll posting reconciliation could not be loaded.",
+      "detail_hint": "Per-employee detail is available in the payroll run and on the Payments and settlement page for the same period.",
+      "hint_tax_evidence": "The company keeps tax records — payroll is not posted to the journal, so the Journal column stays empty.",
+      "hint_unposted": "The revision is approved but has not been posted yet (automatic posting is disabled or has not run yet) — the Journal column stays empty.",
+      "hint_payments_not_materialized": "Payment liabilities for this period have not been prepared yet — the Payments columns stay empty.",
+      "summary": {
+        "reconciled": "Payroll, journal and payments match by category.",
+        "diff": "A difference was found between payroll, journal and/or payments — see the highlighted categories below.",
+        "unposted": "The period has not been posted yet — this is not a difference, just a pending step.",
+        "tax_evidence": "The company keeps tax records — accounting reconciliation does not apply.",
+        "info": "There is nothing to compare for this period yet."
+      },
+      "empty_no_run": {
+        "title": "No payroll run exists for this period",
+        "message": "Choose a different payroll period or first create a payroll run under Payroll runs."
+      },
+      "empty_unapproved": {
+        "title": "The month has not been approved yet",
+        "message": "Reconciliation is only computed for an approved payroll revision — finish the approval under Payroll runs."
+      },
+      "table": {
+        "category": "Category",
+        "payroll": "Payroll",
+        "journal": "Journal",
+        "diff_journal": "Diff (payroll vs. journal)",
+        "payments_liability": "Payments — liability",
+        "payments_paid": "Payments — paid",
+        "diff_payments": "Diff (payroll vs. payments)",
+        "status": "Status"
+      },
+      "categories": {
+        "gross_wages": "Gross wages (521/522/523)",
+        "employer_contributions": "Employer statutory contributions (524)",
+        "social_health_insurance": "Social and health insurance (336)",
+        "income_tax": "Payroll income tax (342)",
+        "other_deductions": "Other deductions (379)",
+        "enforcement": "Garnishment and insolvency deductions (379)",
+        "net_wage": "Net wage payable (331/366)"
+      },
+      "category_status": {
+        "match": "Match",
+        "diff": "Difference",
+        "not_applicable": "Not applicable"
+      }
+    },
     "runs": {
       "title": "Payroll runs",
       "subtitle": "Input locking, immutable calculation, four-eye review and monthly payroll approval.",
@@ -751,6 +899,39 @@
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
       "validations": "Blocking checks",
+      "net": {
+        "title": "Net pay breakdown",
+        "subtitle": "From gross income through contributions, tax and deductions to the payout split — from the approved revision.",
+        "people_tabs": "Employee net pay",
+        "person_fallback": "Employee no. {id}",
+        "load_failed": "The net pay breakdown could not be loaded.",
+        "gross": "Gross income",
+        "contributions": "Employee contributions",
+        "tax": "Tax after credits and bonus",
+        "payable": "Payable",
+        "steps_title": "Calculation steps",
+        "cash_income": "Cash income",
+        "non_cash_income": "Non-cash income",
+        "social": "Employee social insurance",
+        "health": "Employee health insurance",
+        "advance_tax": "Advance tax",
+        "withholding_tax": "Withholding tax",
+        "bonus": "Tax bonus",
+        "correction": "Correction",
+        "before_deductions": "Net pay before deductions",
+        "deductions_total": "Standard deductions",
+        "enforcement": "Enforcement deductions",
+        "deductions_title": "Deductions by order",
+        "priority": "Order {priority}",
+        "unapplied": "Not applied: {value}",
+        "no_deductions": "No deduction was applied in this revision.",
+        "allocations_title": "Payout split",
+        "allocations_hint": "The bank destination is shown only as a mask from the frozen revision.",
+        "allocations_total": "Allocation total",
+        "destination_bank": "Bank account",
+        "destination_cash": "Cash",
+        "no_allocations": "The revision has no frozen payout rules."
+      },
       "tax": {
         "title": "Employment income tax breakdown",
         "subtitle": "An auditable calculation from the frozen payroll run revision.",
@@ -1349,6 +1530,96 @@
       "show_detail": "Edit employee",
       "hide_detail": "Hide details",
       "detail_hint": "Each relationship has its own terms history, lifecycle, checklist and audit timeline.",
+      "dependants": {
+        "title": "Dependants and child tax credit",
+        "subtitle": "Children for the monthly credit under § 35c and a spouse or partner for the annual reconciliation. A claim only arises once it is documented and dated.",
+        "add": "Add dependant",
+        "empty": "No dependant has been recorded yet.",
+        "load_failed": "The dependant records could not be loaded.",
+        "save_failed": "Saving failed.",
+        "saved": "Dependant records saved.",
+        "show": "Show claims",
+        "hide": "Hide claims",
+        "edit_person": "Edit person",
+        "edit_claim": "Edit claim",
+        "add_claim": "Add claim",
+        "student": "Student",
+        "frozen": "Frozen by revision",
+        "frozen_hint": "Payroll is approved through {date}. A substantive change to an older claim never rewrites history — it creates a new effective version from the following month.",
+        "spouse_annual_only": "The spouse or partner credit cannot be claimed monthly; it belongs to the annual reconciliation.",
+        "order": "Child order {order}",
+        "period_open": "from {from}",
+        "period_closed": "{from} – {to}",
+        "credit_monthly": "Monthly credit {amount} CZK",
+        "credit_manual_review": "The credit rate cannot be resolved — manual review required.",
+        "claim_ok": "The claim is documented and can be applied.",
+        "columns": {
+          "person": "Person",
+          "relation": "Relationship",
+          "birth_number": "Birth number",
+          "existence": "Dependant",
+          "claims": "Claims"
+        },
+        "relations": {
+          "child_own": "Own child",
+          "child_adopted": "Adopted child",
+          "child_in_care": "Child in substitute parental care",
+          "child_of_spouse": "Child of the spouse or partner",
+          "grandchild": "Grandchild",
+          "spouse": "Spouse",
+          "partner": "Registered partner"
+        },
+        "reasons": {
+          "own_household": "Shared household",
+          "shared_custody": "Shared custody",
+          "adoption": "Adoption",
+          "foster_care": "Foster care",
+          "study_continues": "Continued study up to age 26",
+          "other": "Other documented reason"
+        },
+        "evidence": {
+          "verified": "Documented",
+          "unverified": "Not documented yet"
+        },
+        "blockers": {
+          "relation_not_child": "The monthly credit belongs to a child only.",
+          "evidence_unverified": "The claim has no document — the credit will not be applied.",
+          "shared_household_unconfirmed": "The shared household is not confirmed.",
+          "other_claimant_not_excluded": "It is not documented that the other taxpayer does not claim the credit.",
+          "declaration_missing": "A signed taxpayer declaration is missing at the start of the claim.",
+          "outside_existence": "The claim falls outside the period in which the person is a dependant.",
+          "superseded": "This version of the claim was replaced by a newer one."
+        },
+        "form": {
+          "person_title": "Dependant",
+          "claim_title": "Credit claim — {name}",
+          "relation": "Relationship to the taxpayer",
+          "full_name": "Full name",
+          "birth_date": "Date of birth",
+          "birth_number": "Birth number",
+          "birth_number_placeholder": "YYMMDD/XXXX",
+          "birth_number_hint": "Stored encrypted and shown only masked in the list. An empty field keeps the stored value unchanged.",
+          "existence_from": "Dependant from",
+          "existence_to": "Dependant until",
+          "ztp_p": "The person holds a ZTP/P card",
+          "student": "The adult child studies continuously (up to age 26)",
+          "note": "Note",
+          "child_order": "Child order",
+          "child_order_hint": "The order drives the credit amount and belongs to the claim of this taxpayer, not to the child.",
+          "reason": "Reason for the claim",
+          "evidence_status": "Documentation status",
+          "evidence_reference": "Document reference",
+          "evidence_reference_placeholder": "document:birth-certificate",
+          "evidence_reference_hint": "Canonical reference into the payroll documentation. Without a document and a signed declaration no claim arises.",
+          "effective_from": "Claim from (first day of the month)",
+          "effective_to": "Claim until (last day of the month)",
+          "effective_to_hint": "Leave empty for an ongoing claim. Filling it in ends the claim.",
+          "claim_ztp_p": "Claim the double amount for a ZTP/P child",
+          "shared_household": "The child lives in the shared household",
+          "other_claimant_excluded": "The other taxpayer does not claim the credit for this period",
+          "supersede_hint": "If the claim reaches into a period covered by an approved payroll revision, the change is stored as a new effective version and the original record stays in history."
+        }
+      },
       "quick_edit": {
         "title": "Common employee details",
         "subtitle": "Edit the most frequently used personal, contact and employment details together without switching tabs.",
@@ -1674,6 +1945,8 @@
           "deduction_priority_missing": "A continuing deduction is missing its priority.",
           "deduction_result_not_supported": "A deduction result cannot be safely included in the certificate.",
           "average_earnings_ruleset_not_ready": "The § 313(2) average-earnings rules are not approved yet. The system therefore does not offer manual entry of a net amount.",
+          "average_earnings_snapshot_missing": "The decisive period {year}/Q{quarter} has no approved average-earnings snapshot yet. Create and approve one in the Absences & averages module first.",
+          "average_earnings_net_conversion_not_verified": "An approved gross hourly average exists for the decisive period {year}/Q{quarter}, but the conversion to a net monthly amount under the Employment Act is not yet implemented in the application. Please issue this certificate outside the application for now.",
           "dpp_sickness_evidence_not_ready": "For a DPP without a continuing deduction, sickness-insurance participation cannot yet be evidenced safely.",
           "dpp_wage_deduction_missing": "No continuing deduction establishing the DPP certificate obligation was found.",
           "dpp_issuance_basis_missing": "The DPP is missing a verified statutory basis for issuing the certificate.",
@@ -1693,6 +1966,28 @@
         "dpc": "Agreement to complete a job",
         "partner_dependent": "Partner's income",
         "statutory_body": "Statutory-office remuneration"
+      },
+      "dimensions": {
+        "title": "Payroll dimensions of this relation",
+        "hint": "Assignment of cost centers, projects and activities to this employment relation over time.",
+        "add": "Assign dimension",
+        "empty": "This relation has no dimension assigned yet.",
+        "load_failed": "Failed to load assigned dimensions.",
+        "type": "Type",
+        "dimension": "Dimension",
+        "validity": "Validity",
+        "select_dimension": "Select a dimension",
+        "no_results": "No dimensions match the search.",
+        "valid_from": "Valid from",
+        "valid_to": "Valid to",
+        "saved": "Dimension assignment saved.",
+        "save_failed": "Failed to save the dimension assignment.",
+        "overlap_error": "This employment relation already has another dimension of the same type assigned in this period.",
+        "ineffective_error": "The selected dimension is not effective for the whole assignment period.",
+        "conflict_title": "Someone else changed this assignment in the meantime",
+        "reload_current": "Reload current state",
+        "new_title": "New dimension assignment",
+        "edit_title": "Edit dimension assignment"
       }
     },
     "submissions": {
@@ -1702,13 +1997,58 @@
       "tabs": {
         "regzel": "Employer registration",
         "jmhz": "JMHZ",
-        "health": "Health insurers"
+        "health": "Health insurers",
+        "inbox": "Inbox"
       },
       "unsupported": "Not supported yet",
       "jmhz_title": "Unified monthly employer report",
       "jmhz_fail_closed": "Direct JMHZ preparation and submission are not available yet. Until mapping, receipt verification and corrections are complete, the system will not pretend that a submission occurred.",
       "health_title": "Health-insurer reports",
       "health_fail_closed": "Direct health-insurer submissions are not available yet. The system will not mark them as sent or accepted without a verified channel and receipt.",
+      "inbox": {
+        "title": "Payroll submission inbox",
+        "subtitle": "A derived overview of approaching and missed deadlines, rejected submissions and pending identity checks. Acknowledging or snoozing never changes the obligation or submission state — it only manages the reminder.",
+        "load_failed": "The inbox could not be loaded.",
+        "empty": "No open items. Everything is either fine or resolved.",
+        "summary": {
+          "total": "Open",
+          "open": "New",
+          "acknowledged": "Acknowledged",
+          "snoozed": "Snoozed"
+        },
+        "agenda": "Agenda",
+        "due_on": "Due date",
+        "problem_label": "Problem",
+        "status_label": "Status",
+        "problem": {
+          "due_soon": "Due soon",
+          "due_today": "Due today",
+          "overdue": "Overdue",
+          "rejected": "Rejected",
+          "waiting_for_identity": "Waiting for identification",
+          "manual_review": "Needs review"
+        },
+        "status": {
+          "open": "New",
+          "acknowledged": "Acknowledged",
+          "snoozed": "Snoozed",
+          "resolved": "Resolved"
+        },
+        "acknowledge": "Acknowledge",
+        "acknowledging": "Acknowledging…",
+        "acknowledge_failed": "Failed to acknowledge the item.",
+        "snooze": "Snooze",
+        "snoozing": "Snoozing…",
+        "snooze_failed": "Failed to snooze the item.",
+        "snooze_modal_title": "Snooze reminder",
+        "snooze_until": "Snooze until",
+        "snooze_until_required": "Enter the date and time to snooze until.",
+        "snooze_reason": "Snooze reason",
+        "snooze_reason_placeholder": "E.g. waiting for a document from the client.",
+        "snooze_reason_required": "Please provide a reason for snoozing.",
+        "snooze_confirm": "Snooze",
+        "snoozed_until_label": "Snoozed until {at}"
+      },
       "overview": {
         "period": "Reporting period",
         "environment": "Evidence environment",
@@ -1911,7 +2251,8 @@
         "institutions": "Institution accounts",
         "accounting": "Automatic posting",
         "policies": "Policies and readiness",
-        "submissions": "Submissions"
+        "submissions": "Submissions",
+        "dimensions": "Dimensions"
       },
       "policies": {
         "title": "Employer policies",
@@ -2129,7 +2470,60 @@
         "account_wrong_type": "Select {type}."
       },
       "read_only": "You have read-only access. The Payroll settings permission is required to make changes.",
-      "discard": "Discard changes"
+      "discard": "Discard changes",
+      "dimensions": {
+        "title": "Payroll dimensions",
+        "hint": "Cost centers, projects and activities for analytic breakdown of payroll and their default accounting mapping. Work even without double-entry bookkeeping.",
+        "add": "Add dimension",
+        "add_first": "Add first dimension",
+        "empty": "No payroll dimensions have been created yet.",
+        "load_failed": "Failed to load payroll dimensions.",
+        "retry": "Try again",
+        "type": "Type",
+        "code": "Code",
+        "name": "Name",
+        "validity": "Validity",
+        "account": "Default account",
+        "status": "Status",
+        "type_options": {
+          "cost_center": "Cost center",
+          "project": "Project",
+          "activity": "Activity"
+        },
+        "filter_type": "Filter by type",
+        "filter_type_all": "All types",
+        "effective": "Effective",
+        "outside_period": "Outside validity",
+        "inactive": "Inactive",
+        "new_title": "New dimension",
+        "edit_title": "Edit dimension",
+        "editor_hint": "The code is unique per tenant within its type and effective history — the same code and type can be reused in a non-overlapping period.",
+        "valid_from": "Effective from",
+        "valid_to": "Effective to",
+        "is_active": "Active",
+        "default_account_code": "Default analytic account",
+        "default_account_hint": "Analytic sub-account for the payroll automatic posting bridge accounts (MZ-03). Optional.",
+        "validation": {
+          "title": "Please check the highlighted fields.",
+          "code": "Code must be 1–50 characters: uppercase letters, digits, dot, underscore or hyphen.",
+          "name": "Name must be 1–190 characters.",
+          "dates": "The validity end cannot precede its start.",
+          "account": "The default account must match the chart-of-accounts format, e.g. 518 or 518.001."
+        },
+        "saved": "Payroll dimension saved.",
+        "save_failed": "Failed to save the payroll dimension.",
+        "conflict_title": "Someone else changed this dimension in the meantime",
+        "conflict_description": "Please reload the current state and try the change again.",
+        "reload_current": "Reload current state",
+        "overlap_error": "This dimension's validity overlaps another record with the same code and type.",
+        "history_locked_error": "A dimension used in history cannot be rewritten — its type, code and start of validity cannot change.",
+        "delete": "Delete",
+        "delete_confirm": "Really delete this dimension?",
+        "deleted": "Dimension deleted.",
+        "delete_failed": "Failed to delete the dimension.",
+        "in_use_error": "This dimension is used in an approved payroll revision — you can only end its validity, not delete it.",
+        "terminate_hint": "This dimension cannot be deleted because it is used in history — end its validity by setting a validity end date instead."
+      }
     },
     "status": {
       "disabled": "Inactive",
@@ -2185,6 +2579,93 @@
       "supported": "Supported",
       "manual_review": "Manual review required",
       "not_supported": "Not supported"
+    },
+    "deductions": {
+      "title": "Deduction agreements",
+      "subtitle": "Advances, meals, savings, damage compensation and voluntary contributions — with order, limit and validity.",
+      "priority_hint": "Use an order between {floor} and {ceiling}. The lower band is reserved for statutory and enforcement deductions, so a voluntary agreement can never jump ahead of them or bypass the protected amount.",
+      "add": "New agreement",
+      "employee": "Employee",
+      "select_employee": "Select an employee",
+      "all_employees": "All employees",
+      "all_statuses": "All statuses",
+      "agreement_title": "Agreement title",
+      "kind": "Deduction kind",
+      "priority": "Order",
+      "requested": "Requested deduction",
+      "requested_czk": "Requested deduction (CZK)",
+      "percent": "Percentage (%)",
+      "base_czk": "Percentage base (CZK)",
+      "base_hint": "The percentage and base are stored as a fixed amount that the payroll run freezes into its inputs.",
+      "amount_mode": "Amount entry",
+      "amount_mode_fixed": "Fixed amount",
+      "amount_mode_percentage": "Percentage of a base",
+      "limit_czk": "Total limit (CZK)",
+      "remaining_limit": "Remaining limit: {value}",
+      "withheld": "Withheld in total",
+      "validity": "Validity",
+      "valid_from": "Valid from",
+      "valid_to": "Valid to",
+      "effective_from": "Change effective from",
+      "effective_hint": "The date under which the new version of the agreement is recorded in history.",
+      "activate_now": "Activate immediately",
+      "recipient": "Deduction recipient",
+      "note": "Note",
+      "status_label": "Status",
+      "section_terms": "Deduction terms",
+      "section_validity": "Validity and status",
+      "section_recipient": "Recipient and note",
+      "history": "Version history",
+      "ledger": "Deduction movements",
+      "no_ledger": "No withheld amounts yet.",
+      "version": "version {version}",
+      "empty_title": "No deduction agreement",
+      "empty_description": "Create an agreement so the deduction is applied in the net pay calculation.",
+      "load_failed": "Deduction agreements could not be loaded.",
+      "detail_failed": "Agreement detail could not be loaded.",
+      "save_failed": "The change could not be saved.",
+      "conflict": "Somebody else changed the agreement in the meantime. The form was reloaded — check the values and save again.",
+      "validation": {
+        "amount": "Enter an amount in CZK with at most two decimals.",
+        "percent": "Enter a percentage between 0 and 100.",
+        "employee": "Select the employee the agreement belongs to."
+      },
+      "kinds": {
+        "advance": "Advance",
+        "meal": "Meals",
+        "contribution": "Contribution",
+        "damage": "Damage compensation",
+        "other": "Other deduction"
+      },
+      "status": {
+        "draft": "Draft",
+        "active": "Active",
+        "paused": "Paused",
+        "ended": "Ended",
+        "cancelled": "Cancelled"
+      },
+      "commands": {
+        "activate": "Activate",
+        "pause": "Pause",
+        "resume": "Resume",
+        "end": "End",
+        "cancel": "Cancel"
+      },
+      "change_kind": {
+        "created": "Created",
+        "updated": "Updated",
+        "activated": "Activated",
+        "paused": "Paused",
+        "resumed": "Resumed",
+        "ended": "Ended",
+        "cancelled": "Cancelled"
+      },
+      "ledger_kind": {
+        "withheld": "Withheld",
+        "reversed": "Deduction reversal",
+        "paid": "Remitted to recipient",
+        "payment_reversed": "Remittance reversal"
+      }
     },
     "enforcement": {
       "title": "Deductions, enforcement and debt relief",
@@ -2318,6 +2799,22 @@
           "mark_paid": "Mark the zero-balance case as paid?",
           "stop": "Select the decision and provide a reason for stopping the case."
         }
+      },
+      "recipient_account": "Deduction recipient (payment account catalogue)",
+      "recipient_account_none": "Not selected",
+      "recipient_account_hint": "Pick a verified account from payroll settings (type “other recipient”). Without it the withheld money cannot be remitted.",
+      "settlement": {
+        "title": "Withheld, held and remitted amounts",
+        "hint": "A claim balance drops only once a payment to the recipient is confirmed, never on the payroll deduction itself.",
+        "withheld": "Withheld from employee",
+        "held": "Held in deposit",
+        "liability": "Prepared for payment",
+        "remitted": "Remitted to recipient",
+        "remaining": "Remaining on claim",
+        "per_claim": "Breakdown per claim",
+        "empty": "No deductions or payments for this case yet.",
+        "held_hint": "Held amounts are never included in an outgoing payment batch.",
+        "inactive": "Inactive claim"
       },
       "ledger_kind": {
         "withheld": "Withheld from employee",
@@ -9600,11 +10097,11 @@
       "staff": "Staff",
       "client": "Client"
     },
-    "levels": {
-      "0": "Hidden",
-      "1": "Read only",
-      "2": "Write"
-    }
+    "levels": [
+      "Hidden",
+      "Read only",
+      "Write"
+    ]
   },
   "permissions": {
     "groups": {
@@ -9628,7 +10125,7 @@
       "utilities": "Utilities",
       "profile": "Personal profile"
     },
-    "items": {}
+    "items": []
   },
   "users": {
     "title": "Users",
@@ -9977,12 +10474,12 @@
       "no_data": "No EU supplies in this period (no issued invoices with VAT classification 20/22 for EU clients with VAT ID).",
       "note": "Recapitulative statement is submitted by VAT payers with at least 1 EU supply in the period. Identified persons (non-payers) submit when B2B EU services or goods purchases over the limit.",
       "note_quarterly_goods": "⚠️ Quarterly ESL is only allowed for services (code 22, §9/1). Goods supplies to EU (code 20) require monthly submission regardless of taxpayer type (§ 102(3) of Act 235/2004).",
-      "sh_type": {
-        "0": "Supply of goods to EU",
-        "1": "Transfer of business assets",
-        "2": "Triangular trade (intermediary)",
-        "3": "Supply of services to EU"
-      }
+      "sh_type": [
+        "Supply of goods to EU",
+        "Transfer of business assets",
+        "Triangular trade (intermediary)",
+        "Supply of services to EU"
+      ]
     },
     "submissions": {
       "title": "EPO filing & archive",
@@ -10050,9 +10547,9 @@
       "popup_blocked": "The browser blocked the new window. Use Continue to EPO in the detail panel.",
       "handoff_created": "The EPO form is ready and opened in a new window. You can return to it for about 20 minutes, as long as the underlying data does not change.",
       "handoff_ready": "The EPO form is ready",
-      "handoff_window": "The link is usable for about 20 minutes after it was created, and only while the underlying data stays unchanged. The portal never tells us how long the link really lives.",
+      "handoff_window": "The link is single-use — the portal consumes it the first time it is opened. It is also usable only for about 20 minutes after creation and only while the underlying data stays unchanged. The portal never tells us how long the link really lives.",
       "handoff_stale_title": "The link is no longer offered",
-      "handoff_stale_hint": "Either the roughly 20-minute window has passed, or the XML has been recalculated since the link was created — the old link would then point to an outdated filing. If you did not finish the filing, create a new link.",
+      "handoff_stale_hint": "The link has already been opened (it is single-use and the portal then reports that the filing does not exist), or the roughly 20-minute window has passed, or the XML has been recalculated in the meantime. If you did not finish the filing, create a new link — it is cheap and always works.",
       "moss_oss_title": "The OSS return is filed in the MOSS/OSS application",
       "moss_oss_hint": "It cannot be filed through the general EPO route — neither by handing the XML over to the web form nor by a direct ZAREP filing: the portal does recognise the document, but rejects it because you must be signed in to the MOSS/OSS application. That is why no filing route is offered here. Download the XML and upload it in the MOSS/OSS application on the Czech tax portal (a separate item in the top bar next to EPO), which requires its own sign-in.",
       "continue_epo": "Continue to EPO",
@@ -12292,6 +12789,115 @@
       "footer_note": "The preview shows work in progress that has not been invoiced yet. The data updates continuously."
     }
   },
+  "payroll_travel": {
+    "title": "Travel allowances",
+    "subtitle": "Domestic business trip records, allowance calculation from the effective decree and the split into the tax-exempt and above-limit part.",
+    "period": "Settlement period",
+    "empty": "No business trip for the selected period yet.",
+    "actions": {
+      "new": "New business trip",
+      "preview": "Recalculate preview",
+      "approve": "Approve settlement",
+      "materialize": "Post to payroll"
+    },
+    "status": {
+      "draft": "Draft",
+      "approved": "Approved",
+      "settled": "Posted to payroll",
+      "cancelled": "Cancelled"
+    },
+    "table": {
+      "employee": "Employee",
+      "route": "Route and purpose",
+      "interval": "Departure and return",
+      "entitlement": "Total entitlement",
+      "exempt": "Within limit",
+      "taxable": "Above limit",
+      "status": "Status"
+    },
+    "editor": {
+      "new": "New business trip",
+      "edit": "Edit business trip"
+    },
+    "form": {
+      "employment": "Employment relation",
+      "select": "Select an employment relation",
+      "settlement_period": "Settlement period",
+      "country": "Country (ISO)",
+      "departure_at": "Departure",
+      "arrival_at": "Return",
+      "transport_mode": "Means of transport",
+      "origin_place": "Place of departure",
+      "destination_place": "Place of work",
+      "purpose": "Purpose of the trip",
+      "meal_rate_band_1": "Meal allowance 5–12 h (CZK)",
+      "meal_rate_band_2": "Meal allowance over 12 up to 18 h (CZK)",
+      "meal_rate_band_3": "Meal allowance over 18 h (CZK)",
+      "statutory_minimum": "statutory minimum",
+      "advance": "Advance paid (CZK)"
+    },
+    "transport": {
+      "public_transport": "Public transport",
+      "company_vehicle": "Company vehicle",
+      "private_vehicle": "Private vehicle",
+      "other": "Other"
+    },
+    "items": {
+      "title": "Documented expenses",
+      "add": "Add item",
+      "empty": "No documented expenses yet.",
+      "kind": "Expense kind",
+      "spent_on": "Date",
+      "description": "Description",
+      "amount": "Amount (CZK)",
+      "documented": "Supported by a receipt",
+      "document_reference": "Receipt reference",
+      "vehicle_kind": "Vehicle kind",
+      "fuel_kind": "Fuel kind",
+      "distance_km": "Distance (km)",
+      "consumption": "Consumption per 100 km",
+      "documented_fuel_price": "Documented fuel price (CZK)"
+    },
+    "item_kinds": {
+      "transport": "Fare",
+      "accommodation": "Accommodation",
+      "incidental": "Necessary incidental expense",
+      "private_vehicle": "Private vehicle mileage"
+    },
+    "vehicles": {
+      "car": "Passenger car",
+      "single_track": "Single-track vehicle or tricycle"
+    },
+    "fuels": {
+      "petrol_95": "Petrol 95 octane",
+      "petrol_98": "Petrol 98 octane",
+      "diesel": "Diesel",
+      "electricity": "Electricity"
+    },
+    "meals": {
+      "title": "Free meals",
+      "add": "Add day",
+      "empty": "No free meal was provided during the trip.",
+      "date": "Date",
+      "count": "Number of meals"
+    },
+    "preview": {
+      "band": "band {band}",
+      "settlement": "Balance against the advance: {amount}",
+      "manual_review": "The settlement requires manual review and cannot be approved:"
+    },
+    "messages": {
+      "load_failed": "Business trips could not be loaded.",
+      "preview_failed": "The calculation preview could not be computed.",
+      "save_failed": "The business trip could not be saved.",
+      "approve_failed": "The settlement could not be approved.",
+      "materialize_failed": "The settlement could not be posted to payroll.",
+      "created": "The business trip was created.",
+      "updated": "The business trip was saved.",
+      "approved": "The settlement was approved.",
+      "materialized": "Posted to payroll: {created} new, {replayed} unchanged."
+    }
+  },
   "payroll_absence": {
     "title": "Absence, leave and sickness",
     "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
@@ -12303,19 +12909,46 @@
     "period": "Period",
     "note": "Note",
     "select": "Select…",
-    "tabs": {"label": "Absence records", "absences": "Absences", "averages": "Average earning", "leave": "Leave"},
-    "types": {
-      "vacation": "Annual leave", "dpn": "Temporary incapacity for work", "quarantine": "Quarantine",
-      "ocr": "Care allowance", "long_term_care": "Long-term care", "ppm": "Maternity benefit",
-      "paternity": "Paternity leave", "parental": "Parental leave", "unpaid_leave": "Unpaid leave",
-      "employee_obstacle": "Employee-side obstacle", "employer_obstacle": "Employer-side obstacle", "other": "Other absence"
+    "tabs": {
+      "label": "Absence records",
+      "absences": "Absences",
+      "averages": "Average earning",
+      "leave": "Leave"
     },
-    "status": {"requested": "Pending", "approved": "Approved", "rejected": "Rejected", "cancelled": "Cancelled"},
-    "actions": {"approve": "Approve", "reject": "Reject", "cancel": "Cancel"},
+    "types": {
+      "vacation": "Annual leave",
+      "dpn": "Temporary incapacity for work",
+      "quarantine": "Quarantine",
+      "ocr": "Care allowance",
+      "long_term_care": "Long-term care",
+      "ppm": "Maternity benefit",
+      "paternity": "Paternity leave",
+      "parental": "Parental leave",
+      "unpaid_leave": "Unpaid leave",
+      "employee_obstacle": "Employee-side obstacle",
+      "employer_obstacle": "Employer-side obstacle",
+      "other": "Other absence"
+    },
+    "status": {
+      "requested": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "actions": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel"
+    },
     "absences": {
-      "new": "New absence", "list": "Recorded absences", "empty": "No absences in the selected period.",
-      "type": "Absence type", "average": "Approved hourly average", "partial_first": "First-day absence (hours)",
-      "partial_last": "Last-day absence (hours)", "create": "Create absence",
+      "new": "New absence",
+      "list": "Recorded absences",
+      "empty": "No absences in the selected period.",
+      "type": "Absence type",
+      "average": "Approved hourly average",
+      "partial_first": "First-day absence (hours)",
+      "partial_last": "Last-day absence (hours)",
+      "create": "Create absence",
       "cancel_confirm": "Cancel this absence? Annual leave creates a traceable reversing entry.",
       "correction_pending": "The related payroll run requires correction review."
     },
@@ -12325,27 +12958,54 @@
       "first_day_worked": "The first scheduled shift was fully worked"
     },
     "averages": {
-      "new": "New average earning snapshot", "year": "Application year", "quarter": "Quarter",
-      "decisive_from": "Decisive period from", "decisive_to": "Decisive period to",
-      "gross_minor": "Qualifying earnings (CZK)", "allocated_minor": "Allocated long-term remuneration (CZK)",
-      "worked_minutes": "Hours worked", "worked_days": "Days worked",
-      "probable_minor": "Probable hourly earning (CZK)", "rationale": "Probable earning rationale",
+      "new": "New average earning snapshot",
+      "year": "Application year",
+      "quarter": "Quarter",
+      "decisive_from": "Decisive period from",
+      "decisive_to": "Decisive period to",
+      "gross_minor": "Qualifying earnings (CZK)",
+      "allocated_minor": "Allocated long-term remuneration (CZK)",
+      "worked_minutes": "Hours worked",
+      "worked_days": "Days worked",
+      "probable_minor": "Probable hourly earning (CZK)",
+      "rationale": "Probable earning rationale",
       "create": "Calculate snapshot"
     },
-    "average_source": {"actual": "Actual", "probable": "Probable"},
+    "average_source": {
+      "actual": "Actual",
+      "probable": "Probable"
+    },
     "average_status": {
-      "manual_review": "Pending manual review", "approved": "Approved snapshot", "superseded": "Superseded by a newer revision"
+      "manual_review": "Pending manual review",
+      "approved": "Approved snapshot",
+      "superseded": "Superseded by a newer revision"
     },
     "leave": {
-      "balance": "Leave balance (h:mm)", "year": "Year", "entitlement": "Entitlement calculation",
-      "weekly_minutes": "Weekly working time (hours)", "weeks": "Leave allowance (weeks)",
-      "duration_days": "Continuous duration (days)", "worked_equivalent": "Qualifying time (hours)",
-      "rationale": "Manual assessment of qualifying time", "calculate": "Calculate and post entitlement",
-      "manual_entry": "Manual ledger entry", "entry_type": "Entry type", "effective_date": "Effective date",
-      "minutes_delta": "Change (hours)", "reason": "Reason", "add": "Add entry", "ledger": "Leave history",
+      "balance": "Leave balance (h:mm)",
+      "year": "Year",
+      "entitlement": "Entitlement calculation",
+      "weekly_minutes": "Weekly working time (hours)",
+      "weeks": "Leave allowance (weeks)",
+      "duration_days": "Continuous duration (days)",
+      "worked_equivalent": "Qualifying time (hours)",
+      "rationale": "Manual assessment of qualifying time",
+      "calculate": "Calculate and post entitlement",
+      "manual_entry": "Manual ledger entry",
+      "entry_type": "Entry type",
+      "effective_date": "Effective date",
+      "minutes_delta": "Change (hours)",
+      "reason": "Reason",
+      "add": "Add entry",
+      "ledger": "Leave history",
       "types": {
-        "entitlement": "Entitlement", "carryover": "Carry-over", "taken": "Taken", "adjustment": "Adjustment",
-        "shortening": "Reduction", "overdrawn": "Overdrawn", "payout": "Payout", "reversal": "Reversal"
+        "entitlement": "Entitlement",
+        "carryover": "Carry-over",
+        "taken": "Taken",
+        "adjustment": "Adjustment",
+        "shortening": "Reduction",
+        "overdrawn": "Overdrawn",
+        "payout": "Payout",
+        "reversal": "Reversal"
       }
     },
     "validation": {
@@ -12355,11 +13015,16 @@
       "whole_number": "Enter a whole number."
     },
     "messages": {
-      "load_failed": "Absence data could not be loaded.", "save_failed": "The change could not be saved.",
+      "load_failed": "Absence data could not be loaded.",
+      "save_failed": "The change could not be saved.",
       "average_required": "Select an approved average earning for this absence type.",
-      "absence_created": "Absence created.", "approved": "Absence approved.", "rejected": "Absence rejected.",
-      "cancelled": "Absence cancelled.", "average_created": "Average snapshot calculated.",
-      "average_approved": "Average snapshot approved.", "entitlement_created": "Entitlement posted to the ledger.",
+      "absence_created": "Absence created.",
+      "approved": "Absence approved.",
+      "rejected": "Absence rejected.",
+      "cancelled": "Absence cancelled.",
+      "average_created": "Average snapshot calculated.",
+      "average_approved": "Average snapshot approved.",
+      "entitlement_created": "Entitlement posted to the ledger.",
       "entry_created": "Ledger entry added."
     }
   }

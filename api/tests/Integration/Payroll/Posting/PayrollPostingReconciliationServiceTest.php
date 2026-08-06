@@ -1,0 +1,889 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll\Posting;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * MZ-18-W07 — reconciliation je odvozený read model: porovnává kontrolní
+ * součty MZ-13-W06, skutečně zaúčtovaný deník a platební závazky MZ-17.
+ * Fixture staví jeden vyvážený mzdový předpis (521/524 MD, 336/342/379/331
+ * D) s konzistentními čísly napříč všemi třemi zdroji, aby šlo cíleně
+ * rozbít právě jeden z nich a ověřit, že rozdíl padne do správné kategorie.
+ */
+#[Group('integration')]
+final class PayrollPostingReconciliationServiceTest extends TestCase
+{
+    private const YEAR = 2098;
+
+    private Connection $db;
+    private PostingService $posting;
+    private PayrollPostingReconciliationService $reconciliation;
+    private AccountingPeriodRepository $periods;
+    private ChartOfAccountsSeeder $seeder;
+    private int $supplierId = 0;
+    private int $userId = 0;
+    private bool $inTransaction = false;
+
+    protected function setUp(): void
+    {
+        $rootDir = dirname(__DIR__, 5);
+        if (!is_file($rootDir . '/cfg.php')) {
+            $this->markTestSkipped(
+                'cfg.php neexistuje — test vyžaduje DB connection.',
+            );
+        }
+
+        try {
+            $container = Bootstrap::buildApp()->getContainer();
+            $this->db = $container->get(Connection::class);
+            $this->posting = $container->get(PostingService::class);
+            $this->reconciliation = $container->get(
+                PayrollPostingReconciliationService::class,
+            );
+            $this->periods = $container->get(AccountingPeriodRepository::class);
+            $this->seeder = $container->get(ChartOfAccountsSeeder::class);
+        } catch (\Throwable $exception) {
+            $this->markTestSkipped('DI nedostupné: ' . $exception->getMessage());
+        }
+
+        $pdo = $this->db->pdo();
+        $this->userId = (int) (
+            $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn()
+                ?: 0
+        );
+        $currencyId = (int) (
+            $pdo->query(
+                "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+            )->fetchColumn() ?: 0
+        );
+        $vatRateId = (int) (
+            $pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn()
+                ?: 0
+        );
+        $countryId = (int) (
+            $pdo->query(
+                "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+            )->fetchColumn() ?: 0
+        );
+        if ($this->userId === 0
+            || $currencyId === 0
+            || $vatRateId === 0
+            || $countryId === 0
+        ) {
+            $this->markTestSkipped(
+                'Chybí základní data (user/currency/vat_rate/country) v DB.',
+            );
+        }
+
+        $pdo->beginTransaction();
+        $this->inTransaction = true;
+        $this->supplierId = $this->createSupplier(
+            $pdo,
+            'double_entry',
+            $countryId,
+            $currencyId,
+            $vatRateId,
+        );
+    }
+
+    protected function tearDown(): void
+    {
+        if (!isset($this->db) || !$this->inTransaction) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $this->db->close();
+    }
+
+    public function testMatchingPeriodReportsZeroDiffs(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 6, deducted: 445, tag: 'A');
+        $this->createEmployee($fixture['employeeId']);
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'net_wage' => 10_100,
+            'social_insurance' => 1_400,
+            'health_insurance' => 1_000,
+            'advance_tax' => 900,
+            'deduction' => 445,
+        ]);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-06',
+        );
+
+        self::assertSame('posted', $result['journal_state']);
+        self::assertSame('materialized', $result['payments_state']);
+        self::assertSame('reconciled', $result['overall_status']);
+        $byKey = array_column($result['categories'], null, 'key');
+        foreach ([
+            'gross_wages' => 12_345,
+            'employer_contributions' => 1_500,
+            'social_health_insurance' => 2_400,
+            'income_tax' => 900,
+            'other_deductions' => 445,
+            'enforcement' => 0,
+            'net_wage' => 10_100,
+        ] as $key => $expected) {
+            self::assertSame($expected, $byKey[$key]['payroll_minor'], "payroll_minor {$key}");
+            self::assertSame('match', $byKey[$key]['status'], "status {$key}");
+        }
+        self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(2_400, $byKey['social_health_insurance']['journal_minor']);
+        self::assertSame(0, $byKey['social_health_insurance']['diff_payroll_journal_minor']);
+    }
+
+    public function testTamperedJournalIsDetectedAndAttributedToTheRightCategory(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 6, deducted: 445, tag: 'B');
+        $this->createEmployee($fixture['employeeId']);
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'net_wage' => 10_100,
+            'social_insurance' => 1_400,
+            'health_insurance' => 1_000,
+            'advance_tax' => 900,
+            'deduction' => 445,
+        ]);
+
+        // Simuluje poškozený/ručně upravený deník mimo aplikační vrstvu —
+        // reconciliation musí porovnávat SKUTEČNÝ deník, ne interní cache.
+        $this->db->pdo()->prepare(
+            'UPDATE journal_entry_lines line
+               JOIN chart_of_accounts account ON account.id = line.account_id
+                SET line.amount = line.amount + 0.50
+              WHERE line.supplier_id = ?
+                AND account.account_code = "336"
+                AND line.side = "credit"',
+        )->execute([$this->supplierId]);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-06',
+        );
+
+        self::assertSame('diff', $result['overall_status']);
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('diff', $byKey['social_health_insurance']['status']);
+        self::assertSame(2_450, $byKey['social_health_insurance']['journal_minor']);
+        self::assertSame(-50, $byKey['social_health_insurance']['diff_payroll_journal_minor']);
+        // Ostatní kategorie zůstávají nedotčené.
+        foreach (['gross_wages', 'employer_contributions', 'income_tax', 'other_deductions', 'net_wage'] as $key) {
+            self::assertSame('match', $byKey[$key]['status'], "status {$key} nemá zůstat rozdíl");
+        }
+    }
+
+    public function testCorrectionRevisionSumsWithOriginalAgainstJournal(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 7, deducted: 445, tag: 'C');
+
+        // Opravná revize: standardní srážka naroste o 100 Kč, čistá mzda o 100 Kč klesne.
+        $correctionResult = $this->buildResultSnapshot(
+            $fixture['employeeId'],
+            $fixture['employmentId'],
+            deducted: 545,
+        );
+        $correctionRevisionId = $this->insertRevision(
+            $fixture['runId'],
+            2,
+            $fixture['inputJson'],
+            $correctionResult['json'],
+            approved: true,
+        );
+        $this->insertStatutoryResult(
+            $correctionRevisionId,
+            'social_insurance',
+            ['employer_contribution_minor_units' => 800],
+        );
+        $this->insertStatutoryResult(
+            $correctionRevisionId,
+            'health_insurance',
+            ['employer_contribution_minor_units' => 700],
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_runs SET current_revision_no = 2 WHERE id = ?',
+        )->execute([$fixture['runId']]);
+
+        // Deník opravné revize nese jen DELTU: +100 na 379 (dimenze MZ-SR-),
+        // -100 (debit) na 331 — přesně mechanika PayrollPostingLineBuilder::deltaLines.
+        $correctionBatchId = $this->preparePostingBatch(
+            $fixture['runId'],
+            $correctionRevisionId,
+            self::YEAR . '-07-31',
+            $fixture['batchId'],
+        );
+        $correctionEntryId = $this->postJournal(
+            $correctionRevisionId,
+            self::YEAR . '-07-31',
+            [
+                ['account_code' => '379', 'side' => 'credit', 'amount' => '1.00', 'cost_center' => 'MZ-SR-CORR0000000001'],
+                ['account_code' => '331', 'side' => 'debit', 'amount' => '1.00'],
+            ],
+        );
+        $this->finalizeBatch($correctionBatchId, $correctionEntryId);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-07',
+        );
+
+        self::assertSame('posted', $result['journal_state']);
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame(545, $byKey['other_deductions']['payroll_minor']);
+        self::assertSame(545, $byKey['other_deductions']['journal_minor']);
+        self::assertSame(0, $byKey['other_deductions']['diff_payroll_journal_minor']);
+        self::assertSame(10_000, $byKey['net_wage']['payroll_minor']);
+        self::assertSame(10_000, $byKey['net_wage']['journal_minor']);
+        self::assertSame(0, $byKey['net_wage']['diff_payroll_journal_minor']);
+        self::assertSame('reconciled', $result['overall_status']);
+    }
+
+    public function testUnapprovedMonthIsUnpostedNotADiff(): void
+    {
+        $employeeId = 9_001;
+        $employmentId = 9_101;
+        $runId = $this->createRun(month: 8);
+        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $resultData = $this->buildResultSnapshot($employeeId, $employmentId, deducted: 100);
+        // Revize zůstává ve stavu 'reviewed' — otevřený, neschválený měsíc.
+        $this->insertRevision(
+            $runId,
+            1,
+            CanonicalJson::encode($input),
+            $resultData['json'],
+            approved: false,
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-08',
+        );
+
+        self::assertSame('no_revision', $result['journal_state']);
+        self::assertSame('info', $result['overall_status']);
+        self::assertSame([], $result['categories']);
+    }
+
+    public function testApprovedButNotYetPostedMonthIsUnposted(): void
+    {
+        $employeeId = 9_002;
+        $employmentId = 9_102;
+        $runId = $this->createRun(month: 9);
+        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $resultData = $this->buildResultSnapshot($employeeId, $employmentId, deducted: 100);
+        $revisionId = $this->insertRevision(
+            $runId,
+            1,
+            CanonicalJson::encode($input),
+            $resultData['json'],
+            approved: true,
+        );
+        $this->insertStatutoryResult(
+            $revisionId,
+            'social_insurance',
+            ['employer_contribution_minor_units' => 800],
+        );
+        $this->insertStatutoryResult(
+            $revisionId,
+            'health_insurance',
+            ['employer_contribution_minor_units' => 700],
+        );
+        // Žádná payroll_posting_batches — automatické zaúčtování je vypnuté/zatím neproběhlo.
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-09',
+        );
+
+        self::assertSame('unposted', $result['journal_state']);
+        self::assertNotSame('diff', $result['overall_status']);
+        foreach ($result['categories'] as $category) {
+            self::assertNull($category['journal_minor']);
+            self::assertNull($category['diff_payroll_journal_minor']);
+        }
+    }
+
+    public function testTaxEvidenceSupplierIsNotApplicableAndDoesNotCrash(): void
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = (int) $pdo->query(
+            "SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1",
+        )->fetchColumn();
+        $vatRateId = (int) $pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        $countryId = (int) $pdo->query(
+            "SELECT id FROM countries WHERE iso2 = 'CZ' ORDER BY id LIMIT 1",
+        )->fetchColumn();
+        $deSupplierId = $this->createSupplier(
+            $pdo,
+            'tax_evidence',
+            $countryId,
+            $currencyId,
+            $vatRateId,
+        );
+        $employeeId = 9_003;
+        $employmentId = 9_103;
+        $statement = $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status,
+                 current_revision_no, created_by, updated_by)
+             VALUES (?, ?, ?, "approved", 1, ?, ?)',
+        );
+        $statement->execute([
+            $deSupplierId,
+            self::YEAR . '-10-01',
+            self::YEAR . '-11-15',
+            $this->userId,
+            $this->userId,
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $resultData = $this->buildResultSnapshot($employeeId, $employmentId, deducted: 100);
+        $inputJson = CanonicalJson::encode($input);
+        $deRevisionId = $this->insertRevisionFor(
+            $deSupplierId,
+            $runId,
+            1,
+            $inputJson,
+            $resultData['json'],
+            true,
+        );
+        $this->insertStatutoryResultFor(
+            $deSupplierId,
+            $deRevisionId,
+            'social_insurance',
+            ['employer_contribution_minor_units' => 800],
+        );
+        $this->insertStatutoryResultFor(
+            $deSupplierId,
+            $deRevisionId,
+            'health_insurance',
+            ['employer_contribution_minor_units' => 700],
+        );
+
+        $result = $this->reconciliation->forPeriod($deSupplierId, self::YEAR . '-10');
+
+        self::assertSame('tax_evidence', $result['accounting_mode']);
+        self::assertSame('not_applicable', $result['journal_state']);
+        self::assertNotSame('diff', $result['overall_status']);
+    }
+
+    public function testForeignSupplierCannotSeeAnotherCompanysPeriod(): void
+    {
+        $this->buildBalancedRevision(month: 6, deducted: 445, tag: 'D');
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId + 1_000_000,
+            self::YEAR . '-06',
+        );
+
+        self::assertNull($result['run']);
+        self::assertSame('no_revision', $result['journal_state']);
+        self::assertSame([], $result['categories']);
+    }
+
+    public function testReconciliationNeverMutatesJournalOrRevision(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 6, deducted: 445, tag: 'E');
+        $this->createEmployee($fixture['employeeId']);
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'net_wage' => 10_100,
+        ]);
+        $pdo = $this->db->pdo();
+        $countBefore = [
+            'revisions' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_run_revisions')->fetchColumn(),
+            'journal_entries' => (int) $pdo->query('SELECT COUNT(*) FROM journal_entries')->fetchColumn(),
+            'journal_entry_lines' => (int) $pdo->query('SELECT COUNT(*) FROM journal_entry_lines')->fetchColumn(),
+            'posting_batches' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_posting_batches')->fetchColumn(),
+            'liabilities' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_payment_liabilities')->fetchColumn(),
+        ];
+
+        $first = $this->reconciliation->forPeriod($this->supplierId, self::YEAR . '-06');
+        $second = $this->reconciliation->forPeriod($this->supplierId, self::YEAR . '-06');
+
+        $countAfter = [
+            'revisions' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_run_revisions')->fetchColumn(),
+            'journal_entries' => (int) $pdo->query('SELECT COUNT(*) FROM journal_entries')->fetchColumn(),
+            'journal_entry_lines' => (int) $pdo->query('SELECT COUNT(*) FROM journal_entry_lines')->fetchColumn(),
+            'posting_batches' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_posting_batches')->fetchColumn(),
+            'liabilities' => (int) $pdo->query('SELECT COUNT(*) FROM payroll_payment_liabilities')->fetchColumn(),
+        ];
+        self::assertSame($countBefore, $countAfter);
+        self::assertSame($first, $second);
+    }
+
+    // ---------------------------------------------------------------
+    // Fixture helpers
+    // ---------------------------------------------------------------
+
+    /**
+     * @return array{
+     *   runId:int,revisionId:int,batchId:int,employeeId:int,employmentId:int,
+     *   inputJson:string
+     * }
+     */
+    private function buildBalancedRevision(int $month, int $deducted, string $tag): array
+    {
+        $employeeId = 8_000 + crc32($tag) % 900;
+        $employmentId = 8_500 + crc32($tag . 'e') % 900;
+        $this->createEmployee($employeeId);
+        $runId = $this->createRun($month);
+        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $inputJson = CanonicalJson::encode($input);
+        $resultData = $this->buildResultSnapshot($employeeId, $employmentId, $deducted);
+        $revisionId = $this->insertRevision($runId, 1, $inputJson, $resultData['json'], true);
+        $this->createRunPerson($revisionId, $employeeId);
+        $this->insertStatutoryResult(
+            $revisionId,
+            'social_insurance',
+            ['employer_contribution_minor_units' => 800],
+        );
+        $this->insertStatutoryResult(
+            $revisionId,
+            'health_insurance',
+            ['employer_contribution_minor_units' => 700],
+        );
+
+        $netWage = 12_345 - 600 - 300 - 900 - $deducted;
+        $lines = [
+            ['account_code' => '521', 'side' => 'debit', 'amount' => '123.45'],
+            ['account_code' => '524', 'side' => 'debit', 'amount' => '15.00'],
+            ['account_code' => '336', 'side' => 'credit', 'amount' => '24.00'],
+            ['account_code' => '342', 'side' => 'credit', 'amount' => '9.00'],
+            [
+                'account_code' => '379',
+                'side' => 'credit',
+                'amount' => number_format($deducted / 100, 2, '.', ''),
+                'cost_center' => 'MZ-SR-' . strtoupper(substr(hash('sha256', $tag), 0, 16)),
+            ],
+            [
+                'account_code' => '331',
+                'side' => 'credit',
+                'amount' => number_format($netWage / 100, 2, '.', ''),
+            ],
+        ];
+        $entryDate = sprintf('%d-%02d-%02d', self::YEAR, $month, cal_days_in_month(CAL_GREGORIAN, $month, self::YEAR));
+        $batchId = $this->preparePostingBatch($runId, $revisionId, $entryDate, null);
+        $entryId = $this->postJournal($revisionId, $entryDate, $lines);
+        $this->finalizeBatch($batchId, $entryId);
+
+        return [
+            'runId' => $runId,
+            'revisionId' => $revisionId,
+            'batchId' => $batchId,
+            'employeeId' => $employeeId,
+            'employmentId' => $employmentId,
+            'inputJson' => $inputJson,
+        ];
+    }
+
+    private function createSupplier(
+        PDO $pdo,
+        string $accountingMode,
+        int $countryId,
+        int $currencyId,
+        int $vatRateId,
+    ): int {
+        $statement = $pdo->prepare(
+            'INSERT INTO supplier
+                (company_name, street, city, zip, country_id, email,
+                 default_currency_id, default_vat_rate_id, accounting_mode)
+             VALUES (?, "Testovací 1", "Praha", "11000", ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            'Payroll Posting Reconciliation ' . bin2hex(random_bytes(4)) . ' s.r.o.',
+            $countryId,
+            'payroll-posting-reconciliation-' . bin2hex(random_bytes(4)) . '@example.com',
+            $currencyId,
+            $vatRateId,
+            $accountingMode,
+        ]);
+        $supplierId = (int) $pdo->lastInsertId();
+        if ($accountingMode === 'double_entry') {
+            $this->seeder->seedForSupplier($supplierId);
+            $this->periods->create(
+                $supplierId,
+                self::YEAR,
+                self::YEAR . '-01-01',
+                self::YEAR . '-12-31',
+            );
+        }
+
+        return $supplierId;
+    }
+
+    private function createRun(int $month): int
+    {
+        $pdo = $this->db->pdo();
+        $statement = $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status,
+                 current_revision_no, created_by, updated_by)
+             VALUES (?, ?, ?, "approved", 1, ?, ?)',
+        );
+        $paymentMonth = $month === 12 ? 1 : $month + 1;
+        $paymentYear = $month === 12 ? self::YEAR + 1 : self::YEAR;
+        $statement->execute([
+            $this->supplierId,
+            sprintf('%d-%02d-01', self::YEAR, $month),
+            sprintf('%d-%02d-15', $paymentYear, $paymentMonth),
+            $this->userId,
+            $this->userId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** @return array<string,mixed> */
+    private function buildInputSnapshot(int $employeeId, int $employmentId): array
+    {
+        return [
+            'schema_version' => 'payroll-run-input.v2',
+            'people' => [[
+                'employee' => ['id' => $employeeId],
+                'employments' => [[
+                    'employment' => ['id' => $employmentId, 'office_id' => 1],
+                    'inputs' => [],
+                ]],
+            ]],
+        ];
+    }
+
+    /** @return array{data:array<string,mixed>,json:string} */
+    private function buildResultSnapshot(
+        int $employeeId,
+        int $employmentId,
+        int $deducted,
+    ): array {
+        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $inputJson = CanonicalJson::encode($input);
+        $metrics = [
+            'source_amount_minor' => 12_345,
+            'cash_payable_minor' => 12_345,
+            'tax_base_minor' => 12_345,
+            'social_base_minor' => 12_345,
+            'health_base_minor' => 12_345,
+            'average_earning_base_minor' => 12_345,
+            'enforcement_base_minor' => 12_345,
+            'jmhz_amount_minor' => 12_345,
+        ];
+        $netBeforeDeductions = 12_345 - 600 - 300 - 900;
+        $netPayable = $netBeforeDeductions - $deducted;
+        $result = [
+            'schema_version' => 'payroll-run-result.v2',
+            'source_snapshot_hash' => hash('sha256', $inputJson),
+            'people' => [[
+                'employee_id' => $employeeId,
+                'employments' => [[
+                    'employment_id' => $employmentId,
+                    'inputs' => [[
+                        'input_id' => 1,
+                        'accounting' => [
+                            'debit_code' => '521',
+                            'credit_code' => '331',
+                            'amount_minor' => 12_345,
+                        ],
+                    ]],
+                    'totals' => $metrics,
+                ]],
+                'totals' => $metrics,
+                'statutory' => [
+                    'person_reference' => "employee:{$employeeId}",
+                    'status' => 'calculated',
+                    'social_insurance' => [
+                        'employee_contribution_minor_units' => 600,
+                    ],
+                    'health_insurance' => [
+                        'employee_contribution_minor_units' => 300,
+                        'employer_contribution_minor_units' => 700,
+                        'total_contribution_minor_units' => 1_000,
+                    ],
+                    'income_tax' => [
+                        'advance_tax' => [
+                            'tax_after_credits_minor_units' => 900,
+                        ],
+                        'withholding_tax_minor_units' => 0,
+                    ],
+                    'net_pay' => [
+                        'person_reference' => "employee:{$employeeId}",
+                        'relationships' => [[
+                            'relationship_reference' => "employment:{$employmentId}",
+                            'cash_income_minor_units' => 12_345,
+                            'non_cash_income_minor_units' => 0,
+                        ]],
+                        'cash_income_minor_units' => 12_345,
+                        'non_cash_income_minor_units' => 0,
+                        'employee_social_minor_units' => 600,
+                        'employee_health_minor_units' => 300,
+                        'advance_tax_minor_units' => 900,
+                        'withholding_tax_minor_units' => 0,
+                        'tax_bonus_minor_units' => 0,
+                        'correction_minor_units' => 0,
+                        'net_before_deductions_minor_units' => $netBeforeDeductions,
+                        'deducted_minor_units' => $deducted,
+                        'net_payable_minor_units' => $netPayable,
+                        'deductions' => [[
+                            'applied_minor_units' => $deducted,
+                            'deduction_reference' => 'test-deduction',
+                        ]],
+                    ],
+                    'net_payable_minor_units' => $netPayable,
+                ],
+            ]],
+            'totals' => $metrics,
+            'accounting_totals' => [[
+                'debit_code' => '521',
+                'credit_code' => '331',
+                'amount_minor' => 12_345,
+            ]],
+            'statutory' => [
+                'status' => 'calculated',
+                'employer_social_minor_units' => 800,
+            ],
+        ];
+
+        return ['data' => $result, 'json' => CanonicalJson::encode($result)];
+    }
+
+    private function insertRevision(
+        int $runId,
+        int $revisionNo,
+        string $inputJson,
+        string $resultJson,
+        bool $approved,
+    ): int {
+        return $this->insertRevisionFor(
+            $this->supplierId,
+            $runId,
+            $revisionNo,
+            $inputJson,
+            $resultJson,
+            $approved,
+        );
+    }
+
+    private function insertRevisionFor(
+        int $supplierId,
+        int $runId,
+        int $revisionNo,
+        string $inputJson,
+        string $resultJson,
+        bool $approved,
+    ): int {
+        $pdo = $this->db->pdo();
+        $statement = $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_by, approved_at)
+             VALUES (?, ?, ?, ?, "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $supplierId,
+            $runId,
+            $revisionNo,
+            $approved ? 'approved' : 'reviewed',
+            str_repeat('a', 64),
+            $inputJson,
+            hash('sha256', $inputJson),
+            $resultJson,
+            hash('sha256', $resultJson),
+            random_bytes(32),
+            $approved ? $this->userId : null,
+            $approved ? (self::YEAR . '-01-01 10:00:00') : null,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** @param array<string,mixed> $resultSnapshot */
+    private function insertStatutoryResult(
+        int $revisionId,
+        string $calculationKind,
+        array $resultSnapshot,
+    ): void {
+        $this->insertStatutoryResultFor(
+            $this->supplierId,
+            $revisionId,
+            $calculationKind,
+            $resultSnapshot,
+        );
+    }
+
+    /** @param array<string,mixed> $resultSnapshot */
+    private function insertStatutoryResultFor(
+        int $supplierId,
+        int $revisionId,
+        string $calculationKind,
+        array $resultSnapshot,
+    ): void {
+        $pdo = $this->db->pdo();
+        $inputJson = CanonicalJson::encode([]);
+        $resultJson = CanonicalJson::encode($resultSnapshot);
+        $statement = $pdo->prepare(
+            'INSERT INTO payroll_statutory_results
+                (supplier_id, revision_id, calculation_kind, schema_version,
+                 result_status, ruleset_id, ruleset_hash,
+                 input_snapshot_json, input_snapshot_hash,
+                 result_snapshot_json, result_snapshot_hash, result_set_hash, created_by)
+             VALUES (?, ?, ?, "payroll-statutory-result.v1", "calculated",
+                     "test-ruleset", ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $supplierId,
+            $revisionId,
+            $calculationKind,
+            str_repeat('b', 64),
+            $inputJson,
+            hash('sha256', $inputJson),
+            $resultJson,
+            hash('sha256', $resultJson),
+            hash('sha256', $calculationKind . $revisionId . $supplierId),
+            $this->userId,
+        ]);
+    }
+
+    /**
+     * PostingService::assertPayrollPostingContext (F1) vyžaduje existující
+     * "prepared" dávku PŘED zápisem do deníku — dávka se proto vždy zakládá
+     * dřív, než se zavolá postJournal().
+     */
+    private function preparePostingBatch(
+        int $runId,
+        int $revisionId,
+        string $entryDate,
+        ?int $previousBatchId,
+    ): int {
+        $pdo = $this->db->pdo();
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_posting_batches
+                (supplier_id, run_id, revision_id, previous_batch_id,
+                 entry_date, status, target_hash, delta_hash, created_by)
+             VALUES (?, ?, ?, ?, ?, "prepared", ?, ?, ?)',
+        );
+        $insert->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $previousBatchId,
+            $entryDate,
+            hash('sha256', 'target:' . $revisionId),
+            hash('sha256', 'delta:' . $revisionId),
+            $this->userId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * @param list<array{account_code:string,side:string,amount:string,cost_center?:string}> $lines
+     */
+    private function postJournal(int $revisionId, string $entryDate, array $lines): int
+    {
+        return $this->posting->postDocument(
+            $this->supplierId,
+            'payroll',
+            $revisionId,
+            $lines,
+            [
+                'entry_date' => $entryDate,
+                'document_no' => 'MZ-TEST-' . $revisionId,
+                'description' => 'Testovací mzdový předpis revize ' . $revisionId,
+                'posted_by' => $this->userId,
+                'user_id' => $this->userId,
+            ],
+        );
+    }
+
+    private function finalizeBatch(int $batchId, int $journalEntryId): void
+    {
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_posting_batches
+                SET status = "posted", journal_entry_id = ?, posted_at = NOW()
+              WHERE supplier_id = ? AND id = ? AND status = "prepared"',
+        );
+        $update->execute([$journalEntryId, $this->supplierId, $batchId]);
+        self::assertSame(1, $update->rowCount());
+    }
+
+    private function createEmployee(int $employeeId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (id, supplier_id, full_name, taxpayer_type)
+             VALUES (?, ?, "Testovací zaměstnanec", "employee")
+             ON DUPLICATE KEY UPDATE full_name = full_name',
+        )->execute([$employeeId, $this->supplierId]);
+    }
+
+    /**
+     * Vyžaduje trigger `trg_payroll_payment_liability_validate_insert` pro
+     * závazek 'net_wage' s vyplněným employee_id.
+     */
+    private function createRunPerson(int $revisionId, int $employeeId): void
+    {
+        $resultJson = CanonicalJson::encode(['status' => 'calculated']);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, result_json, result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")
+             ON DUPLICATE KEY UPDATE status = status',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $employeeId,
+            $resultJson,
+            hash('sha256', $resultJson),
+        ]);
+    }
+
+    /** @param array<string,int> $amountsByKind */
+    private function materializeLiabilities(
+        int $revisionId,
+        int $revisionEmployeeId,
+        array $amountsByKind,
+    ): void {
+        $pdo = $this->db->pdo();
+        foreach ($amountsByKind as $kind => $amountMinor) {
+            $reference = 'test-' . $kind . '-' . $revisionId;
+            $employeeId = $kind === 'net_wage' ? $revisionEmployeeId : null;
+            $snapshot = CanonicalJson::encode(['kind' => $kind]);
+            $statement = $pdo->prepare(
+                'INSERT INTO payroll_payment_liabilities
+                    (supplier_id, revision_id, employee_id, liability_reference,
+                     liability_kind, direction, recipient_reference, due_on,
+                     currency_code, amount_minor, source_snapshot_json,
+                     source_snapshot_hash, idempotency_key_hash, created_by)
+                 VALUES (?, ?, ?, ?, ?, "outgoing", "test-recipient",
+                         ?, "CZK", ?, ?, ?, ?, ?)',
+            );
+            $statement->execute([
+                $this->supplierId,
+                $revisionId,
+                $employeeId,
+                $reference,
+                $kind,
+                self::YEAR . '-07-15',
+                $amountMinor,
+                $snapshot,
+                hash('sha256', $snapshot),
+                random_bytes(32),
+                $this->userId,
+            ]);
+        }
+    }
+}

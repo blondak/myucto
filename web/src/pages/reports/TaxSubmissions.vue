@@ -514,6 +514,9 @@ async function createHandoff(item: TaxSubmission) {
     await load(false)
     if (popup) {
       popup.location.replace(result.url)
+      // Otevřeli jsme ji, takže je z pohledu portálu spotřebovaná. Když pop-up
+      // neprošel, k otevření nedošlo a odkaz zůstane nabídnutý.
+      markHandoffConsumed(item.id)
     } else {
       toast.warning(t('reports.submissions.popup_blocked'))
     }
@@ -539,6 +542,23 @@ function openPendingHandoff(item: TaxSubmission) {
     return
   }
   window.open(link.url, '_blank', 'noopener,noreferrer')
+  markHandoffConsumed(item.id)
+}
+
+/**
+ * URL do EPO je jednorázová — portál ji spotřebuje prvním otevřením. Jakmile jsme
+ * ji otevřeli, přestaneme ji nabízet, ať uživatel místo nefunkčního „Pokračovat“
+ * dostane nabídku vytvořit nový odkaz. Záznam nemažeme kvůli `attemptId`, přes
+ * který se párují nahrané artefakty.
+ */
+function markHandoffConsumed(submissionId: number) {
+  const link = handoffLinks.value[submissionId]
+  if (!link || link.consumedAt !== undefined) return
+  handoffLinks.value = {
+    ...handoffLinks.value,
+    [submissionId]: { ...link, consumedAt: new Date().toISOString() },
+  }
+  persistHandoffLinks()
 }
 
 async function uploadFiles(files: File[]) {

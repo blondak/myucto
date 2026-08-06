@@ -1,0 +1,344 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Payroll;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionInboxService;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+final class PayrollSubmissionInboxAction
+{
+    use PayrollActionSupport;
+
+    public function __construct(
+        private readonly PayrollSubmissionInboxService $inbox,
+        private readonly PayrollModuleAccess $access,
+        private readonly ActivityLogger $activity,
+        private readonly IpMatcher $ipMatcher,
+    ) {}
+
+    public function list(Request $request, Response $response): Response
+    {
+        if (!$this->authorize($request, $response, AccessLevel::READ, $error)) {
+            return $this->errorResponse($error);
+        }
+
+        try {
+            $environment = $this->environment(
+                $request->getQueryParams()['environment'] ?? null,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        $items = $this->inbox->list(
+            $this->currentSupplierId($request),
+            $environment,
+        );
+        $summary = [
+            'total' => 0,
+            'open' => 0,
+            'acknowledged' => 0,
+            'snoozed' => 0,
+        ];
+        foreach ($items as $item) {
+            if ($item['status'] === 'resolved') {
+                continue;
+            }
+            ++$summary['total'];
+            if (array_key_exists($item['status'], $summary)) {
+                ++$summary[$item['status']];
+            }
+        }
+
+        return Json::ok($response, [
+            'environment' => $environment,
+            'summary' => $summary,
+            'items' => $items,
+        ])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function acknowledge(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->errorResponse($error);
+        }
+        $itemId = $this->positiveInteger($args['itemId'] ?? null);
+        $userId = $this->userId($request);
+        $body = $this->objectBody($request);
+        if ($itemId === null || $userId === null || $body === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí obsahovat platnou verzi položky.',
+                422,
+            );
+        }
+        $rowVersion = filter_var(
+            $body['row_version'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        if (!is_int($rowVersion)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Verze položky musí být kladné celé číslo.',
+                422,
+            );
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->inbox->acknowledge(
+                $supplierId,
+                $itemId,
+                $rowVersion,
+                $userId,
+            );
+        } catch (PayrollSubmissionConflictException $exception) {
+            return Json::error(
+                $response,
+                'conflict',
+                $exception->getMessage(),
+                409,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'not_found',
+                $exception->getMessage(),
+                404,
+            );
+        }
+
+        $this->activity->log(
+            'payroll.submission_inbox_acknowledged',
+            $userId,
+            'payroll_submission_inbox_item',
+            $itemId,
+            ['row_version' => $result['row_version']],
+            $this->ipMatcher->clientIpFromRequest(
+                $this->serverParams($request),
+            ),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    /** @param array<string,string> $args */
+    public function snooze(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->errorResponse($error);
+        }
+        $itemId = $this->positiveInteger($args['itemId'] ?? null);
+        $userId = $this->userId($request);
+        $body = $this->objectBody($request);
+        if ($itemId === null || $userId === null || $body === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí obsahovat verzi, termín a důvod odložení.',
+                422,
+            );
+        }
+        $rowVersion = filter_var(
+            $body['row_version'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        $snoozedUntil = $body['snoozed_until'] ?? null;
+        $reason = $body['reason'] ?? null;
+        if (!is_int($rowVersion)
+            || !is_string($snoozedUntil)
+            || !is_string($reason)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí obsahovat verzi, termín a důvod odložení.',
+                422,
+            );
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->inbox->snooze(
+                $supplierId,
+                $itemId,
+                $rowVersion,
+                $snoozedUntil,
+                $reason,
+                $userId,
+            );
+        } catch (PayrollSubmissionConflictException $exception) {
+            return Json::error(
+                $response,
+                'conflict',
+                $exception->getMessage(),
+                409,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'not_found',
+                $exception->getMessage(),
+                404,
+            );
+        }
+
+        $this->activity->log(
+            'payroll.submission_inbox_snoozed',
+            $userId,
+            'payroll_submission_inbox_item',
+            $itemId,
+            [
+                'row_version' => $result['row_version'],
+                'snoozed_until' => $result['snoozed_until'],
+            ],
+            $this->ipMatcher->clientIpFromRequest(
+                $this->serverParams($request),
+            ),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    private function authorize(
+        Request $request,
+        Response $response,
+        AccessLevel $minimum,
+        ?Response &$error,
+    ): bool {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            $error = Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+
+            return false;
+        }
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.submissions',
+            $minimum,
+            $error,
+        )) {
+            return false;
+        }
+
+        return $this->requirePayrollEnabled(
+            $request,
+            $response,
+            $this->access,
+            $error,
+        );
+    }
+
+    private function errorResponse(?Response $error): Response
+    {
+        if ($error === null) {
+            throw new \LogicException(
+                'Chybí odpověď pro zamítnuté oprávnění.',
+            );
+        }
+
+        return $error;
+    }
+
+    private function environment(mixed $value): string
+    {
+        if ($value === null) {
+            return 'production';
+        }
+        if (!is_string($value)
+            || !in_array($value, ['production', 'test'], true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Prostředí inboxu musí být production nebo test.',
+            );
+        }
+
+        return $value;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function objectBody(Request $request): ?array
+    {
+        $body = $request->getParsedBody();
+        if (!is_array($body) || array_is_list($body)) {
+            return null;
+        }
+
+        return $body;
+    }
+
+    private function positiveInteger(mixed $value): ?int
+    {
+        $result = filter_var(
+            $value,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+
+        return is_int($result) ? $result : null;
+    }
+
+    /** @return array<string,mixed> */
+    private function serverParams(Request $request): array
+    {
+        $result = [];
+        foreach ($request->getServerParams() as $key => $value) {
+            if (is_string($key)) {
+                $result[$key] = $value;
+            }
+        }
+
+        return $result;
+    }
+}

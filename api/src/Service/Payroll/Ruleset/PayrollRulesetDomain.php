@@ -11,6 +11,7 @@ enum PayrollRulesetDomain: string
     case HealthInsurance = 'health_insurance';
     case EmploymentThresholds = 'employment_thresholds';
     case CompensationAverages = 'compensation_averages';
+    case TravelAllowances = 'travel_allowances';
     case EnforcementDeductions = 'enforcement_deductions';
     case Deadlines = 'deadlines';
     case Codebooks = 'codebooks';

@@ -502,7 +502,7 @@ final class PayrollRunStatutoryResultPersister
         array $results,
     ): array {
         $this->assertCompleteMap($snapshot['people'], $results, 'daně z příjmů');
-        $canonicalPolicy = EmploymentIncomeTaxPolicy2026::create();
+        $canonicalPolicyHash = EmploymentIncomeTaxPolicy2026::contractHash();
         $rulesetId = null;
         $rulesetHash = null;
         $policyId = null;
@@ -648,7 +648,7 @@ final class PayrollRunStatutoryResultPersister
                 "daně osoby {$personReference}",
             );
             if ($entryPolicyId !== EmploymentIncomeTaxPolicy2026::ID
-                || $entryPolicyHash !== $canonicalPolicy->canonicalHash
+                || $entryPolicyHash !== $canonicalPolicyHash
             ) {
                 throw new \DomainException(
                     "Výsledek {$personReference} nemá kanonickou identitu daňové politiky.",

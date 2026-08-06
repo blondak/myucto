@@ -11,6 +11,7 @@ import {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
+import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import { todayIso, transitionPresentation } from './employmentLifecycleUi'
 
@@ -259,6 +260,11 @@ const actions = computed<ActionItem[]>(() => [
         </ol>
       </section>
     </div>
+
+    <EmploymentDimensionsPanel
+      :employment-id="employment.id"
+      :can-write="canWrite"
+    />
 
     <EmploymentExitDocumentsPanel
       v-if="employment.end_date && canReadDocuments"

@@ -191,6 +191,36 @@ final class PayrollAverageEarningRepository
         return is_array($row) ? self::cast($row) : null;
     }
 
+    /**
+     * Nejnovější schválený snapshot průměru pro dané rozhodné čtvrtletí, nebo
+     * null, pokud pro toto období žádný schválený snapshot neexistuje.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findApproved(
+        int $supplierId,
+        int $employmentId,
+        int $applicableYear,
+        int $applicableQuarter,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM payroll_average_earning_snapshots
+              WHERE supplier_id = ? AND employment_id = ?
+                AND applicable_year = ? AND applicable_quarter = ?
+                AND status = 'approved'
+              ORDER BY revision_no DESC
+              LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId,
+            $employmentId,
+            $applicableYear,
+            $applicableQuarter,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? self::cast($row) : null;
+    }
+
     private function lockEmployment(int $supplierId, int $employmentId): void
     {
         $stmt = $this->db->pdo()->prepare(

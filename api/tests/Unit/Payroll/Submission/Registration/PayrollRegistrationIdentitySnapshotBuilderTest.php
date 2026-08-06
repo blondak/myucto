@@ -100,11 +100,10 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
             'id' => 122,
             'row_version' => 1,
         ];
-        $source['identity']['citizenship_country_code'] = 'SK';
         $snapshot = $this->builder->build($scope, $source);
         self::assertNull($snapshot->identifiers['birth_number']);
         self::assertSame(
-            'foreign_citizenship_country_code',
+            'domestic_citizenship_country_code',
             $snapshot->registrationEligibility['basis'],
         );
     }
@@ -165,19 +164,82 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
         }
     }
 
-    public function testPrezecRequiresExplicitForeignEmployeeEligibility(): void
+    public function testRegzecIgnoresPrezecDomesticEligibility(): void
     {
         $source = $this->source();
-        $source['identifiers']['ecp'] = '123456789';
-        $source['identifier_sources']['ecp'] = [
-            'id' => 141,
+        $source['identity']['citizenship_country_code'] = 'SK';
+
+        $snapshot = $this->builder->build($this->scope(), $source);
+
+        self::assertSame(
+            'not_applicable',
+            $snapshot->registrationEligibility['status'],
+        );
+        self::assertSame(
+            'agenda_not_prezec',
+            $snapshot->registrationEligibility['basis'],
+        );
+    }
+
+    public function testPrezecAcceptsVerifiedDomesticCitizenship(): void
+    {
+        $source = $this->source();
+        $source['identifiers']['birth_number'] = '9102030014';
+        $source['identifier_sources']['birth_number'] = [
+            'id' => 151,
             'row_version' => 1,
         ];
         $scope = $this->scope();
         $scope['agenda_code'] = 'PREZEC26';
 
+        $snapshot = $this->builder->build($scope, $source);
+
+        self::assertSame(
+            'verified',
+            $snapshot->registrationEligibility['status'],
+        );
+        self::assertSame(
+            'domestic_citizenship_country_code',
+            $snapshot->registrationEligibility['basis'],
+        );
+        self::assertSame(
+            'CZ',
+            $snapshot->registrationEligibility['citizenship_country_code'],
+        );
+    }
+
+    public function testPrezecRejectsForeignEmployeeRequiringFullRegistration(): void
+    {
+        $source = $this->source();
+        $source['identifiers']['ecp'] = '123456789';
+        $source['identifier_sources']['ecp'] = [
+            'id' => 152,
+            'row_version' => 1,
+        ];
+        $source['identity']['citizenship_country_code'] = 'SK';
+        $scope = $this->scope();
+        $scope['agenda_code'] = 'PREZEC26';
+
         $this->expectCode(
-            'registration_identity_prezec_foreign_eligibility_unverified',
+            'registration_identity_prezec_foreign_requires_full_registration',
+            fn () => $this->builder->build($scope, $source),
+        );
+    }
+
+    public function testPrezecBlocksUnverifiedCitizenship(): void
+    {
+        $source = $this->source();
+        $source['identifiers']['ecp'] = '123456789';
+        $source['identifier_sources']['ecp'] = [
+            'id' => 153,
+            'row_version' => 1,
+        ];
+        $source['identity']['citizenship_country_code'] = null;
+        $scope = $this->scope();
+        $scope['agenda_code'] = 'PREZEC26';
+
+        $this->expectCode(
+            'registration_identity_prezec_citizenship_unverified',
             fn () => $this->builder->build($scope, $source),
         );
     }

@@ -89,6 +89,17 @@ překrývat. Nové budoucí pravidlo proto založ až po ukončení platnosti
 předchozího záznamu. Původ systémového nebo migrovaného záznamu nelze při
 ruční úpravě změnit.
 
+V záložce **Dimenze** se vedou mzdová střediska, zakázky a činnosti — vlastní
+číselník nezávislý na účetním rozvrhu, takže funguje i ve firmě v daňové
+evidenci. Každá dimenze má typ, kód, název, období účinnosti a volitelný
+výchozí analytický účet k předkontacím automatického můstku. Kód je unikátní
+v rámci typu jen s ohledem na účinnou historii — stejný kód a typ lze znovu
+použít v neprekrývajícím se pozdějším období. Dimenzi použitou ve schválené
+mzdové revizi nejde smazat, jen ukončit její účinnost; nepoužitou dimenzi lze
+smazat běžně. Konkrétní přiřazení střediska, zakázky nebo činnosti pracovnímu
+vztahu se vede přímo na kartě daného vztahu v seznamu zaměstnanců, opět
+s vlastním obdobím účinnosti a bez souběhu dvou dimenzí stejného typu.
+
 Kontrola připravenosti se spouští k vybranému dni. Ukazuje každý ověřený
 předpoklad i přesný blokující nedostatek. Kontrolují se jen funkce, které firma
 skutečně zapnula; zapnutá automatizace, JMHZ nebo bezpečné doručení však bez
@@ -157,6 +168,46 @@ uveď druh podkladu i datum ověření. Máš-li ve formuláři neuloženou změ
 ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila předchozí
 uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
 účinnosti nebo aktivního stavu ověření automaticky zneplatní.
+
+### 58.4.1 Vyživované osoby a daňové zvýhodnění na dítě
+
+Ve sbalené části **Úplná osobní evidence a historie** je pod osobním profilem
+sekce **Vyživované osoby a daňové zvýhodnění**. Eviduje děti, na které se
+uplatňuje měsíční daňové zvýhodnění podle § 35c zákona o daních z příjmů,
+a manžela nebo partnera, u kterých lze slevu uplatnit až v ročním zúčtování.
+
+U osoby zadáš vztah k poplatníkovi, jméno, datum narození, volitelné rodné
+číslo, průkaz ZTP/P, soustavné studium a období, po které je osoba vyživovaná.
+Rodné číslo dítěte se ukládá šifrovaně, v seznamu i v detailu se zobrazuje jen
+maskované a odkrýt je lze pouze auditovaným odhalením citlivých údajů.
+
+Samotná evidence osoby ještě nezakládá nárok. Ten vzniká až **uplatněním**
+s vlastním obdobím účinnosti, kde uvedeš:
+
+- **pořadí dítěte** — určuje výši zvýhodnění a patří k uplatnění u konkrétního
+  poplatníka, ne k dítěti; dvě děti nesmí mít v jednom měsíci stejné pořadí;
+- **ZTP/P** — zvýhodnění za dítě s průkazem ZTP/P je dvojnásobné a zaškrtnout
+  je lze jen tehdy, je-li ZTP/P vedeno i u samotné osoby;
+- **důvod a doklad** — doložený nárok vyžaduje odkaz do mzdové dokumentace
+  a podepsané prohlášení poplatníka platné k počátku nároku; bez obojího se
+  nárok uloží jen jako nedoložený a do výpočtu mzdy nevstoupí;
+- **potvrzení společně hospodařící domácnosti a druhého poplatníka** — chybí-li,
+  výpočet skončí v ruční kontrole.
+
+Aplikace nedovolí dvě překrývající se uplatnění na totéž dítě u jednoho
+poplatníka ani uplatnění mimo období, kdy je osoba vedena jako vyživovaná.
+Uplatňuje-li totéž dítě (rozpoznané podle rodného čísla) ve stejném měsíci jiný
+zaměstnanec téže firmy, uložení se odmítne.
+
+Sazby zvýhodnění se berou z legislativního rulesetu. Pokud pro dané období
+žádná účinná sazba neexistuje, aplikace částku neodhaduje — označí nárok
+k ruční kontrole.
+
+Nárok zasahující do měsíce uzavřeného schválenou mzdovou revizí se věcnou
+změnou nepřepisuje. Původní záznam se ukončí posledním zmrazeným měsícem
+a vznikne nová účinná verze od měsíce následujícího, takže historický výsledek
+zůstane nedotčený. Ukončení nároku mimo zmrazené období se provede běžnou
+úpravou data „Nárok do".
 
 ## 58.5 Pracovní vztah a předkontace
 
@@ -301,6 +352,37 @@ uložení nepodaří například proto, že stejný vstup mezitím změnil jiný
 uživatel, přesný důvod zůstane viditelný nad formulářem. Před dalším pokusem
 načti aktuální měsíc tlačítkem **Obnovit** a změny zkontroluj.
 
+### 58.9.2 Cestovní náhrady
+
+V **Mzdy → Cestovní náhrady** vedeš tuzemské pracovní cesty a jejich vyúčtování.
+U cesty zadej pracovní vztah, odjezd a návrat s časem, místo, účel a dopravní
+prostředek. K vyúčtování přidáš doložené výdaje (jízdné, ubytování, nutné
+vedlejší výdaje), jízdy soukromým vozidlem v kilometrech a spotřebě na 100 km,
+bezplatná jídla po dnech a poskytnutou zálohu.
+
+Nárok se počítá z účinné vyhlášky k rozhodnému dni:
+
+- stravné podle časových pásem pracovní cesty (5 až 12 h, nad 12 do 18 h,
+  nad 18 h) za každý kalendářní den; u cesty spadající do dvou kalendářních dnů
+  se použije výhodnější varianta;
+- krácení stravného za každé poskytnuté bezplatné jídlo;
+- základní náhrada za ujetý kilometr a náhrada za spotřebované pohonné hmoty
+  z průměrné ceny podle vyhlášky, nebo z doložené ceny;
+- doložené ubytování a nutné vedlejší výdaje.
+
+Náhled ukazuje rozpad po dnech i po položkách a rozdělí výsledek na část **do
+zákonného limitu**, která není předmětem daně, pojistného ani exekučních srážek,
+a na **nadlimitní část**, která do mzdy vstupuje jako zdanitelný příjem a do
+vyměřovacích základů. Sazba stravného nižší než zákonné minimum, chybějící
+účinná sazba i zahraniční pracovní cesta skončí v ruční kontrole a vyúčtování
+nelze schválit.
+
+Schválené vyúčtování promítneš tlačítkem **Promítnout do mzdy**; založí mzdové
+vstupy na složkách `CESTOVNI_NAHRADA_LIMIT` a `CESTOVNI_NAHRADA_NADLIMIT`
+v období vyúčtování. Opakované promítnutí nevytvoří duplicitu. Zakládat a
+upravovat cesty smí role s oprávněním pro mzdové vstupy, schválení a promítnutí
+vyžaduje oprávnění pro schvalování.
+
 ## 58.10 Absence, dovolená a DPN
 
 V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
@@ -395,6 +477,26 @@ a nevznikne částečně schválená mzda.
 > pro ruční kontrolu a schválení zablokuje; aplikace chybějící zákonné údaje
 > neodhaduje.
 
+U schválené revize nabídne karta běhu **Rozklad čisté mzdy**. Pro vybranou osobu
+ukáže hrubý příjem, odvody zaměstnance, daň a bonus, čistou mzdu před srážkami,
+jednotlivé srážky s titulem a pořadím, exekuční srážku a výslednou částku
+k výplatě včetně rozdělení mezi platební cíle. Údaje se čtou ze zmrazené revize,
+takže pozdější změna dohody ani výplatního pravidla je nezmění. Zobrazí se vždy
+jen vybraná osoba a bankovní cíl pouze maskou účtu.
+
+V podvojném účetnictví je pro schválenou revizi dostupná stránka
+**Mzdy → Shoda účtování mezd**. Pro zvolené období porovná mzdovou revizi,
+skutečně zaúčtovaný deník a platební závazky po kategoriích (hrubé mzdy,
+pojistné hrazené zaměstnavatelem, sociální a zdravotní pojištění, daň,
+ostatní srážky, exekuční srážky a čistá mzda) a u každé ukáže, na které
+straně případný rozdíl vznikl. Oprava schváleného měsíce se do porovnání
+promítne správně — deník se sčítá napříč všemi revizemi běhu, protože
+rozdílová revize účtuje jen rozdíl proti poslední zaúčtované revizi. Měsíc,
+který ještě nebyl zaúčtován (vypnuté automatické zaúčtování, čekající krok,
+nebo firma vedoucí daňovou evidenci), stránka označí jako nezaúčtovaný —
+nejde o rozdíl. Stránka je čistě informační a nic nezapisuje ani do deníku,
+ani do mzdové revize.
+
 ## 58.12 Platby mezd a odvodů
 
 V **Mzdy → Platby mezd a odvodů** vybereš mzdové období a připravíš platební
@@ -472,8 +574,8 @@ dokument; u odkladu a zastavení je navíc povinný důvod.
 
 Výpočet používá celé haléře a uchovává neměnný měsíční vstup, použitou verzi
 pravidel, mezikroky zaokrouhlení, přidělení částek pohledávkám a pohyby
-**sraženo / deponováno**. Budoucí platební krok přidá samostatný pohyb
-**odesláno**, aby výpočet nemohl předstírat skutečnou úhradu. Kontroluje zejména nezabavitelnou částku,
+**sraženo / deponováno**. Odeslané peníze eviduje samostatně platební vrstva,
+aby výpočet nemohl předstírat skutečnou úhradu. Kontroluje zejména nezabavitelnou částku,
 třetiny, plně zabavitelný zbytek, pořadí přednostních pohledávek, běžné a dlužné
 výživné, více exekučních příkazů, více plátců, oddlužení a paušální náhradu
 nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
@@ -483,8 +585,48 @@ označí pro ruční kontrolu.
 nepřepisují. Patří do zabezpečených dokumentů; agenda srážek pracuje pouze
 s interním identifikátorem a ověřenými skutečnostmi. Odklad a zastavení vyžadují
 ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevřít.
-Označení případu za uhrazený se zpřístupní až po zavedení skutečné platby
-a nulovém zůstatku; na této obrazovce se zatím nenabízí.
+Označení případu za uhrazený projde teprve tehdy, když potvrzené úhrady pokryjí
+celý zůstatek pohledávek — samotné sražení ze mzdy k tomu nestačí.
+
+### 58.13.1 Odeslání sražených částek příjemci
+
+Aby aplikace sražené peníze skutečně odeslala, vyber v případu **příjemce srážky**
+z katalogu **Mzdy → Nastavení → Účty institucí** (typ *ostatní příjemce*). Účet
+musí být ověřený a účinný k datu výplaty; číslo účtu ani symboly se do případu
+neopisují. Po schválení mzdové revize vytvoří akce **Připravit závazky**
+v **Mzdy → Platby** závazek vůči tomuto příjemci — ale jen z částek, které jsou
+ve stavu **odesílání**. Cokoli je deponované (nový případ, odklad, zastavení)
+se do odchozí platební dávky nedostane. Opakovaná příprava nevytvoří druhý
+závazek; oprava mzdy promítne jen rozdíl a pokles vznikne jako samostatný
+příchozí opravný závazek.
+
+Blok **Sraženo, depozitum a odeslané platby** v detailu případu ukazuje, kolik
+bylo sraženo, kolik drží depozitum, kolik je připraveno k úhradě, kolik už
+příjemce dostal a kolik na pohledávce zbývá. Poslední dva údaje se mění až
+po spárování skutečné bankovní nebo pokladní platby v **Mzdy → Platby →
+Úhrady a párování**.
+
+### 58.13.2 Dohody o srážkách
+
+Dobrovolné a standardní srážky — zálohy, stravování, spoření, náhrada škody
+a příspěvky — spravuješ v **Mzdy → Dohody o srážkách**. Dohoda má titul,
+příjemce, druh, pořadí, částku a účinnost od–do; volitelně i celkový limit,
+po jehož vyčerpání se srážka přestane uplatňovat. Částku lze zadat pevně,
+nebo procentem ze zadaného základu — z procenta a základu se uloží pevná
+částka, protože mzdový běh zmrazuje podklady dřív, než zná výsledný příjem.
+
+Pořadí zadáváš v rozsahu 10–9999. Nižší pásmo je vyhrazené zákonným
+a exekučním srážkám, takže dobrovolná dohoda nikdy nepředběhne přednostní
+pohledávku ani neobejde nezabavitelnou částku — výpočet dobrovolné srážky vždy
+omezí volnou kapacitou po zákonných srážkách.
+
+Dohoda prochází stavy **Návrh → Aktivní → Pozastavená → Ukončená**; návrh, který
+ještě nemá jediný pohyb, lze zrušit. Do mzdového běhu vstupuje jen aktivní
+dohoda účinná v daném období. Změna dohody nikdy nepřepíše podklady už schválené
+mzdy: uloží se jako nová účinná verze a historie verzí i pohybů zůstává v detailu
+dohody. Ukončení dohodu zastaví, ale historii sražených částek nemaže. Pokud
+dohodu mezitím změnil někdo jiný nebo do ní přibyl pohyb, uložení skončí
+konfliktem a formulář se načte znovu — poslední zápis nikdy tiše nevyhrává.
 
 ## 58.14 Dokumenty a měsíční balíček
 
@@ -537,9 +679,12 @@ pokračující srážky a případné důchodové kategorie před rokem 1993. Č
 srážek se nezadávají — aplikace je přebírá z uzavřené evidence. Každá oprava
 vyžaduje konkrétní důvod a vytvoří novou neměnnou revizi.
 
-Samostatné potvrzení pro Úřad práce zatím zůstává zablokované. Zpřístupní se až
-po odborném schválení výpočtu průměrného měsíčního čistého výdělku; aplikace
-proto nenabízí ruční zadání hotové čisté částky.
+Samostatné potvrzení pro Úřad práce (§ 313 odst. 2) zatím zůstává zablokované.
+Aplikace v modulu Absence a průměry rozlišuje, zda pro rozhodné čtvrtletí
+chybí schválený snapshot průměrného výdělku, nebo zda snapshot existuje a
+chybí jen ověřený přepočet na čistý měsíční výdělek podle zákona o
+zaměstnanosti — v obou případech ale potvrzení nelze vydat a aplikace
+nenabízí ruční zadání hotové čisté částky.
 
 Stažení nejprve získá krátkodobé jednorázové oprávnění a potom soubor předá
 prohlížeči. Původní dokument se při opravě nikdy nepřepisuje. Nový výstup má
@@ -621,6 +766,18 @@ o oficiální PPZ/HOZ ani o elektronické podání; výstup vzniká jen ze všec
 aktuálních schválených neměnných revizí měsíce a před stažením se znovu
 ověřují jejich hashe a kontrolní součty.
 
+Záložka **Inbox** shrnuje napříč agendami a prostředím vše, co aktuálně
+vyžaduje pozornost: blížící se nebo prošlou lhůtu, odmítnuté podání, čekání
+na ztotožnění nebo jiný vzdálený problém. Odznak u záložky ukazuje počet
+otevřených položek. Jde o čistě odvozený přehled — potvrzení ani odložení
+nikdy nemění stav povinnosti ani podání, jen připomínku samotnou. Jednou
+dosažená naléhavost (blíží se → dnes → po lhůtě) se u položky už nikdy
+nesníží, ani když se zdánlivě zmírní. Položku lze **potvrdit** (beze změny
+zmizí z pozornosti, zůstane ale vidět jako vyřízená) nebo **odložit** na
+zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
+vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
+zrušeno v termínu), položka automaticky zmizí jako vyřešená.
+
 ## 58.16 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
@@ -646,7 +803,36 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 58.17 Vztah k Mzdové rekapitulaci
+## 58.17 Legislativní pravidla mezd
+
+Sazby, hranice, lhůty a číselníky, ze kterých mzdový výpočet čerpá, jsou
+rozdělené do samostatných oblastí (daň z příjmů, sociální a zdravotní pojištění,
+hranice a minimální mzda, průměry a náhrady, cestovní náhrady, exekuční srážky,
+termíny, číselníky a verze podání). Každá oblast má vlastní verze s obdobím
+účinnosti. Otevřete je na **Mzdy → Legislativní pravidla**.
+
+Ověřená sada je součástí aplikace a používá se, dokud ji nikdo nezmění. Na téže
+obrazovce ji lze přepsat, aniž by se čekalo na novou verzi programu — uloží se
+jen změněné hodnoty, ostatní se dál berou z ověřené sady. Tlačítko **Vrátit
+ověřenou hodnotu** ruční úpravu zahodí. Hodnoty jsou národní a společné pro
+všechny firmy, takže je smí měnit jen superadmin; ostatní je vidí ke čtení.
+
+Peníze se zadávají v korunách a sazby v procentech; převod na vnitřní jednotky
+řeší aplikace.
+
+Verze prochází stavy **Rozpracováno → Technicky zkontrolováno → Odborně
+schváleno → Účinné → Nahrazeno**. Výpočet čerpá jen z účinné verze — dokud
+verzi někdo neuvede do provozu, modul ji odmítne použít. Před schválením a
+uvedením do provozu se kontroluje, že v období účinnosti dané oblasti nevzniká
+mezera ani překryv a že uložené hodnoty odpovídají svému kontrolnímu součtu;
+dokud kontrola neprojde, obrazovka u akce ukáže konkrétní důvod.
+
+Ke každé verzi je vidět rozdíl proti ověřené sadě (co přibylo, co zmizelo a jak
+se změnila hodnota) a historie změn: kdo, kdy, co a proč změnil. Historii nelze
+mazat ani přepisovat. Pokud verzi schválí tentýž člověk, který ji upravil,
+změna projde, ale obrazovka na to upozorní.
+
+## 58.18 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

@@ -17,6 +17,7 @@ final class PayrollPaymentQueryService
         'social_insurance',
         'advance_tax',
         'withholding_tax',
+        'enforcement',
     ];
 
     private readonly PayrollPaymentBatchQueryService $batchQueries;

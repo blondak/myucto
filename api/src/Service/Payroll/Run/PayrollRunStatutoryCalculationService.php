@@ -7,7 +7,6 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthCalculationStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthCalculator;
-use MyInvoice\Service\Payroll\IncomeTax\EmploymentIncomeTaxPolicy2026;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\Net\NetRelationshipIncome;
@@ -35,17 +34,21 @@ final class PayrollRunStatutoryCalculationService
     ) {
         $this->social = new SocialInsuranceMonthCalculator($rulesets);
         $this->health = new HealthInsuranceMonthCalculator($rulesets);
-        $this->tax = new MonthlyEmploymentIncomeTaxCalculator(
-            $rulesets,
-            EmploymentIncomeTaxPolicy2026::create(),
-        );
+        $this->tax = new MonthlyEmploymentIncomeTaxCalculator($rulesets);
         $this->netInputs = new PayrollNetInputAssembler();
         $this->net = new PayrollNetCalculator();
     }
 
     /**
+     * `$voluntaryDeductionCapacities` dostane čistou mzdu osoby PŘED dobrovolnými
+     * srážkami a vrátí, kolik z ní smí dohoda o srážkách ukousnout. Pořadí
+     * podle § 148 zákoníku práce je tím dané: zákonné odvody a daň → čistá mzda
+     * → exekuční a insolvenční srážky → teprve zbytek dobrovolným dohodám.
+     * Bez resolveru je kapacita nulová — fail-closed, nikdy „vezmi si vše".
+     *
      * @param array<string,mixed> $snapshot
      * @param array<string,mixed> $baseResult
+     * @param (callable(array<int,int>):array<int,int>)|null $voluntaryDeductionCapacities
      * @return array<string,mixed>
      */
     public function calculateAndPersist(
@@ -54,6 +57,7 @@ final class PayrollRunStatutoryCalculationService
         ?int $actorUserId,
         array $snapshot,
         array $baseResult,
+        ?callable $voluntaryDeductionCapacities = null,
     ): array {
         $period = self::object($snapshot['statutory_period'] ?? null, 'statutory_period');
         $inactive = [];
@@ -125,6 +129,8 @@ final class PayrollRunStatutoryCalculationService
         }
 
         $netByEmployee = [];
+        $prepared = [];
+        $netBeforeDeductions = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::object($person['employee'] ?? null, 'employee');
             $employeeId = self::positiveInt($employee, 'id');
@@ -166,9 +172,8 @@ final class PayrollRunStatutoryCalculationService
                     $source - $cash,
                 );
             }
-            $deductions = $this->deductions($person);
             $advanceTax = $taxPerson->advanceTax;
-            $capacity = $this->netBeforeDeductions(
+            $netBeforeDeductions[$employeeId] = $this->netBeforeDeductions(
                 $relationships,
                 $socialPerson->employeeContributionMinorUnits ?? 0,
                 $healthPerson->employeeContributionMinorUnits ?? 0,
@@ -176,18 +181,46 @@ final class PayrollRunStatutoryCalculationService
                 $taxPerson->withholdingTaxMinorUnits,
                 $advanceTax === null ? 0 : $advanceTax->taxBonusMinorUnits,
             );
-            $netByEmployee[$employeeId] = $this->net->calculate(
+            $prepared[$employeeId] = [
+                'reference' => $reference,
+                'relationships' => $relationships,
+                'social' => $socialPerson,
+                'health' => $healthPerson,
+                'tax' => $taxPerson,
+                'deductions' => $this->deductions($person),
+            ];
+        }
+
+        $capacities = $voluntaryDeductionCapacities === null || $prepared === []
+            ? []
+            : $voluntaryDeductionCapacities($netBeforeDeductions);
+        foreach ($prepared as $employeeId => $entry) {
+            $capacity = $capacities[$employeeId] ?? 0;
+            if (!is_int($capacity) || $capacity < 0) {
+                throw new \DomainException(
+                    "Kapacita dobrovolných srážek {$entry['reference']} není platná.",
+                );
+            }
+            $netResult = $this->net->calculate(
                 $this->netInputs->assemble(
-                    $reference,
-                    $relationships,
-                    $socialPerson,
-                    $healthPerson,
-                    $taxPerson,
+                    $entry['reference'],
+                    $entry['relationships'],
+                    $entry['social'],
+                    $entry['health'],
+                    $entry['tax'],
                     0,
-                    $capacity,
-                    $deductions,
+                    min($capacity, $netBeforeDeductions[$employeeId]),
+                    $entry['deductions'],
                 ),
             );
+            if ($netResult->netBeforeDeductionsMinorUnits
+                !== $netBeforeDeductions[$employeeId]
+            ) {
+                throw new \DomainException(
+                    "Základ exekuční srážky {$entry['reference']} neodpovídá čisté mzdě.",
+                );
+            }
+            $netByEmployee[$employeeId] = $netResult;
         }
         ksort($taxByEmployee, SORT_NUMERIC);
         ksort($netByEmployee, SORT_NUMERIC);

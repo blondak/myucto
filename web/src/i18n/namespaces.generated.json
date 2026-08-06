@@ -60,6 +60,7 @@
     "payment_order",
     "payroll",
     "payroll_absence",
+    "payroll_travel",
     "permissions",
     "portal",
     "portfolio",
@@ -262,6 +263,9 @@
     "payroll-payments": [
       "payroll"
     ],
+    "payroll-posting-reconciliation": [
+      "payroll"
+    ],
     "payroll-people": [
       "payroll"
     ],
@@ -278,6 +282,12 @@
       "payroll",
       "payroll_absence"
     ],
+    "payroll-travel": [
+      "payroll_travel"
+    ],
+    "payroll-deduction-agreements": [
+      "payroll"
+    ],
     "payroll-enforcement": [
       "payroll"
     ],
@@ -288,6 +298,9 @@
       "payroll"
     ],
     "payroll-settings": [
+      "payroll"
+    ],
+    "payroll-rulesets": [
       "payroll"
     ],
     "accounting-accounts": [
@@ -709,6 +722,7 @@
       "payment_order",
       "payroll",
       "payroll_absence",
+      "payroll_travel",
       "permissions",
       "portal",
       "portfolio",

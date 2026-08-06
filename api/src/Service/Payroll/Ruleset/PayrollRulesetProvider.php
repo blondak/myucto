@@ -27,6 +27,12 @@ final class PayrollRulesetProvider
         $this->assertNoSelectableOverlaps();
     }
 
+    /** @return list<PayrollRulesetVersion> */
+    public function versions(): array
+    {
+        return $this->versions;
+    }
+
     public function forDate(PayrollRulesetDomain $domain, string $date): PayrollRulesetVersion
     {
         $matches = array_values(array_filter(

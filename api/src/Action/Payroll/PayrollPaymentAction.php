@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
@@ -44,6 +45,7 @@ final class PayrollPaymentAction
         private readonly PayrollHealthInsuranceLiabilityMaterializer $healthInsurance,
         private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
         private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
+        private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
@@ -974,6 +976,11 @@ final class PayrollPaymentAction
                     $userId,
                 ),
             'income_tax' => fn (): array => $this->incomeTax->materialize(
+                $supplierId,
+                $revisionId,
+                $userId,
+            ),
+            'enforcement' => fn (): array => $this->enforcement->materialize(
                 $supplierId,
                 $revisionId,
                 $userId,

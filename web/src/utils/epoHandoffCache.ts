@@ -5,7 +5,7 @@
  * `expiresAt` je proto jen odhad backendu (viz `EpoClient::ESTIMATED_LINK_LIFETIME_SECONDS`)
  * a nesmí se z něj dělat slib, že odkaz ještě žije.
  *
- * Odkaz se proto smí znovu nabídnout jen tehdy, když platí obojí:
+ * Odkaz se proto smí znovu nabídnout jen tehdy, když platí všechno tohle:
  *
  * 1. **Okno {@link HANDOFF_LINK_LIFETIME_MS}.** Portál v chybové hlášce sám uvádí
  *    session zhruba 30 minut od poslední aktivity; 20 minut je rezerva pod tím.
@@ -13,6 +13,11 @@
  *    přepočítá, míří starý odkaz na neaktuální písemnost — nabízet ho je horší,
  *    než ho zahodit. Váže se na SHA-256 otisk, který archiv u snapshotu už vede
  *    (`tax_submissions.xml_sha256`); druhý otisk se kvůli tomu nezavádí.
+ * 3. **Odkaz ještě nebyl otevřený.** Ověřeno provozem: URL je **jednorázová** —
+ *    portál ji spotřebuje při prvním otevření a druhý pokus skončí hláškou
+ *    „přístup k neexistujícímu podání“, i kdyby to bylo za minutu a v tomtéž
+ *    prohlížeči. Otevřený odkaz proto označíme {@link CachedEpoHandoffLink.consumedAt}
+ *    a místo něj nabídneme vytvoření nového; to je levné a funguje vždy.
  *
  * `attemptId` v záznamu zůstává i po vypršení okna — párují se přes něj nahrané
  * artefakty s pokusem o podání.
@@ -24,6 +29,13 @@ export interface CachedEpoHandoffLink {
   attemptId: number
   /** Otisk snapshotu v okamžiku vytvoření odkazu — proti němu se pozná přepočtený podklad. */
   xmlSha256: string
+  /**
+   * Kdy byl odkaz otevřen. URL je na straně portálu jednorázová, takže jakmile
+   * je tohle vyplněné, odkaz se už nesmí nabídnout — druhé otevření vždy skončí
+   * chybou. Nevyplněné zůstává, když prohlížeč zablokoval pop-up a k otevření
+   * tedy nedošlo.
+   */
+  consumedAt?: string
 }
 
 type HandoffLinks = Record<number, CachedEpoHandoffLink>
@@ -60,6 +72,8 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
     || !SHA256_HEX.test(link.xmlSha256)
     || !Number.isInteger(link.attemptId)
     || (link.attemptId ?? 0) <= 0
+    || (link.consumedAt !== undefined
+      && (typeof link.consumedAt !== 'string' || !Number.isFinite(new Date(link.consumedAt).getTime())))
   ) return false
 
   const expiresAt = new Date(link.expiresAt).getTime()
@@ -80,8 +94,9 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
 }
 
 /**
- * Smí se odkaz ještě nabídnout k otevření? Jen dokud běží okno platnosti a zároveň
- * je podklad pořád ten, ke kterému odkaz vznikl. Jinak zbývá jedině nový handoff.
+ * Smí se odkaz ještě nabídnout k otevření? Jen dokud běží okno platnosti, podklad
+ * je pořád ten, ke kterému odkaz vznikl, a odkaz ještě nebyl otevřen. Jinak zbývá
+ * jedině nový handoff.
  */
 export function canOfferHandoffLink(
   link: CachedEpoHandoffLink | undefined,
@@ -89,6 +104,8 @@ export function canOfferHandoffLink(
   now = Date.now(),
 ): boolean {
   if (!link) return false
+  // Jednorázová URL: po otevření ji portál zneplatní, druhý pokus vždy selže.
+  if (link.consumedAt !== undefined) return false
   if (!SHA256_HEX.test(currentXmlSha256) || link.xmlSha256.toLowerCase() !== currentXmlSha256.toLowerCase()) {
     return false
   }

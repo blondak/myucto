@@ -120,11 +120,27 @@ final class PayrollPersonSensitiveRevealService
                 ];
             }
 
+            $dependants = [];
+            foreach ($profile['dependants'] ?? [] as $row) {
+                $dependants[] = [
+                    'id' => $row['id'],
+                    'full_name' => $row['full_name'],
+                    'birth_number' => $this->verifiedReveal(
+                        $row['ciphertext'],
+                        $row['lookup_hash'],
+                        PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                        $supplierId,
+                        $row['id'],
+                    ),
+                ];
+            }
+
             $result = new PayrollPersonSensitiveReveal(
                 $employeeId,
                 $identifiers,
                 $contacts,
                 $accounts,
+                $dependants,
             );
             $this->activity->log(
                 action: 'payroll.person_sensitive.revealed',

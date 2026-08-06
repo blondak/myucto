@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxResult;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class MonthlyEmploymentIncomeTaxCalculator
 {
@@ -19,7 +20,6 @@ final class MonthlyEmploymentIncomeTaxCalculator
 
     public function __construct(
         private readonly PayrollRulesetProvider $rulesets,
-        private readonly EmploymentIncomeTaxPolicy2026 $policy,
     ) {
         $this->advanceTaxCalculator = new MonthlyAdvanceTaxCalculator($rulesets);
     }
@@ -31,10 +31,20 @@ final class MonthlyEmploymentIncomeTaxCalculator
             PayrollRulesetDomain::IncomeTax,
             $input->calculationDate,
         );
-        $this->policy->assertCompatibleRuleset($ruleset);
+        // Fasáda nad účinným rulesetem, ne druhá kopie hodnot: ověří se ÚPLNOST
+        // parametrů (fail-closed), nikdy shoda s literálem v kódu. Změna sazby
+        // nebo slevy v administraci se tak projeví ve výpočtu bez nasazení.
+        $policy = EmploymentIncomeTaxPolicy2026::forRuleset($ruleset);
 
         $issues = [];
-        if (substr($input->calculationDate, 0, 4) !== '2026') {
+        // Podporovaný zdaňovací rok = rok, který má účinný ruleset po celou svou
+        // délku. Roční akumulátor sčítá celý rok, takže částečné pokrytí je
+        // stejná chyba jako žádné.
+        if (!PayrollRulesetYearCoverage::coversYear(
+            $this->rulesets,
+            PayrollRulesetDomain::IncomeTax,
+            (int) substr($input->calculationDate, 0, 4),
+        )) {
             $issues[] = 'unsupported-tax-year';
         }
 
@@ -98,9 +108,9 @@ final class MonthlyEmploymentIncomeTaxCalculator
             }
         }
 
-        $creditResolution = $this->resolveCredits($input, $declaration);
+        $creditResolution = $this->resolveCredits($input, $declaration, $policy);
         $issues = [...$issues, ...$creditResolution['issues']];
-        $childResolution = $this->resolveChildren($input, $declaration);
+        $childResolution = $this->resolveChildren($input, $declaration, $policy);
         $issues = [...$issues, ...$childResolution['issues']];
         $issues = array_values(array_unique($issues));
 
@@ -130,10 +140,10 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 0,
                 $childResolution['amount'],
                 0,
-                $this->annualResult($input, null, 0, 0, 0, 0),
+                $this->annualResult($input, $policy, null, 0, 0, 0, 0),
                 $issues,
                 EmploymentIncomeTaxPolicy2026::ID,
-                $this->policy->canonicalHash,
+                EmploymentIncomeTaxPolicy2026::contractHash(),
                 $ruleset->id,
                 $ruleset->canonicalHash,
             );
@@ -158,6 +168,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 $signed,
                 $group,
                 $group === null ? 0 : $groupTotals[$group],
+                $policy,
             );
             if ($regime === TaxRegime::Advance) {
                 $advanceBase = TaxIntegerMath::add($advanceBase, $bases[$index]);
@@ -194,7 +205,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $step = CalculationStep::calculate(
                 "monthly-withholding-tax-{$group}",
                 $base,
-                DecimalRate::fromString($this->policy->rate('withholding.rate')),
+                DecimalRate::fromString($policy->rate('withholding.rate')),
                 RoundingMode::Floor,
             );
             $withholdingGroups[] = new WithholdingTaxGroupResult(
@@ -241,6 +252,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $appliedChild,
             $this->annualResult(
                 $input,
+                $policy,
                 $advanceTax,
                 $withholdingBase,
                 $withholdingTax,
@@ -249,7 +261,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             ),
             [],
             EmploymentIncomeTaxPolicy2026::ID,
-            $this->policy->canonicalHash,
+            EmploymentIncomeTaxPolicy2026::contractHash(),
             $ruleset->id,
             $ruleset->canonicalHash,
         );
@@ -350,14 +362,18 @@ final class MonthlyEmploymentIncomeTaxCalculator
         };
     }
 
-    private function regime(bool $signed, ?string $group, int $groupBase): TaxRegime
-    {
+    private function regime(
+        bool $signed,
+        ?string $group,
+        int $groupBase,
+        EmploymentIncomeTaxPolicy2026 $policy,
+    ): TaxRegime {
         if ($signed || $group === null) {
             return TaxRegime::Advance;
         }
         $maximum = $group === 'dpp'
-            ? $this->policy->money('dpp.withholding.maximum')
-            : $this->policy->money('other.withholding.maximum');
+            ? $policy->money('dpp.withholding.maximum')
+            : $policy->money('other.withholding.maximum');
 
         return $groupBase <= $maximum
             ? TaxRegime::Withholding
@@ -370,6 +386,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
     private function resolveCredits(
         MonthlyEmploymentIncomeTaxInput $input,
         ?TaxDeclarationEvidence $declaration,
+        EmploymentIncomeTaxPolicy2026 $policy,
     ): array {
         $active = array_values(array_filter(
             $input->creditClaims,
@@ -408,14 +425,14 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $other = TaxIntegerMath::add($other, match ($claim->kind) {
                 TaxCreditKind::Taxpayer => 0,
                 TaxCreditKind::DisabilityBasic
-                    => $this->policy->money('credit.disability.basic.monthly'),
+                    => $policy->money('credit.disability.basic.monthly'),
                 TaxCreditKind::DisabilityExtended
-                    => $this->policy->money('credit.disability.extended.monthly'),
-                TaxCreditKind::ZtpP => $this->policy->money('credit.ztp_p.monthly'),
+                    => $policy->money('credit.disability.extended.monthly'),
+                TaxCreditKind::ZtpP => $policy->money('credit.ztp_p.monthly'),
             });
         }
         $amount = TaxIntegerMath::add($other, $taxpayer
-            ? $this->policy->money('credit.taxpayer.monthly')
+            ? $policy->money('credit.taxpayer.monthly')
             : 0);
 
         return [
@@ -430,6 +447,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
     private function resolveChildren(
         MonthlyEmploymentIncomeTaxInput $input,
         ?TaxDeclarationEvidence $declaration,
+        EmploymentIncomeTaxPolicy2026 $policy,
     ): array {
         $active = array_values(array_filter(
             $input->childClaims,
@@ -472,11 +490,9 @@ final class MonthlyEmploymentIncomeTaxCalculator
 
         $amount = 0;
         foreach ($active as $claim) {
-            $credit = match ($claim->order) {
-                1 => $this->policy->money('credit.child.first.monthly'),
-                2 => $this->policy->money('credit.child.second.monthly'),
-                default => $this->policy->money('credit.child.third_and_next.monthly'),
-            };
+            $credit = $policy->money(
+                ChildCreditRateKey::forOrder($claim->order),
+            );
             $amount = TaxIntegerMath::add(
                 $amount,
                 $claim->ztpP ? TaxIntegerMath::add($credit, $credit) : $credit,
@@ -491,6 +507,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
 
     private function annualResult(
         MonthlyEmploymentIncomeTaxInput $input,
+        EmploymentIncomeTaxPolicy2026 $policy,
         ?MonthlyAdvanceTaxResult $advanceTax,
         int $withholdingBase,
         int $withholdingTax,
@@ -531,7 +548,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             ),
             TaxIntegerMath::add($prior->taxBonusMinorUnits, $currentTaxBonus),
             $bonusQualifyingIncome,
-            $bonusQualifyingIncome >= $this->policy->money('bonus.minimum_income.yearly'),
+            $bonusQualifyingIncome >= $policy->money('bonus.minimum_income.yearly'),
             $input->externalCertificates,
             false,
             false,

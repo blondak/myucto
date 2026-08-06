@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use PDO;
 
 final class PayrollSicknessRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollRulesetProvider $rulesets,
+    ) {}
 
     /** @param array<string,mixed> $absence @return array<string,mixed> */
     public function record(
@@ -31,9 +36,12 @@ final class PayrollSicknessRepository
         if ($firstDayFullyWorked) {
             $from = $from->modify('+1 day');
         }
-        $fourteenth = $from->modify('+13 days');
+        // Stejné okno § 192 ZP jako v PayrollAbsenceRepository::publishedShiftSegments —
+        // jedno číslo z rulesetu, aby se uložené okno a spočítané segmenty nerozešly.
+        $windowEnd = AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
+            ->sicknessWindowEnd($from);
         $absenceTo = new \DateTimeImmutable((string) $absence['date_to']);
-        $to = $absenceTo < $fourteenth ? $absenceTo : $fourteenth;
+        $to = $absenceTo < $windowEnd ? $absenceTo : $windowEnd;
 
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_sickness_events

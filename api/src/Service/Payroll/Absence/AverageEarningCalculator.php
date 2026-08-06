@@ -6,10 +6,14 @@ namespace MyInvoice\Service\Payroll\Absence;
 
 use InvalidArgumentException;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
 final class AverageEarningCalculator
 {
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
+
     public function calculate(
+        string $applicationDate,
         int $grossEarningsMinor,
         int $longerPeriodAllocatedMinor,
         int $workedMinutes,
@@ -24,16 +28,20 @@ final class AverageEarningCalculator
             throw new InvalidArgumentException('Odpracovaná doba nesmí být záporná.');
         }
 
+        $minimumWorkedDays = AbsenceRuleset::forDate($this->rulesets, $applicationDate)
+            ->averageEarningMinimumWorkedDays();
+
         $earningsMinor = $grossEarningsMinor + $longerPeriodAllocatedMinor;
         if ($earningsMinor < $grossEarningsMinor) {
             throw new \OverflowException('Součet započitatelné mzdy překročil celočíselný rozsah.');
         }
 
-        if ($workedDays < 21) {
+        if ($workedDays < $minimumWorkedDays) {
             $rationale = trim((string) $probableRationale);
             if ($probableHourlyMinor === null || $probableHourlyMinor <= 0 || $rationale === '') {
                 throw new InvalidArgumentException(
-                    'Při méně než 21 odpracovaných dnech zadej pravděpodobný hodinový výdělek a odůvodnění.'
+                    "Při méně než {$minimumWorkedDays} odpracovaných dnech zadej pravděpodobný"
+                    . ' hodinový výdělek a odůvodnění.'
                 );
             }
 
@@ -44,9 +52,10 @@ final class AverageEarningCalculator
                 [
                     'worked_days' => $workedDays,
                     'worked_minutes' => $workedMinutes,
+                    'minimum_worked_days' => $minimumWorkedDays,
                     'probable_hourly_minor' => $probableHourlyMinor,
                     'rationale' => $rationale,
-                    'rule' => 'probable-earning-required-below-21-worked-days',
+                    'rule' => 'probable-earning-required-below-minimum-worked-days',
                 ],
             );
         }
@@ -74,6 +83,7 @@ final class AverageEarningCalculator
                 'longer_period_allocated_minor' => $longerPeriodAllocatedMinor,
                 'worked_days' => $workedDays,
                 'worked_minutes' => $workedMinutes,
+                'minimum_worked_days' => $minimumWorkedDays,
                 'average_hourly_minor' => $hourlyMinor,
                 'rounding' => 'half-up-to-minor-unit',
                 'rule' => 'gross-earnings-divided-by-worked-time',

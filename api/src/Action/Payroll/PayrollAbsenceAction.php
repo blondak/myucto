@@ -19,8 +19,8 @@ use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -39,6 +39,7 @@ final class PayrollAbsenceAction
         private readonly LeaveEntitlementCalculator $leaveCalculator,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollRulesetProvider $rulesets,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -253,7 +254,13 @@ final class PayrollAbsenceAction
         }
         try {
             $data = $this->validator->average($this->body($request));
+            $applicationDate = sprintf(
+                '%04d-%02d-01',
+                $data['applicable_year'],
+                (($data['applicable_quarter'] - 1) * 3) + 1,
+            );
             $result = $this->averageCalculator->calculate(
+                $applicationDate,
                 $data['gross_earnings_minor'],
                 $data['longer_period_allocated_minor'],
                 $data['worked_minutes'],
@@ -261,12 +268,7 @@ final class PayrollAbsenceAction
                 $data['probable_hourly_minor'],
                 $data['rationale'],
             );
-            $applicationDate = sprintf(
-                '%04d-%02d-01',
-                $data['applicable_year'],
-                (($data['applicable_quarter'] - 1) * 3) + 1,
-            );
-            $ruleset = CzechPayrollRulesets2026::provider()->forDate(
+            $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
                 $applicationDate,
             );
@@ -349,11 +351,7 @@ final class PayrollAbsenceAction
         try {
             $leaveYear = $this->requiredPositiveInt($body['leave_year'] ?? null, 'leave_year');
             $effectiveDate = $this->queryDate($body['effective_date'] ?? null, 'effective_date');
-            if ($leaveYear !== 2026 || !str_starts_with($effectiveDate, '2026-')) {
-                throw new \InvalidArgumentException(
-                    'Položku dovolené lze nyní zapsat pouze do rulesetu a roku 2026.'
-                );
-            }
+            $this->validator->assertLeaveEntryPeriod($leaveYear, $effectiveDate);
             $entry = $this->leave->appendManual(
                 $this->currentSupplierId($request),
                 $this->requiredPositiveInt($body['employment_id'] ?? null, 'employment_id'),
@@ -383,6 +381,7 @@ final class PayrollAbsenceAction
                 $data['employment_id'],
             );
             $result = $this->leaveCalculator->calculate(
+                sprintf('%04d-01-01', $data['leave_year']),
                 $relationType,
                 $data['weekly_minutes'],
                 $data['entitlement_weeks'],

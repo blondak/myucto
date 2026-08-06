@@ -15,6 +15,7 @@ import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
+import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
 import {
   PAYROLL_ACCOUNT_TYPES,
@@ -34,10 +35,10 @@ const loadFailed = ref(false)
 const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
-type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'submissions'
+type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'dimensions' | 'submissions'
 const initialTab = new URLSearchParams(window.location.search).get('tab')
 const activeTab = ref<SettingsTab>(initialTab === 'submissions' ? 'submissions' : 'employer')
-const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'submissions']
+const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions']
 
 type AccountKey = PayrollAccountKey
 type FormOffice = PayrollEmployerSettings['offices'][number] & { is_new?: boolean }
@@ -708,6 +709,8 @@ onMounted(load)
       </section>
 
       <EmployerPolicies v-if="activeTab === 'policies'" :can-write="canWrite" />
+
+      <PayrollDimensions v-if="activeTab === 'dimensions'" :can-write="canWrite" />
 
       <RegzelProfileSettings
         v-if="activeTab === 'submissions'"

@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
+
 final class PayrollAbsenceValidator
 {
     private const TYPES = [
@@ -11,6 +16,10 @@ final class PayrollAbsenceValidator
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
         'employer_obstacle', 'other',
     ];
+
+    private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
+
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /** @param array<string,mixed> $body @return array<string,mixed> */
     public function absence(array $body): array
@@ -25,11 +34,8 @@ final class PayrollAbsenceValidator
         if ($to < $from) {
             throw new \InvalidArgumentException('Konec absence nesmí předcházet začátku.');
         }
-        if (!str_starts_with($from, '2026-') || !str_starts_with($to, '2026-')) {
-            throw new \InvalidArgumentException(
-                'Výpočtová podpora absencí je nyní připnutá pouze k rulesetu 2026.'
-            );
-        }
+        PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $from);
+        PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $to);
         $timezone = trim((string) ($body['timezone_name'] ?? 'Europe/Prague'));
         try {
             new \DateTimeZone($timezone);
@@ -71,9 +77,13 @@ final class PayrollAbsenceValidator
             ),
             'note' => $this->nullableText($body['note'] ?? null, 1000),
             'compensation_policy' => $policy,
+            // Sazba náhrady při DPN je zákonná a mění se — bere se z rulesetu,
+            // ať absence a výpočet náhrady nikdy nepracují s jiným číslem.
+            // 10 000 bp u ostatních politik je definice „average_100", ne sazba.
             'compensation_rate_basis_points' => match ($policy) {
                 'none' => null,
-                'dpn' => 6_000,
+                'dpn' => AbsenceRuleset::forDate($this->rulesets, $from)
+                    ->compensationRateBasisPoints(),
                 default => 10_000,
             },
             'average_snapshot_id' => $averageId,
@@ -85,9 +95,10 @@ final class PayrollAbsenceValidator
     {
         $year = $this->positiveInt($body, 'applicable_year');
         $quarter = $this->positiveInt($body, 'applicable_quarter');
-        if ($year !== 2026 || $quarter > 4) {
-            throw new \InvalidArgumentException('Průměr lze nyní založit jen pro ruleset 2026 a čtvrtletí 1–4.');
+        if ($quarter > 4) {
+            throw new \InvalidArgumentException('Čtvrtletí průměru musí být 1–4.');
         }
+        PayrollRulesetYearCoverage::assertYear($this->rulesets, self::DOMAIN, $year);
         $from = $this->date($body['decisive_from'] ?? null, 'decisive_from');
         $to = $this->date($body['decisive_to'] ?? null, 'decisive_to');
         if ($to < $from) {
@@ -131,18 +142,39 @@ final class PayrollAbsenceValidator
             throw new \InvalidArgumentException('Odůvodnění nároku je povinné a smí mít nejvýše 1000 znaků.');
         }
         $year = $this->positiveInt($body, 'leave_year');
-        if ($year !== 2026) {
-            throw new \InvalidArgumentException('Nárok dovolené lze nyní založit jen pro ruleset 2026.');
+        PayrollRulesetYearCoverage::assertYear($this->rulesets, self::DOMAIN, $year);
+        $minimumWeeks = AbsenceRuleset::forYear($this->rulesets, $year)
+            ->leaveStatutoryMinimumWeeks();
+        $entitlementWeeks = $this->positiveInt($body, 'entitlement_weeks');
+        if ($entitlementWeeks < $minimumWeeks) {
+            throw new \InvalidArgumentException(
+                "Výměra dovolené nesmí být nižší než zákonné minimum {$minimumWeeks} týdny."
+            );
         }
         return [
             'employment_id' => $this->positiveInt($body, 'employment_id'),
             'leave_year' => $year,
             'weekly_minutes' => $this->positiveInt($body, 'weekly_minutes'),
-            'entitlement_weeks' => $this->positiveInt($body, 'entitlement_weeks'),
+            'entitlement_weeks' => $entitlementWeeks,
             'continuous_calendar_days' => $this->positiveInt($body, 'continuous_calendar_days'),
             'worked_equivalent_minutes' => $this->positiveInt($body, 'worked_equivalent_minutes'),
             'rationale' => $rationale,
         ];
+    }
+
+    /**
+     * Ruční položka knihy dovolené smí vzniknout jen v roce, který má účinný
+     * ruleset, a její datum účinnosti musí do téhož roku patřit.
+     */
+    public function assertLeaveEntryPeriod(int $leaveYear, string $effectiveDate): void
+    {
+        PayrollRulesetYearCoverage::assertYear($this->rulesets, self::DOMAIN, $leaveYear);
+        if ((int) substr($effectiveDate, 0, 4) !== $leaveYear) {
+            throw new \InvalidArgumentException(
+                'Datum účinnosti položky dovolené musí ležet v roce nároku.'
+            );
+        }
+        PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $effectiveDate);
     }
 
     private function date(mixed $value, string $field): string

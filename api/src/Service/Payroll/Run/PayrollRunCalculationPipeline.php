@@ -47,12 +47,19 @@ final class PayrollRunCalculationPipeline
         if (($snapshot['schema_version'] ?? null) === 'payroll-run-input.v2'
             && $this->statutory !== null
         ) {
+            $baseResult = $result;
             $result['statutory'] = $this->statutory->calculateAndPersist(
                 $supplierId ?? throw new \LogicException('Chybí firma zákonného výpočtu.'),
                 $revisionId ?? throw new \LogicException('Chybí revize zákonného výpočtu.'),
                 $actorUserId,
                 $snapshot,
                 $result,
+                fn (array $netBeforeDeductions): array =>
+                    $this->garnishments->voluntaryDeductionCapacities(
+                        $snapshot,
+                        $baseResult,
+                        $netBeforeDeductions,
+                    ),
             );
             $result = $this->attachStatutoryPeople($result);
         }

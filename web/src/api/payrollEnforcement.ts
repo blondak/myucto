@@ -83,10 +83,35 @@ export interface EnforcementCaseSummary {
   updated_at: string
 }
 
+export interface EnforcementSettlementClaim {
+  claim_id: number
+  category: EnforcementClaimCategory
+  priority_date: string | null
+  is_active: boolean
+  outstanding_minor: number
+  withheld_minor: number
+  held_minor: number
+  liability_minor: number
+  settled_minor: number
+  remaining_minor: number
+}
+
+export interface EnforcementSettlement {
+  claims: EnforcementSettlementClaim[]
+  withheld_minor: number
+  held_minor: number
+  liability_minor: number
+  settled_minor: number
+  outstanding_minor: number
+  remaining_minor: number
+}
+
 export interface EnforcementCaseDetail extends EnforcementCaseSummary {
+  recipient_institution_id: number | null
   claims: EnforcementClaim[]
   events: EnforcementEvent[]
   ledger: EnforcementLedgerEntry[]
+  settlement: EnforcementSettlement
 }
 
 export interface EnforcementClaimPayload {
@@ -159,6 +184,7 @@ export const payrollEnforcementApi = {
       evidence_complete: boolean
       recipient_verified: boolean
       row_version: number
+      recipient_institution_id?: number | null
     },
   ) =>
     api.put<{ case: EnforcementCaseDetail }>(

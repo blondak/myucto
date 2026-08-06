@@ -26,10 +26,17 @@ use PDO;
  *   ciphertext:string,
  *   lookup_hash:string
  * }
+ * @phpstan-type EncryptedDependant array{
+ *   id:int,
+ *   full_name:string,
+ *   ciphertext:string,
+ *   lookup_hash:string
+ * }
  * @phpstan-type EncryptedProfile array{
  *   identifiers:list<EncryptedIdentifier>,
  *   contacts:list<EncryptedContact>,
- *   accounts:list<EncryptedAccount>
+ *   accounts:list<EncryptedAccount>,
+ *   dependants:list<EncryptedDependant>
  * }
  */
 final class PayrollPersonSensitiveRepository
@@ -99,7 +106,42 @@ final class PayrollPersonSensitiveRepository
             'identifiers' => $this->identifiers($supplierId, $employeeId),
             'contacts' => $this->contacts($supplierId, $employeeId),
             'accounts' => $this->accounts($supplierId, $employeeId),
+            'dependants' => $this->dependants($supplierId, $employeeId),
         ];
+    }
+
+    /** @return list<EncryptedDependant> */
+    private function dependants(int $supplierId, int $employeeId): array
+    {
+        if (!$this->db->hasTable('payroll_dependants')) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, full_name, birth_number_ciphertext, birth_number_hash
+               FROM payroll_dependants
+              WHERE supplier_id = ? AND employee_id = ?
+                AND birth_number_ciphertext IS NOT NULL
+              ORDER BY id'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+        $result = [];
+        while (($fetched = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $row = $this->row($fetched);
+            $result[] = [
+                'id' => $this->integer($row['id'] ?? null, 'id'),
+                'full_name' => $this->text($row['full_name'] ?? null, 'full_name'),
+                'ciphertext' => $this->text(
+                    $row['birth_number_ciphertext'] ?? null,
+                    'birth_number_ciphertext',
+                ),
+                'lookup_hash' => $this->hash(
+                    $row['birth_number_hash'] ?? null,
+                    'birth_number_hash',
+                ),
+            ];
+        }
+
+        return $result;
     }
 
     /** @return list<EncryptedIdentifier> */

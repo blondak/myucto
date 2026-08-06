@@ -124,6 +124,64 @@ final class GarnishmentCalculator
     }
 
     /**
+     * Kolik z obecné (nepřednostní) kapacity zbylo po exekučních srážkách —
+     * teprve z toho smí zaměstnavatel uspokojit dobrovolnou dohodu o srážkách
+     * ze mzdy (§ 148 odst. 2 zákoníku práce: dohoda se provádí jen za podmínek
+     * výkonu rozhodnutí srážkami ze mzdy podle § 276 a násl. OSŘ).
+     *
+     * Vrací 0, kdykoli výsledek není uzavřený nebo běží schválené oddlužení —
+     * fail-closed, protože v takovém případě není jisté, co exekuce ještě vezme.
+     */
+    public function voluntaryDeductionCapacity(GarnishmentResult $result): int
+    {
+        if ($result->status !== GarnishmentStatus::Supported
+            || $result->insolvencyApplied
+        ) {
+            return 0;
+        }
+        $priorityUsed = 0;
+        $generalUsed = $result->employerFlatFeeMinorUnits;
+        foreach ($result->allocations as $allocation) {
+            $priorityUsed = self::addExactly(
+                $priorityUsed,
+                $allocation->secondPoolMinorUnits,
+            );
+            $generalUsed = self::addExactly(
+                $generalUsed,
+                $allocation->firstPoolMinorUnits,
+            );
+        }
+
+        return max(0, self::generalPool(
+            $result->thirdMinorUnits,
+            $result->fullyAttachableExcessMinorUnits,
+            $priorityUsed,
+            $result->fourEnforcementRuleApplied,
+        ) - $generalUsed);
+    }
+
+    /**
+     * Obecná (nepřednostní) kapacita: první třetina, nevyužitý plně zabavitelný
+     * zbytek a — při pravidle čtyř exekucí — i nevyužitá druhá třetina.
+     */
+    private static function generalPool(
+        int $third,
+        int $excess,
+        int $priorityUsed,
+        bool $fourRule,
+    ): int {
+        $excessUsed = max(0, $priorityUsed - $third);
+        $unusedSecondThird = $fourRule
+            ? max(0, $third - min($priorityUsed, $third))
+            : 0;
+
+        return self::addExactly(
+            self::addExactly($third, $excess - $excessUsed),
+            $unusedSecondThird,
+        );
+    }
+
+    /**
      * @return array{
      *   first:array<string,int>,
      *   second:array<string,int>,
@@ -145,13 +203,7 @@ final class GarnishmentCalculator
             $priorityCapacity = self::addExactly($third, $excess);
             $second = $this->allocatePriorityClaims($claims, $priorityCapacity, $balances);
             $priorityUsed = self::sumExactly($second);
-            $excessUsed = max(0, $priorityUsed - $third);
-            $unusedExcess = $excess - $excessUsed;
-            $unusedSecondThird = $fourRule ? max(0, $third - min($priorityUsed, $third)) : 0;
-            $generalBeforeFee = self::addExactly(
-                self::addExactly($third, $unusedExcess),
-                $unusedSecondThird,
-            );
+            $generalBeforeFee = self::generalPool($third, $excess, $priorityUsed, $fourRule);
             $actualFee = min($requestedFee, $generalBeforeFee);
             $first = $this->allocateRankedClaims(
                 $claims,
