@@ -217,6 +217,53 @@ function resetEmployeeForm() {
 }
 
 /**
+ * Pracovněprávní vztahy na kartě. `statutory_body` = smlouva o výkonu funkce
+ * (§ 59 ZOK, migrace 1302); týž klíč používá i novější mzdový modul.
+ */
+const EMPLOYMENT_TYPES: readonly PayrollEmploymentType[] = ['hpp', 'dpp', 'dpc', 'statutory_body']
+
+/**
+ * Typ poplatníka, který se u daného vztahu PŘEDPOKLÁDÁ. Zrcadlí
+ * `PayrollEmployeeAction::TAXPAYER_TYPE_HINTS` na serveru — formulář hodnotu
+ * předvyplní, server na nesoulad ještě jednou upozorní v `warnings`.
+ */
+const TAXPAYER_TYPE_HINTS: Partial<Record<PayrollEmploymentType, PayrollTaxpayerType>> = {
+  statutory_body: 'managing_partner',
+}
+
+/**
+ * Volba vztahu typ poplatníka jen PŘEDVYPLNÍ, nevynutí — kdo si vědomě zvolí
+ * „zaměstnanec", tomu formulář volbu nevrátí zpátky, jen ukáže varování. Kombinace
+ * může legitimně vzniknout u jednatele, který má u firmy i pracovní poměr.
+ *
+ * Záměrně `@change`, ne `watch` nad polem formuláře: watcher by se spustil i při
+ * načtení existující karty (`openEditEmployee` plní pole programově) a otevření
+ * detailu by uloženou hodnotu tiše přepsalo. Takhle se předvyplní jen to, co uživatel
+ * doopravdy přepnul.
+ */
+function onEmploymentTypeChange(event: Event): void {
+  const previous = employeeForm.employment_type
+  const type = (event.target as HTMLSelectElement).value as PayrollEmploymentType
+  employeeForm.employment_type = type
+  if (type === previous) return
+
+  const hint = TAXPAYER_TYPE_HINTS[type]
+  const previousHint = TAXPAYER_TYPE_HINTS[previous]
+  if (hint !== undefined) {
+    // Přepisuje se jen výchozí hodnota — vědomá volba uživatele zůstane.
+    if (employeeForm.taxpayer_type === 'employee') employeeForm.taxpayer_type = hint
+  } else if (previousHint !== undefined && employeeForm.taxpayer_type === previousHint) {
+    // Odchod od výkonu funkce vrátí zpátky to, co předtím předvyplnil on sám.
+    employeeForm.taxpayer_type = 'employee'
+  }
+}
+
+const taxpayerTypeMismatch = computed(() => {
+  const hint = TAXPAYER_TYPE_HINTS[employeeForm.employment_type]
+  return hint !== undefined && employeeForm.taxpayer_type !== hint
+})
+
+/**
  * Automat bez částky nemá co zaúčtovat — checkbox proto zůstane nepřístupný, dokud
  * není mzda vyplněná, a smazání částky ho shodí zpátky. Server tutéž podmínku hlídá
  * znovu; tohle je jen to, aby uživatel nedostal 422 za něco, co mu formulář dovolil.
@@ -275,13 +322,15 @@ async function saveEmployee() {
       auto_post: autoPostAvailable.value && employeeForm.auto_post,
       is_active: employeeForm.is_active,
     }
-    if (editingEmployeeId.value === null) {
-      await accountingApi.createPayrollEmployee(payload)
-      toast.success(t('accounting.payroll.employees.created'))
-    } else {
-      await accountingApi.updatePayrollEmployee(editingEmployeeId.value, payload)
-      toast.success(t('accounting.payroll.employees.updated'))
-    }
+    const saved = editingEmployeeId.value === null
+      ? await accountingApi.createPayrollEmployee(payload)
+      : await accountingApi.updatePayrollEmployee(editingEmployeeId.value, payload)
+    toast.success(t(editingEmployeeId.value === null
+      ? 'accounting.payroll.employees.created'
+      : 'accounting.payroll.employees.updated'))
+    // Varování uložení neblokují (chyby chodí jako 422) — ale zmizet nesmí,
+    // jinak by nesourodá kombinace prošla úplně tiše.
+    for (const w of saved.warnings ?? []) toast.warning(w)
     showEmployeeForm.value = false
     await loadEmployees()
   } catch (e: any) {
@@ -783,11 +832,15 @@ const remittanceRows = computed(() => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_employment_type') }}</label>
-          <select v-model="employeeForm.employment_type" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-            <option v-for="e in (['hpp', 'dpp', 'dpc'] as const)" :key="e" :value="e">
+          <select :value="employeeForm.employment_type" @change="onEmploymentTypeChange"
+                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option v-for="e in EMPLOYMENT_TYPES" :key="e" :value="e">
               {{ t(`accounting.payroll.employment.${e}`) }}
             </option>
           </select>
+          <p v-if="taxpayerTypeMismatch" class="text-xs text-warning-600 mt-1">
+            {{ t('accounting.payroll.employees.form_statutory_body_mismatch') }}
+          </p>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_child_count') }}</label>

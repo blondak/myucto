@@ -18,8 +18,13 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         yield 'zaměstnání malého rozsahu' => ['small_scale_employment', 'employee', 'hpp'];
         yield 'DPP' => ['dpp', 'employee', 'dpp'];
         yield 'DPČ' => ['dpc', 'employee', 'dpc'];
+        // `partner_dependent` protějšek v ENUMu `payroll_employees.employment_type` nemá,
+        // takže spadá na `hpp`; kontaci 522/366 mu zajistí `taxpayer_type`.
         yield 'závislý příjem společníka' => ['partner_dependent', 'managing_partner', 'hpp'];
-        yield 'výkon funkce' => ['statutory_body', 'managing_partner', 'hpp'];
+        // Migrace 1302 — do té doby dostal člen statutárního orgánu na legacy kartě
+        // „pracovní poměr", což u odměny podle § 6 odst. 1 písm. c) ZDP není pravda.
+        // Klíč je v obou větvích SHODNÝ, takže je mapování identita.
+        yield 'výkon funkce' => ['statutory_body', 'managing_partner', 'statutory_body'];
     }
 
     #[DataProvider('relationMappings')]

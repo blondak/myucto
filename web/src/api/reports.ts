@@ -219,6 +219,11 @@ export interface OssPreview {
     correction_row_count: number
     invalid_correction_count: number
     conversion_missing_count: number
+    /**
+     * OSS řádky období čekající na ruční posouzení. Táž množina, kterou v seznamu
+     * faktur vrátí `filter[oss_review]=oss` — náhled na ni proto umí prokliknout.
+     */
+    manual_review_count?: number
   }
   countries: Array<{
     country: string

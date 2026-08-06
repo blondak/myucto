@@ -202,7 +202,8 @@ nedokážou určit, jestli je řádek OSS plnění, nebo tuzemský. Takový řá
 do OSS podání** — tam nepatří, dokud to není potvrzené — ale označí ho k ručnímu posouzení
 a nechá ho v českém přiznání na ř. 1 a 2. Aby ti neproklouzl:
 
-- v **seznamu faktur** je najdeš filtrem **Nejisté místo plnění (OSS)**,
+- v **seznamu faktur** je najdeš filtrem **Místo plnění (OSS)**, volbou **Nejisté —
+  v tuzemsku** ([§ 14.1.1](14_Faktury.md#nejiste-misto-plneni-oss)),
 - v **přiznání k DPH** na ně upozorní varování se seznamem dokladů.
 
 Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně přes
@@ -210,7 +211,8 @@ Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hroma
 zůstává plnění v tuzemském přiznání.
 
 U **importu vydaných faktur** je to obráceně: nejednoznačný řádek se zařadí do OSS
-a označí k posouzení. Proč, vysvětluje
+a označí k posouzení — v seznamu faktur ho vypíše volba **Nejisté — v OSS podání**.
+Proč se import rozhoduje opačně, vysvětluje
 [§ 36 — Plnění k ručnímu posouzení](36_Vykazy_DPH.md#plneni-k-rucnimu-posouzeni).
 
 > ⚠️ MyÚčto neurčuje samo B2C režim, neuzavírá období a XML automaticky nepodává.

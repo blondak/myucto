@@ -179,19 +179,109 @@ final class OssUncertainRowsVisibilityTest extends TestCase
         self::assertSame([], $this->ledger->ossRows($this->supplierId, '2099-04-01', '2099-04-30'));
     }
 
+    /**
+     * Filtr musí pokrýt OBA konce nejistoty, ne jen ten tuzemský.
+     *
+     * Řádek, který se do OSS ZAŘADIL a přitom je označený k posouzení (nejednoznačná
+     * sazba — 21 % platí v ČR i v NL/BE/ES/LT/LV — nebo doklad rozpadlý mezi OSS
+     * a tuzemské přiznání), byl vidět jen ve varování náhledu podání a v reportu importu,
+     * který po zavření stránky zmizí. Uživatel si filtr projel, vyčistil ho a v dobré víře
+     * mu zůstala druhá polovina sporných řádků.
+     */
+    public function testInvoiceListFilterCoversBothEndsOfTheUncertainty(): void
+    {
+        $czClient = $this->client('CZ');
+        $plClient = $this->client('PL');
+        $domestic = $this->sale($czClient, '2099-04-10', 1000.0, 23.0, applicable: 0, needsReview: 1);
+        $inOss = $this->sale($plClient, '2099-04-11', 800.0, 21.0, applicable: 1, needsReview: 1, consumerCountry: 'PL');
+        $this->sale($czClient, '2099-04-12', 500.0, 21.0, applicable: 0, needsReview: 0);
+        $this->sale($plClient, '2099-04-13', 400.0, 23.0, applicable: 1, needsReview: 0, consumerCountry: 'PL');
+
+        $base = ['supplier_id' => $this->supplierId, 'year' => 2099];
+
+        self::assertCount(4, $this->listIds($base), 'Kontrola vzorku: bez filtru jsou vidět všechny doklady.');
+
+        $both = [$domestic, $inOss];
+        sort($both);
+        self::assertSame($both, $this->listIds($base + ['oss_review' => 'any']),
+            'Rozsah „vše nejisté" musí vrátit obě větve — jinak si uživatel vyčistí filtr s polovinou práce.');
+        self::assertSame([$inOss], $this->listIds($base + ['oss_review' => 'oss']));
+        self::assertSame([$domestic], $this->listIds($base + ['oss_review' => 'domestic']));
+
+        // Uložené filtry a starší odkazy nesou `1`. Musí se rozšířit na obě větve,
+        // ne zůstat u původní poloviny.
+        self::assertSame($both, $this->listIds($base + ['oss_review' => '1']));
+        self::assertSame($both, $this->listIds($base + ['oss_review' => true]));
+    }
+
+    /**
+     * Rozlišení v datech: „vše nejisté" nesmí být nerozlišený seznam. Každý konec se
+     * řeší jinak — řádek v OSS znamená „zkontroluj zemi a typ sazby", řádek v tuzemsku
+     * „zkontroluj, jestli tam vůbec patří" — a UI to bez těchhle příznaků neumí říct.
+     */
+    public function testInvoiceListTellsWhichEndOfTheUncertaintyEachDocumentCarries(): void
+    {
+        $czClient = $this->client('CZ');
+        $plClient = $this->client('PL');
+        $domestic = $this->sale($czClient, '2099-04-10', 1000.0, 23.0, applicable: 0, needsReview: 1);
+        $inOss = $this->sale($plClient, '2099-04-11', 800.0, 21.0, applicable: 1, needsReview: 1, consumerCountry: 'PL');
+        $clean = $this->sale($czClient, '2099-04-12', 500.0, 21.0, applicable: 0, needsReview: 0);
+
+        $rows = $this->listRows(['supplier_id' => $this->supplierId, 'year' => 2099]);
+
+        self::assertArrayHasKey('oss_review_domestic', $rows[$domestic],
+            'Seznam musí příznak vracet, jinak ho UI nemá z čeho vykreslit.');
+        self::assertTrue($rows[$domestic]['oss_review_domestic']);
+        self::assertFalse($rows[$domestic]['oss_review_oss']);
+
+        self::assertTrue($rows[$inOss]['oss_review_oss']);
+        self::assertFalse($rows[$inOss]['oss_review_domestic']);
+
+        self::assertFalse($rows[$clean]['oss_review_oss']);
+        self::assertFalse($rows[$clean]['oss_review_domestic']);
+    }
+
+    /**
+     * Doklad rozpadlý mezi OSS a tuzemské přiznání nese OBA otazníky najednou — takový
+     * je celý smysl kontroly soudržnosti dokladu. Musí ho proto najít každý ze tří
+     * rozsahů a nést oba příznaky, ne jen ten, který se v řádcích potkal první.
+     */
+    public function testDocumentSplitBetweenOssAndDomesticCarriesBothFlags(): void
+    {
+        $plClient = $this->client('PL');
+        $split = $this->sale($plClient, '2099-04-10', 1000.0, 21.0, applicable: 0, needsReview: 1);
+        $this->addItem($split, 700.0, 21.0, applicable: 1, needsReview: 1, consumerCountry: 'PL');
+
+        $base = ['supplier_id' => $this->supplierId, 'year' => 2099];
+        foreach (['any', 'oss', 'domestic'] as $scope) {
+            self::assertSame([$split], $this->listIds($base + ['oss_review' => $scope]),
+                'Rozpadlý doklad musí být vidět v rozsahu ' . $scope . '.');
+        }
+
+        $row = $this->listRows($base)[$split];
+        self::assertTrue($row['oss_review_oss']);
+        self::assertTrue($row['oss_review_domestic']);
+    }
+
     /** @param array<string,mixed> $filters @return list<int> */
     private function listIds(array $filters): array
     {
+        return array_keys($this->listRows($filters));
+    }
+
+    /** @param array<string,mixed> $filters @return array<int,array<string,mixed>> id → řádek */
+    private function listRows(array $filters): array
+    {
         $result = $this->invoices->listGroupedByMonth($filters, 1, 100);
-        $ids = [];
+        $rows = [];
         foreach ($result['data'] as $group) {
             foreach ($group['invoices'] as $row) {
-                $ids[] = (int) $row['id'];
+                $rows[(int) $row['id']] = $row;
             }
         }
-        sort($ids);
+        ksort($rows);
 
-        return $ids;
+        return $rows;
     }
 
     private function sale(
@@ -220,6 +310,25 @@ final class OssUncertainRowsVisibilityTest extends TestCase
             $base, $vat, $base + $vat, $status, $this->userId,
         ]);
         $invoiceId = (int) $pdo->lastInsertId();
+        $this->addItem($invoiceId, $base, $rate, $applicable, $needsReview, $consumerCountry);
+
+        return $invoiceId;
+    }
+
+    /** Další řádek k existujícímu dokladu — doklad může míchat OSS a tuzemské plnění. */
+    private function addItem(
+        int $invoiceId,
+        float $base,
+        float $rate,
+        int $applicable,
+        int $needsReview,
+        ?string $consumerCountry = null,
+    ): void {
+        $pdo = $this->db->pdo();
+        $vat = round($base * $rate / 100.0, 2);
+        $order = (int) $pdo->query(
+            'SELECT COUNT(*) FROM invoice_items WHERE invoice_id = ' . $invoiceId
+        )->fetchColumn();
 
         $pdo->prepare(
             'INSERT INTO invoice_items
@@ -227,17 +336,15 @@ final class OssUncertainRowsVisibilityTest extends TestCase
                  vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
                  oss_applicable, oss_consumer_country, oss_rate_type, oss_supply_type,
                  oss_needs_manual_review)
-             VALUES (?, "Plnění", 1, "ks", ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)'
+             VALUES (?, "Plnění", 1, "ks", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
-            $invoiceId, $base, $this->rateId, $rate, $base, $vat, $base + $vat,
+            $invoiceId, $base, $this->rateId, $rate, $base, $vat, $base + $vat, $order,
             $applicable,
             $applicable === 1 ? ($consumerCountry ?? 'PL') : null,
             $applicable === 1 ? 'standard' : null,
             $applicable === 1 ? 'services' : null,
             $needsReview,
         ]);
-
-        return $invoiceId;
     }
 
     private function client(string $iso2): int

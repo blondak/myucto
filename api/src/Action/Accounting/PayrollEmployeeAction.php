@@ -29,8 +29,28 @@ final class PayrollEmployeeAction
     use AccountingActionSupport;
     use GuardsAccountingMode;
 
-    /** Pracovněprávní vztah — migrace 1156; řídí režim pojistného a srážkové daně. */
-    private const EMPLOYMENT_TYPES = ['hpp', 'dpp', 'dpc'];
+    /**
+     * Pracovněprávní vztah — migrace 1156, `statutory_body` doplněn migrací 1302;
+     * řídí režim pojistného a srážkové daně.
+     *
+     * `statutory_body` (smlouva o výkonu funkce, § 59 ZOK) má SHODNÝ klíč jako
+     * `payroll_employments.relation_type` v novějším mzdovém modulu — jeden právní
+     * pojem, jeden identifikátor, aby mapování mezi větvemi bylo identita.
+     */
+    private const EMPLOYMENT_TYPES = ['hpp', 'dpp', 'dpc', 'statutory_body'];
+
+    /**
+     * Kombinace, které se nevylučují, ale skoro jistě jsou překlep — hlásí se
+     * varováním, neblokují.
+     *
+     * `employment_type` a `taxpayer_type` popisují dvě různé věci: první právní titul
+     * příjmu, druhá kontaci (521/331 vs. 522/366). Vynutit jedno druhým by z jednoho
+     * pole udělalo dvě autority nad týmž faktem, a kombinace může legitimně vzniknout
+     * u někoho, kdo má u firmy obojí (jednatel se zároveň zaměstnaneckou smlouvou).
+     */
+    private const TAXPAYER_TYPE_HINTS = [
+        'statutory_body' => PayrollCalculator::TYPE_MANAGING_PARTNER,
+    ];
 
     /** Účtové skupiny, na které čistou mzdu přeúčtovat nelze — vlastní modul si je hlídá sám. */
     private const MONEY_ACCOUNT_PREFIXES = ['21', '22', '26'];
@@ -74,7 +94,10 @@ final class PayrollEmployeeAction
 
         $id = $this->employees->insert($supplierId, $data);
         $this->log($request, 'payroll_employee.created', $id, ['full_name' => $data['full_name']]);
-        return Json::ok($response, ['employee' => $this->employees->find($supplierId, $id)], 201);
+        return Json::ok($response, [
+            'employee' => $this->employees->find($supplierId, $id),
+            'warnings' => self::consistencyWarnings($data),
+        ], 201);
     }
 
     public function update(Request $request, Response $response, array $args): Response
@@ -96,7 +119,12 @@ final class PayrollEmployeeAction
 
         $this->employees->update($supplierId, $id, $fields);
         $this->log($request, 'payroll_employee.updated', $id, array_keys($fields));
-        return Json::ok($response, ['employee' => $this->employees->find($supplierId, $id)]);
+        return Json::ok($response, [
+            'employee' => $this->employees->find($supplierId, $id),
+            // Varování se počítá nad SLOUČENÝM stavem — částečný update může poslat
+            // jen jedno z dvojice polí a nesoulad vznikne až vůči tomu, co je na kartě.
+            'warnings' => self::consistencyWarnings(array_merge($current, $fields)),
+        ]);
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -130,7 +158,16 @@ final class PayrollEmployeeAction
             $err = Json::error($response, 'validation_failed', 'Jméno a příjmení je povinné.', 422);
             return null;
         }
-        $type = (string) ($body['taxpayer_type'] ?? PayrollCalculator::TYPE_EMPLOYEE);
+        $employmentType = in_array((string) ($body['employment_type'] ?? ''), self::EMPLOYMENT_TYPES, true)
+            ? (string) $body['employment_type']
+            : 'hpp';
+        // Nezadaný typ poplatníka se u výkonu funkce PŘEDVYPLNÍ na jednatele-společníka
+        // (kontace 522/366), protože to je u členů statutárního orgánu obvyklý stav.
+        // Předvyplní, NEvynutí: výslovně poslanou hodnotu se nepřebíjí, jen se na
+        // nesoulad upozorní varováním — viz self::TAXPAYER_TYPE_HINTS.
+        $type = (string) ($body['taxpayer_type']
+            ?? self::TAXPAYER_TYPE_HINTS[$employmentType]
+            ?? PayrollCalculator::TYPE_EMPLOYEE);
         if (!in_array($type, PayrollCalculator::types(), true)) {
             $err = Json::error($response, 'validation_failed', 'Neznámý typ poplatníka.', 422);
             return null;
@@ -173,9 +210,7 @@ final class PayrollEmployeeAction
             'tax_declaration_signed' => array_key_exists('tax_declaration_signed', $body)
                 ? (bool) filter_var($body['tax_declaration_signed'], FILTER_VALIDATE_BOOLEAN)
                 : false,
-            'employment_type'     => in_array((string) ($body['employment_type'] ?? ''), self::EMPLOYMENT_TYPES, true)
-                ? (string) $body['employment_type']
-                : 'hpp',
+            'employment_type'     => $employmentType,
             'child_count'         => $childCount,
             // Migrace 1178 — kam se měsíčně přeúčtuje čistá mzda (typicky 365.x).
             'net_settlement_account_code' => $settlement,
@@ -346,6 +381,37 @@ final class PayrollEmployeeAction
         }
         $err = null;
         return true;
+    }
+
+    /**
+     * Nesoulad pracovněprávního vztahu a typu poplatníka — VAROVÁNÍ, ne chyba.
+     *
+     * Odměna člena statutárního orgánu se u nás v drtivé většině účtuje 522/366, takže
+     * kombinace „výkon funkce + zaměstnanec" je skoro jistě překlep. Blokovat ji ale
+     * nelze: jeden člověk může mít u téže firmy zároveň smlouvu o výkonu funkce
+     * a pracovní poměr, a kdo si to na jedné kartě vede jinak, má na to právo — kontace
+     * je věcí účtové osnovy firmy, ne zákona.
+     *
+     * Metoda je veřejná a statická záměrně: totéž pravidlo zrcadlí formulář ve frontendu
+     * a testy ho volají přímo. Schované v `private` by se okopírovalo dřív, než by se
+     * našlo (viz AGENTS.md — „SSOT musí jít ZAVOLAT").
+     *
+     * @param array<string,mixed> $effective stav karty po aplikaci změn
+     * @return list<string>
+     */
+    public static function consistencyWarnings(array $effective): array
+    {
+        $employmentType = (string) ($effective['employment_type'] ?? 'hpp');
+        $expected = self::TAXPAYER_TYPE_HINTS[$employmentType] ?? null;
+        if ($expected === null || (string) ($effective['taxpayer_type'] ?? '') === $expected) {
+            return [];
+        }
+
+        return [
+            'Vztah „smlouva o výkonu funkce" (§ 59 ZOK) se obvykle pojí s typem poplatníka '
+                . '„jednatel/společník" — odměna se pak účtuje 522/366 místo 521/331. '
+                . 'Zvolená kombinace není chyba, jen ověřte, že je to záměr.',
+        ];
     }
 
     /** @return int|null|false false = mimo rozsah */

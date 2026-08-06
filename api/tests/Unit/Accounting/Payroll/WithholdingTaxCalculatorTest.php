@@ -77,6 +77,32 @@ final class WithholdingTaxCalculatorTest extends TestCase
         self::assertFalse(W::applies(W::REASON_DPP, 9000.0, $this->c, taxDeclarationSigned: true));
     }
 
+    /**
+     * Typ pracovněprávního vztahu → důvod srážky. Whitelist, ne negace: výčet
+     * `payroll_employees.employment_type` roste (1156 hpp/dpp/dpc, 1302 statutory_body)
+     * a jediná hodnota, která zakládá srážku, je DPP.
+     *
+     * Odměna člena statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP ze
+     * smlouvy o výkonu funkce (§ 59 ZOK) a daní se VŽDY zálohou, i když je nízká —
+     * § 6 odst. 4 na ni nedopadá. Kdyby tu byla podmínka „všechno kromě pracovního
+     * poměru", spadl by výkon funkce pod limitem do samostatného základu daně a
+     * poplatník by přišel o slevy i o roční zúčtování.
+     */
+    public function testWithholdingReasonIsWhitelistedPerEmploymentType(): void
+    {
+        self::assertSame(W::REASON_DPP, W::reasonForEmploymentType('dpp'));
+        self::assertNull(W::reasonForEmploymentType('hpp'));
+        self::assertNull(W::reasonForEmploymentType('dpc'));
+        self::assertNull(
+            W::reasonForEmploymentType('statutory_body'),
+            'Výkon funkce (§ 59 ZOK) se daní zálohou — § 6/4 ZDP je jen o DPP.',
+        );
+        self::assertNull(
+            W::reasonForEmploymentType('cokoliv_noveho'),
+            'Neznámý typ nesmí do srážkového režimu spadnout sám od sebe.',
+        );
+    }
+
     /** Autorský honorář do limitu (§ 7/6) — prohlášení tu roli nehraje. */
     public function testAuthorFeeUnderLimitIsWithheld(): void
     {

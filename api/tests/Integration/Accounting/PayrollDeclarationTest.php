@@ -470,6 +470,124 @@ final class PayrollDeclarationTest extends TestCase
             'Nad limitem se odvádí pojistné jako u běžné mzdy.');
     }
 
+    // ── § 59 ZOK: smlouva o výkonu funkce (migrace 1302) ─────────────────────
+    //
+    // Odměna člena statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP —
+    // NENÍ to příjem z dohody o provedení práce, takže § 6 odst. 4 (srážková daň do
+    // limitu) na ni nedopadá a daní se VŽDY zálohou. Účast na nemocenském se naopak
+    // řídí týmž rozhodným příjmem jako u ostatních (§ 6 odst. 1 z. 187/2006 ve spojení
+    // s § 5 písm. a) bodem 20), takže se výpočet pojistného nemění.
+
+    /**
+     * KRITICKÉ: nízká odměna za výkon funkce se daní ZÁLOHOU, ne srážkou.
+     *
+     * Kdyby se nová hodnota chytila do větve DPP, dostal by člen statutárního orgánu
+     * samostatný základ daně: bez slev, mimo roční zúčtování a bez pojistného. Tady se
+     * proto netestují jen částky, ale i to, že náhled srážkovou větev VŮBEC nepoužil —
+     * částky samotné by to neprozradily, 15 % ze 4 000 Kč vyjde v obou režimech 600 Kč.
+     */
+    public function testStatutoryBodyLowRemunerationIsTaxedByAdvanceNotWithholding(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: false, declarationSigned: false, employmentType: 'statutory_body',
+        );
+
+        $preview = $this->payroll->preview(
+            self::YEAR, self::MONTH, 4_000.0, 'employee',
+            taxpayerCredit: false, childCount: 0, ytdSocialBase: null,
+            supplierId: $this->supplierId, employeeId: $employeeId,
+        );
+
+        self::assertArrayNotHasKey('withholding', $preview,
+            'Výkon funkce nesmí projít srážkovou větví — § 6/4 ZDP je jen o DPP.');
+        self::assertSame(600, (int) $preview['breakdown']['advance_tax_withheld'],
+            'Daní se zálohou i u nízké odměny.');
+        self::assertGreaterThan(0, (int) $preview['breakdown']['employee_deductions'],
+            'Srážkový režim by pojistné vynuloval — zálohový ho odvádí.');
+
+        // Kontrast na TÉŽE částce: DPP srážkovou větví projde, výkon funkce ne.
+        $dppId = $this->employee(
+            creditClaimed: false, declarationSigned: false, employmentType: 'dpp',
+        );
+        $dpp = $this->payroll->preview(
+            self::YEAR, self::MONTH, 4_000.0, 'employee',
+            taxpayerCredit: false, childCount: 0, ytdSocialBase: null,
+            supplierId: $this->supplierId, employeeId: $dppId,
+        );
+        self::assertArrayHasKey('withholding', $dpp, 'REGRESE: DPP režim musí zůstat beze změny.');
+        self::assertSame(0, (int) $dpp['breakdown']['employee_deductions']);
+    }
+
+    /**
+     * POD rozhodným příjmem (2026: 4 500 Kč) se sociální pojistné neodvádí ani
+     * zaměstnancem, ani zaměstnavatelem — zdravotní ano, včetně doplatku do
+     * minimálního vyměřovacího základu. Rozhodný příjem u člena statutárního orgánu
+     * platí stejně jako u zaměstnance, takže se tu nesmí lišit nic než popisek vztahu.
+     */
+    public function testStatutoryBodyBelowParticipationThresholdSkipsSocialButNotHealth(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: false, declarationSigned: false, employmentType: 'statutory_body',
+            taxpayerType: 'managing_partner',
+        );
+
+        $b = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, 4_000.0, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        )['breakdown'];
+
+        self::assertTrue((bool) $b['below_participation'], 'Zaměstnání malého rozsahu (§ 7).');
+        self::assertSame(0, (int) $b['employee_social']);
+        self::assertSame(0, (int) $b['employer_social']);
+        self::assertSame(180, (int) $b['employee_health'], '4,5 % ze 4 000.');
+        self::assertSame(2_484, (int) $b['health_min_topup'], 'Doplatek do minimální mzdy 22 400.');
+        self::assertSame(600, (int) $b['advance_tax_withheld']);
+    }
+
+    /** NAD rozhodným příjmem se odvádí obojí — jako u kterékoli jiné odměny. */
+    public function testStatutoryBodyAboveParticipationThresholdPaysBothInsurances(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: false, declarationSigned: false, employmentType: 'statutory_body',
+            taxpayerType: 'managing_partner',
+        );
+
+        $b = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, 30_000.0, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        )['breakdown'];
+
+        self::assertFalse((bool) $b['below_participation']);
+        self::assertSame(2_130, (int) $b['employee_social'], '7,1 % z 30 000.');
+        self::assertSame(1_350, (int) $b['employee_health'], '4,5 % z 30 000.');
+        self::assertSame(7_440, (int) $b['employer_social']);
+        self::assertSame(4_500, (int) $b['advance_tax_withheld']);
+    }
+
+    /**
+     * Kontace se řídí `taxpayer_type`, ne typem vztahu — jednatel účtuje 522/366
+     * i s novou hodnotou v ENUMu.
+     */
+    public function testStatutoryBodyKeepsPostingDrivenByTaxpayerType(): void
+    {
+        $employeeId = $this->employee(
+            creditClaimed: false, declarationSigned: false, employmentType: 'statutory_body',
+            taxpayerType: 'managing_partner',
+        );
+
+        $res = $this->payroll->post(
+            $this->supplierId, self::YEAR, self::MONTH, 30_000.0, 'employee',
+            ['user_id' => $this->userId], $employeeId,
+        );
+        // assertArrayHasKey, ne assertContains nad array_keys(): PHP z číselného
+        // řetězcového klíče udělá int a striktní porovnání s '522' by neprošlo.
+        $sums = $this->accountSums((int) $res['journal_entry_id']);
+
+        self::assertArrayHasKey('522', $sums);
+        self::assertArrayHasKey('366', $sums);
+        self::assertArrayNotHasKey('521', $sums);
+    }
+
     /** Hlavní pracovní poměr srážkovou daň nepoužívá ani pod limitem. */
     public function testHppIsUnaffectedByWithholding(): void
     {

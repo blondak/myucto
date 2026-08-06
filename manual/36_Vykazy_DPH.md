@@ -234,12 +234,19 @@ o plnění, u kterých se nepodařilo spolehlivě určit místo plnění — tá
 dodavatele (21 % zná ČR, Nizozemsko, Belgie, Španělsko, Litva i Lotyšsko), číselník neuměl
 odpovědět, nebo si doklad protiřečí, protože míchá plnění v režimu OSS s tuzemským.
 
-Označené řádky mohou skončit na dvou různých místech a hledají se každý jinak:
+Označené řádky mohou skončit na dvou různých místech a každé se řeší jinou otázkou:
 
-| Kde řádek leží | Kdo ho tak založí | Kde ho najdeš |
+| Kde řádek leží | Kdo ho tak založí | Na co se ptát |
 |---|---|---|
-| **V OSS podání**, s příznakem k posouzení | Import vydaných faktur — u nejednoznačné sazby se rozhodne ve prospěch OSS, protože chybný OSS řádek je v krátkém náhledu podání vidět, kdežto chybný tuzemský zmizí mezi stovkami řádků přiznání | Varování v náhledu OSS podání a report importu |
-| **V tuzemském přiznání** na ř. 1 a 2, s příznakem k posouzení | Doklady zakládané automaticky bez lidského zásahu — pravidelná fakturace, synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API. Doklad vzniknout musel, ale do OSS podání řádek nepatří, dokud to nikdo nepotvrdí | Filtr **Nejisté místo plnění (OSS)** v seznamu faktur a varování v přiznání k DPH |
+| **V OSS podání**, s příznakem k posouzení | Import vydaných faktur — u nejednoznačné sazby se rozhodne ve prospěch OSS, protože chybný OSS řádek je v krátkém náhledu podání vidět, kdežto chybný tuzemský zmizí mezi stovkami řádků přiznání | Sedí země spotřeby a typ sazby? Nepatří plnění do tuzemska? |
+| **V tuzemském přiznání** na ř. 1 a 2, s příznakem k posouzení | Doklady zakládané automaticky bez lidského zásahu — pravidelná fakturace, synchronizace z iDokladu a Fakturoidu, čtení PDF, vlastní integrace přes API. Doklad vzniknout musel, ale do OSS podání řádek nepatří, dokud to nikdo nepotvrdí | Patří plnění do tuzemského přiznání? Nemá jít do OSS? |
+
+**Obojí najdeš filtrem Místo plnění (OSS)** v seznamu faktur
+([§ 14.1.1](14_Faktury.md#nejiste-misto-plneni-oss)) — buď najednou volbou
+**Nejisté místo plnění (OSS)**, nebo každou větev zvlášť. Doklad v seznamu nese štítek
+**OSS ?**, resp. **ČR ?** podle toho, který otazník na něm visí. Varování v náhledu OSS
+podání navíc nabízí přímý proklik na řádky té první skupiny za zobrazené čtvrtletí;
+řádky té druhé hlásí i přiznání k DPH.
 
 Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně —
 [§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss); volba **Jen řádky k ručnímu

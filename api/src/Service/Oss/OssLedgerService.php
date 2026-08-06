@@ -366,6 +366,10 @@ final class OssLedgerService
                 'correction_row_count' => $correctionRowCount,
                 'invalid_correction_count' => $invalidCorrectionCount,
                 'conversion_missing_count' => $conversionMissingCount,
+                // Vedle varování i jako číslo, aby náhled uměl nabídnout PROKLIK do
+                // seznamu faktur na filtr „nejisté místo plnění — v OSS podání". Bez něj
+                // by uživatel četl, že něco k posouzení je, a musel to hledat ručně.
+                'manual_review_count' => $manualReviewCount,
             ],
             'countries' => $countryRows,
             'corrections' => $correctionRows,
@@ -773,6 +777,7 @@ final class OssLedgerService
                 'correction_row_count' => 0,
                 'invalid_correction_count' => 0,
                 'conversion_missing_count' => 0,
+                'manual_review_count' => 0,
             ],
             'countries' => [],
             'corrections' => [],

@@ -3651,7 +3651,8 @@
       "employment": {
         "hpp": "Employment contract",
         "dpp": "Agreement to complete a job (DPP)",
-        "dpc": "Agreement to perform work (DPČ)"
+        "dpc": "Agreement to perform work (DPČ)",
+        "statutory_body": "Service contract of a statutory body member (§ 59 ZOK)"
       },
       "employees": {
         "title": "Employees",
@@ -3672,6 +3673,7 @@
         "form_birth_date": "Date of birth",
         "form_address": "Address (residence)",
         "form_employment_type": "Type of employment",
+        "form_statutory_body_mismatch": "Remuneration of a statutory body member is usually posted to 522/366, i.e. with the taxpayer type “Managing partner”. You can save it this way — just make sure it is intentional (e.g. a director who also holds an employment contract with the company).",
         "form_child_count": "Number of children",
         "form_monthly_gross": "Recurring gross salary (CZK)",
         "form_auto_post": "Post automatically",
@@ -6928,8 +6930,19 @@
     "month_filter": "Filter by month (within selected year)",
     "overdue_only": "Overdue",
     "unpaid_only": "Unpaid",
-    "oss_review_only": "Uncertain place of supply (OSS)",
-    "oss_review_only_hint": "Documents with a line where the system could not determine whether it is an OSS supply. They enter the Czech VAT return on lines 1 and 2, not the OSS return — review them and decide.",
+    "oss_review_only_hint": "Documents with a line whose place of supply the system is unsure about. Some ended up in the OSS return (check the country and rate type), some stayed in the Czech VAT return on lines 1 and 2 (check whether they belong there).",
+    "oss_review_scope": {
+      "off": "Place of supply (OSS): all",
+      "any": "Uncertain place of supply (OSS)",
+      "oss": "Uncertain — in the OSS return",
+      "domestic": "Uncertain — domestic"
+    },
+    "oss_review_badge": {
+      "oss": "OSS ?",
+      "oss_hint": "The line went into the OSS return but awaits review — check the country of consumption and the rate type, or move it back to the domestic return.",
+      "domestic": "DOM ?",
+      "domestic_hint": "The line stayed out of OSS and awaits review — it enters the Czech VAT return on lines 1 and 2, check whether it belongs there."
+    },
     "csv_export": "CSV export",
     "varsymbol": "Var. symbol",
     "client_project": "Client · Project",
@@ -10618,6 +10631,7 @@
       "corrections": "Corrections of previous periods",
       "deadline": "Submission deadline",
       "warnings": "Warnings",
+      "manual_review_link": "Show documents with lines awaiting review ({n}) in the invoice list",
       "threshold_title": "EUR 10,000 threshold usage for {year}",
       "threshold_note": "The threshold (§ 8(3) of the Czech VAT Act) counts all cross-border B2C supplies to the EU, including those invoiced with Czech VAT. The EUR conversion is indicative (daily CNB rate) — verify with your accountant near the threshold.",
       "no_data": "No OSS rows are marked for the selected quarter.",

@@ -31,6 +31,18 @@ poplatníka, pracovněprávní vztah, příznak základní slevy na poplatníka,
 pravidelnou měsíční hrubou mzdu a aktivní stav. Tyto údaje slouží ročnímu mzdovému
 listu; samy nedokládají podepsané prohlášení poplatníka ani nárok na slevu.
 
+**Pracovněprávní vztah** nabízí pracovní poměr, dohodu o provedení práce, dohodu
+o pracovní činnosti a smlouvu o výkonu funkce (§ 59 ZOK). Rozhoduje o režimu zdanění:
+srážkovou daní ze samostatného základu (§ 6 odst. 4 ZDP) se daní **pouze** dohoda
+o provedení práce do ročního limitu bez podepsaného prohlášení. Odměna člena
+statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP a daní se vždy zálohou,
+i když je nízká; pojistné se u ní řídí rozhodným příjmem stejně jako u zaměstnance.
+
+U smlouvy o výkonu funkce formulář předvyplní typ poplatníka **jednatel/společník**
+(kontace 522/366). Předvyplní jej, ale nevynutí — jinou kombinaci lze uložit, jen na
+ni aplikace upozorní. Jeden člověk totiž může mít u téže firmy vedle výkonu funkce
+i pracovní poměr.
+
 Karta je zdroj pravdy: vyberete-li ve výpočtu zaměstnance, převezme se z ní **typ
 poplatníka i slevy** a příslušná pole ve formuláři se zamknou. Zabraňuje to tomu, aby
 náhled ukazoval kontaci 521/331 a zaúčtovalo se 522/366.

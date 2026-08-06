@@ -135,15 +135,16 @@ OSS řádek uvidíš v krátkém náhledu podání, kdežto chybně zařazený t
 mezi stovkami řádků přiznání k DPH.
 
 Kolik takových řádků vzniklo, říká souhrn importu, a upozorní na ně i **varování v náhledu
-OSS podání** za dané období. Rozhodnutí uděláš v editoru faktury nebo hromadně přes
+OSS podání** za dané období — odtud na ně vede přímý proklik do seznamu faktur.
+Rozhodnutí uděláš v editoru faktury nebo hromadně přes
 [hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) — výběr **Jen řádky
 k ručnímu posouzení**.
 
 > [!NOTE]
-> Filtr **Nejisté místo plnění (OSS)** v seznamu faktur je na něco jiného: ukazuje řádky,
-> které zůstaly v **tuzemském** přiznání a systém si jimi není jistý. Takové zakládají
-> automatické kanály (pravidelná fakturace, iDoklad, Fakturoid, čtení PDF, API), ne import
-> vydaných faktur. Rozdíl vysvětluje
+> Souhrn importu po zavření stránky zmizí, filtr **Místo plnění (OSS)** v seznamu faktur
+> ne. Volba **Nejisté — v OSS podání** vypíše přesně tyhle řádky; **Nejisté — v tuzemsku**
+> tu druhou skupinu, kterou zakládají automatické kanály (pravidelná fakturace, iDoklad,
+> Fakturoid, čtení PDF, API). Rozdíl vysvětluje
 > [§ 36 — Plnění k ručnímu posouzení](36_Vykazy_DPH.md#plneni-k-rucnimu-posouzeni).
 
 Zvlášť se hlásí **doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání. Import

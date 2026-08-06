@@ -37,6 +37,27 @@ final class WithholdingTaxCalculator
     public const REASON_NON_RESIDENT = 'non_resident';
 
     /**
+     * Důvod srážky plynoucí ze samotného typu pracovněprávního vztahu, nebo `null`,
+     * když se z tohohle titulu srážková daň neuplatní vůbec.
+     *
+     * ── Proč to je pojmenované pravidlo, a ne podmínka v jednom volajícím ───────────
+     * Výčet `payroll_employees.employment_type` roste (1156 hpp/dpp/dpc, 1302
+     * statutory_body) a jediná hodnota, která srážku zakládá, je DPP. Odměna člena
+     * statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP ze smlouvy o výkonu
+     * funkce — NE příjem z dohody o provedení práce — a daní se VŽDY zálohou, i když
+     * je nízká; § 6 odst. 4 na ni nedopadá. Kdyby byla podmínka psaná negací
+     * („všechno kromě pracovního poměru je dohoda"), spadl by výkon funkce pod limitem
+     * do srážky a poplatník by přišel o slevy i o roční zúčtování.
+     *
+     * Proto whitelist s jednou položkou: nový typ vztahu se do srážkového režimu
+     * nedostane, dokud ho sem někdo vědomě nedopíše.
+     */
+    public static function reasonForEmploymentType(string $employmentType): ?string
+    {
+        return $employmentType === 'dpp' ? self::REASON_DPP : null;
+    }
+
+    /**
      * Posoudí, jestli se na odměnu srážková daň vůbec vztahuje.
      *
      * @param array<string,mixed> $c roční daňové konstanty

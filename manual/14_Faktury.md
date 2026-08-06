@@ -36,13 +36,32 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Měna | CZK / EUR / … |
 | Období | Tento měsíc / minulý měsíc / tento rok / minulý rok / vlastní rozsah |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
-| Nejisté místo plnění (OSS) | Zaškrtávátko. Vypíše doklady s řádkem, u kterého se nepodařilo určit, jestli jde o plnění v režimu OSS, nebo o tuzemské. Takové řádky vstupují do tuzemského přiznání na ř. 1 a 2, do OSS podání ne — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
+| Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
 filtrů](71_Nastaveni.md#719-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
+
+#### Nejisté místo plnění (OSS)
+
+Sporné řádky končí na **dvou různých místech** a každé se řeší jinou otázkou. Proto má
+filtr tři hodnoty, ne zaškrtávátko:
+
+| Volba | Co vypíše | Co s tím |
+|---|---|---|
+| **Nejisté místo plnění (OSS)** | Obojí najednou | Rozliš je podle štítku u varsymbolu |
+| **Nejisté — v OSS podání** | Řádek se do OSS zařadil, ale s otazníkem — sazba platí i v ČR (21 % zná Nizozemsko, Belgie, Španělsko, Litva i Lotyšsko), číselník neuměl odpovědět, nebo doklad míchá OSS s tuzemským plněním | Ověř zemi spotřeby a typ sazby; pokud plnění patří do tuzemska, vypni na položce OSS |
+| **Nejisté — v tuzemsku** | Řádek zůstal mimo OSS a vstupuje do přiznání k DPH na ř. 1 a 2, aniž to kdo potvrdil | Ověř, jestli tam patří; pokud jde o plnění do jiného členského státu, zapni na položce OSS |
+
+U dokladu v seznamu je vidět, který otazník nese: štítek **OSS ?** u varsymbolu značí
+řádek v OSS podání, štítek **ČR ?** řádek v tuzemsku. Doklad rozpadlý mezi obojí nese
+oba štítky.
+
+Filtr jde do URL i do uložených filtrů. Starší odkazy a filtry uložené dřív, než měl
+filtr tři hodnoty, se otevřou jako **Nejisté místo plnění (OSS)**, tedy s obojím — nic
+se tím neschová.
 
 ## 14.2 Stavy faktur
 
@@ -108,8 +127,8 @@ doplnit nebo opravit údaje k režimu [OSS](35_Fakturujeme.md#354-zahranicni-fak
 Proklikat je po jednom není reálné, proto má seznam faktur hromadnou akci
 **Nastavit OSS (N)**.
 
-Nejdřív si vyber doklady (typicky přes filtr **Nejisté místo plnění (OSS)**), pak
-v dialogu nastav:
+Nejdřív si vyber doklady (typicky přes filtr **Místo plnění (OSS)** —
+[§ 14.1.1](#1411-filtry-vlevo)), pak v dialogu nastav:
 
 | Pole | Význam |
 |---|---|

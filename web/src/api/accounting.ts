@@ -536,8 +536,14 @@ export interface PostingRulePayload {
 /** 521/331 zaměstnanec vs. 522/366 jednatel-společník. */
 export type PayrollTaxpayerType = 'employee' | 'managing_partner'
 
-/** Pracovní poměr / dohoda o provedení práce / dohoda o pracovní činnosti. */
-export type PayrollEmploymentType = 'hpp' | 'dpp' | 'dpc'
+/**
+ * Pracovní poměr / dohoda o provedení práce / dohoda o pracovní činnosti /
+ * smlouva o výkonu funkce (§ 59 ZOK, migrace 1302).
+ *
+ * `statutory_body` má SHODNÝ klíč jako `relation_type` v novějším mzdovém modulu
+ * (`PayrollRelationType` v `api/payroll.ts`) — jeden právní pojem, jeden identifikátor.
+ */
+export type PayrollEmploymentType = 'hpp' | 'dpp' | 'dpc' | 'statutory_body'
 
 /** Rozpad hrubé mzdy — všechny částky v celých Kč. */
 export interface PayrollBreakdown {
@@ -659,6 +665,15 @@ export interface PayrollEmployee {
 
 export type PayrollEmployeePayload = Omit<PayrollEmployee,
   'id' | 'supplier_id' | 'created_at' | 'updated_at'>
+
+/**
+ * Uložení karty. `warnings` jsou upozornění, která uložení NEBLOKUJÍ (nesourodá
+ * kombinace vztahu a typu poplatníka) — chyby chodí jako 422, ne tudy.
+ */
+export interface PayrollEmployeeSaveResult {
+  employee: PayrollEmployee
+  warnings: string[]
+}
 
 // ── Účetní sestavy (Epic F2) ───────────────────────────────────────────────
 export interface ReportPeriod {
@@ -1423,10 +1438,13 @@ export const accountingApi = {
     api.get<{ items: PayrollEmployee[] }>('/accounting/payroll/employees', {
       params: active === undefined ? {} : { active: active ? '1' : '0' },
     }).then(r => r.data.items),
+  // Vrací celou odpověď, ne jen kartu: `warnings` nese upozornění na nesourodou
+  // kombinaci vztahu a typu poplatníka, které NEblokuje uložení — kdyby se tu
+  // odstřihlo, uživatel by se o něm nedozvěděl.
   createPayrollEmployee: (payload: PayrollEmployeePayload) =>
-    api.post<{ employee: PayrollEmployee }>('/accounting/payroll/employees', payload).then(r => r.data.employee),
+    api.post<PayrollEmployeeSaveResult>('/accounting/payroll/employees', payload).then(r => r.data),
   updatePayrollEmployee: (id: number, payload: Partial<PayrollEmployeePayload>) =>
-    api.put<{ employee: PayrollEmployee }>(`/accounting/payroll/employees/${id}`, payload).then(r => r.data.employee),
+    api.put<PayrollEmployeeSaveResult>(`/accounting/payroll/employees/${id}`, payload).then(r => r.data),
   deletePayrollEmployee: (id: number) =>
     api.delete<{ deleted: true }>(`/accounting/payroll/employees/${id}`).then(r => r.data),
 

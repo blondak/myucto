@@ -588,10 +588,13 @@ paths:
         - in: query
           name: filter[oss_review]
           description: >
-            Pouze doklady s řádkem, u kterého se nepodařilo určit místo plnění
-            (`oss_applicable = 0` a `oss_needs_manual_review = 1`). Takové řádky vstupují
-            do tuzemského přiznání k DPH na ř. 1/2 a do OSS podání nepatří.
-          schema: { type: boolean }
+            Pouze doklady s řádkem k ručnímu posouzení místa plnění
+            (`oss_needs_manual_review = 1`). Rozsah říká, kde řádek leží:
+            `domestic` = mimo OSS (`oss_applicable = 0`) — vstupuje do tuzemského přiznání
+            na ř. 1/2 a do OSS podání nepatří;
+            `oss` = v OSS podání (`oss_applicable = 1`) s otazníkem nad zemí či typem sazby;
+            `any` = obojí. Legacy `1` / `true` se mapuje na `any`.
+          schema: { type: string, enum: [any, oss, domestic, '1'] }
         - in: query
           name: page
           schema: { type: integer, minimum: 1, default: 1 }
@@ -14845,6 +14848,11 @@ components:
             correction_row_count: { type: integer }
             invalid_correction_count: { type: integer }
             conversion_missing_count: { type: integer }
+            manual_review_count:
+              type: integer
+              description: >
+                Počet OSS řádků období s příznakem `oss_needs_manual_review`. Táž množina,
+                kterou v seznamu faktur vrátí `filter[oss_review]=oss`.
         countries:
           type: array
           items: { type: object, additionalProperties: true }
@@ -16676,6 +16684,11 @@ components:
             Faktury skupiny — list vrací podmnožinu polí `Invoice` (bez items,
             bankovních polí apod.) plus listová pole `month_bucket` (YYYY-MM),
             `has_work_report` a `project_requires_approval`.
+
+            Dále booleany `oss_review_domestic` a `oss_review_oss` — doklad má řádek
+            k ručnímu posouzení místa plnění mimo OSS, resp. v OSS podání. Rozlišují
+            výsledky filtru `filter[oss_review]=any`; každý stav se řeší jinak. Chybí,
+            když schéma sloupec `oss_needs_manual_review` nezná.
           items: { $ref: '#/components/schemas/Invoice' }
 
     InvoiceInput:

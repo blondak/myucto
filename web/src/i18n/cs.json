@@ -3651,7 +3651,8 @@
       "employment": {
         "hpp": "Pracovní poměr",
         "dpp": "Dohoda o provedení práce",
-        "dpc": "Dohoda o pracovní činnosti"
+        "dpc": "Dohoda o pracovní činnosti",
+        "statutory_body": "Smlouva o výkonu funkce (§ 59 ZOK)"
       },
       "employees": {
         "title": "Zaměstnanci",
@@ -3672,6 +3673,7 @@
         "form_birth_date": "Datum narození",
         "form_address": "Adresa (bydliště)",
         "form_employment_type": "Pracovněprávní vztah",
+        "form_statutory_body_mismatch": "Odměna člena statutárního orgánu se obvykle účtuje 522/366, tedy s typem poplatníka „Jednatel/společník“. Uložit to takhle lze — jen ověřte, že je to záměr (např. jednatel, který má u firmy i pracovní poměr).",
         "form_child_count": "Počet dětí",
         "form_monthly_gross": "Pravidelná hrubá mzda (Kč)",
         "form_auto_post": "Účtovat automaticky",
@@ -6928,8 +6930,19 @@
     "month_filter": "Filtr na měsíc (ve zvoleném roce)",
     "overdue_only": "Po splatnosti",
     "unpaid_only": "Nezaplacené",
-    "oss_review_only": "Nejisté místo plnění (OSS)",
-    "oss_review_only_hint": "Doklady s řádkem, u kterého se nepodařilo určit, jestli jde o plnění v režimu OSS. Vstupují do tuzemského přiznání na ř. 1 a 2, do OSS podání ne — ověřte je a rozhodněte.",
+    "oss_review_only_hint": "Doklady s řádkem, u kterého si systém není jistý místem plnění. Část z nich se do OSS zařadila (ověřte zemi a typ sazby), část zůstala v tuzemském přiznání na ř. 1 a 2 (ověřte, jestli tam patří).",
+    "oss_review_scope": {
+      "off": "Místo plnění (OSS): vše",
+      "any": "Nejisté místo plnění (OSS)",
+      "oss": "Nejisté — v OSS podání",
+      "domestic": "Nejisté — v tuzemsku"
+    },
+    "oss_review_badge": {
+      "oss": "OSS ?",
+      "oss_hint": "Řádek se do OSS zařadil, ale čeká na posouzení — ověřte zemi spotřeby a typ sazby, případně ho vraťte do tuzemska.",
+      "domestic": "ČR ?",
+      "domestic_hint": "Řádek zůstal mimo OSS a čeká na posouzení — vstupuje do tuzemského přiznání na ř. 1 a 2, ověřte, jestli tam patří."
+    },
     "csv_export": "CSV export",
     "varsymbol": "Var. symbol",
     "client_project": "Klient · Zakázka",
@@ -10618,6 +10631,7 @@
       "corrections": "Opravy minulých období",
       "deadline": "Termín podání",
       "warnings": "Upozornění",
+      "manual_review_link": "Zobrazit doklady s řádky k posouzení ({n}) v seznamu faktur",
       "threshold_title": "Čerpání prahu 10 000 EUR za rok {year}",
       "threshold_note": "Do prahu (§ 8 odst. 3 ZDPH) se počítají všechna přeshraniční B2C plnění do EU, i ta fakturovaná s českou daní. Přepočet do EUR je orientační (denní kurz ČNB) — u hodnot blízko prahu ověřte s účetní.",
       "no_data": "Pro zvolené čtvrtletí nejsou označené žádné OSS řádky.",

@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
-  type OssBulkResult, type OssBulkScope, type OssBulkSet } from '@/api/invoices'
+  type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
@@ -74,11 +74,21 @@ const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
-// Doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS). Záměrně NENÍ
-// podmíněné zapnutým OSS: příznak vzniká i u firmy, která OSS nepoužívá (číselník
-// členských států nepotvrdí sazbu → řádek zůstane mimo OSS, ale označený). Kdyby byl
-// filtr schovaný za `oss_enabled`, byly by ty doklady u takové firmy nedohledatelné.
-const ossReviewOnly = ref(false)
+/**
+ * Doklady s řádkem k ručnímu posouzení místa plnění (OSS). Záměrně NENÍ podmíněné
+ * zapnutým OSS: příznak vzniká i u firmy, která OSS nepoužívá (číselník členských států
+ * nepotvrdí sazbu → řádek zůstane mimo OSS, ale označený). Kdyby byl filtr schovaný za
+ * `oss_enabled`, byly by ty doklady u takové firmy nedohledatelné.
+ *
+ * Tři hodnoty místo zaškrtávátka, protože sporné řádky končí na DVOU místech a každé se
+ * řeší jinak: řádek v OSS = zkontrolovat zemi a typ sazby (případně vrátit do tuzemska),
+ * řádek v tuzemsku = zkontrolovat, jestli tam vůbec patří. Zaškrtávátko chytalo jen ten
+ * druhý, takže si uživatel filtr vyčistil a půlka mu zůstala schovaná v náhledu podání
+ * a v reportu importu, který po zavření stránky zmizí. Select (ne dva selecty ani dvě
+ * zaškrtávátka) kopíruje sousední filtr „Zaúčtováno" — týž tvar „vše / A / B" — a drží
+ * počet aktivních filtrů na jedné položce.
+ */
+const ossReviewFilter = ref<'' | OssReviewScope>('')
 const currencyFilter = ref<string>('')
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
@@ -95,7 +105,7 @@ const activeFilterCount = computed(() => {
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   if (bookedFilter.value) n++
-  if (ossReviewOnly.value) n++
+  if (ossReviewFilter.value) n++
   return n
 })
 
@@ -129,7 +139,11 @@ const filterChips = computed<FilterChip[]>(() => {
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: bookedFilter.value === '1' ? t('common.booked_badge') : t('common.unbooked_badge') })
   }
-  if (ossReviewOnly.value) chips.push({ key: 'oss_review', value: t('invoice.oss_review_only') })
+  // Chip nese i ROZSAH, ne jen „filtr je zapnutý" — jinak by po přepnutí na jednu
+  // z větví vypadal stejně jako „vše nejisté" a uživatel by nevěděl, co má před sebou.
+  if (ossReviewFilter.value) {
+    chips.push({ key: 'oss_review', value: t(`invoice.oss_review_scope.${ossReviewFilter.value}`) })
+  }
   return chips
 })
 
@@ -144,7 +158,7 @@ function clearFilter(key: string) {
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
     case 'booked': bookedFilter.value = ''; break
-    case 'oss_review': ossReviewOnly.value = false; break
+    case 'oss_review': ossReviewFilter.value = ''; break
   }
 }
 
@@ -727,7 +741,7 @@ async function load(reset = true) {
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
       booked: bookedFilter.value || undefined,
-      oss_review: ossReviewOnly.value || undefined,
+      oss_review: ossReviewFilter.value || undefined,
       page: page.value,
     })
     if (reset) {
@@ -818,13 +832,17 @@ function loadFiltersFromQuery(q: typeof route.query) {
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
-  ossReviewOnly.value = q.oss_review === '1' || q.oss_review === 'true'
+  // `1` / `true` = uložené filtry a starší odkazy, kdy filtr rozsah neuměl. Mapují se
+  // na „vše nejisté", tedy na ROZŠÍŘENÍ původního významu — nic se nesmí schovat.
+  ossReviewFilter.value = q.oss_review === 'oss' || q.oss_review === 'domestic' || q.oss_review === 'any'
+    ? q.oss_review
+    : (q.oss_review === '1' || q.oss_review === 'true' ? 'any' : '')
   // Nejisté řádky jsou typicky staré (přišly importem nebo cronem kdykoli v minulosti),
   // takže výchozí rok by je schoval a filtr by vypadal, že žádné nejsou — stejný důvod
   // jako u „nezaúčtováno".
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0' || ossReviewOnly.value) ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -846,7 +864,7 @@ function buildQuery(): Record<string, string> {
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
   if (bookedFilter.value) q.booked = bookedFilter.value
-  if (ossReviewOnly.value) q.oss_review = '1'
+  if (ossReviewFilter.value) q.oss_review = ossReviewFilter.value
   if (search.value) q.q = search.value
   return q
 }
@@ -866,7 +884,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, bookedFilter, ossReviewOnly, currencyFilter], () => {
+       overdueOnly, unpaidOnly, bookedFilter, ossReviewFilter, currencyFilter], () => {
   syncFiltersToUrl()
   load(true)
 })
@@ -892,7 +910,7 @@ watch(() => route.query, (newQ) => {
     overdueOnly.value = false
     unpaidOnly.value = false
     bookedFilter.value = ''
-    ossReviewOnly.value = false
+    ossReviewFilter.value = ''
     currencyFilter.value = ''
     search.value = ''
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -1124,11 +1142,14 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <option value="1">{{ t('common.booked_badge') }}</option>
           <option value="0">{{ t('common.unbooked_badge') }}</option>
         </select>
-        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2"
+        <select v-model="ossReviewFilter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('invoice.oss_review_only_hint')">
-          <input v-model="ossReviewOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-          {{ t('invoice.oss_review_only') }}
-        </label>
+          <option value="">{{ t('invoice.oss_review_scope.off') }}</option>
+          <option value="any">{{ t('invoice.oss_review_scope.any') }}</option>
+          <option value="oss">{{ t('invoice.oss_review_scope.oss') }}</option>
+          <option value="domestic">{{ t('invoice.oss_review_scope.domestic') }}</option>
+        </select>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
@@ -1244,6 +1265,12 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                     <span v-else class="text-neutral-400">{{ t('invoice.draft_id_short', { id: inv.id }) }}</span>
                   </RouterLink>
+                  <!-- Štítek říká, KTERÝ konec nejistoty doklad nese. Bez něj by filtr
+                       „vše nejisté" byl nerozlišený seznam dvou různých otázek. -->
+                  <span v-if="inv.oss_review_oss" class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-sans font-semibold whitespace-nowrap"
+                    :title="t('invoice.oss_review_badge.oss_hint')">{{ t('invoice.oss_review_badge.oss') }}</span>
+                  <span v-if="inv.oss_review_domestic" class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-sans font-semibold whitespace-nowrap"
+                    :title="t('invoice.oss_review_badge.domestic_hint')">{{ t('invoice.oss_review_badge.domestic') }}</span>
                 </td>
                 <td v-if="tbl.isVisible('client')" class="px-4 py-2.5">
                   <div class="font-medium text-neutral-900">{{ inv.client_company_name }}</div>
@@ -1394,6 +1421,10 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
                     <span>{{ typeLabel(inv.invoice_type) }}</span>
                     <span v-if="inv.project_name" class="text-neutral-400"> · </span>
                     <span v-if="inv.project_name" class="truncate">{{ inv.project_name }}</span>
+                    <span v-if="inv.oss_review_oss" class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-semibold whitespace-nowrap"
+                      :title="t('invoice.oss_review_badge.oss_hint')">{{ t('invoice.oss_review_badge.oss') }}</span>
+                    <span v-if="inv.oss_review_domestic" class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-semibold whitespace-nowrap"
+                      :title="t('invoice.oss_review_badge.domestic_hint')">{{ t('invoice.oss_review_badge.domestic') }}</span>
                   </div>
                 </div>
                 <div class="flex items-center justify-between gap-2 mt-2">

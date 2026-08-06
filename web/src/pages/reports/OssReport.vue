@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { reportsApi, type OssPreview } from '@/api/reports'
 import {
   ossFilingApi,
@@ -109,6 +109,27 @@ function periodLabel(s: OssArchivedSubmission): string {
 }
 
 const hasRows = computed(() => (preview.value?.summary.row_count ?? 0) > 0)
+
+/**
+ * Proklik z varování „řádky čekají na ruční posouzení" do seznamu faktur.
+ *
+ * Rozsah je `oss` — tady jde právě o řádky, které se do OSS ZAŘADILY a mají otazník
+ * nad zemí nebo typem sazby. Tuzemská větev téhož příznaku do OSS podání nevstupuje
+ * a hlásí ji přiznání k DPH, ne tahle obrazovka.
+ *
+ * `year: 'all'` s rozsahem dat schválně: seznam by jinak nasadil výchozí rok a čtvrtletí
+ * z jiného roku by vypadalo prázdné.
+ */
+const manualReviewCount = computed(() => preview.value?.summary.manual_review_count ?? 0)
+const manualReviewListLink = computed(() => ({
+  path: '/invoices',
+  query: {
+    oss_review: 'oss',
+    year: 'all',
+    from: preview.value?.period.start ?? '',
+    to: preview.value?.period.end ?? '',
+  },
+}))
 
 /**
  * Kurz, kterým se období přepočetlo do měny podání. Účetní ho kontroluje proti tabulce
@@ -290,6 +311,18 @@ onMounted(() => {
           <ul class="list-disc pl-5 space-y-1">
             <li v-for="w in preview.warnings" :key="w">{{ w }}</li>
           </ul>
+          <!--
+            Varování o řádcích k posouzení je jediné, se kterým se dá něco udělat jinde —
+            proklik vede přesně na tu množinu v seznamu faktur. Bez něj by uživatel četl,
+            že něco k posouzení je, a musel to hledat ručně.
+          -->
+          <RouterLink v-if="manualReviewCount > 0" :to="manualReviewListLink"
+            class="mt-2 inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:text-warning-700/80">
+            {{ t('reports.oss.manual_review_link', { n: manualReviewCount }) }}
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </RouterLink>
         </div>
 
         <EmptyState v-if="!hasRows" boxed accent="neutral" icon="doc" :title="t('reports.oss.no_data')" />

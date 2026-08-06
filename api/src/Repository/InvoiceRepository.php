@@ -613,6 +613,23 @@ final class InvoiceRepository
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Normalizace `filter[oss_review]` na rozsah {@see VatLedgerService::MANUAL_REVIEW_SCOPES}.
+     *
+     * `true` / `'1'` musí zůstat funkční: přesně tuhle hodnotu nesou uložené filtry
+     * (SavedFilters ukládají query string) i odkazy vytvořené dřív, než filtr rozsah
+     * uměl. Mapují se na `any`, tedy na ROZŠÍŘENÍ původního významu — to je celý smysl
+     * opravy, uživateli se nemá nic schovat.
+     */
+    private static function ossReviewScope(mixed $raw): string
+    {
+        $scope = is_string($raw) ? strtolower(trim($raw)) : '';
+
+        return in_array($scope, VatLedgerService::MANUAL_REVIEW_SCOPES, true)
+            ? $scope
+            : VatLedgerService::MANUAL_REVIEW_SCOPE_ANY;
+    }
+
     public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
     {
         $where = ['1=1'];
@@ -711,18 +728,26 @@ final class InvoiceRepository
                 }
             }
         }
-        // Nejisté místo plnění (OSS): řádek, u kterého kanál nedokázal určit, jestli jde
-        // o OSS plnění, a nechal ho mimo OSS s příznakem k ručnímu posouzení. Bez tohohle
-        // filtru je takový doklad NEDOHLEDATELNÝ: v OSS podání není (a být nemá — OSS řádek
-        // to není), v seznamu vypadá jako každý jiný, a přitom tiše vstupuje na ř. 1/2
-        // přiznání. Definici vlastní VatLedgerService, ať se filtr a varování v přiznání
-        // nemůžou rozejít; `null` = schéma příznak nezná, filtr je pak no-op (nefiltrovat
-        // je lepší než vrátit prázdno a tvrdit, že nic takového není).
+        // Nejisté místo plnění (OSS): řádek s příznakem k ručnímu posouzení. Bez tohohle
+        // filtru je takový doklad NEDOHLEDATELNÝ — v seznamu vypadá jako každý jiný.
+        //
+        // Filtr pokrývá OBA konce, ne jen ten tuzemský: řádek v OSS s příznakem je vidět
+        // jen ve varování náhledu podání a v reportu importu, který po zavření stránky
+        // zmizí. Kdyby ho filtr nechytal, uživatel by si seznam vyčistil a v dobré víře
+        // by mu zůstala druhá polovina sporných řádků. Který konec ho zajímá, říká
+        // `oss_review` ('any' | 'oss' | 'domestic'); definici vlastní VatLedgerService,
+        // ať se filtr a varování v přiznání nemůžou rozejít. `null` = schéma příznak
+        // nezná, filtr je pak no-op (nefiltrovat je lepší než vrátit prázdno a tvrdit,
+        // že nic takového není).
         if (!empty($filters['oss_review'])) {
-            $uncertain = VatLedgerService::uncertainOssPredicate($this->db, 'ossii');
-            if ($uncertain !== null) {
+            $flagged = VatLedgerService::manualReviewPredicate(
+                $this->db,
+                'ossii',
+                self::ossReviewScope($filters['oss_review']),
+            );
+            if ($flagged !== null) {
                 $where[] = 'EXISTS (SELECT 1 FROM invoice_items ossii'
-                    . ' WHERE ossii.invoice_id = i.id AND ' . $uncertain . ')';
+                    . ' WHERE ossii.invoice_id = i.id AND ' . $flagged . ')';
             }
         }
         if (!empty($filters['q'])) {
@@ -754,7 +779,27 @@ final class InvoiceRepository
             $total = (int) $cntStmt->fetchColumn();
         }
 
-        $sql = "SELECT i.id, i.varsymbol, i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
+        // Který konec nejistoty doklad nese. Bez toho by filtr „vše nejisté" vracel
+        // nerozlišený seznam, ve kterém se dvě různé otázky („patří to sem vůbec?" vs.
+        // „sedí země a typ sazby?") tváří stejně. Počítá se VŽDY, ne jen při zapnutém
+        // filtru: doklad se sporným řádkem má být poznat i při běžném procházení.
+        $ossReviewSelect = '';
+        $flaggedDomestic = VatLedgerService::manualReviewPredicate(
+            $this->db, 'ossii', VatLedgerService::MANUAL_REVIEW_SCOPE_DOMESTIC
+        );
+        $flaggedOss = VatLedgerService::manualReviewPredicate(
+            $this->db, 'ossii', VatLedgerService::MANUAL_REVIEW_SCOPE_OSS
+        );
+        if ($flaggedDomestic !== null && $flaggedOss !== null) {
+            $ossReviewSelect =
+                ' EXISTS (SELECT 1 FROM invoice_items ossii WHERE ossii.invoice_id = i.id'
+                . ' AND ' . $flaggedDomestic . ') AS oss_review_domestic,'
+                . ' EXISTS (SELECT 1 FROM invoice_items ossii WHERE ossii.invoice_id = i.id'
+                . ' AND ' . $flaggedOss . ') AS oss_review_oss,';
+        }
+
+        $sql = "SELECT $ossReviewSelect
+                       i.id, i.varsymbol, i.invoice_type, i.parent_invoice_id, i.recurring_template_id,
                        i.client_id, i.project_id, i.supplier_id,
                        i.issue_date, i.tax_date, i.due_date,
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
@@ -1755,6 +1800,11 @@ final class InvoiceRepository
         }
         if (array_key_exists('has_work_report', $row)) {
             $row['has_work_report'] = (bool) $row['has_work_report'];
+        }
+        foreach (['oss_review_domestic', 'oss_review_oss'] as $ossReviewFlag) {
+            if (array_key_exists($ossReviewFlag, $row)) {
+                $row[$ossReviewFlag] = (bool) $row[$ossReviewFlag];
+            }
         }
         if (array_key_exists('revenue_category_id', $row)) {
             $row['revenue_category_id'] = $row['revenue_category_id'] !== null ? (int) $row['revenue_category_id'] : null;

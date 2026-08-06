@@ -112,9 +112,18 @@ final class PayrollPersonCreateValidator
                     ['partner_dependent', 'statutory_body'],
                     true,
                 ) ? 'managing_partner' : 'employee',
+                // Klíče jsou shodné s `payroll_employments.relation_type` všude, kde ta
+                // hodnota v účetní větvi existuje — mapování je pak identita, ne překlad.
+                // `partner_dependent` v ENUM `payroll_employees.employment_type` protějšek
+                // nemá, takže spadá na `hpp`; kontaci 522/366 mu i tak zajistí
+                // `taxpayer_type = managing_partner` výš.
                 'employment_type' => match ($relationType) {
                     'dpp' => 'dpp',
                     'dpc' => 'dpc',
+                    // Migrace 1302 — do té doby dostal člen statutárního orgánu na
+                    // legacy kartě „pracovní poměr", což u odměny podle § 6/1/c ZDP
+                    // není pravda.
+                    'statutory_body' => 'statutory_body',
                     default => 'hpp',
                 },
                 'tax_declaration_signed' => false,

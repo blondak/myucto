@@ -405,6 +405,16 @@ export interface InvoiceListItem {
   project_name: string | null
   project_requires_approval?: boolean
   has_work_report?: boolean
+  /**
+   * Doklad má řádek k ručnímu posouzení místa plnění MIMO OSS — tiše vstupuje na
+   * ř. 1/2 tuzemského přiznání. Otázka zní „patří sem vůbec?".
+   */
+  oss_review_domestic?: boolean
+  /**
+   * Doklad má řádek k ručnímu posouzení místa plnění V OSS podání. Otázka zní
+   * „sedí země a typ sazby, nebo to patří do tuzemska?".
+   */
+  oss_review_oss?: boolean
   month_bucket: string
   /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
   locked?: DocumentLock
@@ -483,6 +493,12 @@ export interface InvoicePayload {
   }>
 }
 
+/**
+ * Rozsah filtru „nejisté místo plnění (OSS)". Sdílený s BE
+ * (`VatLedgerService::MANUAL_REVIEW_SCOPES`).
+ */
+export type OssReviewScope = 'any' | 'oss' | 'domestic'
+
 export interface ListFilters {
   status?: string | string[]
   type?: string | string[]
@@ -498,11 +514,14 @@ export interface ListFilters {
   /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
   booked?: '1' | '0'
   /**
-   * Jen doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS).
-   * Takové řádky jdou do tuzemského přiznání na ř. 1/2 a do OSS podání nepatří —
-   * bez tohohle filtru je uživatel nemá kde najít.
+   * Jen doklady s řádkem k ručnímu posouzení místa plnění (OSS). Rozsah říká, kde
+   * řádek leží — každý konec se řeší jinak:
+   *  - `domestic` = mimo OSS; jde na ř. 1/2 tuzemského přiznání, ale nikdo nepotvrdil,
+   *    že tam patří,
+   *  - `oss` = v OSS podání, ale s otazníkem nad zemí nebo typem sazby,
+   *  - `any` = obojí.
    */
-  oss_review?: boolean
+  oss_review?: OssReviewScope
   q?: string
   page?: number
   per_page?: number
@@ -606,7 +625,7 @@ export const invoicesApi = {
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
     if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.oss_review)  params['filter[oss_review]']  = 1
+    if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)

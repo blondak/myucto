@@ -39,10 +39,15 @@ final class ListInvoicesAction
             'unpaid_only' => !empty($filter['unpaid_only']),
             'overdue'     => !empty($filter['overdue']),
             'booked'      => $filter['booked']      ?? null,
-            // Doklady s řádkem, u kterého se nepodařilo určit místo plnění (OSS). Jinak
-            // je uživatel nemá jak najít — do OSS podání nepatří a v přiznání vypadají
-            // jako běžné tuzemské plnění (viz VatLedgerService::uncertainOssPredicate()).
-            'oss_review'  => !empty($filter['oss_review']),
+            // Doklady s řádkem k ručnímu posouzení místa plnění (OSS). Rozsah říká, kde
+            // řádek leží: 'domestic' = mimo OSS (tiše v přiznání na ř. 1/2), 'oss' = v OSS
+            // podání s otazníkem nad zemí či typem sazby, 'any' = obojí. Legacy `1`/`true`
+            // se mapuje na 'any' (viz InvoiceRepository::ossReviewScope()) — bez rozsahu
+            // by uživatel viděl jen půlku sporných řádků a druhou by měl jen v reportu
+            // importu, který po zavření stránky zmizí.
+            'oss_review'  => is_scalar($filter['oss_review'] ?? null) && !empty($filter['oss_review'])
+                ? (string) $filter['oss_review']
+                : null,
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
         ];
 

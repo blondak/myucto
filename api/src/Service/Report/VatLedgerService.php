@@ -336,25 +336,46 @@ final class VatLedgerService
         return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
     }
 
+    /** Povolené rozsahy {@see manualReviewPredicate()} — sdílené s `filter[oss_review]`. */
+    public const MANUAL_REVIEW_SCOPE_ANY = 'any';
+    public const MANUAL_REVIEW_SCOPE_OSS = 'oss';
+    public const MANUAL_REVIEW_SCOPE_DOMESTIC = 'domestic';
+
+    /** @var list<string> */
+    public const MANUAL_REVIEW_SCOPES = [
+        self::MANUAL_REVIEW_SCOPE_ANY,
+        self::MANUAL_REVIEW_SCOPE_OSS,
+        self::MANUAL_REVIEW_SCOPE_DOMESTIC,
+    ];
+
     /**
-     * SQL predikát „řádek, u kterého systém sám neví, kam patří" — bez `WHERE`, k připojení.
+     * SQL predikát „řádek, který si má člověk projít" (`oss_needs_manual_review = 1`) —
+     * bez `WHERE`, k připojení. `$scope` říká, KDE ten řádek skončil, protože každý
+     * z těch dvou konců se řeší jinak:
      *
-     * `oss_applicable = 0` + `oss_needs_manual_review = 1` je JEDINÉ povolené „nevím"
-     * nových kanálů (cron opakovaných faktur, iDoklad, Fakturoid, AI extrakce, API bez
-     * OSS klíčů): číselník členských států sazbu v zemi dodavatele nepotvrdil, doklad ale
-     * vzniknout musel, tak řádek zůstal mimo OSS a nejistota se uložila k položce
-     * ({@see \MyInvoice\Service\Oss\OssItemPlanner}).
+     *  - `domestic` (`oss_applicable = 0`) — kanál místo plnění NEURČIL a doklad zahodit
+     *    nesměl (cron opakovaných faktur, iDoklad, Fakturoid, AI extrakce, API bez OSS
+     *    klíčů), tak řádek zůstal mimo OSS a nejistota se uložila k položce
+     *    ({@see \MyInvoice\Service\Oss\OssItemPlanner}). {@see fetchSales()} ho pustí na
+     *    ř. 1/2 tuzemského přiznání jako každé jiné plnění, do OSS podání nejde. Otázka
+     *    zní „patří sem vůbec?".
+     *  - `oss` (`oss_applicable = 1`) — řádek se do OSS ZAŘADIL, ale s otazníkem:
+     *    nejednoznačná sazba (21 % platí v ČR i v NL/BE/ES/LT/LV), číselník neuměl
+     *    odpovědět, nebo si doklad protiřečí ({@see \MyInvoice\Service\Oss\OssDocumentCoherence}).
+     *    Otázka zní „sedí země a typ sazby, nebo to patří do tuzemska?".
+     *  - `any` — obojí; „ukaž mi všechno nedořešené".
      *
-     * Důsledek je nepříjemný a tichý: `oss_applicable = 0` znamená, že ho {@see fetchSales()}
-     * pustí na ř. 1/2 tuzemského přiznání jako každé jiné plnění. Do OSS podání přitom
-     * NEPATŘÍ ({@see ossRows()} bere jen `oss_applicable = 1`) — a to je správně, protože
-     * OSS řádkem není. Nesmí ale zůstat neviditelný: uživatel by odeslal přiznání s řádky,
-     * o kterých systém sám ví, že si jimi není jistý.
+     * Rozsah se NESLÉVÁ do jedné podmínky natvrdo schválně. Varování v přiznání k DPH
+     * ({@see DphPriznaniBuilder::appendSalesDataWarnings()}) smí mluvit jen o řádcích,
+     * které do přiznání skutečně vstupují — tedy `domestic`; kdyby hlásilo i OSS řádky,
+     * byl by to šum o dokladech, které v přiznání nejsou. Naopak filtr v seznamu faktur
+     * ({@see \MyInvoice\Repository\InvoiceRepository::listGroupedByMonth()},
+     * `filter[oss_review]`) musí umět OBOJÍ: kdyby uměl jen `domestic`, uživatel by si
+     * filtr vyčistil a druhá polovina sporných řádků by mu zůstala schovaná v náhledu
+     * OSS podání a v reportu importu, který po zavření stránky zmizí.
      *
-     * Definice bydlí TADY a je jedna, protože ji potřebují dvě různá místa: varování
-     * v přiznání k DPH ({@see DphPriznaniBuilder::appendSalesDataWarnings()}) a filtr
-     * v seznamu faktur ({@see \MyInvoice\Repository\InvoiceRepository::listGroupedByMonth()},
-     * `filter[oss_review]`). Dvě kopie podmínky by se rozešly hned, jak se změní jedna.
+     * Definice bydlí TADY a je jedna — dvě kopie podmínky by se rozešly hned, jak se
+     * změní jedna.
      *
      * Vrací `null`, když schéma příznak nezná (mezi migracemi 0137 a 1293 je řada verzí) —
      * volající pak kontrolu vynechá, místo aby spadl na neexistujícím sloupci.
@@ -365,18 +386,44 @@ final class VatLedgerService
      * který si volající vloží do svého `WHERE`, tuhle vazbu nepotřebuje.
      *
      * @param  string  $itemAlias alias tabulky invoice_items (např. 'ii')
+     * @param  string  $scope     jedna z {@see MANUAL_REVIEW_SCOPES}
      * @return ?string SQL fragment, nebo null když příznak ve schématu není
      */
-    public static function uncertainOssPredicate(Connection $db, string $itemAlias = 'ii'): ?string
-    {
+    public static function manualReviewPredicate(
+        Connection $db,
+        string $itemAlias = 'ii',
+        string $scope = self::MANUAL_REVIEW_SCOPE_DOMESTIC,
+    ): ?string {
         if (!$db->hasColumn('invoice_items', 'oss_applicable')
             || !$db->hasColumn('invoice_items', 'oss_needs_manual_review')
         ) {
             return null;
         }
 
-        return "COALESCE({$itemAlias}.oss_applicable, 0) = 0
-                AND COALESCE({$itemAlias}.oss_needs_manual_review, 0) = 1";
+        $flagged = "COALESCE({$itemAlias}.oss_needs_manual_review, 0) = 1";
+
+        return match ($scope) {
+            self::MANUAL_REVIEW_SCOPE_ANY => $flagged,
+            self::MANUAL_REVIEW_SCOPE_OSS => "COALESCE({$itemAlias}.oss_applicable, 0) = 1
+                AND {$flagged}",
+            // Neznámý rozsah se schválně chová jako `domestic`, ne jako `any`: rozšířit
+            // tichou překlepem množinu řádků, o kterých se tvrdí, že jsou v tuzemském
+            // přiznání, by bylo horší než ji zúžit na původní, ověřenou definici.
+            default => "COALESCE({$itemAlias}.oss_applicable, 0) = 0
+                AND {$flagged}",
+        };
+    }
+
+    /**
+     * Nejistý řádek TUZEMSKÉ větve — zúžená {@see manualReviewPredicate()} pro místa,
+     * která mluví o tuzemském přiznání (varování v DPHDP3, {@see uncertainOssDocuments()}).
+     *
+     * @param  string  $itemAlias alias tabulky invoice_items (např. 'ii')
+     * @return ?string SQL fragment, nebo null když příznak ve schématu není
+     */
+    public static function uncertainOssPredicate(Connection $db, string $itemAlias = 'ii'): ?string
+    {
+        return self::manualReviewPredicate($db, $itemAlias, self::MANUAL_REVIEW_SCOPE_DOMESTIC);
     }
 
     /**

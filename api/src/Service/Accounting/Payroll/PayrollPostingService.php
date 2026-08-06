@@ -359,32 +359,30 @@ final class PayrollPostingService
      * Vrací `null`, když se srážka neuplatní (jiný typ vztahu, podepsané prohlášení,
      * překročený limit) — v tom případě platí běžný zálohový režim.
      *
+     * O tom, které typy vztahu srážku vůbec zakládají, rozhoduje
+     * {@see WithholdingTaxCalculator::reasonForEmploymentType()} — whitelist, ne negace,
+     * aby do srážkového režimu nemohl spadnout nový typ vztahu (výkon funkce podle
+     * § 59 ZOK se daní vždy zálohou, § 6 odst. 4 na něj nedopadá).
+     *
      * @param array<string,mixed> $employee karta zaměstnance
      * @param array<string,mixed> $constants roční daňové konstanty
      * @return array<string,mixed>|null
      */
     private function withholdingFor(array $employee, array $constants, float $gross): ?array
     {
-        if ((string) ($employee['employment_type'] ?? 'hpp') !== 'dpp') {
+        $reason = WithholdingTaxCalculator::reasonForEmploymentType(
+            (string) ($employee['employment_type'] ?? 'hpp')
+        );
+        if ($reason === null) {
             return null;
         }
         $declarationSigned = (bool) ($employee['tax_declaration_signed'] ?? 0);
 
-        if (!WithholdingTaxCalculator::applies(
-            WithholdingTaxCalculator::REASON_DPP,
-            $gross,
-            $constants,
-            $declarationSigned,
-        )) {
+        if (!WithholdingTaxCalculator::applies($reason, $gross, $constants, $declarationSigned)) {
             return null;
         }
 
-        return WithholdingTaxCalculator::compute(
-            WithholdingTaxCalculator::REASON_DPP,
-            $gross,
-            $constants,
-            $declarationSigned,
-        );
+        return WithholdingTaxCalculator::compute($reason, $gross, $constants, $declarationSigned);
     }
 
     /**
