@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Action\Accounting\Reports\SmallAssetReportAction;
 use MyInvoice\Action\Accounting\SmallAssetAction;
+use MyInvoice\Action\PurchaseInvoice\TransitionPurchaseInvoiceStatusAction;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\SmallAssetRepository;
@@ -31,6 +32,7 @@ final class SmallAssetTest extends BankPostingTestCase
     private SmallAssetService $cardService;
     private SmallAssetAction $action;
     private SmallAssetReportAction $reports;
+    private TransitionPurchaseInvoiceStatusAction $transition;
     private int $vatRateId = 0;
 
     protected function setUp(): void
@@ -40,6 +42,7 @@ final class SmallAssetTest extends BankPostingTestCase
         $this->cardService = $this->container->get(SmallAssetService::class);
         $this->action = $this->container->get(SmallAssetAction::class);
         $this->reports = $this->container->get(SmallAssetReportAction::class);
+        $this->transition = $this->container->get(TransitionPurchaseInvoiceStatusAction::class);
         $this->vatRateId = (int) ($this->db->pdo()->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
         if ($this->vatRateId === 0) {
             self::markTestSkipped('Chybí vat_rates v DB.');
@@ -535,6 +538,158 @@ final class SmallAssetTest extends BankPostingTestCase
     {
         $res = $this->callAction($this->action, 'generateFromPurchaseInvoice', 'POST', 'accountant', [], ['id' => '999999999']);
         self::assertSame(404, $res['status']);
+    }
+
+    // ── zařazení při přijetí dokladu ─────────────────────────────────────────
+
+    /**
+     * Nahlášeno z produkce 2026-08-06: uživatel naimportoval ISDOC fakturu, označil na ní
+     * položky za drobný majetek, uložil, přepnul na finální — a v evidenci nebylo nic.
+     * Karta vznikla teprve tím, že šel do faktury podruhé a znovu uložil.
+     *
+     * Příčina: jediný hook byl v UpdatePurchaseInvoiceAction a ten na draftu záměrně mlčí.
+     * ISDOC import zakládá fakturu vždy jako draft, takže klasifikace udělaná v draftu
+     * neměla kdo promítnout — přechod na 'received' o evidenci nevěděl. Druhé uložení už
+     * přijaté faktury navíc chce ?force=1 a roli admin, takže klientovi karta nevznikla
+     * nikdy.
+     */
+    public function testTransitionToReceivedCreatesCardsClassifiedInDraft(): void
+    {
+        $vendorId = $this->client('Alza.cz a.s.');
+        $pf = $this->purchaseWithItems('PF-DRAFT-DM', $vendorId, [
+            ['Monitor Dell', 12000.0, 'small_asset'],
+            ['Licence CAD', 40000.0, 'small_intangible'],
+            ['Doprava', 150.0, 'service'],
+        ]);
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoices SET status = 'draft' WHERE id = ? AND supplier_id = ?"
+        )->execute([$pf, $this->supplierId]);
+
+        self::assertCount(0, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
+
+        $res = $this->callAction(
+            $this->transition, '__invoke', 'POST', 'client',
+            ['target' => 'received'], ['id' => (string) $pf],
+        );
+        self::assertSame(200, $res['status']);
+
+        $names = array_map(
+            static fn (array $c): string => (string) $c['name'],
+            $this->repo->forPurchaseInvoice($this->supplierId, $pf),
+        );
+        sort($names);
+        self::assertSame(
+            ['Licence CAD', 'Monitor Dell'],
+            $names,
+            'Přijetí dokladu zařadí majetek klasifikovaný v draftu — bez druhého uložení.',
+        );
+    }
+
+    /** Un-cancel (cancelled → received) prochází stejným hookem a nesmí kartu zdvojit. */
+    public function testRepeatedReceivedTransitionDoesNotDuplicateCards(): void
+    {
+        $vendorId = $this->client('Alza.cz a.s.');
+        $pf = $this->purchaseWithItems('PF-UNCANCEL-DM', $vendorId, [
+            ['Monitor Dell', 12000.0, 'small_asset'],
+        ]);
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoices SET status = 'draft' WHERE id = ? AND supplier_id = ?"
+        )->execute([$pf, $this->supplierId]);
+
+        $this->callAction($this->transition, '__invoke', 'POST', 'client',
+            ['target' => 'received'], ['id' => (string) $pf]);
+        self::assertCount(1, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
+
+        $this->callAction($this->transition, '__invoke', 'POST', 'accountant',
+            ['target' => 'cancelled'], ['id' => (string) $pf]);
+        $this->callAction($this->transition, '__invoke', 'POST', 'client',
+            ['target' => 'received'], ['id' => (string) $pf]);
+
+        self::assertCount(
+            1,
+            $this->repo->forPurchaseInvoice($this->supplierId, $pf),
+            'Opakované dosažení stavu received kartu neduplikuje.',
+        );
+    }
+
+    /**
+     * Úklidová fáze syncu se ptala jen na `small_asset`, kdežto zakládací na DDHM i DDNM.
+     * Karta drobného NEhmotného majetku tak v témže běhu vznikla a hned se zase smazala —
+     * u DDNM nepomohlo ani to druhé uložení, kterým si uživatel pomáhal.
+     */
+    public function testSyncKeepsIntangibleCardItJustCreated(): void
+    {
+        $vendorId = $this->client('Software s.r.o.');
+        $pf = $this->purchaseWithItems('PF-SYNC-DDNM', $vendorId, [
+            ['Licence CAD', 40000.0, 'small_intangible'],
+            ['Notebook', 30000.0, 'small_asset'],
+        ]);
+
+        $first = $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertCount(2, $first['created']);
+        self::assertSame([], $first['pruned'], 'Úklid nesmí smazat kartu, kterou tentýž běh založil.');
+        self::assertCount(2, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
+
+        $second = $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertSame([], $second['created']);
+        self::assertSame([], $second['pruned']);
+        self::assertCount(
+            2,
+            $this->repo->forPurchaseInvoice($this->supplierId, $pf),
+            'Opakovaný sync drží hmotnou i nehmotnou kartu.',
+        );
+    }
+
+    /**
+     * Karta je vždy v CZK — generate cenu násobí kurzem dokladu. Úklidová fáze ale
+     * počítala klíče z ceny v původní měně, takže u EUR faktury držela 197,39 EUR,
+     * kdežto právě založená karta 4 934,75 Kč: klíče se nepotkaly a sync kartu v témže
+     * běhu smazal. U cizoměnového dokladu tak evidence nevznikla NIKDY — ani opakovaným
+     * uložením, kterým si uživatel pomáhal. Vyplavalo z dry-runu dorovnávacího skriptu
+     * nad ostrými daty (PF 43, faktura v EUR).
+     */
+    public function testSyncKeepsCardOnForeignCurrencyInvoice(): void
+    {
+        $vendorId = $this->client('Sonnet Technologies');
+        $pf = $this->purchaseWithItems('PF-EUR-DM', $vendorId, [
+            ['Sonnet Solo 10G Thunderbolt', 197.39, 'small_asset'],
+        ]);
+        $eurId = $this->currencyRow($this->supplierId, 'EUR');
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET currency_id = ?, exchange_rate = 25.00 WHERE id = ?'
+        )->execute([$eurId, $pf]);
+
+        $first = $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertCount(1, $first['created']);
+        self::assertSame([], $first['pruned'], 'Úklid nesmí smazat kartu, kterou tentýž běh založil.');
+
+        $cards = $this->repo->forPurchaseInvoice($this->supplierId, $pf);
+        self::assertCount(1, $cards);
+        self::assertSame(4934.75, (float) $cards[0]['price'], 'Karta drží cenu v CZK (197,39 × 25).');
+
+        $second = $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertSame([], $second['created'], 'Opakovaný sync kartu nezdvojí…');
+        self::assertSame([], $second['pruned'], '…ani nesmaže.');
+        self::assertCount(1, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
+    }
+
+    /** Úklid pořád musí zabrat, když položka přestane být majetkem. */
+    public function testSyncStillPrunesCardWhoseItemStoppedBeingAsset(): void
+    {
+        $vendorId = $this->client('Software s.r.o.');
+        $pf = $this->purchaseWithItems('PF-SYNC-PRUNE', $vendorId, [
+            ['Licence CAD', 40000.0, 'small_intangible'],
+        ]);
+        $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertCount(1, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
+
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoice_items SET expense_kind = 'service' WHERE purchase_invoice_id = ?"
+        )->execute([$pf]);
+
+        $res = $this->cardService->syncFromPurchaseInvoice($this->supplierId, $pf, $this->userId);
+        self::assertCount(1, $res['pruned']);
+        self::assertCount(0, $this->repo->forPurchaseInvoice($this->supplierId, $pf));
     }
 
     // ── sestavy ──────────────────────────────────────────────────────────────

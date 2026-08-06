@@ -381,10 +381,17 @@ final class UpdatePurchaseInvoiceAction
         // — karta by nevznikla, dokud někdo ručně nespustí generování. Draft se přeskakuje:
         // rozpracovaný doklad ještě není pořízení, karty by vznikaly a mizely při každém
         // rozmyšlení. Nesmí shodit uložení faktury — chyba evidence je vedlejší.
+        // Klasifikaci udělanou v draftu dožene přechod draft→received
+        // (TransitionPurchaseInvoiceStatusAction), aby se neztratila.
         if (($existing['status'] ?? '') !== 'draft') {
             try {
                 $this->smallAssets->syncFromPurchaseInvoice($supplierId, $id, $user['id'] ?? null);
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                // Uložení faktury shodit nesmí, ale tiché spolknutí znamenalo, že o
+                // nezaložené kartě nevěděl nikdo — ani uživatel, ani audit.
+                $this->logger->log('purchase_invoice.small_asset_sync_failed', $user['id'] ?? null,
+                    'purchase_invoice', $id, ['error' => $e->getMessage()],
+                    $ip, $request->getHeaderLine('User-Agent'));
             }
         }
 

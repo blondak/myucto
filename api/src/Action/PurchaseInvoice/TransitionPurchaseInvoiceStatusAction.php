@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -64,6 +65,7 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly Connection $db,
         private readonly DocumentJournalSync $journalSync,
         private readonly DocumentAutoPoster $autoPoster,
+        private readonly SmallAssetService $smallAssets,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -238,6 +240,32 @@ final class TransitionPurchaseInvoiceStatusAction
                 $ip,
                 $request->getHeaderLine('User-Agent'),
             );
+        }
+
+        // Evidence drobného majetku (§DM): protějšek hooku v UpdatePurchaseInvoiceAction,
+        // který na draftu záměrně nic nedělá — rozpracovaný doklad ještě není pořízení.
+        // Bez tohoto volání ale klasifikace udělaná V DRAFTU nikam nedojde: ISDOC import
+        // zakládá fakturu vždy jako draft, uživatel v ní označí položky za majetek, uloží
+        // (hook nad draftem mlčí) a finalizuje — a evidence zůstane prázdná. Kartu pak
+        // vyrobilo teprve druhé uložení už přijaté faktury, které navíc chce ?force=1 a
+        // roli admin, takže klientovi nevznikla nikdy. Přijetí dokladu je právě ten
+        // okamžik, kdy se z rozpracovaného stává pořízení.
+        //
+        // Idempotentní přes přirozený klíč (název + cena), takže opakované dosažení stavu
+        // received (un-cancel) kartu neduplikuje. Chyba evidence NESMÍ shodit přechod
+        // stavu — stejně jako u auto-postu výš; jen ji zalogujeme, ať nezmizí potichu.
+        if ($target === 'received') {
+            try {
+                $this->smallAssets->syncFromPurchaseInvoice(
+                    $supplierId,
+                    $id,
+                    isset($user['id']) ? (int) $user['id'] : null,
+                );
+            } catch (\Throwable $e) {
+                $this->logger->log('purchase_invoice.small_asset_sync_failed', $user['id'] ?? null,
+                    'purchase_invoice', $id, ['error' => $e->getMessage()],
+                    $ip, $request->getHeaderLine('User-Agent'));
+            }
         }
 
         return Json::ok($response, $this->repo->find($id, $supplierId));

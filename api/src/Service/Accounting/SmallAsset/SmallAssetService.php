@@ -372,23 +372,38 @@ final class SmallAssetService
 
         // Přirozené klíče (název+cena po rozpuštění slev) položek, které JSOU drobný majetek —
         // musí sedět na klíče, pod kterými generate karty založil, jinak by úklid smazal i
-        // právě vytvořené karty.
+        // právě vytvořené karty. Proto tady MUSÍ být tentýž filtr druhů jako v generate
+        // (DDHM i DDNM): dokud se ptal jen na `small_asset`, karta drobného NEhmotného
+        // majetku se v témže běhu založila a hned zase smazala.
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.description, pii.total_without_vat
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ? AND pii.expense_kind = ?'
+              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ? AND pii.expense_kind IN (?, ?)'
         );
-        $stmt->execute([$purchaseInvoiceId, $supplierId, ExpenseKind::SmallAsset->value]);
+        $stmt->execute([
+            $purchaseInvoiceId, $supplierId,
+            ExpenseKind::SmallAsset->value, ExpenseKind::SmallIntangible->value,
+        ]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $prices = $this->allocateDiscounts($items);
+        // Karta je vždy v CZK, takže generate cenu násobí kurzem dokladu — a klíč pro úklid
+        // musí projít TOUTÉŽ transformací. Bez toho držel úklid u cizoměnové faktury cenu
+        // v EUR, kdežto právě založená karta cenu v korunách: klíče se nepotkaly a sync
+        // kartu v témže běhu smazal. U EUR/USD dokladu tak evidence nevznikla nikdy.
+        // Doklad tu existuje jistě — generate výš by jinak vyhodil not_found.
+        $header = $this->purchaseInvoiceHeader($supplierId, $purchaseInvoiceId);
+        $czkRate = (float) ($header['czk_rate'] ?? 1.0);
         $wantedKeys = [];
         foreach ($items as $it) {
             $price = $prices[(int) $it['id']] ?? null;
             if ($price === null) {
                 continue;   // slevový řádek — kartu netvoří
             }
-            $wantedKeys[$this->naturalKey((string) $it['description'], $price)] = true;
+            $wantedKeys[$this->naturalKey(
+                (string) $it['description'],
+                round($price * $czkRate, 2),
+            )] = true;
         }
 
         $pruned = [];
