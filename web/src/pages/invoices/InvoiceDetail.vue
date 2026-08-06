@@ -1999,7 +1999,21 @@ const invoiceActions = computed<ActionItem[]>(() => {
         </thead>
         <tbody class="divide-y divide-neutral-100">
           <tr v-for="item in invoice.items" :key="item.id" :class="item.item_kind === 'discount' ? 'text-warning-700' : ''">
-            <td class="px-4 py-2.5 whitespace-pre-wrap">{{ item.description }}</td>
+            <td class="px-4 py-2.5 whitespace-pre-wrap">
+              {{ item.description }}
+              <!-- OSS je vlastnost ŘÁDKU, ne dokladu — dole v doložce je jen souhrn zemí,
+                   takže bez tohohle štítku není vidět, který řádek do OSS jde a který čeká na posouzení. -->
+              <span v-if="item.oss_applicable"
+                class="ml-1.5 px-1 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-semibold whitespace-nowrap"
+                :title="t('invoice.oss.clause_hint')">
+                {{ t('invoice.oss.enabled') }}&nbsp;{{ item.oss_consumer_country || '—' }}
+              </span>
+              <span v-if="item.oss_needs_manual_review"
+                class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-semibold whitespace-nowrap"
+                :title="t('invoice.oss.needs_review_hint')">
+                {{ t('invoice.oss.needs_review') }}
+              </span>
+            </td>
             <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : item.quantity }}</td>
             <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
             <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : formatMoney(displayUnitPriceNet(item), invoice.currency) }}</td>
@@ -2014,7 +2028,18 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <!-- Mobile: stack karet -->
       <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="item in invoice.items" :key="`m-${item.id}`" class="p-3 space-y-1.5">
-          <div class="text-sm whitespace-pre-wrap" :class="item.item_kind === 'discount' ? 'text-warning-700' : 'text-neutral-900'">{{ item.description }}</div>
+          <div class="text-sm whitespace-pre-wrap" :class="item.item_kind === 'discount' ? 'text-warning-700' : 'text-neutral-900'">
+            {{ item.description }}
+            <span v-if="item.oss_applicable"
+              class="ml-1.5 px-1 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-semibold whitespace-nowrap">
+              {{ t('invoice.oss.enabled') }}&nbsp;{{ item.oss_consumer_country || '—' }}
+            </span>
+            <span v-if="item.oss_needs_manual_review"
+              class="ml-1 px-1 py-0.5 rounded bg-warning-50 text-warning-700 text-[10px] font-semibold whitespace-nowrap"
+              :title="t('invoice.oss.needs_review_hint')">
+              {{ t('invoice.oss.needs_review') }}
+            </span>
+          </div>
           <div v-if="item.item_kind !== 'discount'" class="flex items-baseline justify-between text-xs text-neutral-500">
             <span>
               <span class="font-mono text-neutral-700">{{ item.quantity }}</span>

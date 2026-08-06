@@ -13,11 +13,19 @@ const props = withDefaults(defineProps<{
   clearable?: boolean
   required?: boolean
   accent?: 'primary' | 'payroll'
+  /**
+   * Nabízet jen členské státy EU. Pro režimy, které mimo Unii nedávají smysl
+   * (OSS — daň se přiznává ve státě spotřeby, a ten je vždy členský stát).
+   * Už uložený neunijní kód se v nabídce ponechá, ať ho uživatel vidí a může
+   * ho opravit — jinak by pole vypadalo prázdné, přestože v datech hodnota je.
+   */
+  euOnly?: boolean
 }>(), {
   disabled: false,
   clearable: true,
   required: false,
   accent: 'primary',
+  euOnly: false,
 })
 
 const emit = defineEmits<{
@@ -38,7 +46,10 @@ const fallbackSelection = computed({
   set: (value: string) =>
     emit('update:modelValue', value.trim().toUpperCase().slice(0, 2)),
 })
-const options = computed(() => countries.value.map(country => ({
+const visibleCountries = computed(() => props.euOnly
+  ? countries.value.filter(country => country.is_eu || country.iso2 === props.modelValue)
+  : countries.value)
+const options = computed(() => visibleCountries.value.map(country => ({
   value: country.iso2,
   label: locale.value === 'en' ? country.name_en : country.name_cs,
   secondary: `${country.iso2} · ${country.iso3}`,

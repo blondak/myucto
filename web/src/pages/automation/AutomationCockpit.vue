@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { automationApi, type AutomationFeedItem, type AutomationFeedTab } from '@/api/automation'
 import { bankPostingErrorMessage } from '@/api/bankPosting'
+import { autoPostingApi } from '@/api/autoPosting'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useAutomationStore } from '@/stores/automation'
@@ -69,7 +70,31 @@ const rate = computed(() => Math.round((stats.value?.automation_rate ?? 0) * 100
 const currentSupplier = computed(() => store.scopeSupplierId === 'all'
   ? null
   : suppliers.availableSuppliers.find(s => s.id === store.scopeSupplierId) ?? null)
-const operationOptions = ['bank.payment.matched','bank.transfer.own','bank.remittance.social.own','bank.remittance.health.own','bank.remittance.vat','bank.remittance.income','bank.fee','bank.interest','bank.rule.custom','bank.learned','ai.classify.bank']
+/**
+ * Typy operací se NEvypisují ručně. Ruční kopie výčtu `OperationType` tady už jednou
+ * zaostala (chyběl mimo jiné `bank.remittance.oss`) a filtr pak tiše neuměl nabídnout
+ * operaci, která ve feedu existovala. Zdroj je backend: politika automatického účtování
+ * vrací řádek pro každý typ (`OperationType::all()`), popisky jsou v i18n.
+ *
+ * Politika visí na právu `bank.rules`, kdežto feed na `accounting` — uživatel bez
+ * `bank.rules` tedy seznam nedostane. Aby mu filtr nezmizel, doplňujeme typy viděné
+ * ve feedu; posbírané se nezahazují při stránkování, jinak by nabídka poblikávala.
+ */
+const policyOperations = ref<string[]>([])
+const seenOperations = ref<string[]>([])
+const operationOptions = computed(() => {
+  const all = [...policyOperations.value]
+  for (const op of [...seenOperations.value, operationType.value].sort()) {
+    if (op && !all.includes(op)) all.push(op)
+  }
+  return all
+})
+async function loadOperationOptions() {
+  try {
+    const policy = await autoPostingApi.getPolicy()
+    policyOperations.value = policy.rows.map(row => row.operation_type)
+  } catch { /* bez práva bank.rules — nabídka se poskládá z toho, co je ve feedu */ }
+}
 
 function countFor(t: AutomationFeedTab) {
   const key = t === 'auto' ? 'auto_today' : t === 'pending' ? 'pending' : 'needs_input'
@@ -81,6 +106,12 @@ function reasonLabel(code: string): string {
   const key = `automation.reason.${code.split(':')[0]}`
   const translated = t(key)
   return translated === key ? code : translated
+}
+/** Seznam typů teď plyne z backendu, takže může přijít i typ bez překladu — radši kód než klíč. */
+function operationLabel(operation: string): string {
+  const key = `settings.automation.operation.${operation.replaceAll('.', '_')}`
+  const translated = t(key)
+  return translated === key ? operation : translated
 }
 function countForFeedTab(value: CockpitTab): number { return countFor(value as AutomationFeedTab) }
 function changeTab(value: CockpitTab) {
@@ -137,6 +168,11 @@ async function load() {
     }
     items.value = result.items
     total.value = result.total
+    for (const item of result.items) {
+      if (item.operation_type && !seenOperations.value.includes(item.operation_type)) {
+        seenOperations.value.push(item.operation_type)
+      }
+    }
     const supplierStats = await Promise.all(activeSupplierIds.value.map(id => automationApi.stats(id, from.value || undefined, to.value || undefined)))
     if (sequence !== loadSequence) return
     const automated = supplierStats.reduce((sum, row) => sum + row.auto_count + row.approved_count, 0)
@@ -299,6 +335,7 @@ onMounted(async () => {
   } else if ((tab.value === 'rules' || tab.value === 'checklist') && store.scopeSupplierId === 'all') {
     await selectSupplierScope(suppliers.currentSupplierId)
   }
+  void loadOperationOptions()
   void refresh()
 })
 </script>
@@ -317,7 +354,7 @@ onMounted(async () => {
       <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_supplier') }}</span><select :value="selectedSupplier" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm" @change="changeSupplierScope"><option v-if="feedTab || tab === 'history'" value="all">{{ t('automation.filter_all_suppliers') }}</option><option v-for="s in available" :key="s.id" :value="String(s.id)">{{ s.company_name }}</option></select></label>
       <template v-if="feedTab">
         <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_source') }}</span><select v-model="source" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"><option value="">{{ t('common.all') }}</option><option v-for="item in sourceOptions" :key="item.value" :value="item.value">{{ t(`automation.source.${item.label}`) }}</option></select></label>
-        <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_operation') }}</span><select v-model="operationType" class="mt-1 block max-w-48 rounded border border-neutral-300 px-3 py-2 text-sm"><option value="">{{ t('common.all') }}</option><option v-for="operation in operationOptions" :key="operation" :value="operation">{{ t(`settings.automation.operation.${operation.replaceAll('.', '_')}`) }}</option></select></label>
+        <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_operation') }}</span><select v-model="operationType" class="mt-1 block max-w-48 rounded border border-neutral-300 px-3 py-2 text-sm"><option value="">{{ t('common.all') }}</option><option v-for="operation in operationOptions" :key="operation" :value="operation">{{ operationLabel(operation) }}</option></select></label>
         <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_confidence') }}</span><select v-model="minConfidence" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"><option value="">{{ t('common.all') }}</option><option value="0.9">≥ 90 %</option><option value="0.8">≥ 80 %</option><option value="0.7">≥ 70 %</option></select></label>
         <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_amount_min') }}</span><input v-model="minAmount" type="number" min="0" step="100" class="mt-1 block w-28 rounded border border-neutral-300 px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_amount_max') }}</span><input v-model="maxAmount" type="number" min="0" step="100" class="mt-1 block w-28 rounded border border-neutral-300 px-3 py-2 text-sm"></label>

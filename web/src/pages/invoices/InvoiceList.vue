@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
-  type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssReviewScope } from '@/api/invoices'
+  type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
@@ -398,6 +398,33 @@ const ossBulkForm = reactive({
 })
 const euCountries = ref<Country[]>([])
 
+/**
+ * Rozpad zastavené dávky. Backend vrací, co stihl (`bulk_update_failed`, 500) — bez
+ * vypsání by uživatel u 200 dokladů nevěděl, které jsou zapsané a které se ani
+ * nezkusily, a musel by akci naslepo opakovat nad celým výběrem.
+ */
+const ossBulkFailure = ref<(OssBulkFailure & { message: string }) | null>(null)
+/** Doklady, u kterých se po úspěšném zápisu nepovedlo zahodit cache PDF. */
+const ossBulkStalePdf = ref<number[]>([])
+
+function parseOssBulkFailure(e: any): (OssBulkFailure & { message: string }) | null {
+  const err = e?.response?.data?.error
+  if (!err || err.code !== 'bulk_update_failed' || !err.failed_invoice) return null
+  return {
+    message: typeof err.message === 'string' ? err.message : t('common.error'),
+    completed_invoice_ids: Array.isArray(err.completed_invoice_ids) ? err.completed_invoice_ids : [],
+    failed_invoice: err.failed_invoice,
+    not_attempted_invoice_ids: Array.isArray(err.not_attempted_invoice_ids) ? err.not_attempted_invoice_ids : [],
+    pdf_not_invalidated: Array.isArray(err.pdf_not_invalidated) ? err.pdf_not_invalidated : [],
+  }
+}
+
+/** Doklad → varsymbol z načteného seznamu; když v něm není, aspoň `#id`. */
+function invoiceLabel(id: number): string {
+  const inv = groups.value.flatMap(g => g.invoices).find(i => i.id === id)
+  return inv?.varsymbol ? String(inv.varsymbol) : `#${id}`
+}
+
 function ossBulkSet(): OssBulkSet {
   const set: OssBulkSet = { clear_needs_review: ossBulkForm.clear_needs_review }
   if (ossBulkForm.mode === 'on') set.oss_applicable = true
@@ -414,12 +441,20 @@ function ossBulkSet(): OssBulkSet {
 async function openBulkOss() {
   if (selectedIds.value.length === 0) return
   ossBulkPreview.value = null
+  ossBulkFailure.value = null
+  ossBulkStalePdf.value = []
   ossBulkOpen.value = true
   if (euCountries.value.length === 0) {
     try {
       euCountries.value = (await codebooksApi.countries()).filter(c => c.is_eu)
     } catch { /* výběr země zůstane prázdný, ISO2 jde napsat ručně */ }
   }
+}
+
+function closeBulkOss() {
+  ossBulkOpen.value = false
+  ossBulkFailure.value = null
+  ossBulkStalePdf.value = []
 }
 
 async function runBulkOssPreview() {
@@ -438,10 +473,15 @@ async function runBulkOssPreview() {
 async function applyBulkOss() {
   if (!ossBulkPreview.value) return
   bulkBusy.value = true
+  ossBulkFailure.value = null
+  ossBulkStalePdf.value = []
   try {
     const r = await invoicesApi.bulkOssApply(selectedIds.value, ossBulkForm.scope, ossBulkSet())
     markRowsTouched('invoice', r.documents.filter(d => d.action === 'update').map(d => d.invoice_id))
-    ossBulkOpen.value = false
+    const stalePdf = r.pdf_not_invalidated ?? []
+    ossBulkStalePdf.value = stalePdf
+    // Zůstat v dialogu jen kvůli varování o staré PDF cache — jinak zavřít jako dosud.
+    ossBulkOpen.value = stalePdf.length > 0
     ossBulkPreview.value = null
     selectedIds.value = []
     if (r.summary.documents_skipped > 0) {
@@ -453,7 +493,20 @@ async function applyBulkOss() {
     }
     await load()
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    const failure = parseOssBulkFailure(e)
+    if (failure) {
+      // Rozpad dávky se do toastu nevejde a zmizel by dřív, než si ho uživatel přečte —
+      // zůstane v dialogu, dokud ho sám nezavře. Zapsané doklady jdou zvýraznit v seznamu.
+      ossBulkFailure.value = failure
+      ossBulkPreview.value = null
+      markRowsTouched('invoice', failure.completed_invoice_ids)
+      // Nezpracované doklady zůstávají vybrané, ať jde akce zopakovat jen nad nimi.
+      selectedIds.value = [failure.failed_invoice.invoice_id, ...failure.not_attempted_invoice_ids]
+      toast.error(failure.message)
+      await load()
+    } else {
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
+    }
   } finally {
     bulkBusy.value = false
   }
@@ -1509,7 +1562,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
 
     <!-- Hromadné nastavení OSS — dvoufázové: náhled, teprve pak provedení (OSS-7) -->
     <div v-if="ossBulkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      @click.self="ossBulkOpen = false">
+      @click.self="closeBulkOss">
       <div class="bg-surface rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
         <div>
           <h2 class="text-lg font-semibold">{{ t('invoice.bulk_oss_title') }}</h2>
@@ -1578,6 +1631,54 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           </span>
         </label>
 
+        <!-- Rozpad dávky — backend se zastavil u prvního selhání a vrátil, co stihl. -->
+        <div v-if="ossBulkFailure" class="rounded-md border border-danger-500/40 bg-danger-50 p-3 space-y-2 text-sm">
+          <p class="font-medium text-danger-700">{{ t('invoice.bulk_oss_failure_title') }}</p>
+          <p class="text-danger-700">{{ ossBulkFailure.message }}</p>
+          <dl class="space-y-1.5 text-xs text-neutral-700">
+            <div>
+              <dt class="font-medium text-success-700">
+                {{ t('invoice.bulk_oss_failure_completed', { n: ossBulkFailure.completed_invoice_ids.length }) }}
+              </dt>
+              <dd v-if="ossBulkFailure.completed_invoice_ids.length" class="font-mono break-words">
+                {{ ossBulkFailure.completed_invoice_ids.map(invoiceLabel).join(', ') }}
+              </dd>
+            </div>
+            <div>
+              <dt class="font-medium text-danger-700">{{ t('invoice.bulk_oss_failure_failed_at') }}</dt>
+              <dd class="font-mono">
+                {{ ossBulkFailure.failed_invoice.varsymbol ?? ('#' + ossBulkFailure.failed_invoice.invoice_id) }}
+              </dd>
+            </div>
+            <div>
+              <dt class="font-medium text-warning-700">
+                {{ t('invoice.bulk_oss_failure_not_attempted', { n: ossBulkFailure.not_attempted_invoice_ids.length }) }}
+              </dt>
+              <dd v-if="ossBulkFailure.not_attempted_invoice_ids.length" class="font-mono break-words">
+                {{ ossBulkFailure.not_attempted_invoice_ids.map(invoiceLabel).join(', ') }}
+              </dd>
+            </div>
+            <div v-if="ossBulkFailure.pdf_not_invalidated.length">
+              <dt class="font-medium text-warning-700">
+                {{ t('invoice.bulk_oss_failure_pdf_stale', { n: ossBulkFailure.pdf_not_invalidated.length }) }}
+              </dt>
+              <dd class="font-mono break-words">
+                {{ ossBulkFailure.pdf_not_invalidated.map(invoiceLabel).join(', ') }}
+              </dd>
+            </div>
+          </dl>
+          <p class="text-xs text-neutral-600">{{ t('invoice.bulk_oss_failure_retry_hint') }}</p>
+        </div>
+
+        <!-- Zápis prošel, ale u části dokladů zůstala v cache stará PDF. -->
+        <div v-if="ossBulkStalePdf.length" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 space-y-1 text-sm">
+          <p class="font-medium text-warning-700">
+            {{ t('invoice.bulk_oss_failure_pdf_stale', { n: ossBulkStalePdf.length }) }}
+          </p>
+          <p class="font-mono text-xs break-words">{{ ossBulkStalePdf.map(invoiceLabel).join(', ') }}</p>
+          <p class="text-xs text-neutral-600">{{ t('invoice.bulk_oss_pdf_stale_hint') }}</p>
+        </div>
+
         <!-- Náhled -->
         <div v-if="ossBulkPreview" class="space-y-3">
           <div class="flex flex-wrap gap-4 text-sm rounded-md border border-neutral-200 bg-neutral-50 p-3">
@@ -1619,8 +1720,8 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         </div>
 
         <div class="flex flex-wrap justify-end gap-2 pt-1 border-t border-neutral-200">
-          <button type="button" @click="ossBulkOpen = false" :disabled="bulkBusy" :class="btnOutline('neutral')">
-            {{ t('common.cancel') }}
+          <button type="button" @click="closeBulkOss" :disabled="bulkBusy" :class="btnOutline('neutral')">
+            {{ ossBulkFailure || ossBulkStalePdf.length ? t('common.close') : t('common.cancel') }}
           </button>
           <button type="button" @click="runBulkOssPreview" :disabled="bulkBusy" :class="btnOutline('primary')">
             {{ bulkBusy ? t('common.loading') : t('invoice.bulk_oss_preview') }}

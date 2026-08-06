@@ -212,6 +212,12 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- Obecné EPO tuhle písemnost odmítne s tím, že uživatel musí být přihlášený
+         v aplikaci MOSS/OSS. Stažení XML je proto celá cesta, kterou umíme nabídnout. -->
+    <div class="mb-4 rounded-lg border border-primary-500/25 bg-primary-50 p-3 text-sm text-primary-900">
+      {{ t('reports.oss.filing_channel_hint') }}
+    </div>
+
     <div class="flex gap-1 border-b border-neutral-200 overflow-x-auto overflow-y-hidden mb-4">
       <button v-for="tk in TABS" :key="tk" type="button" @click="switchTab(tk)"
         class="px-4 py-2 text-sm border-b-2 -mb-px whitespace-nowrap cursor-pointer"
@@ -432,6 +438,7 @@ onMounted(() => {
               <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.period') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.archive_generated_at') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.archive_status') }}</th>
+              <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.archive_submitted') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.archive_validation') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('reports.oss.archive_sha') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('reports.oss.archive_size') }}</th>
@@ -439,7 +446,8 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="s in archive" :key="s.id">
+            <template v-for="s in archive" :key="s.id">
+            <tr>
               <td class="px-3 py-2 font-mono whitespace-nowrap">{{ periodLabel(s) }}</td>
               <td class="px-3 py-2 whitespace-nowrap">{{ fmtDateTime(s.generated_at) }}</td>
               <td class="px-3 py-2">
@@ -449,9 +457,20 @@ onMounted(() => {
                   {{ t('reports.oss.archive_status_' + s.status) }}
                 </span>
               </td>
+              <td class="px-3 py-2 whitespace-nowrap">
+                <template v-if="s.submitted_at">
+                  {{ fmtDateTime(s.submitted_at) }}
+                  <span v-if="s.submission_ref" class="block font-mono text-[11px] text-neutral-500"
+                    :title="t('reports.oss.archive_submission_ref')">{{ s.submission_ref }}</span>
+                </template>
+                <span v-else class="text-neutral-400">—</span>
+              </td>
               <td class="px-3 py-2">
                 <span :class="s.validation_status === 'failed' ? 'text-danger-600' : 'text-neutral-500'">
                   {{ t('reports.oss.archive_validation_' + s.validation_status) }}
+                </span>
+                <span v-if="s.validation_errors?.length" class="ml-1 text-danger-600">
+                  ({{ s.validation_errors.length }})
                 </span>
               </td>
               <td class="px-3 py-2 font-mono text-[11px] text-neutral-500">{{ s.xml_sha256.slice(0, 16) }}…</td>
@@ -461,6 +480,25 @@ onMounted(() => {
                   class="text-primary-600 hover:text-primary-700">{{ t('reports.oss.archive_download') }}</a>
               </td>
             </tr>
+            <!-- Samotné „Neplatné" je slepá ulička — bez důvodů uživatel neví, co opravit.
+                 Poznámka visí na témž záznamu, takže má smysl ji ukázat na stejném místě. -->
+            <tr v-if="s.validation_errors?.length || s.notes" class="border-t-0!">
+              <td></td>
+              <td colspan="7" class="px-3 pb-2 space-y-1">
+                <div v-if="s.validation_errors?.length"
+                  class="rounded border border-danger-500/40 bg-danger-50 p-2">
+                  <p class="font-medium text-danger-700">{{ t('reports.oss.archive_validation_errors') }}</p>
+                  <ul class="mt-0.5 list-disc pl-4 text-danger-700">
+                    <li v-for="(err, i) in s.validation_errors" :key="i" class="break-words">{{ err }}</li>
+                  </ul>
+                </div>
+                <div v-if="s.notes" class="rounded border border-neutral-200 bg-neutral-50 p-2 text-neutral-600">
+                  <span class="font-medium">{{ t('reports.oss.archive_notes') }}:</span>
+                  <span class="ml-1 break-words whitespace-pre-wrap">{{ s.notes }}</span>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>

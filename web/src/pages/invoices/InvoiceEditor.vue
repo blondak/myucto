@@ -24,6 +24,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import CountrySelect from '@/components/ui/CountrySelect.vue'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -2236,9 +2237,16 @@ async function deleteDraft() {
               <td></td>
               <td :colspan="supplierIsVatPayer ? 7 : 6" class="px-3 pb-2">
                 <div class="flex flex-nowrap items-center gap-1.5 overflow-x-auto text-xs">
-                  <input v-model="item.oss_consumer_country" type="text" maxlength="2"
-                    :placeholder="t('invoice.oss.country')" :title="t('invoice.oss.country')"
-                    class="w-11 h-7 shrink-0 px-1 border border-neutral-300 rounded text-xs text-center font-mono uppercase" />
+                  <!-- teleport: nabídka by se v `overflow-x-auto` řádku ořízla (stejný důvod jako u prodeje majetku výše) -->
+                  <div class="w-44 shrink-0" :title="t('invoice.oss.country')">
+                    <CountrySelect
+                      :model-value="item.oss_consumer_country ?? ''"
+                      eu-only
+                      teleport
+                      input-class="h-7! text-xs! pl-2!"
+                      @update:model-value="(v: string) => item.oss_consumer_country = v || null"
+                    />
+                  </div>
                   <select v-model="item.oss_rate_type"
                     :title="item.oss_rate_type ? t('invoice.oss.rate_type') : t('invoice.oss.rate_type_missing_hint')"
                     :class="['h-7 shrink-0 px-1 border rounded text-xs bg-surface',
@@ -2267,6 +2275,15 @@ async function deleteDraft() {
                       :value="item.oss_original_period">{{ item.oss_original_period }}</option>
                     <option v-for="period in ossOriginalPeriodOptions" :key="period.value" :value="period.value">{{ period.label }}</option>
                   </select>
+                  <!-- Příznak je per položka. V seznamu svítí jen na úrovni dokladu, takže bez
+                       tohohle odznaku se uživatel v editoru nedozví, KTERÝ řádek posoudit. -->
+                  <span v-if="item.oss_needs_manual_review" :title="t('invoice.oss.needs_review_hint')"
+                    class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-warning-50 text-warning-700 border-warning-500/40 whitespace-nowrap">
+                    {{ t('invoice.oss.needs_review') }}
+                    <button type="button" @click="item.oss_needs_manual_review = false"
+                      :title="t('invoice.oss.needs_review_clear')" :aria-label="t('invoice.oss.needs_review_clear')"
+                      class="cursor-pointer leading-none text-warning-700 hover:text-warning-900">×</button>
+                  </span>
                 </div>
               </td>
             </tr>
@@ -2333,10 +2350,22 @@ async function deleteDraft() {
                 <span>{{ t('invoice.oss.enabled') }}</span>
               </label>
               <div v-if="item.oss_applicable" class="grid grid-cols-2 gap-2 mt-2">
+                <div v-if="item.oss_needs_manual_review" class="col-span-2">
+                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-warning-50 text-warning-700 border-warning-500/40 text-xs">
+                    {{ t('invoice.oss.needs_review') }}
+                    <button type="button" @click="item.oss_needs_manual_review = false"
+                      :title="t('invoice.oss.needs_review_clear')" :aria-label="t('invoice.oss.needs_review_clear')"
+                      class="cursor-pointer leading-none text-warning-700 hover:text-warning-900">×</button>
+                  </span>
+                  <p class="mt-1 text-xs text-warning-700">{{ t('invoice.oss.needs_review_hint') }}</p>
+                </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.country') }}</label>
-                  <input v-model="item.oss_consumer_country" type="text" maxlength="2"
-                    class="w-full h-10 px-3 border border-neutral-300 rounded text-sm font-mono uppercase" />
+                  <CountrySelect
+                    :model-value="item.oss_consumer_country ?? ''"
+                    eu-only
+                    @update:model-value="(v: string) => item.oss_consumer_country = v || null"
+                  />
                 </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.supply_type') }}</label>
