@@ -1,14 +1,14 @@
-# 60. Účtový rozvrh
+# 61. Účtový rozvrh
 
 **Cesta: `Nástroje → Účtový rozvrh`**
 
 Účtový rozvrh je seznam účtů, na které firma účtuje. Stránka i její API jsou
 dostupné jen firmě v režimu **podvojného účetnictví**. Předkontace jsou po
-rozdělení menu popsány samostatně v kapitole [Nástroje](67_Ucetni_nastroje.md);
+rozdělení menu popsány samostatně v kapitole [Nástroje](68_Ucetni_nastroje.md);
 šablony zápisů a pravidla nákladů v kapitole
-[Šablony](59_Sablony.md).
+[Šablony](60_Sablony.md).
 
-## 60.1 Co stránka zobrazuje
+## 61.1 Co stránka zobrazuje
 
 Účty jsou seskupené do tříd **0–7** podle prvního znaku kódu. Samostatně se
 zobrazují **podrozvahové účty**, **závěrkové účty** a ostatní kódy. V každé
@@ -29,19 +29,19 @@ kontrolám; vlastní stranu každého řádku určuje účetní zápis.
 Přepínač **Zobrazit neaktivní** načte i vyřazené účty. Neaktivní účet zůstává
 čitelný v historickém deníku a sestavách, ale není nabízen pro nový zápis.
 
-## 60.2 Automatické založení osnovy
+## 61.2 Automatické založení osnovy
 
 Při zahájení aktivace podvojného účetnictví server idempotentně naseeduje
 standardní syntetické účty a systémové předkontace. Stejný seed lze bezpečně
 spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole
-[Aktivace účetnictví](62_Aktivace_ucetnictvi.md).
+[Aktivace účetnictví](63_Aktivace_ucetnictvi.md).
 
 Účty jsou vždy oddělené podle firmy (`supplier_id`). API a repozitář při každém
 čtení i zápisu používají aktuální firmu z požadavku; znalost číselného ID účtu
 jiné firmy nestačí k jeho načtení nebo změně.
 
-## 60.3 Syntetické a analytické účty
+## 61.3 Syntetické a analytické účty
 
 - **Syntetický účet** je zpravidla třímístný účet standardní osnovy, například
   `311` nebo `501`.
@@ -59,7 +59,7 @@ nenabízí. Kód musí být v rámci firmy unikátní. Nový účet vzniká jako
 Novou syntetiku nelze založit tímto formulářem; pro řízený hromadný přenos
 slouží import.
 
-## 60.4 Aktivace a deaktivace
+## 61.4 Aktivace a deaktivace
 
 Akce **Deaktivovat** účet nemaže. Historické řádky deníku, výpis účtu a výkazy
 zůstávají beze změny. Opětovná akce **Aktivovat** účet vrátí do nabídek.
@@ -78,7 +78,7 @@ znovu aktivovat nebo opravit pravidlo.
 Účty se záměrně nemažou. Kód účtu je součást průkazné účetní stopy a mohou na něj
 odkazovat deník, šablony, předkontace, střediska nebo karty majetku.
 
-## 60.5 Import a export
+## 61.5 Import a export
 
 Tlačítka **Export** a **Import** pracují s XLSX nebo CSV. Export zahrnuje i
 neaktivní účty, aby šel použít jako úplný round-trip. Sloupce jsou `ucet`,
@@ -94,7 +94,7 @@ Import probíhá ve třech krocích:
 Náhled ukazuje změny pole po poli a lze jej omezit na problémy. Obsahuje-li
 chybu, potvrzení je zablokované. Import **nikdy nemaže**.
 
-### 60.5.1 Pravidla importu
+### 61.5.1 Pravidla importu
 
 - Identitou je kód účtu.
 - `nadrizeny_ucet` označuje analytiku; rodič musí být syntetika existující
@@ -112,7 +112,7 @@ Zápis importu je tenantově omezený a probíhá až po úspěšném náhledu. 
 jednoho řádku v potvrzeném souboru nesmí vytvořit neohlášený napůl použitelný
 rozvrh; výsledný report vždy uvádí založené, změněné, přeskočené a chybné řádky.
 
-## 60.6 Ochrany při účtování
+## 61.6 Ochrany při účtování
 
 Vedle existence a aktivity účtu hlídá centrální účetní služba i následující
 invarianty:
@@ -128,7 +128,7 @@ invarianty:
 Tyto kontroly běží na backendu i při volání API. Omezení webového výběru proto
 nelze obejít vlastním požadavkem.
 
-## 60.7 Oprávnění a chyby
+## 61.7 Oprávnění a chyby
 
 Čtení a export vyžadují oprávnění `accounting`. Založení analytiky, změna
 aktivity a import vyžadují zápisové účetní oprávnění; readonly role vidí pouze

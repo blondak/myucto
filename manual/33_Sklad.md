@@ -24,7 +24,7 @@ parametry, dodavatelé, přílohy k produktu).
 ## 33.1 Zapnutí modulu
 
 Sklad zapneš na stránce úpravy firmy (**Systém → Nastavení**, viz
-[§ 70.5 Editace dodavatele](70_Multi_supplier.md#705-editace-dodavatele)) v samostatné
+[§ 71.5 Editace dodavatele](71_Multi_supplier.md#715-editace-dodavatele)) v samostatné
 sekci **Vést skladovou evidenci**:
 
 - **Vést skladovou evidenci** — hlavní přepínač (interně sloupec `stock_enabled` na
@@ -54,7 +54,7 @@ vydání funkčně implementované.
 na vybraný sklad), **jen pod minimem**, jen aktivní a fulltextové hledání (SKU, název,
 EAN). Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zapneš/vypneš
 přes výběr sloupců a hustotu řádků přes přepínač hustoty (viz
-[§ 71.9 Uložené filtry a předvolby zobrazení](71_Nastaveni.md#719-ulozene-filtry-a-predvolby-zobrazeni)).
+[§ 72.9 Uložené filtry a předvolby zobrazení](72_Nastaveni.md#729-ulozene-filtry-a-predvolby-zobrazeni)).
 
 Sloupce: **SKU**, **Název**, **Typ**, **MJ** (měrná jednotka), **Stav** (aktuální
 množství — červeně a tučně, pokud je pod nastaveným minimem), **Hodnota** (ocenění

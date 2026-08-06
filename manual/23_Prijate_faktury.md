@@ -442,7 +442,7 @@ Tlačítko **Zaúčtovat** se zobrazí v hlavičce detailu jen firmám v režimu
 doklad nemá účetní ikonu **Zaúčtováno** ani aktivní zápis v deníku. U dokladu typu
 **Záloha** se tlačítko nezobrazuje: zálohová výzva není účetní předpis závazku;
 účtuje se až její skutečná úhrada z banky nebo pokladny na účet 314. Funguje stejně jako u [vydaných faktur](16_Faktura_PDF.md#1613-zauctovani-do-deniku)
-— potvrzovací dialog, zápis podle [předkontace](67_Ucetni_nastroje.md#673-predkontace),
+— potvrzovací dialog, zápis podle [předkontace](68_Ucetni_nastroje.md#683-predkontace),
 po úspěchu účetní ikona **Zaúčtováno** (s datem v tooltipu) + proklik **Zobrazit v deníku**. Stejná
 tabulka chybových hlášek (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově…) platí i tady — viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku).
@@ -462,7 +462,7 @@ Doklady se účtují jeden po druhém (chyba jednoho neblokuje ostatní), na kon
 souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Max 500 dokladů na dávku.
 
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje admin — spustí se
-při přechodu na stav Přijatá) — viz [§ 71.11](71_Nastaveni.md#7111-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
+při přechodu na stav Přijatá) — viz [§ 72.11](72_Nastaveni.md#7211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

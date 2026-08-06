@@ -5,7 +5,7 @@
 Hlavní kniha je úplný přehled zaúčtovaných pohybů seskupený podle účtů.
 Zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové účty včetně účtové
 třídy 7. Je dostupná jen firmám s podvojným účetnictvím a navazuje na
-[Účtový rozvrh](60_Ucetni_osnova.md).
+[Účtový rozvrh](61_Ucetni_osnova.md).
 
 ## 47.1 Co je zdrojem sestavy
 

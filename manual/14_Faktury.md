@@ -40,7 +40,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
-filtrů](71_Nastaveni.md#719-ulozene-filtry-a-predvolby-zobrazeni); promítne se
+filtrů](72_Nastaveni.md#729-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
 
@@ -165,7 +165,7 @@ odevzdaný nebo zamčený, se nepřepisuje:
 > [!WARNING]
 > **Vypnout OSS je hlídané stejně jako zapnout.** Kdyby šlo zhasnout příznak OSS na
 > řádku se zahraniční sazbou, přesunula by se cizí daň na ř. 1 českého přiznání. Vypnout
-> OSS jde proto jen tam, kde číselník [sazeb států OSS](71_Nastaveni.md#7112b-sazby-statu-oss)
+> OSS jde proto jen tam, kde číselník [sazeb států OSS](72_Nastaveni.md#7212b-sazby-statu-oss)
 > **potvrdí**, že sazba řádku v zemi dodavatele k datu plnění opravdu platí. Odpověď
 > „nevím" (chybí číselník, stát k datu nezná, nečitelné datum plnění) se bere stejně jako
 > „neplatí" a doklad se přeskočí.

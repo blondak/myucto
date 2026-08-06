@@ -9,7 +9,7 @@ Související výkazy a exporty mají v manuálu vlastní kapitoly: [Kniha DPH](
 (interní žurnál), [Souhrnné hlášení](39_Souhrnne_hlaseni.md) (EU dodání B2B) a
 [Hromadný export](41_Hromadny_export.md) (ZIP balíček pro účetní). Rozdíl mezi
 staženým a skutečně podaným XML vysvětluje [Archiv podání a daňová
-rekonciliace](68_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
+rekonciliace](69_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
 **Daně**, archiv podání jako poslední bod menu **Nástroje**.
 
 OSS má samostatnou stránku **Daně → OSS přiznání**, která se objeví až po
@@ -220,9 +220,9 @@ a Knihy DPH.
 
 Zbytek OSS je popsaný jinde v manuálu:
 
-- **Zapnutí režimu a registrace** — [§ 71.1.2a](71_Nastaveni.md#7112a-oss-a-danove-nastaveni)
-- **Sazby pro doklad** (`PL-23`, `SK-23`, …) — [§ 71.1.2](71_Nastaveni.md#7112-sazby-dph)
-- **Kontrolní číselník sazeb členských států** — [§ 71.1.2b](71_Nastaveni.md#7112b-sazby-statu-oss)
+- **Zapnutí režimu a registrace** — [§ 72.1.2a](72_Nastaveni.md#7212a-oss-a-danove-nastaveni)
+- **Sazby pro doklad** (`PL-23`, `SK-23`, …) — [§ 72.1.2](72_Nastaveni.md#7212-sazby-dph)
+- **Kontrolní číselník sazeb členských států** — [§ 72.1.2b](72_Nastaveni.md#7212b-sazby-statu-oss)
 - **Vystavení faktury, doložka na PDF, práh 10 000 EUR** — [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss)
 - **Import zahraničních dokladů** — [§ 21.4b](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss)
 - **Hromadná oprava po importu** — [§ 14.3.2](14_Faktury.md#1432-hromadne-nastaveni-oss)
@@ -294,7 +294,7 @@ vzniku, stavem, výsledkem validace, SHA-256 otiskem a odkazem na stažení ulo�
 souboru. Stejné snapshoty leží ve společném archivu v **Nástroje → EPO podání
 a archiv**, kde se k nim připojují EPO pokusy, doručenky a označení „podáno".
 Archivovaný soubor prokazuje, co vzniklo — ne že bylo podáno; rozdíl vysvětluje
-[Archiv podání a daňová rekonciliace](68_Archiv_podani_a_rekonciliace.md).
+[Archiv podání a daňová rekonciliace](69_Archiv_podani_a_rekonciliace.md).
 
 ### Rekonciliace „podáno vs. účetnictví"
 

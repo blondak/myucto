@@ -1,4 +1,4 @@
-# 64. Peněžní toky a kapitál
+# 65. Peněžní toky a kapitál
 
 **Cesta: `Nástroje → Peněžní toky a kapitál`**
 
@@ -6,7 +6,7 @@ Jedna stránka sestavuje dva samostatné přehledy podle § 18 odst. 2 zákona
 o účetnictví: **přehled o peněžních tocích** a **přehled o změnách vlastního
 kapitálu**.
 
-## 64.1 Povinnost a období
+## 65.1 Povinnost a období
 
 Oba přehledy se sestaví za celé vybrané účetní období. Stránka současně
 vyhodnotí kategorii účetní jednotky. Pro střední a velkou jednotku a pro
@@ -17,7 +17,7 @@ Kategorie a auditní nastavení vycházejí ze stejné služby jako automatický
 rozsah [Rozvahy](49_Rozvaha.md), aby stránka a uzávěrka nepoužívaly jiné
 kritérium.
 
-## 64.2 Přehled o peněžních tocích
+## 65.2 Přehled o peněžních tocích
 
 Systém používá přímou metodu: nerozvíjí výsledek hospodaření o odhady změn
 pracovního kapitálu, ale klasifikuje každý zaúčtovaný pohyb peněžních účtů
@@ -34,7 +34,7 @@ U víceřádkového zápisu se částka nerozmnoží spojením s každým proti�
 Každý nepeněžní řádek přispěje částkou `Dal − MD`; díky podvojnosti je jejich
 součet přesně změnou peněžních řádků.
 
-### 64.2.1 Klasifikace toků
+### 65.2.1 Klasifikace toků
 
 | Skupina | Protiúčty |
 |---|---|
@@ -59,7 +59,7 @@ Kontrola na haléře ověřuje:
 Nezařazené pohyby mají vlastní rozbalitelnou skupinu a nepřesouvají se tiše
 do provozu. Červená kontrola znamená, že výkaz nelze bez prověření použít.
 
-## 64.3 Přehled o změnách vlastního kapitálu
+## 65.3 Přehled o změnách vlastního kapitálu
 
 Výkaz není založen na pevném seznamu účtů. Vezme všechny účty osnovy typu
 **vlastní kapitál**, včetně firemních analytik, a vypíše jen složky s
@@ -83,7 +83,7 @@ i součet:
 Zvýšení a snížení se vykazují odděleně. Stejně velký vklad a výplata se tak
 neskryjí v nulové čisté změně.
 
-## 64.4 Export
+## 65.4 Export
 
 Každý přehled má vlastní **PDF** a **XLSX**. Neslučují se, protože jde o dvě
 samostatné přílohy závěrky s odlišnou strukturou. Export obsahuje hlavičku

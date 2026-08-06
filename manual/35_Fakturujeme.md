@@ -188,7 +188,7 @@ kalendářní rok, rozpad po zemích a upozornění od 80 % i po překročení. 
 **všechna** přeshraniční B2C plnění do EU, tedy i ta, která zatím fakturuješ s českou daní
 (jinak by práh nikdy nemohl být překročen). Přepočet do EUR je **orientační** (denní kurz
 ČNB), takže u hodnot těsně u prahu rozhodne účetní. Sazbu porovnává systém s
-[číselníkem sazeb členských států](71_Nastaveni.md#7112b-sazby-statu-oss) k datu plnění
+[číselníkem sazeb členských států](72_Nastaveni.md#7212b-sazby-statu-oss) k datu plnění
 a při neshodě **varuje** — číselník ale může zestárnout, proto nejde o blokaci.
 
 **Historické doklady nemusíš zadávat ručně.** Import vydaných faktur (Pohoda XML, ISDOC)

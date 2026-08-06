@@ -1,4 +1,4 @@
-# 61. Vzájemné zápočty
+# 62. Vzájemné zápočty
 
 **Cesta: `Nástroje → Zápočty`**
 
@@ -9,7 +9,7 @@ bankovní platby. Modul sestaví dohodu, po potvrzení vytvoří účetní zápi
 Aktuální implementace pracuje jen s doklady v **CZK** a jen v podvojném
 účetnictví.
 
-## 61.1 Přehled dohod a jejich stavy
+## 62.1 Přehled dohod a jejich stavy
 
 Tabulka zobrazuje číslo dohody, datum, partnera, částku a stav:
 
@@ -22,7 +22,7 @@ Tabulka zobrazuje číslo dohody, datum, partnera, částku a stav:
 U dohody lze stáhnout PDF. PDF je obraz evidované dohody; samotné stažení ani
 vytvoření konceptu není potvrzením protistrany.
 
-## 61.2 Sestavení zápočtu
+## 62.2 Sestavení zápočtu
 
 Tlačítko **Nový zápočet** nejprve nabídne jen partnery, kteří mají současně
 otevřenou pohledávku i závazek. Po výběru načte:
@@ -43,7 +43,7 @@ uložení se z řady `offset` přidělí jedinečné číslo, standardně
 Vytvoření konceptu je transakční: hlavička a všechny řádky vzniknou společně,
 nebo nevznikne nic. Doklady se v této fázi nemění.
 
-## 61.3 Jak se počítá otevřená částka
+## 62.3 Jak se počítá otevřená částka
 
 U vydané faktury je zbytek:
 
@@ -60,7 +60,7 @@ Přijatá faktura nemá stejný `paid_total` jako vydaná, proto repozitář ode
 neodečítá; teprve potvrzení musí znovu ověřit, zda zbytek mezitím nesnížila
 platba nebo jiný zápočet.
 
-## 61.4 Potvrzení a zaúčtování
+## 62.4 Potvrzení a zaúčtování
 
 Potvrzením se v jedné databázové transakci:
 
@@ -80,7 +80,7 @@ otevřený zbytek, ne jen textový stav.
 Účty lze firemně změnit v předkontacích, ale musí zůstat věcně správné. DPH se
 zápočtem znovu neúčtuje: vznikla už při zaúčtování faktur.
 
-## 61.5 Idempotence a souběh
+## 62.5 Idempotence a souběh
 
 Účetní zápis používá přirozený klíč `source_type='offset'` a ID dohody.
 Opakované potvrzení proto nevytvoří druhý zápis. Platby dokladů se zakládají
@@ -95,7 +95,7 @@ Pokud se od vytvoření konceptu změnila otevřená částka, potvrzení skonč
 znovu; systém nikdy nevytvoří skrytý přeplatek jen proto, aby starý koncept
 prošel.
 
-## 61.6 Zrušení dohody
+## 62.6 Zrušení dohody
 
 Koncept lze zrušit bez dopadu na doklady. U potvrzené dohody systém:
 
@@ -110,7 +110,7 @@ Storno respektuje otevřenost účetního období a zámek k datu. Pokud původn
 období už nelze měnit, nejdřív rozhodni o správném opravném postupu; modul
 nesmí obejít uzávěrku.
 
-## 61.7 PDF, deník a audit
+## 62.7 PDF, deník a audit
 
 PDF obsahuje hlavičku dohody, obě sady dokladů a částky. Účetní zápis je v
 deníku dohledatelný podle čísla ZAP a zdrojový panel odkazuje zpět na zápočet.
@@ -119,7 +119,7 @@ Vytvoření, potvrzení i zrušení zapisuje samostatnou auditní událost s fir
 uživatelem a technickým kontextem požadavku. Data jsou tenantově oddělená:
 partner, dohoda, faktury i výsledný zápis musí patřit stejné firmě.
 
-## 61.8 Oprávnění a chybové scénáře
+## 62.8 Oprávnění a chybové scénáře
 
 Čtení vyžaduje `accounting.offsets`; vytvoření, potvrzení a zrušení jeho
 zápisovou variantu. Webová stránka je dostupná jen v podvojném účetnictví.

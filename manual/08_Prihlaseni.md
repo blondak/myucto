@@ -53,7 +53,7 @@ nespustí.
 
 MyÚčto nepoužívá záložní jednorázové recovery kódy. Obnova přístupu probíhá
 jinou passkey, TOTP nebo administrátorským CLI rescue. Podrobnosti jsou v
-[74. Bezpečnost](74_Bezpecnost.md).
+[75. Bezpečnost](75_Bezpecnost.md).
 
 ## 8.4 Zapomenuté heslo
 

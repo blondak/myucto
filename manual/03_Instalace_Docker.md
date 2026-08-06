@@ -69,9 +69,9 @@ takže aktualizace je otázkou jednoho příkazu.
 > Aktualizace** stav verze + tlačítko *Aktualizovat*, které pull image
 > + restart spustí přes host-side watcher. Detaily včetně instalace
 > watcheru jako systemd unit / Scheduled Task → [§ 3.9 Update watcher](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
-> nebo kapitola [Aktualizace](75_Aktualizace.md).
+> nebo kapitola [Aktualizace](76_Aktualizace.md).
 > Pro denní kontrolu nové verze nezapomeň naplánovat
-> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](75_Aktualizace.md)).
+> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](76_Aktualizace.md)).
 
 > **WSL2 / Linux po klonu:** pokud `./cmd/docker-ghcr.sh` hlásí
 > `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…`,
@@ -250,7 +250,7 @@ log/, storage/, private/dkim/ **i `cfg.local.php`** — per-instance konfigurace
 z setup wizardu tak přežije image update. Viz **[§ 3.5.3 Single-volume úložiště](#353-single-volume-uloziste)** níže.
 Pokud upgraduješ z 3.5.x nebo staršího 3-volume layoutu, `cmd/docker-update.{sh,ps1}`
 detekuje starý layout a před `up -d` automaticky spustí
-`cmd/docker-migrate-volumes.{sh,ps1}` — viz [§ 75.5](75_Aktualizace.md#755-migrace-na-single-volume-layout-35x-360).
+`cmd/docker-migrate-volumes.{sh,ps1}` — viz [§ 76.5](76_Aktualizace.md#765-migrace-na-single-volume-layout-35x-360).
 
 **`cfg.docker.php` mount je nově volitelný** — image obsahuje stub `cfg.php`
 (`<?php return [];`) a vše lze předat přes ENV (12-factor). Pro full-ENV deploy
@@ -308,7 +308,7 @@ docker volume ls | grep myucto                           # vidíš pouze app-dat
 
 **Nikdy nepřepínej layout bez migrace** — aplikace by nahlížela do prázdného
 `/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` to dělá
-automaticky před `up -d`. Detaily v [§ 75.5 Migrace na single-volume layout](75_Aktualizace.md#755-migrace-na-single-volume-layout-35x-360).
+automaticky před `up -d`. Detaily v [§ 76.5 Migrace na single-volume layout](76_Aktualizace.md#765-migrace-na-single-volume-layout-35x-360).
 
 Shrnutí: `cmd/docker-migrate-volumes.{sh,ps1}` snapshotne `cfg.local.php`
 z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data`
@@ -324,7 +324,7 @@ docker run --rm \
   alpine tar czf /backup/myucto-data-$(date +%F).tar.gz -C /data .
 ```
 
-Plus dump MariaDB (viz [§ 75.7 Záloha a obnova](75_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
+Plus dump MariaDB (viz [§ 76.7 Záloha a obnova](76_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
 
 ## 3.6 Daily ops
 
@@ -512,12 +512,12 @@ Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
 
 Watcher jen reaguje na *kliknutí*. Aby admin **viděl**, že je dostupná
 nová verze (badge v patičce + status na `/admin/update`), musí běžet
-denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](75_Aktualizace.md).
+denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](76_Aktualizace.md).
 
 #### Plné detaily
 
 Recovery při zaseknutém upgradu, test workflow z `master`, externí
-monitoring přes `/api/version` → kapitola [Aktualizace](75_Aktualizace.md).
+monitoring přes `/api/version` → kapitola [Aktualizace](76_Aktualizace.md).
 
 ## 3.10 Image: alpine/nginx (default) + Debian fallback
 

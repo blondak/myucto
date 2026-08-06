@@ -1,4 +1,4 @@
-# 73. Daňové konstanty
+# 74. Daňové konstanty
 
 **Cesta: `Systém → Daňové konstanty`**
 
@@ -6,7 +6,7 @@ Daňové konstanty jsou samostatná celosystémová stránka umístěná v menu 
 pod položkou **Sazby a číselníky**. Nejde o nastavení aktuální firmy ani o
 záložku číselníků.
 
-## 73.1 Rok a efektivní hodnoty
+## 74.1 Rok a efektivní hodnoty
 
 Hodnoty jsou verzované po jednotlivých letech. Aplikace pro každý výpočet
 vybere efektivní sadu odpovídající danému roku, aby pozdější změna sazeb
@@ -21,7 +21,7 @@ Konstanty zahrnují zejména:
 - limity DPH a kontrolního hlášení;
 - zákonné termíny podání.
 
-## 73.2 Vlastní přepis
+## 74.2 Vlastní přepis
 
 Vestavěné hodnoty lze pro konkrétní rok administrátorsky přepsat. Tlačítko
 **Uložit** zapíše vlastní efektivní hodnoty; **Obnovit výchozí** vlastní přepis
@@ -33,7 +33,7 @@ každého období. Typickým příkladem je paušální daň: další období p�
 měsíční zálohy a roční částka se dopočítá jako součet měsíců, neupravuje se
 ručně.
 
-## 73.3 Dopad změn
+## 74.3 Dopad změn
 
 > [!WARNING]
 > Změna daňové konstanty ovlivňuje všechny firmy a všechny budoucí přepočty,

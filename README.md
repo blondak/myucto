@@ -64,11 +64,11 @@ Každý modul má vlastní kapitolu manuálu — odkazy vedou na detail.
 | **Nákup a AI zpracování** | Přijaté faktury a účtenky, import ISDOC/Pohoda XML/PDF, [AI extrakce](manual/45_Automat.md), kontrola součtů a DPH, návrh nákladového účtu s povinným potvrzením. |
 | **Banka a pokladna** | Více účtů a měn, import výpisů, automatické párování podle VS a částky, částečné úhrady, kurzové rozdíly, pokladní doklady. |
 | **Podvojné účetnictví** | Účtový rozvrh, předkontace, [automat účtování](manual/45_Automat.md), účetní deník, hlavní kniha, předvaha, rozvaha, výsledovka, saldokonto. |
-| **Daně a evidence** | [Přiznání DPH, kontrolní a souhrnné hlášení](manual/36_Vykazy_DPH.md), [DPFO/DPPO](manual/38_Dan_z_prijmu.md), [daňová evidence](manual/69_Danova_evidence.md), archiv XML a asistované i přímé podání přes EPO API. |
-| **Uzávěrka** | [Účetní období](manual/66_Uzaverka.md), závěrková mapa K1–K10, [kontroly a inventarizace](manual/58_Ucetni_kontroly_a_inventarizace.md), odpisy, časové rozlišení, závěrkový balíček. |
+| **Daně a evidence** | [Přiznání DPH, kontrolní a souhrnné hlášení](manual/36_Vykazy_DPH.md), [DPFO/DPPO](manual/38_Dan_z_prijmu.md), [daňová evidence](manual/70_Danova_evidence.md), archiv XML a asistované i přímé podání přes EPO API. |
+| **Uzávěrka** | [Účetní období](manual/67_Uzaverka.md), závěrková mapa K1–K10, [kontroly a inventarizace](manual/59_Ucetni_kontroly_a_inventarizace.md), odpisy, časové rozlišení, závěrkový balíček. |
 | **Majetek a sklad** | Karty majetku a odpisy, skladové karty a pohyby, inventura, automatická výdejka při fakturaci, napojení e-shopu. |
 | **Reporting a portál** | Přehled tržeb, nákladů, pohledávek a cash-flow, [klientský portál](manual/42_Pruvodce_ucetniho.md), responzivní rozhraní, role admin / účetní / klient / pouze pro čtení. |
-| **Více firem a API** | [Neomezený počet firemních agend](manual/70_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/76_API.md) s osobními tokeny a scopes. |
+| **Více firem a API** | [Neomezený počet firemních agend](manual/71_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/77_API.md) s osobními tokeny a scopes. |
 
 ![Vydané faktury](manual/img/08_faktury_list.webp)
 
@@ -107,7 +107,7 @@ vlastníka a výslovně povolené firemní agendy. Asistovaný a produkční př
 se pro stejný snapshot vzájemně blokují, aby nevzniklo duplicitní podání;
 zkušební přímý pokus asistovaný formulář neblokuje. Podrobný postup včetně
 získání certifikátu, testu a práce s doručenkou popisuje
-[EPO podání, archív a daňová rekonciliace](manual/68_Archiv_podani_a_rekonciliace.md).
+[EPO podání, archív a daňová rekonciliace](manual/69_Archiv_podani_a_rekonciliace.md).
 
 Pro vývoj lze zapnout `epo_test` (nebo `MYINVOICE_EPO_TEST=true`). Podepsané
 přímé operace pak používají zkušební portál
@@ -254,7 +254,7 @@ bcrypt hesla s aplikačním pepperem, TOTP 2FA, CSRF ochrana a rate limiting,
 volitelný IP allowlist, role a oprávnění po jednotlivých firmách, šifrování
 citlivých integračních údajů, auditní log a izolace firemních agend napříč API,
 reporty i souborovými cestami. Bezpečnostní model popisuje
-[kapitola Bezpečnost](manual/74_Bezpecnost.md).
+[kapitola Bezpečnost](manual/75_Bezpecnost.md).
 
 Bezpečnostní chybu **neoznamuj veřejným ticketem.** Použij kontakt na
 [MyWebdesign.cz](https://mywebdesign.cz/) s předmětem `[SECURITY] MyÚčto.cz` a
@@ -265,7 +265,7 @@ postup v [SECURITY.md](SECURITY.md).
 Veřejné REST API v1 používá osobní přístupové tokeny, které lze omezit na čtení
 nebo zápis, konkrétní firmu a dobu platnosti. Určené pro integrace s e-shopy,
 CRM, BI a automatizačními platformami. OpenAPI specifikace:
-[api/openapi.yaml](api/openapi.yaml), postup: [kapitola REST API](manual/76_API.md).
+[api/openapi.yaml](api/openapi.yaml), postup: [kapitola REST API](manual/77_API.md).
 
 ## Technologický základ
 
@@ -288,8 +288,8 @@ Uživatelský manuál pokrývá celý pracovní cyklus v 58 kapitolách:
 - [Průvodce účetního](manual/42_Pruvodce_ucetniho.md)
 - [Automat účtování](manual/45_Automat.md)
 - [Daňové výkazy](manual/36_Vykazy_DPH.md) · [Daň z příjmů](manual/38_Dan_z_prijmu.md)
-- [Kontroly a inventarizace](manual/58_Ucetni_kontroly_a_inventarizace.md) · [Uzávěrka](manual/66_Uzaverka.md)
-- [Daňová evidence](manual/69_Danova_evidence.md) · [Více firem](manual/70_Multi_supplier.md)
+- [Kontroly a inventarizace](manual/59_Ucetni_kontroly_a_inventarizace.md) · [Uzávěrka](manual/67_Uzaverka.md)
+- [Daňová evidence](manual/70_Danova_evidence.md) · [Více firem](manual/71_Multi_supplier.md)
 - [Řešení problémů](manual/99_Reseni_problemu.md)
 
 Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).

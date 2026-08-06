@@ -1,10 +1,10 @@
-# 69. Daňová evidence
+# 70. Daňová evidence
 
 Modul **Daňová evidence** je určen firmám s **režimem účetnictví „Daňová evidence"**
 (OSVČ vedoucí evidenci podle §7b zákona o daních z příjmů — kasová báze, tedy podle
 data úhrady, ne podle vystavení dokladu). Je to **alternativa k podvojnému
 účetnictví** — jde o dva vzájemně se vylučující režimy jedné firmy (dodavatele),
-mezi kterými se přepíná v nastavení dodavatele (viz [Multi_supplier](70_Multi_supplier.md)).
+mezi kterými se přepíná v nastavení dodavatele (viz [Multi_supplier](71_Multi_supplier.md)).
 Firma v režimu „Podvojné účetnictví" místo této sekce vidí plnohodnotné **Účetnictví**
 (deník, hlavní kniha, rozvaha, výsledovka) popsané v [§ 44 a násl.](44_Ucetni_denik.md).
 
@@ -15,18 +15,18 @@ Firma v režimu „Podvojné účetnictví" místo této sekce vidí plnohodnotn
 > bankovními pohyby. Částky, doklady ani protistrany v nich needituješ; to zajistíš
 > na zdrojovém dokladu. Jedinou výjimkou je **ruční zařazení** u bankovních/pokladních
 > pohybů bez navázaného dokladu — u nich přímo v deníku přepíšeš daňovou kategorii
-> (viz [§ 69.6](#696-nezarazene-pohyby-a-varovani)).
+> (viz [§ 70.6](#706-nezarazene-pohyby-a-varovani)).
 
 Peněžní deník je zdrojem daně z příjmů, nikoli DPH. DPHDP3, KH, SH a Kniha DPH
 používají společnou řádkovou evidenci z faktur a daňových pokladních dokladů podle
 DUZP či pravidel nároku na odpočet. Přepnutí mezi daňovou evidencí a účetnictvím
 proto samo nesmí změnit výsledek DPH. Viz [Výkazy DPH](36_Vykazy_DPH.md).
 
-## 69.1 Zapnutí režimu a dostupnost v menu
+## 70.1 Zapnutí režimu a dostupnost v menu
 
 Režim účetnictví je nastavení **per dodavatel** (firmu) — přepínáš ho v editaci
 dodavatele mezi „Daňová evidence" a „Podvojné účetnictví" (viz
-[Multi_supplier](70_Multi_supplier.md)). Podle aktuálně zvoleného režimu se v hlavním
+[Multi_supplier](71_Multi_supplier.md)). Podle aktuálně zvoleného režimu se v hlavním
 menu zobrazí buď sekce **Účetnictví**, nebo sekce **Daňová evidence** — nikdy obě
 najednou.
 
@@ -47,7 +47,7 @@ systém na úvodní stránku.
 > **nevytváří žádný zápis do účetního deníku** (ten v tomto režimu neexistuje) — pohyb
 > se rovnou promítne do peněžního deníku popsaného v této kapitole.
 
-## 69.2 Peněžní deník — filtry a rozsah
+## 70.2 Peněžní deník — filtry a rozsah
 
 Stránka **Peněžní deník** nabízí v horním panelu tři filtry:
 
@@ -66,7 +66,7 @@ Vpravo nahoře jsou k dispozici:
 - **Export PDF** / **Export XLSX** — vygeneruje sestavu za aktuálně zvolený rozsah
   pod názvem `penezni-denik-{rok}.pdf` / `.xlsx`.
 
-## 69.3 Souhrn (počáteční a konečný zůstatek, totály)
+## 70.3 Souhrn (počáteční a konečný zůstatek, totály)
 
 Nad tabulkou pohybů je panel **Souhrn** s běžným zůstatkem a rozpadem do daňových
 kbelíků za celé zvolené období:
@@ -81,7 +81,7 @@ kbelíků za celé zvolené období:
 | Nedaňový výdaj | Výdaj neuznatelný (např. vlastní daň/pojistné, odpočitatelná DPH, nedaňový doklad) |
 | Převody | Přesuny hotovosti mezi bankou a pokladnou — mimo základ daně |
 | Soukromé | Soukromé vklady/výběry — mimo základ daně |
-| Nezařazeno | *(zobrazí se jen když existuje)* — pohyby čekající na zařazení, viz § 69.6 |
+| Nezařazeno | *(zobrazí se jen když existuje)* — pohyby čekající na zařazení, viz § 70.6 |
 | Konečný zůstatek | Zůstatek k poslednímu dni období |
 
 Dole je zvýrazněný řádek **Daňový základ (příjem − výdaj)** = daňový příjem minus
@@ -95,7 +95,7 @@ faktury 12 100 Kč, z toho základ 10 000 Kč a DPH 2 100 Kč, vytvoří daňov�
 formulářová zaokrouhlení popsaná v
 [kapitole Daň z příjmů](38_Dan_z_prijmu.md#jak-se-pocita-dpfo).
 
-## 69.4 Tabulka pohybů
+## 70.4 Tabulka pohybů
 
 Hlavní tabulka řadí všechny pohyby chronologicky a pro každý zobrazuje běžný
 zůstatek po daném řádku. Dostupné (a přes výběr sloupců vypínatelné) sloupce:
@@ -108,7 +108,7 @@ zůstatek po daném řádku. Dostupné (a přes výběr sloupců vypínatelné) 
 | Popis | Popis pohybu |
 | Příjem / Výdaj | Částka v příslušném směru |
 | Běžný zůstatek | Kumulovaný zůstatek k danému řádku |
-| Klasifikace | Barevný štítek s daňovým zařazením (viz § 69.5) |
+| Klasifikace | Barevný štítek s daňovým zařazením (viz § 70.5) |
 | Zdroj *(skrytý)* | Odkud pohyb pochází — pokladna, banka nebo virtuální noha z úhrady faktury |
 | Základ *(skrytý)* | Daňový základ pohybu (bez DPH složky) |
 | DPH *(skrytý)* | DPH složka pohybu |
@@ -117,7 +117,7 @@ Sloupce Zdroj, Základ a DPH jsou ve výchozím zobrazení skryté — zapneš j
 výběr sloupců, hodí se pro kontrolu, jak se DPH rozpočítalo u pohybů s vazbou na
 plátcovskou fakturu.
 
-## 69.5 Daňová klasifikace pohybů
+## 70.5 Daňová klasifikace pohybů
 
 Každý pohyb (pokladní doklad, spárovaná bankovní úhrada nebo virtuální noha z
 úhrady faktury) systém automaticky zařadí do jednoho z kbelíků podle §7b/§23 ZDP:
@@ -131,7 +131,7 @@ Každý pohyb (pokladní doklad, spárovaná bankovní úhrada nebo virtuální 
 | **Nedaňový výdaj** | Úhrada přijaté faktury bez příznaku uznatelnosti; odpočitatelná DPH; vlastní daň z příjmů a pojistné; pokladní doklad „Ostatní" na straně výdeje |
 | **Převod** | Pokladní doklad s účelem „Převod" (přesun hotovost ↔ banka) |
 | **Soukromé** | Soukromé vklady/výběry (ruční zařazení) |
-| **Nezařazeno** | Pohyb, který systém nedokázal automaticky zařadit — viz § 69.6 |
+| **Nezařazeno** | Pohyb, který systém nedokázal automaticky zařadit — viz § 70.6 |
 
 U firem, které jsou **plátci DPH**, se u výdaje počítá částka uznatelná pro daň
 z příjmů jako **základ + skutečně neodpočitatelná část DPH**. Při plném nároku
@@ -164,7 +164,7 @@ chybějící kurz může zablokovat výpočet a nesmí se nahrazovat odhadem 1:1
 > Chceš-li tedy ovlivnit, kam pohyb v peněžním deníku spadne, uprav účel na
 > pokladním dokladu nebo daňové příznaky (uznatelnost, osvobození) na faktuře.
 
-## 69.6 Nezařazené pohyby a varování
+## 70.6 Nezařazené pohyby a varování
 
 Bankovní pohyb, který nemá vazbu na žádnou fakturu ani přijatou fakturu, systém
 **nikdy tiše nezařadí jako nedaňový** — u příchozí platby by to mohlo podhodnotit
@@ -184,7 +184,7 @@ po změně čísla účtu v nastavení), zobrazí se navíc samostatné blokují
 upozornění na **počet bankovních úhrad mimo spárované výpisy** — bez opravy by
 tato část historie v základu daně chyběla úplně.
 
-## 69.7 Kontrola vůči přiznanému příjmu
+## 70.7 Kontrola vůči přiznanému příjmu
 
 Pod souhrnem je sbalovací panel **Kontrola vůči přiznanému příjmu** (rozbalíš
 kliknutím na hlavičku). Porovnává **daňový příjem z deníku** za daný rok s
@@ -210,13 +210,13 @@ jinak oranžová.
 > panel odchylku jen rozepíše na vysvětlitelné složky, nic nevynucuje ani
 > nehlásí jako chybu.
 
-## 69.8 Pohledávky a závazky
+## 70.8 Pohledávky a závazky
 
 Stránka **Pohledávky a závazky** zobrazuje věkové rozložení (aging) nezaplacených
 vydaných faktur (pohledávky) a přijatých faktur (závazky) — **nativně po měnách**,
 bez přepočtu na CZK.
 
-### 69.8.1 Filtr měny a KPI
+### 70.8.1 Filtr měny a KPI
 
 Nahoře je filtr **Měna** (výchozí „Všechny") a tři ukazatele počítané za
 posledních 12 měsíců:
@@ -228,7 +228,7 @@ posledních 12 měsíců:
 - **Platební morálka (včas)** — procento zaplacených faktur uhrazených v den
   splatnosti nebo dřív, s celkovým počtem faktur ve vzorku.
 
-### 69.8.2 Tabulky pohledávek a závazků
+### 70.8.2 Tabulky pohledávek a závazků
 
 Obě tabulky (Pohledávky / Závazky) mají shodnou strukturu — řádek na měnu, sloupce
 podle stáří po splatnosti:
@@ -251,7 +251,7 @@ Export **PDF** / **XLSX** vpravo nahoře vygeneruje sestavu (`pohledavky-zavazky
 / `.xlsx`) se stavem k okamžiku exportu — bez datumového filtru (sestava vždy
 zobrazuje aktuální nezaplacené doklady).
 
-### 69.8.3 Roční uzávěrka daňové evidence
+### 70.8.3 Roční uzávěrka daňové evidence
 
 Před finalizací DPFO se na stránce **Daně → Daň z příjmů** dokončuje roční uzávěrka
 podle § 7b. Obsahuje kontrolní seznam peněžního deníku, inventury majetku a zásob,
@@ -279,7 +279,7 @@ porovnej s kartou majetku a daňovými odpisy. Pole pro nepodporované zvláštn
 existuje na úrovni dat/API, ale běžná obrazovka je neumí kompletně popsat; takový
 případ eviduj v pracovních podkladech a uzávěrku dokonči až po odborném posouzení.
 
-## 69.9 Návaznost na ostatní moduly
+## 70.9 Návaznost na ostatní moduly
 
 - **Pokladna** ([§ 29](30_Pokladna.md)) — jediné místo, kde v režimu daňové
   evidence vznikají nové hotovostní pohyby; volba účelu dokladu určuje, jak se
@@ -292,14 +292,14 @@ případ eviduj v pracovních podkladech a uzávěrku dokonči až po odborném 
   evidence čerpá report příjmy a výdaje přímo z **totálů peněžního deníku**
   (kasová báze podle data úhrady) místo z akruální evidence podle data
   uskutečnění; čísla v obou reportech by tak měla navazovat.
-- **Více dodavatelů** ([§ 52](70_Multi_supplier.md)) — režim účetnictví (daňová
+- **Více dodavatelů** ([§ 52](71_Multi_supplier.md)) — režim účetnictví (daňová
   evidence / podvojné účetnictví) je nastavení jednotlivého dodavatele; firma
   přepínající se mezi více dodavateli může mít každého v jiném režimu.
 
-## 69.10 Přechodový můstek mezi evidencí a účetnictvím (přílohy č. 2 a 3 ZDP)
+## 70.10 Přechodový můstek mezi evidencí a účetnictvím (přílohy č. 2 a 3 ZDP)
 
 Když se firma vedená v daňové evidenci rozhodne přejít na **podvojné účetnictví**
-(změna režimu, viz [§ 70.6.1](70_Multi_supplier.md)), nejde jen o
+(změna režimu, viz [§ 71.6.1](71_Multi_supplier.md)), nejde jen o
 technické přepnutí a založení účtového rozvrhu — zákon (**příloha č. 3 zákona
 o daních z příjmů**) vyžaduje, aby OSVČ k datu přechodu **jednorázově upravila
 základ daně** o rozdíl mezi kasovou bází (daňová evidence — podle úhrady) a
@@ -308,7 +308,7 @@ daňového přiznání za zdaňovací období, ve kterém bylo zahájeno vedení
 (příslušný řádek úpravy základu daně dle přílohy č. 3 ZDP v přiznání), **ne**
 do samotného účetnictví — je to daňová záležitost, ne účetní zápis.
 
-### 69.10.1 Co se do úpravy počítá
+### 70.10.1 Co se do úpravy počítá
 
 Podle přílohy č. 3 ZDP se základ daně upraví zejména o:
 
@@ -326,7 +326,7 @@ u pohledávek/závazků v cizí měně a na dříve vytvořené rezervy či opra
 Ty je ale potřeba posoudit individuálně s účetní nebo daňovým poradcem — systém
 pro ně žádné podklady negeneruje.
 
-### 69.10.2 Co systém nabízí — podklady pro přechod
+### 70.10.2 Co systém nabízí — podklady pro přechod
 
 Účetní režim se eviduje historicky s účinností vždy k 1. lednu; právnická osoba
 nemůže zvolit daňovou evidenci. Přiznání za starší rok proto použije režim platný
@@ -376,7 +376,7 @@ daňovým poradcem a dokonči v EPO.
 > okamžiku, ke kterému se přiznání skutečně vztahuje, zadej do `as_of` to
 > správné rozvahové datum, ne den, kdy jsi nastavení uložil(a).
 
-### 69.10.3 Průvodce aktivací podvojného účetnictví
+### 70.10.3 Průvodce aktivací podvojného účetnictví
 
 Pokud má firma v daňové evidenci už doklady, po volbě **Podvojné účetnictví**
 v nastavení pokračuje admin v pětikrokovém průvodci. Samotná volba režim ještě
@@ -432,14 +432,14 @@ dostupná.
 > základu daně podle přílohy č. 3 ZDP popsanou výše; tu musí účetní posoudit a
 > zanést do daňového přiznání samostatně.
 
-## 69.11 Omezení a tipy
+## 70.11 Omezení a tipy
 
 - Sestavy jsou z většiny **read-only** — v peněžním deníku ani v přehledu
   pohledávek a závazků needituješ částky ani doklady; opravu zařazení uděláš na
   zdrojovém dokladu (účel pokladního dokladu, příznak uznatelnosti/osvobození
   na faktuře) nebo doplněním čísla účtu v nastavení u nespárovaných bankovních
   výpisů. Výjimka je řádek **ruční zařazení** (`Zařadit…`) u bankovních/
-  pokladních pohybů bez navázaného dokladu ([§ 69.6](#696-nezarazene-pohyby-a-varovani))
+  pokladních pohybů bez navázaného dokladu ([§ 70.6](#706-nezarazene-pohyby-a-varovani))
   — tam kategorii nastavíš přímo v deníku, přepsat lze i zpět přes **Zrušit
   ruční zařazení**.
 - **Blokující upozornění nezmizí samo** — dokud zůstane nezařazený příchozí

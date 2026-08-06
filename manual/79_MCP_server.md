@@ -1,14 +1,14 @@
-# 78. MCP server (napojení AI asistenta)
+# 79. MCP server (napojení AI asistenta)
 
 MCP server propojí **AI asistenta** — Claude, ChatGPT přes Codex, Gemini,
 Copilota — s daty tvé firmy. Po zprovoznění se ptáš běžnou češtinou
 („kolik zaplatíme na DPH“, „kdo nám dluží“, „jaký byl loni zisk“) a asistent
-si sám vybere správný nástroj a zavolá ho přes [REST API](76_API.md).
+si sám vybere správný nástroj a zavolá ho přes [REST API](77_API.md).
 
 Nastavení najdeš v aplikaci: **Firma → MCP server**. Ta stránka ukazuje adresu
 API konkrétně tvojí instance a hotovou konfiguraci pro vybraného asistenta.
 
-## 78.1 Co je MCP
+## 79.1 Co je MCP
 
 **Model Context Protocol** je otevřený standard pro připojení nástrojů k AI
 modelům. Server je malý program, který běží u tebe na počítači, mluví s aplikací
@@ -23,7 +23,7 @@ Podstatné vlastnosti:
   i oprávnění role uživatele platí beze změny.
 - **Všechno je vidět v logu.** Každé volání se zapíše včetně názvu nástroje.
 
-## 78.2 Rozsah — co asistent umí
+## 79.2 Rozsah — co asistent umí
 
 | Oblast | Rozsah |
 |---|---|
@@ -42,9 +42,9 @@ Podstatné vlastnosti:
 > zaevidovat opravu podle § 46 / § 74b ani odeslat podání na EPO nemůže. Je to
 > agenda s daňovou odpovědností, kde chyba znamená opravné podání — dělá ji člověk
 > v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
-> na takovou operaci `403 token_write_forbidden` (viz [kapitola 76.6](76_API.md)).
+> na takovou operaci `403 token_write_forbidden` (viz [kapitola 76.6](77_API.md)).
 
-## 78.3 Zprovoznění
+## 79.3 Zprovoznění
 
 ### Krok 1 — API token
 
@@ -123,7 +123,7 @@ ukázkách naráz.
 Napiš asistentovi „ověř připojení k MyÚčtu“. Zavolá nástroj `whoami` a vrátí
 uživatele, roli a firmu. Volání se hned objeví v logu na stránce MCP serveru.
 
-## 78.4 Nastavení
+## 79.4 Nastavení
 
 Server se konfiguruje proměnnými prostředí:
 
@@ -146,9 +146,9 @@ nenaplánuje postup, který by stejně nedokončil.
 Stropy `MAX_RPS` a `MAX_CONCURRENT` nejsou kosmetika: API sdílí PHP procesy
 s běžícím webem, takže asistent bez omezení zpomalí i běžné uživatele.
 Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
-[rate limit](76_API.md) tokenu.
+[rate limit](77_API.md) tokenu.
 
-## 78.5 Příklady dotazů
+## 79.5 Příklady dotazů
 
 **Fakturace a pohledávky**
 
@@ -170,7 +170,7 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Přidej do výkazu 5 metrů kabeláže po 120 Kč.“
 - „Smaž poslední řádek z výkazu, zadal jsem ho omylem.“
 
-Podrobnosti v [78.7](#787-výkazy-práce-a-materiálu).
+Podrobnosti v [78.7](#797-výkazy-práce-a-materiálu).
 
 **Daně**
 
@@ -197,7 +197,7 @@ Podrobnosti v [78.7](#787-výkazy-práce-a-materiálu).
 - „Které zboží je pod minimální zásobou a mělo by se doobjednat?“
 - „Kolik máme uloženo ve skladu k dnešnímu dni?“
 
-## 78.6 Odběratelé a ARES
+## 79.6 Odběratelé a ARES
 
 Nového odběratele stačí zadat IČEM:
 
@@ -228,7 +228,7 @@ Když je ARES nedostupný, u úpravy se **nic nemění** (raději nic než půlk
 starých a půlka nových údajů). U zakládání se použijí údaje ze zadání, pokud
 stačí — asistent do odpovědi napíše, odkud data vzal.
 
-## 78.7 Výkazy práce a materiálu
+## 79.7 Výkazy práce a materiálu
 
 Výkaz je navázaný na **koncept faktury** — přesně jako v aplikaci. Stačí tedy říct:
 
@@ -265,16 +265,16 @@ rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
 existujícího výkazu, jinak si o ni řekne — špatná sazba by se propsala do
 přiznání k DPH.
 
-## 78.8 Log volání
+## 79.8 Log volání
 
 Stránka **Firma → MCP server** má dole **Log volání** — každé volání tvých API
 tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název nástroje**,
 takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
-v [kapitole 76.8](76_API.md).
+v [kapitole 76.8](77_API.md).
 
-## 78.9 Bezpečnost
+## 79.9 Bezpečnost
 
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omez token na IP** — uniklý token je pak mimo tvou síť k ničemu.
@@ -286,7 +286,7 @@ v [kapitole 76.8](76_API.md).
   `.vscode/mcp.json` a `.cursor/mcp.json` v projektu).
 - Nepoužívaný token **zruš**. Historie volání v logu zůstane.
 
-## 78.10 Řešení problémů
+## 79.10 Řešení problémů
 
 | Projev | Příčina a náprava |
 |---|---|
@@ -301,7 +301,7 @@ v [kapitole 76.8](76_API.md).
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |
 | V logu nejsou žádná volání | Server se nespustil — zkontroluj cestu k `index.mjs` a že proběhlo `npm install`. |
 
-## 78.11 Vlastní HTTPS certifikát
+## 79.11 Vlastní HTTPS certifikát
 
 Instance s certifikátem od firemní nebo vlastní autority (typicky testovací
 prostředí) je zvláštní případ: **Node má vlastní seznam kořenových autorit

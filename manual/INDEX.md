@@ -95,41 +95,41 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 54. [Měsíční kontrola](54_Mesicni_kontrola.md)
 55. [Měsíční přehled](55_Mesicni_report.md)
 56. [Mzdová rekapitulace a mzdový list](56_Mzdy.md)
-56a. [Úplné mzdy — aktivace a zaměstnanci](56a_Uplne_mzdy.md)
-57. [Majetek](57_Majetek.md)
-58. [Účetní kontroly a inventarizace — metodika](58_Ucetni_kontroly_a_inventarizace.md)
+57. [Úplné mzdy — aktivace a zaměstnanci](57_Uplne_mzdy.md)
+58. [Majetek](58_Majetek.md)
+59. [Účetní kontroly a inventarizace — metodika](59_Ucetni_kontroly_a_inventarizace.md)
 
 ### Nástroje
 
-59. [Šablony](59_Sablony.md)
-60. [Účtový rozvrh](60_Ucetni_osnova.md)
-61. [Zápočty](61_Zapocty.md)
-62. [Aktivace a doúčtování](62_Aktivace_ucetnictvi.md)
-63. [Inventarizace účtů](63_Inventarizace_rozvahovych_uctu.md)
-64. [Peněžní toky a změny vlastního kapitálu](64_Vykazy_podle_paragrafu_18.md)
-65. [Spojené osoby](65_Propojene_osoby.md)
-66. [Uzávěrka](66_Uzaverka.md)
-67. [Nástroje](67_Ucetni_nastroje.md)
-68. [EPO podání, archív a daňová rekonciliace](68_Archiv_podani_a_rekonciliace.md)
+60. [Šablony](60_Sablony.md)
+61. [Účtový rozvrh](61_Ucetni_osnova.md)
+62. [Zápočty](62_Zapocty.md)
+63. [Aktivace a doúčtování](63_Aktivace_ucetnictvi.md)
+64. [Inventarizace účtů](64_Inventarizace_rozvahovych_uctu.md)
+65. [Peněžní toky a změny vlastního kapitálu](65_Vykazy_podle_paragrafu_18.md)
+66. [Spojené osoby](66_Propojene_osoby.md)
+67. [Uzávěrka](67_Uzaverka.md)
+68. [Nástroje](68_Ucetni_nastroje.md)
+69. [EPO podání, archív a daňová rekonciliace](69_Archiv_podani_a_rekonciliace.md)
 
 ### Daňová evidence
 
-69. [Daňová evidence](69_Danova_evidence.md)
+70. [Daňová evidence](70_Danova_evidence.md)
 
 ### Firma
 
-70. [Více dodavatelů](70_Multi_supplier.md)
-71. [Nastavení](71_Nastaveni.md)
-72. [Elektronické podpisy](72_Elektronicke_podpisy.md)
+71. [Více dodavatelů](71_Multi_supplier.md)
+72. [Nastavení](72_Nastaveni.md)
+73. [Elektronické podpisy](73_Elektronicke_podpisy.md)
 
 ### Systém
 
-73. [Daňové konstanty](73_Danove_konstanty.md)
-74. [Bezpečnost](74_Bezpecnost.md)
-75. [Aktualizace](75_Aktualizace.md)
-76. [REST API](76_API.md)
-77. [Licence a aktivace](77_Licence_a_aktivace.md)
-78. [MCP server (napojení AI asistenta)](78_MCP_server.md)
+74. [Daňové konstanty](74_Danove_konstanty.md)
+75. [Bezpečnost](75_Bezpecnost.md)
+76. [Aktualizace](76_Aktualizace.md)
+77. [REST API](77_API.md)
+78. [Licence a aktivace](78_Licence_a_aktivace.md)
+79. [MCP server (napojení AI asistenta)](79_MCP_server.md)
 
 ### Reference
 

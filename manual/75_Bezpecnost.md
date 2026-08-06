@@ -1,4 +1,4 @@
-# 74. Bezpečnost (MFA, passkeys, zámek session, IP allowlist, role, activity log)
+# 75. Bezpečnost (MFA, passkeys, zámek session, IP allowlist, role, activity log)
 
 Bezpečnost MyÚčto stojí na několika navazujících vrstvách:
 
@@ -10,7 +10,7 @@ Bezpečnost MyÚčto stojí na několika navazujících vrstvách:
 5. **Audit** — activity log všech mutací
 6. **Zámek session** — serverové uzamčení PWA po nečinnosti
 
-## 74.1 Hesla
+## 75.1 Hesla
 
 | Vrstva | Detail |
 |---|---|
@@ -24,7 +24,7 @@ Bezpečnost MyÚčto stojí na několika navazujících vrstvách:
 > 💡 **Passphrase je bezpečnější než krátké složité heslo.** „korelace medvědí
 > dýně přístav 2026" má 49 znaků a je odolnější vůči brute-force než „Hu1@n!22".
 
-## 74.2 Vícefaktorové ověření
+## 75.2 Vícefaktorové ověření
 
 MyÚčto podporuje dva silné faktory:
 
@@ -35,7 +35,7 @@ E-mailové OTP je kompatibilní druhý krok pro účet bez silného faktoru, ale
 nesplňuje povinnou silnou MFA politiku. Důvěryhodné zařízení se týká pouze
 e-mailového OTP.
 
-### 74.2.1 Passkeys
+### 75.2.1 Passkeys
 
 Passkey zaregistruješ v **Profil → Přístupové klíče**. Každý klíč má
 vlastní název, datum vytvoření a posledního použití. Lze jej přejmenovat nebo
@@ -74,7 +74,7 @@ je až po přidání prvního klíče. Další klíče už vyžadují aktuálně
 
 TOTP = time-based one-time password (RFC 6238).
 
-### 74.2.2 Aktivace TOTP
+### 75.2.2 Aktivace TOTP
 
 **Profil → 2FA / TOTP → Aktivovat**.
 
@@ -87,10 +87,10 @@ TOTP = time-based one-time password (RFC 6238).
 4. Zadej aktuální kód do MyÚčto → **Potvrdit aktivaci**.
 
 > 💡 Při ztrátě autentikátoru použij jinou passkey nebo **záložní kód**
-> (viz [§ 74.2.4](#7424-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI
+> (viz [§ 75.2.4](#7524-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI
 > rescue `php api/bin/reset-mfa.php <email>`.
 
-### 74.2.3 Přihlášení s passkey a MFA
+### 75.2.3 Přihlášení s passkey a MFA
 
 Po zadání e-mailu a hesla nabídne aplikace passkey, pokud ji účet má. Je-li
 aktivní také TOTP, lze explicitně přepnout na šestimístný kód z autentikátoru.
@@ -128,7 +128,7 @@ zruš systémový dialog a přihlas se e-mailem a heslem.
 Účet s passkey nedostane automatický fallback na e-mailový kód. Pokud passkey
 na aktuálním zařízení není dostupná, použij jinou passkey, TOTP nebo rescue.
 
-### 74.2.4 Obnova přístupu
+### 75.2.4 Obnova přístupu
 
 Kde passkey fyzicky leží, rozhoduje o tom, co se stane při ztrátě zařízení:
 
@@ -211,7 +211,7 @@ docker compose exec -u www-data app \
 > Reset je zapsaný do auditní stopy a zapečetěný v hash-chainu (§ 33a) — kdo ho
 > spustil a odkud, tedy zpětně dohledáš.
 
-### 74.2.5 Vynucení silného MFA
+### 75.2.5 Vynucení silného MFA
 
 Pokud chceš, aby **každý** uživatel měl passkey nebo TOTP,
 nastav v `cfg.php` (nebo `cfg.local.php`):
@@ -268,7 +268,7 @@ uvidí na health endpointu warning `mfa_methods_configuration`.
 > Health endpoint na chybnou konfiguraci upozorní; viz
 > [§ 99 Řešení problémů](99_Reseni_problemu.md).
 
-### 74.2.6 E-mailové ověření pro účet bez silného faktoru
+### 75.2.6 E-mailové ověření pro účet bez silného faktoru
 
 Pro uživatele, kteří nechtějí (nebo neumí) authenticator aplikaci — typicky
 externí účetní — lze zapnout **e-mailové OTP** jako druhý faktor. Kdo nemá
@@ -310,7 +310,7 @@ Chování:
 > uživateli zrušit i důvěryhodná zařízení a čekající kódy:
 > `php api/bin/reset-mfa.php <email>`.
 
-### 74.2.7 Serverový zámek session
+### 75.2.7 Serverový zámek session
 
 Automatický zámek browserové a PWA session je ve výchozím stavu vypnutý, aby se
 po aktualizaci nezměnilo chování existujících instalací. Správce nastavuje
@@ -370,7 +370,7 @@ zachovaný jen dokud prohlížeč stránku drží v paměti; po ukončení strá
 Androidem se neuložená data ztratí. Offline odemčení není možné, protože server
 musí vydat a ověřit jednorázovou challenge.
 
-### 74.2.8 Nasazení změny autentizačního modelu
+### 75.2.8 Nasazení změny autentizačního modelu
 
 Aktivní session vytvořené před doplněním autentizačního kontextu se po migraci
 označí jako `legacy`; migrace z pouhé existence TOTP neodvozuje, že konkrétní
@@ -395,7 +395,7 @@ instalací s jednotkami až stovkami řádků je to pod sekundu. Před upgradem 
 vyplatí spustit `php api/bin/cron-cleanup.php`, ať se nepřestavují dávno
 expirované řádky.
 
-## 74.3 Brute-force ochrana
+## 75.3 Brute-force ochrana
 
 | Pokusy během | Akce |
 |---|---|
@@ -405,7 +405,7 @@ expirované řádky.
 
 Implementace: **Redis** pokud běží, jinak **MariaDB MEMORY engine** fallback.
 
-## 74.4 IP allowlist (volitelné)
+## 75.4 IP allowlist (volitelné)
 
 V `cfg.php → ip_allowlist.allow` můžeš omezit přístup jen na vybrané IP /
 CIDR rozsahy.
@@ -432,7 +432,7 @@ Doporučení v produkci:
 > deploy. Není v UI **schválně** — v případě omylu by ses zablokoval
 > a nemohl si ho přes UI sundat.
 
-### 74.4.1 Za reverse proxy: `trusted_proxies` (důležité)
+### 75.4.1 Za reverse proxy: `trusted_proxies` (důležité)
 
 Pokud aplikace běží **za reverse proxy** (doporučené produkční nasazení — viz
 kap. 2), vidí všechny požadavky přicházet z IP proxy (např. brána Dockeru
@@ -462,7 +462,7 @@ skutečnou klientskou IP z hlavičky `X-Forwarded-For`:
 > Aplikace hlavičku respektuje pouze tehdy, když `REMOTE_ADDR` odpovídá
 > `trusted_proxies`.
 
-### 74.4.2 Edge proxy MUSÍ `X-Forwarded-For` přepisovat, ne appendovat
+### 75.4.2 Edge proxy MUSÍ `X-Forwarded-For` přepisovat, ne appendovat
 
 Tohle je **nejčastější a nejzávažnější chyba** v nasazení za proxy. `X-Forwarded-For`
 je obyčejná klientská hlavička — kdokoli ji může poslat s libovolným obsahem:
@@ -519,7 +519,7 @@ real_ip_header    X-Forwarded-For;
 real_ip_recursive on;
 ```
 
-## 74.5 RBAC (role-based access)
+## 75.5 RBAC (role-based access)
 
 Role se spravují v **Systém → Role**. Každý modul a významná akce mají jednu
 ze tří úrovní: **neviditelné**, **pouze čtení** nebo **zápis**. Zápis zahrnuje
@@ -545,7 +545,7 @@ nebo prázdný membership jsou vždy fail-closed.
 3. **UI** používá stejnou efektivní matici pro menu, přímé URL a skrytí akcí.
    Po přepnutí firmy stará práva zahodí a před vykreslením načte nová.
 
-## 74.6 CSRF + Origin check
+## 75.6 CSRF + Origin check
 
 Každý mutating request (POST / PUT / PATCH / DELETE) musí mít:
 
@@ -555,7 +555,7 @@ Každý mutating request (POST / PUT / PATCH / DELETE) musí mít:
 Bez nich → 403 `csrf_failed` / `origin_mismatch`. UI to obsluhuje
 automaticky (token v Pinia store, header v axios interceptoru).
 
-## 74.7 Activity log
+## 75.7 Activity log
 
 Každá mutace (vytvoření / změna / vystavení / smazání) se loguje. Záznamy
 obsahují:
@@ -570,15 +570,15 @@ obsahují:
   u `client.updated`)
 - Datum + čas
 
-Viz [71. Nastavení](71_Nastaveni.md) pro UI.
+Viz [72. Nastavení](72_Nastaveni.md) pro UI.
 
-### 74.7.1 Co log NEUKLÁDÁ
+### 75.7.1 Co log NEUKLÁDÁ
 
 - **Hesla** — ani staré, ani nové
 - **PII klientů** mimo to, co bylo změněno (jen fields seznam, ne hodnoty)
 - **Bankovní transakce** — log obsahuje jen ID importovaného výpisu
 
-### 74.7.2 Jak se do logu zapisuje IP adresa
+### 75.7.2 Jak se do logu zapisuje IP adresa
 
 Aplikace bere IP klienta z **IP síťového spojení** (`REMOTE_ADDR`). Když běží
 **za reverse proxy** (Docker, nginx, Cloudflare…), je tím spojením proxy — bez
@@ -587,7 +587,7 @@ konfigurace by se proto do auditu zapisovala **IP proxy**, ne reálného klienta
 
 Reálnou IP přečte aplikace z hlavičky `X-Forwarded-For` **pouze tehdy**, když
 `REMOTE_ADDR` odpovídá rozsahu v `cfg.ip_allowlist.trusted_proxies` (viz
-§ 74.4.1). Z hlavičky se bere **první** adresa (původní klient). Bez nastavené
+§ 75.4.1). Z hlavičky se bere **první** adresa (původní klient). Bez nastavené
 `trusted_proxies` se `X-Forwarded-For` ignoruje (ochrana proti podvržení).
 
 > 🛈 Stejná logika se zjišťování IP používá i pro **brute-force lockout**
@@ -595,7 +595,7 @@ Reálnou IP přečte aplikace z hlavičky `X-Forwarded-For` **pouze tehdy**, kdy
 > pokusy podle IP proxy = fakticky globálně. Po nastavení `trusted_proxies`
 > začnou audit log i lockout pracovat s reálnou klientskou IP.
 
-## 74.8 DKIM podpis e-mailů
+## 75.8 DKIM podpis e-mailů
 
 Pro **deliverabilitu** (aby gmail / o365 / seznam tvé maily nepoznačily jako
 spam) doporučujeme aktivovat DKIM:
@@ -607,7 +607,7 @@ spam) doporučujeme aktivovat DKIM:
 
 Detaily v `README.md` v rootu repa.
 
-## 74.9 Klávesové zkratky
+## 75.9 Klávesové zkratky
 
 Položka **Klávesové zkratky** je pátým bodem menu pod jménem uživatele a
 zároveň pátou záložkou obrazovky **Profil**. Na mobilu je dostupná ve výběru
@@ -622,7 +622,7 @@ zamčené relace ani v otevřeném modálním dialogu. **Obnovit výchozí** ods
 uživatelský přepis a vrátí bezpečné kombinace popsané v
 [Přehledu](10_Prehled.md#klavesove-zkratky).
 
-## 74.10 Tipy
+## 75.10 Tipy
 
 - **Vždycky 2FA pro admin** — pokud admin účet padne, padá vše. Žádná výmluva.
 - **Pravidelně rotuj hesla** každých 6–12 měsíců.
@@ -636,4 +636,4 @@ uživatelský přepis a vrátí bezpečné kombinace popsané v
 > MyInvoice zůstávají plně funkční včetně zápisu. Komerční moduly se skryjí
 > i pro čtení a API, jejich data ale zůstávají beze změny ve vlastní databázi
 > a po obnovení licence se znovu zpřístupní. Detail v
-> [77. Licence a aktivace](77_Licence_a_aktivace.md).
+> [78. Licence a aktivace](78_Licence_a_aktivace.md).

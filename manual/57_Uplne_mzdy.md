@@ -1,4 +1,4 @@
-# 56a. Úplné mzdy — aktivace, zaměstnavatel a zaměstnanci
+# 57. Úplné mzdy — aktivace, zaměstnavatel a zaměstnanci
 
 **Cesta: `Mzdy`**
 
@@ -16,7 +16,7 @@ nemění dosavadní Mzdovou rekapitulaci.
 > dokumentů a elektronická podání zatím nejsou určeny k ostrému použití.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](56_Mzdy.md).
 
-## 56a.1 Zapnutí pro firmu
+## 57.1 Zapnutí pro firmu
 
 V **Firma → Nastavení** je přepínač **Vést mzdy**. Ve výchozím stavu je zapnutý
 a nyní není navázaný na samostatnou licenci. Je-li vypnutý, sekce Mzdy se skryje
@@ -33,7 +33,7 @@ Rozpracovanou aktivaci lze zrušit, dokud je pouze ve stavu nastavení. Ostrý
 začátek se nezruší obyčejným přepínačem, aby nezmizely vazby na uzavřené mzdy,
 platby, dokumenty nebo podání.
 
-## 56a.2 Podporovaný rozsah
+## 57.2 Podporovaný rozsah
 
 Přehled mezd ukazuje podporované roky a schopnosti modulu. Stav má tento význam:
 
@@ -45,7 +45,7 @@ Přehled mezd ukazuje podporované roky a schopnosti modulu. Stav má tento výz
 Označení na přehledu je bezpečnostní hranice. Modul nesmí chybějící pravidlo
 nahradit nejbližším rokem nebo odhadem.
 
-## 56a.3 Nastavení zaměstnavatele
+## 57.3 Nastavení zaměstnavatele
 
 V **Mzdy → Nastavení zaměstnavatele** se evidují registrační a kontaktní údaje
 pro mzdovou agendu. Stránka používá čtyři samostatné záložky:
@@ -100,7 +100,7 @@ jiný uživatel, aplikace zobrazí přesný důvod konfliktu. Tlačítko pro na�
 aktuální verze obnoví také její nové číslo verze a teprve potom dovolí úpravu
 uložit znovu.
 
-## 56a.4 Společný seznam zaměstnanců
+## 57.4 Společný seznam zaměstnanců
 
 V **Mzdy → Zaměstnanci** se zobrazují stejné karty jako ve spodní části Mzdové
 rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto týká
@@ -158,7 +158,7 @@ ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila př
 uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
 účinnosti nebo aktivního stavu ověření automaticky zneplatní.
 
-## 56a.5 Pracovní vztah a předkontace
+## 57.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
 pro výpočet, podání i účetnictví:
@@ -179,7 +179,7 @@ ostrým použitím úplných mezd zkontroluj, zda právní titul odpovídá skut
 zejména starší karta „jednatel-společník“ sama nerozliší smlouvu o výkonu funkce
 od ostatní závislé činnosti.
 
-## 56a.6 Životní cyklus vztahu
+## 57.6 Životní cyklus vztahu
 
 Nový vztah začíná jako **Plánovaný**. Stav se nemění volným přepsáním pole, ale
 jen nabízenými akcemi:
@@ -194,7 +194,7 @@ kroku nebo návrat ze skončeného vztahu aplikace odmítne.
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
 
-## 56a.7 Historie smluvních podmínek a souběhy
+## 57.7 Historie smluvních podmínek a souběhy
 
 Tlačítko **Nová verze podmínek** založí další účinný interval. Předchozí verzi
 uzavře dnem před novou účinností; starší mzdové období proto pozdější změna
@@ -212,7 +212,7 @@ a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah
 jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
 identitu.
 
-## 56a.8 Checklist a časová osa
+## 57.8 Checklist a časová osa
 
 Detail ukazuje povinnosti nástupu, změny a skončení. Patří sem smlouva nebo
 dohoda, registrace a změny pro zdravotní pojišťovnu a ČSSZ/JMHZ, daňové
@@ -224,7 +224,7 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
-## 56a.9 Mzdové složky a vstupy
+## 57.9 Mzdové složky a vstupy
 
 V **Mzdy → Mzdové složky a vstupy** jsou běžnými záložkami oddělené:
 
@@ -258,7 +258,7 @@ zápisem vždy ukáže výsledek náhledu. Soubor můžeš vybrat fialovým tla�
 prvek používá také import docházky. Přijímá CSV a XLSX do 5 MB a chybu zobrazí
 přímo u souboru.
 
-### 56a.9.1 Rychlý měsíční vstup bez docházky
+### 57.9.1 Rychlý měsíční vstup bez docházky
 
 V **Mzdy → Rychlý měsíční vstup** vybereš měsíc a upravíš všechny účinné
 pracovní vztahy na jedné stránce. U každého zaměstnance se zobrazí jméno,
@@ -301,7 +301,7 @@ uložení nepodaří například proto, že stejný vstup mezitím změnil jiný
 uživatel, přesný důvod zůstane viditelný nad formulářem. Před dalším pokusem
 načti aktuální měsíc tlačítkem **Obnovit** a změny zkontroluj.
 
-## 56a.10 Absence, dovolená a DPN
+## 57.10 Absence, dovolená a DPN
 
 V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
 
@@ -339,7 +339,7 @@ a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
 > selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
 > aktuálně dostupné pouze pro legislativní ruleset roku 2026.
 
-## 56a.11 Mzdové běhy
+## 57.11 Mzdové běhy
 
 V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
 zadává také skutečné datum výplaty; podle něj se vybírají účinná pravidla
@@ -395,7 +395,7 @@ a nevznikne částečně schválená mzda.
 > pro ruční kontrolu a schválení zablokuje; aplikace chybějící zákonné údaje
 > neodhaduje.
 
-## 56a.12 Platby mezd a odvodů
+## 57.12 Platby mezd a odvodů
 
 V **Mzdy → Platby mezd a odvodů** vybereš mzdové období a připravíš platební
 závazky z aktuálních schválených revizí. Čistá mzda se vždy odvozuje z částky
@@ -457,7 +457,7 @@ souboru. Dokud nejsou všechny požadované částky průkazně spárovány a p�
 vratky vyřešeny, aplikace závazek ani daňové potvrzení neoznačí za skutečně
 uhrazené.
 
-## 56a.13 Srážky, exekuce a oddlužení
+## 57.13 Srážky, exekuce a oddlužení
 
 V **Mzdy → Srážky a exekuce** založíš zaměstnanci zákonnou srážku, exekuci
 nebo dohodu o srážkách. Případ začíná ve stavu **Přijato — čeká na ověření**.
@@ -486,7 +486,7 @@ ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevř
 Označení případu za uhrazený se zpřístupní až po zavedení skutečné platby
 a nulovém zůstatku; na této obrazovce se zatím nenabízí.
 
-## 56a.14 Dokumenty a měsíční balíček
+## 57.14 Dokumenty a měsíční balíček
 
 V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
 uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
@@ -556,7 +556,7 @@ revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsl
 > v detailu konkrétního vztahu a podací protokoly se evidují samostatně. Neúplný
 > měsíční balíček proto neznamená, že jsou všechny povinné výstupy hotové.
 
-## 56a.15 Podání a hlášení
+## 57.15 Podání a hlášení
 
 V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
 REGZEL. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
@@ -621,7 +621,7 @@ o oficiální PPZ/HOZ ani o elektronické podání; výstup vzniká jen ze všec
 aktuálních schválených neměnných revizí měsíce a před stažením se znovu
 ověřují jejich hashe a kontrolní součty.
 
-## 56a.16 Oprávnění a citlivé údaje
+## 57.16 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
@@ -646,7 +646,7 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 56a.17 Vztah k Mzdové rekapitulaci
+## 57.17 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

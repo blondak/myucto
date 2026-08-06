@@ -1,9 +1,9 @@
-# 71. Nastavení
+# 72. Nastavení
 
 V hlavním menu **Systém** je rozbalovací podmenu se sekcemi pro konfiguraci
 aplikace:
 
-- **Dodavatelé** — viz [70. Multi-supplier](70_Multi_supplier.md)
+- **Dodavatelé** — viz [71. Multi-supplier](71_Multi_supplier.md)
 - **Číselníky** — DPH sazby, země, jednotky a další pomocné seznamy
 - **Uživatelé** — správa lidí, kteří se přihlašují
 - **E-mail šablony** — texty automatických e-mailů
@@ -13,7 +13,7 @@ aplikace:
 Správa opakovaně používaných fakturačních položek je kvůli návaznosti na
 vystavování dokladů v menu **Prodej → Ceník**.
 
-## 71.1 Číselníky
+## 72.1 Číselníky
 
 **Systém → Číselníky**.
 
@@ -21,7 +21,7 @@ vystavování dokladů v menu **Prodej → Ceník**.
 
 4 záložky:
 
-### 71.1.1 Měny
+### 72.1.1 Měny
 
 Měny a bankovní účty aktuálního dodavatele jsou soustředěné na stránce
 **Peníze → Bankovní účty** (viz [29. Bankovní účty](29_Bankovni_ucty.md)).
@@ -49,7 +49,7 @@ Na stejné stránce je i konfigurace **bankovních e-mailových avíz**: IMAP ú
 mapování bankovní účet → IMAP účet → parser, parser provideri a přehled
 zpracovaných e-mailů. Detail je v [§ 28.7 Bankovní e-mailová avíza](28_Banka.md).
 
-### 71.1.2 Sazby DPH
+### 72.1.2 Sazby DPH
 
 ![Číselníky — DPH](img/15_ciselniky_dph.webp)
 
@@ -76,7 +76,7 @@ označeném jako OSS; běžný tuzemský řádek dál používá domácí sazby.
 > v českém přiznání k DPH. Zemi zkontroluj dřív, než spustíš import nebo hromadnou
 > úpravu OSS.
 
-### 71.1.2a OSS a daňové nastavení
+### 72.1.2a OSS a daňové nastavení
 
 V **Nastavení → Daňové nastavení** lze zapnout režim **OSS** pro aktuálního
 dodavatele. Nastavuje se země identifikace (typicky `CZ`), měna podání
@@ -91,13 +91,13 @@ překročení, ale režim sama nezapne ani doklady automaticky nepřeklasifikuje
 Podrobnosti jsou v [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss)
 a [OSS přiznání](36_Vykazy_DPH.md#oss-priznani-ossei1).
 
-### 71.1.2b Sazby států OSS
+### 72.1.2b Sazby států OSS
 
 **Cesta: `Nastavení → Číselníky → Sazby států OSS`.**
 
 Tenhle číselník obsahuje **sazby DPH členských států, proti kterým se OSS doklady
 ověřují**. Je to kontrolní číselník, ne sazby pro doklad — ty se zakládají o kartu
-vedle v [Sazbách DPH](#7112-sazby-dph). Rozdíl je podstatný: sazby DPH si zakládáš ty
+vedle v [Sazbách DPH](#7212-sazby-dph). Rozdíl je podstatný: sazby DPH si zakládáš ty
 (a můžeš v nich mít překlep), kdežto tenhle číselník je společný pro celou instanci
 a slouží jako nezávislá autorita při rozhodování, jestli plnění patří do tuzemska,
 nebo do OSS. Právě proto se ho aplikace ptá při importu, v editoru i při hromadné
@@ -139,12 +139,12 @@ Ve stejném bloku zůstává vedle ID datové schránky také **typ datové schr
 elektronická podání; typ poplatníka se přitom nastavuje samostatně podle právní
 formy firmy.
 
-### 71.1.3 Země
+### 72.1.3 Země
 
 Statický číselník — nemělo by být potřeba editovat. Obsahuje 200+ zemí podle
 ISO 3166-1.
 
-### 71.1.4 Jednotky
+### 72.1.4 Jednotky
 
 Číselník měrných jednotek pro položky faktury. Globální (sdílený mezi
 dodavateli), nahrazuje volný textový vstup za dropdown.
@@ -164,7 +164,7 @@ dodavateli), nahrazuje volný textový vstup za dropdown.
 > popisu i bez ceny tiše smažou. Můžeš tedy v editoru přidat víc řádků na
 > zásobu a nepoužité se neuloží.
 
-### 71.1.5 Ceníkové položky
+### 72.1.5 Ceníkové položky
 
 **Prodej → Ceník** (jen administrátor) spravuje ceník aktuálního dodavatele.
 Každá položka má kód, název, fakturační popis, jednotku, sazbu DPH a povinnou
@@ -197,7 +197,7 @@ Ceníková položka určuje, zda jsou její ceny s DPH, nebo bez DPH. Do dokladu
 šablony ji lze vložit jen při shodném režimu. Používaná položka se při smazání
 archivuje, aby zůstaly zachované vazby a pevné snapshoty šablon.
 
-## 71.2 Uživatelé
+## 72.2 Uživatelé
 
 **Systém → Uživatelé** (jen pro superadmina).
 
@@ -205,7 +205,7 @@ archivuje, aby zůstaly zachované vazby a pevné snapshoty šablon.
 
 Tabulka uživatelů, kteří se mohou přihlásit. Tlačítko **+ Nový uživatel**.
 
-### 71.2.1 Pole formuláře
+### 72.2.1 Pole formuláře
 
 | Pole | Význam |
 |---|---|
@@ -216,7 +216,7 @@ Tabulka uživatelů, kteří se mohou přihlásit. Tlačítko **+ Nový uživate
 | Jazyk | `cs` / `en` |
 | Aktivní | Vypnutý uživatel nemůže se přihlásit |
 
-### 71.2.2 Role a oprávnění
+### 72.2.2 Role a oprávnění
 
 **Systém → Role** nabízí databázový číselník rolí. Superadmin může vytvořit
 interní roli typu **staff** nebo externí roli typu **client** a pro každou
@@ -239,7 +239,7 @@ roli lze deaktivovat, ale její uživatelé tím okamžitě ztratí firemní opr
 Při souběžné editaci systém odmítne starší změnu, aby si administrátoři navzájem
 nepřepsali nastavení.
 
-### 71.2.3 Přiřazení firem
+### 72.2.3 Přiřazení firem
 
 Každý uživatel kromě superadmina má přístup pouze k firmám, které mu
 superadmin výslovně přidá v editaci uživatele. Firma se vyhledá podle názvu,
@@ -256,7 +256,7 @@ API tokenů.
 
 > 🛈 Systém brání odebrání nebo deaktivaci posledního aktivního superadmina.
 
-## 71.3 Můj profil
+## 72.3 Můj profil
 
 **Pravý horní roh → klik na jméno → Můj profil**. Stejná obrazovka jako
 [§ 8.5 Můj profil](08_Prihlaseni.md) — viz screenshot tam.
@@ -291,9 +291,9 @@ vypnutý (`0`). Při této hodnotě jej může uživatel dobrovolně zapnout v p
 v rozsahu 1 až 1440 minut. Kladná hodnota správce platí pro uživatele, kteří
 zvolili **Použít nastavení správce**, a je nepřekročitelným maximem; vlastní
 interval proto může být jen stejný nebo kratší. Ruční zamknutí zůstává dostupné
-vždy. Podrobnosti jsou v [74. Bezpečnost](74_Bezpecnost.md).
+vždy. Podrobnosti jsou v [75. Bezpečnost](75_Bezpecnost.md).
 
-## 71.4 E-mailové šablony
+## 72.4 E-mailové šablony
 
 **Systém → E-mail šablony**.
 
@@ -314,7 +314,7 @@ Seznam šablon:
 | `welcome` | Uvítací e-mail novému uživateli |
 | `test` | Pro Test odeslání (debug) |
 
-### 71.4.1 Editor šablony
+### 72.4.1 Editor šablony
 
 Klik na řádek → editor.
 
@@ -327,17 +327,17 @@ Záložky podle jazyka × formátu:
 
 Editor je **CodeMirror** s syntaxí Twig.
 
-### 71.4.2 Předmět
+### 72.4.2 Předmět
 
 Pole nahoře, podporuje placeholders (`{{ varsymbol }}`, …).
 
-### 71.4.3 Test odeslání
+### 72.4.3 Test odeslání
 
 Tlačítko **Test e-mail** dole — pošle vyplněnou šablonu na **tvůj** e-mail
 (přihlášeného admina) s vzorovými daty (faktura `2605001`, klient „Test
 Klient s.r.o.", …).
 
-### 71.4.4 Placeholders
+### 72.4.4 Placeholders
 
 Závisí na typu šablony. `invoice_new`:
 
@@ -351,7 +351,7 @@ Závisí na typu šablony. `invoice_new`:
 | `{{ supplier_name }}` | Dodavatel |
 | `{{ pdf_url }}` | Odkaz pro stažení PDF (pokud máš public link) |
 
-## 71.5 Activity log
+## 72.5 Activity log
 
 **Systém → Activity log**.
 
@@ -379,15 +379,15 @@ Použití:
 > podléhá stejné povinnosti uchovávat jako doklady samotné (§ 31 ZoÚ), takže by ji rotace
 > po několika měsících znehodnotila. Přehled retenčních lhůt najdete v
 > **Nástroje → Účetní nastavení → Archiv účetnictví** (viz
-> [Retence a právní zadržení](67_Ucetni_nastroje.md#677-retence-a-pravni-zadrzeni-na-backendu)).
+> [Retence a právní zadržení](68_Ucetni_nastroje.md#687-retence-a-pravni-zadrzeni-na-backendu)).
 
-## 71.6 Elektronické podpisy
+## 72.6 Elektronické podpisy
 
 Elektronické podpisy mají vlastní stránku **Systém -> Elektronické podpisy**.
 Aktuální konfigurace už není jeden certifikát dodavatele, ale sada
 podpisových profilů a mapování pro jednotlivé výstupy.
 
-## 71.7 Odesílací e-mailové profily
+## 72.7 Odesílací e-mailové profily
 
 **Systém → E-maily → záložka Odesílací profily** definuje identitu, pod kterou
 aplikace posílá odchozí e-maily aktuálního dodavatele.
@@ -452,7 +452,7 @@ Privátní DKIM klíč je stále globální v `cfg.php`. Odesílací profil mů�
 identity zprávy změnit i samotný transport, pokud je potřeba posílat pro různé
 domény přes různé SMTP účty nebo lokální MTA.
 
-## 71.8 SMTP log analýza
+## 72.8 SMTP log analýza
 
 **Systém → E-maily → záložka SMTP log analýza**. Přístup pouze pro **admin**.
 
@@ -462,7 +462,7 @@ kam byla zpráva doručena a kde nastal problém. Čte přímo logy MTA (poštov
 serveru) a převádí je na přehledný seznam událostí. Jen čte; nic neodesílá ani
 nemění.
 
-### 71.8.1 Co uvidíš
+### 72.8.1 Co uvidíš
 
 - **Souhrnné karty** — počty doručovacích pokusů, doručeno / odloženo /
   odmítnuto a počet přijatých podání.
@@ -501,7 +501,7 @@ Stavy:
 > prohledá **den odeslání a následující den** pro její příjemce a ukáže per-příjemce
 > stav (doručeno / odloženo / odmítnuto) i jednotlivé pokusy s odpovědí serveru.
 
-### 71.8.2 Typické použití
+### 72.8.2 Typické použití
 
 - **„Došlo to klientovi?"** — fulltext na e-mail příjemce → uvidíš poslední stav
   doručení a odpověď jeho serveru.
@@ -510,7 +510,7 @@ Stavy:
 - **Diagnostika odmítnutí** — `541/554 antispam policy`, `550 unauthenticated`
   ukazují na problém s reputací / SPF / DKIM / DMARC.
 
-### 71.8.3 Nastavení
+### 72.8.3 Nastavení
 
 Konfigurace je v `cfg.php` (vzor v `cfg.sample.php`) v sekci `smtp_log`:
 
@@ -532,7 +532,7 @@ Příklady cest:
 > stačí doplnit nový konektor; konfigurace zůstává stejná, jen se změní
 > `connector`.
 
-## 71.9 Uložené filtry a předvolby zobrazení
+## 72.9 Uložené filtry a předvolby zobrazení
 
 Na seznamech dokladů (Vydané i Přijaté faktury, Klienti, Sklad — položky i
 doklady, Pokladna, Deník, Hlavní kniha, Majetek) si každý uživatel může
@@ -541,7 +541,7 @@ uložit vlastní **kombinace filtrů** a nastavit si, **jak má tabulka vypadat*
 seřazeno). Obojí se ukládá **na uživatele** — každý přihlášený má svoje
 vlastní filtry a rozvržení tabulky, nezávisle na kolezích.
 
-### 71.9.1 Kde to najdeš
+### 72.9.1 Kde to najdeš
 
 V horní liště nad tabulkou (vedle vyhledávání a filtrů dané stránky) jsou tři
 ovládací prvky:
@@ -550,7 +550,7 @@ ovládací prvky:
 - **Sloupce** — rozbalovací nabídka se seznamem sloupců k zaškrtnutí,
 - **Hustota** — přepínač komfortního / kompaktního zobrazení řádků.
 
-### 71.9.2 Uložené filtry
+### 72.9.2 Uložené filtry
 
 Tlačítko **Uložené filtry** rozbalí nabídku se třemi částmi:
 
@@ -583,12 +583,12 @@ U každého uloženého filtru v seznamu jsou tři drobné ikony:
 
 Filtry jsou vázané na **konkrétní stránku** (uložený filtr pro Vydané faktury
 se nenabízí na Klientech) a na **aktuálního dodavatele** — při [přepnutí
-firmy](70_Multi_supplier.md) se nabídka filtrů načte znovu pro nově zvolenou
-firmu. Sloupce, hustota a řazení (viz [§ 71.9.3](#7193-sloupce-hustota-radku-a-razeni))
+firmy](71_Multi_supplier.md) se nabídka filtrů načte znovu pro nově zvolenou
+firmu. Sloupce, hustota a řazení (viz [§ 72.9.3](#7293-sloupce-hustota-radku-a-razeni))
 naproti tomu **nejsou** vázané na dodavatele — jsou to čistě osobní
 preference uživatele, platné napříč všemi firmami, ke kterým máš přístup.
 
-### 71.9.3 Sloupce, hustota řádků a řazení
+### 72.9.3 Sloupce, hustota řádků a řazení
 
 **Sloupce** — tlačítko rozbalí seznam všech dostupných sloupců tabulky se
 zaškrtávátky. Některé sloupce (typicky číslo dokladu, částka, akce) jsou
@@ -615,7 +615,7 @@ Všechny tři volby (sloupce, hustota, řazení) se ukládají **automaticky** �
 není potřeba nic potvrzovat tlačítkem, změna se krátce po kliknutí uloží na
 pozadí a při příštím otevření stránky (i z jiného počítače) se obnoví.
 
-### 71.9.4 Omezení a technické poznámky
+### 72.9.4 Omezení a technické poznámky
 
 - Na jednu stránku (a dodavatele) lze mít uloženo **max. 30 filtrů** na
   uživatele; po překročení limitu ukládání odmítne s hláškou o dosaženém
@@ -633,7 +633,7 @@ pozadí a při příštím otevření stránky (i z jiného počítače) se obno
 > příště jen klikni na jeho název (nebo si ho nastav jako výchozí, ať se
 > nabídne rovnou).
 
-## 71.10 Tipy
+## 72.10 Tipy
 
 - **Test šablony** vždy před produkčním nasazením — typo v Twig syntaxi by
   rozbilo odesílání všem klientům.
@@ -644,7 +644,7 @@ pozadí a při příštím otevření stránky (i z jiného počítače) se obno
 - **Z Activity logu** zjistíš všechno — i kdo neúspěšně se zkoušel přihlásit
   (filter akce `auth.login_failed`).
 
-## 71.11 Automatické zaúčtování při vystavení/přijetí dokladu
+## 72.11 Automatické zaúčtování při vystavení/přijetí dokladu
 
 V sekci **Daňové nastavení** (jen u firem v režimu **podvojné účetnictví** —
 u daňové evidence se doklady neúčtují, blok se vůbec nezobrazí) jsou dva
@@ -725,7 +725,7 @@ jak **Převody mezi vlastními účty**, tak **Rozpoznávání vlastních převo
 přes 261 a zůstává auditovatelná. Podrobnosti a práce s frontami jsou v
 [Automatu účtování](45_Automat.md) a kapitole [Banka](28_Banka.md).
 
-## 71.12 Brandingové profily
+## 72.12 Brandingové profily
 
 Brandingové profily jsou volitelný modul, který se zapíná v nastavení dodavatele.
 Dokud je vypnutý, faktury a e-maily používají původní údaje a branding dodavatele.
@@ -755,7 +755,7 @@ variantou. Původní konfigurace brandingu e-mailů se používá při vypnutém
 Obsahové e-mailové šablony zůstávají společné pro dodavatele a spravují se
 odděleně na stránce **E-mail šablony**.
 
-## 71.13 Firma → Kategorie
+## 72.13 Firma → Kategorie
 
 **Cesta: `Firma → Kategorie`**. Stránka obsahuje číselníky platné jen pro
 aktuální firmu:
@@ -775,11 +775,11 @@ jedinečný.
 > Kategorie nemění účetní předkontaci ani klasifikaci DPH. Slouží k provoznímu
 > členění nákladů a tržeb v dokladech a přehledech.
 
-## 71.14 Systém → Sazby a číselníky
+## 72.14 Systém → Sazby a číselníky
 
 **Cesta: `Systém → Sazby a číselníky`**. Stránka sdružuje systémové
 číselníky **Sazby DPH**, **Klasifikace DPH**, **Země** a **Jednotky**.
-Sazby, země a jednotky popisuje [§ 71.1](#711-iselniky); pro výkazy je
+Sazby, země a jednotky popisuje [§ 72.1](#721-iselniky); pro výkazy je
 zásadní také následující klasifikace DPH.
 
 ### Klasifikace DPH
@@ -798,9 +798,9 @@ Knihu DPH. Význam jednotlivých polí je podrobně popsán v
 
 **Daňové konstanty** už nejsou záložkou této stránky. Jsou samostatný bod
 menu hned pod Sazbami a číselníky; podrobnosti popisuje kapitola
-[Daňové konstanty](73_Danove_konstanty.md).
+[Daňové konstanty](74_Danove_konstanty.md).
 
-## 71.15 E-maily → Odeslané
+## 72.15 E-maily → Odeslané
 
 **Cesta: `Systém → E-maily → Odeslané`**. Výchozí záložka zobrazuje
 auditní přehled pokusů aplikace o odeslání zpráv. Zahrnuje e-maily k fakturám,
@@ -815,4 +815,4 @@ umožňuje rychle zobrazit jen neúspěšné pokusy.
 Záložka je pouze pro čtení: zprávu z ní nelze znovu odeslat ani smazat. Stav
 **Odesláno** potvrzuje úspěch odesílacího kroku aplikace, nikoli přečtení nebo
 doručení do schránky příjemce. Pro technickou diagnostiku SMTP komunikace
-použij [SMTP log analýzu](#718-smtp-log-analyza).
+použij [SMTP log analýzu](#728-smtp-log-analyza).

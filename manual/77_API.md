@@ -1,4 +1,4 @@
-# 76. REST API (automatizace a integrace)
+# 77. REST API (automatizace a integrace)
 
 MyÚčto.cz nabízí veřejné REST API pro integraci s e-shopy, CRM, Make/Zapier
 a vlastními skripty. API používá **Personal Access Tokens** (PAT) v hlavičce
@@ -26,7 +26,7 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
 
 ---
 
-## 76.1 Vytvoření tokenu
+## 77.1 Vytvoření tokenu
 
 1. **Systém → API tokeny** (admin) nebo **profil uživatele**.
 2. Klikni **Nový token**, vyplň:
@@ -49,7 +49,7 @@ odemčení zamčené PWA token nevytvoří. PAT je bearer credential a serverov�
 zámek browserové session se na něj nevztahuje; chraň jej vlastní expirací,
 minimálním scopem a včasnou revokací.
 
-## 76.2 Použití tokenu
+## 77.2 Použití tokenu
 
 ```bash
 curl -H "Authorization: Bearer mi_pat_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" \
@@ -98,13 +98,13 @@ curl -X POST https://myucto.cz/api/v1/invoices/123/mark-paid \
      -d '{"paid_at": "2026-05-10"}'
 ```
 
-## 76.3 Verzování
+## 77.3 Verzování
 
 - Stabilní cesta: `/api/v1/...`
 - Každá response vrací hlavičku `X-API-Version: 1`.
 - Pokud přidáme nekompatibilní změnu, půjde do `/api/v2/...`; v1 zůstane funkční.
 
-## 76.4 Rate limity
+## 77.4 Rate limity
 
 - **600 requestů / minutu / token** (defaultně, konfigurovatelně přes
   `cfg.rate_limits.api_per_min_per_token`).
@@ -122,7 +122,7 @@ X-RateLimit-Reset:     42          (sekundy do reset countru)
 Doporučujeme klienta s retry-with-backoff (`axios-retry`, Retry-After-aware) +
 sledovat `X-RateLimit-Remaining` a brzdit, když klesá pod ~10 %.
 
-## 76.5 Multi-supplier
+## 77.5 Multi-supplier
 
 Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 
@@ -132,7 +132,7 @@ Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 | Hlavička `X-Supplier-Id` se ignoruje. | Bez hlavičky = výchozí firma. |
 | Token nemůže „skočit“ do jiné firmy = bezpečnější. | Flexibilnější pro power-user skripty. |
 
-## 76.6 Scopes
+## 77.6 Scopes
 
 | Scope | Povolené metody |
 |---|---|
@@ -160,7 +160,7 @@ kde je vidět kontext a krok se potvrzuje. Integraci ani AI asistentovi to
 nebrání v tom podstatném — obratovku, rozvahu, výsledovku, saldo i odhad DPH
 si přes API přečtou.
 
-## 76.7 Omezení tokenu podle IP adresy
+## 77.7 Omezení tokenu podle IP adresy
 
 U každého tokenu lze nastavit **seznam povolených zdrojových adres**. Ve výpisu
 tokenů k tomu slouží sloupec **IP omezení**.
@@ -187,7 +187,7 @@ které nikdy nic nepovolí, a token by tiše přestal fungovat.
 > Když jede integrace z jednoho serveru, omez token na jeho adresu. Uniklý
 > token je pak k ničemu komukoli mimo tvou síť.
 
-## 76.8 Log volání API
+## 77.8 Log volání API
 
 Každé volání bearer tokenem se zaznamenává — včetně zamítnutých. Výpis najdeš
 v **Nastavení firmy → MCP server → Log volání**; vidíš vždy jen volání svých
@@ -201,7 +201,7 @@ Filtrovat jde podle tokenu, metody, cesty, zdroje (jen MCP) a na samotné chyby.
 Záznamy se drží **90 dní**, pak je uklidí údržbový cron. Nejde o auditní stopu
 podle § 33a — ta žije dál v Aktivitě uživatelů a nemaže se.
 
-## 76.9 Chybové odpovědi
+## 77.9 Chybové odpovědi
 
 Všechny chyby v unifikovaném formátu:
 
@@ -220,7 +220,7 @@ Všechny chyby v unifikovaném formátu:
 | `not_found` | Zdroj neexistuje (nebo nepatří aktuálnímu supplier-ovi) |
 | `rate_limited` | Překročen limit (viz `Retry-After`) |
 
-## 76.10 Nastavení dodavatele a číslování dokladů přes API
+## 77.10 Nastavení dodavatele a číslování dokladů přes API
 
 Veřejný subset nastavení dodavatele jde měnit tokenem se scope `read_write`
 (uživatel tokenu musí být admin):
@@ -263,7 +263,7 @@ curl -X POST https://mojefirma.example/api/v1/settings/supplier/logo \
 # → { "logo_path": "storage/supplier-logos/sup-1.png", "width": 480, "height": 160 }
 ```
 
-## 76.11 Brandingový profil faktury
+## 77.11 Brandingový profil faktury
 
 Po zapnutí modulu brandingových profilů vrací aktivní profily aktuálního
 dodavatele read-only endpoint:
@@ -302,7 +302,7 @@ výchozí profil dodavatele. Není-li žádný nastaven, použije základní ide
 Při vystavení se výsledná identita včetně cesty k verzi loga uloží do snapshotu
 faktury. Pozdější úprava profilu tedy již vystavený doklad nezmění.
 
-## 76.12 Export faktur přes API
+## 77.12 Export faktur přes API
 
 - **`GET /api/v1/invoices/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM`**
   — hromadný export vystavených dokladů za měsíc (nebo
@@ -318,7 +318,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
   "https://mojefirma.example/api/v1/invoices/export?format=isdoc&month=2026-06"
 ```
 
-## 76.13 Bezpečnost tokenů — best practices
+## 77.13 Bezpečnost tokenů — best practices
 
 - **Ukládej token jako secret** (password manager, Make encrypted variable, GitHub Secrets…).
   Nepushuj do gitu.
@@ -329,7 +329,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 - **Sleduj `last_used_at`** v UI — token, který se 3 měsíce nepoužil, asi nepotřebuješ.
 - **Při ztrátě/podezření** — okamžitě **Zrušit** v UI. Revokace je instantní (žádný cache).
 
-## 76.14 Co API nepokrývá
+## 77.14 Co API nepokrývá
 
 - **Admin a settings endpointy** (`/api/admin/*` a `/api/settings/*` mimo
   veřejný subset — supplier, číselníky) nejsou v `openapi.yaml` - jsou určené

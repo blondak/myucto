@@ -1,4 +1,4 @@
-# 65. Spojené osoby
+# 66. Spojené osoby
 
 **Cesta: `Nástroje → Spojené osoby`**
 
@@ -6,7 +6,7 @@ Stránka soustřeďuje zdanitelná plnění se spojenými osobami, měřitelné
 odchylky prodejních cen a ručně evidované úpravy základu daně podle
 § 23 odst. 7 zákona o daních z příjmů.
 
-## 65.1 Označení spojené osoby
+## 66.1 Označení spojené osoby
 
 Systém právní nebo faktický vztah z dokladů neodvozuje. Partner musí být v
 kartě kontaktu označen jako **Spojená osoba** a lze u něj uvést typ vztahu:
@@ -16,7 +16,7 @@ včetně poznámky s doložením vazby.
 Stránka je dostupná uživatelům s právem číst sestavy. Založení nebo smazání
 úpravy základu daně vyžaduje právo dokončovat daňové sestavy.
 
-## 65.2 Soupis transakcí
+## 66.2 Soupis transakcí
 
 Po výběru roku se načtou vydané i přijaté doklady partnerů označených jako
 spojené:
@@ -31,7 +31,7 @@ soupisu nevstupují. Tabulka ukazuje směr, partnera, typ vztahu, doklad, datum
 a částku bez DPH. Celkem je prostý součet vydaných i přijatých částek; nejde
 o jejich vzájemné netto. Doklad vede na svůj detail.
 
-## 65.3 Měřitelné cenové odchylky
+## 66.3 Měřitelné cenové odchylky
 
 Obecnou cenu obvyklou systém nezná. Umí porovnat jen vydanou položku spojené
 osobě s vlastními prodeji stejné položky nespojeným osobám ve zvoleném roce.
@@ -61,7 +61,7 @@ soupisu a cenu obvyklou musí doložit účetní například benchmarkem, posudk
 nebo obchodním důvodem. Výsledek je upozornění, nikoli automatická změna DPH
 nebo účetnictví.
 
-## 65.4 Úpravy základu daně
+## 66.4 Úpravy základu daně
 
 Tlačítko **Přidat úpravu** eviduje pro fiskální rok:
 
@@ -81,7 +81,7 @@ Záznam nic nezaúčtuje; stává se podkladem návrhu přiznání k dani z př�
 právnických osob, kde se předává seznam, zvýšení, snížení, čistá delta,
 objem transakcí a odchylky.
 
-## 65.5 Návazné kontroly
+## 66.5 Návazné kontroly
 
 Měsíční kontrola vždy informativně vypíše počet transakcí se spojenými
 osobami. Zároveň varuje, pokud existuje alespoň jedna měřitelná cenová

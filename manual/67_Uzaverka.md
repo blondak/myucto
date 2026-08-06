@@ -1,4 +1,4 @@
-# 66. Uzávěrka
+# 67. Uzávěrka
 
 **Cesta: `Nástroje → Uzávěrka`**
 
@@ -6,7 +6,7 @@ Kapitola popisuje modul **Účetní období** a **uzávěrkový průvodce** pro 
 v **podvojném účetnictví** (menu se zobrazuje jen firmám v tomto účetním režimu —
 u daňové evidence se místo něj zobrazuje daňový deník příjmů a výdajů). Archiv
 účetnictví je samostatně popsán v kapitole
-[Nástroje](67_Ucetni_nastroje.md#676-archiv-ucetnictvi).
+[Nástroje](68_Ucetni_nastroje.md#686-archiv-ucetnictvi).
 
 > [!NOTE]
 > Uzávěrka je vícekrokový proces s auditní stopou — vazba na §17 odst. 7, §35 a
@@ -15,7 +15,7 @@ u daňové evidence se místo něj zobrazuje daňový deník příjmů a výdaj�
 > schválení/znovuotevření období, uzavření knih, otevření nového roku, revert kroků
 > a archivaci.
 
-## 66.1 Účetní období — přehled a stavy
+## 67.1 Účetní období — přehled a stavy
 
 Stránka **Účetní období** zobrazuje tabulku všech hospodářských/kalendářních roků
 firmy: **Účetní rok**, **Začátek**, **Konec**, **Stav** a sloupec **Akce**. Na mobilu
@@ -42,7 +42,7 @@ Každé období prochází stavovým automatem s pěti stavy, zobrazenými jako 
 | Stav | Význam |
 |---|---|
 | **Otevřené** (`open`) | Běžný provoz — do období lze účtovat, uzávěrka ještě nezačala. |
-| **Uzavírá se** (`closing`) | Probíhá uzávěrkový průvodce (viz [§ 66.2](#662-uzaverkovy-pruvodce-zahajeni-a-kroky)). |
+| **Uzavírá se** (`closing`) | Probíhá uzávěrkový průvodce (viz [§ 67.2](#672-uzaverkovy-pruvodce-zahajeni-a-kroky)). |
 | **Uzavřené** (`closed`) | Knihy jsou uzavřené (krok *Uzavření knih* proběhl), ale závěrka ještě není schválená — kroky lze vzít zpět. |
 | **Zkontrolované** (`reviewed`) | **Vratná** interní kontrola / review závěrky před zákonným schválením — běžný pracovní stav (např. odsouhlasení hlavní účetní). Kontrolu lze s uvedením důvodu kdykoli zrušit a vrátit období na Uzavřené. **Nejde o zákonné schválení.** |
 | **Schválené** (`approved`) | **Nevratné** zákonné schválení účetní závěrky (**§ 17 odst. 7 ZoÚ**); řádek má ikonu 🔒. Uchovává datum schválení, schvalující orgán/osobu, odkaz na rozhodnutí o schválení a hash dokumentu. Schválení už **nelze** zrušit ani přepsat přechodem stavu; případné opravy se řeší v období zjištění (§ 35 ZoÚ). |
@@ -70,7 +70,7 @@ Přímo ze seznamu (jen administrátor) lze provést tyto samostatné přechody:
   Pokud období má zaúčtované uzávěrkové/otevírací zápisy, systém znovuotevření odmítne
   chybou „Existují uzávěrkové zápisy — nejprve vezměte zpět otevření roku a uzavření
   knih" — je nutné nejdřív v průvodci vzít zpět kroky *Otevření nového roku* a
-  *Uzavření knih* (viz [§ 66.3](#663-uzavreni-knih-a-otevreni-noveho-roku)).
+  *Uzavření knih* (viz [§ 67.3](#673-uzavreni-knih-a-otevreni-noveho-roku)).
 
 Všechny tyto přechody nesou interní verzi záznamu (kontrola souběžné editace) — pokud
 období mezitím upravil jiný uživatel, systém to ohlásí a znovu načte aktuální stav
@@ -99,7 +99,7 @@ místo provedení akce.
 > dokladů starších než zamčené datum, i když je období samo pořád Otevřené.
 > Podrobně viz [Účetní deník § 44.9 Zámek účtování k datu](44_Ucetni_denik.md).
 
-## 66.2 Uzávěrkový průvodce — zahájení a kroky
+## 67.2 Uzávěrkový průvodce — zahájení a kroky
 
 Kliknutím na odkaz **„Uzávěrka"** u období otevřeš stránku **Uzávěrka období** —
 levý sloupec s kroky, pravý panel s detailem aktuálně vybraného kroku. V
@@ -126,7 +126,7 @@ fajfkou, přeskočený pomlčkou a popiskem „přeskočeno":
 | 5 | Časové rozlišení | `deferrals` | ✅ | dle potřeby (potvrdit/přeskočit) |
 | 6 | Opravné položky | `provisions` | ✅ | volitelný |
 | 7 | Daň z příjmů | `income_tax` | ✅ | volitelný (u fyzické osoby se přeskočí) |
-| 8 | **Zásoby** | `stock` | ✗ | **podmíněný** — jen firma se skladem účtovaným způsobem B; jinak automaticky `skipped` (viz [§ 66.2.7](#6627-backendovy-krok-zasoby)) |
+| 8 | **Zásoby** | `stock` | ✗ | **podmíněný** — jen firma se skladem účtovaným způsobem B; jinak automaticky `skipped` (viz [§ 67.2.7](#6727-backendovy-krok-zasoby)) |
 | 9 | Uzavření knih | `close_books` | ✅ | až po dokončení/přeskočení kroků 1–8 |
 | 10 | Otevření nového roku | `open_next` | ✅ | až po Uzavření knih |
 
@@ -136,7 +136,7 @@ jen backendový, UI jej **nezobrazuje ani neumí spustit**. Firma se zapnutým s
 je nutný správcovský zásah přes podporované API, nebo uzávěrku zatím neuzavírat. Firma
 bez skladu je tímto omezením nedotčena (krok se sám označí `skipped`).
 
-### 66.2.1 Krok 1 — Předběžné kontroly
+### 67.2.1 Krok 1 — Předběžné kontroly
 
 Tlačítkem **„Spustit kontroly"** systém projede sadu kontrol nad účetnictvím období a
 zobrazí je v tabulce se sloupci **Závažnost** (Chyba/Varování/Info), **Kontrola** a
@@ -158,7 +158,7 @@ Pokud kontroly obsahují alespoň jednu **chybu**, zobrazí se u tlačítka čer
 „Chyby brání uzavření knih" a krok *Uzavření knih* zůstane zablokovaný, dokud
 chyby neodstraníš a kontroly znovu nespustíš.
 
-### 66.2.2 Krok 2 — Odpisy majetku
+### 67.2.2 Krok 2 — Odpisy majetku
 
 Panel jen odkazuje na modul **Majetek** (tlačítko „Přejít na Majetek — Zaúčtovat
 odpisy"), kde se účetní odpisy roku skutečně zaúčtují. Samotný krok v uzávěrce se jen
@@ -173,9 +173,9 @@ u dokončeného kroku se zobrazí datum potvrzení.
 > zaúčtování odpisů přímo pro tento krok uzávěrky, které umí zaúčtovat i do období ve
 > stavu Uzavírá se — vlastní tlačítko přímo v tomto panelu zatím v UI není, takže
 > v běžném provozu odpisy zaúčtuj na Majetku ještě **před** zahájením uzávěrky, jak je
-> popsáno v [Majetek § 49.6](57_Majetek.md).
+> popsáno v [Majetek § 49.6](58_Majetek.md).
 
-### 66.2.3 Krok 3 — Kurzové rozdíly
+### 67.2.3 Krok 3 — Kurzové rozdíly
 
 Krok se zpřístupní až po zahájení uzávěrky. Zobrazí přecenění cizoměnových položek
 kurzem ČNB k rozvahovému dni (§24 odst. 6+7 ZoÚ, ČÚS 006) ve dvou částech:
@@ -201,7 +201,7 @@ Pokud se v nastavení nevytváří storno přecenění na začátku nového roku
 následující přecenění dopočítá jen rozdíl proti již zaúčtované účetní hodnotě;
 předchozí kurzový rozdíl se proto neúčtuje podruhé.
 
-### 66.2.4 Kroky 4–5 — Dohadné položky a časové rozlišení
+### 67.2.4 Kroky 4–5 — Dohadné položky a časové rozlišení
 
 Oba kroky fungují stejně — asistent pro ruční zaúčtování rozvahových položek k
 rozvahovému dni:
@@ -269,7 +269,7 @@ jako průkazný podklad.
 > uznatelnosti, zůstatky 388/389 a 563/663) najdeš v samostatné sestavě API
 > `/accounting/reports/tax-base-adjustments`.
 
-### 66.2.5 Krok — Opravné položky k pohledávkám
+### 67.2.5 Krok — Opravné položky k pohledávkám
 
 Volitelný krok pro tvorbu opravných položek k pohledávkám po splatnosti (zásada
 opatrnosti, § 25 odst. 3 zákona o účetnictví). Tlačítkem **„Načíst pohledávky"** se
@@ -292,7 +292,7 @@ automaticky promítne do úprav základu daně (DPPO); zákonná OP na **558** z
 daňově uznatelná. Krok lze **přeskočit** a administrátor ho může tlačítkem **„Vzít
 krok zpět"** vrátit (zápisy OP se smažou s auditní stopou).
 
-### 66.2.6 Krok — Daň z příjmů
+### 67.2.6 Krok — Daň z příjmů
 
 Volitelný krok pro zaúčtování **předpisu splatné daně z příjmů** k rozvahovému dni
 (**MD 591 / D 341**). Panel přednabídne částku z **finalizovaného přiznání DPPO**
@@ -309,7 +309,7 @@ nepoužitelný a vyžaduje jeho vědomé přeskočení.
 > Kroky Opravné položky a Daň z příjmů musí být před uzavřením knih
 > **dokončené nebo vědomě přeskočené**, protože ovlivňují výsledek hospodaření.
 
-### 66.2.7 Backendový krok — Zásoby
+### 67.2.7 Backendový krok — Zásoby
 
 **Podmíněnost.** Krok je aktivní jen pro firmu s **zapnutým skladem** vedeným
 v podvojném účetnictví; ostatní firmy backend automaticky označí `skipped` (jinak by
@@ -341,7 +341,7 @@ inventuru, ocenění, neidentifikované doklady a posouzení mank a přebytků.
 > vyžaduje před uzavřením knih, takže standardní UI cestou nelze uzávěrku dokončit.
 > Firma bez skladu je tímto omezením nedotčena — krok se označí jako nepoužitelný.
 
-## 66.3 Uzavření knih a otevření nového roku
+## 67.3 Uzavření knih a otevření nového roku
 
 ### Krok — Uzavření knih
 
@@ -354,7 +354,7 @@ přeskočené). Po potvrzení v dialogu se zaúčtuje uzávěrkový zápis:
 - **rozvahové účty** se uzavřou přes **702 — Konečný účet rozvažný**,
 - vypočte se **výsledek hospodaření** a období přejde do stavu **Uzavřené**.
 
-Doklad dostane číslo z řady **UZ** (viz [§ 66.5](#665-iselne-rady-dokladu-uzaverky)).
+Doklad dostane číslo z řady **UZ** (viz [§ 67.5](#675-iselne-rady-dokladu-uzaverky)).
 Po dokončení kroku panel zobrazí zjištěný **výsledek hospodaření**, **číslo dokladu**
 a odkaz **„Zobrazit uzávěrkové zápisy v deníku"**. Dokud závěrka není schválená,
 administrátor může krok tlačítkem **„Vzít zpět uzavření knih"** zrušit — uzávěrkové
@@ -369,16 +369,16 @@ rozvažný** a převede výsledek hospodaření na účet **431**. Doklad dostan
 řady **OT**.
 
 Pokud je v nastavení uzávěrky zapnutá volba **„Storno přecenění saldokonta k 1. dni
-nového období"** (viz [§ 66.5](#665-iselne-rady-dokladu-uzaverky)), zaúčtuje se
+nového období"** (viz [§ 67.5](#675-iselne-rady-dokladu-uzaverky)), zaúčtuje se
 zároveň zrcadlový storno zápis kurzových rozdílů z kroku 3 — doklad z řady **KR**; v
 panelu se pak zobrazí hláška „Bylo zaúčtováno storno přecenění saldokonta k 1. dni
 období." Administrátor může i tento krok tlačítkem **„Vzít zpět otevření roku"**
 zrušit.
 
-## 66.4 Interní kontrola, schválení závěrky a znovuotevření
+## 67.4 Interní kontrola, schválení závěrky a znovuotevření
 
 Jakmile je krok *Uzavření knih* hotový, období je ve stavu **Uzavřené** a je možné
-kroky ještě revidovat (revert) nebo období znovuotevřít (viz [§ 66.1](#661-cetni-obdobi-prehled-a-stavy)).
+kroky ještě revidovat (revert) nebo období znovuotevřít (viz [§ 67.1](#671-cetni-obdobi-prehled-a-stavy)).
 
 Aplikace rozlišuje **dva různé** koncepty, které je nutné nezaměňovat:
 
@@ -399,7 +399,7 @@ Aplikace rozlišuje **dva různé** koncepty, které je nutné nezaměňovat:
 > (§ 35 ZoÚ), nikoli zrušením schválení. Pro pouhé interní odsouhlasení, které chceš mít
 > možnost vzít zpět, použij vratný stav **Zkontrolované**, ne zákonné schválení.
 
-### 66.4.1 Rozdělení výsledku hospodaření (431 → 428 / 429 / 364)
+### 67.4.1 Rozdělení výsledku hospodaření (431 → 428 / 429 / 364)
 
 Po schválení závěrky (a po převodu VH na účet **431** otevíracím zápisem) je na
 stránce uzávěrky dostupná karta **„Rozdělení výsledku hospodaření"**. Zápis se účtuje
@@ -426,7 +426,7 @@ hromady** (musí ležet v otevřeném období) a tlačítkem
 **„Zaúčtovat rozdělení VH"** se vytvoří doklad z řady **ID**. Rozdělení je idempotentní
 a administrátor ho může vzít zpět.
 
-## 66.5 Číselné řady dokladů uzávěrky
+## 67.5 Číselné řady dokladů uzávěrky
 
 Tlačítkem **„Číselné řady"** na stránce Účetní období (jen administrátor) otevřeš
 modální okno se dvěma částmi:
@@ -454,7 +454,7 @@ nedorovnávají** (§11 ZoÚ — jedinečné označení dokladu).
 - **Automatická čísla dokladů ručních zápisů (řada ID)** — když ruční zápis v deníku
   nemá vyplněné číslo dokladu, přidělí se mu automaticky číslo z řady ID.
 - **Storno přecenění saldokonta k 1. dni nového období** — řídí, zda krok *Otevření
-  nového roku* zaúčtuje i zrcadlové storno kurzových rozdílů (viz [§ 66.3](#663-uzavreni-knih-a-otevreni-noveho-roku)).
+  nového roku* zaúčtuje i zrcadlové storno kurzových rozdílů (viz [§ 67.3](#673-uzavreni-knih-a-otevreni-noveho-roku)).
 - **Časové rozlišení drobného majetku** — výchozí politika `none`, `pro_rata`
   nebo `flat_pct`; nové účetní období ji při založení převezme. Konkrétní
   uzávěrka pak ukládá a používá snapshot politiky svého období, takže změna
@@ -467,7 +467,7 @@ nedorovnávají** (§11 ZoÚ — jedinečné označení dokladu).
 > účet odeslání/přijetí, datum odeslání/přijetí) zaúčtuje dvě nohy převodu přes
 > účet **261 — Peníze na cestě** a obě sdílejí společné číslo dokladu z řady PP.
 
-## 66.6 Uzávěrkový balíček
+## 67.6 Uzávěrkový balíček
 
 **Cesta: `Nástroje → Uzávěrka → Uzávěrkový balíček`**
 
@@ -494,18 +494,18 @@ vyžaduje `reports.export:write`.
 > inventurní zápisy, bankovní potvrzení ani jiné podklady. Přiznání k dani je jen
 > **vygenerovaná** sestava (XML nese vlastní varování) — **skutečné podání dokládá až
 > importovaný podaný soubor**, ne balíček (viz křížová kontrola **K9 — rekonciliace
-> přiznání** v [§ 66.7.1](#6671-kontrolni-mapa-k1k10-a-jeji-interpretace)). Případné
+> přiznání** v [§ 67.7.1](#6771-kontrolni-mapa-k1k10-a-jeji-interpretace)). Případné
 > chybějící/přeskočené sestavy jsou vypsané jako **upozornění** v README balíčku a
 > v logu úlohy. Na rozdíl od Archivu účetnictví nejde o úplnou technickou zálohu ani
 > prostředek obnovy firmy.
 
-## 66.7 Měsíční kontrola
+## 67.7 Měsíční kontrola
 
 Praktické pořadí kontrol, inventarizaci rozvahových účtů a společnou interpretaci
 K1–K10 shrnuje samostatná kapitola
-[Účetní kontroly a inventarizace](58_Ucetni_kontroly_a_inventarizace.md).
+[Účetní kontroly a inventarizace](59_Ucetni_kontroly_a_inventarizace.md).
 
-Uzávěrkové kontroly z [kroku 1](#6621-krok-1-predbezne-kontroly) nemusíš čekat až na
+Uzávěrkové kontroly z [kroku 1](#6721-krok-1-predbezne-kontroly) nemusíš čekat až na
 konec roku — stránka **Účetnictví → Měsíční kontrola** spustí **stejné kontroly**
 kdykoli během roku, nad libovolným rozsahem uvnitř otevřeného účetního období, a **bez
 zahájení uzávěrky** (stav období se nemění). Hodí se jako běžná měsíční rutina: po
@@ -549,7 +549,7 @@ zamknout, aby se do něj náhodou nezaúčtoval další doklad.
 > nezávislý (obsahuje navíc i kontroly vázané na **celé** účetní období — kontinuitu
 > výsledku hospodaření, vyrovnanost deníku).
 
-### 66.7.1 Kontrolní mapa K1–K10 a její interpretace
+### 67.7.1 Kontrolní mapa K1–K10 a její interpretace
 
 K1–K10 je společná mapa kontrol rozprostřených mezi import dokladu, bankovní párování,
 účetní sestavy, měsíční kontrolu a uzávěrku. Ne každé K se proto na stránce Měsíční
@@ -574,7 +574,7 @@ Kontroly vždy spouštěj znovu po opravě. Uložení komentáře nebo přeskoč
 záznam rozhodnutí, nikoli potvrzení správnosti; k významným varováním uchovej podklad
 a zdůvodnění podle vnitřní směrnice.
 
-## 66.8 Omezení a tipy
+## 67.8 Omezení a tipy
 
 - Celý modul (období, průvodce i uzávěrkový balíček) je dostupný jen firmám vedeným v
   **podvojném účetnictví** — u daňové evidence se nezobrazuje.

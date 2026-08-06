@@ -1,4 +1,4 @@
-# 68. EPO podání, archív a daňová rekonciliace
+# 69. EPO podání, archív a daňová rekonciliace
 
 Tato kapitola vysvětluje rozdíl mezi **výpočtem**, **vygenerovaným XML**, skutečně
 **odeslaným podáním** a pozdějším potvrzením správce daně. Tyto stavy se nesmějí
@@ -8,7 +8,7 @@ správou.
 Související výpočty jsou popsány v kapitolách [Výkazy DPH](36_Vykazy_DPH.md),
 [Souhrnné hlášení](39_Souhrnne_hlaseni.md) a [Daň z příjmů](38_Dan_z_prijmu.md).
 
-## 68.1 Stavy daňového výstupu
+## 69.1 Stavy daňového výstupu
 
 | Stav | Co prokazuje | Co neprokazuje |
 |---|---|---|
@@ -22,7 +22,7 @@ vygenerované snapshoty, výsledek lokální validace, historii předání do EP
 uložené důkazní dokumenty a stav podání. Záznam, ke kterému už existuje EPO
 pokus, dokument nebo potvrzený stav, nelze smazat.
 
-## 68.2 Co se v archivu ukládá
+## 69.2 Co se v archivu ukládá
 
 Při ostrém exportu se uchovává přesný XML obsah, velikost, SHA-256 otisk, typ
 formuláře, období, varianta podání a výsledek dostupné validace. Otisk umožňuje
@@ -56,7 +56,7 @@ U DPHDP3, KH a souhrnného hlášení je archivovaný soubor technickým obrazem
 vygenerovaného výkazu. Před odesláním vždy porovnej období, typ podání, identifikační
 údaje a součty s náhledem a související kontrolní sestavou.
 
-## 68.3 Přímé podání přes EPO API
+## 69.3 Přímé podání přes EPO API
 
 Přímý režim vytvoří uznávaný elektronický podpis ZAREP, provede test oficiální
 podatelny a po samostatném potvrzení odešle skutečné podání. Potřebuješ osobní
@@ -273,7 +273,7 @@ evidovanou identitou. MyÚčto na jeho nerozpoznání upozorní, ale samo nerozh
 o oprávnění jednat za konkrétní daňový subjekt. To musí odpovídat skutečnému
 zastoupení, funkci nebo plné moci.
 
-## 68.4 Asistované podání přes EPO
+## 69.4 Asistované podání přes EPO
 
 1. Dokonči účetní nebo evidenční kontrolu daného období.
 2. Vygeneruj XML a ověř, že interní kontrola nehlásí blokující chybu.
@@ -312,10 +312,10 @@ dosavadní aktivní pokus se v historii označí jako zrušený a vznikne nový.
 
 Samotné stažení XML neposouvá stav na odesláno a nemá nahrazovat ruční zámek období.
 Po úspěšném podání uzamkni příslušné daňové období k datu přes
-[Měsíční kontrolu](66_Uzaverka.md#667-mesicni-kontrola), pokud to již neprovedlo
+[Měsíční kontrolu](67_Uzaverka.md#677-mesicni-kontrola), pokud to již neprovedlo
 řízené workflow firmy.
 
-## 68.5 Rekonciliace proti skutečně podanému XML
+## 69.5 Rekonciliace proti skutečně podanému XML
 
 Rekonciliace odpovídá na otázku: „Shoduje se dnešní výpočet MyÚčto s tím, co bylo
 skutečně odesláno?“ Není to totéž jako kontrola, že dvě interní sestavy čerpají ze
@@ -369,7 +369,7 @@ Pro tato podání uchovej finální XML i potvrzení a při opravě porovnej pod
 s aktuálním náhledem ručně. Rozdíly po podání mohou znamenat pozdě doplněný doklad,
 změněnou klasifikaci, kurz, datum přijetí nebo ruční zásah provedený přímo na portálu.
 
-## 68.6 Řádné, opravné a dodatečné podání
+## 69.6 Řádné, opravné a dodatečné podání
 
 - **Řádné** je první tvrzení za období.
 - **Opravné** nahrazuje předchozí podání před uplynutím lhůty.
@@ -379,7 +379,7 @@ Před vytvořením další varianty vždy určuj poslední účinné podání po
 správce daně, ne podle nejnovějšího souboru v archivu. Vygenerovaný, ale neodeslaný
 soubor se poslední známou daní nestává.
 
-## 68.7 Co systém nenahrazuje
+## 69.7 Co systém nenahrazuje
 
 - podání na ePortál ČSSZ nebo portály zdravotních pojišťoven,
 - právní oprávnění podepisující osoby jednat za konkrétní daňový subjekt,

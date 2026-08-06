@@ -1,4 +1,4 @@
-# 67. Nástroje
+# 68. Nástroje
 
 **Cesta: `Nástroje → Účetní nastavení`**. Sekce **Nástroje** následuje v
 hlavním menu bezprostředně po **Účetnictví** v horním i levém rozložení.
@@ -15,9 +15,9 @@ Nástroje jsou jedna položka menu s několika záložkami. Viditelnost závisí
 | Archiv účetnictví | Podvojné účetnictví, jen administrátor |
 
 Účetní období a průvodce uzávěrkou jsou samostatný bod menu
-[Uzávěrka](66_Uzaverka.md), nikoli záložka Nástrojů.
+[Uzávěrka](67_Uzaverka.md), nikoli záložka Nástrojů.
 
-## 67.1 Hromadný export
+## 68.1 Hromadný export
 
 **Cesta: `Daně → Hromadný export`**. Hromadný export je samostatná stránka,
 nikoli záložka Nástrojů.
@@ -30,7 +30,7 @@ spočítá dostupné soubory a dovolí vybrat:
 - bankovní výpisy v PDF a GPC,
 - knihu DPH.
 
-### 67.1.1 Zařazení do období
+### 68.1.1 Zařazení do období
 
 Export používá stejné rozhodné datum jako daňová vrstva:
 
@@ -44,7 +44,7 @@ Export používá stejné rozhodné datum jako daňová vrstva:
 Tím se podklady přijatých faktur zařadí do stejného měsíce jako kniha DPH.
 Změna data doručení nebo daňové klasifikace proto může změnit výsledek náhledu.
 
-### 67.1.2 Background job
+### 68.1.2 Background job
 
 Po spuštění vznikne úloha `queued → running → completed`, případně `failed`
 nebo `cancelled`. Worker vytváří soubory postupně, ukládá aktuální krok a počet
@@ -58,7 +58,7 @@ nepovažuj za úplný jen podle toho, že ZIP existuje.
 Čtení a náhled vyžadují `reports.export`; spuštění, zrušení a smazání jeho
 zápisovou variantu.
 
-## 67.2 Střediska
+## 68.2 Střediska
 
 Středisko rozlišuje odpovědnost nebo část firmy na řádcích účetního zápisu.
 Číselník obsahuje neměnný unikátní **kód**, název a aktivní stav.
@@ -72,7 +72,7 @@ Středisko samo nic nezaúčtuje a nemění účetní výkazy podle účtů. Je 
 rozměrem pro filtrování, export a manažerské vyhodnocení. Čtení vyžaduje
 `accounting`, změny zápisové účetní oprávnění.
 
-## 67.3 Předkontace
+## 68.3 Předkontace
 
 Předkontace jsou efektivní mapa systémových účetních operací na výchozí účty.
 Server spojí globální pravidla s firemním override stejného klíče.
@@ -89,7 +89,7 @@ Prázdná strana může být záměrná: konkrétní protiúčet doplní služba
 dokladu, například u kurzového rozdílu. DPH na 343 také není součástí základní
 mapy; dopočítává ji daňová služba z položek.
 
-### 67.3.1 Firemní override
+### 68.3.1 Firemní override
 
 Akce **Upravit** mění jen MD/Dal účet. Alespoň jedna strana musí být vyplněná
 a každý kód musí existovat a být aktivní v osnově firmy. Uložením vznikne
@@ -99,7 +99,7 @@ Zaúčtování si účet ověří znovu. Deaktivuje-li se později, operace skon
 chybou, nepoužije jiný účet potichu. Stejně se hlídají závěrkové účty,
 podrozvaha, otevřené období, zámek a vyrovnanost.
 
-### 67.3.2 Import a export předkontací
+### 68.3.2 Import a export předkontací
 
 Export obsahuje efektivní pohled se sloupci `klic`, `popis`, `md_ucet`,
 `d_ucet`, `aktivni`, `priorita` a `zdroj`. Import přijímá XLSX/CSV do 2 MB a
@@ -115,7 +115,7 @@ má dry-run před potvrzením.
 `accounting.templates:write`; server při zápisu navíc vyžaduje zápisové
 oprávnění k účetnictví.
 
-## 67.4 Kurzový režim
+## 68.4 Kurzový režim
 
 Firma může zvolit:
 
@@ -139,7 +139,7 @@ tato odchylková kontrola záměrně vypnutá, protože odlišný kurz je zvolen
 Pevné kurzy jsou tenantové, měna se normalizuje na třípísmenný kód a kurz musí
 být kladný. Změna režimu i sazby se auditují.
 
-## 67.5 Repo sazba ČNB
+## 68.5 Repo sazba ČNB
 
 Číselník uchovává 2T repo sazbu, datum platnosti a poznámku. Řádek se stejným
 datem se aktualizuje, nikoli duplikuje.
@@ -156,7 +156,7 @@ nevymyslí. Více viz [Upomínky](22_Upominky.md).
 Editaci sazeb svěř administrátorovi nebo účetnímu, který doloží zdroj ČNB.
 Smazání používané historické sazby může znemožnit reprodukovat starší výpočet.
 
-## 67.6 Archiv účetnictví
+## 68.6 Archiv účetnictví
 
 Archiv je per-firemní technický ZIP pro uschování a forenzní obnovu účetní
 stopy. Je dostupný jen administrátorovi v podvojném účetnictví.
@@ -177,7 +177,7 @@ faktur nejsou součástí technického archivu; pro ně slouží samostatný exp
 Tabulka ukazuje datum vytvoření, název, velikost a kontrolní součet. **Smazat**
 odstraní metadata i ZIP. Zdrojová účetní data v databázi tím nezmizí.
 
-### 67.6.1 Obnova ze serveru
+### 68.6.1 Obnova ze serveru
 
 Obnova není dostupná ve webu. Administrátor serveru použije:
 
@@ -195,7 +195,7 @@ Přílohy se uloží do datového adresáře nové firmy. Hesla a klíče je nut
 nastavit znovu. Automatický round-trip test hlídá základní počty a součty, ale
 archiv stále nenahrazuje celoinstanční zálohu databáze.
 
-## 67.7 Retence a právní zadržení na backendu
+## 68.7 Retence a právní zadržení na backendu
 
 Aktuální web Nástrojů nemá samostatnou záložku **Retence**, backend však
 retenční pravidla vynucuje při mazání účetních a daňových dokladů a poskytuje
@@ -219,7 +219,7 @@ Zadržení může platit pro období nebo celou firmu a uchovává důvod a spis
 značku. Aktivní hold blokuje smazání i po uplynutí běžné lhůty. Uvolnění je
 ruční a auditované; historický záznam nezmizí.
 
-## 67.8 Oprávnění a řešení problémů
+## 68.8 Oprávnění a řešení problémů
 
 - Záložky podvojného účetnictví vyžadují `accounting`; jejich změny zápisové
   oprávnění příslušného modulu.

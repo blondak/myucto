@@ -1,4 +1,4 @@
-# 70. Více dodavatelů z jedné instalace
+# 71. Více dodavatelů z jedné instalace
 
 MyÚčto umožňuje fakturovat za **libovolný počet dodavatelů (firem / IČO)**
 z jedné instalace. Typické scénáře:
@@ -13,7 +13,7 @@ Data jsou **plně izolovaná** — klienti jednoho dodavatele nejsou viditelní
 pro druhého, faktury mají vlastní řadu varsymbolů, číselné cykly,
 e-mailové šablony atd.
 
-## 70.1 Jak to vidět v UI
+## 71.1 Jak to vidět v UI
 
 Pokud máš přístup k více firmám, uprostřed spodní lišty se zobrazí **přepínač
 dodavatele**:
@@ -29,7 +29,7 @@ Při přepnutí:
 - Pokud jsi byl na detailu / editoru entity, přesměruje na seznam (entita
   patří jinému dodavateli, neviděl bys ji)
 
-## 70.2 Přidání nového dodavatele
+## 71.2 Přidání nového dodavatele
 
 V hlavním menu **Systém → Dodavatelé**.
 
@@ -49,7 +49,7 @@ Tabulka:
 
 Tlačítko **+ Nový dodavatel** vpravo nahoře.
 
-### 70.2.1 Modal nového dodavatele
+### 71.2.1 Modal nového dodavatele
 
 ![Nový dodavatel — ARES](img/14_dodavatel_novy.webp)
 
@@ -64,7 +64,7 @@ Tlačítko **+ Nový dodavatel** vpravo nahoře.
 
 Po **Vytvořit** je dodavatel okamžitě v dropdownu, můžeš na něj přepnout.
 
-## 70.3 Co je per-dodavatel (izolované)
+## 71.3 Co je per-dodavatel (izolované)
 
 Každý dodavatel má vlastní:
 
@@ -73,7 +73,7 @@ Každý dodavatel má vlastní:
 - **Číselnou řadu varsymbolů** (každý dodavatel má samostatné `2605001`,
   `2605002`, …)
 - **Šablonu čísla faktury** — vlastní formát per typ dokladu (`{YY}{MM}{CCC}`,
-  `JD{YYYY}-{CC}`, …) + reset cyklu (rok / měsíc / nikdy) — viz § 70.5.3
+  `JD{YYYY}-{CC}`, …) + reset cyklu (rok / měsíc / nikdy) — viz § 71.5.3
 - **Výchozí nastavení** — splatnost, hodinová sazba, DPH, **výchozí režim cen
   s DPH / bez DPH** (*Ceny s DPH* — předvyplní přepínač u nové
   faktury, viz [§ 15.2.6](15_Faktura_editor.md#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim))
@@ -82,7 +82,7 @@ Každý dodavatel má vlastní:
 - **From: jméno + Reply-To** v odchozích e-mailech
 - **Statistiky** (dashboard ukazuje data jen aktuálního dodavatele)
 
-## 70.4 Co je sdílené (cross-supplier)
+## 71.4 Co je sdílené (cross-supplier)
 
 - **Uživatelé + role** — uživatel vidí všechny dodavatele
 - **Číselníky** (DPH sazby, země) — společné systémové
@@ -91,7 +91,7 @@ Každý dodavatel má vlastní:
 - **SMTP konfigurace** — globální (`From:` jméno se ale řídí per-dodavatel)
 - **Cron skripty** — projedou všechny dodavatele
 
-## 70.5 Editace dodavatele
+## 71.5 Editace dodavatele
 
 Nastavení aktuálně zvolené firmy je v **Firma → Nastavení** rozdělené do
 záložek **Údaje firmy**, **Fakturace**, **Daně a účetnictví** a **Pokročilé**.
@@ -101,12 +101,12 @@ Změny ze všech záložek se ukládají společným tlačítkem dole pod obsahe
 
 Záložky:
 
-### 70.5.1 Základní údaje
+### 71.5.1 Základní údaje
 
 Stejné jako při založení (IČO, název, adresa, kontakt). Změna se projeví na
 NOVÝCH fakturách. Vystavené mají vlastní snapshot.
 
-### 70.5.2 E-mail branding
+### 71.5.2 E-mail branding
 
 **From / Reply-To** se odvozuje automaticky:
 
@@ -169,7 +169,7 @@ firemní identitu, jen drobně označuje použitou platformu.
 > Docker image `ghcr.io/radekhulan/myucto` má `librsvg2-bin` zabalené, takže
 > SVG funguje out-of-the-box. PNG / JPG funguje vždy přes GD (built-in).
 
-### 70.5.3 Číslování faktur
+### 71.5.3 Číslování faktur
 
 V detailu dodavatele najdeš sekci **Číslování faktur** se šablonami pro každý
 typ dokladu a volbou cyklu, kdy se pořadové číslo resetuje.
@@ -220,7 +220,7 @@ s chybou „Chybí counter".
   immutable `varsymbol`.
 - V editoru konceptu můžeš číslo přepsat ručně — viz [§ 15.2.5](15_Faktura_editor.md#1525-islo-dokladu-rucni-override-volitelne).
 
-### 70.5.4 Kopie odchozích e-mailů dodavateli
+### 71.5.4 Kopie odchozích e-mailů dodavateli
 
 Sekce **Kopie odchozích e-mailů na e-mail dodavatele** v nastavení dodavatele.
 Zprávy klientům se mohou posílat v kopii i na e-mail dodavatele — audit vlastní
@@ -248,7 +248,7 @@ Volby per typ:
 > 🛈 Děkovný e-mail za úhradu kopii dodavateli záměrně neposílá — o úhradě
 > dodavatel ví (sám ji označil, nebo přišla z banky).
 
-### 70.5.5 Poděkování za úhradu
+### 71.5.5 Poděkování za úhradu
 
 Sekce **Poděkování za úhradu** v nastavení dodavatele zapíná krátký děkovný
 e-mail, který se zákazníkovi pošle po zaplacení faktury. Funkce je **ve
@@ -270,7 +270,7 @@ nebo hromadně v seznamu faktur při označování plateb.
 > Neposílá se u storna ani u faktury bez e-mailu příjemce; selhání e-mailu
 > nikdy nezablokuje samotné označení platby. Vše se zapisuje do activity logu.
 
-### 70.5.6 Pohoda kódy
+### 71.5.6 Pohoda kódy
 
 | Pole | Význam | Příklad |
 |---|---|---|
@@ -281,18 +281,18 @@ nebo hromadně v seznamu faktur při označování plateb.
 
 Viz [20. Exporty](20_Exporty.md).
 
-## 70.6 Režim účtování per firma
+## 71.6 Režim účtování per firma
 
-Kromě izolovaných dat (§ 70.3) si každý dodavatel v multi-supplier instalaci **nezávisle
+Kromě izolovaných dat (§ 71.3) si každý dodavatel v multi-supplier instalaci **nezávisle
 na ostatních** volí i svůj vlastní **režim účetnictví**. Přepnutí dodavatele ve spodní liště
-(§ 70.1) tak nemění jen viditelná data, ale i to, jaké sekce menu a moduly máš k dispozici —
+(§ 71.1) tak nemění jen viditelná data, ale i to, jaké sekce menu a moduly máš k dispozici —
 holding s mateřskou firmou v podvojném účetnictví a dceřinou firmou vedenou v daňové evidenci
 je běžný a plně podporovaný stav.
 
-### 70.6.1 Kde se nastavuje
+### 71.6.1 Kde se nastavuje
 
-V **detailu dodavatele** (§ 70.5), sekce **„Daňové nastavení"** (stejný box jako EPO údaje
-a Pohoda kódy, viz [§ 70.5.6](#7056-pohoda-kody)), je pole **Režim účetnictví**:
+V **detailu dodavatele** (§ 71.5), sekce **„Daňové nastavení"** (stejný box jako EPO údaje
+a Pohoda kódy, viz [§ 71.5.6](#7156-pohoda-kody)), je pole **Režim účetnictví**:
 
 | Volba | Hodnota v DB (`accounting_mode`) | Význam |
 |---|---|---|
@@ -300,8 +300,8 @@ a Pohoda kódy, viz [§ 70.5.6](#7056-pohoda-kody)), je pole **Režim účetnict
 | **Podvojné účetnictví** | `double_entry` | Plnohodnotné podvojné účetnictví — účetní deník, hlavní kniha, výkazy, majetek |
 
 > [!NOTE]
-> Pole smí měnit jen **admin**, stejně jako ostatní údaje v detailu dodavatele (§ 70.5).
-> Výjimkou je zapnutí skladu (§ 70.6.3), které smí přepnout i role **účetní**.
+> Pole smí měnit jen **admin**, stejně jako ostatní údaje v detailu dodavatele (§ 71.5).
+> Výjimkou je zapnutí skladu (§ 71.6.3), které smí přepnout i role **účetní**.
 
 > [!WARNING]
 > Firma s historií se na podvojné účetnictví přepíná výhradně přes **průvodce
@@ -309,7 +309,7 @@ a Pohoda kódy, viz [§ 70.5.6](#7056-pohoda-kody)), je pole **Režim účetnict
 > zapne až po úspěšné kontrole a doúčtování, takže účetní sestavy mezitím nevypadají
 > jako úplné. Průvodce založí účtový rozvrh, nechá zkontrolovat otevírací rozvahu,
 > provede kontrolu nanečisto a teprve potom zpracuje faktury, pokladnu a banku.
-> Podrobný postup je v [§ 69.10.3](69_Danova_evidence.md#69103-pruvodce-aktivaci-podvojneho-ucetnictvi).
+> Podrobný postup je v [§ 70.10.3](70_Danova_evidence.md#70103-pruvodce-aktivaci-podvojneho-ucetnictvi).
 
 U nové firmy bez historie se režim přepne přímo a výchozí účtový rozvrh se založí
 automaticky. Pokud byla podvojná evidence zapnuta dříve a historie není kompletní,
@@ -322,7 +322,7 @@ Stejný úkol se zobrazí i na Přehledu.
 > Zákon u OSVČ navíc vyžaduje jednorázovou **úpravu základu daně** o neuhrazené
 > pohledávky/závazky a zásoby k datu přechodu (příloha č. 3 ZDP) — to je daňová
 > záležitost mimo účetní zápisy, systém k ní jen připraví podklady. Podrobně viz
-> [Daňová evidence § 51.10](69_Danova_evidence.md).
+> [Daňová evidence § 51.10](70_Danova_evidence.md).
 
 > [!WARNING]
 > Fyzická osoba může vedení účetnictví ukončit až po **5 po sobě jdoucích účetních
@@ -330,9 +330,9 @@ Stejný úkol se zobrazí i na Přehledu.
 > daňovou evidenci odmítne. I při povoleném přechodu je nutné upravit základ daně
 > podle přílohy č. 2 ZDP; přechodová sestava umí připravit podklady pro oba směry.
 
-### 70.6.2 Co která volba zpřístupní v menu
+### 71.6.2 Co která volba zpřístupní v menu
 
-Volba se v menu projeví **okamžitě** po přihlášení nebo po přepnutí dodavatele (§ 70.1):
+Volba se v menu projeví **okamžitě** po přihlášení nebo po přepnutí dodavatele (§ 71.1):
 
 | Režim | Sekce v menu | Obsahuje |
 |---|---|---|
@@ -341,7 +341,7 @@ Volba se v menu projeví **okamžitě** po přihlášení nebo po přepnutí dod
 
 Podrobný popis obou modulů najdeš v samostatných kapitolách —
 [Účetní deník](44_Ucetni_denik.md) pro podvojné účetnictví,
-[Daňová evidence](69_Danova_evidence.md) pro daňovou evidenci.
+[Daňová evidence](70_Danova_evidence.md) pro daňovou evidenci.
 
 Nezávisle na zvoleném režimu zůstávají v menu i:
 
@@ -352,7 +352,7 @@ Nezávisle na zvoleném režimu zůstávají v menu i:
 - Položka **Export/Import** (`/exchange`) — u dodavatele v daňové evidenci je (jako
   fallback) v sekci Daně; u dodavatele v podvojném účetnictví je součástí sekce Účetnictví.
 
-### 70.6.3 Sklad je nezávislý na režimu účetnictví
+### 71.6.3 Sklad je nezávislý na režimu účetnictví
 
 Zapnutí skladové evidence (pole `stock_enabled`) je **samostatný přepínač** v detailu
 dodavatele, nezávislý na volbě daňová evidence / podvojné účetnictví — funguje shodně
@@ -366,9 +366,9 @@ e-shop číselníky, inventury, sestavy) — podrobně viz [Sklad](33_Sklad.md).
 
 > [!TIP]
 > Obě pole skladu smí přepnout i role **účetní**, ne jen admin — je to jediná výjimka
-> z jinak admin-only nastavení dodavatele (§ 70.5).
+> z jinak admin-only nastavení dodavatele (§ 71.5).
 
-## 70.7 Smazání dodavatele
+## 71.7 Smazání dodavatele
 
 Na stránce **Systém → Dodavatelé** (`/admin/suppliers`, jen admin) má každý
 řádek tlačítko **Smazat**.
@@ -400,7 +400,7 @@ Firmu, která žádná data nemá (čerstvě založená, nikdy nepoužitá), app
 rovnou. Poslední zbývajícího dodavatele instalace smazat nejde vůbec
 („Posledního supplier nelze smazat" — vždy musí zůstat aspoň jeden).
 
-## 70.8 X-Supplier-Id v API
+## 71.8 X-Supplier-Id v API
 
 Aktuální dodavatel se posílá v každém API requestu jako header
 `X-Supplier-Id: N`. UI ho posílá z localStorage (`myinvoice.current_supplier_id`).
@@ -408,9 +408,9 @@ Aktuální dodavatel se posílá v každém API requestu jako header
 Pokud header chybí, server fallbackuje na `MIN(supplier.id)` — typicky první
 dodavatel = ten z setup wizardu.
 
-## 70.9 Přehled firem (pro účetní kancelář)
+## 71.9 Přehled firem (pro účetní kancelář)
 
-Přepínání dodavatele (§ 70.1) stačí, dokud spravuješ pár firem. Účetní kancelář
+Přepínání dodavatele (§ 71.1) stačí, dokud spravuješ pár firem. Účetní kancelář
 se 8+ klienty ale potřebuje vidět termíny a resty **napříč všemi firmami
 najednou**, ne proklikávat každou zvlášť. K tomu slouží stránka **Účetnictví →
 Přehled firem** (`/portfolio`).
@@ -433,7 +433,7 @@ termínem nahoře, firmy bez termínu (neplátci DPH) dole. Per firma vidíš:
 | **Poslední import banky** | Kdy byl naposledy naimportován bankovní výpis |
 
 Klik na **název firmy** nebo na konkrétní číslo/termín **přepne aktivní
-firmu** (stejný mechanismus jako přepínač v horní liště, § 70.1) a rovnou tě
+firmu** (stejný mechanismus jako přepínač v horní liště, § 71.1) a rovnou tě
 přesměruje na odpovídající agendu (např. klik na nezaúčtované doklady tě
 přepne na firmu a otevře filtrovaný seznam faktur).
 
@@ -443,7 +443,7 @@ přepne na firmu a otevře filtrovaný seznam faktur).
 > vidíš v přehledu jen ty. Globální admin a účty bez omezení (nic
 > nezaškrtnuto) vidí všechny firmy v instalaci.
 
-## 70.10 Tipy
+## 71.10 Tipy
 
 - **Při založení dodavatele použij ARES** — ušetří 5 minut opisování.
 - **Nevynechej Pohoda kódy** pokud plánuješ používat Pohoda XML export.

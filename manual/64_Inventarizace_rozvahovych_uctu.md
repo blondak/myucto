@@ -1,13 +1,13 @@
-# 63. Inventarizace účtů
+# 64. Inventarizace účtů
 
 **Cesta: `Nástroje → Inventarizace účtů`**
 
 Inventarizace účtů převádí konečné zůstatky rozvahových účtů na pracovní
 protokol, do kterého účetní doplní skutečný stav a vypořádání rozdílu.
 Je součástí kontroly před uzavřením knih. Doporučený celkový postup popisuje
-také kapitola [Účetní kontroly a inventarizace](58_Ucetni_kontroly_a_inventarizace.md).
+také kapitola [Účetní kontroly a inventarizace](59_Ucetni_kontroly_a_inventarizace.md).
 
-## 63.1 Jaké účty a datum sestava používá
+## 64.1 Jaké účty a datum sestava používá
 
 Sestava se vždy sestavuje k poslednímu dni celého vybraného účetního období.
 Libovolné `Od / Do` se zde nepoužívá. Z deníku bere jen zaúčtované řádky a
@@ -25,7 +25,7 @@ Kladná hodnota je KS MD, záporná KS Dal. Na obrazovce se zobrazuje jedno
 znaménkové **Účetní saldo**. Koncepty se nezapočítají a jejich počet se
 zobrazí ve varování.
 
-## 63.2 Protokol a skutečný stav
+## 64.2 Protokol a skutečný stav
 
 Hlavička protokolu obsahuje odpovědnou osobu, datum inventarizace, označení
 protokolu a poznámku. U každého účtu lze zadat:
@@ -45,7 +45,7 @@ a důvod rozdílu doložit.
 znovu načte živé účetní zůstatky, vypočte rozdíly a přepíše položky protokolu,
 takže klientem zaslané účetní saldo není zdrojem pravdy.
 
-## 63.3 Dokončení a vazba na uzávěrku
+## 64.3 Dokončení a vazba na uzávěrku
 
 **Uložit** ponechá protokol rozpracovaný. **Uložit a dokončit** uspěje pouze
 tehdy, když nezůstal žádný nevyřešený účet. Nedokončená inventarizace nebo
@@ -61,7 +61,7 @@ pro čtení doplní skutečný stav z účetního zůstatku a položky se označ
 vyřešené. Jde o technický backfill uzavřeného roku, nikoli důkaz, že byla
 provedena fyzická nebo dokladová inventura.
 
-## 63.4 Doporučené podklady
+## 64.4 Doporučené podklady
 
 Systém podle účtu nabídne typ podkladu, například:
 
@@ -78,7 +78,7 @@ Systém podle účtu nabídne typ podkladu, například:
 Jde o vodítko. Systém neověřuje, zda podklad existuje, je podepsaný nebo
 odpovídá skutečnosti. Kód účtu vede do opisu za celé období.
 
-## 63.5 Export
+## 64.5 Export
 
 PDF/XLSX z položky menu exportují účetní soupis KS MD/KS Dal, doporučený
 podklad a prázdná pole pro ruční doplnění skutečného stavu a rozdílu.

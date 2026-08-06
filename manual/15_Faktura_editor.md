@@ -71,7 +71,7 @@ V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové fa
 > znovu pod jiným číslem.
 
 Šablonu pro automatické generování nastavuješ v **Systém → Dodavatelé →
-[tvůj dodavatel] → Číslování faktur** — viz [§ 70.5.3](70_Multi_supplier.md#7053-islovani-faktur).
+[tvůj dodavatel] → Číslování faktur** — viz [§ 71.5.3](71_Multi_supplier.md#7153-islovani-faktur).
 
 ### 15.2.6 Ceny „s DPH" vs „bez DPH" (brutto / netto režim)
 
@@ -98,7 +98,7 @@ DPH výkazy (přiznání, kontrolní hlášení, kniha DPH) ukazují stejné č�
   vždy ukazuje jako **netto** (bez DPH) — i v režimu „s DPH", kde se netto dopočítá z
   řádkového základu.
 - **Předvyplnění per dodavatel:** výchozí režim nové faktury nastavíš v
-  **Nastavení → Můj dodavatel → Ceny s DPH** (viz [§ 70.3](70_Multi_supplier.md#703-co-je-per-dodavatel-izolovane)).
+  **Nastavení → Můj dodavatel → Ceny s DPH** (viz [§ 71.3](71_Multi_supplier.md#713-co-je-per-dodavatel-izolovane)).
 - **Zpětná kompatibilita:** výchozí stav je „bez DPH" a všechny existující
   faktury zůstávají beze změny.
 
@@ -124,13 +124,13 @@ cena a její zdroj; u kurzového přepočtu také datum použitého kurzovního 
 
 Vložený řádek je samostatný snapshot. Lze jej dále upravit a pozdější změna
 ceníku, zákazníka nebo kurzu jej automaticky nepřecení. Správa ceníku je popsána
-v [§ 71.1.5](71_Nastaveni.md#7115-cenikove-polozky).
+v [§ 72.1.5](72_Nastaveni.md#7215-cenikove-polozky).
 
 | Sloupec | Význam |
 |---|---|
 | Popis | Co fakturuješ. Lze multiline. **Tip:** pokud je v popisu měsíc (`Konzultace 3/2026`), klonování faktury automaticky inkrementuje. |
 | Množství | Počet jednotek (kusy / hodiny / …) |
-| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 71.1.4](71_Nastaveni.md#7114-jednotky). |
+| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 72.1.4](72_Nastaveni.md#7214-jednotky). |
 | Cena/jed. | Jednotková cena (v režimu „bez DPH" netto, v režimu „s DPH" brutto — viz [§ 15.2.6](#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)) |
 | DPH | Sazba — `21 %`, `12 %`, `0 %` (osvobozeno), `RC` (reverse charge) |
 | Celkem | Auto-počítáno (množství × cena/jed.) |
@@ -173,7 +173,7 @@ Pokud se karta uzavřít nepodaří — zavřené účetní období, nebo u dlou
 rok, který nemá potvrzený ani přerušený daňový odpis — **faktura se přesto vystaví
 a zaúčtuje** a systém hned po vystavení upozorní, která karta zůstala v užívání
 a proč (např. „rok 2025 nemá potvrzený ani přerušený daňový odpis"). Doděláš odpisy
-(viz [§ 57.6](57_Majetek.md#576-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
+(viz [§ 58.6](58_Majetek.md#586-hromadne-zauctovani-odpisu-roku)) a kartu vyřadíš
 z její vlastní stránky.
 
 Jednu kartu lze prodat jen jednou: pokud už ji prodal jiný doklad nebo je

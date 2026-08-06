@@ -1,4 +1,4 @@
-# 59. Šablony a pravidla
+# 60. Šablony a pravidla
 
 **Cesta: `Nástroje → Šablony`**
 
@@ -16,7 +16,7 @@ Globální katalog šablon bankovních pravidel je systémová agenda a má vlas
 stránku **Systém → Šablony bank. pravidel** (viz 59.4). Změna pravidla se
 použije na nové návrhy; již zaúčtované zápisy sama zpětně nepřepočítává.
 
-## 59.1 Šablony účetních zápisů
+## 60.1 Šablony účetních zápisů
 
 Šablona ukládá název, popis a libovolný počet řádků:
 
@@ -35,7 +35,7 @@ Stejný výběr šablon je dostupný také v náhledu kontace dokladu. Použití
 změní návrh řádků, nikoli zdrojový doklad. Backend při uložení znovu ověří
 aktivitu účtů, otevřené období, datumový zámek a rovnost MD/Dal.
 
-### 59.1.1 Systémové a vlastní šablony
+### 60.1.1 Systémové a vlastní šablony
 
 Při prvním načtení seznamu repozitář idempotentně doplní doporučenou mzdovou
 šablonu a předuzávěrkové šablony. Každá má stabilní `seed_key`, takže opakované
@@ -47,7 +47,7 @@ Kód střediska se ověřuje proti firemnímu číselníku. Endpoint
 `/journal-templates/{id}/import-csv` slouží jen k náhledu napárování externí
 rekapitulace; samotný import bez potvrzení nic nezaúčtuje.
 
-## 59.2 Pravidla klasifikace nákladů
+## 60.2 Pravidla klasifikace nákladů
 
 Pravidlo předvyplní na řádku přijaté faktury jeden z druhů:
 
@@ -59,7 +59,7 @@ Pravidlo předvyplní na řádku přijaté faktury jeden z druhů:
 Pravidlo může místo výchozího účtu určit konkrétní aktivní nákladový účet.
 Saldokonto, DPH, banku a pokladnu nelze nastavit jako cílový nákladový účet.
 
-### 59.2.1 Podmínky shody
+### 60.2.1 Podmínky shody
 
 Formulář dovoluje omezit pravidlo:
 
@@ -81,7 +81,7 @@ Volba **opakovaný předplacený náklad** může označit pravidelně hrazenou 
 pro návrh časového rozlišení. Nejde o automatické zaúčtování: uzávěrková logika
 musí stále ověřit období, významnost a podklad.
 
-### 59.2.2 Od návrhu k deníku
+### 60.2.2 Od návrhu k deníku
 
 Klasifikátor může spojit firemní pravidlo, text položky a výsledek importu nebo
 AI vytěžení. Do uložení řádku jde jen o návrh. Potvrzený `expense_kind` následně
@@ -97,7 +97,7 @@ nevytváří druhý nákladový zápis; podrobnosti jsou v kapitole
 > majetek, technické zhodnocení nebo soubor věcí. Konečné posouzení patří účetnímu
 > a vnitřní směrnici firmy.
 
-## 59.3 Pravidla účtování banky
+## 60.3 Pravidla účtování banky
 
 Tato záložka spravuje opakované bankovní pohyby bez spolehlivě párovatelného
 dokladu, například bankovní poplatky, odvody, úroky nebo splátky úvěru.
@@ -119,7 +119,7 @@ stopu. Opakovaně odmítané pravidlo se může deaktivovat. Historický backfil
 vždy degraduje automatický režim na návrh, aby stará data neúčtoval bez
 kontroly.
 
-## 59.4 Šablony bankovních pravidel (globální katalog)
+## 60.4 Šablony bankovních pravidel (globální katalog)
 
 **Cesta: `Systém → Šablony bank. pravidel`**
 
@@ -132,7 +132,7 @@ Instalace ověřuje existenci účtů v osnově konkrétní firmy. Neplatná neb
 neaktivní šablona se neinstaluje. Globální CRUD je oddělený od tenantových
 bankovních pravidel a je dostupný pouze administrátorovi.
 
-## 59.5 Předkontace nejsou šablony
+## 60.5 Předkontace nejsou šablony
 
 Předkontace v **Nástrojích** je systémová mapa operace na základní dvojici účtů,
 například `invoice.services.issued` nebo `offset.mutual`. Šablona naproti tomu
@@ -146,7 +146,7 @@ Při řešení chyby proto postupuj podle vrstvy:
 3. nestandardní vícerádkový zápis — použij nebo uprav šablonu,
 4. opakovaná platba bez dokladu — oprav bankovní pravidlo.
 
-## 59.6 Oprávnění, audit a chyby
+## 60.6 Oprávnění, audit a chyby
 
 Čtení šablon vyžaduje `accounting.templates`; jejich změna zápisovou variantu
 téhož oprávnění. Pravidla nákladů používají účetní oprávnění, bankovní pravidla

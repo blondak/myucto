@@ -1,4 +1,4 @@
-# 62. Aktivace podvojného účetnictví
+# 63. Aktivace podvojného účetnictví
 
 **Cesta: `Nástroje → Aktivace a doúčtování`**
 
@@ -10,7 +10,7 @@ Aktivace není pouhé přepnutí přepínače. Obsahuje datum přechodu, účtov
 otevírací rozvahu, kontrolní běh a dávkové doúčtování. Až po úspěšném dokončení
 se `accounting_mode` změní na `double_entry`.
 
-## 62.1 Stav a pět kroků
+## 63.1 Stav a pět kroků
 
 Průvodce rozlišuje stavy:
 
@@ -23,7 +23,7 @@ Průvodce rozlišuje stavy:
 V hlavičce je vidět počet čekajících vydaných a přijatých faktur, pokladních
 dokladů a bankovních transakcí, zámek účtování k datu a poslední úloha.
 
-## 62.2 Krok 1 — datum zahájení
+## 63.2 Krok 1 — datum zahájení
 
 Datum `accounting_starts_on` určuje:
 
@@ -39,7 +39,7 @@ Volbu data dělej podle schváleného přechodového postupu. Příliš časné 
 zahrne doklady, které už představují jen počáteční saldo; příliš pozdní může
 naopak vynechat transakce, jež mají být v deníku.
 
-## 62.3 Krok 2 — otevírací rozvaha
+## 63.3 Krok 2 — otevírací rozvaha
 
 Každý řádek obsahuje aktivní účet, stranu MD/Dal, kladnou částku a poznámku.
 Účet 701 se nezadává: systém jej při účtování doplní jako protiúčet každého
@@ -50,7 +50,7 @@ vyrovnaný na haléř. Uložení nahrazuje celý koncept v jedné transakci a vr
 hash normalizovaných řádků. Tento hash váže pozdější dry-run k přesné verzi
 počátečních stavů.
 
-### 62.3.1 Předvyplnění z přechodového můstku
+### 63.3.1 Předvyplnění z přechodového můstku
 
 Akce **Předvyplnit** sestaví návrh k dni předcházejícímu zahájení:
 
@@ -69,7 +69,7 @@ tenantové vlastnictví výpisu a počítá jen CZK pohyby do rozhodného dne. N
 nenahrazuje inventuru. Administrátor musí doplnit ostatní aktiva, pasiva,
 oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
 
-### 62.3.2 Zaúčtování počátečních stavů
+### 63.3.2 Zaúčtování počátečních stavů
 
 Ostrý běh zajistí otevřené období pro datum zahájení a vytvoří jediný zápis se
 zdrojem `opening`. Pro řádek MD vytvoří `účet MD / 701 Dal`, pro řádek Dal
@@ -79,7 +79,7 @@ Pokud předchozí den patří uzavíranému, uzavřenému nebo schválenému obd
 otevření už vlastní uzávěrka předchozího období a aktivační zápis se odmítne.
 Opakovaný běh používá stejné `source_type + source_id`, takže zápis neduplikuje.
 
-## 62.4 Krok 3 — kontrola nanečisto
+## 63.4 Krok 3 — kontrola nanečisto
 
 Dry-run vytvoří background úlohu a projde stejné fáze jako ostrý běh, ale nic
 nezaúčtuje:
@@ -99,13 +99,13 @@ očekávaných kandidátů s počtem skutečně obsloužených; chybějící i n
 Jakákoli změna data nebo počátečních stavů změní hash a před ostrým během je
 nutné kontrolu zopakovat.
 
-## 62.5 Krok 4 — ostré doúčtování
+## 63.5 Krok 4 — ostré doúčtování
 
 Ostrý job běží ve workeru `api/bin/accounting-backfill-worker.php`. Web stav
 pravidelně načítá a zobrazuje fázi, počet zpracovaných položek, log a závěrečný
 report.
 
-### 62.5.1 Doklady
+### 63.5.1 Doklady
 
 `DocumentBackfill` používá stejnou účetní cestu jako běžné zaúčtování. Zpracuje
 doklady od data zahájení, které podle stavů mají patřit do deníku, a využije
@@ -115,13 +115,13 @@ aktualizuje nebo přeskočí; nevytváří druhý předpis.
 Po bankovní fázi následuje ještě zúčtování záloh. Je záměrně až za platbami,
 protože převod proformy na finální doklad musí znát skutečné spárování.
 
-### 62.5.2 Pokladna
+### 63.5.2 Pokladna
 
 `CashBackfill` bere zaúčtované pokladní doklady bez deníku. Dry-run používá
 čistý náhled řádků, ostrý běh stejnou `CashDocumentService` jako nový doklad.
 Zdrojové ID zajistí idempotenci.
 
-### 62.5.3 Banka
+### 63.5.3 Banka
 
 Bankovní backfill nejdřív zpracuje párování dokladů. Volitelné firemní pravidlo
 smí při historii vytvořit jen **návrh**; automatický režim se během backfillu
@@ -132,7 +132,7 @@ zpracování a vrátí aktivační stav na `draft`; již potvrzené transakce se
 automaticky hromadně nemažou. Před opakováním proto projdi report — idempotentní
 zdrojové klíče zajistí, že hotové položky nevzniknou znovu.
 
-## 62.6 Dokončení a oprava selhání
+## 63.6 Dokončení a oprava selhání
 
 Po všech fázích se znovu sečtou všechny řádky deníku firmy v haléřích. Pokud
 MD ≠ Dal nebo report obsahuje chyby, job skončí jako `failed` a režim se
@@ -149,7 +149,7 @@ Po chybě oprav konkrétní doklad, účet, kurz, předkontaci nebo počátečn�
 spusť znovu dry-run a poté ostrý běh. Tlačítko opravy používá tutéž
 idempotentní exekuci, nejde o jiný „silový“ režim.
 
-## 62.7 Historie úloh, zámky a souběh
+## 63.7 Historie úloh, zámky a souběh
 
 Historie je stránkovaná a uchovává druh běhu, stav, fázi, parametry, report,
 log, poslední chybu a časy. Aktivní může být nejvýše jedna úloha firmy;
@@ -164,7 +164,7 @@ Zámek účtování k datu se během aktivace neobchází. Pokud datum backfillu
 v zamčené části, účetní služba zápis odmítne. Stejně se respektuje otevřenost
 období a aktivita účtů.
 
-## 62.8 Oprávnění a nejčastější chyby
+## 63.8 Oprávnění a nejčastější chyby
 
 Stav může číst uživatel s oprávněním k firemnímu nastavení. Zahájení, počáteční
 stavy, joby a zrušení vyžadují administrátorské

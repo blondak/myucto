@@ -51,7 +51,7 @@ nesmí předcházet pořízení.
 
 Řádek přijaté faktury musí mít potvrzený druh **Drobný majetek**. Návrh může
 přijít z importu, rozpoznání textu nebo firemního pravidla v kapitole
-[Šablony](59_Sablony.md), konečné rozhodnutí však dělá účetní.
+[Šablony](60_Sablony.md), konečné rozhodnutí však dělá účetní.
 
 Zaúčtování faktury použije nákladovou předkontaci, typicky analytiku 501.
 Vytvoření karty poté účetní zápis neopakuje. Smazání karty také nesmaže náklad
@@ -173,7 +173,7 @@ Uzávěrka může nabídnout volitelné časové rozlišení nákladu drobného 
 Nejde o daňový odpis. Použije účetní politiku období a předkontaci 381/501,
 v dalším období vytvoří zrcadlové rozpuštění. Bez doložené doby užitku a
 významnosti návrh nepotvrzuj; podrobnosti jsou v kapitole
-[Uzávěrka](66_Uzaverka.md).
+[Uzávěrka](67_Uzaverka.md).
 
 ## 27.8 Oprávnění a chyby
 

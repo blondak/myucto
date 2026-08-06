@@ -1,4 +1,4 @@
-# 57. Majetek
+# 58. Majetek
 
 **Cesta: `Účetnictví → Majetek`**
 
@@ -7,7 +7,7 @@ hmotného a nehmotného majetku** — karty s inventárními čísly, výpočet 
 odpisů** (§26–33 zákona o daních z příjmů) i **účetních odpisů** (ČÚS 013),
 technická zhodnocení a vyřazení. Je dostupný jen v režimu **podvojného
 účetnictví** (u daňové evidence se pořízení majetku eviduje jinak, viz
-[Daňová evidence](69_Danova_evidence.md)).
+[Daňová evidence](70_Danova_evidence.md)).
 
 > [!NOTE]
 > Sazby a koeficienty daňových odpisů (§30–32 ZDP) i podmínky mimořádných
@@ -16,7 +16,7 @@ technická zhodnocení a vyřazení. Je dostupný jen v režimu **podvojného
 > Zkontroluj vždy aktuální stav se svou účetní, zejména u hraničních částek
 > (80 000 Kč, limit 2 000 000 Kč u vozidel M1).
 
-## 57.1 Seznam majetku
+## 58.1 Seznam majetku
 
 Stránka **Majetek** zobrazuje všechny karty firmy v tabulce se sloupci
 **inventární číslo**, **název**, **účet**, **datum zařazení**, **vstupní cena**
@@ -29,19 +29,19 @@ přepínačem hustoty; obojí se pamatuje jako u ostatních seznamů v aplikaci.
 Filtrovat lze podle **stavu** (Koncept / V užívání / Vyřazeno) a fulltextem
 podle **inventárního čísla nebo názvu**. Filtry si můžeš uložit jako výchozí
 pohled (stejný mechanismus uložených filtrů jako jinde v aplikaci). Klik na
-řádek otevře [detail karty](#573-detail-karty-a-plan-odpisu).
+řádek otevře [detail karty](#583-detail-karty-a-plan-odpisu).
 
 Nad tabulkou najdeš tlačítka:
 
 - **Export** / **Import** — hromadný přenos karet přes Excel, viz
-  [§ 57.7](#577-import-a-export-excelem).
+  [§ 58.7](#587-import-a-export-excelem).
 - **Zaúčtovat odpisy** — hromadné roční zaúčtování, viz
-  [§ 57.6](#576-hromadne-zauctovani-odpisu-roku).
+  [§ 58.6](#586-hromadne-zauctovani-odpisu-roku).
 - **Z přijaté faktury** — založení nové karty z přijaté faktury označené jako
   dlouhodobý majetek.
 - **Nový majetek** — ruční založení karty.
 
-### 57.1.1 Založení z přijaté faktury
+### 58.1.1 Založení z přijaté faktury
 
 Tlačítko **Z přijaté faktury** otevře seznam přijatých faktur s příznakem
 **dlouhodobý majetek**, které ještě nemají svou kartu (faktury, které kartu
@@ -53,7 +53,7 @@ vystavení) a **názvem** (popis položky nebo dodavatel + číslo dokladu).
 Karta zůstává provázaná s fakturou — v editoru i detailu je odkaz zpět na
 přijatou fakturu.
 
-## 57.2 Založení a úprava karty
+## 58.2 Založení a úprava karty
 
 Editor karty (**Nový majetek** / úprava konceptu) je rozdělený do sekcí:
 
@@ -109,7 +109,7 @@ přesáhnout vstupní cenu; počáteční účetní oprávky spolu s účetní z
 hodnotou rovněž nesmějí vstupní cenu překročit. Stejná kontrola platí při
 importu karet.
 
-### 57.2.1 Zámky po zařazení a potvrzení
+### 58.2.1 Zámky po zařazení a potvrzení
 
 Karta se v čase postupně **uzamyká**, aby nešlo měnit už uplatněné odpisy
 zpětně:
@@ -125,7 +125,7 @@ Zamčená pole jsou v editoru neaktivní s vysvětlující bublinou. Účetní p
 (životnost, zbytková hodnota) zamčené nejsou — jejich změna se promítne
 prospektivně do dalších měsíců plánu.
 
-## 57.3 Detail karty a plán odpisů
+## 58.3 Detail karty a plán odpisů
 
 Detail karty ukazuje hlavičku (název, stav, inventární číslo, druh, metoda a
 skupina, trojice účtů), **souhrnné dlaždice** (vstupní cena, zvýšená vstupní
@@ -151,7 +151,7 @@ zůstane zachováno. Mazat lze pouze poslední potvrzený rok, v otevřeném obd
 mimo uzamčenou část účetnictví a dokud majetek není vyřazený.
 
 Řádky mohou nést značky **½** (půlodpis podle §26/7 v roce vyřazení) a
-**⏸** (přerušení §26/8, viz [§ 57.5](#575-preruseni-danoveho-odpisu)).
+**⏸** (přerušení §26/8, viz [§ 58.5](#585-preruseni-danoveho-odpisu)).
 U mimořádných odpisů (§30a) a u účetních odpisů se dá řádek roku **rozkliknout**
 — rozbalí se **měsíční rozpis** částek. Pod tabulkou je poznámka o znění
 zákona, ke kterému jsou sazby v systému vedené.
@@ -162,11 +162,11 @@ zákona, ke kterému jsou sazby v systému vedené.
 > parametrů karty. Změníš-li parametr, který ovlivňuje výpočet (např. přidáš
 > technické zhodnocení), plán pro nepotvrzené roky se přepočítá okamžitě.
 
-## 57.4 Zařazení do užívání, technické zhodnocení, vyřazení
+## 58.4 Zařazení do užívání, technické zhodnocení, vyřazení
 
 Akce dostupné v hlavičce detailu se mění podle stavu karty.
 
-### 57.4.1 Zařazení do užívání
+### 58.4.1 Zařazení do užívání
 
 U karty ve stavu **Koncept** tlačítko **Zařadit do užívání** otevře dialog s
 **datem zařazení** (nesmí předcházet datu pořízení) a zaškrtávátkem
@@ -185,7 +185,7 @@ odpisy je potřeba nejdřív odstranit odzadu a přerušení zrušit. Zápis za�
 musí být v otevřeném období a mimo uzamčenou část účetnictví. Vyřazenou kartu
 je nutné nejdřív vrátit z vyřazení.
 
-### 57.4.2 Technické zhodnocení (§33)
+### 58.4.2 Technické zhodnocení (§33)
 
 U karty **V užívání** tlačítko **Technické zhodnocení** otevře formulář s
 **datem dokončení** (nesmí předcházet datu zařazení do užívání), **částkou**
@@ -209,7 +209,7 @@ TZ z roku, který ještě nemá potvrzený daňový odpis.
 > změnil odpisovou základnu, se kterou už pozdější potvrzený rok počítal. V takovém
 > případě je nejdřív potřeba vrátit potvrzení pozdějších let.
 
-### 57.4.3 Vyřazení a vrácení vyřazení
+### 58.4.3 Vyřazení a vrácení vyřazení
 
 Tlačítko **Vyřadit** (u karty V užívání) otevře dialog s **typem vyřazení**
 (Prodej / Likvidace / Dar / Manko a škoda), **datem vyřazení** (nesmí
@@ -265,7 +265,7 @@ stornuje vyřazovací zápis i účetní odpis roku vyřazení, smaže jím vytv
 daňového odpisu podle §26 odst. 8 zůstává zachována; vrácení se potvrzuje
 přes dialogové okno, protože jde o nevratnou operaci v rámci daného běhu.
 
-## 57.5 Přerušení daňového odpisu
+## 58.5 Přerušení daňového odpisu
 
 U karty s **rovnoměrnou nebo zrychlenou** daňovou metodou nabízí detail
 tlačítko **Přerušit odpis roku** — otevře výběr roku a po potvrzení se daný
@@ -282,7 +282,7 @@ přerušený rok označí značkou **⏸**; tlačítkem **Zrušit přerušení**
 > systém přerušení odmítne a je potřeba nejdřív vrátit potvrzení pozdějších let, teprve
 > pak přerušit rok dřívější.
 
-## 57.6 Hromadné zaúčtování odpisů roku
+## 58.6 Hromadné zaúčtování odpisů roku
 
 Tlačítko **Zaúčtovat odpisy** na seznamu majetku otevře dialog s výběrem
 **ukončeného zdaňovacího období (roku)**. Probíhající ani budoucí období
@@ -314,10 +314,10 @@ připočítá do souhrnu, ostatní karty se zaúčtují normálně.
 
 > [!TIP]
 > Zaúčtování odpisů spouštěj typicky **jednou ročně** před uzávěrkou období
-> (viz [Uzávěrka](66_Uzaverka.md)) — po uzavření období už
+> (viz [Uzávěrka](67_Uzaverka.md)) — po uzavření období už
 > zápis pro daný rok zaúčtovat nejde.
 
-## 57.7 Import a export Excelem
+## 58.7 Import a export Excelem
 
 Karty majetku lze **hromadně exportovat** (tlačítko **Export** na seznamu) do
 Excelu — soubor obsahuje aktuální stav všech karet firmy podle zadaných
@@ -330,10 +330,10 @@ založených/aktualizovaných karet po dokončení.
 > [!TIP]
 > Import je praktický při přechodu z jiného účetního systému — historický
 > majetek založíš rovnou ve stavu V užívání s vyplněnými poli „daňově/účetně
-> odepsáno dosud" ([§ 57.2](#572-zalozeni-a-uprava-karty)), bez nutnosti
+> odepsáno dosud" ([§ 58.2](#582-zalozeni-a-uprava-karty)), bez nutnosti
 > ručně procházet každou kartu editorem.
 
-## 57.8 Omezení a tipy
+## 58.8 Omezení a tipy
 
 - Modul Majetek je dostupný jen v režimu **podvojného účetnictví** — v daňové
   evidenci se dlouhodobý majetek eviduje jinak.
@@ -350,7 +350,7 @@ založených/aktualizovaných karet po dokončení.
 - **Technické zhodnocení u §30a (bezemisní vozidla)** vstupní cenu nezvyšuje
   — pro TZ u takového vozidla založ novou kartu.
 - **Vrácení vyřazení** funguje, jen dokud je účetní období data vyřazení
-  otevřené — po uzávěrce (viz [Uzávěrka](66_Uzaverka.md)) už
+  otevřené — po uzávěrce (viz [Uzávěrka](67_Uzaverka.md)) už
   vyřazení vrátit nejde.
 - Pro čtenáře bez oprávnění k zápisu (readonly) jsou všechny akce karty
   (založení, editace, zařazení, TZ, vyřazení, zaúčtování) nedostupné — mají

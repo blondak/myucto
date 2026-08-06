@@ -1,4 +1,4 @@
-# 72. Elektronické podpisy
+# 73. Elektronické podpisy
 
 Elektronické podpisy slouží ke správě certifikátů, podpisových profilů a
 pravidel, který profil se použije pro konkrétní výstup. Aktuálně se podepisují
@@ -46,7 +46,7 @@ ale e-mail nešifruje.
 > a elektronický podpis tuto archivní konformitu **zachová** — podepsaný
 > dokument je stále validní PDF/A-3b (ověřeno nástrojem veraPDF).
 
-## 72.1 Základní pojmy
+## 73.1 Základní pojmy
 
 | Pojem | Význam |
 |---|---|
@@ -56,7 +56,7 @@ ale e-mail nešifruje.
 | Konfigurace podpisů | Admin nastavení, které určuje, zda se PDF nebo e-mailový výstup podepisuje a odkud se bere podpisový profil. |
 | Mapování podpisových profilů | Uživatelské výchozí profily pro výstupy, kde admin zvolil strategii **Přihlášený uživatel**. |
 
-## 72.2 Oprávnění
+## 73.2 Oprávnění
 
 | Role | Co může |
 |---|---|
@@ -68,7 +68,7 @@ Admin povolí uživatelské profily přepínačem **Povolit uživatelům správu
 vlastních podpisových profilů** (na záložce Elektronické podpisy v E-mailech).
 Pokud není zapnutý, účetní položku elektronických podpisů v menu nevidí.
 
-## 72.3 Založení podpisového profilu
+## 73.3 Založení podpisového profilu
 
 1. Admin otevře **Systém -> E-maily** a přepne na záložku **Elektronické
    podpisy**. Účetní (má-li povoleno) otevře rovnou **Systém -> Elektronické
@@ -90,7 +90,7 @@ Pokud není zapnutý, účetní položku elektronických podpisů v menu nevidí
 7. Nech profil aktivní, pokud se má dát použít při podepisování.
 8. Ulož profil.
 
-## 72.4 Certifikát P12/PFX
+## 73.4 Certifikát P12/PFX
 
 Každý profil používá jeden certifikát. Stejný certifikát se může použít pro PDF
 podpis i pro S/MIME podpis e-mailu, pokud profil povoluje obě použití.
@@ -147,7 +147,7 @@ adresu používanou jako odesílatel nebo aby ho příjemcův klient uměl při�
 odesílateli. Aplikace podpis vytvoří, ale důvěryhodnost a shoda identity se
 vyhodnocuje až v e-mailovém klientovi příjemce.
 
-## 72.5 Politika hesla k certifikátu
+## 73.5 Politika hesla k certifikátu
 
 | Politika | Kdy použít | Chování |
 |---|---|---|
@@ -192,7 +192,7 @@ Do pole **ID hesla v passphrase file** v profilu zadej například
 `owner_john`. Soubor musí být čitelný procesem aplikace a neměl by být
 součástí webového rootu ani gitu.
 
-## 72.6 TSA a důvod podpisu
+## 73.6 TSA a důvod podpisu
 
 V profilu je volitelná část **PDF nastavení profilu**. Tato nastavení platí jen
 pro PDF podpisy:
@@ -209,7 +209,7 @@ přidá se důvěryhodné časové razítko a výsledkem je PAdES-T.
 
 S/MIME podpis odchozího e-mailu v této implementaci TSA nepoužívá.
 
-## 72.7 Konfigurace podpisů pro výstupy
+## 73.7 Konfigurace podpisů pro výstupy
 
 Sekci **Konfigurace podpisů** vidí admin na záložce Elektronické podpisy v
 **Systém -> E-maily**. Každý řádek nastavuje jeden typ výstupu: buď PDF, nebo
@@ -262,7 +262,7 @@ pod tabulkou.
 S/MIME podpis otestuješ odesláním testovacího e-mailu pro příslušný typ zprávy
 a ověřením podpisu v e-mailovém klientovi.
 
-## 72.8 Mapování podpisových profilů uživatele
+## 73.8 Mapování podpisových profilů uživatele
 
 Sekce **Mapování podpisových profilů** slouží pro osobní výchozí profily
 přihlášeného uživatele. Admin ji vidí na záložce Elektronické podpisy v
@@ -277,7 +277,7 @@ Pro každý výstup vyber vlastní aktivní profil, který podporuje stejné pou
 jako výstup. Pro PDF výstupy musí profil podporovat použití **PDF**, pro
 e-mailové výstupy použití **S/MIME e-mail**.
 
-## 72.9 Výběr podpisu na konkrétním dokladu
+## 73.9 Výběr podpisu na konkrétním dokladu
 
 Na detailu faktury je pro uživatele s právem zápisu sekce
 **Elektronický podpis dokumentu**. Umožňuje přepsat výchozí konfiguraci pro
@@ -297,7 +297,7 @@ profilem podle přihlášeného uživatele.
 Per-dokladový výběr se týká PDF dokladů. Odchozí e-maily se řídí mapováním
 e-mailových výstupů v **Konfiguraci podpisů**.
 
-## 72.10 Podepisování odchozích e-mailů
+## 73.10 Podepisování odchozích e-mailů
 
 S/MIME podpis se aplikuje při sestavení e-mailu těsně před odesláním přes SMTP.
 Podepisuje se výsledná MIME zpráva včetně HTML/textového těla a příloh, takže
@@ -352,7 +352,7 @@ může jedna odesílací identita držet pohromadě `From`, DKIM identitu a cert
 S/MIME podpis e-mail nešifruje. Obsah zprávy zůstává čitelný stejně jako u
 běžného e-mailu, jen je opatřen elektronickým podpisem.
 
-## 72.11 Ověření podepsaného PDF
+## 73.11 Ověření podepsaného PDF
 
 Po stažení můžeš PDF ověřit v běžné PDF čtečce nebo na serveru například přes
 `pdfsig`:
@@ -366,7 +366,7 @@ vydavatel certifikátu je neznámý, znamená to obvykle chybějící důvěryho
 certifikační řetězec v prostředí ověřovatele. Samotný kryptografický podpis
 může být přesto validní.
 
-## 72.12 Audit a řešení problémů
+## 73.12 Audit a řešení problémů
 
 Správa i použití podpisů se zapisuje do activity logu. Typické události:
 
@@ -398,7 +398,7 @@ Správa i použití podpisů se zapisuje do activity logu. Typické události:
 | E-mailový klient podpisu nevěří | Zkontroluj e-mail v certifikátu, důvěryhodnost certifikační autority a to, zda po podpisu zprávu neupravuje SMTP brána nebo antispam. |
 | Účetní nevidí položku Elektronické podpisy v menu | Zkontroluj v **Systém -> E-maily -> Elektronické podpisy**, jestli je zapnutý přepínač **Povolit uživatelům správu vlastních podpisových profilů**. |
 
-## 72.13 Poznámka k REST API
+## 73.13 Poznámka k REST API
 
 Podpisové endpointy jsou interní administrační endpointy používané SPA
 aplikací (`/api/settings/...` a `/api/documents/.../signature-selection`).

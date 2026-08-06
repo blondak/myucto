@@ -1,11 +1,11 @@
-# 58. Účetní kontroly a inventarizace
+# 59. Účetní kontroly a inventarizace
 
 MyÚčto nabízí několik kontrolních pohledů, ale žádný z nich sám neprokazuje věcnou
 správnost účetnictví. Tato kapitola skládá jednotlivé kontroly do jednoho měsíčního
 a ročního postupu a vysvětluje, co systém pouze signalizuje a co musí účetní ověřit
 nezávislým podkladem.
 
-## 58.1 Tři vrstvy kontroly
+## 59.1 Tři vrstvy kontroly
 
 1. **Provozní úplnost** — [K doúčtování](46_Rucni_fronta_doctovani.md)
    a [Úplnost dokladů](53_Uplnost_dokladu.md) hledají známé položky bez
@@ -18,7 +18,7 @@ nezávislým podkladem.
 Prázdná fronta nebo zelený technický check není důkaz, že nechybí smlouva, přijatá
 faktura, závazek, majetek nebo časové rozlišení, které systém neměl z čeho rozpoznat.
 
-## 58.2 Doporučená měsíční kontrola
+## 59.2 Doporučená měsíční kontrola
 
 1. Dokonči nebo vysvětli položky v [**K doúčtování**](46_Rucni_fronta_doctovani.md).
 2. Otevři [**Účetnictví → Úplnost dokladů**](53_Uplnost_dokladu.md)
@@ -36,7 +36,7 @@ faktura, závazek, majetek nebo časové rozlišení, které systém neměl z č
 Kontroly jsou read-only, pokud u nich není výslovně uvedeno tlačítko pro vytvoření
 návrhu či zápisu. Nález se nemá „zazelenat“ ručním dorovnáním bez podkladu.
 
-## 58.3 Provozní úplnost dokladů
+## 59.3 Provozní úplnost dokladů
 
 Podrobný popis obou pracovních pohledů je rozdělený podle bodů menu:
 
@@ -50,7 +50,7 @@ převod mezi vlastními účty nebo výplata. Požadavek na chybějící dokumen
 eviduje komunikaci; případ je vyřešený až po doručení, kontrole a správném
 zaúčtování podkladu.
 
-## 58.4 Audit párování plateb
+## 59.4 Audit párování plateb
 
 [Měsíční kontrola](54_Mesicni_kontrola.md) porovnává stav úhrad, vazby
 bankovních pohybů a otevřené saldo.
@@ -65,7 +65,7 @@ Typické nálezy:
 Opravuj vazbu platby nebo účetní zápis. Neměň ručně jen stav dokladu, pokud by tím
 evidence úhrad a deník přestaly odpovídat skutečnosti.
 
-## 58.5 Inventarizace rozvahových účtů
+## 59.5 Inventarizace rozvahových účtů
 
 **Cesta: `Účetnictví → Inventarizace účtů`**
 
@@ -114,7 +114,7 @@ podepsané důkazy, externí potvrzení a schválený protokol podle vnitřní s
 Starší již uzavřené období bez uložené inventarizace je pouze pro čtení a
 aplikace jeho stav zpětně odvodí z ověřených účetních zůstatků.
 
-## 58.6 Kontrolní mapa K1–K10
+## 59.6 Kontrolní mapa K1–K10
 
 | Kód | Oblast | Co je rozhodující |
 |---|---|---|
@@ -132,7 +132,7 @@ aplikace jeho stav zpětně odvodí z ověřených účetních zůstatků.
 Podrobný rozpad průběžných kontrol a možnost exportovat všechna zjištění jsou
 v kapitole [Měsíční kontrola](54_Mesicni_kontrola.md).
 
-## 58.7 Audit kurzů ČNB
+## 59.7 Audit kurzů ČNB
 
 Audit porovná uložený kurz dokladu s kurzem ČNB k rozhodnému dni a vypíše odchylku.
 Neopravuje doklady ani deník. Odchylka může být správná, pokud firma používá doložený
@@ -143,7 +143,7 @@ Kurz na faktuře, kurz bankovní úhrady a závěrkový kurz plní různé úče
 rozdíl se nemá odstranit přepsáním historie; tvoří realizovaný nebo nerealizovaný
 kurzový rozdíl podle povahy položky.
 
-## 58.8 Vazba na uzávěrku a balíček
+## 59.8 Vazba na uzávěrku a balíček
 
 Uzávěrkový balíček umí shromáždit účetní výkazy, deník, knihu DPH, daňový výstup,
 inventuru dlouhodobého a drobného majetku, staré saldo a časová rozlišení. Balíček

@@ -300,7 +300,7 @@ sloučená úhrada — [§ 28.4](#284-detail-vypisu)), MyÚčto se ji hned pokus
 zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 
 - **běžná vydaná faktura** → **MD 221 Bankovní účty / D 311 Odběratelé**
-  (skutečné účty bere z [předkontace](67_Ucetni_nastroje.md#673-predkontace)
+  (skutečné účty bere z [předkontace](68_Ucetni_nastroje.md#683-predkontace)
   `payment.receivable.bank`, pokud ji máš upravenou),
 - **běžná přijatá faktura** → **MD 321 Dodavatelé / D 221** (`payment.payable.bank`),
 - **zálohová (proforma) faktura** → **MD 221 / D 324 Přijaté zálohy** (inkaso zálohy)

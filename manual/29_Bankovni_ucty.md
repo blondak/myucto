@@ -347,7 +347,7 @@ plánovaných úloh.
 Bankovní výpis (§ 24) i e-mailové avízo (§ 29.1–37.7) řeší jen **párování na
 faktury**. Transakce, které s fakturou nesouvisí — bankovní poplatky, úroky,
 odvody sociálního a zdravotního pojištění, splátky leasingu, převody mezi
-vlastními účty — potřebují vlastní **účetní zápis** (MD/D dle [Předkontace](67_Ucetni_nastroje.md#673-predkontace)).
+vlastními účty — potřebují vlastní **účetní zápis** (MD/D dle [Předkontace](68_Ucetni_nastroje.md#683-predkontace)).
 O to se stará **PostingService** a dvě záložky na téže stránce **Peníze →
 Bankovní účty**, viditelné jen dodavateli s **podvojným účetnictvím**:
 
@@ -368,7 +368,7 @@ opakuje" — viz § 29.8.4) založíš pravidlo:
 | Variabilní symbol | Přesná shoda VS (číslice) |
 | Fragment zprávy | Podřetězec v popisu/zprávě transakce (bez ohledu na velikost písmen a diakritiku) |
 | Rozsah částky (od–do) | Interval absolutní částky, ve kterém se pravidlo použije |
-| MD účet / D účet | Kontace zápisu — účty musí existovat v [účtovém rozvrhu](60_Ucetni_osnova.md) |
+| MD účet / D účet | Kontace zápisu — účty musí existovat v [účtovém rozvrhu](61_Ucetni_osnova.md) |
 | Režim | **Návrh**, nebo **Automaticky** (§ 29.8.2) |
 
 Pravidlo musí mít **aspoň jedno kritérium** (protiúčet, VS nebo fragment zprávy)
@@ -413,7 +413,7 @@ Záložka **K zaúčtování** má čtyři podzáložky — **K zaúčtování**
 **Zaúčtováno automaticky**, **Schválené** a **Odmítnuté**. U čekajícího návrhu
 vidíš datum, částku, protistranu, navrhované pravidlo a **kontaci** (MD/D):
 
-- **Schválit** — vytvoří zápis do deníku (viz [Předkontace](67_Ucetni_nastroje.md#673-predkontace)
+- **Schválit** — vytvoří zápis do deníku (viz [Předkontace](68_Ucetni_nastroje.md#683-predkontace)
   pro logiku sestavení zápisu) a návrh přejde do stavu Schváleno.
 - **Odmítnout** — návrh se zahodí; ke stejné transakci a pravidlu se už
   znovu nenabídne. **Tři odmítnutí stejného pravidla po sobě** ho automaticky
@@ -426,7 +426,7 @@ vidíš datum, částku, protistranu, navrhované pravidlo a **kontaci** (MD/D):
 
 Transakce v **cizí měně** se automaticky ani návrhem zatím neúčtují (chybí
 řešení kurzových rozdílů) — takové řádky nesou štítek **Cizí měna** a řeší se
-ručně v [Předkontace](67_Ucetni_nastroje.md#673-predkontace).
+ručně v [Předkontace](68_Ucetni_nastroje.md#683-predkontace).
 
 U už **zaúčtovaných** položek (podzáložka **Zaúčtováno automaticky**) vidíš
 odkaz na zápis v deníku a tlačítko **Stornovat** — vytvoří opravný (storno)

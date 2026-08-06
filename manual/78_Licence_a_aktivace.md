@@ -1,4 +1,4 @@
-# 77. Licence a aktivace
+# 78. Licence a aktivace
 
 MyÚčto.cz je nástupcem open-source systému MyInvoice. Všechny funkce MyInvoice
 zůstávají v MyÚčto navždy zdarma; rozšířená účetní nadstavba je komerční
@@ -6,7 +6,7 @@ produkt na předplatné. Tato kapitola popisuje, jak licence funguje, kde ji
 spravuješ, co se děje po vypršení a jak předplatné zakoupíš, aktivuješ,
 navýšíš nebo přeneseš na jinou instalaci.
 
-## 77.1 Licenční model
+## 78.1 Licenční model
 
 MyÚčto stojí na dvou vrstvách:
 
@@ -28,11 +28,11 @@ nezakládá právo produkt jako celek provozovat bez licence.
 > licenčním klíčem.
 
 Cena předplatného je **za jednoho aktivního uživatele a měsíc**; celková cena
-je násobkem tarifu a počtu aktivních uživatelů (viz [§ 77.3](#773-zkusebni-obdobi-a-stavy-licence)
+je násobkem tarifu a počtu aktivních uživatelů (viz [§ 78.3](#783-zkusebni-obdobi-a-stavy-licence)
 ke způsobu započítání). Úplné znění licenčního ujednání je v souboru
 `LICENCE.txt` v rootu instalace a na `myucto.cz/licence`.
 
-## 77.2 Kde licenci spravovat
+## 78.2 Kde licenci spravovat
 
 Správa licence je v menu **Aktivace** — úplně dole v hlavním menu. Obsahuje
 tři stránky:
@@ -46,7 +46,7 @@ tři stránky:
 > 🛈 Správu licence (stránku **Zakoupení**) vidí a ovládá jen **administrátor**.
 > Běžný uživatel stránku otevře, ale operace nejsou dostupné.
 
-## 77.3 Zkušební období a stavy licence
+## 78.3 Zkušební období a stavy licence
 
 Stav licence se počítá při každém přihlášeném požadavku a promítá se do banneru
 v aplikaci i do karty stavu na stránce **Aktivace → Zakoupení**.
@@ -81,7 +81,7 @@ a komerční nadstavba se vypne.
 > Data komerčních modulů se nemažou ani nemění; zůstávají ve vlastní databázi
 > provozovatele. Aplikace je znovu zpřístupní po obnovení licence.
 
-## 77.4 Zakoupení předplatného
+## 78.4 Zakoupení předplatného
 
 Na stránce **Aktivace → Zakoupení** klikni na **Zakoupit předplatné**. Otevře
 se objednávka na myucto.cz s předvyplněnou instalací a fakturačními údaji firmy
@@ -97,7 +97,7 @@ se objednávka na myucto.cz s předvyplněnou instalací a fakturačními údaji
 Po zaplacení první platby je smlouva uzavřena a **licenční klíč přijde
 e-mailem** (obvykle během minut), spolu s potvrzením.
 
-## 77.5 Aktivace licenčním klíčem
+## 78.5 Aktivace licenčním klíčem
 
 Klíč z e-mailu vlož na stránce **Aktivace → Zakoupení** do pole v sekci
 **Aktivace licenčního klíče** a klikni **Aktivovat**. Aktivací se licence
@@ -114,7 +114,7 @@ samo, na pozadí — **nevyžaduje žádné nastavení uživatele**.
 > uživatelů a firem. **Žádná účetní ani osobní data** se na licenční server
 > neposílají.
 
-## 77.6 Navýšení počtu uživatelů
+## 78.6 Navýšení počtu uživatelů
 
 Potřebuješ-li přidat další licencované uživatele během běžícího období, není
 třeba zakládat novou objednávku — navýšení se dělá **přímo v aplikaci**.
@@ -126,7 +126,7 @@ cyklu se pak účtuje plná nová cena.
 Stejné tlačítko se nabídne i v případě, že jsi v překročeném rozsahu
 (overage) — navýšením přečerpání odstraníš.
 
-## 77.7 Přenos licence a přeinstalace
+## 78.7 Přenos licence a přeinstalace
 
 Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —
 **nejvýše dvakrát za 30 dní**.
@@ -143,7 +143,7 @@ Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —
 > nedostupný — nezasekneš se. Vyčerpáš-li limit přenosů, další povolí poskytovatel
 > na žádost (kontakt na myucto.cz).
 
-## 77.8 Přehled dokladů a plateb
+## 78.8 Přehled dokladů a plateb
 
 - **Daňový doklad** za každou platbu chodí **e-mailem**.
 - **Opakované platby** (kartou přes platební bránu) běží automaticky v pevné
@@ -155,12 +155,12 @@ Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —
 Po zrušení licence doběhne do konce zaplaceného období; poměrná část se
 nevrací. Detailní pravidla jsou v **Aktivace → Obchodní podmínky**.
 
-## 77.9 Řešení potíží
+## 78.9 Řešení potíží
 
 | Problém | Co s tím |
 |---|---|
 | **Klíč nejde aktivovat** | Zkontroluj, že jsi klíč zkopíroval celý (formát `MYU-XXXX-…`) a že je instalace online. Chyba serveru se vypíše přímo pod polem. |
-| **„Tato licence je aktivní na jiné instalaci"** | Klíč běží jinde (typicky po přeinstalaci bez deaktivace). Použij **Aktivovat na této instalaci (přenést)** — viz [§ 77.7](#777-prenos-licence-a-preinstalace). |
+| **„Tato licence je aktivní na jiné instalaci"** | Klíč běží jinde (typicky po přeinstalaci bez deaktivace). Použij **Aktivovat na této instalaci (přenést)** — viz [§ 78.7](#787-prenos-licence-a-preinstalace). |
 | **Poslední kontrola selhala** | Krátký výpadek internetu nevadí — token platí 14 dní. Když výpadek trvá, ověř konektivitu na `myucto.cz`. |
 | **Komerční moduly zmizely z menu** | Vypršelo předplatné (nebo skončil trial). Bezplatné funkce zůstávají plně dostupné. Komerční funkce obnovíš aktivací licence na stránce **Zakoupení**; jejich data zůstávají v databázi beze změny. |
 

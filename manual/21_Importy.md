@@ -91,7 +91,7 @@ příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je proklikáv
 ### Než spustíš import
 
 1. **Spusť databázové migrace** (`php api/bin/migrate.php`). Bez číselníku
-   [sazeb států OSS](71_Nastaveni.md#7112b-sazby-statu-oss) se import zahraničních
+   [sazeb států OSS](72_Nastaveni.md#7212b-sazby-statu-oss) se import zahraničních
    dokladů **vůbec nerozběhne** — raději neudělá nic, než aby doklady zařadil naslepo.
 2. **Zkontroluj zemi u zahraničních sazeb** v `Nastavení → Číselníky → DPH sazby`.
    Formulář zemi předvyplňuje na `CZ`, takže sazba `PL-23` bývá založená se zemí `CZ`.
