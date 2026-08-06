@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { hasUnresolvedProductionDirectAttempt } from '@/utils/epoAttemptState'
 import {
+  canOfferHandoffLink,
   loadEpoHandoffLinks,
   saveEpoHandoffLinks,
   type CachedEpoHandoffLink,
@@ -313,13 +314,23 @@ function hasActiveAttempt(item: TaxSubmission): boolean {
   })
 }
 
+/**
+ * Odkaz, který ještě nikdo neotevřel — jediný, který smíme nabídnout k otevření.
+ * Spotřebovaný záznam v cache zůstává (kvůli `attemptId` pro nahrávané artefakty),
+ * ale jako odkaz už se netváří.
+ */
+function pendingHandoffLink(item: TaxSubmission): CachedEpoHandoffLink | null {
+  const link = handoffLinks.value[item.id]
+  return canOfferHandoffLink(link) ? link! : null
+}
+
 function canHandoff(item: TaxSubmission): boolean {
   return canWrite.value
     && epoEnvironment.value !== null
     && item.validation_status === 'passed'
     && !['submitted', 'accepted'].includes(item.status)
     && !hasUnresolvedProductionDirectAttempt(item.attempts)
-    && (!hasActiveAttempt(item) || !handoffLinks.value[item.id])
+    && (!hasActiveAttempt(item) || !pendingHandoffLink(item))
     && !handoffBusy.value.has(item.id)
 }
 
@@ -370,7 +381,7 @@ function canDirectSubmit(item: TaxSubmission): boolean {
 
 function handoffButtonLabel(item: TaxSubmission): string {
   if (handoffBusy.value.has(item.id)) return t('common.loading')
-  return hasActiveAttempt(item) && !handoffLinks.value[item.id]
+  return hasActiveAttempt(item) && !pendingHandoffLink(item)
     ? t('reports.submissions.replace_epo_link')
     : t('reports.submissions.open_epo')
 }
@@ -468,11 +479,19 @@ async function createHandoff(item: TaxSubmission) {
   if (popup) popup.opener = null
   handoffBusy.value = new Set(handoffBusy.value).add(item.id)
   try {
-    const replaceActive = hasActiveAttempt(item) && !handoffLinks.value[item.id]
+    const replaceActive = hasActiveAttempt(item) && !pendingHandoffLink(item)
     const result = await epoSubmissionsApi.handoff(item.id, replaceActive)
+    // Odkaz označíme za spotřebovaný už tady, když ho níž předáme popupu — dál ho
+    // pak nenabízíme, protože o jeho životnosti ani jednorázovosti nic nevíme.
+    // Když popup neprošel, odkaz nikdo neotevřel a zůstává nabídnutelný.
     handoffLinks.value = {
       ...handoffLinks.value,
-      [item.id]: { url: result.url, expiresAt: result.expires_at, attemptId: result.attempt_id },
+      [item.id]: {
+        url: result.url,
+        expiresAt: result.expires_at,
+        attemptId: result.attempt_id,
+        opened: popup !== null,
+      },
     }
     persistHandoffLinks()
     expandedId.value = item.id
@@ -496,17 +515,21 @@ async function createHandoff(item: TaxSubmission) {
   }
 }
 
-function reopenHandoff(item: TaxSubmission) {
+function openPendingHandoff(item: TaxSubmission) {
   const link = handoffLinks.value[item.id]
   if (!link) return
-  if (new Date(link.expiresAt).getTime() <= Date.now()) {
-    const remaining = { ...handoffLinks.value }
-    delete remaining[item.id]
-    handoffLinks.value = remaining
-    persistHandoffLinks()
-    toast.warning(t('reports.submissions.handoff_expired'))
+  if (!canOfferHandoffLink(link)) {
+    // Odkaz už jednou odešel do prohlížeče nebo přetekl odhadovanou mez. Nabízet
+    // ho znovu nesmíme — mohl být jednorázový a portál by ukázal „neexistující
+    // podání". Záznam ale necháváme kvůli attemptId pro nahrávané artefakty.
+    toast.warning(t('reports.submissions.handoff_consumed_hint'))
     return
   }
+  handoffLinks.value = {
+    ...handoffLinks.value,
+    [item.id]: { ...link, opened: true },
+  }
+  persistHandoffLinks()
   window.open(link.url, '_blank', 'noopener,noreferrer')
 }
 
@@ -942,17 +965,17 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'send',
       tier: 'primary',
       variant: 'warning',
-      show: !!handoffLinks.value[s.id],
-      run: () => reopenHandoff(s),
+      show: !!pendingHandoffLink(s),
+      run: () => openPendingHandoff(s),
     },
     {
-      // v-else-if k předchozí položce: rozdělaný handoff má přednost před založením nového.
+      // v-else-if k předchozí položce: neotevřený handoff má přednost před založením nového.
       key: 'handoff',
       label: handoffButtonLabel(s),
       icon: 'send',
       tier: 'primary',
       variant: 'primary',
-      show: !handoffLinks.value[s.id] && canHandoff(s),
+      show: !pendingHandoffLink(s) && canHandoff(s),
       run: () => createHandoff(s),
     },
     {
@@ -1177,7 +1200,7 @@ onMounted(async () => {
               </td>
               <td class="px-4 py-3">
                 <div class="flex flex-wrap justify-end gap-2" @click.stop>
-                  <button v-if="handoffLinks[item.id]" type="button" :class="btnFilledSm('warning')" @click="reopenHandoff(item)">
+                  <button v-if="pendingHandoffLink(item)" type="button" :class="btnFilledSm('warning')" @click="openPendingHandoff(item)">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
                     </svg>
@@ -1307,18 +1330,30 @@ onMounted(async () => {
             </ul>
           </div>
 
-          <div v-if="handoffLinks[selected.id]" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-center justify-between gap-3">
+          <div v-if="pendingHandoffLink(selected)" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="font-medium text-warning-800 text-sm">{{ t('reports.submissions.handoff_ready') }}</div>
-              <div class="text-xs text-warning-700 mt-1">
-                {{ t('reports.submissions.handoff_expires', { date: formatDate(handoffLinks[selected.id].expiresAt) }) }}
-              </div>
+              <div class="text-xs text-warning-700 mt-1">{{ t('reports.submissions.handoff_one_time') }}</div>
             </div>
-            <button type="button" :class="btnFilled('warning')" @click="reopenHandoff(selected)">
+            <button type="button" :class="btnFilled('warning')" @click="openPendingHandoff(selected)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
               </svg>
               {{ t('reports.submissions.continue_epo') }}
+            </button>
+          </div>
+          <!-- Odkaz už jednou odešel do prohlížeče. Znovu ho nenabízíme — místo toho
+               nabídneme vytvoření nového, což je levné a vždycky funguje. -->
+          <div v-else-if="handoffLinks[selected.id]" class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="font-medium text-neutral-800 text-sm">{{ t('reports.submissions.handoff_consumed_title') }}</div>
+              <div class="text-xs text-neutral-600 mt-1">{{ t('reports.submissions.handoff_consumed_hint') }}</div>
+            </div>
+            <button v-if="canHandoff(selected)" type="button" :class="btnOutline('primary')" @click="createHandoff(selected)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
+              </svg>
+              {{ t('reports.submissions.replace_epo_link') }}
             </button>
           </div>
 

@@ -183,7 +183,7 @@ async function save() {
       <div class="flex items-center gap-3 flex-wrap">
         <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="save">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-          {{ saving ? '…' : t('common.save') }}
+          {{ saving ? '…' : t('settings.automation.save') }}
         </button>
         <span v-if="saved" class="text-xs text-success-600">{{ t('common.saved') }}</span>
         <span v-if="error" class="text-xs text-danger-500">{{ error }}</span>

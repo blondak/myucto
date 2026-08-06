@@ -1280,7 +1280,7 @@ final class Routes
         // Kniha DPH (interní VAT žurnál — NE EPO podání, vždy měsíční)
         $app->get    ('/api/reports/dph-book/preview', [DphBookAction::class, 'preview']);
         $app->get    ('/api/reports/dph-book',         [DphBookAction::class, 'download']);
-        // OSS (One Stop Shop) — kvartální dashboard z ručně označených řádků.
+        // OSS (One Stop Shop) — kvartální dashboard; zařazení řádků se odvozuje automaticky.
         $app->get    ('/api/reports/oss/preview',      [OssReportAction::class, 'preview']);
         // Práh 10 000 EUR (§ 8 odst. 3 ZDPH) — bez guardu oss_disabled, protože ho
         // potřebuje znát právě ten, kdo ještě registrovaný není.

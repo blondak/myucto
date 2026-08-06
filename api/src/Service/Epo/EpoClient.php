@@ -17,6 +17,19 @@ final class EpoClient
     private const ENDPOINT_BASE = 'https://adisspr.mfcr.cz/dpr';
     private const MAX_RESPONSE_BYTES = 262144;
 
+    /**
+     * NÁŠ ODHAD, ne údaj od EPO. Odpověď portálu obsahuje jedině URL formuláře —
+     * žádnou platnost, žádný příznak jednorázovosti. Tahle hodnota slouží výhradně
+     * jako horní mez okna, po které pokus považujeme za rozdělaný (`handoff_expires_at`),
+     * a je záměrně spíš delší než kratší, aby okno nezhaslo dřív než skutečný odkaz.
+     *
+     * Skutečná životnost může být kratší a odkaz může být jednorázový (spotřebuje se
+     * prvním otevřením) — proto se z toho NIKDY nesmí odvozovat tvrzení „odkaz do {čas}
+     * funguje". Frontend proto odkaz nabízí jen do prvního otevření, viz
+     * `web/src/utils/epoHandoffCache.ts`.
+     */
+    private const ESTIMATED_LINK_LIFETIME_SECONDS = 30 * 60;
+
     private readonly Client $http;
 
     public function __construct(?Client $http = null)
@@ -37,6 +50,7 @@ final class EpoClient
 
     /**
      * @return array{url:string,http_status:int,expires_at:string}
+     *     `expires_at` je náš odhad, ne údaj od EPO — viz {@see self::ESTIMATED_LINK_LIFETIME_SECONDS}.
      */
     public function createHandoff(string $xml): array
     {
@@ -129,7 +143,7 @@ final class EpoClient
         return [
             'url' => $url,
             'http_status' => $status,
-            'expires_at' => date('Y-m-d H:i:s', time() + 30 * 60),
+            'expires_at' => date('Y-m-d H:i:s', time() + self::ESTIMATED_LINK_LIFETIME_SECONDS),
         ];
     }
 }

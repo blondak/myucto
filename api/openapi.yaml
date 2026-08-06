@@ -7027,7 +7027,7 @@ paths:
     get:
       tags: [Reports]
       summary: Náhled OSS přiznání
-      description: Kvartální podklad One Stop Shop z ručně označených řádků vydaných faktur. Vyžaduje zapnutý OSS režim v nastavení firmy.
+      description: Kvartální podklad One Stop Shop z vydaných faktur. Zařazení řádku do OSS se odvozuje automaticky ze sazby, země odběratele a číselníku sazeb členských států. Vyžaduje zapnutý OSS režim v nastavení firmy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
@@ -7044,7 +7044,7 @@ paths:
     get:
       tags: [Reports]
       summary: OSS XML export
-      description: EPO XML pro OSS EU režim (OSSEI1) z ručně označených řádků vydaných faktur. Běžná plnění generuje jako VetaR a opravy minulých období jako VetaO. Vyžaduje zapnutý OSS režim v nastavení firmy.
+      description: EPO XML pro OSS EU režim (OSSEI1) z vydaných faktur; zařazení řádku do OSS se odvozuje automaticky. Běžná plnění generuje jako VetaR a opravy minulých období jako VetaO. Vyžaduje zapnutý OSS režim v nastavení firmy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }

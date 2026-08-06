@@ -1,7 +1,27 @@
+/**
+ * Cache odkazu do interaktivního formuláře EPO.
+ *
+ * EPO nám o odkazu neřekne nic než URL — ani platnost, ani jestli je jednorázový.
+ * `expiresAt` je proto jen odhad backendu (viz `EpoClient::ESTIMATED_LINK_LIFETIME_SECONDS`)
+ * a nesmí se z něj dělat slib, že odkaz ještě žije. Kdo si na tom slibu postavil
+ * nabídku „otevřít znovu", posílal uživatele na hlášku portálu o neexistujícím podání.
+ *
+ * Cache proto drží odkaz jako JEDNORÁZOVÝ: nabízí se pouze do prvního otevření
+ * (`opened`). Jakmile odkaz jednou odešel do prohlížeče — ať už ho otevřel popup
+ * hned po vytvoření, nebo uživatel ručně — přestává být nabízený a jediná dál
+ * nabízená cesta je vytvořit nový handoff. To je správně bez ohledu na to, jestli
+ * je skutečnou příčinou jednorázovost odkazu, nebo životnost kratší než náš odhad.
+ *
+ * `attemptId` v záznamu zůstává i po spotřebování odkazu — párují se přes něj
+ * nahrané artefakty s pokusem o podání.
+ */
 export interface CachedEpoHandoffLink {
   url: string
+  /** Odhad backendu, ne údaj od EPO. Slouží jen jako horní mez, ne jako záruka. */
   expiresAt: string
   attemptId: number
+  /** Odkaz už jednou odešel do prohlížeče — dál se nenabízí. */
+  opened: boolean
 }
 
 type HandoffLinks = Record<number, CachedEpoHandoffLink>
@@ -26,6 +46,9 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
   if (
     typeof link.url !== 'string'
     || typeof link.expiresAt !== 'string'
+    // Záznamy bez `opened` pocházejí ze starší verze, kde se odkaz nabízel opakovaně.
+    // Nevíme o nich, jestli už byly spotřebované, takže je zahazujeme celé.
+    || typeof link.opened !== 'boolean'
     || !Number.isInteger(link.attemptId)
     || (link.attemptId ?? 0) <= 0
   ) return false
@@ -41,6 +64,19 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
   } catch {
     return false
   }
+}
+
+/**
+ * Smí se odkaz ještě nabídnout k otevření? Jen dokud neodešel do prohlížeče
+ * a zároveň nepřekročil odhadovanou mez. Po spotřebování zbývá jedině nový handoff.
+ */
+export function canOfferHandoffLink(
+  link: CachedEpoHandoffLink | undefined,
+  now = Date.now(),
+): boolean {
+  if (!link || link.opened) return false
+  const expiresAt = new Date(link.expiresAt).getTime()
+  return Number.isFinite(expiresAt) && expiresAt > now
 }
 
 export function loadEpoHandoffLinks(

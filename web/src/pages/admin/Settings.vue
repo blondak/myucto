@@ -986,6 +986,44 @@ function vatCollisionLabel(c: VatStatusCollision): string {
         </div>
       </section>
 
+      <!-- OSS (One Stop Shop) — čtvrtá modulová karta ve stejném vzoru jako účetnictví/mzdy/sklad.
+           Údaje o identifikaci a platnosti mají smysl jen se zapnutým režimem, proto se
+           odkrývají stejně jako vnořená „Automatická výdejka" u skladu. -->
+      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.oss_section') }}</h2>
+        <div class="space-y-3">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input v-model="(supplier as any).oss_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+            <span>
+              <span class="font-medium">{{ t('settings.oss_enabled') }}</span>
+              <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.oss_hint') }}</p>
+            </span>
+          </label>
+          <div v-if="(supplier as any).oss_enabled" class="grid grid-cols-1 md:grid-cols-4 gap-3 ml-6">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_identification_country') }}</label>
+              <input v-model="(supplier as any).oss_identification_country" type="text" maxlength="2" placeholder="CZ"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_return_currency') }}</label>
+              <input v-model="(supplier as any).oss_return_currency" type="text" maxlength="3" placeholder="EUR"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_from') }}</label>
+              <input v-model="(supplier as any).oss_valid_from" type="date"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_to') }}</label>
+              <input v-model="(supplier as any).oss_valid_to" type="date"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Daňové nastavení (EPO výkazy DPH/KH/DPFO/DPPO) — samostatný box -->
       <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.tax_section') }}</h2>
@@ -1187,35 +1225,6 @@ function vatCollisionLabel(c: VatStatusCollision): string {
                 <option value="band3">{{ t('settings.flat_tax_band3') }}</option>
               </select>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.flat_tax_hint') }}</p>
-            </div>
-            <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
-              <label class="flex items-center gap-2 text-sm">
-                <input v-model="(supplier as any).oss_enabled" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-                <span>{{ t('settings.oss_enabled') }}</span>
-              </label>
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.oss_hint') }}</p>
-              <div v-if="(supplier as any).oss_enabled" class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
-                <div>
-                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_identification_country') }}</label>
-                  <input v-model="(supplier as any).oss_identification_country" type="text" maxlength="2" placeholder="CZ"
-                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_return_currency') }}</label>
-                  <input v-model="(supplier as any).oss_return_currency" type="text" maxlength="3" placeholder="EUR"
-                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_from') }}</label>
-                  <input v-model="(supplier as any).oss_valid_from" type="date"
-                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_to') }}</label>
-                  <input v-model="(supplier as any).oss_valid_to" type="date"
-                    class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-                </div>
-              </div>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.financial_office_code') }}</label>
