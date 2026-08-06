@@ -5920,6 +5920,9 @@
     "draft_open_mode_monthly_only": "„Na začátku období\" je dostupné jen pro měsíční periodicitu.",
     "period_start_requires_monthly": "Režim „Na začátku období\" lze použít jen u měsíční periodicity.",
     "period_start_requires_auto_issue": "Režim „Na začátku období\" vyžaduje automatické vystavení (koncept se na konci období uzavře sám).",
+    "oss_country_required": "U položky v režimu OSS vyplňte stát spotřeby — bez něj se řádek uloží jako tuzemský.",
+    "oss_rate_type_missing_hint": "Bez typu sazby se ho generátor pokusí doplnit z číselníku, a to jen tehdy, odvodí-li tentýž stát spotřeby. Jinak řádek do OSS přiznání nepůjde — doplňte typ podle sazby platné ve státě spotřeby.",
+    "oss_registration_hint": "OSS zadané na položce šablony je uložené rozhodnutí: při generování má přednost před automatickým odvozením. Použije se ale jen tehdy, má-li firma k datu plnění vygenerované faktury platnou registraci do OSS. Po jejím skončení se řádek vystaví jako tuzemský a označí se k ručnímu posouzení.",
     "reminder_days_before": "Připomenout dní před vystavením",
     "reminder_days_before_hint": "Kolik dní před vystavením vám přijde e-mailová připomínka, ať stihnete doplnit vícepráce. 0 = neposílat.",
     "items": "Položky",
@@ -7451,11 +7454,21 @@
       "rate_type_missing_hint": "Bez typu sazby se řádek nedostane do OSS přiznání. Doplňte jej podle sazby platné ve státě spotřeby.",
       "clause_row": "Jedno správní místo",
       "clause_hint": "Daň je přiznána a odvedena ve státě spotřeby v režimu OSS; doklad o tom nese doložku v PDF i ve veřejném náhledu.",
-      "clause_countries_unknown": "stát spotřeby neuveden"
+      "clause_countries_unknown": "stát spotřeby neuveden",
+      "needs_review": "k posouzení",
+      "needs_review_hint": "Místo plnění u tohoto řádku systém neurčil sám — ověřte zemi spotřeby a typ sazby. Křížkem příznak zhasnete.",
+      "needs_review_clear": "Označit řádek za posouzený"
     },
     "rebuild_snapshots": "Obnovit údaje stran",
     "rebuild_snapshots_confirm": "Přepsat údaje dodavatele, odběratele a banky na dokladu podle aktuálního stavu? Částky, stav ani číslo dokladu se nezmění. Vygenerované PDF se zneplatní a nové se může lišit od toho, které odběratel dostal.",
-    "rebuild_snapshots_done": "Údaje stran na dokladu obnoveny."
+    "rebuild_snapshots_done": "Údaje stran na dokladu obnoveny.",
+    "bulk_oss_failure_title": "Hromadná změna se zastavila",
+    "bulk_oss_failure_completed": "Zapsáno dokladů: {n}",
+    "bulk_oss_failure_failed_at": "Spadlo na dokladu",
+    "bulk_oss_failure_not_attempted": "Nezkoušeno dokladů: {n}",
+    "bulk_oss_failure_pdf_stale": "Nepodařilo se zneplatnit cache PDF u {n} dokladů",
+    "bulk_oss_failure_retry_hint": "Nezpracované doklady zůstaly beze změny a máte je vybrané — po odstranění příčiny spusťte akci znovu jen nad nimi.",
+    "bulk_oss_pdf_stale_hint": "Data jsou zapsaná, ale uložené PDF je staré. Vygenerujte je znovu, než doklad odešlete."
   },
   "status": {
     "draft": "Koncept",
@@ -10032,11 +10045,13 @@
       "open_epo": "Otevřít a podat v EPO",
       "replace_epo_link": "Vytvořit nový odkaz EPO",
       "popup_blocked": "Prohlížeč zablokoval nové okno. Použijte tlačítko Pokračovat do EPO v detailu.",
-      "handoff_created": "Formulář EPO byl připraven a otevřen v novém okně. Odkaz je jednorázový — když okno zavřete, vytvořte si nový odkaz.",
+      "handoff_created": "Formulář EPO byl připraven a otevřen v novém okně. Vrátit se k němu jde přibližně 20 minut, dokud se podklad nezmění.",
       "handoff_ready": "Formulář EPO je připraven",
-      "handoff_one_time": "Odkaz zatím nebyl otevřen. Použít ho jde jednou — pak si vytvořte nový.",
-      "handoff_consumed_title": "Odkaz už byl použit",
-      "handoff_consumed_hint": "Odkaz do EPO je jednorázový a jak dlouho žije, nám portál neříká. Znovu ho proto nenabízíme — pokud jste podání nedokončili, vytvořte si nový odkaz.",
+      "handoff_window": "Odkaz je použitelný přibližně 20 minut od vytvoření, a to jen dokud se podklad nezmění. Jak dlouho odkaz doopravdy žije, nám portál neříká.",
+      "handoff_stale_title": "Odkaz už nenabízíme",
+      "handoff_stale_hint": "Buď uplynulo okno přibližně 20 minut, nebo se XML od vytvoření odkazu přepočítalo — starý odkaz by pak mířil na neaktuální písemnost. Pokud jste podání nedokončili, vytvořte si nový odkaz.",
+      "moss_oss_title": "OSS přiznání se podává v aplikaci MOSS/OSS",
+      "moss_oss_hint": "Obecnou cestou EPO ho podat nelze — ani předáním do formuláře, ani přímým podáním se ZAREP: portál písemnost sice rozpozná, ale odmítne ji s tím, že musíte být přihlášeni v aplikaci MOSS/OSS. Proto tady žádná cesta odeslání nesvítí. Stáhněte si XML a nahrajte ho na Daňovém portálu v aplikaci MOSS/OSS (samostatná položka v horní liště vedle EPO), do které se musíte přihlásit.",
       "continue_epo": "Pokračovat do EPO",
       "snapshot": "XML snapshot",
       "snapshot_details": "Podrobnosti snapshotu",
@@ -10640,6 +10655,7 @@
     "oss": {
       "title": "OSS přiznání",
       "subtitle": "Kvartální přehled One Stop Shop z vydaných faktur. Řádky se do OSS zařazují automaticky, sporné případy jsou označené k ručnímu posouzení.",
+      "filing_channel_hint": "OSS přiznání se podává v aplikaci MOSS/OSS na Daňovém portálu, ne obecnou cestou EPO. Stáhněte si XML a nahrajte ho tam po přihlášení do aplikace MOSS/OSS.",
       "period": "Období",
       "total_base": "Základ daně",
       "total_vat": "DPH",
@@ -10720,7 +10736,11 @@
       "evidence_supply": "Plnění",
       "evidence_customer": "Odběratel",
       "evidence_retain_until": "Uchovat do",
-      "evidence_adjustment": "oprava {period}"
+      "evidence_adjustment": "oprava {period}",
+      "archive_submitted": "Podáno",
+      "archive_submission_ref": "Číslo jednací podání",
+      "archive_validation_errors": "Důvody neplatnosti",
+      "archive_notes": "Poznámka"
     }
   },
   "tax_evidence": {

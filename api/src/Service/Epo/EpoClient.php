@@ -19,16 +19,17 @@ final class EpoClient
 
     /**
      * NÁŠ ODHAD, ne údaj od EPO. Odpověď portálu obsahuje jedině URL formuláře —
-     * žádnou platnost, žádný příznak jednorázovosti. Tahle hodnota slouží výhradně
-     * jako horní mez okna, po které pokus považujeme za rozdělaný (`handoff_expires_at`),
-     * a je záměrně spíš delší než kratší, aby okno nezhaslo dřív než skutečný odkaz.
+     * žádnou platnost. Hodnota slouží jako horní mez okna, po které pokus považujeme
+     * za rozdělaný (`handoff_expires_at`), a z toho se NIKDY nesmí stát tvrzení
+     * „odkaz do {čas} funguje".
      *
-     * Skutečná životnost může být kratší a odkaz může být jednorázový (spotřebuje se
-     * prvním otevřením) — proto se z toho NIKDY nesmí odvozovat tvrzení „odkaz do {čas}
-     * funguje". Frontend proto odkaz nabízí jen do prvního otevření, viz
-     * `web/src/utils/epoHandoffCache.ts`.
+     * 20 minut je rezerva pod session portálu, o které EPO v chybové hlášce mluví
+     * jako o zhruba 30 minutách od poslední aktivity. Musí zůstat v souladu
+     * s `HANDOFF_LINK_LIFETIME_MS` ve `web/src/utils/epoHandoffCache.ts` — dvě různá
+     * čísla by znamenala, že si UI a backend o témž okně protiřečí. Druhou podmínkou
+     * pro znovunabídnutí odkazu je nezměněný otisk podkladu, tu řeší frontend.
      */
-    private const ESTIMATED_LINK_LIFETIME_SECONDS = 30 * 60;
+    private const ESTIMATED_LINK_LIFETIME_SECONDS = 20 * 60;
 
     private readonly Client $http;
 

@@ -5920,6 +5920,9 @@
     "draft_open_mode_monthly_only": "„At start of period\" is only available for monthly frequency.",
     "period_start_requires_monthly": "„At start of period\" mode can only be used with monthly frequency.",
     "period_start_requires_auto_issue": "„At start of period\" mode requires auto-issue (the draft closes itself at the end of the period).",
+    "oss_country_required": "Fill in the Member State of consumption for the OSS line — without it the line is saved as domestic.",
+    "oss_rate_type_missing_hint": "Without a rate type the generator will try to fill it from the codebook, but only if it derives the same Member State of consumption. Otherwise the line will not reach the OSS return — set the type according to the rate applicable in the Member State of consumption.",
+    "oss_registration_hint": "OSS set on a template line is a stored decision: it takes precedence over automatic derivation when invoices are generated. It is only used when the company holds a valid OSS registration on the tax point date of the generated invoice. Once the registration ends, the line is issued as domestic and flagged for manual review.",
     "reminder_days_before": "Remind days before issue",
     "reminder_days_before_hint": "How many days before issuing you get an email reminder to add extra work. 0 = do not send.",
     "items": "Items",
@@ -7451,11 +7454,21 @@
       "rate_type_missing_hint": "Without a rate type the line will not reach the OSS return. Set it according to the rate applicable in the Member State of consumption.",
       "clause_row": "One Stop Shop",
       "clause_hint": "VAT is declared and paid in the Member State of consumption under the OSS scheme; the document carries the clause in the PDF and in the public preview.",
-      "clause_countries_unknown": "Member State of consumption not stated"
+      "clause_countries_unknown": "Member State of consumption not stated",
+      "needs_review": "needs review",
+      "needs_review_hint": "The system could not determine the place of supply for this line — check the country of consumption and the rate type. Use the cross to clear the flag.",
+      "needs_review_clear": "Mark line as reviewed"
     },
     "rebuild_snapshots": "Refresh party details",
     "rebuild_snapshots_confirm": "Overwrite supplier, customer and bank details on this document with their current values? Amounts, status and document number stay unchanged. The generated PDF is invalidated and the new one may differ from the one the customer received.",
-    "rebuild_snapshots_done": "Party details refreshed."
+    "rebuild_snapshots_done": "Party details refreshed.",
+    "bulk_oss_failure_title": "The bulk change stopped",
+    "bulk_oss_failure_completed": "Documents written: {n}",
+    "bulk_oss_failure_failed_at": "Failed on document",
+    "bulk_oss_failure_not_attempted": "Documents not attempted: {n}",
+    "bulk_oss_failure_pdf_stale": "PDF cache could not be invalidated for {n} documents",
+    "bulk_oss_failure_retry_hint": "The unprocessed documents are unchanged and stay selected — once the cause is fixed, run the action again over them only.",
+    "bulk_oss_pdf_stale_hint": "The data is saved, but the stored PDF is stale. Regenerate it before sending the document."
   },
   "status": {
     "draft": "Draft",
@@ -10032,11 +10045,13 @@
       "open_epo": "Open and submit in EPO",
       "replace_epo_link": "Create a new EPO link",
       "popup_blocked": "The browser blocked the new window. Use Continue to EPO in the detail panel.",
-      "handoff_created": "The EPO form is ready and opened in a new window. The link is single-use — if you close the window, create a new link.",
+      "handoff_created": "The EPO form is ready and opened in a new window. You can return to it for about 20 minutes, as long as the underlying data does not change.",
       "handoff_ready": "The EPO form is ready",
-      "handoff_one_time": "The link has not been opened yet. It works once — after that, create a new one.",
-      "handoff_consumed_title": "The link has already been used",
-      "handoff_consumed_hint": "The EPO link is single-use and the portal never tells us how long it lives, so we do not offer it again. If you did not finish the filing, create a new link.",
+      "handoff_window": "The link is usable for about 20 minutes after it was created, and only while the underlying data stays unchanged. The portal never tells us how long the link really lives.",
+      "handoff_stale_title": "The link is no longer offered",
+      "handoff_stale_hint": "Either the roughly 20-minute window has passed, or the XML has been recalculated since the link was created — the old link would then point to an outdated filing. If you did not finish the filing, create a new link.",
+      "moss_oss_title": "The OSS return is filed in the MOSS/OSS application",
+      "moss_oss_hint": "It cannot be filed through the general EPO route — neither by handing the XML over to the web form nor by a direct ZAREP filing: the portal does recognise the document, but rejects it because you must be signed in to the MOSS/OSS application. That is why no filing route is offered here. Download the XML and upload it in the MOSS/OSS application on the Czech tax portal (a separate item in the top bar next to EPO), which requires its own sign-in.",
       "continue_epo": "Continue to EPO",
       "snapshot": "XML snapshot",
       "snapshot_details": "Snapshot details",
@@ -10640,6 +10655,7 @@
     "oss": {
       "title": "OSS return",
       "subtitle": "Quarterly One Stop Shop overview from issued invoices. Lines are assigned to OSS automatically; uncertain cases are flagged for manual review.",
+      "filing_channel_hint": "The OSS return is filed in the MOSS/OSS application on the Czech tax portal, not through the general EPO route. Download the XML and upload it there after signing in to MOSS/OSS.",
       "period": "Period",
       "total_base": "Taxable amount",
       "total_vat": "VAT",
@@ -10720,7 +10736,11 @@
       "evidence_supply": "Supply",
       "evidence_customer": "Customer",
       "evidence_retain_until": "Retain until",
-      "evidence_adjustment": "correction {period}"
+      "evidence_adjustment": "correction {period}",
+      "archive_submitted": "Filed",
+      "archive_submission_ref": "Filing reference",
+      "archive_validation_errors": "Reasons for invalidity",
+      "archive_notes": "Note"
     }
   },
   "tax_evidence": {

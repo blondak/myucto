@@ -15,8 +15,32 @@ use MyInvoice\Service\Report\TaxSubmissionFilename;
 final class EpoDirectSubmissionService
 {
     private const SUPPORTED_FORMS = [
-        'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9', 'ossei1',
+        'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9',
     ];
+
+    /**
+     * Písemnosti, které se podávají v samostatné aplikaci MOSS/OSS Daňového portálu,
+     * a přímý kanál je proto odesílat nesmí.
+     *
+     * Není to domněnka. POST XML na `/dpr/epo_podani` vrátil chybu „Pro práci
+     * s písemností 'DAP OSS - režim EU - Přiznání k DPH platné od 1.7.2021' musíte být
+     * přihlášeni v aplikaci MOSS/OSS!" — XML tedy prošlo a odmítnutá byla sama
+     * písemnost, ne její obsah ani formát. Přímé podání míří na TÝŽ endpoint
+     * `/dpr/epo_podani` (viz {@see EpoDirectClient}); od asistovaného předání
+     * (viz {@see EpoClient}) se liší jen podepsaným tělem místo `?otevriFormular=1`.
+     * Láme se tedy o stejnou podmínku a podpis ze ZAREP na ní nic nezmění — portál
+     * nechce jiný podpis, ale přihlášení do jiné aplikace. Nabídnout tlačítko, které
+     * po odemčení klíče a podepsání skončí toutéž chybou, jen o pár kroků později
+     * a hůř čitelně, je horší než ho nenabídnout.
+     *
+     * Blokuje se pouze NOVÉ odeslání. Dohledání stavu a obnova potvrzení u pokusu
+     * založeného dřív, než tohle omezení vyšlo najevo, zůstávají dostupné — jinak by
+     * takový pokus zůstal navždy viset v „nejistém" stavu a nešel uzavřít.
+     *
+     * Musí zůstat v souladu s `EpoSubmissionService::MOSS_OSS_FORMS`; hlídá to
+     * `EpoMossOssChannelGuardTest`.
+     */
+    private const MOSS_OSS_FORMS = ['ossei1'];
 
     public function __construct(
         private readonly Connection $db,
@@ -41,16 +65,20 @@ final class EpoDirectSubmissionService
         int $credentialId,
     ): array {
         $environment = $this->client->environment();
-        $unlocked = $this->credentials->unlockForSigning(
-            $credentialId,
-            $userId,
-            $supplierId,
-        );
+        // Nejdřív se ptáme, jestli tenhle snapshot vůbec smíme odeslat, a teprve
+        // potom odemykáme privátní klíč. Opačné pořadí dešifrovalo PFX i pro podání,
+        // které se stejně zahodí — a u MOSS/OSS formulářů by chybu o špatné cestě
+        // zastínila hláška o certifikátu.
         $submission = $this->validatedSubmission(
             $submissionId,
             $supplierId,
             false,
             $environment,
+        );
+        $unlocked = $this->credentials->unlockForSigning(
+            $credentialId,
+            $userId,
+            $supplierId,
         );
         $attemptId = $this->direct->createAttempt(
             $supplierId,
@@ -1226,7 +1254,13 @@ final class EpoDirectSubmissionService
         }
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @param bool $allowSubmitted `false` = chystáme se něco odeslat ven (test, podání),
+     *     `true` = jen dohledáváme nebo uzavíráme stav už existujícího pokusu. Rozlišení
+     *     používá i brána na MOSS/OSS formuláře, viz {@see self::MOSS_OSS_FORMS}.
+     *
+     * @return array<string,mixed>
+     */
     private function validatedSubmission(
         int $submissionId,
         int $supplierId,
@@ -1237,7 +1271,17 @@ final class EpoDirectSubmissionService
         if ($submission === null) {
             throw new EpoSubmissionException('not_found', 'Podání nebylo nalezeno.', 404);
         }
-        if (!in_array((string) $submission['form_code'], self::SUPPORTED_FORMS, true)) {
+        $formCode = (string) $submission['form_code'];
+        if (in_array($formCode, self::MOSS_OSS_FORMS, true)) {
+            if (!$allowSubmitted) {
+                throw new EpoSubmissionException(
+                    'moss_oss_only',
+                    'OSS přiznání nelze odeslat přímým EPO API — podává se v aplikaci MOSS/OSS'
+                    . ' na Daňovém portálu, do které se musíte přihlásit. Stáhněte XML a nahrajte ho tam.',
+                    422,
+                );
+            }
+        } elseif (!in_array($formCode, self::SUPPORTED_FORMS, true)) {
             throw new EpoSubmissionException(
                 'unsupported_form',
                 'Tento formulář nelze odeslat přímým EPO API.',

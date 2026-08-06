@@ -3,25 +3,27 @@
  *
  * EPO nám o odkazu neřekne nic než URL — ani platnost, ani jestli je jednorázový.
  * `expiresAt` je proto jen odhad backendu (viz `EpoClient::ESTIMATED_LINK_LIFETIME_SECONDS`)
- * a nesmí se z něj dělat slib, že odkaz ještě žije. Kdo si na tom slibu postavil
- * nabídku „otevřít znovu", posílal uživatele na hlášku portálu o neexistujícím podání.
+ * a nesmí se z něj dělat slib, že odkaz ještě žije.
  *
- * Cache proto drží odkaz jako JEDNORÁZOVÝ: nabízí se pouze do prvního otevření
- * (`opened`). Jakmile odkaz jednou odešel do prohlížeče — ať už ho otevřel popup
- * hned po vytvoření, nebo uživatel ručně — přestává být nabízený a jediná dál
- * nabízená cesta je vytvořit nový handoff. To je správně bez ohledu na to, jestli
- * je skutečnou příčinou jednorázovost odkazu, nebo životnost kratší než náš odhad.
+ * Odkaz se proto smí znovu nabídnout jen tehdy, když platí obojí:
  *
- * `attemptId` v záznamu zůstává i po spotřebování odkazu — párují se přes něj
- * nahrané artefakty s pokusem o podání.
+ * 1. **Okno {@link HANDOFF_LINK_LIFETIME_MS}.** Portál v chybové hlášce sám uvádí
+ *    session zhruba 30 minut od poslední aktivity; 20 minut je rezerva pod tím.
+ * 2. **Podklad se nezměnil.** Když uživatel mezitím opraví doklady a snapshot se
+ *    přepočítá, míří starý odkaz na neaktuální písemnost — nabízet ho je horší,
+ *    než ho zahodit. Váže se na SHA-256 otisk, který archiv u snapshotu už vede
+ *    (`tax_submissions.xml_sha256`); druhý otisk se kvůli tomu nezavádí.
+ *
+ * `attemptId` v záznamu zůstává i po vypršení okna — párují se přes něj nahrané
+ * artefakty s pokusem o podání.
  */
 export interface CachedEpoHandoffLink {
   url: string
   /** Odhad backendu, ne údaj od EPO. Slouží jen jako horní mez, ne jako záruka. */
   expiresAt: string
   attemptId: number
-  /** Odkaz už jednou odešel do prohlížeče — dál se nenabízí. */
-  opened: boolean
+  /** Otisk snapshotu v okamžiku vytvoření odkazu — proti němu se pozná přepočtený podklad. */
+  xmlSha256: string
 }
 
 type HandoffLinks = Record<number, CachedEpoHandoffLink>
@@ -32,9 +34,16 @@ interface StorageLike {
   removeItem(key: string): void
 }
 
+// Klíč zůstává `v1`: starší záznamy (bez otisku podkladu) neprojdou validací
+// a `loadEpoHandoffLinks` je i s klíčem rovnou uklidí. Nová verze klíče by je
+// nechala v úložišti ležet napořád.
 const STORAGE_PREFIX = 'myinvoice.epo_handoff_links.v1'
-const MAX_LINK_LIFETIME_MS = 35 * 60_000
+/** Musí odpovídat `EpoClient::ESTIMATED_LINK_LIFETIME_SECONDS` — jinak si dvě čísla protiřečí. */
+export const HANDOFF_LINK_LIFETIME_MS = 20 * 60_000
+/** `expiresAt` počítá server, tohle je tolerance na rozdíl jeho a prohlížečových hodin. */
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000
 const ALLOWED_HOST = 'adisspr.mfcr.cz'
+const SHA256_HEX = /^[0-9a-f]{64}$/i
 
 function storageKey(userId: number, supplierId: number): string {
   return `${STORAGE_PREFIX}.${userId}.${supplierId}`
@@ -46,15 +55,19 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
   if (
     typeof link.url !== 'string'
     || typeof link.expiresAt !== 'string'
-    // Záznamy bez `opened` pocházejí ze starší verze, kde se odkaz nabízel opakovaně.
-    // Nevíme o nich, jestli už byly spotřebované, takže je zahazujeme celé.
-    || typeof link.opened !== 'boolean'
+    // Bez otisku podkladu nelze poznat, jestli odkaz nemíří na přepočtenou písemnost.
+    || typeof link.xmlSha256 !== 'string'
+    || !SHA256_HEX.test(link.xmlSha256)
     || !Number.isInteger(link.attemptId)
     || (link.attemptId ?? 0) <= 0
   ) return false
 
   const expiresAt = new Date(link.expiresAt).getTime()
-  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + MAX_LINK_LIFETIME_MS) {
+  if (
+    !Number.isFinite(expiresAt)
+    || expiresAt <= now
+    || expiresAt > now + HANDOFF_LINK_LIFETIME_MS + CLOCK_SKEW_TOLERANCE_MS
+  ) {
     return false
   }
 
@@ -67,14 +80,18 @@ function validLink(value: unknown, now: number): value is CachedEpoHandoffLink {
 }
 
 /**
- * Smí se odkaz ještě nabídnout k otevření? Jen dokud neodešel do prohlížeče
- * a zároveň nepřekročil odhadovanou mez. Po spotřebování zbývá jedině nový handoff.
+ * Smí se odkaz ještě nabídnout k otevření? Jen dokud běží okno platnosti a zároveň
+ * je podklad pořád ten, ke kterému odkaz vznikl. Jinak zbývá jedině nový handoff.
  */
 export function canOfferHandoffLink(
   link: CachedEpoHandoffLink | undefined,
+  currentXmlSha256: string,
   now = Date.now(),
 ): boolean {
-  if (!link || link.opened) return false
+  if (!link) return false
+  if (!SHA256_HEX.test(currentXmlSha256) || link.xmlSha256.toLowerCase() !== currentXmlSha256.toLowerCase()) {
+    return false
+  }
   const expiresAt = new Date(link.expiresAt).getTime()
   return Number.isFinite(expiresAt) && expiresAt > now
 }

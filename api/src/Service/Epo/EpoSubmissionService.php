@@ -10,8 +10,21 @@ use MyInvoice\Repository\TaxSubmissionEpoRepository;
 final class EpoSubmissionService
 {
     private const SUPPORTED_FORMS = [
-        'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9', 'ossei1',
+        'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9',
     ];
+
+    /**
+     * Formuláře, které obecné EPO sice rozpozná, ale odmítne je zpracovat mimo
+     * vlastní aplikaci daňového portálu. U OSS to portál říká doslova: „Pro práci
+     * s písemností … musíte být přihlášeni v aplikaci MOSS/OSS!" Asistované předání
+     * tedy skončí vždycky chybou, ať uděláme cokoli — nabízet ho je jen slib, který
+     * nemůžeme dodržet. Odmítá se tady, ne až v UI, aby to nešlo obejít přes API.
+     *
+     * Přímý kanál na tom je stejně (týž endpoint `/dpr/epo_podani`) a má vlastní
+     * kopii seznamu v `EpoDirectSubmissionService::MOSS_OSS_FORMS`. Shodu obou
+     * seznamů hlídá `EpoMossOssChannelGuardTest`.
+     */
+    private const MOSS_OSS_FORMS = ['ossei1'];
 
     public function __construct(
         private readonly Connection $db,
@@ -37,6 +50,14 @@ final class EpoSubmissionService
             $submission = $this->repo->lockSubmission($submissionId, $supplierId);
             if ($submission === null) {
                 throw new EpoSubmissionException('not_found', 'Podání nebylo nalezeno.', 404);
+            }
+            if (in_array((string) $submission['form_code'], self::MOSS_OSS_FORMS, true)) {
+                throw new EpoSubmissionException(
+                    'moss_oss_only',
+                    'OSS přiznání nelze podat obecnou cestou EPO — podává se v aplikaci MOSS/OSS'
+                    . ' na Daňovém portálu, do které se musíte přihlásit. Stáhněte XML a nahrajte ho tam.',
+                    422,
+                );
             }
             if (!in_array((string) $submission['form_code'], self::SUPPORTED_FORMS, true)) {
                 throw new EpoSubmissionException(

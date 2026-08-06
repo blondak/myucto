@@ -10,6 +10,9 @@ function memoryStorage() {
   }
 }
 
+const SNAPSHOT_SHA = 'a'.repeat(64)
+const RECALCULATED_SHA = 'b'.repeat(64)
+
 describe('EPO handoff cache', () => {
   const now = new Date('2026-07-27T12:00:00Z').getTime()
 
@@ -18,9 +21,9 @@ describe('EPO handoff cache', () => {
     saveEpoHandoffLinks(storage, 7, 11, {
       1099: {
         url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
-        expiresAt: '2026-07-27T12:30:00Z',
+        expiresAt: '2026-07-27T12:20:00Z',
         attemptId: 42,
-        opened: false,
+        xmlSha256: SNAPSHOT_SHA,
       },
     }, now)
 
@@ -35,7 +38,7 @@ describe('EPO handoff cache', () => {
         url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
         expiresAt: '2026-07-27T12:20:00Z',
         attemptId: 42,
-        opened: false,
+        xmlSha256: SNAPSHOT_SHA,
       },
     }, now)
 
@@ -49,55 +52,68 @@ describe('EPO handoff cache', () => {
         url: 'https://attacker.example/formular?x=synthetic',
         expiresAt: '2026-07-27T12:20:00Z',
         attemptId: 42,
-        opened: false,
+        xmlSha256: SNAPSHOT_SHA,
       },
     }, now)
 
     expect(saved).toEqual({})
   })
 
-  it('offers a link only until it has been opened once', () => {
+  it('offers a link repeatedly inside the window while the snapshot stays the same', () => {
     const link = {
       url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
-      expiresAt: '2026-07-27T12:30:00Z',
+      expiresAt: '2026-07-27T12:20:00Z',
       attemptId: 42,
-      opened: false,
+      xmlSha256: SNAPSHOT_SHA,
     }
 
-    expect(canOfferHandoffLink(link, now)).toBe(true)
-    // Po prvním otevření o odkazu nevíme, jestli ještě žije (EPO nám o životnosti
-    // ani jednorázovosti nic neříká) — nabídnout ho znovu by znamenalo poslat
-    // uživatele na hlášku portálu o neexistujícím podání.
-    expect(canOfferHandoffLink({ ...link, opened: true }, now)).toBe(false)
-    expect(canOfferHandoffLink(link, now + 31 * 60_000)).toBe(false)
-    expect(canOfferHandoffLink(undefined, now)).toBe(false)
+    // Opakované otevření je v pořádku — odkaz se prvním otevřením nespotřebuje,
+    // skutečnou překážkou byla autentizace do aplikace MOSS/OSS, ne jednorázovost.
+    expect(canOfferHandoffLink(link, SNAPSHOT_SHA, now)).toBe(true)
+    expect(canOfferHandoffLink(link, SNAPSHOT_SHA, now + 19 * 60_000)).toBe(true)
+    expect(canOfferHandoffLink(link, SNAPSHOT_SHA, now + 21 * 60_000)).toBe(false)
+    expect(canOfferHandoffLink(undefined, SNAPSHOT_SHA, now)).toBe(false)
   })
 
-  it('keeps an already opened link in storage so uploads stay tied to the attempt', () => {
+  it('stops offering a link once the underlying XML has been recalculated', () => {
+    const link = {
+      url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
+      expiresAt: '2026-07-27T12:20:00Z',
+      attemptId: 42,
+      xmlSha256: SNAPSHOT_SHA,
+    }
+
+    expect(canOfferHandoffLink(link, RECALCULATED_SHA, now)).toBe(false)
+    // Prázdný nebo nesmyslný otisk se nesmí brát jako shoda.
+    expect(canOfferHandoffLink(link, '', now)).toBe(false)
+  })
+
+  it('keeps a stale link in storage so uploads stay tied to the attempt', () => {
     const storage = memoryStorage()
     saveEpoHandoffLinks(storage, 7, 11, {
       1099: {
         url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
-        expiresAt: '2026-07-27T12:30:00Z',
+        expiresAt: '2026-07-27T12:20:00Z',
         attemptId: 42,
-        opened: true,
+        xmlSha256: SNAPSHOT_SHA,
       },
     }, now)
 
     const restored = loadEpoHandoffLinks(storage, 7, 11, now + 60_000)
     expect(restored[1099]?.attemptId).toBe(42)
-    expect(canOfferHandoffLink(restored[1099], now + 60_000)).toBe(false)
+    expect(canOfferHandoffLink(restored[1099], RECALCULATED_SHA, now + 60_000)).toBe(false)
   })
 
-  it('drops legacy entries written before the single-use rule existed', () => {
+  it('drops legacy entries written before the snapshot fingerprint existed', () => {
     const storage = memoryStorage()
-    // Starý formát bez `opened` — nevíme, jestli už byl odkaz spotřebovaný,
-    // takže se nesmí obnovit ani jako nabídnutelný, ani jako spotřebovaný.
+    // Starý formát bez `xmlSha256` — nevíme, ke kterému podkladu odkaz vznikl,
+    // takže se nesmí obnovit vůbec.
     storage.setItem('myinvoice.epo_handoff_links.v1.7.11', JSON.stringify({
       1099: {
         url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
-        expiresAt: '2026-07-27T12:30:00Z',
+        expiresAt: '2026-07-27T12:20:00Z',
         attemptId: 42,
+        opened: false,
       },
     }))
 

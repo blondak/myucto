@@ -315,17 +315,30 @@ function hasActiveAttempt(item: TaxSubmission): boolean {
 }
 
 /**
- * Odkaz, který ještě nikdo neotevřel — jediný, který smíme nabídnout k otevření.
- * Spotřebovaný záznam v cache zůstává (kvůli `attemptId` pro nahrávané artefakty),
- * ale jako odkaz už se netváří.
+ * Odkaz, který je pořád v okně platnosti a míří na nezměněný podklad — jediný,
+ * který smíme nabídnout k otevření. Vyčerpaný záznam v cache zůstává (kvůli
+ * `attemptId` pro nahrávané artefakty), ale jako odkaz už se netváří.
  */
 function pendingHandoffLink(item: TaxSubmission): CachedEpoHandoffLink | null {
   const link = handoffLinks.value[item.id]
-  return canOfferHandoffLink(link) ? link! : null
+  return canOfferHandoffLink(link, item.xml_sha256) ? link! : null
+}
+
+/**
+ * OSS přiznání se obecnou cestou EPO podat nedá: portál písemnost sice rozpozná,
+ * ale odmítne ji hláškou, že uživatel musí být přihlášený v aplikaci MOSS/OSS.
+ * Platí to pro OBA kanály — asistované předání i přímé podání se ZAREP míří na týž
+ * endpoint `/dpr/epo_podani`, takže se lámou o stejnou podmínku. Jediná pravdivá
+ * cesta je stáhnout XML a nahrát ho v MOSS/OSS, a tak se tu skryje handoff, panel
+ * přímého podání i jeho akce. Backend oba kanály odmítá taky (`moss_oss_only`).
+ */
+function isMossOssForm(item: TaxSubmission): boolean {
+  return item.form_code === 'ossei1'
 }
 
 function canHandoff(item: TaxSubmission): boolean {
   return canWrite.value
+    && !isMossOssForm(item)
     && epoEnvironment.value !== null
     && item.validation_status === 'passed'
     && !['submitted', 'accepted'].includes(item.status)
@@ -354,6 +367,7 @@ function latestDirectAttempt(item: TaxSubmission): EpoAttempt | null {
 
 function canDirectTest(item: TaxSubmission): boolean {
   return canWrite.value
+    && !isMossOssForm(item)
     && epoEnvironment.value !== null
     && enabledCredentials.value.length > 0
     && selectedCredentialId.value !== null
@@ -373,6 +387,7 @@ function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
 
 function canDirectSubmit(item: TaxSubmission): boolean {
   return canWrite.value
+    && !isMossOssForm(item)
     && epoEnvironment.value !== null
     && latestDirectAttempt(item)?.status === 'test_passed'
     && !['submitted', 'accepted'].includes(item.status)
@@ -481,16 +496,15 @@ async function createHandoff(item: TaxSubmission) {
   try {
     const replaceActive = hasActiveAttempt(item) && !pendingHandoffLink(item)
     const result = await epoSubmissionsApi.handoff(item.id, replaceActive)
-    // Odkaz označíme za spotřebovaný už tady, když ho níž předáme popupu — dál ho
-    // pak nenabízíme, protože o jeho životnosti ani jednorázovosti nic nevíme.
-    // Když popup neprošel, odkaz nikdo neotevřel a zůstává nabídnutelný.
+    // Otisk podkladu se ukládá spolu s odkazem: jakmile se snapshot přepočítá,
+    // starý odkaz míří na neaktuální písemnost a přestane se nabízet.
     handoffLinks.value = {
       ...handoffLinks.value,
       [item.id]: {
         url: result.url,
         expiresAt: result.expires_at,
         attemptId: result.attempt_id,
-        opened: popup !== null,
+        xmlSha256: item.xml_sha256,
       },
     }
     persistHandoffLinks()
@@ -518,18 +532,12 @@ async function createHandoff(item: TaxSubmission) {
 function openPendingHandoff(item: TaxSubmission) {
   const link = handoffLinks.value[item.id]
   if (!link) return
-  if (!canOfferHandoffLink(link)) {
-    // Odkaz už jednou odešel do prohlížeče nebo přetekl odhadovanou mez. Nabízet
-    // ho znovu nesmíme — mohl být jednorázový a portál by ukázal „neexistující
-    // podání". Záznam ale necháváme kvůli attemptId pro nahrávané artefakty.
-    toast.warning(t('reports.submissions.handoff_consumed_hint'))
+  if (!canOfferHandoffLink(link, item.xml_sha256)) {
+    // Buď uplynulo okno platnosti, nebo se podklad mezitím přepočítal. Záznam
+    // necháváme kvůli attemptId pro nahrávané artefakty, ale odkaz už nenabízíme.
+    toast.warning(t('reports.submissions.handoff_stale_hint'))
     return
   }
-  handoffLinks.value = {
-    ...handoffLinks.value,
-    [item.id]: { ...link, opened: true },
-  }
-  persistHandoffLinks()
   window.open(link.url, '_blank', 'noopener,noreferrer')
 }
 
@@ -1270,7 +1278,25 @@ onMounted(async () => {
             </ul>
           </div>
 
-          <div class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
+          <div
+            v-if="isMossOssForm(selected)"
+            class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-start justify-between gap-3"
+          >
+            <div class="min-w-0">
+              <div class="font-medium text-warning-800 text-sm">{{ t('reports.submissions.moss_oss_title') }}</div>
+              <p class="text-xs text-warning-700 mt-1">{{ t('reports.submissions.moss_oss_hint') }}</p>
+            </div>
+            <a :href="epoSubmissionsApi.xmlUrl(selected.id)" :class="btnFilled('warning')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download"/>
+              </svg>
+              {{ t('reports.submissions.download_xml') }}
+            </a>
+          </div>
+
+          <!-- U MOSS/OSS písemností panel nesvítí vůbec: sliboval by cestu, kterou
+               portál odmítne, a přitom hned nad ním stojí opačné sdělení. -->
+          <div v-if="!isMossOssForm(selected)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 class="font-medium text-sm text-primary-900">{{ t('reports.submissions.direct_panel_title') }}</h3>
@@ -1333,7 +1359,7 @@ onMounted(async () => {
           <div v-if="pendingHandoffLink(selected)" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="font-medium text-warning-800 text-sm">{{ t('reports.submissions.handoff_ready') }}</div>
-              <div class="text-xs text-warning-700 mt-1">{{ t('reports.submissions.handoff_one_time') }}</div>
+              <div class="text-xs text-warning-700 mt-1">{{ t('reports.submissions.handoff_window') }}</div>
             </div>
             <button type="button" :class="btnFilled('warning')" @click="openPendingHandoff(selected)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1342,12 +1368,12 @@ onMounted(async () => {
               {{ t('reports.submissions.continue_epo') }}
             </button>
           </div>
-          <!-- Odkaz už jednou odešel do prohlížeče. Znovu ho nenabízíme — místo toho
-               nabídneme vytvoření nového, což je levné a vždycky funguje. -->
+          <!-- Okno platnosti uplynulo, nebo se podklad přepočítal. Odkaz už nenabízíme —
+               místo toho nabídneme vytvoření nového, což je levné a vždycky funguje. -->
           <div v-else-if="handoffLinks[selected.id]" class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div class="font-medium text-neutral-800 text-sm">{{ t('reports.submissions.handoff_consumed_title') }}</div>
-              <div class="text-xs text-neutral-600 mt-1">{{ t('reports.submissions.handoff_consumed_hint') }}</div>
+              <div class="font-medium text-neutral-800 text-sm">{{ t('reports.submissions.handoff_stale_title') }}</div>
+              <div class="text-xs text-neutral-600 mt-1">{{ t('reports.submissions.handoff_stale_hint') }}</div>
             </div>
             <button v-if="canHandoff(selected)" type="button" :class="btnOutline('primary')" @click="createHandoff(selected)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
