@@ -148,9 +148,33 @@ $__rootDir = \MyInvoice\Bootstrap::rootDir();
 // nemáme reálnou DB a integrační testy se stejně soft-skipnou (markTestSkipped
 // 'cfg.php neexistuje'). Bezpečnostní pojistka proti ostré DB má smysl jen tam,
 // kde cfg.php reálně je. Proto require nesmí být fatální.
+//
 $__cfgPath = $__rootDir . DIRECTORY_SEPARATOR . 'cfg.php';
 $__cfg     = is_file($__cfgPath) ? require $__cfgPath : [];
 $__realDb  = is_array($__cfg) ? (string) ($__cfg['db']['name'] ?? '') : '';
+
+// ZÁMĚRNĚ čteme jen cfg.php, i když aplikace přes Config::load() mergne ještě
+// cfg.local.php (pořadí defaults → cfg.php → cfg.local.php → DATA_DIR → ENV).
+// Testovací DB musí být ŘÍZENÝ fixture odvozený od kanonického jména projektu,
+// ne kopie toho, na co má vývojář zrovna přepnutou aplikaci. Vyzkoušeno opačně:
+// odvození z mergnuté konfigurace přesměrovalo sadu na klon ostrých dat a rozsvítilo
+// 47 testů, které mlčky počítají s výchozím stavem (uložený licenční klíč, existující
+// bankovní import, jiné role uživatelů). To nejsou vady těch testů — sada prostě
+// potřebuje známý výchozí bod.
+//
+// Rozejití obou souborů ale mate: člověk klikne v aplikaci nad jednou databází a testy
+// mu běží nad úplně jinou. Proto to aspoň nahlas oznámíme.
+$__localPath = $__rootDir . DIRECTORY_SEPARATOR . 'cfg.local.php';
+if (is_file($__localPath)) {
+    $__localCfg = require $__localPath;
+    $__localDb  = is_array($__localCfg) ? (string) ($__localCfg['db']['name'] ?? '') : '';
+    if ($__localDb !== '' && $__localDb !== $__realDb) {
+        fwrite(STDERR, "[TEST DB] Pozor: aplikace jede nad '{$__localDb}' (cfg.local.php),"
+            . " ale testy běží nad '{$__realDb}_test' (odvozeno z cfg.php).\n");
+    }
+    unset($__localCfg, $__localDb);
+}
+unset($__localPath);
 
 $__chosenDb = getenv('MYINVOICE_DB_NAME');
 if (!is_string($__chosenDb)) {
