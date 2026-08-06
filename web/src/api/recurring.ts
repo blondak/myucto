@@ -8,7 +8,27 @@ export type RecurringSort = 'client' | 'next_run' | 'amount_czk'
 export type TaxDateMode = 'same_as_issue' | 'previous_month_last_day'
 export type DraftOpenMode = 'at_issue' | 'period_start'
 
-export interface RecurringTemplateItem {
+export type OssRateType = 'standard' | 'reduced' | 'second_reduced' | 'parking'
+export type OssSupplyType = 'goods' | 'services'
+
+/**
+ * OSS na položce ŠABLONY (migrace 1297) — uložené rozhodnutí člověka, ne snímek výpočtu.
+ * Proti položce faktury tu chybí kurz, přepočtené částky, původní období i příznak
+ * „k ručnímu posouzení": to všechno jsou vlastnosti KONKRÉTNÍHO dokladu k jeho datu
+ * plnění, které dopočítá až generátor.
+ *
+ * Rozhodnutí má při generování přednost před odvozením — s jedinou výjimkou: nemá-li
+ * dodavatel k datu plnění generovaného dokladu platnou registraci do OSS, řádek jde
+ * cestou odvození (tedy do tuzemska) a dostane příznak k ručnímu posouzení.
+ */
+export interface RecurringTemplateItemOss {
+  oss_applicable?: boolean
+  oss_consumer_country?: string | null
+  oss_rate_type?: OssRateType | string | null
+  oss_supply_type?: OssSupplyType | null
+}
+
+export interface RecurringTemplateItem extends RecurringTemplateItemOss {
   id?: number
   template_id?: number
   description: string
@@ -134,7 +154,7 @@ export interface RecurringTemplatePayload {
     catalog_exchange_rate?: number | null
     catalog_exchange_rate_date?: string | null
     accept_catalog_changes?: boolean
-  }>
+  } & RecurringTemplateItemOss>
 }
 
 export interface RunNowResult {

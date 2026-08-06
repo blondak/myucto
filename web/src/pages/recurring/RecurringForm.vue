@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency } from '@/api/recurring'
+import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency, type OssRateType, type OssSupplyType } from '@/api/recurring'
 import type { PaymentMethod } from '@/api/invoices'
 import { apiErrorMessage } from '@/api/errors'
 import { clientsApi, type Client, type ViesLookupResult } from '@/api/clients'
@@ -136,6 +136,13 @@ type FormItem = {
   catalog_exchange_rate_date: string | null
   accept_catalog_changes: boolean
   catalog_current: ResolvedPriceListItem | null
+  // OSS na položce šablony (migrace 1297) — uložené rozhodnutí, ne snímek výpočtu.
+  // Kurz, přepočtené částky ani „oprava období" tu záměrně nejsou: to jsou vlastnosti
+  // konkrétního dokladu k jeho datu plnění, které dopočítá až generátor.
+  oss_applicable: boolean
+  oss_consumer_country: string | null
+  oss_rate_type: OssRateType | null
+  oss_supply_type: OssSupplyType | null
 }
 
 const form = ref<{
@@ -210,12 +217,55 @@ const formLoaded = ref(false)
 
 function defaultVatRateId(): number {
   // Neplátce DPH → vždy 0% Osvobozeno (rate_percent=0, !is_reverse_charge), jako InvoiceEditor.
+  // U dodavatele v OSS je v číselníku i cizí 0 %, proto se nejdřív hledá tuzemská.
   if (!supplierIsVatPayer.value) {
-    const zero = vatRates.value.find(v => Number(v.rate_percent) === 0 && !v.is_reverse_charge)
+    const zero = vatRates.value.find(v => v.country === 'CZ' && Number(v.rate_percent) === 0 && !v.is_reverse_charge)
+      || vatRates.value.find(v => Number(v.rate_percent) === 0 && !v.is_reverse_charge)
     if (zero) return zero.id
   }
-  const def = vatRates.value.find(v => v.is_default)
+  const def = vatRates.value.find(v => v.country === 'CZ' && v.is_default)
+    || vatRates.value.find(v => v.is_default)
   return def?.id ?? vatRates.value[0]?.id ?? 0
+}
+
+// ── OSS na položce šablony (migrace 1297) ────────────────────────────────────────────
+// Vzor i chování zrcadlí řádek faktury (InvoiceEditor): zaškrtávátko u řádku a pod ním
+// pod-řádek se zemí spotřeby, typem sazby a typem plnění. Rozdíl je jediný — šablona
+// nezná „opravu období", protože to je vlastnost konkrétního dokladu, ne předpisu.
+const ossAvailable = computed(() => supplierStore.currentSupplier?.oss_enabled === true)
+const hasOssItem = computed(() => form.value.items.some(it => it.oss_applicable))
+
+// Sazbu státu spotřeby nabízíme jen OSS řádku; tuzemský řádek zůstává u českých sazeb,
+// jinak by se cizí sazba dostala na tuzemské plnění (a s ní cizí daň na ř. 1 přiznání).
+const selectableVatRates = computed(() => vatRates.value.filter(r => !r.is_reverse_charge))
+const domesticVatRates = computed(() => selectableVatRates.value.filter(r => r.country === 'CZ'))
+function vatRatesForItem(item: FormItem): VatRate[] {
+  // Dodavatel mimo OSS má v číselníku stejně jen tuzemské sazby — nabídka zůstává,
+  // jaká byla (včetně RC řádku), ať se filtrem nezmění chování šablon bez OSS.
+  if (!ossAvailable.value) return vatRates.value
+  return item.oss_applicable ? selectableVatRates.value : domesticVatRates.value
+}
+function vatRateLabel(r: VatRate): string {
+  const prefix = r.country !== 'CZ' ? `${r.country} ` : ''
+  if (Number(r.rate_percent) > 0) return `${prefix}${r.rate_percent} %`
+  if (r.is_reverse_charge) return `${prefix}RC`
+  return `${prefix}0 %`
+}
+
+function onOssApplicableChange(item: FormItem) {
+  if (item.oss_applicable) {
+    // Typ plnění je u OSS řádku povinný (bez něj by ho generátor stejně doplnil),
+    // ať uživatel vidí, s čím se počítá, místo prázdného selectu.
+    if (!item.oss_supply_type) item.oss_supply_type = 'goods'
+    return
+  }
+  // Vypnuté OSS = tuzemský řádek. Cizí sazba by na něm zůstala viset neviditelně,
+  // protože select ji po přepnutí přestane nabízet.
+  item.oss_consumer_country = null
+  item.oss_rate_type = null
+  item.oss_supply_type = null
+  const current = vatRates.value.find(v => v.id === item.vat_rate_id)
+  if (current && current.country !== 'CZ') item.vat_rate_id = defaultVatRateId()
 }
 
 function blankItem(): FormItem {
@@ -236,6 +286,10 @@ function blankItem(): FormItem {
     catalog_exchange_rate_date: null,
     accept_catalog_changes: false,
     catalog_current: null,
+    oss_applicable: false,
+    oss_consumer_country: null,
+    oss_rate_type: null,
+    oss_supply_type: null,
   }
 }
 
@@ -568,7 +622,9 @@ onMounted(async () => {
     // Klienti se hledají server-side (onClientSearch); cache se plní výsledky + vybraným.
     const [cur, vat, un, rcat] = await Promise.all([
       codebooksApi.currencies(),
-      codebooksApi.vatRates(),
+      // Dodavatel v OSS potřebuje i sazby států spotřeby — bez nich by OSS řádek
+      // šablony musel nést tuzemskou sazbu a generoval by měsíčně špatnou daň.
+      codebooksApi.vatRates(supplierStore.currentSupplier?.oss_enabled ? 'ALL' : 'CZ'),
       codebooksApi.units(),
       revenueCategoriesApi.list(false).catch(() => [] as RevenueCategory[]),  // jen aktivní
     ])
@@ -639,6 +695,12 @@ onMounted(async () => {
           catalog_exchange_rate_date: null,
           accept_catalog_changes: false,
           catalog_current: null,
+          // OSS z předlohy se přenáší: jednorázová faktura polskému spotřebiteli
+          // se dělá šablonou právě proto, aby se totéž rozhodnutí nedělalo znovu.
+          oss_applicable: it.oss_applicable ?? false,
+          oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
+          oss_rate_type: it.oss_applicable ? ((it.oss_rate_type as OssRateType | null) || null) : null,
+          oss_supply_type: it.oss_applicable ? (it.oss_supply_type ?? null) : null,
         }))
         if (inv.client_id) await loadProjectsForClient(inv.client_id)
       } catch {
@@ -692,6 +754,10 @@ onMounted(async () => {
           catalog_exchange_rate_date: it.catalog_exchange_rate_date ?? null,
           accept_catalog_changes: false,
           catalog_current: null,
+          oss_applicable: it.oss_applicable ?? false,
+          oss_consumer_country: it.oss_consumer_country ?? null,
+          oss_rate_type: (it.oss_rate_type as OssRateType | null) ?? null,
+          oss_supply_type: it.oss_supply_type ?? null,
         })),
       })
       loadedCategoryLabel.value = tpl.revenue_category_label ?? null
@@ -740,6 +806,13 @@ async function submit() {
     error.value = t('invoice.amount_positive_required')
     return
   }
+  // OSS bez země spotřeby server ukládá jako NE-OSS (položka by při každém generování
+  // vznikla neplatná). Bez téhle hlášky by uživatel zaškrtl OSS, uložil a rozhodnutí by
+  // tiše zmizelo — o to hůř, že šablona generuje bez dozoru.
+  if (form.value.items.some(it => it.oss_applicable && !(it.oss_consumer_country || '').trim())) {
+    error.value = t('recurring.oss_country_required')
+    return
+  }
 
   submitting.value = true
   try {
@@ -786,6 +859,10 @@ async function submit() {
         catalog_exchange_rate: it.catalog_exchange_rate,
         catalog_exchange_rate_date: it.catalog_exchange_rate_date,
         accept_catalog_changes: it.accept_catalog_changes,
+        oss_applicable: it.oss_applicable,
+        oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || '').trim().toUpperCase() || null : null,
+        oss_rate_type: it.oss_applicable ? it.oss_rate_type : null,
+        oss_supply_type: it.oss_applicable ? it.oss_supply_type : null,
       })),
     }
     if (isEdit.value && tplId.value) {
@@ -1079,11 +1156,12 @@ async function submit() {
               <th class="text-left" style="width:8%">{{ t('invoice.items_table.unit') }}</th>
               <th class="text-right" style="width:15%">{{ unitPriceHeaderLabel }}</th>
               <th v-if="supplierIsVatPayer" class="text-left" style="width:14%">{{ t('invoice.items_table.vat') ?? 'DPH' }}</th>
-              <th style="width:30px"></th>
+              <th :style="ossAvailable || hasOssItem ? 'width:96px' : 'width:30px'"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(it, idx) in form.items" :key="idx" :class="['border-t border-neutral-200', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
+            <template v-for="(it, idx) in form.items" :key="idx">
+            <tr :class="['border-t border-neutral-200', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
               <td class="py-1.5 pr-2">
                 <div v-if="priceListEnabled && (hasPriceList || it.price_list_item_id)" class="mb-1 grid gap-1 xl:grid-cols-3">
                   <select v-model.number="it.price_list_item_id" class="h-8 min-w-0 px-2 border border-neutral-300 rounded bg-surface text-xs" @change="applyCatalogItem(it, idx)">
@@ -1121,15 +1199,58 @@ async function submit() {
               <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td v-if="supplierIsVatPayer" class="py-1.5 pr-2">
                 <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
-                  <option v-for="r in vatRates" :key="r.id" :value="r.id">
-                    {{ Number(r.rate_percent) > 0 ? r.rate_percent + ' %' : (r.is_reverse_charge ? 'RC' : '0 %') }}
+                  <option v-for="r in vatRatesForItem(it)" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
+                  <option v-if="!vatRatesForItem(it).some(r => r.id === it.vat_rate_id)" :value="it.vat_rate_id">
+                    {{ vatRates.find(r => r.id === it.vat_rate_id) ? vatRateLabel(vatRates.find(r => r.id === it.vat_rate_id)!) : '—' }}
                   </option>
                 </select>
               </td>
               <td class="py-1.5 text-right">
-                <button type="button" @click="removeItem(idx)" class="cursor-pointer text-danger-500 hover:text-danger-700 text-lg">×</button>
+                <div class="flex items-center justify-end gap-2 whitespace-nowrap">
+                  <label v-if="ossAvailable || it.oss_applicable"
+                    class="inline-flex shrink-0 items-center gap-1 text-xs text-neutral-600" :title="t('invoice.oss.enabled')">
+                    <input v-model="it.oss_applicable" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+                      @change="onOssApplicableChange(it)" />
+                    <span>{{ t('invoice.oss.enabled') }}</span>
+                  </label>
+                  <button type="button" @click="removeItem(idx)" class="cursor-pointer text-danger-500 hover:text-danger-700 text-lg">×</button>
+                </div>
               </td>
             </tr>
+            <!-- OSS pod-řádek — stejná pole jako na řádku faktury; „oprava období" tu není,
+                 protože to je vlastnost konkrétního dokladu, ne předpisu. -->
+            <tr v-if="it.oss_applicable" :class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
+              <td :colspan="supplierIsVatPayer ? 6 : 5" class="pb-2">
+                <div class="flex flex-wrap items-center gap-1.5 text-xs">
+                  <input v-model="it.oss_consumer_country" type="text" maxlength="2"
+                    :placeholder="t('invoice.oss.country')" :title="t('invoice.oss.country')"
+                    :class="['w-11 h-7 shrink-0 px-1 border rounded text-xs text-center font-mono uppercase',
+                             (it.oss_consumer_country || '').trim() ? 'border-neutral-300' : 'border-warning-500 text-warning-700']" />
+                  <select v-model="it.oss_rate_type"
+                    :title="it.oss_rate_type ? t('invoice.oss.rate_type') : t('invoice.oss.rate_type_missing_hint')"
+                    :class="['h-7 shrink-0 px-1 border rounded text-xs bg-surface',
+                             it.oss_rate_type ? 'border-neutral-300' : 'border-warning-500 text-warning-700']">
+                    <option :value="null">{{ t('invoice.oss.rate_unknown') }}</option>
+                    <option value="standard">{{ t('invoice.oss.rate_standard') }}</option>
+                    <option value="reduced">{{ t('invoice.oss.rate_reduced') }}</option>
+                    <option value="second_reduced">{{ t('invoice.oss.rate_second_reduced') }}</option>
+                    <option value="parking">{{ t('invoice.oss.rate_parking') }}</option>
+                  </select>
+                  <!-- Prázdný typ sazby není kosmetika: na šabloně se dá dopočítat odvozením
+                       až při generování, ale jen když najde tutéž zemi spotřeby. -->
+                  <span v-if="!it.oss_rate_type" :title="t('recurring.oss_rate_type_missing_hint')"
+                    class="shrink-0 px-1.5 py-0.5 rounded border bg-warning-50 text-warning-700 border-warning-500/40 whitespace-nowrap">
+                    {{ t('invoice.oss.rate_type_missing') }}
+                  </span>
+                  <select v-model="it.oss_supply_type" :title="t('invoice.oss.supply_type')"
+                    class="h-7 shrink-0 px-1 border border-neutral-300 rounded text-xs bg-surface">
+                    <option value="goods">{{ t('invoice.oss.goods') }}</option>
+                    <option value="services">{{ t('invoice.oss.services') }}</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
         </div>
@@ -1193,13 +1314,56 @@ async function submit() {
               <div v-if="supplierIsVatPayer">
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.vat') ?? 'DPH' }}</label>
                 <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100">
-                  <option v-for="r in vatRates" :key="r.id" :value="r.id">
-                    {{ Number(r.rate_percent) > 0 ? r.rate_percent + ' %' : (r.is_reverse_charge ? 'RC' : '0 %') }}
+                  <option v-for="r in vatRatesForItem(it)" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
+                  <option v-if="!vatRatesForItem(it).some(r => r.id === it.vat_rate_id)" :value="it.vat_rate_id">
+                    {{ vatRates.find(r => r.id === it.vat_rate_id) ? vatRateLabel(vatRates.find(r => r.id === it.vat_rate_id)!) : '—' }}
                   </option>
                 </select>
               </div>
             </div>
+            <div v-if="ossAvailable || it.oss_applicable" class="border border-neutral-200 rounded-md p-2">
+              <label class="inline-flex items-center gap-2 text-sm">
+                <input v-model="it.oss_applicable" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+                  @change="onOssApplicableChange(it)" />
+                <span>{{ t('invoice.oss.enabled') }}</span>
+              </label>
+              <div v-if="it.oss_applicable" class="grid grid-cols-2 gap-2 mt-2">
+                <div>
+                  <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.country') }}</label>
+                  <input v-model="it.oss_consumer_country" type="text" maxlength="2"
+                    :class="['w-full h-10 px-3 border rounded text-sm font-mono uppercase',
+                             (it.oss_consumer_country || '').trim() ? 'border-neutral-300' : 'border-warning-500 text-warning-700']" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.supply_type') }}</label>
+                  <select v-model="it.oss_supply_type" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
+                    <option value="goods">{{ t('invoice.oss.goods') }}</option>
+                    <option value="services">{{ t('invoice.oss.services') }}</option>
+                  </select>
+                </div>
+                <div class="col-span-2">
+                  <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.oss.rate_type') }}</label>
+                  <select v-model="it.oss_rate_type"
+                    :class="['w-full h-10 px-2 border rounded text-sm bg-surface',
+                             it.oss_rate_type ? 'border-neutral-300' : 'border-warning-500 text-warning-700']">
+                    <option :value="null">{{ t('invoice.oss.rate_unknown') }}</option>
+                    <option value="standard">{{ t('invoice.oss.rate_standard') }}</option>
+                    <option value="reduced">{{ t('invoice.oss.rate_reduced') }}</option>
+                    <option value="second_reduced">{{ t('invoice.oss.rate_second_reduced') }}</option>
+                    <option value="parking">{{ t('invoice.oss.rate_parking') }}</option>
+                  </select>
+                  <p v-if="!it.oss_rate_type" class="mt-1 text-xs text-warning-700">
+                    {{ t('recurring.oss_rate_type_missing_hint') }}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
+        </div>
+        <!-- Šablona se zakládá jednou a generuje roky, registrace do OSS má konec platnosti.
+             Bez téhle věty uživatel čeká, že mu OSS pojede i po jejím skončení. -->
+        <div v-if="hasOssItem" class="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+          {{ t('recurring.oss_registration_hint') }}
         </div>
         <dl v-if="form.items.length > 0" class="mt-4 ml-auto max-w-xs space-y-1 text-sm">
           <div v-if="computedDiscountAmount > 0" class="flex justify-between text-warning-700">

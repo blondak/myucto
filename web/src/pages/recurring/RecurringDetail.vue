@@ -362,6 +362,18 @@ const recurringActions = computed<ActionItem[]>(() => {
                   <span class="text-neutral-500">{{ it.price_list_item_code }} · {{ t('recurring.catalog_policy_' + (it.catalog_policy ?? 'fixed')) }}</span>
                   <span v-if="it.price_list_item_archived" class="status-badge bg-warning-50 text-warning-700">{{ t('recurring.catalog_archived') }}</span>
                 </div>
+                <!-- OSS rozhodnutí uložené na šabloně — bez badge by bylo vidět až v editoru. -->
+                <div v-if="it.oss_applicable" class="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                  <span class="status-badge bg-primary-50 text-primary-700">{{ t('invoice.oss.enabled') }}</span>
+                  <span class="text-neutral-500">{{ it.oss_consumer_country }}</span>
+                  <!-- Prázdný typ plnění je na šabloně legitimní (doplní ho odvození při
+                       generování) — psát sem „Služby" by tvrdilo něco, co uložené není. -->
+                  <span v-if="it.oss_supply_type" class="text-neutral-500">
+                    · {{ it.oss_supply_type === 'goods' ? t('invoice.oss.goods') : t('invoice.oss.services') }}
+                  </span>
+                  <span v-if="!it.oss_rate_type" class="status-badge bg-warning-50 text-warning-700">{{ t('invoice.oss.rate_type_missing') }}</span>
+                  <span v-else class="text-neutral-500">{{ t('invoice.oss.rate_' + it.oss_rate_type) }}</span>
+                </div>
               </td>
               <td class="px-4 py-2 text-right font-mono">{{ it.quantity }}</td>
               <td class="px-4 py-2">{{ it.unit }}</td>
