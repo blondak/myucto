@@ -233,11 +233,21 @@ final class PohodaXmlParser
             throw new \RuntimeException('Chybí invoiceHeader.');
         }
 
+        // `issuedCorrectiveTax` je OPRAVNÝ DAŇOVÝ DOKLAD podle § 42 ZDPH — to, čemu se
+        // běžně říká dobropis, a to, co pod tímhle typem vyváží SuperFaktura i sama
+        // Pohoda. `issuedCreditNotice` je jen jeho nedaňová varianta. Dokud sem padal
+        // do `default`, přišel opravný doklad do systému jako ŘÁDNÁ faktura: kladná
+        // daň na výstupu místo záporné, jiná sekce kontrolního hlášení a mimo veškerou
+        // mechaniku oprav (vč. VetaO v OSS podání). U migrace se 99 dobropisy je to
+        // rozdíl v celé jedné straně přiznání.
+        //
+        // Vrubopis (`issuedDebitNote`) zůstává fakturou schválně — zvyšuje závazek,
+        // znaménka se mu nesmějí otáčet.
         $typeRaw = $this->text($xpath, 'inv:invoiceType', $hdr);
         $invoiceType = match ($typeRaw) {
-            'issuedAdvanceInvoice' => 'proforma',
-            'issuedCreditNotice'   => 'credit_note',
-            default                => 'invoice',
+            'issuedAdvanceInvoice'                     => 'proforma',
+            'issuedCreditNotice', 'issuedCorrectiveTax' => 'credit_note',
+            default                                    => 'invoice',
         };
 
         $documentNumber = $this->text($xpath, 'inv:number/typ:numberRequested', $hdr);
@@ -558,9 +568,13 @@ final class PohodaXmlParser
                 continue;
             }
             $key = self::rateKey($rate);
+            // Sčítá se SE ZNAMÉNKEM, absolutní hodnota až ze součtu — viz tentýž komentář
+            // v {@see IsdocParser::recapConflicts()}. Per-řádkové `abs()` dělalo ze
+            // slevového kupónu přírůstek a hlásilo rozpor, který v souboru není.
             $itemBases[$key] = ($itemBases[$key] ?? 0.0)
-                + abs((float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0));
+                + (float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0);
         }
+        $itemBases = array_map('abs', $itemBases);
         if ($itemBases === []) {
             return [];
         }

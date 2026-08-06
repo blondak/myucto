@@ -188,6 +188,44 @@ XML;
         self::assertSame('credit_note', $result['invoices'][0]['invoice_type']);
     }
 
+    /**
+     * `issuedCorrectiveTax` je OPRAVNÝ DAŇOVÝ DOKLAD podle § 42 ZDPH — to, čemu se
+     * běžně říká dobropis, a typ, pod kterým opravné doklady vyváží SuperFaktura
+     * i sama Pohoda. `issuedCreditNotice` je jen jeho nedaňová varianta, takže
+     * pokrytím jedné z nich byla druhá tiše vynechaná.
+     *
+     * Dokud padal do `default`, přišel opravný doklad do systému jako ŘÁDNÁ faktura:
+     * kladná daň na výstupu místo záporné, jiná sekce kontrolního hlášení a mimo
+     * veškerou mechaniku oprav (v OSS včetně opravné věty za minulé období). U migrace
+     * s 99 opravnými doklady jde o rozdíl v celé jedné straně přiznání.
+     */
+    public function testCorrectiveTaxDocumentIsCreditNote(): void
+    {
+        $xml = str_replace(
+            '<inv:invoiceType>issuedInvoice</inv:invoiceType>',
+            '<inv:invoiceType>issuedCorrectiveTax</inv:invoiceType>',
+            $this->minimalPohoda()
+        );
+        $result = $this->parser->parse($xml);
+        self::assertSame('credit_note', $result['invoices'][0]['invoice_type']);
+    }
+
+    /**
+     * Vrubopis zůstává fakturou schválně — zvyšuje závazek, takže by mu otočení
+     * znamének z {@see \MyInvoice\Service\Import\InvoiceImportService} obrátilo
+     * daň na špatnou stranu.
+     */
+    public function testDebitNoteStaysInvoice(): void
+    {
+        $xml = str_replace(
+            '<inv:invoiceType>issuedInvoice</inv:invoiceType>',
+            '<inv:invoiceType>issuedDebitNote</inv:invoiceType>',
+            $this->minimalPohoda()
+        );
+        $result = $this->parser->parse($xml);
+        self::assertSame('invoice', $result['invoices'][0]['invoice_type']);
+    }
+
     public function testRejectsDoctype(): void
     {
         $xml = <<<'XML'

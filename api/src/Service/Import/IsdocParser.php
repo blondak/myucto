@@ -143,9 +143,11 @@ final class IsdocParser
         );
         $currency = $foreignCur !== '' ? $foreignCur : $localCur;
         $rate = null;
-        $rateRaw = $this->text($xpath, 'i:CurrRate', $root);
-        if ($rateRaw !== '' && $currency !== $localCur) {
-            $rate = (float) $rateRaw;
+        if ($currency !== $localCur) {
+            $rate = self::exchangeRate(
+                $this->text($xpath, 'i:CurrRate', $root),
+                $this->text($xpath, 'i:RefCurrRate', $root),
+            );
         }
 
         // Reverse charge (přenesená daň. povinnost) = ISDOC <LocalReverseChargeFlag>true</…>
@@ -228,6 +230,40 @@ final class IsdocParser
     }
 
     /**
+     * Kurz za JEDNU jednotku cizí měny z `<CurrRate>` a `<RefCurrRate>`.
+     *
+     * ISDOC vede kurz jako ZLOMEK: `CurrRate` je částka v lokální měně, `RefCurrRate`
+     * množství cizí měny, kterému odpovídá. U měn kotovaných po stovkách (HUF, JPY)
+     * tedy chodí `CurrRate=6.86` + `RefCurrRate=100`; SuperFaktura zapisuje týž poměr
+     * obráceně jako `CurrRate=1` + `RefCurrRate=14.5688`. Obojí je totéž číslo a obojí
+     * musí projít dělením.
+     *
+     * Čtení samotného `CurrRate` bylo tiché a drahé: forintový doklad dostal kurz 1,00,
+     * takže se 13 520 HUF zaúčtovalo jako 13 520 Kč místo 844 Kč — u dokladu před
+     * registrací do OSS rovnou na ř. 1 přiznání k DPH, tedy čtrnáctinásobný základ.
+     *
+     * Chybějící, nečíselný nebo nekladný `RefCurrRate` znamená 1 — XSD mu default
+     * nedává a nula by dělila nulou. Nekladný `CurrRate` vrací `null` (kurz neznáme),
+     * ať se dosadí kurz ČNB k DUZP místo nesmyslné nuly.
+     */
+    private static function exchangeRate(string $rateRaw, string $refRaw): ?float
+    {
+        if ($rateRaw === '' || !is_numeric($rateRaw)) {
+            return null;
+        }
+        $rate = (float) $rateRaw;
+        if ($rate <= 0.0) {
+            return null;
+        }
+        $ref = is_numeric($refRaw) ? (float) $refRaw : 1.0;
+        if ($ref <= 0.0) {
+            $ref = 1.0;
+        }
+
+        return $rate / $ref;
+    }
+
+    /**
      * Rozpory mezi ŘÁDKY a REKAPITULACÍ téhož souboru.
      *
      * Táž otázka a tytéž hlášky jako {@see PohodaXmlParser::recapConflicts()} — jen nad
@@ -262,9 +298,17 @@ final class IsdocParser
                 continue;
             }
             $key = number_format($rate, 2, '.', '');
+            // Sčítá se SE ZNAMÉNKEM, absolutní hodnota se bere až ze součtu. Řádek se
+            // záporným součtem (slevový kupón, dobropisovaný kus, storno položky) je
+            // v e-shopových exportech běžný a per-řádkové `abs()` ho přičítalo místo
+            // odečítalo: doklad 1 195 + 74 − 165 + 65 vycházel na 1 500 proti rekapitulaci
+            // 1 169 a uživatel dostal hlášku o rozporu, který v souboru není. Rekapitulace
+            // je z `parseTaxRecap()` kladná i u dobropisu, proto se srovnává až `abs()`
+            // celého součtu — jinak by falešný poplach jen přeskočil na opravné doklady.
             $itemBases[$key] = ($itemBases[$key] ?? 0.0)
-                + abs((float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0));
+                + (float) ($item['quantity'] ?? 0) * (float) ($item['unit_price_without_vat'] ?? 0);
         }
+        $itemBases = array_map('abs', $itemBases);
         if ($itemBases === []) {
             return [];
         }
