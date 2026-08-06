@@ -67,9 +67,11 @@ final class VatStatusHistoryTest extends TestCase
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplier);
 
         // Deterministický výchozí stav: plátce od 1900-01-01, žádné IO, žádný
-        // paušál, daňová evidence, žádné zámky ani podaná přiznání. Recyklované
-        // TINYINT ID může zdědit duchová data po dřívějších bězích (tabulky bez
-        // FK na supplier) — retro-guard by pak viděl cizí podání/zámky.
+        // paušál, daňová evidence, žádné zámky ani podaná přiznání. Původně to
+        // řešilo duchová data po recyklovaném TINYINT id; klony dnes dostávají
+        // čerstvé id z AUTO_INCREMENT, takže je to už jen pojistka na stav fixture
+        // — tabulky bez FK na supplier by po případné změně způsobu klonování
+        // znovu podstrčily retro-guardu cizí podání a zámky.
         $pdo->prepare('DELETE FROM tax_submissions WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM accounting_supplier_settings WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$this->supplierId]);

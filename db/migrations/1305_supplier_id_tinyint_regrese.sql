@@ -1,0 +1,42 @@
+-- 1305_supplier_id_tinyint_regrese.sql
+-- Náprava regrese migrace 0115_supplier_id_int.sql.
+--
+-- 0115 záměrně rozšířila tenant klíč `supplier.id` (a všech 35 tehdejších sloupců
+-- `supplier_id`) z TINYINT UNSIGNED na INT UNSIGNED — hostovaná multi-tenant verze
+-- by jinak narazila na 256. dodavateli. Tři pozdější migrace tu opravu zregresovaly
+-- a založily nové tabulky se `supplier_id` znovu jako TINYINT UNSIGNED:
+--
+--   • 1111_vat_s74b_corrections.sql        → vat_s74b_corrections
+--   • 1150_vat_s46_corrections.sql         → vat_s46_corrections
+--   • 1173_api_token_ips_and_request_log.sql → api_request_log
+--
+-- Proč to nikdo nechytil: ani jedna z těch tří tabulek nemá na `supplier_id` cizí
+-- klíč na `supplier.id` (FK mají jen na invoices / purchase_invoices / api_tokens).
+-- Nesoulad typů by FK odmítl založit a chyba by praskla hned při migraci. Bez FK
+-- vyjde najevo až tím, že firmě s id > 255 selže KAŽDÝ zápis do těchto tabulek —
+-- `sql_mode` je připnutý (viz a8482d4d), takže chyba, ne tiché oříznutí. Prakticky:
+-- účetní kanceláři s 256. klientskou firmou přestane logovat API a nejdou uložit
+-- opravy DPH podle §46 a §74b.
+--
+-- FK sem ZÁMĚRNĚ nedoplňujeme — to je samostatné rozhodnutí (ON DELETE chování
+-- u účetních evidencí není triviální) a tahle migrace řeší jen šířku sloupce.
+-- Proti čtvrté regresi hlídá schéma test `api/tests/Architecture/SupplierIdColumnWidthTest.php`.
+--
+-- Indexy: `supplier_id` je vedoucím sloupcem v idx_s74b_supplier_invoice,
+-- idx_s74b_period, idx_s46_supplier_invoice a idx_s46_period; MODIFY je přestaví
+-- sám, ruční DROP/ADD KEY není potřeba. `api_request_log` index na supplier_id nemá.
+--
+-- Idempotentní (DDL nejde do transakce → musí jít bezpečně zopakovat po pádu
+-- uprostřed): `MODIFY ... INT UNSIGNED` je samo idempotentní — opakovaný běh jen
+-- potvrdí už platný typ. Definice sloupce se přepisuje CELÁ, proto je tu doslovně
+-- opsaná ze současného schématu (nullability + komentář) a mění se jen šířka.
+--
+-- Rozsah NEZAHRNUJE `documents`, `document_folders` a `document_tags`, které mají
+-- `supplier_id` jako BIGINT UNSIGNED. Ty jsou ŠIRŠÍ než INT UNSIGNED, tedy funkčně
+-- neškodné — jen nekonzistentní. Sjednocovat je dolů by znamenalo přestavět tři
+-- z největších tabulek v DB (DMS) kvůli kosmetice, s reálným rizikem dlouhého
+-- zámku při produkčním nasazení a nulovým přínosem. Vědomě je necháváme být.
+
+ALTER TABLE vat_s74b_corrections MODIFY supplier_id INT UNSIGNED NOT NULL COMMENT 'tenant (náš plátce-dlužník)';
+ALTER TABLE vat_s46_corrections  MODIFY supplier_id INT UNSIGNED NOT NULL COMMENT 'tenant (náš plátce-věřitel)';
+ALTER TABLE api_request_log      MODIFY supplier_id INT UNSIGNED NULL;

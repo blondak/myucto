@@ -28,7 +28,7 @@ use Slim\Psr7\Response as Psr7Response;
  *         firma jen s baseline řádkem → check vůbec nevznikne (null).
  *
  * Vzor VatStatusHistoryTest: action z DI kontejneru, transakce + rollback,
- * setUp maže duchová data recyklovaného TINYINT supplier ID (tabulky bez FK).
+ * setUp srovnává výchozí stav v tabulkách bez FK na supplier.
  */
 #[Group('integration')]
 final class VatStatusTransitionTest extends TestCase
@@ -70,8 +70,10 @@ final class VatStatusTransitionTest extends TestCase
 
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplier);
 
-        // Duchová data recyklovaného TINYINT ID (tabulky bez FK na supplier):
-        // retro-guard by viděl cizí podání/zámky a uzávěrkový check cizí korekce.
+        // Pojistka na výchozí stav fixture v tabulkách bez FK na supplier — jinak by
+        // retro-guard viděl cizí podání/zámky a uzávěrkový check cizí korekce.
+        // (Dřív to bylo nutné kvůli recyklovaným TINYINT id; klony dnes dostávají
+        // čerstvé id z AUTO_INCREMENT.)
         $pdo->prepare('DELETE FROM tax_submissions WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM accounting_supplier_settings WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$this->supplierId]);

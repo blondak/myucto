@@ -9,24 +9,16 @@ use RuntimeException;
 
 trait IsolatedSupplierTrait
 {
+    /**
+     * Zakládá kopii zdrojového dodavatele přes AUTO_INCREMENT, ne hledáním volného
+     * id v rozsahu 1–255. Ten strop tu byl jen kvůli sloupcům `supplier_id`, které
+     * ještě byly TINYINT UNSIGNED; migrace 0115 (a 1305 pro tři regresní tabulky)
+     * je rozšířila na INT UNSIGNED, takže omezovat rozsah nemá důvod. Naopak škodil:
+     * spadlý běh testů nechá klony po sobě, pool se vyčerpá a další běh padá stovkami
+     * chyb, které s testovaným kódem nesouvisejí.
+     */
     protected function createIsolatedSupplier(PDO $pdo, int $sourceSupplierId): int
     {
-        $usedIds = array_fill_keys(array_map(
-            'intval',
-            $pdo->query('SELECT id FROM supplier WHERE id BETWEEN 1 AND 255')->fetchAll(PDO::FETCH_COLUMN)
-        ), true);
-
-        $supplierId = 0;
-        for ($candidate = 1; $candidate <= 255; ++$candidate) {
-            if (!isset($usedIds[$candidate])) {
-                $supplierId = $candidate;
-                break;
-            }
-        }
-        if ($supplierId === 0) {
-            throw new RuntimeException('Pro izolovaný test není volné žádné TINYINT supplier ID.');
-        }
-
         // Schéma se v rámci jednoho běhu nemění, ale tenhle dotaz stojí ~2,5 ms a volá se
         // při KAŽDÉM založení izolovaného dodavatele (336 testů) — zbytečně ~0,8 s na sadu.
         // Cache je statická, tedy per proces; migrace testovací DB proběhnou v bootstrapu
@@ -42,12 +34,16 @@ trait IsolatedSupplierTrait
         $columnList = implode(', ', array_map(static fn (string $column): string => "`{$column}`", $columns));
 
         $stmt = $pdo->prepare(
-            "INSERT INTO supplier (`id`, {$columnList})
-             SELECT ?, {$columnList} FROM supplier WHERE id = ?"
+            "INSERT INTO supplier ({$columnList})
+             SELECT {$columnList} FROM supplier WHERE id = ?"
         );
-        $stmt->execute([$supplierId, $sourceSupplierId]);
+        $stmt->execute([$sourceSupplierId]);
         if ($stmt->rowCount() !== 1) {
             throw new RuntimeException('Zdrojový supplier pro izolovaný test neexistuje.');
+        }
+        $supplierId = (int) $pdo->lastInsertId();
+        if ($supplierId === 0) {
+            throw new RuntimeException('Izolovaný supplier se nepodařilo založit — prázdné lastInsertId().');
         }
 
         $pdo->prepare(

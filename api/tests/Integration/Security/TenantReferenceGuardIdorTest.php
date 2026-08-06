@@ -222,21 +222,13 @@ final class TenantReferenceGuardIdorTest extends TestCase
         )->fetchAll(PDO::FETCH_COLUMN);
         $list = implode(', ', array_map(static fn (string $c): string => "`{$c}`", $columns));
 
-        $used = array_fill_keys(array_map(
-            'intval',
-            $this->pdo->query('SELECT id FROM supplier')->fetchAll(PDO::FETCH_COLUMN)
-        ), true);
-        $newId = 0;
-        for ($candidate = 1; $candidate <= 255; $candidate++) {
-            if (!isset($used[$candidate])) {
-                $newId = $candidate;
-                break;
-            }
-        }
-        self::assertGreaterThan(0, $newId, 'Není volné supplier ID pro klon.');
-
-        $this->pdo->prepare("INSERT INTO supplier (`id`, {$list}) SELECT ?, {$list} FROM supplier WHERE id = ?")
-            ->execute([$newId, $sourceId]);
+        // Id přiděluje AUTO_INCREMENT, ne hledání volného místa v rozsahu 1–255. Ten
+        // rozsah tu zbyl z doby, kdy byl `supplier.id` TINYINT; jakmile pool došel,
+        // padal test na chybějící id místo na to, co měří (viz IsolatedSupplierTrait).
+        $this->pdo->prepare("INSERT INTO supplier ({$list}) SELECT {$list} FROM supplier WHERE id = ?")
+            ->execute([$sourceId]);
+        $newId = (int) $this->pdo->lastInsertId();
+        self::assertGreaterThan(0, $newId, 'Klon firmy se nezaložil.');
 
         return $newId;
     }
