@@ -578,7 +578,7 @@ php api/bin/migrate.php</code></pre>
         </template>
 
         <p class="text-xs text-neutral-500 mt-3">
-          <a href="/manual?ch=75_Aktualizace" target="_blank" rel="noopener" class="text-primary-600 hover:text-primary-800 hover:underline">
+          <a href="/manual?ch=76_Aktualizace" target="_blank" rel="noopener" class="text-primary-600 hover:text-primary-800 hover:underline">
             {{ t('updates.manual_link') }} →
           </a>
         </p>
