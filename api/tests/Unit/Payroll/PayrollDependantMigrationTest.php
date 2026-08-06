@@ -81,6 +81,9 @@ final class PayrollDependantMigrationTest extends TestCase
         $sql = file_get_contents($path);
         self::assertIsString($sql, 'Migrace 1312 nebyla nalezena.');
 
-        return $sql;
+        // Víceřádkové asserty níž porovnávají na "\n". Git na Windows soubor při
+        // checkoutu převede na CRLF, takže bez normalizace by test na tomhle
+        // stroji spadl vždycky, i když je obsah migrace v pořádku.
+        return str_replace("\r\n", "\n", $sql);
     }
 }
