@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = '345fff051975d1be5bf2eac60bff2d92130e21c5260a05a5e4ee987a3349aed1';
+    private const EXPECTED_MANIFEST_SHA256 = 'd12810ddcff282efb2d1e86512132eac2e49f4f3ad052237a628da8060141f54';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -90,8 +90,12 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'credit.child.first.monthly' => ['money_minor', 126_700],
                 'credit.child.second.monthly' => ['money_minor', 186_000],
                 'credit.child.third_and_next.monthly' => ['money_minor', 232_000],
+                'credit.disability.basic.monthly' => ['money_minor', 21_000],
+                'credit.disability.extended.monthly' => ['money_minor', 42_000],
                 'credit.taxpayer.monthly' => ['money_minor', 257_000],
+                'credit.ztp_p.monthly' => ['money_minor', 134_500],
                 'dpp.withholding.maximum' => ['money_minor', 1_199_900],
+                'other.withholding.maximum' => ['money_minor', 449_900],
                 'withholding.rate' => ['decimal_rate', '0.15'],
             ],
             'social_insurance' => [

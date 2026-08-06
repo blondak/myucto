@@ -481,7 +481,6 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
 
         return new MonthlyEmploymentIncomeTaxCalculator(
             new PayrollRulesetProvider([$active]),
-            EmploymentIncomeTaxPolicy2026::create(),
         );
     }
 

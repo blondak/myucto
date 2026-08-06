@@ -52,15 +52,22 @@ final class AnnualTaxCertificateFormCatalogTest extends TestCase
         );
     }
 
-    public function testRejectsUnsupportedTaxYear(): void
+    public function testRejectsTaxYearWithoutKnownMinistryForm(): void
     {
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('Nepodporovaný rok daňového potvrzení: 2025.');
+        $this->expectExceptionMessage(
+            'Pro rok 2027 není znám vzor tiskopisu ročního daňového potvrzení;',
+        );
 
         AnnualTaxCertificateFormCatalog::resolve(
-            2025,
+            2027,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
         );
+    }
+
+    public function testKnownTaxYearsAreEnumeratedInsteadOfCompared(): void
+    {
+        self::assertSame([2026], AnnualTaxCertificateFormCatalog::knownTaxYears());
     }
 
     public function testRejectsNonCertificateDocumentKind(): void

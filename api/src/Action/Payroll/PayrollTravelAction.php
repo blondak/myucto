@@ -1,0 +1,393 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Payroll;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollBusinessTripConflictException;
+use MyInvoice\Repository\Payroll\PayrollBusinessTripRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Travel\BusinessTripCalculation;
+use MyInvoice\Service\Payroll\Travel\BusinessTripCalculator;
+use MyInvoice\Service\Payroll\Travel\BusinessTripMaterializer;
+use MyInvoice\Service\Payroll\Travel\BusinessTripValidator;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+/**
+ * Session-only API evidence pracovních cest a jejich cestovních náhrad (MZ-08-W07).
+ */
+final class PayrollTravelAction
+{
+    use PayrollActionSupport;
+
+    public function __construct(
+        private readonly PayrollBusinessTripRepository $trips,
+        private readonly BusinessTripValidator $validator,
+        private readonly BusinessTripCalculator $calculator,
+        private readonly BusinessTripMaterializer $materializer,
+        private readonly PayrollModuleAccess $access,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+    ) {}
+
+    public function list(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        $period = $request->getQueryParams()['period'] ?? null;
+        try {
+            $periodStart = $period === null || $period === '' ? null : $this->month($period);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'trips' => $this->trips->list($this->currentSupplierId($request), $periodStart),
+        ]);
+    }
+
+    public function preview(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $data = $this->validator->validate($this->input($request));
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'calculation' => $this->calculate($data)->jsonSerialize(),
+        ]);
+    }
+
+    public function create(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $trip = $this->trips->create(
+                $this->currentSupplierId($request),
+                $this->validator->validate($this->input($request)),
+                $this->userId($request),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->audit($request, 'payroll.travel.created', $trip);
+
+        return Json::ok($response, ['trip' => $trip], 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function update(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = $this->rowVersion($body['row_version'] ?? null);
+        if ($version === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'row_version musí být kladné celé číslo.',
+                422,
+            );
+        }
+        unset($body['row_version']);
+        try {
+            $trip = $this->trips->update(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->validator->validate($body),
+                $version,
+            );
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollBusinessTripConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        }
+        if ($trip === null) {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+        $this->audit($request, 'payroll.travel.updated', $trip);
+
+        return Json::ok($response, ['trip' => $trip]);
+    }
+
+    /** @param array<string,string> $args */
+    public function recalculate(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        $trip = $this->trips->find(
+            $this->currentSupplierId($request),
+            (int) ($args['id'] ?? 0),
+        );
+        if ($trip === null) {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+
+        return Json::ok($response, [
+            'trip' => $trip,
+            'calculation' => $this->calculateStored($trip)->jsonSerialize(),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function approve(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
+            return $error;
+        }
+        $version = $this->rowVersion($this->input($request)['row_version'] ?? null);
+        if ($version === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'row_version musí být kladné celé číslo.',
+                422,
+            );
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $trip = $this->trips->find($supplierId, $id);
+        if ($trip === null) {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+        $calculation = $this->calculateStored($trip);
+        if (!$calculation->isSupported()) {
+            return Json::error(
+                $response,
+                'travel_requires_manual_review',
+                'Vyúčtování vyžaduje ruční posouzení, schválit ho nelze.',
+                409,
+                ['blockers' => $calculation->blockers],
+            );
+        }
+        try {
+            $approved = $this->trips->approve(
+                $supplierId,
+                $id,
+                $version,
+                $calculation->rulesetIds === [] ? 'none' : implode(',', $calculation->rulesetIds),
+                CanonicalJson::encode($calculation->jsonSerialize()),
+                $calculation->entitlementTotalMinor,
+                $calculation->exemptTotalMinor,
+                $calculation->taxableTotalMinor,
+                $this->userId($request),
+            );
+        } catch (\DomainException $e) {
+            return Json::error($response, 'trip_state_conflict', $e->getMessage(), 409);
+        } catch (PayrollBusinessTripConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        }
+        if ($approved === null) {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+        $this->audit($request, 'payroll.travel.approved', $approved);
+
+        return Json::ok($response, [
+            'trip' => $approved,
+            'calculation' => $calculation->jsonSerialize(),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function materialize(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $result = $this->materializer->materialize(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->userId($request),
+            );
+        } catch (\DomainException $e) {
+            return Json::error($response, 'trip_state_conflict', $e->getMessage(), 409);
+        }
+        if (($result['status'] ?? null) === 'not_found') {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+        $this->logger->log(
+            'payroll.travel.materialized',
+            $this->userId($request),
+            'payroll_business_trip',
+            (int) ($args['id'] ?? 0),
+            $result,
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $this->currentSupplierId($request),
+        );
+
+        return Json::ok($response, ['materialization' => $result]);
+    }
+
+    /** @param array<string,mixed> $data */
+    private function calculate(array $data): BusinessTripCalculation
+    {
+        /** @var list<array<string,mixed>> $items */
+        $items = $data['items'] ?? [];
+        /** @var array<string,int> $meals */
+        $meals = $data['free_meals'] ?? [];
+        try {
+            $trip = BusinessTripValidator::toDomain($data, $items, $meals);
+        } catch (\InvalidArgumentException $e) {
+            return BusinessTripCalculation::blocked([$e->getMessage()]);
+        }
+
+        return $this->calculator->calculate($trip);
+    }
+
+    /** @param array<string,mixed> $trip */
+    private function calculateStored(array $trip): BusinessTripCalculation
+    {
+        /** @var list<array<string,mixed>> $items */
+        $items = $trip['items'] ?? [];
+        /** @var array<string,int> $meals */
+        $meals = $trip['free_meals'] ?? [];
+
+        return $this->calculate([
+            'departure_at' => PayrollTimeValue::string(
+                $trip['departure_at'] ?? null,
+                'departure_at',
+            ),
+            'arrival_at' => PayrollTimeValue::string($trip['arrival_at'] ?? null, 'arrival_at'),
+            'country_code' => PayrollTimeValue::string(
+                $trip['country_code'] ?? null,
+                'country_code',
+            ),
+            'transport_mode' => PayrollTimeValue::string(
+                $trip['transport_mode'] ?? null,
+                'transport_mode',
+            ),
+            'meal_rate_band_1_minor' => $trip['meal_rate_band_1_minor'] ?? null,
+            'meal_rate_band_2_minor' => $trip['meal_rate_band_2_minor'] ?? null,
+            'meal_rate_band_3_minor' => $trip['meal_rate_band_3_minor'] ?? null,
+            'advance_minor' => $trip['advance_minor'] ?? 0,
+            'items' => $items,
+            'free_meals' => $meals,
+        ]);
+    }
+
+    private function authorize(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+        ?string $permissionOverride = null,
+    ): ?Response {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+        }
+        $error = null;
+        $permission = $permissionOverride ?? (
+            $level === AccessLevel::READ ? 'payroll' : 'payroll.inputs.write'
+        );
+        if (!$this->requirePermission($request, $response, $permission, $level, $error)) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error;
+        }
+
+        return null;
+    }
+
+    /** @return array<string,mixed> */
+    private function input(Request $request): array
+    {
+        $body = $request->getParsedBody();
+
+        return is_array($body) ? PayrollTimeValue::row($body, 'request_body') : [];
+    }
+
+    private function month(mixed $value): string
+    {
+        if (!is_string($value)) {
+            throw new \InvalidArgumentException('period musí být měsíc YYYY-MM.');
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m', $value);
+        if ($date === false || $date->format('Y-m') !== $value) {
+            throw new \InvalidArgumentException('period musí být měsíc YYYY-MM.');
+        }
+
+        return $value . '-01';
+    }
+
+    private function rowVersion(mixed $value): ?int
+    {
+        $version = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+        return $version === false ? null : (int) $version;
+    }
+
+    /** @param array<string,mixed> $trip */
+    private function audit(Request $request, string $action, array $trip): void
+    {
+        $this->logger->log(
+            $action,
+            $this->userId($request),
+            'payroll_business_trip',
+            PayrollTimeValue::int($trip['id'] ?? null, 'id'),
+            [
+                'employee_id' => PayrollTimeValue::int($trip['employee_id'] ?? null, 'employee_id'),
+                'employment_id' => PayrollTimeValue::int(
+                    $trip['employment_id'] ?? null,
+                    'employment_id',
+                ),
+                'settlement_period_start' => PayrollTimeValue::string(
+                    $trip['settlement_period_start'] ?? null,
+                    'settlement_period_start',
+                ),
+                'status' => PayrollTimeValue::string($trip['status'] ?? null, 'status'),
+                'row_version' => PayrollTimeValue::int(
+                    $trip['row_version'] ?? null,
+                    'row_version',
+                ),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $this->currentSupplierId($request),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function serverParams(Request $request): array
+    {
+        return PayrollTimeValue::row($request->getServerParams(), 'server_params');
+    }
+}

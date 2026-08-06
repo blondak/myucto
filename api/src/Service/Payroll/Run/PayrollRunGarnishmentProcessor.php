@@ -33,11 +33,105 @@ final class PayrollRunGarnishmentProcessor
      */
     public function calculate(array $snapshot, array $baseResult): array
     {
-        $supplierId = self::positiveInt($snapshot, 'supplier_id');
-        $period = substr(self::string($snapshot, 'period_start'), 0, 7);
-        $paymentDate = self::string($snapshot, 'payment_date');
-        $requiresNetPay = ($snapshot['schema_version'] ?? null) === 'payroll-run-input.v2'
-            && isset($baseResult['statutory']);
+        $context = $this->context($snapshot, $baseResult);
+        $people = self::rows($baseResult['people'] ?? null, 'result.people');
+        $withheldTotal = 0;
+        $payableTotal = 0;
+        foreach ($people as &$person) {
+            $employeeId = self::positiveInt($person, 'employee_id');
+            [$netCashPayable, $voluntaryDeducted] = $this->netPay(
+                $person,
+                $context['requires_net_pay'],
+            );
+            [$input, $result, $income] = $this->evaluate(
+                $context,
+                $person,
+                $employeeId,
+                $netCashPayable,
+            );
+            $person['enforcement'] = [
+                'input' => $input->toCanonicalArray(),
+                'result' => $result->jsonSerialize(),
+            ];
+            $payable = self::add(
+                $result->employeePaymentMinorUnits,
+                $income->excludedMinorUnits,
+            ) - $voluntaryDeducted;
+            if ($payable < 0) {
+                throw new \DomainException(
+                    'Dobrovolná srážka přesáhla výplatu po exekučních srážkách.',
+                );
+            }
+            $person['payable_after_enforcement_minor'] = $payable;
+            $withheldTotal = self::add(
+                $withheldTotal,
+                $result->totalWithheldMinorUnits,
+            );
+            $payableTotal = self::add($payableTotal, $payable);
+        }
+        unset($person);
+        $baseResult['people'] = $people;
+        $totals = self::row($baseResult['totals'] ?? null, 'result.totals');
+        $totals['enforcement_withheld_minor'] = $withheldTotal;
+        $totals['payable_after_enforcement_minor'] = $payableTotal;
+        $baseResult['totals'] = $totals;
+
+        return $baseResult;
+    }
+
+    /**
+     * Kolik smí zaměstnavatel v tomto běhu strhnout na dobrovolné dohody
+     * o srážkách — až z toho, co exekuce nechala v obecné (nepřednostní)
+     * kapacitě. Volá se PŘED výpočtem čisté mzdy se srážkami, takže dostane
+     * čistou mzdu před dohodami a exekuci počítá ze správného základu.
+     *
+     * @param array<string,mixed> $snapshot
+     * @param array<string,mixed> $baseResult
+     * @param array<int,int> $netCashPayableByEmployee
+     * @return array<int,int>
+     */
+    public function voluntaryDeductionCapacities(
+        array $snapshot,
+        array $baseResult,
+        array $netCashPayableByEmployee,
+    ): array {
+        $context = $this->context($snapshot, $baseResult, true);
+        $capacities = [];
+        foreach (self::rows($baseResult['people'] ?? null, 'result.people') as $person) {
+            $employeeId = self::positiveInt($person, 'employee_id');
+            $netCashPayable = $netCashPayableByEmployee[$employeeId] ?? null;
+            if ($netCashPayable === null) {
+                continue;
+            }
+            [, $result] = $this->evaluate(
+                $context,
+                $person,
+                $employeeId,
+                $netCashPayable,
+            );
+            $capacities[$employeeId] =
+                $this->calculator->voluntaryDeductionCapacity($result);
+        }
+
+        return $capacities;
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     * @param array<string,mixed> $baseResult
+     * @return array{
+     *     supplier_id:int,
+     *     period:string,
+     *     payment_date:string,
+     *     requires_net_pay:bool,
+     *     evidence:array<int,EnforcementPersonMonthEvidence>
+     * }
+     */
+    private function context(
+        array $snapshot,
+        array $baseResult,
+        bool $requiresNetPay = false,
+    ): array {
         $evidenceByEmployee = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::row($person['employee'] ?? null, 'snapshot.employee');
@@ -49,115 +143,138 @@ final class PayrollRunGarnishmentProcessor
                 EnforcementPersonMonthEvidence::fromCanonicalArray($evidence);
         }
 
-        $people = self::rows($baseResult['people'] ?? null, 'result.people');
-        $withheldTotal = 0;
-        $payableTotal = 0;
-        foreach ($people as &$person) {
-            $employeeId = self::positiveInt($person, 'employee_id');
-            $totals = self::row($person['totals'] ?? null, 'result.person.totals');
-            $grossCashPayable = self::int($totals, 'cash_payable_minor');
-            $grossEnforcementBase = self::int(
-                $totals,
-                'enforcement_base_minor',
-            );
-            $cashPayable = $grossCashPayable;
-            $enforcementBase = $grossEnforcementBase;
-            $statutoryUnavailable = false;
-            if ($requiresNetPay) {
-                $statutory = self::row(
-                    $person['statutory'] ?? null,
-                    'result.person.statutory',
-                );
-                if (($statutory['status'] ?? null) === 'calculated'
-                    && is_int($statutory['net_payable_minor_units'] ?? null)
-                ) {
-                    $excluded = $grossCashPayable - $grossEnforcementBase;
-                    $cashPayable = (int) $statutory['net_payable_minor_units'];
-                    $enforcementBase = $cashPayable - $excluded;
-                } else {
-                    $statutoryUnavailable = true;
-                }
+        return [
+            'supplier_id' => self::positiveInt($snapshot, 'supplier_id'),
+            'period' => substr(self::string($snapshot, 'period_start'), 0, 7),
+            'payment_date' => self::string($snapshot, 'payment_date'),
+            'requires_net_pay' => $requiresNetPay
+                || (($snapshot['schema_version'] ?? null) === 'payroll-run-input.v2'
+                    && isset($baseResult['statutory'])),
+            'evidence' => $evidenceByEmployee,
+        ];
+    }
+
+    /**
+     * Čistá mzda PŘED dobrovolnými srážkami a částka, kterou dohody nakonec
+     * dostaly. `null` znamená, že zákonný výsledek osoby není uzavřený.
+     *
+     * @param array<string,mixed> $person
+     * @return array{0:?int,1:int}
+     */
+    private function netPay(array $person, bool $requiresNetPay): array
+    {
+        if (!$requiresNetPay) {
+            return [null, 0];
+        }
+        $statutory = self::row(
+            $person['statutory'] ?? null,
+            'result.person.statutory',
+        );
+        if (($statutory['status'] ?? null) !== 'calculated'
+            || !is_int($statutory['net_payable_minor_units'] ?? null)
+        ) {
+            return [null, 0];
+        }
+        $netPay = self::row(
+            $statutory['net_pay'] ?? null,
+            'result.person.statutory.net_pay',
+        );
+
+        return [
+            self::int($netPay, 'net_before_deductions_minor_units'),
+            self::int($netPay, 'deducted_minor_units'),
+        ];
+    }
+
+    /**
+     * @param array{
+     *     supplier_id:int,
+     *     period:string,
+     *     payment_date:string,
+     *     requires_net_pay:bool,
+     *     evidence:array<int,EnforcementPersonMonthEvidence>
+     * } $context
+     * @param array<string,mixed> $person
+     * @return array{0:GarnishmentInput,1:GarnishmentResult,2:GarnishableIncomeResult}
+     */
+    private function evaluate(
+        array $context,
+        array $person,
+        int $employeeId,
+        ?int $netCashPayable,
+    ): array {
+        $supplierId = $context['supplier_id'];
+        $totals = self::row($person['totals'] ?? null, 'result.person.totals');
+        $grossCashPayable = self::int($totals, 'cash_payable_minor');
+        $grossEnforcementBase = self::int($totals, 'enforcement_base_minor');
+        $cashPayable = $grossCashPayable;
+        $enforcementBase = $grossEnforcementBase;
+        $statutoryUnavailable = false;
+        if ($context['requires_net_pay']) {
+            if ($netCashPayable === null) {
+                $statutoryUnavailable = true;
+            } else {
+                $excluded = $grossCashPayable - $grossEnforcementBase;
+                $cashPayable = $netCashPayable;
+                $enforcementBase = $cashPayable - $excluded;
             }
-            $income = $statutoryUnavailable
-                ? new GarnishableIncomeResult(
-                    GarnishmentStatus::ManualReview,
-                    0,
-                    0,
-                    ['net_pay_result_missing_or_unverified'],
-                    [],
-                )
-                : ($cashPayable < 0
-                    || $enforcementBase < 0
-                    || $enforcementBase > $cashPayable
-                ? new GarnishableIncomeResult(
-                    GarnishmentStatus::ManualReview,
-                    0,
-                    0,
-                    ['cash_payable_enforcement_base_inconsistent'],
-                    [],
-                )
-                : $this->incomeResolver->resolve(array_values(array_filter([
-                    $enforcementBase === 0 ? null : new GarnishableIncomeItem(
-                        "revision-person-{$employeeId}-garnishable",
-                        GarnishableIncomeKind::Wage,
-                        $enforcementBase,
+        }
+        $income = $statutoryUnavailable
+            ? new GarnishableIncomeResult(
+                GarnishmentStatus::ManualReview,
+                0,
+                0,
+                ['net_pay_result_missing_or_unverified'],
+                [],
+            )
+            : ($cashPayable < 0
+                || $enforcementBase < 0
+                || $enforcementBase > $cashPayable
+            ? new GarnishableIncomeResult(
+                GarnishmentStatus::ManualReview,
+                0,
+                0,
+                ['cash_payable_enforcement_base_inconsistent'],
+                [],
+            )
+            : $this->incomeResolver->resolve(array_values(array_filter([
+                $enforcementBase === 0 ? null : new GarnishableIncomeItem(
+                    "revision-person-{$employeeId}-garnishable",
+                    GarnishableIncomeKind::Wage,
+                    $enforcementBase,
+                    "supplier-{$supplierId}",
+                ),
+                $cashPayable === $enforcementBase
+                    ? null
+                    : new GarnishableIncomeItem(
+                        "revision-person-{$employeeId}-excluded",
+                        GarnishableIncomeKind::TravelReimbursement,
+                        $cashPayable - $enforcementBase,
                         "supplier-{$supplierId}",
                     ),
-                    $cashPayable === $enforcementBase
-                        ? null
-                        : new GarnishableIncomeItem(
-                            "revision-person-{$employeeId}-excluded",
-                            GarnishableIncomeKind::TravelReimbursement,
-                            $cashPayable - $enforcementBase,
-                            "supplier-{$supplierId}",
-                        ),
-                ])), true));
-            $evidence = $evidenceByEmployee[$employeeId]
-                ?? throw new \UnexpectedValueException(
-                    'Snapshot neobsahuje exekuční důkazy zaměstnance.',
-                );
-            $input = new GarnishmentInput(
-                $period,
-                $paymentDate,
-                $income,
-                $evidence->claims,
-                $evidence->eligibleDependants,
-                $evidence->dependantsEvidenceComplete,
-                $evidence->eligibleSpouse,
-                $evidence->spouseEvidenceComplete,
-                $evidence->pensionEvidence,
-                $evidence->hasMultiplePayers,
-                $evidence->protectedAmountOverrideMinorUnits,
-                $evidence->insolvency,
-                $evidence->protectedAmountOverrideVerified,
-                $evidence->claimRegisterEvidenceComplete,
+            ])), true));
+        $evidence = $context['evidence'][$employeeId]
+            ?? throw new \UnexpectedValueException(
+                'Snapshot neobsahuje exekuční důkazy zaměstnance.',
             );
-            $result = $this->calculator->calculate($input);
-            $person['enforcement'] = [
-                'input' => $input->toCanonicalArray(),
-                'result' => $result->jsonSerialize(),
-            ];
-            $person['payable_after_enforcement_minor'] = self::add(
-                $result->employeePaymentMinorUnits,
-                $income->excludedMinorUnits,
-            );
-            $withheldTotal = self::add(
-                $withheldTotal,
-                $result->totalWithheldMinorUnits,
-            );
-            $payableTotal = self::add(
-                $payableTotal,
-                $person['payable_after_enforcement_minor'],
-            );
-        }
-        unset($person);
-        $baseResult['people'] = $people;
-        $totals = self::row($baseResult['totals'] ?? null, 'result.totals');
-        $totals['enforcement_withheld_minor'] = $withheldTotal;
-        $totals['payable_after_enforcement_minor'] = $payableTotal;
-        $baseResult['totals'] = $totals;
+        $input = new GarnishmentInput(
+            $context['period'],
+            $context['payment_date'],
+            $income,
+            $evidence->claims,
+            $evidence->eligibleDependants,
+            $evidence->dependantsEvidenceComplete,
+            $evidence->eligibleSpouse,
+            $evidence->spouseEvidenceComplete,
+            $evidence->pensionEvidence,
+            $evidence->hasMultiplePayers,
+            $evidence->protectedAmountOverrideMinorUnits,
+            $evidence->insolvency,
+            $evidence->protectedAmountOverrideVerified,
+            $evidence->claimRegisterEvidenceComplete,
+        );
 
-        return $baseResult;
+        return [$input, $this->calculator->calculate($input), $income];
     }
 
     /** @param array<string,mixed> $result */

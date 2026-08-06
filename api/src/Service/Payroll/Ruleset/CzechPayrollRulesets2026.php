@@ -26,6 +26,8 @@ final class CzechPayrollRulesets2026
             self::healthInsurance($technicalReview),
             self::employmentThresholds($technicalReview),
             self::compensationAverages($technicalReview),
+            self::travelAllowancesUntilMay($technicalReview),
+            self::travelAllowancesFromJune($technicalReview),
             self::enforcementDeductions($technicalReview),
             self::deadlines($technicalReview),
             self::codebooks($technicalReview),
@@ -53,8 +55,12 @@ final class CzechPayrollRulesets2026
                 'credit.child.first.monthly' => PayrollRuleValue::moneyMinor(126_700),
                 'credit.child.second.monthly' => PayrollRuleValue::moneyMinor(186_000),
                 'credit.child.third_and_next.monthly' => PayrollRuleValue::moneyMinor(232_000),
+                'credit.disability.basic.monthly' => PayrollRuleValue::moneyMinor(21_000),
+                'credit.disability.extended.monthly' => PayrollRuleValue::moneyMinor(42_000),
                 'credit.taxpayer.monthly' => PayrollRuleValue::moneyMinor(257_000),
+                'credit.ztp_p.monthly' => PayrollRuleValue::moneyMinor(134_500),
                 'dpp.withholding.maximum' => PayrollRuleValue::moneyMinor(1_199_900),
+                'other.withholding.maximum' => PayrollRuleValue::moneyMinor(449_900),
                 'withholding.rate' => PayrollRuleValue::rate('0.15'),
             ],
             $technicalReview,
@@ -138,7 +144,13 @@ final class CzechPayrollRulesets2026
             PayrollRulesetCapability::ManualReview,
             [self::socialSecurity(), self::labourCode()],
             [
+                'average_earning.minimum_worked_days' => PayrollRuleValue::integer(21),
                 'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
+                'leave.agreement_weekly_minutes' => PayrollRuleValue::integer(1_200),
+                'leave.entitlement_weeks.statutory_minimum' => PayrollRuleValue::integer(4),
+                'leave.minimum_continuous_calendar_days' => PayrollRuleValue::integer(28),
+                'leave.minimum_worked_week_multiples' => PayrollRuleValue::integer(4),
+                'leave.weeks_per_year' => PayrollRuleValue::integer(52),
                 'wage_compensation.compensation_rate' => PayrollRuleValue::rate('0.60'),
                 'wage_compensation.hourly_boundary_1_minor' => PayrollRuleValue::moneyMinor(28_578),
                 'wage_compensation.hourly_boundary_2_minor' => PayrollRuleValue::moneyMinor(42_858),
@@ -149,7 +161,100 @@ final class CzechPayrollRulesets2026
                 'wage_compensation.reduction_band_1_rate' => PayrollRuleValue::rate('0.90'),
                 'wage_compensation.reduction_band_2_rate' => PayrollRuleValue::rate('0.60'),
                 'wage_compensation.reduction_band_3_rate' => PayrollRuleValue::rate('0.30'),
+                'wage_compensation.window_calendar_days' => PayrollRuleValue::integer(14),
             ],
+            $technicalReview,
+        );
+    }
+
+    /**
+     * Tuzemské cestovní náhrady. Časová pásma, krácení za bezplatné jídlo a
+     * zaokrouhlení plynou přímo ze zákoníku práce, peněžní sazby z vyhlášky
+     * č. 573/2025 Sb. Novela č. 78/2026 Sb. zvedla od 1. 6. 2026 průměrnou cenu
+     * motorové nafty, proto má rok dvě neprolínající se účinné verze.
+     */
+    private static function travelAllowancesUntilMay(
+        RulesetTechnicalReview $technicalReview,
+    ): PayrollRulesetVersion {
+        return self::travelAllowances(
+            'cz-payroll-2026.travel-allowances.v1',
+            '2026.1.0',
+            '2026-01-01',
+            '2026-05-31',
+            3_410,
+            [self::labourCodeTravel(), self::travelAllowanceDecree2026()],
+            $technicalReview,
+        );
+    }
+
+    private static function travelAllowancesFromJune(
+        RulesetTechnicalReview $technicalReview,
+    ): PayrollRulesetVersion {
+        return self::travelAllowances(
+            'cz-payroll-2026.travel-allowances.v2',
+            '2026.2.0',
+            '2026-06-01',
+            '2026-12-31',
+            4_450,
+            [
+                self::labourCodeTravel(),
+                self::travelAllowanceDecree2026(),
+                self::travelAllowanceDieselAmendment2026(),
+            ],
+            $technicalReview,
+        );
+    }
+
+    /** @param non-empty-list<RulesetSource> $sources */
+    private static function travelAllowances(
+        string $id,
+        string $version,
+        string $effectiveFrom,
+        string $effectiveTo,
+        int $dieselPerLitreMinor,
+        array $sources,
+        RulesetTechnicalReview $technicalReview,
+    ): PayrollRulesetVersion {
+        $parameters = [
+            'foreign_travel' => PayrollRuleValue::manualReview(
+                'Foreign business trips (foreign meal allowance, pocket money, currency conversion) are outside this ruleset and must be settled manually.',
+            ),
+            'fuel.average_price.diesel_per_litre' => PayrollRuleValue::moneyMinor($dieselPerLitreMinor),
+            'fuel.average_price.electricity_per_kwh' => PayrollRuleValue::moneyMinor(720),
+            'fuel.average_price.petrol_95_per_litre' => PayrollRuleValue::moneyMinor(3_470),
+            'fuel.average_price.petrol_98_per_litre' => PayrollRuleValue::moneyMinor(3_900),
+            'meal_allowance.band_1.free_meal_reduction_rate' => PayrollRuleValue::rate('0.70'),
+            'meal_allowance.band_1.minimum' => PayrollRuleValue::moneyMinor(15_500),
+            'meal_allowance.band_1.tax_exempt_maximum' => PayrollRuleValue::moneyMinor(18_500),
+            'meal_allowance.band_1.to_minutes' => PayrollRuleValue::integer(720),
+            'meal_allowance.band_2.free_meal_reduction_rate' => PayrollRuleValue::rate('0.35'),
+            'meal_allowance.band_2.minimum' => PayrollRuleValue::moneyMinor(23_600),
+            'meal_allowance.band_2.tax_exempt_maximum' => PayrollRuleValue::moneyMinor(28_400),
+            'meal_allowance.band_2.to_minutes' => PayrollRuleValue::integer(1_080),
+            'meal_allowance.band_3.free_meal_reduction_rate' => PayrollRuleValue::rate('0.25'),
+            'meal_allowance.band_3.minimum' => PayrollRuleValue::moneyMinor(37_000),
+            'meal_allowance.band_3.tax_exempt_maximum' => PayrollRuleValue::moneyMinor(44_200),
+            'meal_allowance.from_minutes' => PayrollRuleValue::integer(300),
+            'meal_allowance.two_day_merge_rule' => PayrollRuleValue::text(
+                'merge-two-calendar-days-when-more-favourable',
+            ),
+            'rounding.entitlement' => PayrollRuleValue::text('ceil-to-1-czk'),
+            'vehicle.basic_compensation.car_per_km' => PayrollRuleValue::moneyMinor(590),
+            'vehicle.basic_compensation.single_track_per_km' => PayrollRuleValue::moneyMinor(160),
+        ];
+        ksort($parameters, SORT_STRING);
+
+        return new PayrollRulesetVersion(
+            $id,
+            $version,
+            PayrollRulesetDomain::TravelAllowances,
+            $effectiveFrom,
+            $effectiveTo,
+            PayrollRulesetLifecycle::Reviewed,
+            PayrollRulesetCapability::Supported,
+            $sources,
+            $parameters,
+            null,
             $technicalReview,
         );
     }
@@ -326,8 +431,38 @@ final class CzechPayrollRulesets2026
     {
         return new RulesetSource(
             'mpsv-labour-code-current',
-            'MPSV: zákoník práce č. 262/2006 Sb., § 192 a § 351 až 362',
+            'MPSV: zákoník práce č. 262/2006 Sb., § 192, § 213 a § 351 až 362',
             'https://ppropo.mpsv.cz/zakon_262_2006',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function labourCodeTravel(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-labour-code-travel',
+            'MPSV: zákoník práce č. 262/2006 Sb., § 156 až 189 (cestovní náhrady, časová pásma stravného a krácení za bezplatné jídlo)',
+            'https://ppropo.mpsv.cz/zakon_262_2006',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function travelAllowanceDecree2026(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-travel-allowance-decree-2026',
+            'MPSV: vyhláška č. 573/2025 Sb., o sazbě základní náhrady, stravném a průměrné ceně pohonných hmot pro rok 2026',
+            'https://ppropo.mpsv.cz/Vyhlaska_573_2025',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function travelAllowanceDieselAmendment2026(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-travel-allowance-diesel-2026',
+            'MPSV: vyhláška č. 78/2026 Sb. — změna průměrné ceny motorové nafty od 1. 6. 2026',
+            'https://mpsv.gov.cz/rust-cen-nafty-se-promita-do-cestovnich-nahrad-mpsv-aktualizuje-vyhlasku',
             self::RETRIEVED_ON,
         );
     }

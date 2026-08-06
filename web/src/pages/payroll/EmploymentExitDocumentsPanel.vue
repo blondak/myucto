@@ -90,11 +90,14 @@ const canGenerate = computed(() =>
   && (!hasExistingCertificate.value || correctionReason.value.trim() !== ''),
 )
 
-function blockerLabel(code: string | null | undefined): string {
+function blockerLabel(
+  code: string | null | undefined,
+  params?: Record<string, unknown>,
+): string {
   if (!code) return t('payroll.people.exit_documents.ready')
   const key = `payroll.people.exit_documents.blockers.${code}`
   return te(key)
-    ? t(key)
+    ? t(key, params ?? {})
     : t('payroll.people.exit_documents.blockers.unknown', { code })
 }
 
@@ -459,7 +462,12 @@ onMounted(() => void load())
       <template v-else>
         <div class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-warning-800" role="status" data-test="average-certificate-unavailable">
           <p class="text-sm font-medium">{{ t('payroll.people.exit_documents.average_unavailable') }}</p>
-          <p class="mt-1 text-xs">{{ blockerLabel(averageReadiness?.readiness_code ?? 'average_earnings_ruleset_not_ready') }}</p>
+          <p class="mt-1 text-xs">
+            {{ blockerLabel(
+              averageReadiness?.readiness_code ?? 'average_earnings_ruleset_not_ready',
+              { year: averageReadiness?.decisive_year, quarter: averageReadiness?.decisive_quarter },
+            ) }}
+          </p>
         </div>
         <div v-if="averageDocuments.length" class="mt-4 space-y-2">
           <article v-for="document in averageDocuments" :key="document.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-surface p-3">

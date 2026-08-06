@@ -257,6 +257,8 @@ final class PayrollComponentsInputsApiTest extends TestCase
 
         self::assertSame([
             'CESTOVNI_NAHRADA',
+            'CESTOVNI_NAHRADA_LIMIT',
+            'CESTOVNI_NAHRADA_NADLIMIT',
             'DOPLATEK_MZDY',
             'MZDA_HODINOVA',
             'MZDA_MESICNI',

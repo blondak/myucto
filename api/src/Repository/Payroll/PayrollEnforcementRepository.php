@@ -111,6 +111,7 @@ final class PayrollEnforcementRepository implements
         ));
         $case['events'] = $this->eventsForCase($supplierId, $caseId);
         $case['ledger'] = $this->ledgerForCase($supplierId, $caseId);
+        $case['settlement'] = $this->settlementForCase($supplierId, $caseId);
 
         return $case;
     }
@@ -262,6 +263,8 @@ final class PayrollEnforcementRepository implements
         bool $recipientVerified,
         int $expectedVersion,
         ?int $userId,
+        ?int $recipientInstitutionId = null,
+        bool $updateRecipientInstitution = false,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -295,16 +298,34 @@ final class PayrollEnforcementRepository implements
                     'Případ nelze označit za úplný, dokud nejsou ověřeny všechny pohledávky.',
                 );
             }
+            if ($updateRecipientInstitution && $recipientInstitutionId !== null) {
+                $this->assertPaymentRecipientInstitution(
+                    $supplierId,
+                    $recipientInstitutionId,
+                );
+            }
             $stmt = $pdo->prepare(
-                'UPDATE payroll_enforcement_cases
-                    SET evidence_complete = ?, recipient_verified = ?,
-                        row_version = row_version + 1, updated_by = ?
-                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+                $updateRecipientInstitution
+                    ? 'UPDATE payroll_enforcement_cases
+                          SET evidence_complete = ?, recipient_verified = ?,
+                              recipient_institution_id = ?,
+                              row_version = row_version + 1, updated_by = ?
+                        WHERE supplier_id = ? AND id = ? AND row_version = ?'
+                    : 'UPDATE payroll_enforcement_cases
+                          SET evidence_complete = ?, recipient_verified = ?,
+                              row_version = row_version + 1, updated_by = ?
+                        WHERE supplier_id = ? AND id = ? AND row_version = ?'
             );
-            $stmt->execute([
-                (int) $evidenceComplete, (int) $recipientVerified, $userId,
-                $supplierId, $caseId, $expectedVersion,
-            ]);
+            $stmt->execute($updateRecipientInstitution
+                ? [
+                    (int) $evidenceComplete, (int) $recipientVerified,
+                    $recipientInstitutionId, $userId,
+                    $supplierId, $caseId, $expectedVersion,
+                ]
+                : [
+                    (int) $evidenceComplete, (int) $recipientVerified, $userId,
+                    $supplierId, $caseId, $expectedVersion,
+                ]);
             if ($stmt->rowCount() !== 1) {
                 $this->throwConflictOrNotFound($supplierId, $caseId);
             }
@@ -345,10 +366,40 @@ final class PayrollEnforcementRepository implements
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollEnforcementConflictException($currentVersion);
             }
+            // MZ-14-W02: zůstatek pohledávky snižuje až POTVRZENÁ úhrada
+            // příjemci (platební ledger MZ-17), nikoli samotné sražení ze mzdy.
+            // Sražená, ale dosud neodeslaná či nespárovaná částka drží případ
+            // otevřený — `mark-paid` proto projde teprve po skutečné platbě.
             $outstandingStmt = $pdo->prepare(
-                'SELECT COALESCE(SUM(outstanding_minor_units), 0)
-                   FROM payroll_enforcement_claims
-                  WHERE supplier_id = ? AND case_id = ? AND is_active = 1'
+                "SELECT COALESCE(SUM(GREATEST(0,
+                          claim.outstanding_minor_units
+                          - COALESCE((
+                              SELECT SUM(
+                                CASE WHEN liability.direction = 'outgoing'
+                                  THEN payment_match.amount_minor
+                                  ELSE -payment_match.amount_minor END
+                              )
+                                FROM payroll_payment_liabilities liability
+                                JOIN payroll_payment_allocations allocation
+                                  ON allocation.supplier_id =
+                                     liability.supplier_id
+                                 AND allocation.liability_id = liability.id
+                                JOIN payroll_payment_matches payment_match
+                                  ON payment_match.supplier_id =
+                                     allocation.supplier_id
+                                 AND payment_match.allocation_id =
+                                     allocation.id
+                               WHERE liability.supplier_id = claim.supplier_id
+                                 AND liability.liability_kind = 'enforcement'
+                                 AND liability.liability_reference = CONCAT(
+                                   'enforcement:c', claim.case_id,
+                                   ':cl', claim.id
+                                 )
+                          ), 0)
+                        )), 0)
+                   FROM payroll_enforcement_claims claim
+                  WHERE claim.supplier_id = ? AND claim.case_id = ?
+                    AND claim.is_active = 1"
             );
             $outstandingStmt->execute([$supplierId, $caseId]);
             $from = EnforcementCaseStatus::from(
@@ -1014,6 +1065,71 @@ final class PayrollEnforcementRepository implements
         ));
     }
 
+    /**
+     * MZ-14-W08 — „sraženo / deponováno / odesláno / zbývá" pro jeden případ.
+     * Odeslané peníze se nikdy neodvozují ze srážky, ale výhradně z potvrzených
+     * úhrad platebního ledgeru.
+     *
+     * @return array{
+     *   claims:list<array<string,mixed>>,
+     *   withheld_minor:int,
+     *   held_minor:int,
+     *   liability_minor:int,
+     *   settled_minor:int,
+     *   outstanding_minor:int,
+     *   remaining_minor:int
+     * }
+     */
+    private function settlementForCase(int $supplierId, int $caseId): array
+    {
+        $claims = (new PayrollEnforcementPaymentRepository($this->db))
+            ->settlementForCase($supplierId, $caseId);
+        $totals = [
+            'withheld_minor' => 0,
+            'held_minor' => 0,
+            'liability_minor' => 0,
+            'settled_minor' => 0,
+            'outstanding_minor' => 0,
+            'remaining_minor' => 0,
+        ];
+        foreach ($claims as $claim) {
+            if (!$claim['is_active']) {
+                continue;
+            }
+            $totals['withheld_minor'] += $claim['withheld_minor'];
+            $totals['held_minor'] += $claim['held_minor'];
+            $totals['liability_minor'] += $claim['liability_minor'];
+            $totals['settled_minor'] += $claim['settled_minor'];
+            $totals['outstanding_minor'] += $claim['outstanding_minor'];
+            $totals['remaining_minor'] += $claim['remaining_minor'];
+        }
+
+        return ['claims' => $claims, ...$totals];
+    }
+
+    private function assertPaymentRecipientInstitution(
+        int $supplierId,
+        int $institutionId,
+    ): void {
+        if ($institutionId <= 0) {
+            throw new \InvalidArgumentException(
+                'Příjemce srážky musí být kladné číslo.',
+            );
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT institution_type FROM payroll_institutions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $institutionId]);
+        $type = $stmt->fetchColumn();
+        if ($type !== 'other_recipient') {
+            throw new \InvalidArgumentException(
+                'Příjemce srážky musí být záznam z katalogu platebních účtů '
+                . 'institucí typu „ostatní příjemce".',
+            );
+        }
+    }
+
     /** @return list<array<string,mixed>> */
     private function ledgerForCase(int $supplierId, int $caseId): array
     {
@@ -1415,7 +1531,8 @@ final class PayrollEnforcementRepository implements
         return self::castBooleansAndIntegers(
             $row,
             ['id', 'employee_id', 'row_version', 'claim_count',
-                'outstanding_minor_units', 'created_by', 'updated_by'],
+                'outstanding_minor_units', 'recipient_institution_id',
+                'created_by', 'updated_by'],
             ['evidence_complete', 'recipient_verified'],
         );
     }

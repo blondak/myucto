@@ -1,0 +1,301 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import {
+  payrollPostingApi,
+  type PayrollPostingReconciliation,
+  type PayrollPostingReconciliationCategory,
+  type PayrollPostingReconciliationCategoryKey,
+} from '@/api/payrollPosting'
+import { apiErrorMessage } from '@/api/errors'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import { localPayrollPeriod } from './payrollComponentsUi'
+
+const { t } = useI18n()
+const period = ref(localPayrollPeriod())
+const loading = ref(true)
+const loadError = ref('')
+const result = ref<PayrollPostingReconciliation | null>(null)
+const expandedKey = ref<PayrollPostingReconciliationCategoryKey | null>(null)
+
+const CATEGORY_KEYS: PayrollPostingReconciliationCategoryKey[] = [
+  'gross_wages',
+  'employer_contributions',
+  'social_health_insurance',
+  'income_tax',
+  'other_deductions',
+  'enforcement',
+  'net_wage',
+]
+
+async function load(): Promise<void> {
+  loading.value = true
+  loadError.value = ''
+  expandedKey.value = null
+  try {
+    result.value = await payrollPostingApi.reconciliation(period.value)
+  } catch (error: unknown) {
+    loadError.value = apiErrorMessage(error, t('payroll.posting_reconciliation.load_failed'))
+    result.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+function formatMoney(amountMinor: number | null): string {
+  if (amountMinor === null) return '—'
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'CZK' }).format(amountMinor / 100)
+}
+
+function formatDiff(diffMinor: number | null): string {
+  if (diffMinor === null) return '—'
+  const formatted = formatMoney(Math.abs(diffMinor))
+  if (diffMinor === 0) return formatted
+  return diffMinor > 0 ? `+${formatted}` : `−${formatted}`
+}
+
+function toggle(key: PayrollPostingReconciliationCategoryKey): void {
+  expandedKey.value = expandedKey.value === key ? null : key
+}
+
+function categoryLabel(key: PayrollPostingReconciliationCategoryKey): string {
+  return t(`payroll.posting_reconciliation.categories.${key}`)
+}
+
+function statusLabel(status: PayrollPostingReconciliationCategory['status']): string {
+  return t(`payroll.posting_reconciliation.category_status.${status}`)
+}
+
+function statusBadgeClass(status: PayrollPostingReconciliationCategory['status']): string {
+  if (status === 'diff') return 'bg-danger-50 text-danger-700'
+  if (status === 'match') return 'bg-success-50 text-success-700'
+  return 'bg-neutral-100 text-neutral-600'
+}
+
+const orderedCategories = computed<PayrollPostingReconciliationCategory[]>(() => {
+  const byKey = new Map((result.value?.categories ?? []).map(category => [category.key, category]))
+  return CATEGORY_KEYS.map(key => byKey.get(key)).filter((c): c is PayrollPostingReconciliationCategory => !!c)
+})
+
+const hasNoRun = computed(() => result.value !== null && result.value.run === null)
+const isUnapproved = computed(() => result.value !== null
+  && result.value.run !== null
+  && (result.value.revision === null
+    || !['approved', 'superseded'].includes(result.value.revision.status)))
+const showCategories = computed(() => orderedCategories.value.length > 0)
+
+const summaryVariant = computed<'success' | 'warning' | 'danger' | 'neutral'>(() => {
+  if (!result.value) return 'neutral'
+  if (result.value.overall_status === 'diff') return 'danger'
+  if (result.value.overall_status === 'reconciled') return 'success'
+  return 'neutral'
+})
+
+const summaryText = computed(() => {
+  if (!result.value) return ''
+  if (result.value.overall_status === 'diff') {
+    return t('payroll.posting_reconciliation.summary.diff')
+  }
+  if (result.value.overall_status === 'reconciled') {
+    return t('payroll.posting_reconciliation.summary.reconciled')
+  }
+  if (result.value.journal_state === 'unposted') {
+    return t('payroll.posting_reconciliation.summary.unposted')
+  }
+  if (result.value.accounting_mode !== 'double_entry') {
+    return t('payroll.posting_reconciliation.summary.tax_evidence')
+  }
+  return t('payroll.posting_reconciliation.summary.info')
+})
+
+onMounted(load)
+</script>
+
+<template>
+  <div class="space-y-6">
+    <header class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-neutral-900">
+          {{ t('payroll.posting_reconciliation.title') }}
+        </h1>
+        <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+          {{ t('payroll.posting_reconciliation.subtitle') }}
+        </p>
+      </div>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.posting_reconciliation.period') }}
+          </span>
+          <input
+            v-model="period"
+            type="month"
+            min="2024-01"
+            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm focus:border-payroll-500 focus:ring-payroll-500/20"
+            @change="load"
+          >
+        </label>
+        <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.cycle" />
+          </svg>
+          {{ t('payroll.posting_reconciliation.reload') }}
+        </button>
+      </div>
+    </header>
+
+    <div
+      v-if="loadError"
+      class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+      role="alert"
+    >
+      <p>{{ loadError }}</p>
+      <button type="button" :class="[btnOutline('danger'), 'mt-3']" @click="load">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.cycle" />
+        </svg>
+        {{ t('payroll.posting_reconciliation.retry') }}
+      </button>
+    </div>
+
+    <p v-else-if="loading" class="text-sm text-neutral-500">
+      {{ t('common.loading') }}
+    </p>
+
+    <template v-else-if="result">
+      <EmptyState
+        v-if="hasNoRun"
+        boxed
+        icon="inbox"
+        accent="neutral"
+        :title="t('payroll.posting_reconciliation.empty_no_run.title')"
+        :message="t('payroll.posting_reconciliation.empty_no_run.message')"
+      />
+      <EmptyState
+        v-else-if="isUnapproved"
+        boxed
+        icon="lock"
+        accent="warning"
+        :title="t('payroll.posting_reconciliation.empty_unapproved.title')"
+        :message="t('payroll.posting_reconciliation.empty_unapproved.message')"
+      />
+      <template v-else>
+        <section
+          class="rounded-xl border p-4 text-sm shadow-sm"
+          :class="{
+            'border-success-500/30 bg-success-50 text-success-700': summaryVariant === 'success',
+            'border-danger-500/30 bg-danger-50 text-danger-700': summaryVariant === 'danger',
+            'border-neutral-200 bg-neutral-50 text-neutral-700': summaryVariant === 'neutral',
+          }"
+          role="status"
+        >
+          <p class="font-medium">{{ summaryText }}</p>
+          <p v-if="result.accounting_mode !== 'double_entry'" class="mt-1 text-xs opacity-80">
+            {{ t('payroll.posting_reconciliation.hint_tax_evidence') }}
+          </p>
+          <p v-else-if="result.journal_state === 'unposted'" class="mt-1 text-xs opacity-80">
+            {{ t('payroll.posting_reconciliation.hint_unposted') }}
+          </p>
+          <p v-if="result.payments_state === 'not_materialized'" class="mt-1 text-xs opacity-80">
+            {{ t('payroll.posting_reconciliation.hint_payments_not_materialized') }}
+          </p>
+        </section>
+
+        <section v-if="showCategories" class="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm">
+            <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
+              <tr>
+                <th class="px-3 py-2">{{ t('payroll.posting_reconciliation.table.category') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.payroll') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.journal') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.diff_journal') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.payments_liability') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.payments_paid') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.diff_payments') }}</th>
+                <th class="px-3 py-2">{{ t('payroll.posting_reconciliation.table.status') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-200">
+              <template v-for="category in orderedCategories" :key="category.key">
+                <tr
+                  class="cursor-pointer hover:bg-neutral-50"
+                  @click="toggle(category.key)"
+                >
+                  <td class="px-3 py-3 font-medium text-neutral-900">{{ categoryLabel(category.key) }}</td>
+                  <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.payroll_minor) }}</td>
+                  <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.journal_minor) }}</td>
+                  <td
+                    class="px-3 py-3 text-right font-mono"
+                    :class="category.diff_payroll_journal_minor ? 'text-danger-700 font-semibold' : 'text-neutral-500'"
+                  >
+                    {{ formatDiff(category.diff_payroll_journal_minor) }}
+                  </td>
+                  <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.payments_liability_minor) }}</td>
+                  <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.payments_paid_minor) }}</td>
+                  <td
+                    class="px-3 py-3 text-right font-mono"
+                    :class="category.diff_payroll_payments_minor ? 'text-danger-700 font-semibold' : 'text-neutral-500'"
+                  >
+                    {{ formatDiff(category.diff_payroll_payments_minor) }}
+                  </td>
+                  <td class="px-3 py-3">
+                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category.status)">
+                      {{ statusLabel(category.status) }}
+                    </span>
+                  </td>
+                </tr>
+                <tr v-if="expandedKey === category.key">
+                  <td colspan="8" class="bg-neutral-50 px-3 py-3 text-xs text-neutral-600">
+                    {{ t('payroll.posting_reconciliation.detail_hint') }}
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </section>
+
+        <section v-if="showCategories" class="space-y-3 md:hidden">
+          <article
+            v-for="category in orderedCategories"
+            :key="`mobile-${category.key}`"
+            class="rounded-lg border border-neutral-200 p-4"
+            @click="toggle(category.key)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <p class="font-medium text-neutral-900">{{ categoryLabel(category.key) }}</p>
+              <span class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category.status)">
+                {{ statusLabel(category.status) }}
+              </span>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll.posting_reconciliation.table.payroll') }}</dt>
+                <dd class="font-mono text-neutral-900">{{ formatMoney(category.payroll_minor) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll.posting_reconciliation.table.journal') }}</dt>
+                <dd class="font-mono text-neutral-900">{{ formatMoney(category.journal_minor) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll.posting_reconciliation.table.payments_liability') }}</dt>
+                <dd class="font-mono text-neutral-900">{{ formatMoney(category.payments_liability_minor) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll.posting_reconciliation.table.payments_paid') }}</dt>
+                <dd class="font-mono text-neutral-900">{{ formatMoney(category.payments_paid_minor) }}</dd>
+              </div>
+            </dl>
+            <p
+              v-if="category.diff_payroll_journal_minor || category.diff_payroll_payments_minor"
+              class="mt-2 text-xs font-semibold text-danger-700"
+            >
+              {{ t('payroll.posting_reconciliation.table.diff_journal') }}: {{ formatDiff(category.diff_payroll_journal_minor) }}
+              · {{ t('payroll.posting_reconciliation.table.diff_payments') }}: {{ formatDiff(category.diff_payroll_payments_minor) }}
+            </p>
+          </article>
+        </section>
+      </template>
+    </template>
+  </div>
+</template>

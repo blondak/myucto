@@ -21,6 +21,7 @@ final class PayrollPaymentBatchBuilder
         'social_insurance',
         'advance_tax',
         'withholding_tax',
+        'enforcement',
     ];
 
     public function __construct(
@@ -523,6 +524,7 @@ final class PayrollPaymentBatchBuilder
                 'payroll-payment-health-insurance-source.v1',
                 'payroll-payment-social-insurance-source.v1',
                 'payroll-payment-income-tax-source.v1',
+                'payroll-payment-enforcement-source.v1',
             ], true)
             || ($source['recipient_reference'] ?? null)
                 !== $liability['recipient_reference']
@@ -556,6 +558,10 @@ final class PayrollPaymentBatchBuilder
             'advance_tax', 'withholding_tax' => [
                 'payroll-payment-income-tax-source.v1',
                 'tax_office',
+            ],
+            'enforcement' => [
+                'payroll-payment-enforcement-source.v1',
+                'other_recipient',
             ],
             default => null,
         };
@@ -929,6 +935,15 @@ final class PayrollPaymentBatchBuilder
                 'reference_code' => 'withholding',
                 'institution_code' => 'withholding_tax',
                 'message' => 'Srazkova dan z prijmu',
+            ],
+            // Zpráva pro příjemce srážky je záměrně neutrální: spis, jméno
+            // povinného ani interní klíč případu se do bankovní instrukce
+            // nevkládají. Konkrétní platbu identifikuje VS z ověřeného účtu.
+            'enforcement' => [
+                'type' => 'other_recipient',
+                'reference_code' => '[A-Z0-9][A-Z0-9._-]{0,31}',
+                'institution_code' => null,
+                'message' => 'Srazka ze mzdy',
             ],
             default => null,
         };

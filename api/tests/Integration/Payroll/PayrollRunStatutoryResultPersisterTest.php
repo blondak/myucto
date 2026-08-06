@@ -529,7 +529,6 @@ final class PayrollRunStatutoryResultPersisterTest extends TestCase
         $relationshipReference = $relationshipReference !== ''
             ? $relationshipReference
             : "employment:{$this->employmentId}";
-        $policy = EmploymentIncomeTaxPolicy2026::create();
         $advance = new MonthlyAdvanceTaxResult(
             100_000,
             100_000,
@@ -584,7 +583,7 @@ final class PayrollRunStatutoryResultPersisterTest extends TestCase
             ),
             [],
             EmploymentIncomeTaxPolicy2026::ID,
-            $policyHash ?? $policy->canonicalHash,
+            $policyHash ?? EmploymentIncomeTaxPolicy2026::contractHash(),
             self::TAX_RULESET_ID,
             self::TAX_RULESET_HASH,
         );

@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use PDO;
 
 final class PayrollAbsenceRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollRulesetProvider $rulesets,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function employments(int $supplierId): array
@@ -233,16 +238,22 @@ final class PayrollAbsenceRepository
         if ($firstDayFullyWorked) {
             $windowFrom = $windowFrom->modify('+1 day');
         }
-        $fourteenth = $windowFrom->modify('+13 days');
         $absenceTo = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
         $isSickness = in_array(
             $absence['absence_type'],
             ['dpn', 'quarantine'],
             true,
         );
-        $windowTo = $isSickness && $fourteenth < $absenceTo
-            ? $fourteenth
-            : $absenceTo;
+        $windowTo = $absenceTo;
+        if ($isSickness) {
+            // Délka okna náhrady mzdy podle § 192 ZP se historicky měnila
+            // (21 → 14 dnů), proto je v rulesetu, ne v literálu.
+            $windowEnd = AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
+                ->sicknessWindowEnd($windowFrom);
+            if ($windowEnd < $absenceTo) {
+                $windowTo = $windowEnd;
+            }
+        }
         if ($windowTo < $windowFrom) {
             return [];
         }

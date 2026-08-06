@@ -22,6 +22,11 @@ use JsonSerializable;
  *   label:string,
  *   bank_account:string
  * }
+ * @phpstan-type RevealedDependant array{
+ *   id:int,
+ *   full_name:string,
+ *   birth_number:string
+ * }
  */
 final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
 {
@@ -29,12 +34,14 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
      * @param list<RevealedIdentifier> $identifiers
      * @param list<RevealedContact> $contacts
      * @param list<RevealedAccount> $accounts
+     * @param list<RevealedDependant> $dependants
      */
     public function __construct(
         public int $employeeId,
         public array $identifiers,
         public array $contacts,
         public array $accounts,
+        public array $dependants = [],
     ) {}
 
     public function cacheControl(): string
@@ -56,7 +63,8 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
      *   employee_id:int,
      *   identifiers:list<RevealedIdentifier>,
      *   contacts:list<RevealedContact>,
-     *   accounts:list<RevealedAccount>
+     *   accounts:list<RevealedAccount>,
+     *   dependants:list<RevealedDependant>
      * }
      */
     public function jsonSerialize(): array
@@ -66,6 +74,7 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
             'identifiers' => $this->identifiers,
             'contacts' => $this->contacts,
             'accounts' => $this->accounts,
+            'dependants' => $this->dependants,
         ];
     }
 }

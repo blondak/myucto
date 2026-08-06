@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentExitRevisionRepository;
 use PDO;
 
@@ -18,6 +19,7 @@ final class EmploymentExitDocumentService
         private readonly EmploymentCertificatePdfRenderer $renderer,
         private readonly PayrollDocumentService $documents,
         private readonly PayrollEmploymentExitRevisionRepository $revisions,
+        private readonly PayrollAverageEarningRepository $averageEarnings,
     ) {}
 
     /**
@@ -99,10 +101,35 @@ final class EmploymentExitDocumentService
             $idempotencyKey,
             $actorUserId,
         );
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
+        }
+        try {
+            $sources = $this->revisions->lockCertificateSources(
+                $supplierId,
+                $employmentId,
+            );
+            EmploymentExitRelationshipPolicy::documentKind(
+                self::text($sources['employment'], 'relation_type'),
+            );
+            $blocker = $this->averageEarningsReadiness(
+                $supplierId,
+                $employmentId,
+                $sources['employment'],
+            );
+        } catch (\Throwable $exception) {
+            $this->rollback($pdo, $ownsTransaction);
+            throw $exception;
+        }
+        $this->finishReadTransaction($pdo, $ownsTransaction);
+
         throw new EmploymentExitReadinessException(
-            'average_earnings_ruleset_not_ready',
-            'Potvrzení podle § 313 odst. 2 zatím nemá ověřený výpočet '
-                . 'průměrného měsíčního čistého výdělku.',
+            self::text($blocker, 'readiness_code'),
+            self::averageEarningsMessage($blocker),
         );
     }
 
@@ -113,7 +140,12 @@ final class EmploymentExitDocumentService
      *     readiness_code:?string,
      *     deduction_claim_ids:list<int>
      *   },
-     *   average_earnings_certificate:array{available:bool,readiness_code:string}
+     *   average_earnings_certificate:array{
+     *     available:bool,
+     *     readiness_code:?string,
+     *     decisive_year:?int,
+     *     decisive_quarter:?int
+     *   }
      * }
      */
     public function readiness(int $supplierId, int $employmentId): array
@@ -152,6 +184,11 @@ final class EmploymentExitDocumentService
                     $claims,
                 ),
             ];
+            $average = $this->averageEarningsReadiness(
+                $supplierId,
+                $employmentId,
+                $sources['employment'],
+            );
             $this->finishReadTransaction($pdo, $ownsTransaction);
         } catch (EmploymentExitReadinessException $exception) {
             $this->rollback($pdo, $ownsTransaction);
@@ -160,6 +197,12 @@ final class EmploymentExitDocumentService
                 'readiness_code' => $exception->readinessCode,
                 'deduction_claim_ids' => [],
             ];
+            $average = [
+                'available' => false,
+                'readiness_code' => $exception->readinessCode,
+                'decisive_year' => null,
+                'decisive_quarter' => null,
+            ];
         } catch (\Throwable $exception) {
             $this->rollback($pdo, $ownsTransaction);
             throw $exception;
@@ -167,11 +210,75 @@ final class EmploymentExitDocumentService
 
         return [
             'employment_certificate' => $certificate,
-            'average_earnings_certificate' => [
-                'available' => false,
-                'readiness_code' => 'average_earnings_ruleset_not_ready',
-            ],
+            'average_earnings_certificate' => $average,
         ];
+    }
+
+    /**
+     * Potvrzení podle § 313 odst. 2 zatím nemá ověřený legislativní přepočet
+     * schváleného hrubého hodinového průměru na čistý měsíční výdělek podle
+     * zákona o zaměstnanosti, takže zůstává vždy fail-closed. Rozlišuje ale,
+     * jestli chybí samotný schválený podklad (MZ-07), nebo jestli podklad
+     * existuje a chybí jen ověřené pravidlo přepočtu.
+     *
+     * @param array<string,mixed> $employment
+     * @return array{
+     *   available:bool,
+     *   readiness_code:string,
+     *   decisive_year:int,
+     *   decisive_quarter:int
+     * }
+     */
+    private function averageEarningsReadiness(
+        int $supplierId,
+        int $employmentId,
+        array $employment,
+    ): array {
+        $end = new \DateTimeImmutable(self::text($employment, 'end_date'));
+        $decisiveYear = (int) $end->format('Y');
+        $decisiveQuarter = intdiv(((int) $end->format('n')) - 1, 3) + 1;
+        $snapshot = $this->averageEarnings->findApproved(
+            $supplierId,
+            $employmentId,
+            $decisiveYear,
+            $decisiveQuarter,
+        );
+
+        return [
+            'available' => false,
+            'readiness_code' => $snapshot === null
+                ? 'average_earnings_snapshot_missing'
+                : 'average_earnings_net_conversion_not_verified',
+            'decisive_year' => $decisiveYear,
+            'decisive_quarter' => $decisiveQuarter,
+        ];
+    }
+
+    /** @param array<string,mixed> $blocker */
+    private static function averageEarningsMessage(array $blocker): string
+    {
+        $year = self::positiveInt($blocker, 'decisive_year');
+        $quarter = self::positiveInt($blocker, 'decisive_quarter');
+
+        return match (self::text($blocker, 'readiness_code')) {
+            'average_earnings_snapshot_missing' => sprintf(
+                'Pro rozhodné období %d/Q%d chybí schválený snapshot '
+                    . 'průměrného výdělku. Nejprve ho založte a schvalte '
+                    . 'v modulu Absence a průměry.',
+                $year,
+                $quarter,
+            ),
+            'average_earnings_net_conversion_not_verified' => sprintf(
+                'Za rozhodné období %d/Q%d existuje schválený hrubý '
+                    . 'hodinový průměr, ale ověřený přepočet na čistý '
+                    . 'měsíční výdělek podle zákona o zaměstnanosti zatím '
+                    . 'v aplikaci není implementován. Potvrzení prosím '
+                    . 'vystavte mimo aplikaci.',
+                $year,
+                $quarter,
+            ),
+            default => 'Potvrzení podle § 313 odst. 2 zatím nelze vydat.',
+        };
     }
 
     private function validateRequest(

@@ -4,14 +4,41 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
+
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-04-v5';
-    private const SUPPORTED_YEARS = [2024, 2025, 2026];
+    public const VERSION = '2026-08-06-v6';
+
+    /**
+     * Mzdový rok je podporovaný jen tehdy, když ho pokrývají VŠECHNY výpočtově
+     * kritické domény rulesetu. Seznam se proto neudržuje ručně — odvozuje se
+     * z registry a rok navíc se zpřístupní přidáním rulesetu, ne novou verzí
+     * aplikace. Rok bez rulesetu tu nikdy nesmí svítit jako podporovaný.
+     *
+     * @var non-empty-list<PayrollRulesetDomain>
+     */
+    private const REQUIRED_DOMAINS = [
+        PayrollRulesetDomain::IncomeTax,
+        PayrollRulesetDomain::SocialInsurance,
+        PayrollRulesetDomain::HealthInsurance,
+        PayrollRulesetDomain::EmploymentThresholds,
+        PayrollRulesetDomain::CompensationAverages,
+    ];
+
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
+
+    /** @return list<int> */
+    public function supportedYears(): array
+    {
+        return PayrollRulesetYearCoverage::commonYears($this->rulesets, self::REQUIRED_DOMAINS);
+    }
 
     public function supportsYear(int $year): bool
     {
-        return in_array($year, self::SUPPORTED_YEARS, true);
+        return in_array($year, $this->supportedYears(), true);
     }
 
     /**
@@ -29,7 +56,7 @@ final class SupportMatrix
     {
         return [
             'version' => self::VERSION,
-            'supported_years' => self::SUPPORTED_YEARS,
+            'supported_years' => $this->supportedYears(),
             'employment_types' => [
                 ['key' => 'hpp', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],
                 ['key' => 'dpp', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-05'],

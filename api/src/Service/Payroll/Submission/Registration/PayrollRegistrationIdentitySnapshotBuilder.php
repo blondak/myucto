@@ -471,17 +471,28 @@ final class PayrollRegistrationIdentitySnapshotBuilder
                 'basis' => 'agenda_not_prezec',
             ];
         }
+        // Zákon č. 323/2025 Sb.: částečné přihlášení před nástupem je vyhrazeno
+        // tuzemské osobě, zahraniční zaměstnanec vyžaduje plnou registraci
+        // (REGZEC) před výkonem práce. PREZEC26 tomu odpovídá i strukturálně —
+        // povinné `client/@bno` (RČ/EČP) a žádný blok pro zahraniční identitu,
+        // doklad totožnosti ani daňovou rezidenci.
         $citizenship = $identity['citizenship_country_code'] ?? null;
-        if (!is_string($citizenship) || $citizenship === 'CZ') {
+        if (!is_string($citizenship)) {
             $this->invalid(
-                'registration_identity_prezec_foreign_eligibility_unverified',
-                'PREZEC vyžaduje explicitní jiné než české státní občanství; nejednoznačný nebo český případ je blokován.',
+                'registration_identity_prezec_citizenship_unverified',
+                'PREZEC vyžaduje ověřené státní občanství; bez něj nelze rozlišit tuzemskou a zahraniční osobu a případ je blokován.',
+            );
+        }
+        if ($citizenship !== 'CZ') {
+            $this->invalid(
+                'registration_identity_prezec_foreign_requires_full_registration',
+                'PREZEC je částečné přihlášení tuzemské osoby; zahraniční zaměstnanec vyžaduje plnou registraci REGZEC před výkonem práce.',
             );
         }
 
         return [
             'status' => 'verified',
-            'basis' => 'foreign_citizenship_country_code',
+            'basis' => 'domestic_citizenship_country_code',
             'citizenship_country_code' => $citizenship,
         ];
     }

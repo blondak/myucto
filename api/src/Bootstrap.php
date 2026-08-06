@@ -128,8 +128,15 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Garnishment\RepositoryPayrollGarnishmentPort::class,
                 ),
+            // Runtime registry = ověřený default z kódu (CzechPayrollRulesets2026)
+            // sloučený s DB overridem z administrace (migrace 1306), stejně jako
+            // u ročních daňových konstant. Bez tohohle bindu by „aktivace" rulesetu
+            // znamenala nasazení nové verze aplikace. Registry při nekonzistentním
+            // overridu degraduje zpět na default, ne na výjimku.
             \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class =>
-                fn () => \MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026::provider(),
+                fn (ContainerInterface $c) => $c
+                    ->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::class)
+                    ->provider(),
             \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class =>
                 fn (ContainerInterface $c) =>
                     new \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository(

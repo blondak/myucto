@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\SupportMatrix;
+use MyInvoice\Tests\Fixtures\Payroll\ShiftedYearPayrollRulesetFixture;
 use PHPUnit\Framework\TestCase;
 
 final class SupportMatrixTest extends TestCase
 {
     public function testMatrixSeparatesTargetSupportFromRuntimeAvailability(): void
     {
-        $matrix = (new SupportMatrix())->all();
+        $matrix = $this->matrix()->all();
         self::assertSame(SupportMatrix::VERSION, $matrix['version']);
-        self::assertSame([2024, 2025, 2026], $matrix['supported_years']);
+        self::assertSame([2026], $matrix['supported_years']);
 
         $features = array_column($matrix['features'], null, 'key');
         self::assertTrue($features['module_shell']['available']);
@@ -38,11 +40,34 @@ final class SupportMatrixTest extends TestCase
 
     public function testEveryCapabilityHasKnownStatusAndEpic(): void
     {
-        $matrix = (new SupportMatrix())->all();
+        $matrix = $this->matrix()->all();
         foreach (array_merge($matrix['employment_types'], $matrix['features']) as $capability) {
             self::assertContains($capability['status'], ['supported', 'manual_review', 'not_supported']);
             self::assertMatchesRegularExpression('/^MZ-[0-9]{2}$/', $capability['min_epic']);
             self::assertIsBool($capability['available']);
         }
+    }
+
+    public function testYearWithoutRulesetIsNotSupported(): void
+    {
+        $matrix = $this->matrix();
+
+        self::assertFalse($matrix->supportsYear(2025));
+        self::assertFalse($matrix->supportsYear(2027));
+        self::assertTrue($matrix->supportsYear(2026));
+    }
+
+    public function testNextYearBecomesSupportedAsSoonAsItsRulesetsExist(): void
+    {
+        $matrix = new SupportMatrix(ShiftedYearPayrollRulesetFixture::provider(2027));
+
+        self::assertSame([2026, 2027], $matrix->supportedYears());
+        self::assertTrue($matrix->supportsYear(2027));
+        self::assertFalse($matrix->supportsYear(2028));
+    }
+
+    private function matrix(): SupportMatrix
+    {
+        return new SupportMatrix(CzechPayrollRulesets2026::provider());
     }
 }

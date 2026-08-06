@@ -165,6 +165,11 @@ final class PayrollEnforcementAction
                         ),
                         $this->positiveInt($body['row_version'] ?? null, 'row_version'),
                         $this->userId($request),
+                        $this->optionalPositiveInt(
+                            $body['recipient_institution_id'] ?? null,
+                            'recipient_institution_id',
+                        ),
+                        array_key_exists('recipient_institution_id', $body),
                     );
                     $this->audit(
                         $request,

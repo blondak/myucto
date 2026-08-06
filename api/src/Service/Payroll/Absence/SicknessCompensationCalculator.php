@@ -6,13 +6,16 @@ namespace MyInvoice\Service\Payroll\Absence;
 
 use InvalidArgumentException;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
-use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
+/**
+ * Provider je povinná závislost: jako volitelný class-param by ho PHP-DI
+ * nevyplnil a kalkulátor by za běhu tiše četl default z kódu místo rulesetu
+ * účinného podle administrace.
+ */
 final class SicknessCompensationCalculator
 {
-    public function __construct(private readonly ?PayrollRulesetProvider $rulesets = null) {}
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /**
      * @param list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}> $segments
@@ -29,18 +32,14 @@ final class SicknessCompensationCalculator
             throw new InvalidArgumentException('DPN náhrada vyžaduje alespoň jednu publikovanou směnu.');
         }
 
-        $ruleset = ($this->rulesets ?? CzechPayrollRulesets2026::provider())
-            ->forDate(PayrollRulesetDomain::CompensationAverages, $date);
-        $boundary1 = $this->integerParameter($ruleset->parameters, 'wage_compensation.hourly_boundary_1_minor');
-        $boundary2 = $this->integerParameter($ruleset->parameters, 'wage_compensation.hourly_boundary_2_minor');
-        $boundary3 = $this->integerParameter($ruleset->parameters, 'wage_compensation.hourly_boundary_3_minor');
-        $bandRate1 = $this->rateBasisPoints($ruleset->parameters, 'wage_compensation.reduction_band_1_rate');
-        $bandRate2 = $this->rateBasisPoints($ruleset->parameters, 'wage_compensation.reduction_band_2_rate');
-        $bandRate3 = $this->rateBasisPoints($ruleset->parameters, 'wage_compensation.reduction_band_3_rate');
-        $compensationRate = $this->rateBasisPoints(
-            $ruleset->parameters,
-            'wage_compensation.compensation_rate',
-        );
+        $rules = AbsenceRuleset::forDate($this->rulesets, $date);
+        $boundary1 = $rules->hourlyBoundaryMinor(1);
+        $boundary2 = $rules->hourlyBoundaryMinor(2);
+        $boundary3 = $rules->hourlyBoundaryMinor(3);
+        $bandRate1 = $rules->reductionBandBasisPoints(1);
+        $bandRate2 = $rules->reductionBandBasisPoints(2);
+        $bandRate3 = $rules->reductionBandBasisPoints(3);
+        $compensationRate = $rules->compensationRateBasisPoints();
 
         $band1 = min($averageHourlyMinor, $boundary1);
         $band2 = min(max($averageHourlyMinor - $boundary1, 0), $boundary2 - $boundary1);
@@ -79,8 +78,8 @@ final class SicknessCompensationCalculator
             $reducedHourlyMinor,
             $totalMinor,
             'manual_review',
-            $ruleset->id,
-            $ruleset->canonicalHash,
+            $rules->version->id,
+            $rules->version->canonicalHash,
             $calculatedSegments,
             [
                 'average_hourly_minor' => $averageHourlyMinor,
@@ -91,39 +90,11 @@ final class SicknessCompensationCalculator
                 'band_2_basis_points' => $bandRate2,
                 'band_3_basis_points' => $bandRate3,
                 'compensation_basis_points' => $compensationRate,
+                'window_calendar_days' => $rules->sicknessWindowCalendarDays(),
                 'segment_count' => count($calculatedSegments),
                 'compensation_minor' => $totalMinor,
                 'support_status' => 'manual_review',
             ],
         );
-    }
-
-    /**
-     * @param array<string,\MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue> $parameters
-     */
-    private function integerParameter(array $parameters, string $key): int
-    {
-        $value = $parameters[$key] ?? null;
-        if ($value === null || !is_int($value->value) || $value->value <= 0) {
-            throw new \LogicException("Ruleset neobsahuje kladný celočíselný parametr {$key}.");
-        }
-        return $value->value;
-    }
-
-    /**
-     * @param array<string,\MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue> $parameters
-     */
-    private function rateBasisPoints(array $parameters, string $key): int
-    {
-        $value = $parameters[$key] ?? null;
-        $text = $value?->value;
-        if (!is_string($text) || preg_match('/^0\.([0-9]{1,4})$/', $text, $match) !== 1) {
-            throw new \LogicException("Ruleset neobsahuje kanonickou desetinnou sazbu {$key}.");
-        }
-        $basisPoints = (int) str_pad($match[1], 4, '0');
-        if ($basisPoints <= 0 || $basisPoints > 10_000) {
-            throw new \LogicException("Ruleset obsahuje neplatnou sazbu {$key}.");
-        }
-        return $basisPoints;
     }
 }

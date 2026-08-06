@@ -418,14 +418,17 @@
     "payroll_overview": "Přehled mezd",
     "payroll_runs": "Mzdové běhy",
     "payroll_payments": "Platby a úhrady",
+    "payroll_posting_reconciliation": "Shoda účtování mezd",
     "payroll_people": "Zaměstnanci",
     "payroll_quick_inputs": "Rychlý měsíční vstup",
     "payroll_components": "Mzdové složky a vstupy",
     "payroll_time": "Docházka a směny",
     "payroll_absences": "Absence a dovolená",
+    "payroll_travel": "Cestovní náhrady",
     "payroll_documents": "Dokumenty a výstupy",
     "payroll_submissions": "Podání a hlášení",
     "payroll_enforcement": "Srážky a exekuce",
+    "payroll_deduction_agreements": "Dohody o srážkách",
     "payroll_settings": "Nastavení mezd",
     "settings": "Nastavení",
     "branding": "Branding",
@@ -573,6 +576,100 @@
     "mcp_server": "MCP server"
   },
   "payroll": {
+    "rulesets": {
+      "title": "Legislativní pravidla mezd",
+      "subtitle": "Sazby, hranice, lhůty a číselníky pro mzdový výpočet. Ověřená sada je v aplikaci; tady se dá přepsat a uvést do provozu bez nasazení nové verze. Hodnoty jsou národní a platí pro všechny firmy.",
+      "load_failed": "Legislativní pravidla se nepodařilo načíst.",
+      "save_failed": "Změnu se nepodařilo uložit.",
+      "command_failed": "Změnu stavu se nepodařilo provést.",
+      "saved": "Změna uložena.",
+      "nothing_changed": "Žádná hodnota se nezměnila.",
+      "reason_required": "Vyplňte důvod změny.",
+      "reason_label": "Důvod změny",
+      "reason_placeholder": "Např. novela zákona č. …/2027 Sb. účinná od 1. 1.",
+      "read_only_hint": "Pravidla jsou společná pro všechny firmy, takže je smí měnit jen superadmin. Vidíte je jen ke čtení.",
+      "storage_unavailable": "Úložiště úprav není dostupné — chybí migrace databáze. Platí ověřená sada z aplikace.",
+      "degraded": "Uložená úprava je nekonzistentní, takže výpočet běží na ověřené sadě z aplikace: {reason}",
+      "version_count": "Verzí: {count}",
+      "ready": "Výpočet povolen",
+      "blocked": "Výpočet blokován",
+      "open": "Otevřít",
+      "reset": "Vrátit ověřenou hodnotu",
+      "reset_confirm": "Opravdu zahodit ruční úpravu a vrátit se k ověřené sadě z aplikace?",
+      "reset_done": "Vráceno na ověřenou sadu.",
+      "reset_default_reason": "Návrat k ověřené sadě z aplikace.",
+      "checksum_invalid": "Neplatný kontrolní součet",
+      "blocked_because": "Blokuje:",
+      "command_noop": "Stav už byl nastavený, nic se nezměnilo.",
+      "diff_hint": "Beze změny zůstalo parametrů: {unchanged}",
+      "diff_identical": "Proti ověřené sadě není žádný rozdíl.",
+      "diff_unavailable": "Tato verze nemá ověřenou předlohu, není proti čemu porovnávat.",
+      "diff_added": "Nový parametr",
+      "diff_removed": "Odebráno",
+      "audit_empty": "Zatím žádná změna.",
+      "audit_actor": "Uživatel: {user}",
+      "unit": { "czk": "Kč" },
+      "tab": {
+        "parameters": "Parametry",
+        "diff": "Rozdíl proti ověřené sadě",
+        "audit": "Historie změn"
+      },
+      "column": {
+        "version": "Verze",
+        "effective": "Účinnost",
+        "lifecycle": "Stav",
+        "source": "Zdroj hodnot",
+        "parameter": "Parametr",
+        "value": "Hodnota",
+        "note": "Poznámka",
+        "before": "Původně",
+        "after": "Nově"
+      },
+      "source": {
+        "builtin": "Ověřená sada v aplikaci",
+        "override": "Ruční úprava"
+      },
+      "lifecycle": {
+        "draft": "Rozpracováno",
+        "reviewed": "Technicky zkontrolováno",
+        "approved": "Odborně schváleno",
+        "active": "Účinné",
+        "superseded": "Nahrazeno"
+      },
+      "command": {
+        "review": "Označit jako zkontrolované",
+        "approve": "Odborně schválit",
+        "activate": "Uvést do provozu",
+        "supersede": "Nahradit novější verzí"
+      },
+      "command_done": {
+        "review": "Verze označena jako zkontrolovaná.",
+        "approve": "Verze odborně schválena.",
+        "activate": "Verze je účinná — výpočet ji začne používat.",
+        "supersede": "Verze byla nahrazena."
+      },
+      "action": {
+        "created": "Založeno",
+        "updated": "Upraveno",
+        "reset": "Vráceno na ověřenou sadu",
+        "review": "Zkontrolováno",
+        "approve": "Schváleno",
+        "activate": "Uvedeno do provozu",
+        "supersede": "Nahrazeno"
+      },
+      "domain": {
+        "income_tax": "Daň z příjmů ze závislé činnosti",
+        "social_insurance": "Sociální pojištění",
+        "health_insurance": "Zdravotní pojištění",
+        "employment_thresholds": "Hranice a minimální mzda",
+        "compensation_averages": "Průměry a náhrady",
+        "travel_allowances": "Cestovní náhrady",
+        "enforcement_deductions": "Exekuční srážky",
+        "deadlines": "Termíny a lhůty",
+        "codebooks": "Číselníky",
+        "submissions": "Verze podání"
+      }
+    },
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
     "load_failed": "Mzdový modul se nepodařilo načíst.",
@@ -724,6 +821,57 @@
         }
       }
     },
+    "posting_reconciliation": {
+      "title": "Shoda účtování mezd",
+      "subtitle": "Porovnání schválené mzdové revize, skutečně zaúčtovaného deníku a platebních závazků po kategoriích.",
+      "period": "Mzdové období",
+      "reload": "Obnovit",
+      "retry": "Zkusit znovu",
+      "load_failed": "Reconciliaci účtování mezd se nepodařilo načíst.",
+      "detail_hint": "Podrobný rozpad podle zaměstnance najdete v mzdovém běhu a na stránce Platby a úhrady za totéž období.",
+      "hint_tax_evidence": "Firma vede daňovou evidenci — mzdy se do deníku neúčtují, sloupec Deník proto zůstává prázdný.",
+      "hint_unposted": "Revize je schválená, ale zatím nebyla zaúčtována (automatické zaúčtování je vypnuté nebo zatím neproběhlo) — sloupec Deník proto zůstává prázdný.",
+      "hint_payments_not_materialized": "Platební závazky pro toto období zatím nebyly připraveny — sloupce Platby proto zůstávají prázdné.",
+      "summary": {
+        "reconciled": "Mzda, deník i platby si po kategoriích odpovídají.",
+        "diff": "Nalezen rozdíl mezi mzdou, deníkem a/nebo platbami — viz zvýrazněné kategorie níže.",
+        "unposted": "Období zatím není zaúčtováno — nejde o rozdíl, jen o čekající krok.",
+        "tax_evidence": "Firma vede daňovou evidenci — účetní srovnání se nepoužívá.",
+        "info": "Pro toto období zatím není co porovnávat."
+      },
+      "empty_no_run": {
+        "title": "Pro toto období neexistuje mzdový běh",
+        "message": "Vyberte jiné mzdové období nebo nejdřív založte mzdový běh v sekci Mzdové běhy."
+      },
+      "empty_unapproved": {
+        "title": "Měsíc ještě není schválen",
+        "message": "Reconciliace se počítá až pro schválenou mzdovou revizi — dokončete schválení v sekci Mzdové běhy."
+      },
+      "table": {
+        "category": "Kategorie",
+        "payroll": "Mzda",
+        "journal": "Deník",
+        "diff_journal": "Rozdíl (mzda ↔ deník)",
+        "payments_liability": "Platby — závazek",
+        "payments_paid": "Platby — uhrazeno",
+        "diff_payments": "Rozdíl (mzda ↔ platby)",
+        "status": "Stav"
+      },
+      "categories": {
+        "gross_wages": "Hrubé mzdy (521/522/523)",
+        "employer_contributions": "Pojistné hrazené zaměstnavatelem (524)",
+        "social_health_insurance": "Sociální a zdravotní pojištění (336)",
+        "income_tax": "Daň ze závislé činnosti (342)",
+        "other_deductions": "Ostatní srážky (379)",
+        "enforcement": "Exekuční a insolvenční srážky (379)",
+        "net_wage": "Čistá mzda k výplatě (331/366)"
+      },
+      "category_status": {
+        "match": "Souhlasí",
+        "diff": "Rozdíl",
+        "not_applicable": "Nepoužije se"
+      }
+    },
     "runs": {
       "title": "Mzdové běhy",
       "subtitle": "Uzamknutí vstupů, neměnný výpočet, kontrola čtyř očí a schválení měsíční mzdy.",
@@ -751,6 +899,39 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Blokující kontroly",
+      "net": {
+        "title": "Rozklad čisté mzdy",
+        "subtitle": "Od hrubého příjmu přes odvody, daň a srážky až k rozdělení výplaty — ze schválené revize.",
+        "people_tabs": "Čistá mzda zaměstnanců",
+        "person_fallback": "Zaměstnanec č. {id}",
+        "load_failed": "Rozklad čisté mzdy se nepodařilo načíst.",
+        "gross": "Hrubý příjem",
+        "contributions": "Odvody zaměstnance",
+        "tax": "Daň po slevách a bonusu",
+        "payable": "K výplatě",
+        "steps_title": "Kroky výpočtu",
+        "cash_income": "Peněžní příjem",
+        "non_cash_income": "Nepeněžní příjem",
+        "social": "Sociální pojištění zaměstnance",
+        "health": "Zdravotní pojištění zaměstnance",
+        "advance_tax": "Zálohová daň",
+        "withholding_tax": "Srážková daň",
+        "bonus": "Daňový bonus",
+        "correction": "Korekce",
+        "before_deductions": "Čistá mzda před srážkami",
+        "deductions_total": "Standardní srážky",
+        "enforcement": "Exekuční srážky",
+        "deductions_title": "Srážky podle pořadí",
+        "priority": "Pořadí {priority}",
+        "unapplied": "Neuplatněno: {value}",
+        "no_deductions": "V této revizi se neuplatnila žádná srážka.",
+        "allocations_title": "Rozdělení výplaty",
+        "allocations_hint": "Bankovní cíl se zobrazuje jen jako maska ze zmrazené revize.",
+        "allocations_total": "Součet alokací",
+        "destination_bank": "Bankovní účet",
+        "destination_cash": "Hotovost",
+        "no_allocations": "Revize nemá zmrazená výplatní pravidla."
+      },
       "tax": {
         "title": "Rozpad daně ze závislé činnosti",
         "subtitle": "Kontrolovatelný výpočet ze zmrazené revize mzdového běhu.",
@@ -1349,6 +1530,96 @@
       "show_detail": "Upravit zaměstnance",
       "hide_detail": "Skrýt detail",
       "detail_hint": "Každý vztah má vlastní historii podmínek, stav, checklist a auditní časovou osu.",
+      "dependants": {
+        "title": "Vyživované osoby a daňové zvýhodnění",
+        "subtitle": "Děti pro měsíční zvýhodnění podle § 35c a manžel/partner pro roční zúčtování. Nárok vzniká až doloženým uplatněním s platností.",
+        "add": "Přidat vyživovanou osobu",
+        "empty": "Zatím není evidovaná žádná vyživovaná osoba.",
+        "load_failed": "Evidenci vyživovaných osob se nepodařilo načíst.",
+        "save_failed": "Uložení se nezdařilo.",
+        "saved": "Evidence vyživovaných osob byla uložena.",
+        "show": "Zobrazit nároky",
+        "hide": "Skrýt nároky",
+        "edit_person": "Upravit osobu",
+        "edit_claim": "Upravit nárok",
+        "add_claim": "Přidat nárok",
+        "student": "Student",
+        "frozen": "Zmrazeno revizí",
+        "frozen_hint": "Mzdy jsou schválené včetně {date}. Věcná změna staršího nároku historii nepřepíše — vytvoří novou účinnou verzi od dalšího měsíce.",
+        "spouse_annual_only": "Slevu na manžela nebo partnera nelze uplatnit měsíčně; patří až do ročního zúčtování.",
+        "order": "Pořadí dítěte {order}",
+        "period_open": "od {from}",
+        "period_closed": "{from} – {to}",
+        "credit_monthly": "Měsíční zvýhodnění {amount} Kč",
+        "credit_manual_review": "Sazbu zvýhodnění nelze určit — nutná ruční kontrola.",
+        "claim_ok": "Nárok je doložený a lze jej uplatnit.",
+        "columns": {
+          "person": "Osoba",
+          "relation": "Vztah",
+          "birth_number": "Rodné číslo",
+          "existence": "Vyživovaná",
+          "claims": "Nároky"
+        },
+        "relations": {
+          "child_own": "Vlastní dítě",
+          "child_adopted": "Osvojené dítě",
+          "child_in_care": "Dítě v péči nahrazující péči rodičů",
+          "child_of_spouse": "Dítě manžela/partnera",
+          "grandchild": "Vnuk nebo vnučka",
+          "spouse": "Manžel nebo manželka",
+          "partner": "Registrovaný partner"
+        },
+        "reasons": {
+          "own_household": "Společně hospodařící domácnost",
+          "shared_custody": "Střídavá péče",
+          "adoption": "Osvojení",
+          "foster_care": "Pěstounská péče",
+          "study_continues": "Pokračující studium do 26 let",
+          "other": "Jiný doložený důvod"
+        },
+        "evidence": {
+          "verified": "Doložený dokladem",
+          "unverified": "Zatím nedoložený"
+        },
+        "blockers": {
+          "relation_not_child": "Měsíční zvýhodnění náleží jen dítěti.",
+          "evidence_unverified": "Chybí doklad k nároku — zvýhodnění se neuplatní.",
+          "shared_household_unconfirmed": "Není potvrzena společně hospodařící domácnost.",
+          "other_claimant_not_excluded": "Není doloženo, že druhý poplatník zvýhodnění neuplatňuje.",
+          "declaration_missing": "K počátku nároku chybí podepsané prohlášení poplatníka.",
+          "outside_existence": "Nárok je mimo období, kdy je osoba vedena jako vyživovaná.",
+          "superseded": "Tato verze nároku byla nahrazena novější."
+        },
+        "form": {
+          "person_title": "Vyživovaná osoba",
+          "claim_title": "Uplatnění zvýhodnění — {name}",
+          "relation": "Vztah k poplatníkovi",
+          "full_name": "Jméno a příjmení",
+          "birth_date": "Datum narození",
+          "birth_number": "Rodné číslo",
+          "birth_number_placeholder": "RRMMDD/XXXX",
+          "birth_number_hint": "Ukládá se šifrovaně a v seznamu se zobrazuje jen maskované. Prázdné pole ponechá uloženou hodnotu beze změny.",
+          "existence_from": "Vyživovaná od",
+          "existence_to": "Vyživovaná do",
+          "ztp_p": "Osoba je držitelem průkazu ZTP/P",
+          "student": "Zletilé dítě soustavně studuje (do 26 let)",
+          "note": "Poznámka",
+          "child_order": "Pořadí dítěte",
+          "child_order_hint": "Pořadí určuje výši zvýhodnění a je vlastností uplatnění u tohoto poplatníka, ne vlastností dítěte.",
+          "reason": "Důvod uplatnění",
+          "evidence_status": "Stav doložení",
+          "evidence_reference": "Odkaz na doklad",
+          "evidence_reference_placeholder": "document:rodny-list",
+          "evidence_reference_hint": "Kanonický odkaz do mzdové dokumentace. Bez dokladu a bez podepsaného prohlášení nárok nevznikne.",
+          "effective_from": "Nárok od (první den měsíce)",
+          "effective_to": "Nárok do (poslední den měsíce)",
+          "effective_to_hint": "Prázdné pole znamená trvající nárok. Vyplněním nárok ukončíte.",
+          "claim_ztp_p": "Uplatnit dvojnásobek za dítě ZTP/P",
+          "shared_household": "Dítě žije ve společně hospodařící domácnosti",
+          "other_claimant_excluded": "Druhý poplatník zvýhodnění v tomto období neuplatňuje",
+          "supersede_hint": "Zasahuje-li nárok do období schválené mzdové revize, uloží se změna jako nová účinná verze a původní záznam zůstane v historii."
+        }
+      },
       "quick_edit": {
         "title": "Běžné údaje zaměstnance",
         "subtitle": "Nejčastější osobní, kontaktní a pracovní údaje upravíte najednou bez přepínání záložek.",
@@ -1674,6 +1945,8 @@
           "deduction_priority_missing": "U pokračující srážky chybí pořadí.",
           "deduction_result_not_supported": "Výsledek některé srážky nelze bezpečně převzít do potvrzení.",
           "average_earnings_ruleset_not_ready": "Pravidla pro průměrný výdělek podle § 313 odst. 2 ještě nejsou schválená. Systém proto nenabízí ruční zadání čisté částky.",
+          "average_earnings_snapshot_missing": "Pro rozhodné období {year}/Q{quarter} chybí schválený snapshot průměrného výdělku. Nejprve ho založte a schvalte v modulu Absence a průměry.",
+          "average_earnings_net_conversion_not_verified": "Za rozhodné období {year}/Q{quarter} existuje schválený hrubý hodinový průměr, ale ověřený přepočet na čistý měsíční výdělek podle zákona o zaměstnanosti zatím není v aplikaci implementován. Potvrzení prosím vystavte mimo aplikaci.",
           "dpp_sickness_evidence_not_ready": "U DPP bez pokračující srážky zatím nelze bezpečně doložit vznik účasti na nemocenském pojištění.",
           "dpp_wage_deduction_missing": "U DPP nebyla nalezena pokračující srážka, která by zakládala vydání potvrzení.",
           "dpp_issuance_basis_missing": "U DPP chybí ověřený zákonný důvod pro vydání potvrzení.",
@@ -1693,6 +1966,28 @@
         "dpc": "Dohoda o pracovní činnosti",
         "partner_dependent": "Příjem společníka",
         "statutory_body": "Odměna za výkon funkce"
+      },
+      "dimensions": {
+        "title": "Mzdové dimenze vztahu",
+        "hint": "Přiřazení středisek, zakázek a činností tomuto pracovnímu vztahu v čase.",
+        "add": "Přiřadit dimenzi",
+        "empty": "Vztah zatím nemá přiřazenou žádnou dimenzi.",
+        "load_failed": "Přiřazené dimenze se nepodařilo načíst.",
+        "type": "Typ",
+        "dimension": "Dimenze",
+        "validity": "Platnost",
+        "select_dimension": "Vyberte dimenzi",
+        "no_results": "Žádné dimenze neodpovídají hledání.",
+        "valid_from": "Platí od",
+        "valid_to": "Platí do",
+        "saved": "Přiřazení dimenze bylo uloženo.",
+        "save_failed": "Přiřazení dimenze se nepodařilo uložit.",
+        "overlap_error": "Pracovní vztah už má v tomto období přiřazenou jinou dimenzi stejného typu.",
+        "ineffective_error": "Vybraná dimenze není účinná po celou dobu přiřazení.",
+        "conflict_title": "Přiřazení mezitím změnil někdo jiný",
+        "reload_current": "Načíst aktuální stav",
+        "new_title": "Nové přiřazení dimenze",
+        "edit_title": "Upravit přiřazení dimenze"
       }
     },
     "submissions": {
@@ -1702,13 +1997,58 @@
       "tabs": {
         "regzel": "Registrace zaměstnavatele",
         "jmhz": "JMHZ",
-        "health": "Zdravotní pojišťovny"
+        "health": "Zdravotní pojišťovny",
+        "inbox": "Inbox"
       },
       "unsupported": "Zatím nepodporováno",
       "jmhz_title": "Jednotné měsíční hlášení zaměstnavatele",
       "jmhz_fail_closed": "Přímá příprava a odeslání JMHZ zatím nejsou zpřístupněné. Dokud nebude dokončené mapování, ověření dodejek a korekcí, systém žádné podání nepředstírá.",
       "health_title": "Hlášení zdravotním pojišťovnám",
       "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+      "inbox": {
+        "title": "Inbox mzdových podání",
+        "subtitle": "Odvozený přehled blížících se a prošlých lhůt, odmítnutých podání a čekání na ztotožnění. Potvrzení ani odložení nemění stav povinnosti ani podání — jen připomínku.",
+        "load_failed": "Inbox se nepodařilo načíst.",
+        "empty": "Žádné otevřené položky. Vše je buď v pořádku, nebo vyřešené.",
+        "summary": {
+          "total": "Otevřené",
+          "open": "Nové",
+          "acknowledged": "Potvrzené",
+          "snoozed": "Odložené"
+        },
+        "agenda": "Agenda",
+        "due_on": "Termín",
+        "problem_label": "Problém",
+        "status_label": "Stav",
+        "problem": {
+          "due_soon": "Blíží se lhůta",
+          "due_today": "Lhůta dnes",
+          "overdue": "Po lhůtě",
+          "rejected": "Odmítnuto",
+          "waiting_for_identity": "Čeká na ztotožnění",
+          "manual_review": "Vyžaduje kontrolu"
+        },
+        "status": {
+          "open": "Nové",
+          "acknowledged": "Potvrzeno",
+          "snoozed": "Odloženo",
+          "resolved": "Vyřešeno"
+        },
+        "acknowledge": "Potvrdit",
+        "acknowledging": "Potvrzuji…",
+        "acknowledge_failed": "Potvrzení položky se nepodařilo.",
+        "snooze": "Odložit",
+        "snoozing": "Odkládám…",
+        "snooze_failed": "Odložení položky se nepodařilo.",
+        "snooze_modal_title": "Odložit připomínku",
+        "snooze_until": "Odložit do",
+        "snooze_until_required": "Zadejte termín, do kdy se má připomínka odložit.",
+        "snooze_reason": "Důvod odložení",
+        "snooze_reason_placeholder": "Např. čekáme na doklad od klienta.",
+        "snooze_reason_required": "Uveďte důvod odložení.",
+        "snooze_confirm": "Odložit",
+        "snoozed_until_label": "Odloženo do {at}"
+      },
       "overview": {
         "period": "Věcné období",
         "environment": "Prostředí evidence",
@@ -1911,7 +2251,8 @@
         "institutions": "Účty institucí",
         "accounting": "Automatické účtování",
         "policies": "Politiky a připravenost",
-        "submissions": "Podání"
+        "submissions": "Podání",
+        "dimensions": "Dimenze"
       },
       "policies": {
         "title": "Zaměstnavatelské politiky",
@@ -2129,7 +2470,60 @@
         "account_wrong_type": "Vyberte {type}."
       },
       "read_only": "Nastavení máš pouze pro čtení. K úpravě je potřeba oprávnění Nastavení mezd.",
-      "discard": "Zahodit změny"
+      "discard": "Zahodit změny",
+      "dimensions": {
+        "title": "Mzdové dimenze",
+        "hint": "Střediska, zakázky a činnosti pro analytické členění mezd a jejich výchozí účetní mapování. Fungují i bez podvojného účetnictví.",
+        "add": "Přidat dimenzi",
+        "add_first": "Přidat první dimenzi",
+        "empty": "Zatím nejsou založené žádné mzdové dimenze.",
+        "load_failed": "Mzdové dimenze se nepodařilo načíst.",
+        "retry": "Zkusit znovu",
+        "type": "Typ",
+        "code": "Kód",
+        "name": "Název",
+        "validity": "Platnost",
+        "account": "Výchozí účet",
+        "status": "Stav",
+        "type_options": {
+          "cost_center": "Středisko",
+          "project": "Zakázka",
+          "activity": "Činnost"
+        },
+        "filter_type": "Filtrovat podle typu",
+        "filter_type_all": "Všechny typy",
+        "effective": "Účinná",
+        "outside_period": "Mimo platnost",
+        "inactive": "Neaktivní",
+        "new_title": "Nová dimenze",
+        "edit_title": "Upravit dimenzi",
+        "editor_hint": "Kód je tenantově unikátní v rámci typu a s ohledem na historii účinnosti — stejný kód a typ lze znovu použít v neprekrývajícím se období.",
+        "valid_from": "Účinná od",
+        "valid_to": "Účinná do",
+        "is_active": "Aktivní",
+        "default_account_code": "Výchozí analytický účet",
+        "default_account_hint": "Analytika k účtům mzdového automatického můstku (MZ-03). Nepovinné.",
+        "validation": {
+          "title": "Zkontrolujte prosím zvýrazněná pole.",
+          "code": "Kód musí mít 1–50 znaků: velká písmena, číslice, tečku, podtržítko nebo pomlčku.",
+          "name": "Název musí mít 1–190 znaků.",
+          "dates": "Konec platnosti nesmí předcházet začátku.",
+          "account": "Výchozí účet musí mít formát účtové osnovy, např. 518 nebo 518.001."
+        },
+        "saved": "Mzdová dimenze byla uložena.",
+        "save_failed": "Mzdovou dimenzi se nepodařilo uložit.",
+        "conflict_title": "Dimenzi mezitím upravil někdo jiný",
+        "conflict_description": "Načtěte prosím aktuální stav a proveďte úpravu znovu.",
+        "reload_current": "Načíst aktuální stav",
+        "overlap_error": "Platnost dimenze se s tímto kódem a typem překrývá s jiným záznamem.",
+        "history_locked_error": "Dimenze použitá v historii se nepřepisuje — typ, kód ani začátek účinnosti nelze změnit.",
+        "delete": "Smazat",
+        "delete_confirm": "Opravdu smazat tuto dimenzi?",
+        "deleted": "Dimenze byla smazána.",
+        "delete_failed": "Dimenzi se nepodařilo smazat.",
+        "in_use_error": "Dimenze je použitá ve schválené mzdové revizi — jde jen ukončit její účinnost (nastavit konec platnosti), ne ji smazat.",
+        "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii — ukončete její účinnost nastavením konce platnosti."
+      }
     },
     "status": {
       "disabled": "Neaktivní",
@@ -2185,6 +2579,93 @@
       "supported": "Podporováno",
       "manual_review": "Vyžaduje ruční kontrolu",
       "not_supported": "Nepodporováno"
+    },
+    "deductions": {
+      "title": "Dohody o srážkách",
+      "subtitle": "Zálohy, stravování, spoření, náhrada škody a dobrovolné příspěvky — s pořadím, limitem a účinností.",
+      "priority_hint": "Pořadí zadávej v rozsahu {floor}–{ceiling}. Nižší pásmo je vyhrazené zákonným a exekučním srážkám, dobrovolná dohoda je nikdy nepředběhne ani neobejde chráněnou částku.",
+      "add": "Nová dohoda",
+      "employee": "Zaměstnanec",
+      "select_employee": "Vyber zaměstnance",
+      "all_employees": "Všichni zaměstnanci",
+      "all_statuses": "Všechny stavy",
+      "agreement_title": "Titul dohody",
+      "kind": "Druh srážky",
+      "priority": "Pořadí",
+      "requested": "Požadovaná srážka",
+      "requested_czk": "Požadovaná srážka (Kč)",
+      "percent": "Procento (%)",
+      "base_czk": "Základ pro procento (Kč)",
+      "base_hint": "Z procenta a základu se uloží pevná částka, kterou mzdový běh zmrazí do podkladů.",
+      "amount_mode": "Zadání částky",
+      "amount_mode_fixed": "Pevná částka",
+      "amount_mode_percentage": "Procento ze základu",
+      "limit_czk": "Celkový limit (Kč)",
+      "remaining_limit": "Zbývá do limitu: {value}",
+      "withheld": "Sraženo celkem",
+      "validity": "Účinnost",
+      "valid_from": "Účinnost od",
+      "valid_to": "Účinnost do",
+      "effective_from": "Změna účinná od",
+      "effective_hint": "Datum, ke kterému se nová verze dohody zapíše do historie.",
+      "activate_now": "Rovnou aktivovat",
+      "recipient": "Příjemce srážky",
+      "note": "Poznámka",
+      "status_label": "Stav",
+      "section_terms": "Podmínky srážky",
+      "section_validity": "Účinnost a stav",
+      "section_recipient": "Příjemce a poznámka",
+      "history": "Historie verzí",
+      "ledger": "Pohyby srážek",
+      "no_ledger": "Zatím žádné sražené částky.",
+      "version": "verze {version}",
+      "empty_title": "Žádná dohoda o srážce",
+      "empty_description": "Založ dohodu, aby se srážka promítla do výpočtu čisté mzdy.",
+      "load_failed": "Dohody o srážkách se nepodařilo načíst.",
+      "detail_failed": "Detail dohody se nepodařilo načíst.",
+      "save_failed": "Změnu se nepodařilo uložit.",
+      "conflict": "Dohodu mezitím změnil někdo jiný. Formulář jsme načetli znovu — zkontroluj hodnoty a ulož znovu.",
+      "validation": {
+        "amount": "Zadej částku v Kč, nejvýše na dvě desetinná místa.",
+        "percent": "Zadej procento mezi 0 a 100.",
+        "employee": "Vyber zaměstnance, kterému dohoda patří."
+      },
+      "kinds": {
+        "advance": "Záloha",
+        "meal": "Stravování",
+        "contribution": "Příspěvek",
+        "damage": "Náhrada škody",
+        "other": "Jiná srážka"
+      },
+      "status": {
+        "draft": "Návrh",
+        "active": "Aktivní",
+        "paused": "Pozastavená",
+        "ended": "Ukončená",
+        "cancelled": "Zrušená"
+      },
+      "commands": {
+        "activate": "Aktivovat",
+        "pause": "Pozastavit",
+        "resume": "Obnovit",
+        "end": "Ukončit",
+        "cancel": "Zrušit"
+      },
+      "change_kind": {
+        "created": "Založeno",
+        "updated": "Změněno",
+        "activated": "Aktivováno",
+        "paused": "Pozastaveno",
+        "resumed": "Obnoveno",
+        "ended": "Ukončeno",
+        "cancelled": "Zrušeno"
+      },
+      "ledger_kind": {
+        "withheld": "Sraženo",
+        "reversed": "Storno srážky",
+        "paid": "Odesláno příjemci",
+        "payment_reversed": "Storno odeslání"
+      }
     },
     "enforcement": {
       "title": "Srážky, exekuce a oddlužení",
@@ -2318,6 +2799,22 @@
           "mark_paid": "Označit případ s nulovým zůstatkem za uhrazený?",
           "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu."
         }
+      },
+      "recipient_account": "Příjemce srážky (katalog platebních účtů)",
+      "recipient_account_none": "Nezvoleno",
+      "recipient_account_hint": "Vyberte ověřený účet z nastavení mezd (typ „ostatní příjemce\"). Bez něj nelze sražené peníze odeslat.",
+      "settlement": {
+        "title": "Sraženo, depozitum a odeslané platby",
+        "hint": "Zůstatek pohledávky snižuje až potvrzená úhrada příjemci, nikoli samotná srážka ze mzdy.",
+        "withheld": "Sraženo zaměstnanci",
+        "held": "Drženo v depozitu",
+        "liability": "Připraveno k úhradě",
+        "remitted": "Odesláno příjemci",
+        "remaining": "Zbývá na pohledávce",
+        "per_claim": "Rozpad podle pohledávek",
+        "empty": "Pro tento případ zatím nejsou žádné srážky ani platby.",
+        "held_hint": "Částky v depozitu se do odchozí platební dávky nikdy nezařadí.",
+        "inactive": "Neaktivní pohledávka"
       },
       "ledger_kind": {
         "withheld": "Sraženo zaměstnanci",
@@ -9600,11 +10097,11 @@
       "staff": "Interní",
       "client": "Klientská"
     },
-    "levels": {
-      "0": "Neviditelné",
-      "1": "Pouze čtení",
-      "2": "Zápis"
-    }
+    "levels": [
+      "Neviditelné",
+      "Pouze čtení",
+      "Zápis"
+    ]
   },
   "permissions": {
     "groups": {
@@ -9628,7 +10125,7 @@
       "utilities": "Nástroje",
       "profile": "Osobní profil"
     },
-    "items": {}
+    "items": []
   },
   "users": {
     "title": "Uživatelé",
@@ -9977,12 +10474,12 @@
       "no_data": "V tomto měsíci nejsou žádné EU dodávky (žádné vystavené faktury s VAT klasifikací 20/22 pro EU klienty s DIČ).",
       "note": "Souhrnné hlášení podávají plátci DPH s alespoň 1 EU dodávkou v období. Identifikované osoby (neplátci) podávají při B2B EU službách nebo nákupech zboží z EU nad limit.",
       "note_quarterly_goods": "⚠️ Kvartální SH je povoleno pouze při poskytování služeb (kód 22, §9/1). Dodání zboží do EU (kód 20) vyžaduje měsíční podání bez ohledu na typ plátce (§ 102 odst. 3 zákona 235/2004 Sb.).",
-      "sh_type": {
-        "0": "Dodání zboží do EU",
-        "1": "Přemístění obchodního majetku",
-        "2": "Třístranný obchod (prostředník)",
-        "3": "Poskytnutí služby do EU"
-      }
+      "sh_type": [
+        "Dodání zboží do EU",
+        "Přemístění obchodního majetku",
+        "Třístranný obchod (prostředník)",
+        "Poskytnutí služby do EU"
+      ]
     },
     "submissions": {
       "title": "EPO podání a archív",
@@ -10050,9 +10547,9 @@
       "popup_blocked": "Prohlížeč zablokoval nové okno. Použijte tlačítko Pokračovat do EPO v detailu.",
       "handoff_created": "Formulář EPO byl připraven a otevřen v novém okně. Vrátit se k němu jde přibližně 20 minut, dokud se podklad nezmění.",
       "handoff_ready": "Formulář EPO je připraven",
-      "handoff_window": "Odkaz je použitelný přibližně 20 minut od vytvoření, a to jen dokud se podklad nezmění. Jak dlouho odkaz doopravdy žije, nám portál neříká.",
+      "handoff_window": "Odkaz je jednorázový — portál ho spotřebuje prvním otevřením. Použitelný je navíc jen asi 20 minut od vytvoření a jen dokud se podklad nezmění. Jak dlouho odkaz doopravdy žije, nám portál neříká.",
       "handoff_stale_title": "Odkaz už nenabízíme",
-      "handoff_stale_hint": "Buď uplynulo okno přibližně 20 minut, nebo se XML od vytvoření odkazu přepočítalo — starý odkaz by pak mířil na neaktuální písemnost. Pokud jste podání nedokončili, vytvořte si nový odkaz.",
+      "handoff_stale_hint": "Odkaz už byl otevřen (je jednorázový a portál podruhé hlásí, že podání neexistuje), nebo uplynulo okno přibližně 20 minut, případně se XML mezitím přepočítalo. Pokud jste podání nedokončili, vytvořte si nový odkaz — je to levné a funguje vždy.",
       "moss_oss_title": "OSS přiznání se podává v aplikaci MOSS/OSS",
       "moss_oss_hint": "Obecnou cestou EPO ho podat nelze — ani předáním do formuláře, ani přímým podáním se ZAREP: portál písemnost sice rozpozná, ale odmítne ji s tím, že musíte být přihlášeni v aplikaci MOSS/OSS. Proto tady žádná cesta odeslání nesvítí. Stáhněte si XML a nahrajte ho na Daňovém portálu v aplikaci MOSS/OSS (samostatná položka v horní liště vedle EPO), do které se musíte přihlásit.",
       "continue_epo": "Pokračovat do EPO",
@@ -12290,6 +12787,115 @@
       "unit_price": "Cena/MJ",
       "total_open": "Celkem otevřeno",
       "footer_note": "Náhled ukazuje rozpracované výkazy, které dosud nebyly vyfakturovány. Údaje se průběžně aktualizují."
+    }
+  },
+  "payroll_travel": {
+    "title": "Cestovní náhrady",
+    "subtitle": "Evidence tuzemských pracovních cest, výpočet náhrad z účinné vyhlášky a rozpad na nezdaňovanou a nadlimitní část.",
+    "period": "Období vyúčtování",
+    "empty": "Pro zvolené období zatím není žádná pracovní cesta.",
+    "actions": {
+      "new": "Nová pracovní cesta",
+      "preview": "Přepočítat náhled",
+      "approve": "Schválit vyúčtování",
+      "materialize": "Promítnout do mzdy"
+    },
+    "status": {
+      "draft": "Rozpracovaná",
+      "approved": "Schválená",
+      "settled": "Promítnutá do mzdy",
+      "cancelled": "Zrušená"
+    },
+    "table": {
+      "employee": "Zaměstnanec",
+      "route": "Trasa a účel",
+      "interval": "Odjezd a návrat",
+      "entitlement": "Nárok celkem",
+      "exempt": "Do limitu",
+      "taxable": "Nadlimitní",
+      "status": "Stav"
+    },
+    "editor": {
+      "new": "Nová pracovní cesta",
+      "edit": "Úprava pracovní cesty"
+    },
+    "form": {
+      "employment": "Pracovní vztah",
+      "select": "Vyber pracovní vztah",
+      "settlement_period": "Období vyúčtování",
+      "country": "Země (ISO)",
+      "departure_at": "Odjezd",
+      "arrival_at": "Návrat",
+      "transport_mode": "Dopravní prostředek",
+      "origin_place": "Místo odjezdu",
+      "destination_place": "Místo výkonu práce",
+      "purpose": "Účel cesty",
+      "meal_rate_band_1": "Stravné 5–12 h (Kč)",
+      "meal_rate_band_2": "Stravné nad 12 do 18 h (Kč)",
+      "meal_rate_band_3": "Stravné nad 18 h (Kč)",
+      "statutory_minimum": "zákonné minimum",
+      "advance": "Poskytnutá záloha (Kč)"
+    },
+    "transport": {
+      "public_transport": "Veřejná doprava",
+      "company_vehicle": "Firemní vozidlo",
+      "private_vehicle": "Soukromé vozidlo",
+      "other": "Jiný"
+    },
+    "items": {
+      "title": "Doložené výdaje",
+      "add": "Přidat položku",
+      "empty": "Zatím žádné doložené výdaje.",
+      "kind": "Druh výdaje",
+      "spent_on": "Datum",
+      "description": "Popis",
+      "amount": "Částka (Kč)",
+      "documented": "Doložený dokladem",
+      "document_reference": "Odkaz na doklad",
+      "vehicle_kind": "Druh vozidla",
+      "fuel_kind": "Druh paliva",
+      "distance_km": "Ujeto (km)",
+      "consumption": "Spotřeba na 100 km",
+      "documented_fuel_price": "Doložená cena PHM (Kč)"
+    },
+    "item_kinds": {
+      "transport": "Jízdné",
+      "accommodation": "Ubytování",
+      "incidental": "Nutný vedlejší výdaj",
+      "private_vehicle": "Jízda soukromým vozidlem"
+    },
+    "vehicles": {
+      "car": "Osobní automobil",
+      "single_track": "Jednostopé vozidlo nebo tříkolka"
+    },
+    "fuels": {
+      "petrol_95": "Benzín 95 oktanů",
+      "petrol_98": "Benzín 98 oktanů",
+      "diesel": "Motorová nafta",
+      "electricity": "Elektřina"
+    },
+    "meals": {
+      "title": "Bezplatná jídla",
+      "add": "Přidat den",
+      "empty": "Během cesty nebylo poskytnuto bezplatné jídlo.",
+      "date": "Datum",
+      "count": "Počet jídel"
+    },
+    "preview": {
+      "band": "pásmo {band}",
+      "settlement": "Doplatek nebo vratka proti záloze: {amount}",
+      "manual_review": "Vyúčtování vyžaduje ruční posouzení a nelze ho schválit:"
+    },
+    "messages": {
+      "load_failed": "Pracovní cesty se nepodařilo načíst.",
+      "preview_failed": "Náhled výpočtu se nepodařilo spočítat.",
+      "save_failed": "Pracovní cestu se nepodařilo uložit.",
+      "approve_failed": "Vyúčtování se nepodařilo schválit.",
+      "materialize_failed": "Vyúčtování se nepodařilo promítnout do mzdy.",
+      "created": "Pracovní cesta byla založena.",
+      "updated": "Pracovní cesta byla uložena.",
+      "approved": "Vyúčtování bylo schváleno.",
+      "materialized": "Promítnuto do mzdy: {created} nových, {replayed} beze změny."
     }
   },
   "payroll_absence": {

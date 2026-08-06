@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
 import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
 import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
+import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import { todayIso } from './employmentLifecycleUi'
 
 const { t } = useI18n()
@@ -486,11 +487,15 @@ onMounted(load)
             </svg>
           </span>
         </summary>
-        <div v-if="advancedProfileOpen" class="border-t border-neutral-200 p-3 sm:p-4">
+        <div v-if="advancedProfileOpen" class="space-y-4 border-t border-neutral-200 p-3 sm:p-4">
           <PayrollPersonProfilePanel
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
             @saved="updatePersonProfile"
+          />
+          <PayrollPersonDependantsPanel
+            :person-id="expandedId"
+            :can-write="auth.canWrite('payroll.person.write')"
           />
         </div>
       </details>
