@@ -88,8 +88,11 @@ onMounted(async () => {
        nejtišší karty. Zvednutá plocha + brand rámeček mu dávají váhu, kterou
        jeho obsah zaslouží. `to-white` bylo navíc v dark módu doslova bílé —
        gradient musí končit v tokenu plochy, ne v natvrdo zapsané barvě. -->
-  <div v-if="actionItems && actionItems.total > 0" class="bg-surface-raised border border-primary-500/25 rounded-xl shadow-md overflow-hidden">
-    <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between gap-3 bg-gradient-to-r from-primary-50 to-surface">
+  <!-- Pozor: kontejner NESMÍ mít `overflow-hidden`. Nabídka odložení je `absolute`
+       uvnitř řádku, takže u posledního řádku přesahuje pod kartu a `overflow-hidden`
+       ji uřízne. Zaoblení proto drží přímo hlavička a poslední řádek. -->
+  <div v-if="actionItems && actionItems.total > 0" class="bg-surface-raised border border-primary-500/25 rounded-xl shadow-md">
+    <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between gap-3 bg-gradient-to-r from-primary-50 to-surface rounded-t-xl">
       <h3 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.12em] text-primary-700">
         <span aria-hidden="true">⚡</span>
         {{ t('crm.action_items.title') }}
@@ -102,7 +105,7 @@ onMounted(async () => {
     </header>
     <div class="divide-y divide-neutral-100">
       <div v-for="(item, idx) in actionItems.items" :key="idx"
-        class="relative px-5 py-3 hover:bg-neutral-50">
+        class="relative px-5 py-3 hover:bg-neutral-50 last:rounded-b-xl">
         <div class="flex items-center justify-between">
         <RouterLink :to="item.link" class="flex items-center gap-3 flex-1 min-w-0">
           <span :class="['inline-block w-2.5 h-2.5 rounded-full shrink-0',
