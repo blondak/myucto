@@ -81,9 +81,10 @@ final class PayrollDependantMigrationTest extends TestCase
         $sql = file_get_contents($path);
         self::assertIsString($sql, 'Migrace 1312 nebyla nalezena.');
 
-        // Víceřádkové asserty níž porovnávají na "\n". Git na Windows soubor při
-        // checkoutu převede na CRLF, takže bez normalizace by test na tomhle
-        // stroji spadl vždycky, i když je obsah migrace v pořádku.
-        return str_replace("\r\n", "\n", $sql);
+        // Bez normalizace schválně: víceřádkové asserty porovnávají na "\n"
+        // a `.gitattributes` drží `*.sql text eol=lf` na všech platformách.
+        // Kdyby to pravidlo někdo odstranil, tenhle test to má odhalit —
+        // lokální str_replace by regresi jen zamaskoval.
+        return $sql;
     }
 }

@@ -476,17 +476,24 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         // (REGZEC) před výkonem práce. PREZEC26 tomu odpovídá i strukturálně —
         // povinné `client/@bno` (RČ/EČP) a žádný blok pro zahraniční identitu,
         // doklad totožnosti ani daňovou rezidenci.
+        //
+        // Kritériem je STÁTNÍ OBČANSTVÍ, ne držení přiděleného RČ/EČP. Cizinec
+        // s trvalým pobytem a českým rodným číslem by PREZEC strukturálně
+        // naplnil, přesto ho tahle podmínka pošle na REGZEC — vědomě
+        // fail-closed. Rozhodnout to umí jedině katalog kontrol MH na
+        // developers.mpsv.cz, který lokálně nemáme (otevřený bod
+        // „PREZEC a cizinec s českým RČ" v `private/MZDY-EPICs.md`).
         $citizenship = $identity['citizenship_country_code'] ?? null;
         if (!is_string($citizenship)) {
             $this->invalid(
                 'registration_identity_prezec_citizenship_unverified',
-                'PREZEC vyžaduje ověřené státní občanství; bez něj nelze rozlišit tuzemskou a zahraniční osobu a případ je blokován.',
+                'Bez vyplněného státního občanství nelze částečné přihlášení PREZEC založit. Doplňte v kartě zaměstnance státní občanství a snapshot založte znovu.',
             );
         }
         if ($citizenship !== 'CZ') {
             $this->invalid(
                 'registration_identity_prezec_foreign_requires_full_registration',
-                'PREZEC je částečné přihlášení tuzemské osoby; zahraniční zaměstnanec vyžaduje plnou registraci REGZEC před výkonem práce.',
+                'PREZEC (částečné přihlášení před nástupem) se tady zakládá jen zaměstnanci s českým státním občanstvím. U zaměstnance s jiným občanstvím — i když má přidělené české rodné číslo — založte podání v agendě REGZEC25 (plná registrace) a podejte je před zahájením práce.',
             );
         }
 

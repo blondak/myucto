@@ -1,0 +1,175 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Submission\Registration;
+
+final class PayrollRegistrationInteractionResolver
+{
+    /**
+     * Připnutá schémata (PREZEC26 1.2, REGZEC25 1.4.0.4) popisují režim platný
+     * od spuštění registrační agendy. Pro starší rozhodné datum se neodvozuje
+     * nic — resolver raději nevrátí interakci, než aby hádal starý formulář.
+     *
+     * POZOR — hodnota je NEOVĚŘENÁ. Převzala se z rozpracované verze a v repu
+     * pro ni není podklad: připnutá XSD žádné datum účinnosti neuvádějí
+     * a `private/MZDY.md` § 9.3/9.4 uvádí jako začátek režimu 1. 7. 2026
+     * („do 30. 6. platila pro běžné tuzemské nástupy následná osmidenní
+     * registrace"), tedy o týden později. Konstanta je tím pádem mírnější,
+     * ne přísnější, než dokumentovaný přechod. Nepřebírat jako fakt.
+     * Potvrdit ji může jedině oficiální metodika ČSSZ/MPSV k JMHZ
+     * (developers.mpsv.cz, „Pokyny k vyplnění" + katalog kontrol MH), kterou
+     * lokálně nemáme; do té doby se hodnota vědomě nemění.
+     */
+    private const SUPPORTED_FROM = '2026-06-23';
+
+    /**
+     * @param array{
+     *   work_started:bool,full_registration_data:bool,
+     *   pre_registration_accepted:bool,did_not_start:bool
+     * } $context
+     */
+    public function resolve(
+        PayrollRegistrationIdentitySnapshot $snapshot,
+        array $context,
+    ): PayrollRegistrationInteraction {
+        if ($snapshot->scope['effective_on'] < self::SUPPORTED_FROM) {
+            $this->invalid(
+                'registration_interaction_before_supported_window',
+                'PREZEC/REGZEC tok není podporován před začátkem ověřeného okna.',
+            );
+        }
+        $citizenship = $snapshot->identity['citizenship_country_code'] ?? null;
+        if (!is_string($citizenship)) {
+            $this->invalid(
+                'registration_interaction_citizenship_unverified',
+                'Bez ověřeného státního občanství nelze rozlišit částečné přihlášení a plnou registraci.',
+            );
+        }
+        if ($context['did_not_start']) {
+            if (!$context['pre_registration_accepted']) {
+                $this->invalid(
+                    'registration_interaction_no_show_without_p1',
+                    'PREZEC P2 vyžaduje přijatou předregistraci P1.',
+                );
+            }
+
+            return $this->forSnapshot(
+                $snapshot,
+                'PREZEC26',
+                'pre_registration_no_show',
+                10,
+            );
+        }
+        if ($context['work_started']
+            || $context['full_registration_data']
+            || $citizenship !== 'CZ'
+        ) {
+            if (!$context['full_registration_data']) {
+                $this->invalid(
+                    'registration_interaction_full_data_missing',
+                    'REGZEC A1 vyžaduje úplnou a samostatně ověřenou datovou sadu.',
+                );
+            }
+
+            return $this->forSnapshot(
+                $snapshot,
+                'REGZEC25',
+                $context['pre_registration_accepted']
+                    ? 'full_registration_after_p1'
+                    : 'direct_full_registration',
+                1,
+            );
+        }
+        if ($context['pre_registration_accepted']) {
+            $this->invalid(
+                'registration_interaction_duplicate_p1',
+                'Přijatou PREZEC P1 nelze opakovat.',
+            );
+        }
+
+        return $this->forSnapshot(
+            $snapshot,
+            'PREZEC26',
+            'limited_pre_registration',
+            9,
+        );
+    }
+
+    private function forSnapshot(
+        PayrollRegistrationIdentitySnapshot $snapshot,
+        string $documentType,
+        string $interaction,
+        int $actionCode,
+    ): PayrollRegistrationInteraction {
+        $candidate = new PayrollRegistrationInteraction(
+            $documentType,
+            $interaction,
+            $actionCode,
+        );
+        $this->assertBoundToSnapshot($snapshot, $candidate);
+
+        return $candidate;
+    }
+
+    /**
+     * Jediná implementace vazby „interakce ↔ zmrazený snapshot". Volá ji
+     * resolver při odvození i validátor před přijetím bajtů:
+     * `PayrollRegistrationXmlPayload` je volně sestavitelný, takže resolver
+     * jde obejít a jednomístná pojistka by nebyla brána.
+     */
+    public function assertBoundToSnapshot(
+        PayrollRegistrationIdentitySnapshot $snapshot,
+        PayrollRegistrationInteraction $interaction,
+    ): void {
+        $documentType = $interaction->documentType;
+        if ($snapshot->scope['agenda_code'] !== $documentType) {
+            $this->invalid(
+                'registration_interaction_snapshot_agenda_mismatch',
+                'Zmrazený snapshot patří jiné registrační agendě.',
+            );
+        }
+        // Způsobilost počítá snapshot builder a zmrazí ji do neměnného
+        // snapshotu; resolver ji smí jen přečíst. Jiný `basis` znamená, že
+        // snapshot vznikl podle jiného výkladu agendy, než jaký core umí.
+        [$expectedStatus, $expectedBasis] = match ($documentType) {
+            'PREZEC26' => ['verified', 'domestic_citizenship_country_code'],
+            default => ['not_applicable', 'agenda_not_prezec'],
+        };
+        $eligibility = $snapshot->registrationEligibility;
+        if (($eligibility['status'] ?? null) !== $expectedStatus
+            || ($eligibility['basis'] ?? null) !== $expectedBasis
+        ) {
+            $this->invalid(
+                'registration_interaction_eligibility_basis_unsupported',
+                'Způsobilost zmrazeného snapshotu neodpovídá dnešnímu výkladu registrační agendy.',
+            );
+        }
+        // PREZEC26 má `client/@bno` povinné a nemá jediné pole, kterým by se
+        // identifikátor teprve přiděloval — částečné přihlášení tedy dává smysl
+        // jen u osoby, která už rodné číslo nebo EČP má. Rozsah identifikátorů
+        // určuje výhradně `PayrollRegistrationIdentitySnapshotBuilder`
+        // (viz `bno` = „Rodné číslo / EČP (ID 10057)" v připnutém XSD);
+        // resolver ho nesmí zúžit, jinak vznikne druhý zdroj pravdy.
+        if ($documentType === 'PREZEC26'
+            && $snapshot->identifiers['birth_number'] === null
+            && $snapshot->identifiers['ecp'] === null
+        ) {
+            $this->invalid(
+                'registration_prezec_identifier_required',
+                'PREZEC vyžaduje přidělené rodné číslo nebo EČP; bez osobního identifikátoru nelze částečné přihlášení podat.',
+            );
+        }
+        if (!$interaction->supported()) {
+            $this->invalid(
+                'registration_interaction_unsupported',
+                'Core umí jen PREZEC P1/P2 a REGZEC A1; opravy, storna a další akce zůstávají uzavřené.',
+            );
+        }
+    }
+
+    private function invalid(string $code, string $message): never
+    {
+        throw new PayrollRegistrationXmlException($code, $message);
+    }
+}

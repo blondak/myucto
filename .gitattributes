@@ -6,6 +6,11 @@
 # heredocy v testech se jinak porovnávají proti CRLF verzi sebe sama.
 *.php text eol=lf
 
+# SQL migrace ze stejného důvodu: architekturní testy porovnávají víceřádkové
+# úseky DDL proti řetězcům s "\n". S core.autocrlf=true by je Windows checkout
+# dostal jako CRLF a testy by padaly na koncích řádků, ne na obsahu.
+*.sql text eol=lf
+
 # Vendorovaná XSD schémata se pinují bajt po bajtu přes api/xsd/jmhz/SHA256SUMS.
 # Git je nesmí nijak konvertovat, jinak manifest sedí jen na jedné platformě.
 *.xsd -text
