@@ -30,7 +30,11 @@ use ZipArchive;
  *       b) napříč balíkem má klient >1 odlišných emailů → per-(client, email) projekt s názvem
  *          "{company_name} – {email}", projekt se přiřadí podle emailu faktury.
  *       c) jinak project_id = NULL.
- *   - Duplicity: pokud (supplier_id, varsymbol) existuje → skip s reportem.
+ *   - Duplicity: pokud (supplier_id, varsymbol) existuje u dokladu TÉHOŽ druhu → skip
+ *     s reportem. Existuje-li u dokladu JINÉHO druhu (opravný daňový doklad nese symbol
+ *     opravované faktury), jde o kolizi, ne o duplicitu — symbol se odvodí z čísla dokladu
+ *     a náhrada jde do reportu ({@see processOne()}).
+ *   - Doklad bez jediné položky se NEZAKLÁDÁ (odmítne se) — vznikl by doklad na nulu.
  *   - Status: pokud je due_date starší než 30 dní od dnešního data → 'paid'
  *     (paid_at = tax_date|issue_date), jinak 'issued' (paid_at = NULL).
  *   - Snapshoty: vyrobí čerstvé z aktuálního supplier/client/bank.
@@ -104,6 +108,17 @@ final class InvoiceImportService
 {
     /** Pod touhle hodnotou je součet dokladu v haléřích nula — znaménko z něj neurčujeme. */
     private const CREDIT_SIGN_EPSILON = 0.005;
+
+    /** Druhy dokladů pojmenované tak, jak jim uživatel říká — do hlášek reportu. */
+    private const INVOICE_TYPE_LABELS = [
+        'invoice'          => 'faktura',
+        'proforma'         => 'zálohová faktura',
+        'credit_note'      => 'opravný daňový doklad (dobropis)',
+        'tax_document'     => 'daňový doklad k přijaté platbě',
+        'cancellation'     => 'storno',
+        'penalty'          => 'penalizační faktura',
+        'payment_calendar' => 'splátkový kalendář',
+    ];
 
     /** Bezpečnostní limity proti zip-bomb / DoS. */
     private const MAX_ZIP_ENTRIES = 500;
@@ -789,15 +804,126 @@ final class InvoiceImportService
             );
         }
 
+        $invoiceType = (string) ($inv['invoice_type'] ?? 'invoice');
+        // Symbol tak, jak ho nesl SOUBOR (po případné náhradě GUIDu, ale PŘED náhradou
+        // kvůli kolizi druhů dokladu níž). Pod ním se hledá opravovaný doklad —
+        // viz {@see resolveCorrectedInvoiceId()}.
+        $fileVarsymbol = $varsymbol;
+
+        // Doklad BEZ JEDINÉ POLOŽKY se nezakládá — a to u KAŽDÉHO druhu vydaného dokladu.
+        //
+        // Součty vydané faktury se počítají výhradně z řádků ({@see InvoiceCalculator::recompute()}),
+        // takže by vznikl doklad na nulu: v evidenci by vypadal jako naimportovaný, ale do
+        // žádného výkazu by nepřispěl ničím. SuperFaktura přesně takhle vyváží opravné daňové
+        // doklady (`<inv:invoiceDetail>` v nich chybí úplně), takže by migrace vyrobila
+        // 99 prázdných dobropisů a uživatel by si myslel, že vratky v systému jsou.
+        //
+        // ODMÍTNUTÍ, ne založení s varováním: report je jednorázová stránka, kdežto doklad
+        // zůstane. Varování by po jejím zavření nikdo nedohledal a nulový dobropis je pak
+        // v evidenci nerozeznatelný od záměrně vystaveného. Odmítnutý doklad naopak
+        // nezanechá nic k úklidu a po opravě zdroje se doimportuje. Je to zároveň táž
+        // úroveň přísnosti, jakou má import na JEDINOU položku s nenapárovanou sazbou —
+        // ta odmítá celý doklad, protože doklad s vynechaným řádkem má špatné součty.
+        //
+        // Přijaté faktury tenhle guard nemají: jedou vlastní cestou ({@see processPurchase()}),
+        // vznikají jako `draft` k ruční kontrole (prázdný draft je pracovní stav, ne tichá
+        // nula v účetnictví) a nahlášené vady se netýkají jich.
+        if (($inv['items'] ?? []) === []) {
+            return [
+                'status' => 'failed',
+                'reason' => sprintf(
+                    'Doklad %s (%s) nemá v souboru jedinou položku — nezaložili jsme ho. Vznikl by '
+                        . 'doklad na nulu, který v seznamu vypadá jako naimportovaný, ale do žádného '
+                        . 'výkazu nepřispěje. Doplňte položky ve zdrojovém systému a doklad importujte '
+                        . 'znovu, nebo ho zadejte ručně.',
+                    $docNumber !== '' ? '„' . $docNumber . '"' : '„' . $varsymbol . '"',
+                    self::invoiceTypeLabel($invoiceType),
+                ),
+                'notes' => $notes,
+                'warnings' => [],
+                'varsymbol_substituted' => $vsSubstituted,
+                'document_number' => $docNumber !== '' ? $docNumber : null,
+            ];
+        }
+
         // Duplicita vs. KOLIZE po náhradě (§ D9). U dokladu s dosazeným VS není shoda
         // důkazem duplicity — pod stejným symbolem může být uložený úplně jiný doklad,
         // a ten by se tichým „již existuje" schoval mezi stovky legitimních přeskočení.
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ? LIMIT 1'
-        );
-        $stmt->execute([$supplierId, $varsymbol]);
-        $existing = $stmt->fetchColumn();
-        if ($existing !== false) {
+        $existing = $this->findInvoiceByVarsymbol($supplierId, $varsymbol);
+
+        // KOLIZE DRUHŮ DOKLADU (§ D). Opravný daňový doklad běžně nese TÝŽ variabilní symbol
+        // jako opravovaná faktura, aby vratka došla na stejný symbol. To NENÍ duplicita —
+        // je to jiný doklad. Uložit ho pod tím symbolem ale nejde: unikátní index
+        // `uq_inv_supplier_varsymbol (supplier_id, varsymbol)` druhý řádek odmítne, takže
+        // by pouhé zúžení duplicitní kontroly na typ dokladu vyměnilo tiché přeskočení za
+        // pád na duplicitním klíči. Symbol proto ODVODÍME z čísla dokladu — týmž
+        // mechanismem, jakým se nahrazuje nepoužitelný GUID ze SuperFaktury
+        // ({@see PohodaXmlParser::varsymbolFromDocumentNumber()}).
+        //
+        // Index se ZÁMĚRNĚ nerozšiřuje o `invoice_type`: variabilní symbol je při párování
+        // plateb z banky jediný identifikátor úhrady a dva doklady pod jedním symbolem by
+        // párování znejednoznačnily. To je zásah do účetního jádra a nemá vzniknout jako
+        // vedlejší efekt migrace dat.
+        if ($existing !== null && $existing['invoice_type'] !== $invoiceType) {
+            $derived = PohodaXmlParser::varsymbolFromDocumentNumber($docNumber);
+            // Odvození, které vrátí týž symbol, nic neřeší (VS už z čísla dokladu pochází).
+            $usable = $derived !== null && $derived[0] !== $varsymbol;
+            $taken  = $usable ? $this->findInvoiceByVarsymbol($supplierId, $derived[0]) : null;
+
+            if ($taken !== null && $taken['invoice_type'] === $invoiceType) {
+                // Odvozený symbol patří dokladu TÉHOŽ druhu — tenhle doklad tedy v systému
+                // už je, jen pod svým odvozeným symbolem (typicky podruhé nahraný týž soubor).
+                // To je obyčejná duplicita, ne kolize: přeskočí se dole stejnou hláškou jako
+                // každá jiná, jinak by opakovaný import vyráběl varovné hlášky o kolizi.
+                $varsymbol = $derived[0];
+                $existing  = $taken;
+            } elseif (!$usable || $taken !== null) {
+                $reason = sprintf(
+                    'Doklad %s se nenaimportoval: variabilní symbol „%s" už u tohohle dodavatele patří '
+                        . 'dokladu #%d (%s), a tenhle doklad je %s. Dva doklady pod jedním symbolem '
+                        . 'databáze neuloží a náhradní symbol %s. Zadejte dokladu jiný variabilní symbol '
+                        . 'a importujte ho znovu.',
+                    $docNumber !== '' ? '„' . $docNumber . '"' : 'ze souboru',
+                    $varsymbol,
+                    $existing['id'],
+                    self::invoiceTypeLabel($existing['invoice_type']),
+                    self::invoiceTypeLabel($invoiceType),
+                    $taken !== null
+                        ? 'z čísla dokladu („' . $derived[0] . '") už patří dokladu #' . $taken['id']
+                        : 'z čísla dokladu odvodit nejde',
+                );
+
+                return [
+                    'status' => 'skipped',
+                    'reason' => $reason,
+                    'invoice_id' => $existing['id'],
+                    'notes' => $notes,
+                    'warnings' => [$reason],
+                    'varsymbol_substituted' => $vsSubstituted,
+                    'document_number' => $docNumber !== '' ? $docNumber : null,
+                ];
+            } else {
+                // Náhrada patří do reportu: doklad má v systému JINÝ symbol, než měl v souboru,
+                // takže se pod tím původním nedohledá a úhrada se na něj sama nenapáruje.
+                $notes[] = sprintf(
+                    'Variabilní symbol „%s" ze souboru už u tohohle dodavatele patří dokladu #%d (%s), '
+                        . 'a tenhle doklad je %s — dva doklady pod jedním symbolem databáze neuloží. '
+                        . 'Uložili jsme ho pod symbolem „%s" odvozeným z čísla dokladu; pod symbolem '
+                        . 'ze souboru ho v systému nedohledáte a platba se na něj sama nenapáruje.',
+                    $varsymbol,
+                    $existing['id'],
+                    self::invoiceTypeLabel($existing['invoice_type']),
+                    self::invoiceTypeLabel($invoiceType),
+                    $derived[0],
+                );
+                $varsymbol     = $derived[0];
+                $vsSource      = $derived[1];
+                $vsSubstituted = true;
+                $existing      = null;
+            }
+        }
+
+        if ($existing !== null) {
             $reason = $vsSubstituted
                 ? sprintf(
                     'Doklad %s se nenaimportoval: variabilní symbol „%s" jsme mu dosadili %s (%s), '
@@ -808,15 +934,15 @@ final class InvoiceImportService
                     $varsymbol,
                     $vsSource === 'number_sanitized' ? 'z upraveného tvaru čísla dokladu' : 'z čísla dokladu',
                     $vsOriginal !== '' ? 'v souboru byl symbol „' . $vsOriginal . '"' : 'v souboru symbol chyběl',
-                    (int) $existing,
-                    (int) $existing,
+                    $existing['id'],
+                    $existing['id'],
                 )
-                : "Faktura s varsymbolem $varsymbol již existuje (#{$existing}).";
+                : "Faktura s varsymbolem $varsymbol již existuje (#{$existing['id']}).";
 
             return [
                 'status' => 'skipped',
                 'reason' => $reason,
-                'invoice_id' => (int) $existing,
+                'invoice_id' => $existing['id'],
                 // Poznámka o náhradě se dřív v téhle větvi zahodila, takže se uživatel
                 // u přeskočeného dokladu o dosazeném symbolu vůbec nedozvěděl.
                 'notes' => $notes,
@@ -847,6 +973,21 @@ final class InvoiceImportService
         // Client
         $clientResult = $this->clientResolver->resolve($inv['client'] ?? [], $supplierId);
         $clientId = $clientResult['id'];
+
+        // Vazba opravného dokladu na opravovaný. U dobropisu s ODVOZENÝM symbolem je to
+        // jediné, co ho s originálem spojuje: symbol ze souboru už nenese a číslo dokladu
+        // z původního systému se nikam neukládá.
+        $parentInvoiceId = $this->resolveCorrectedInvoiceId($inv, $supplierId, $clientId, $fileVarsymbol);
+        $correctedRef = trim((string) ($inv['original_document_number'] ?? ''));
+        if ($parentInvoiceId !== null) {
+            $notes[] = sprintf('Opravný doklad jsme navázali na opravovaný doklad #%d.', $parentInvoiceId);
+        } elseif ($correctedRef !== '' && $invoiceType === 'credit_note') {
+            $notes[] = sprintf(
+                'Doklad opravuje doklad č. „%s", ten ale u tohohle odběratele v systému není — '
+                    . 'vazbu na opravovaný doklad doplňte ručně.',
+                $correctedRef,
+            );
+        }
 
         // Project
         $projectId = $this->resolveProject($inv, $clientId, $emailMap);
@@ -904,17 +1045,18 @@ final class InvoiceImportService
         // Insert invoice
         $pdo = $this->db->pdo();
         $sql = 'INSERT INTO invoices
-            (supplier_id, varsymbol, invoice_type, client_id, project_id,
+            (supplier_id, varsymbol, invoice_type, parent_invoice_id, client_id, project_id,
              issue_date, tax_date, due_date, currency_id, exchange_rate, exchange_rate_date,
              reverse_charge, language,
              total_without_vat, total_vat, total_with_vat,
              status, sent_at, paid_at, revenue_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)';
 
         $pdo->prepare($sql)->execute([
             $supplierId,
             $varsymbol,
-            (string) $inv['invoice_type'],
+            $invoiceType,
+            $parentInvoiceId,
             $clientId,
             $projectId,
             $issueDate,
@@ -977,6 +1119,89 @@ final class InvoiceImportService
             'oss_manual_review' => $plan['oss_manual_review'],
             'oss_credit_note_pending_period' => $plan['oss_credit_note_pending_period'],
         ];
+    }
+
+    /**
+     * Doklad daného variabilního symbolu u dodavatele — i s jeho DRUHEM.
+     *
+     * Druh se čte schválně: shoda symbolu u dokladu JINÉHO druhu není duplicita, ale
+     * kolize (opravný daňový doklad nese symbol opravované faktury). Bez téhle informace
+     * se obojí slilo do jediné hlášky „již existuje".
+     *
+     * @return array{id:int, invoice_type:string}|null
+     */
+    private function findInvoiceByVarsymbol(int $supplierId, string $varsymbol): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, invoice_type FROM invoices WHERE supplier_id = ? AND varsymbol = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $varsymbol]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row === false
+            ? null
+            : ['id' => (int) $row['id'], 'invoice_type' => (string) $row['invoice_type']];
+    }
+
+    private static function invoiceTypeLabel(string $type): string
+    {
+        return self::INVOICE_TYPE_LABELS[$type] ?? $type;
+    }
+
+    /**
+     * Doklad, který tenhle OPRAVNÝ doklad opravuje — pro `invoices.parent_invoice_id`.
+     *
+     * Tutéž vazbu zakládá aplikace i sama ({@see \MyInvoice\Action\Invoice\CancelInvoiceAction}),
+     * takže naimportovaný dobropis skončí ve stejném stavu jako vystavený a detail dokladu
+     * i navazující dotazy na rodiče čtou týž sloupec. Bez vazby by dobropis s odvozeným
+     * symbolem nebyl s originálem spojený vůbec ničím.
+     *
+     * Hledá se podle DVOU odkazů, protože každý pokrývá jinou situaci:
+     *   1. číslo opravovaného dokladu ze souboru (`original_document_number`) — sedí tam,
+     *      kde se ORIGINÁLU variabilní symbol dosadil z jeho čísla (GUID ze SuperFaktury);
+     *   2. variabilní symbol, který tenhle doklad nesl v SOUBORU — sedí tam, kde opravný
+     *      doklad úmyslně nese symbol opravované faktury (a právě proto se mu musel
+     *      odvodit jiný).
+     *
+     * Guardy jsou dva a oba jsou podstatné: hledá se u TÉHOŽ odběratele (shoda symbolu
+     * u cizího klienta je náhoda, ne vazba) a jen mezi doklady, které lze opravovat
+     * (dobropis dobropisu by byl nesmysl). Špatně navázaný dobropis je horší než
+     * nenavázaný — FK má `ON DELETE CASCADE`, takže smazání „rodiče" vezme i jeho.
+     *
+     * @param array<string,mixed> $inv
+     */
+    private function resolveCorrectedInvoiceId(array $inv, int $supplierId, int $clientId, string $fileVarsymbol): ?int
+    {
+        if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'credit_note') {
+            return null;
+        }
+
+        $refs = [];
+        foreach ([(string) ($inv['original_document_number'] ?? ''), $fileVarsymbol] as $ref) {
+            $ref = trim($ref);
+            if ($ref !== '' && !in_array($ref, $refs, true)) {
+                $refs[] = $ref;
+            }
+        }
+        if ($refs === []) {
+            return null;
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id FROM invoices
+              WHERE supplier_id = ? AND client_id = ? AND varsymbol = ?
+                AND invoice_type IN ('invoice', 'tax_document')
+           ORDER BY id LIMIT 1"
+        );
+        foreach ($refs as $ref) {
+            $stmt->execute([$supplierId, $clientId, $ref]);
+            $id = $stmt->fetchColumn();
+            if ($id !== false) {
+                return (int) $id;
+            }
+        }
+
+        return null;
     }
 
     /**

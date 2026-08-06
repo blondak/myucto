@@ -26,6 +26,7 @@ namespace MyInvoice\Service\Import;
  *     'varsymbol_original'    => string|null,
  *     'varsymbol_substituted' => bool,
  *     'document_number'       => string|null,   // z inv:number/typ:numberRequested
+ *     'original_document_number' => string|null, // číslo OPRAVOVANÉHO dokladu (opravný daň. doklad)
  *     'issue_date'            => 'Y-m-d',
  *     'tax_date'              => 'Y-m-d'|null,
  *     'due_date'              => 'Y-m-d',
@@ -48,6 +49,13 @@ namespace MyInvoice\Service\Import;
  * {@see self::VARSYMBOL_PATTERN}). Jiný zdroj než `symVar` znamená, že import
  * má náhradu uvést v reportu — doklad se totiž pod původním symbolem už nenajde.
  * `varsymbol_original` je `null`, když nebylo co nahradit (prázdný `symVar`).
+ *
+ * `original_document_number` nese číslo dokladu, který tenhle doklad OPRAVUJE — bez něj
+ * by naimportovaný dobropis visel v systému bez vazby na opravovanou fakturu. Čte se
+ * z `<inv:correctiveDocument>/<typ:sourceDocument>/<typ:number>` s fallbackem na
+ * `<inv:originalDocumentNumber>`. Podobně pojmenovaný `<inv:originalDocument>` se
+ * ZÁMĚRNĚ nečte: u řádné faktury do něj SuperFaktura zapisuje její VLASTNÍ číslo,
+ * takže by z každé faktury udělal odkaz sám na sebe.
  *
  * `varsymbol_substituted` = varsymbol NEPOCHÁZÍ z `<inv:symVar>`, dosadili jsme ho my
  * z čísla dokladu. Pro kontrolu duplicity v importu je to tvrdý rozdíl: shoda VS
@@ -251,6 +259,10 @@ final class PohodaXmlParser
         };
 
         $documentNumber = $this->text($xpath, 'inv:number/typ:numberRequested', $hdr);
+        // Odkaz na OPRAVOVANÝ doklad — viz docblock třídy (`inv:originalDocument` je past).
+        // `correctiveDocument` visí na `<inv:invoice>`, ne na hlavičce.
+        $originalDocumentNumber = $this->text($xpath, 'inv:correctiveDocument/typ:sourceDocument/typ:number', $invEl)
+            ?: $this->text($xpath, 'inv:originalDocumentNumber', $hdr);
         [$varsymbol, $varsymbolSource, $varsymbolOriginal] = $this->resolveVarsymbol(
             $this->text($xpath, 'inv:symVar', $hdr),
             $documentNumber,
@@ -308,6 +320,7 @@ final class PohodaXmlParser
             // rozliší duplicitu od kolize (viz docblock třídy).
             'varsymbol_substituted' => $varsymbolSource !== 'symVar',
             'document_number'       => $documentNumber !== '' ? $documentNumber : null,
+            'original_document_number' => $originalDocumentNumber !== '' ? $originalDocumentNumber : null,
             'issue_date'            => $issueDate,
             'tax_date'              => $taxDate,
             'due_date'              => $dueDate,
@@ -331,10 +344,8 @@ final class PohodaXmlParser
      *
      * SuperFaktura zapisuje do `symVar` svůj interní GUID (36 znaků s pomlčkami),
      * který {@see self::VARSYMBOL_PATTERN} neprojde, a import celý doklad odmítne.
-     * Fallback proto neřeší jen prázdný `symVar`, ale i neplatný tvar.
-     * Sanitizovaný tvar čísla dokladu je poslední záchrana — čísla jako `2026/0123`
-     * by jinak taky neprošla. Odlišuje se ve zdroji, protože po ořezu na 20 znaků
-     * teoreticky může kolidovat s jiným dokladem; import to má vypsat do reportu.
+     * Fallback proto neřeší jen prázdný `symVar`, ale i neplatný tvar. Samotné odvození
+     * z čísla dokladu žije v {@see self::varsymbolFromDocumentNumber()}.
      *
      * Když se nabídnout nedá nic, vrací se původní `symVar` beze změny: report
      * importu tak ukáže konkrétní vadnou hodnotu místo obecné chyby parseru.
@@ -350,16 +361,44 @@ final class PohodaXmlParser
         // Prázdný symVar není náhrada — nebylo co nahradit, nemá smysl to hlásit.
         $replaced = $symVar !== '' ? $symVar : null;
 
-        if (self::isAcceptableVarsymbol($docNumber)) {
-            return [$docNumber, 'number', $replaced];
-        }
-
-        $sanitized = self::sanitizeVarsymbol($docNumber);
-        if ($sanitized !== '') {
-            return [$sanitized, 'number_sanitized', $replaced];
+        $derived = self::varsymbolFromDocumentNumber($docNumber);
+        if ($derived !== null) {
+            return [$derived[0], $derived[1], $replaced];
         }
 
         return [$symVar, 'symVar', null];
+    }
+
+    /**
+     * Variabilní symbol ODVOZENÝ z čísla dokladu — jediná implementace téhle náhrady.
+     *
+     * Volají ji dvě různé příčiny se stejným řešením, a proto tu ta metoda je veřejná:
+     *   1. {@see self::resolveVarsymbol()} — symbol ze souboru nemá použitelný TVAR
+     *      (typicky interní GUID ze SuperFaktury);
+     *   2. {@see \MyInvoice\Service\Import\InvoiceImportService::processOne()} — symbol
+     *      tvar má, ale je u téhož dodavatele OBSAZENÝ dokladem JINÉHO DRUHU (opravný
+     *      daňový doklad běžně nese symbol opravované faktury, aby vratka došla na týž
+     *      symbol; unikátní index `uq_inv_supplier_varsymbol` ale dva takové doklady
+     *      neuloží).
+     * Druhá kopie tohohle pravidla by se od první rozešla a náhrada by v jedné cestě
+     * vyráběla symboly, které druhá cesta odmítá.
+     *
+     * Sanitizovaný tvar je poslední záchrana — čísla jako `2026/0123` by jinak neprošla.
+     * Odlišuje se ve zdroji, protože po ořezu na 20 znaků teoreticky může kolidovat
+     * s jiným dokladem; volající to má vypsat do reportu.
+     *
+     * @return array{0:string,1:string}|null [varsymbol, zdroj] nebo `null`, když se
+     *         z čísla dokladu nedá vyrobit nic použitelného
+     */
+    public static function varsymbolFromDocumentNumber(string $docNumber): ?array
+    {
+        if (self::isAcceptableVarsymbol($docNumber)) {
+            return [$docNumber, 'number'];
+        }
+
+        $sanitized = self::sanitizeVarsymbol($docNumber);
+
+        return $sanitized !== '' ? [$sanitized, 'number_sanitized'] : null;
     }
 
     /**

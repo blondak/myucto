@@ -55,8 +55,32 @@ Aby ses nemusel po importu zabývat starými fakturami:
 
 - **Cizí dodavatel** — celý soubor se přeskočí, pokud IČO dodavatele v souboru
   neodpovídá aktuálnímu dodavateli v aplikaci. (Hláška v reportu.)
-- **Duplicita** — pokud faktura s daným varsymbolem u tohoto dodavatele už
-  existuje, přeskočí se. V reportu se zobrazí důvod a id existující faktury.
+- **Duplicita** — pokud doklad **stejného druhu** s daným varsymbolem u tohoto
+  dodavatele už existuje, přeskočí se. V reportu se zobrazí důvod a id
+  existující faktury.
+- **Doklad bez položek** — doklad, který v souboru nemá jedinou položku, se
+  **nezaloží** a v reportu skončí jako chyba. Vznikl by doklad na nulu, který
+  v seznamu vypadá jako naimportovaný, ale do žádného výkazu nepřispěje.
+  Doplň položky ve zdrojovém systému a doklad naimportuj znovu.
+
+## 21.4a Dobropis se stejným variabilním symbolem jako faktura
+
+Většina systémů vystavuje opravný daňový doklad (dobropis) s **týmž variabilním
+symbolem**, jaký má opravovaná faktura, aby vratka odešla na stejný symbol.
+Dva doklady pod jedním symbolem ale u jednoho dodavatele vést nejde — variabilní
+symbol je jediné, podle čeho se páruje platba z banky.
+
+Import to řeší takto:
+
+- Dobropis se naimportuje pod **variabilním symbolem odvozeným z čísla dokladu**
+  (např. `D262200015`). V reportu je o tom poznámka — pod symbolem ze souboru
+  doklad v aplikaci **nedohledáš** a platba se na něj sama nenapáruje.
+- Vazba na opravovaný doklad se přesto zachová: dobropis se naváže na původní
+  fakturu (v detailu dokladu je vidět odkaz), pokud je faktura u téhož odběratele
+  v systému. Když tam není, řekne to poznámka v reportu a vazbu doplníš ručně.
+- Když se symbol z čísla dokladu odvodit nedá (soubor číslo neuvádí) nebo je
+  i ten obsazený, doklad se přeskočí s hláškou, ať mu zadáš jiný variabilní
+  symbol a naimportuješ ho znovu.
 
 ## 21.5 Report
 
