@@ -34,22 +34,30 @@ Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová au
 
 V seznamu klikni **+ Nová přijatá faktura**. Otevře se formulář.
 
-### 23.2.1 Drag & drop PDF
-Nad formulářem je **drag & drop zóna**. Pokud máš PDF od dodavatele:
+### 23.2.1 Drag & drop dokladu
+Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
 
-- Přetáhni PDF do zóny (nebo klikni a vyber soubor).
-- Systém prohledá PDF zda obsahuje **embedded ISDOC** přílohu:
-  - **Pokud ano** (fakturační software jako Money S3, Pohoda, Stormware, sám MyÚčto) → pole formuláře se předvyplní strukturovanými daty.
-  - **Pokud ne** (běžné PDF bez přílohy) → můžeš použít **AI extrakci přes Anthropic Claude** (viz [AI extrakce](25_AI_extrakce.md)), nebo pole vyplnit ručně.
-- Originál PDF se po prvním uložení faktury automaticky **archivuje** mimo webroot a v detailu si ho můžeš kdykoli stáhnout zpět.
+- Samostatný **ISDOC**, **ISDOCX** nebo PDF/A-3 s **vloženým ISDOC** se naparsuje
+  deterministicky bez AI. Systém ověří IČO odběratele, vyhledá nebo založí
+  dodavatele, vytvoří předvyplněný koncept včetně položek, DPH a platebních údajů
+  a rovnou ho otevře v editoru ke kontrole. Tato cesta je dostupná i klientské roli
+  s oprávněním vytvářet přijaté faktury.
+- Běžné PDF bez vloženého ISDOC nebo fotka se pouze připraví jako příloha. Pole
+  vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
+  webroot. Pro nestrukturované PDF lze podle oprávnění použít také
+  [AI extrakci](25_AI_extrakce.md).
 - **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat (i kdyby se zpracování v budoucnu změnilo). V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML; originál se nikdy nepřepíše. Formát je univerzální (`source_format`), do budoucna pokryje i další strukturované zdroje.
 
-> 💡 Doklad jde nahrát **už při zakládání nové faktury** (po přetažení se ukáže kartička „soubor připraven, nahraje se po uložení") i **z detailu** faktury, která zatím doklad nemá. Kromě PDF lze přetáhnout i **fotku** (JPG/PNG/WEBP/HEIC) — systém ji převede na PDF — nebo přímo **ISDOC / ISDOCX** balíček: ten se rozbalí a naparsuje deterministicky (bez AI), z `.isdocx` se navíc archivuje zabalené PDF pro náhled.
+> 💡 ISDOC/ISDOCX se importuje při **zakládání nové faktury**. Dropzone na detailu
+> nebo při editaci existující faktury slouží jen k doplnění PDF či fotografie; nový
+> strukturovaný doklad by tam nečekaně založil druhou fakturu. Fotku
+> (JPG/PNG/WEBP/HEIC) systém před archivací převede na PDF. Z `.isdocx` se vedle
+> strojového originálu archivuje i zabalené PDF pro náhled.
 
 Limity:
 - Max 20 MiB per soubor
 - Akceptujeme PDF, fotku (JPG/PNG/WEBP/HEIC) a ISDOC/ISDOCX (magic bytes se ověřují server-side)
-- SHA-256 deduplikace — stejný doklad už archivovaný u jiné faktury nebude akceptován
+- SHA-256 a dokladová deduplikace — při opakovaném importu se otevře existující doklad
 
 > 💰 **Zaokrouhlení „k úhradě".** U dokladů se zaokrouhlením na celé koruny (typicky e‑faktury z e‑shopů) systém převezme zaokrouhlení přímo z dokladu — částka **K úhradě** pak sedí na haléř se skutečnou částkou na faktuře (a přesně se spáruje s platbou v bance). Základ a DPH zůstávají nezměněné (správně pro přiznání DPH a kontrolní hlášení); zaokrouhlení se vede jako samostatná položka a promítne se do „k úhradě", QR platby, platebního příkazu i vygenerovaného PDF (rekonstrukce „Náš PDF" zobrazí řádek *Zaokrouhlení*).
 

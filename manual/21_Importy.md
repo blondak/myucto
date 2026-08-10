@@ -502,6 +502,13 @@ Server u této stránky vždy použije směr **přijatá faktura** a ověří, �
 odběratele ve vstupním dokladu odpovídá aktuálně zvolené firmě. Doklad s cizím
 odběratelem odmítne, i kdyby byl jinak syntakticky platný.
 
+Pro vložení **jedné** přijaté faktury není administrátorská stránka potřeba.
+Uživatel včetně klientské role s oprávněním vytvářet přijaté faktury může na
+`Nákup → Přijaté faktury → Nová přijatá faktura` přetáhnout `.isdoc`, `.isdocx`
+nebo PDF/A-3 s vloženým ISDOC. Použije se stejné mapování, vznikne předvyplněný
+koncept a otevře se ke kontrole. Běžné PDF bez vloženého ISDOC zůstane přílohou
+pro ruční vyplnění; tato jednosouborová cesta nikdy nevolá AI.
+
 Pro každý platný doklad systém:
 
 1. vyhledá nebo založí dodavatele,

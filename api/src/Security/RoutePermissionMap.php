@@ -74,6 +74,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices/payment-orders(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/payment-orders(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/scan-inbox$#', 'purchase_invoices.scan', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoices/import-structured$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-invoices/[0-9]+/documents(/|$)#', 'documents', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/[0-9]+/documents(/|$)#', 'documents', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::READ],

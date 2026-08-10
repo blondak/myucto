@@ -941,16 +941,52 @@ const totals = computed(() => {
 })
 
 async function onPdfDropped(file: File) {
-  // Pokud editujeme existující fakturu, upload rovnou.
-  // Pro novou fakturu si soubor podržíme a uploadneme po prvním uložení (pro získání ID).
+  // U existujícího dokladu je dropzone čistě archiv přílohy. Strukturovaný import
+  // patří jen k nové faktuře, jinak by nečekaně založil druhý doklad.
   if (isEdit.value && invoiceId.value) {
     await uploadPdfToInvoice(invoiceId.value, file)
-  } else {
-    pendingPdfFile.value = file
-    setPendingPdfUrl(file)
-    dropzoneVisible.value = false
-    toast.success(t('purchase_invoice.pdf.pending_upload', { name: file.name }))
+    return
   }
+
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const structuredCandidate = extension === 'isdoc' || extension === 'isdocx' || extension === 'pdf'
+  if (structuredCandidate) {
+    if (blockDemoMutation()) return
+    pdfUploading.value = true
+    try {
+      const imported = await purchaseInvoicesApi.importStructured(file)
+      toast.success(t(imported.duplicate
+        ? 'purchase_invoice.extraction.isdoc_duplicate'
+        : 'purchase_invoice.extraction.isdoc_found'))
+      await router.replace(`/purchase-invoices/${imported.purchase_invoice_id}/edit`)
+      // /new i /:id/edit používají tutéž komponentu, takže Vue ji při navigaci
+      // nere-mountuje a onMounted() se znovu nespustí. Importovaný draft proto
+      // načti explicitně; jinak se hodnoty objeví až po F5.
+      await loadInvoice(imported.purchase_invoice_id)
+      return
+    } catch (e: any) {
+      // Běžný PDF bez embedded ISDOC není vadný: zachovej dosavadní ruční flow
+      // a nahraj ho jako přílohu až po uložení formuláře.
+      if (extension === 'pdf' && e?.response?.data?.error?.code === 'no_embedded_isdoc') {
+        queuePendingPdf(file)
+        toast.info(t('purchase_invoice.extraction.no_embedded_isdoc'))
+        return
+      }
+      toast.error(apiErrorMessage(e))
+      return
+    } finally {
+      pdfUploading.value = false
+    }
+  }
+
+  queuePendingPdf(file)
+  toast.success(t('purchase_invoice.pdf.pending_upload', { name: file.name }))
+}
+
+function queuePendingPdf(file: File) {
+  pendingPdfFile.value = file
+  setPendingPdfUrl(file)
+  dropzoneVisible.value = false
 }
 
 // Odebrání souboru připraveného k nahrání (u nové faktury, před uložením).
@@ -1196,7 +1232,7 @@ function fieldErr(key: string): string | null {
     <form v-else @submit.prevent="submit" class="space-y-5">
       <!-- DRAG & DROP PDF (jen nahoře u nové faktury, schovaný po prvním interaction) -->
       <div v-if="!isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <PdfDropzone accept-structured :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <p class="text-xs text-neutral-500 mt-2">
           {{ t('purchase_invoice.extraction.ai_pending') }}
         </p>

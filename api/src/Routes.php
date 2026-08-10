@@ -143,6 +143,7 @@ use MyInvoice\Action\PurchaseInvoice\OurPdfPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\ExportPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\ExportPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceAction;
+use MyInvoice\Action\PurchaseInvoice\ImportStructuredPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentQrAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentOrderAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
@@ -525,6 +526,7 @@ final class Routes
         // Všechny chráněné AuthMiddleware + SupplierScopeMiddleware (skrz globální group).
         // scan-inbox je admin/accountant only (check v Action).
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
+        $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);

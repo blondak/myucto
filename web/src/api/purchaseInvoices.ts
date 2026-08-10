@@ -5,6 +5,14 @@ import type { CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from '.
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
 export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
+export type StructuredPurchaseImportSource = 'isdoc' | 'isdocx' | 'isdoc_embedded'
+
+export interface StructuredPurchaseImportResult {
+  purchase_invoice_id: number
+  purchase_invoice_ids: number[]
+  source: StructuredPurchaseImportSource
+  duplicate: boolean
+}
 
 /**
  * Druhy dokladů přijaté faktury pro výběr v editoru (pořadí = pořadí v dropdownu).
@@ -646,6 +654,21 @@ export const purchaseInvoicesApi = {
     ).then(r => r.data),
   create: (payload: PurchaseInvoicePayload) =>
     api.post<PurchaseInvoice>('/purchase-invoices', payload).then(r => r.data),
+
+  /**
+   * Deterministický jednosouborový import z editoru nové PF. Nevstupuje do admin
+   * dávkového importu ani do AI: podporuje .isdoc, .isdocx a PDF/A-3 s embedded ISDOC.
+   */
+  importStructured: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<StructuredPurchaseImportResult>(
+      '/purchase-invoices/import-structured',
+      fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    ).then(r => r.data)
+  },
+
   update: (id: number, payload: PurchaseInvoicePayload, force = false) =>
     api.put<PurchaseInvoice>(
       `/purchase-invoices/${id}${force ? '?force=1' : ''}`,
