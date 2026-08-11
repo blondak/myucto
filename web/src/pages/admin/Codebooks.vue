@@ -473,6 +473,7 @@ async function removeVatCls(c: VatClassification) {
 const ossRates = ref<OssMemberStateRate[]>([])
 const ossAvailable = ref(true)
 const ossManageable = ref(true)
+const ossCoverageGaps = ref<string[]>([])
 const ossCanWrite = ref(false)
 const ossRateTypes = ref<OssRateType[]>(['standard', 'reduced', 'second_reduced', 'parking'])
 const ossCountryFilter = ref('')
@@ -501,6 +502,7 @@ async function loadOssRates() {
     ossRates.value = r.rates
     ossAvailable.value = r.available
     ossManageable.value = r.manageable
+    ossCoverageGaps.value = r.coverage_gaps ?? []
     ossCanWrite.value = r.can_write
     if (r.rate_types.length > 0) ossRateTypes.value = r.rate_types
   } catch (e: any) {
@@ -1208,6 +1210,10 @@ watch(tab, (newTab) => {
         </div>
         <div v-else-if="!ossCanWrite" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
           {{ t('oss_rates.readonly_for_role') }}
+        </div>
+        <div v-if="ossAvailable && ossCoverageGaps.length > 0"
+          class="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-600">
+          {{ t('oss_rates.coverage_gap', { countries: ossCoverageGaps.join(', ') }) }}
         </div>
 
         <div class="flex flex-wrap items-center gap-2">

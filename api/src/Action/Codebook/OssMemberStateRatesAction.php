@@ -54,11 +54,15 @@ final class OssMemberStateRatesAction
         return Json::ok($response, [
             // Chybějící tabulka je stav instalace, ne prázdný číselník — UI musí umět
             // říct „spusťte migrace" místo „žádné sazby".
-            'available'  => $this->codebook->isAvailable(),
-            'manageable' => $this->codebook->isManageable(),
-            'can_write'  => $this->canWrite($request),
-            'rate_types' => OssRateCodebook::RATE_TYPES,
-            'rates'      => $this->codebook->listAll($country !== '' ? $country : null),
+            'available'      => $this->codebook->isAvailable(),
+            'manageable'     => $this->codebook->isManageable(),
+            'can_write'      => $this->canWrite($request),
+            'rate_types'     => OssRateCodebook::RATE_TYPES,
+            'rates'          => $this->codebook->listAll($country !== '' ? $country : null),
+            // Neúplný seed (viz migrace 1319) se jinak projeví jen jako stovky stejných
+            // hlášek u importu — tady dostane uživatel jednu srozumitelnou větu na
+            // stránce, kde se dá i opravit.
+            'coverage_gaps'  => $this->codebook->countriesMissingCurrentRate(),
         ]);
     }
 

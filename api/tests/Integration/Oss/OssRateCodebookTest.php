@@ -149,4 +149,53 @@ final class OssRateCodebookTest extends TestCase
         self::assertSame([], $missing,
             'Státy EU bez základní sazby v číselníku: ' . implode(', ', $missing));
     }
+
+    /**
+     * Zdravá instalace (všechny migrace proběhly) nesmí hlásit žádnou díru — jinak by
+     * banner na stránce číselníku strašil uživatele zbytečně.
+     */
+    public function testCoverageGapsEmptyOnHealthyCodebook(): void
+    {
+        self::assertSame([], $this->codebook->countriesMissingCurrentRate());
+    }
+
+    /**
+     * Reprodukce hlášení zákazníka (migrace 1319): po částečném seedu (jen historické
+     * a druhé snížené řádky, bez aktuálních sazeb) musí `countriesMissingCurrentRate()`
+     * nahlásit PL, HU a CZ/SK — přesně ty státy, které si zákazník musel dohledávat sám.
+     * Test si díru vytvoří dočasně přímo v transakci a na konci ji vrátí, aby neovlivnil
+     * ostatní testy nad sdílenou `myucto_test`.
+     */
+    public function testCoverageGapsDetectPartialSeed(): void
+    {
+        $pdo = $this->db->pdo();
+        $today = date('Y-m-d');
+
+        // PL nemá v číselníku vůbec žádný řádek — smaž ho dočasně (jen is_custom=0,
+        // aby test nesáhl na případnou vlastní sazbu jiného testu).
+        $pl = $pdo->query("SELECT id, country, rate_type, rate_percent, valid_from, valid_to
+                              FROM oss_member_state_rates WHERE country = 'PL' AND is_custom = 0")
+            ->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertNotSame([], $pl, 'Test předpokládá zdravou instanci se seedovaným PL.');
+
+        $pdo->exec("DELETE FROM oss_member_state_rates WHERE country = 'PL' AND is_custom = 0");
+        try {
+            $missing = $this->codebook->countriesMissingCurrentRate($today);
+            self::assertContains('PL', $missing);
+        } finally {
+            // Vrátit přesně to, co bylo smazáno — stejné id díky AUTO_INCREMENT nejde
+            // zaručit, ale identita (country, rate_type, rate_percent, valid_from), na
+            // které stojí `uq_osmr` i test výše, se obnoví beze zbytku.
+            $stmt = $pdo->prepare(
+                'INSERT INTO oss_member_state_rates (country, rate_type, rate_percent, valid_from, valid_to)
+                 VALUES (?, ?, ?, ?, ?)'
+            );
+            foreach ($pl as $row) {
+                $stmt->execute([
+                    $row['country'], $row['rate_type'], $row['rate_percent'],
+                    $row['valid_from'], $row['valid_to'],
+                ]);
+            }
+        }
+    }
 }

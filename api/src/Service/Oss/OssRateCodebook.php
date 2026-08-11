@@ -97,6 +97,52 @@ final class OssRateCodebook
     }
 
     /**
+     * Členské státy EU, pro které číselník K ZADANÉMU DATU (výchozí dnešek) nemá žádnou
+     * platnou sazbu — ani systémovou, ani vlastní.
+     *
+     * ── Proč tohle existuje ──────────────────────────────────────────────────────────
+     * Hlášení zákazníka (viz migrace 1319): po upgradu měl číselník jen 23 řádků, skoro
+     * výhradně historické, a chybělo Polsko úplně. `checkRate()` a `OssItemDeriver` na to
+     * reagují SPRÁVNĚ per řádek — „stát v číselníku není" u KAŽDÉ položky zvlášť — ale
+     * u 850 importovaných dokladů se z toho stane 850 stejných hlášek a nikdo nespojí
+     * tečky k jediné příčině: neúplný seed. Tahle metoda dá tu souvislost NA JEDNO MÍSTO
+     * (číselníková stránka), aby uživatel dostal jednu větu „doplňte seed", ne stovky
+     * řádkových varování bez kontextu.
+     *
+     * Nerozlišuje „stát v tabulce vůbec není" od „má jen historické řádky" — z pohledu
+     * uživatele je to totéž: dnešní doklad do/z téhle země skončí u ručního posouzení.
+     *
+     * Zdroj pravdy pro „který stát je členský" je tabulka `countries.is_eu` — stejná,
+     * kterou už používá {@see \MyInvoice\Tests\Integration\Oss\OssRateCodebookTest::testEveryEuCountryHasStandardRate()},
+     * ne pevný seznam v kódu: instance s upraveným číselníkem zemí (např. po Brexitu,
+     * nebo budoucí rozšíření EU) se tím nerozejde s tím, co migrace skutečně seedují.
+     *
+     * @return list<string> ISO2 kódy, abecedně
+     */
+    public function countriesMissingCurrentRate(?string $onDate = null): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        $eu = $this->db->pdo()
+            ->query('SELECT UPPER(iso2) FROM countries WHERE is_eu = 1 ORDER BY iso2')
+            ->fetchAll(\PDO::FETCH_COLUMN);
+        if ($eu === []) {
+            return [];
+        }
+        $onDate ??= (new \DateTimeImmutable())->format('Y-m-d');
+
+        $missing = [];
+        foreach ($eu as $code) {
+            if ($this->ratesFor((string) $code, $onDate) === []) {
+                $missing[] = (string) $code;
+            }
+        }
+
+        return $missing;
+    }
+
+    /**
      * Ověří sazbu použitou na OSS řádku proti číselníku. Vrací varování, nebo `null`,
      * je-li vše v pořádku (nebo nelze-li ověřit).
      *

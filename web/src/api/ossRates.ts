@@ -32,6 +32,8 @@ export interface OssMemberStateRatesResponse {
   can_write: boolean
   rate_types: OssRateType[]
   rates: OssMemberStateRate[]
+  /** ISO2 kódy členských států EU bez aktuálně platné sazby — příznak neúplného seedu. */
+  coverage_gaps: string[]
 }
 
 export interface OssRateCreate {
