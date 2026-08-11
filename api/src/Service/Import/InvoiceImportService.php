@@ -655,6 +655,7 @@ final class InvoiceImportService
     ): array {
         try {
             $r = $this->purchaseMapper->map($inv, $supplierId, $userId);
+            $duplicate = !empty($r['duplicate']);
             // Čitelné PDF (z ISDOCX balíčku nebo nahraného PDF/A-3 s embedded ISDOC)
             // zaarchivuj k faktuře pro náhled/stažení (issue #149) — stejná archivace
             // jako AI/dropzone a inbox scan (sdílený PurchaseInvoicePdfArchiver).
@@ -679,9 +680,12 @@ final class InvoiceImportService
             }
             return [
                 'status' => 'created',
-                'reason' => $r['vendor_created'] ? 'vytvořen vendor + draft přijaté faktury' : 'draft přijaté faktury (vendor reuse)',
+                'reason' => $duplicate
+                    ? 'přijatá faktura již existuje'
+                    : (!empty($r['vendor_created']) ? 'vytvořen vendor + draft přijaté faktury' : 'draft přijaté faktury (vendor reuse)'),
                 'purchase_invoice_id' => $r['purchase_invoice_id'],
                 'vendor_id'           => $r['vendor_id'],
+                'duplicate'           => $duplicate,
             ];
         } catch (\InvalidArgumentException $e) {
             return ['status' => 'failed', 'reason' => $e->getMessage()];

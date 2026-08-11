@@ -5910,7 +5910,8 @@
     },
     "pdf": {
       "title": "Originální PDF od dodavatele",
-      "dropzone_hint": "Sem přetáhni PDF, fotku nebo ISDOC/ISDOCX faktury (nebo klikni pro výběr)",
+      "dropzone_hint": "Sem přetáhni PDF nebo fotku faktury (nebo klikni pro výběr)",
+      "dropzone_hint_structured": "Sem přetáhni PDF, fotku nebo ISDOC/ISDOCX faktury (nebo klikni pro výběr)",
       "dropzone_active": "Pusť soubor pro nahrání",
       "uploading": "Nahrávám…",
       "uploaded_at": "Nahráno {date}",
@@ -5929,7 +5930,9 @@
       "replace": "Nahradit",
       "no_pdf": "K této faktuře není archivovaný PDF dokument.",
       "max_size_hint": "PDF nebo obrázek (JPG/PNG/WEBP/HEIC), max 20 MiB",
+      "max_size_hint_structured": "PDF, obrázek, ISDOC nebo ISDOCX, max 20 MiB",
       "invalid_pdf": "Soubor musí být PDF nebo obrázek (JPG/PNG/WEBP/HEIC).",
+      "invalid_document": "Soubor musí být PDF, obrázek, ISDOC nebo ISDOCX.",
       "duplicate": "Stejný PDF dokument už je archivován u jiné faktury.",
       "upload_error": "Nahrání selhalo: {error}"
     },
@@ -5938,8 +5941,10 @@
       "badge_title": "Strojový originál dokladu — klikni pro stažení"
     },
     "extraction": {
-      "isdoc_found": "Z PDF jsem rozpoznal ISDOC. Pole jsou předvyplněna z přílohy.",
-      "ai_pending": "Toto PDF neobsahuje ISDOC. Vyplň pole ručně, nebo použij AI extrakci v Externí integrace → AI.",
+      "isdoc_found": "ISDOC byl načten. Otevírám předvyplněný koncept ke kontrole.",
+      "isdoc_duplicate": "Tento ISDOC už byl importován. Otevírám existující doklad.",
+      "no_embedded_isdoc": "PDF neobsahuje vložený ISDOC. Zůstane přílohou k ručně vyplněnému dokladu.",
+      "ai_pending": "ISDOC/ISDOCX nebo PDF s vloženým ISDOC načte údaje automaticky. Běžné PDF či fotka zůstanou přílohou pro ruční vyplnění.",
       "manual_fallback": "Vyplnit ručně",
       "warning_title": "AI extrakce vyžaduje kontrolu",
       "needs_review_tooltip": "Tato faktura vyžaduje kontrolu po AI extrakci",

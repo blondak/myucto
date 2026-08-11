@@ -5910,7 +5910,8 @@
     },
     "pdf": {
       "title": "Vendor original PDF",
-      "dropzone_hint": "Drag a PDF, photo or ISDOC/ISDOCX invoice here (or click to pick)",
+      "dropzone_hint": "Drag a PDF or photo of the invoice here (or click to pick)",
+      "dropzone_hint_structured": "Drag a PDF, photo or ISDOC/ISDOCX invoice here (or click to pick)",
       "dropzone_active": "Drop file to upload",
       "uploading": "Uploading…",
       "uploaded_at": "Uploaded {date}",
@@ -5929,7 +5930,9 @@
       "replace": "Replace",
       "no_pdf": "No archived PDF for this invoice.",
       "max_size_hint": "PDF or image (JPG/PNG/WEBP/HEIC), max 20 MiB",
+      "max_size_hint_structured": "PDF, image, ISDOC or ISDOCX, max 20 MiB",
       "invalid_pdf": "File must be a PDF or image (JPG/PNG/WEBP/HEIC).",
+      "invalid_document": "File must be a PDF, image, ISDOC or ISDOCX.",
       "duplicate": "The same PDF is already archived under another invoice.",
       "upload_error": "Upload failed: {error}"
     },
@@ -5938,8 +5941,10 @@
       "badge_title": "Machine-readable source document — click to download"
     },
     "extraction": {
-      "isdoc_found": "ISDOC detected in PDF. Fields prefilled from attachment.",
-      "ai_pending": "This PDF has no ISDOC. Fill manually, or use AI extraction in External integrations → AI.",
+      "isdoc_found": "ISDOC loaded. Opening the prefilled draft for review.",
+      "isdoc_duplicate": "This ISDOC has already been imported. Opening the existing document.",
+      "no_embedded_isdoc": "The PDF has no embedded ISDOC. It will remain attached to the manually completed document.",
+      "ai_pending": "ISDOC/ISDOCX or a PDF with embedded ISDOC is loaded automatically. A regular PDF or photo remains attached for manual entry.",
       "manual_fallback": "Fill manually",
       "warning_title": "AI extraction needs review",
       "needs_review_tooltip": "This invoice needs review after AI extraction",
