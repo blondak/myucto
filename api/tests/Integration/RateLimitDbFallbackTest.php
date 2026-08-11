@@ -82,6 +82,17 @@ final class RateLimitDbFallbackTest extends TestCase
         }
     }
 
+    /** Součet čítačů bucketů odpovídajících prefixu — dřív to byl počet řádků. */
+    private function hits(string $pattern): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(hits), 0) FROM rate_limit_counters WHERE bucket_key LIKE ?'
+        );
+        $stmt->execute([$pattern]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     private function middleware(): RateLimitMiddleware
     {
         return new RateLimitMiddleware(
@@ -200,13 +211,8 @@ final class RateLimitDbFallbackTest extends TestCase
             $mw->process($this->loginRequest(), $handler);
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM rate_limit_counters WHERE bucket_key LIKE ?'
-        );
-        $stmt->execute(['rl:login:ip:%']);
-
-        self::assertSame(3, (int) $stmt->fetchColumn(),
-            'Každý propuštěný request musí zapsat jeden řádek čítače');
+        self::assertSame(3, $this->hits('rl:login:ip:%'),
+            'Každý propuštěný request musí čítač zvýšit o jedna');
     }
 
     /** Odmítnutý request už čítač nezvyšuje — jinak by se okno donekonečna posouvalo. */
@@ -219,13 +225,93 @@ final class RateLimitDbFallbackTest extends TestCase
             $mw->process($this->loginRequest(), $handler);
         }
 
+        self::assertSame(3, $this->hits('rl:login:ip:%'),
+            '429 odpovědi nesmí čítač dál zvyšovat');
+    }
+
+    // ------------------------------------------------ zaplnění MEMORY tabulky
+
+    /**
+     * Jádro incidentu z 2026-08-11: fallback zapisoval JEDEN ŘÁDEK NA REQUEST a
+     * mazal je až denní cron s dvouhodinovou retencí. MEMORY tabulka má tvrdý
+     * strop `max_heap_table_size` (výchozích 16 MB), takže na produkci narostla na
+     * 31 665 řádků / 15,7 MB a od té chvíle padal každý INSERT na
+     * `1114 table is full`. Limiter běží nad každým requestem → celé API do 500
+     * (/api/auth/session/status, bankovní import, číselníky).
+     *
+     * Počet řádků proto NESMÍ růst s objemem provozu — jeden bucket = jeden řádek.
+     */
+    public function testCounterTableDoesNotGrowWithTraffic(): void
+    {
+        $mw = $this->middleware();
+        $handler = $this->handler();
+
+        for ($i = 0; $i < 25; $i++) {
+            $mw->process($this->loginRequest(), $handler);
+        }
+
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM rate_limit_counters WHERE bucket_key LIKE ?'
         );
         $stmt->execute(['rl:login:ip:%']);
 
-        self::assertSame(3, (int) $stmt->fetchColumn(),
-            '429 odpovědi nesmí zapisovat další řádky');
+        self::assertSame(1, (int) $stmt->fetchColumn(),
+            '25 requestů jednoho bucketu musí držet JEDEN řádek — dřív jich bylo 25');
+    }
+
+    /**
+     * Úklid nesmí viset jen na denním cronu: instalace bez naplánované úlohy jinak
+     * dojede zpátky do plné tabulky. Middleware mete expirované buckety pokaždé,
+     * když zakládá nový — přesně tehdy, když tabulka roste.
+     */
+    public function testExpiredBucketsAreSweptWhenNewBucketAppears(): void
+    {
+        $stale = 'rl:login:ip:__stale_sweep__';
+        $ins = $this->db->pdo()->prepare(
+            'INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at)
+                  VALUES (?, 0, 99, 1)'
+        );
+        $ins->execute([$stale]);
+
+        $mw = $this->middleware();
+        // První request z čisté IP = nový bucket → úklid.
+        $mw->process($this->loginRequest(), $this->handler());
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM rate_limit_counters WHERE bucket_key = ?'
+        );
+        $stmt->execute([$stale]);
+
+        self::assertSame(0, (int) $stmt->fetchColumn(),
+            'Expirovaný bucket musí zmizet při založení nového — bez toho tabulka roste do stropu');
+    }
+
+    /**
+     * Když je tabulka čítačů nedostupná (plná, chybí, spadlá DB), musí limiter
+     * pustit dál. Právě opačné chování — výjimka z INSERTu skrz celý middleware —
+     * proměnilo plnou pomocnou tabulku v HTTP 500 na každém API volání.
+     */
+    public function testFailsOpenWhenCounterTableIsUnavailable(): void
+    {
+        $data = $this->config->all();
+        $data['db']['name'] = 'myucto_nonexistent_ratelimit_db';
+
+        $broken = new RateLimitMiddleware(
+            $this->config,
+            new RedisFactory($this->config),
+            new ResponseFactory(),
+            new IpMatcher(),
+            new Connection(new Config($data, $this->config->dataDir())),
+        );
+
+        $handler = $this->handler();
+        for ($i = 0; $i < 5; $i++) {
+            self::assertSame(200, $broken->process($this->loginRequest(), $handler)->getStatusCode(),
+                'Nedostupný čítač nesmí shodit request — limiter je pomocná vrstva, ne brána');
+        }
+
+        self::assertNull($broken->consume(self::EMAIL_BUCKET, 1, 3600),
+            'Ani consume() nesmí propadnout výjimkou do akce');
     }
 
     // ---------------------------------------------------------------- SEC-03
@@ -386,9 +472,7 @@ final class RateLimitDbFallbackTest extends TestCase
             $mw->process($req, $handler);
         }
 
-        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM rate_limit_counters WHERE bucket_key LIKE ?');
-        $stmt->execute(['rl:login:ip:%']);
-        self::assertSame(3, (int) $stmt->fetchColumn(),
+        self::assertSame(3, $this->hits('rl:login:ip:%'),
             'Všechny varianty musí padnout do login bucketu');
     }
 

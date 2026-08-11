@@ -35,8 +35,10 @@ $report = [];
 $n = $pdo->exec("DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL 24 HOUR");
 $report['login_attempts'] = (int) $n;
 
-// 1b) rate_limit_counters — DB fallback limiteru, nejdelší okno 1h (rezerva 2h)
-$n = $pdo->exec("DELETE FROM rate_limit_counters WHERE created_at < NOW() - INTERVAL 2 HOUR");
+// 1b) rate_limit_counters — DB fallback limiteru. Běžný úklid dělá middleware sám
+// při zakládání nového bucketu (viz migrace 1317); tohle je jen záchranná brzda pro
+// instalace bez provozu. Maže se podle absolutní expirace okna, ne podle stáří řádku.
+$n = $pdo->exec("DELETE FROM rate_limit_counters WHERE expires_at < UNIX_TIMESTAMP()");
 $report['rate_limit_counters'] = (int) $n;
 
 // 2) sessions — TIMESTAMP expires_at porovnáváme s CURRENT_TIMESTAMP, aby

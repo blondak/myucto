@@ -14,10 +14,12 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface as Handler;
+use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
 
 /**
- * Sliding-window rate limiter dle cfg.rate_limits.
+ * Rate limiter dle cfg.rate_limits — pevné okno (Redis INCR+EXPIRE, v DB větvi
+ * zarovnané `window_start`).
  *
  *   login_per_min_per_ip      → 60s window, key = "rl:login:ip:{ip/24}"
  *   forgot_per_hour_per_ip    → 3600s window, key = "rl:forgot:ip:{ip/24}"
@@ -39,12 +41,16 @@ use Slim\Psr7\Factory\ResponseFactory;
  */
 final class RateLimitMiddleware implements MiddlewareInterface
 {
+    /** Nahlásili jsme v tomhle requestu už výpadek DB větve? (jeden log stačí) */
+    private bool $dbFailureLogged = false;
+
     public function __construct(
         private readonly Config $config,
         private readonly RedisFactory $redis,
         private readonly ResponseFactory $responseFactory,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -205,7 +211,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
         // DB fallback: nejdřív INSERT, teprve pak COUNT. V tomhle pořadí se každý
         // souběžný request započítá sám do sebe, takže se přes limit neprotlačí
         // (MEMORY engine je netransakční — spoléháme na pořadí, ne na transakci).
-        $this->dbIncrement($key);
+        $this->dbIncrement($key, $window);
 
         return $this->dbState($key, $window);
     }
@@ -347,13 +353,6 @@ final class RateLimitMiddleware implements MiddlewareInterface
     }
 
     /**
-     * DB fallback čítače — sliding window nad MEMORY tabulkou, stejný vzor jako
-     * BruteForceGuard::check(). `ttl` odvozujeme od nejstaršího záznamu v okně,
-     * aby Retry-After odpovídal skutečnému uvolnění slotu.
-     *
-     * @return array{count:int,ttl:int,redis:bool}
-     */
-    /**
      * Šířka `rate_limit_counters.bucket_key`. Tabulka je ENGINE=MEMORY, kde se
      * VARCHAR paduje na plnou délku, takže sloupec nelze rozšiřovat od oka —
      * platí se za to pamětí u každého řádku.
@@ -377,31 +376,130 @@ final class RateLimitMiddleware implements MiddlewareInterface
         return substr($key, 0, self::DB_KEY_MAX - 41) . ':' . sha1($key);
     }
 
-    private function dbState(string $key, int $window): array
+    /**
+     * Začátek aktuálního okna — zarovnaný na násobek délky okna, aby se na něj
+     * dalo klíčovat. Čas bereme z PHP, ne z DB: `expires_at` i `window_start` tak
+     * pochází z jediných hodin a nezávisí na session timezone MariaDB (dřívější
+     * `created_at >= NOW() - INTERVAL ?` na tomhle rozdílu mohl tiše ujet).
+     */
+    private static function windowStart(int $window): int
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) AS c, COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()), 0) AS age
-               FROM rate_limit_counters
-              WHERE bucket_key = ? AND created_at >= NOW() - INTERVAL ? SECOND'
-        );
-        $stmt->execute([self::dbKey($key), $window]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['c' => 0, 'age' => 0];
+        $window = max(1, $window);
 
-        $ttl = $window - (int) $row['age'];
-
-        return [
-            'count' => (int) $row['c'],
-            'ttl'   => $ttl > 0 ? $ttl : $window,
-            'redis' => false,
-        ];
+        return intdiv(time(), $window) * $window;
     }
 
-    private function dbIncrement(string $key): void
+    /**
+     * DB fallback čítače — jeden řádek na (bucket, okno) s počítadlem `hits`.
+     *
+     * Dřív se zapisoval JEDEN ŘÁDEK NA REQUEST a mazal je až denní cron s dvouhodinovou
+     * retencí. MEMORY tabulka má tvrdý strop `max_heap_table_size` (výchozích 16 MB),
+     * takže na produkci narostla na 31 665 řádků / 15,7 MB a od té chvíle padal každý
+     * INSERT na `1114 table is full`. Protože limiter běží nad každým requestem,
+     * shodila jedna plná pomocná tabulka celé API do 500 (viz migrace 1317).
+     *
+     * `ttl` = zbytek okna, takže Retry-After odpovídá skutečnému uvolnění slotu.
+     *
+     * Při nedostupné DB vrací nulový stav → limiter propustí (fail-open). Shodit
+     * celé API kvůli pomocnému čítači je horší selhání než dočasně nevynucený limit;
+     * hrubou sílu na loginu drží nezávisle BruteForceGuard nad `login_attempts`.
+     *
+     * @return array{count:int,ttl:int,redis:bool}
+     */
+    private function dbState(string $key, int $window): array
+    {
+        $start = self::windowStart($window);
+        $ttl = $start + $window - time();
+        if ($ttl < 1) {
+            $ttl = $window;
+        }
+
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT hits FROM rate_limit_counters WHERE bucket_key = ? AND window_start = ?'
+            );
+            $stmt->execute([self::dbKey($key), $start]);
+            $hits = (int) $stmt->fetchColumn();
+        } catch (\Throwable $e) {
+            $this->dbUnavailable($e);
+
+            return ['count' => 0, 'ttl' => $window, 'redis' => false];
+        }
+
+        return ['count' => $hits, 'ttl' => $ttl, 'redis' => false];
+    }
+
+    private function dbIncrement(string $key, int $window): void
+    {
+        $dbKey = self::dbKey($key);
+        $start = self::windowStart($window);
+
+        try {
+            $inserted = $this->dbUpsert($dbKey, $start, $start + $window);
+        } catch (\Throwable $e) {
+            // Nejpravděpodobnější příčina je plná MEMORY tabulka (1114). Zameť
+            // expirované buckety a zkus zápis ještě jednou — instalace, které
+            // nemají rozběhnutý cron, se tím uzdraví samy.
+            try {
+                $this->dbPruneExpired();
+                $this->dbUpsert($dbKey, $start, $start + $window);
+            } catch (\Throwable $fatal) {
+                $this->dbUnavailable($fatal);
+            }
+
+            return;
+        }
+
+        // Úklid věšíme na ZALOŽENÍ nového bucketu, ne na každý request: přesně
+        // tehdy tabulka roste, takže sweep drží krok s růstem a mimo něj nestojí
+        // nic. Náhodné vzorkování by tuhle záruku nedalo.
+        if ($inserted) {
+            try {
+                $this->dbPruneExpired();
+            } catch (\Throwable $e) {
+                $this->dbUnavailable($e);
+            }
+        }
+    }
+
+    /**
+     * Atomický inkrement čítače okna.
+     *
+     * @return bool true = vznikl nový řádek (nový bucket/okno), false = jen inkrement
+     */
+    private function dbUpsert(string $dbKey, int $windowStart, int $expiresAt): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO rate_limit_counters (bucket_key) VALUES (?)'
+            'INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at)
+                  VALUES (?, ?, 1, ?)
+             ON DUPLICATE KEY UPDATE hits = hits + 1'
         );
-        $stmt->execute([self::dbKey($key)]);
+        $stmt->execute([$dbKey, $windowStart, $expiresAt]);
+
+        // MariaDB vrací 1 za INSERT a 2 za větev ON DUPLICATE KEY UPDATE.
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Buckety, jejichž okno už doběhlo — indexovaný rozsahový DELETE nad `expires_at`. */
+    private function dbPruneExpired(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE FROM rate_limit_counters WHERE expires_at <= ?'
+        );
+        $stmt->execute([time()]);
+    }
+
+    private function dbUnavailable(\Throwable $e): void
+    {
+        if ($this->dbFailureLogged) {
+            return;
+        }
+        $this->dbFailureLogged = true;
+
+        $this->logger?->warning(
+            'Rate limiter: DB fallback selhal, request jede bez limitu.',
+            ['error' => $e->getMessage()],
+        );
     }
 
     /** Public kvůli ForgotPasswordAction — potřebuje stejné /24 (resp. /64) bucketování. */

@@ -116,11 +116,48 @@ final class RedisDegradationTest extends TestCase
             'Bucket lookup musí být indexovaný');
     }
 
+    /**
+     * MEMORY tabulka má tvrdý strop `max_heap_table_size` (16 MB). Model „jeden
+     * řádek na request" ho na produkci vyčerpal (31 665 řádků / 15,7 MB) a plná
+     * tabulka shodila celé API do 500. Čítač proto MUSÍ být agregovaný.
+     */
+    public function testRateLimitCountersAreAggregated(): void
+    {
+        $sql = $this->repoFile('db/migrations/1317_rate_limit_counters_agregace.sql');
+        self::assertStringContainsString('hits', $sql,
+            'Tabulka musí držet čítač, ne řádek na každý request');
+        self::assertStringContainsString('PRIMARY KEY (bucket_key, window_start)', $sql,
+            'Jeden řádek na (bucket, okno) je to, co drží velikost tabulky konečnou');
+
+        $code = $this->src('Middleware/RateLimitMiddleware.php');
+        self::assertStringContainsString('ON DUPLICATE KEY UPDATE hits = hits + 1', $code,
+            'Zápis musí inkrementovat čítač, ne přidávat řádek');
+    }
+
     public function testCleanupPurgesRateLimitCounters(): void
     {
         $code = $this->repoFile('api/bin/cron-cleanup.php');
         self::assertStringContainsString('rate_limit_counters', $code,
             'cron-cleanup musí uklízet rate_limit_counters — MEMORY tabulka jinak roste');
+
+        // Denní cron je jen záchranná brzda — hlavní úklid dělá middleware sám,
+        // jinak instalace bez naplánované úlohy zaplní tabulku znovu.
+        $mw = $this->src('Middleware/RateLimitMiddleware.php');
+        self::assertStringContainsString('dbPruneExpired', $mw,
+            'Limiter musí mazat expirované buckety za běhu, ne spoléhat na cron');
+    }
+
+    /**
+     * Plná/nedostupná tabulka čítačů nesmí shodit request — přesně tohle udělalo
+     * z pomocné MEMORY tabulky výpadek celého API.
+     */
+    public function testRateLimitFailsOpenOnDatabaseError(): void
+    {
+        $code = $this->src('Middleware/RateLimitMiddleware.php');
+        self::assertStringContainsString('dbUnavailable', $code,
+            'DB větev limiteru musí mít fail-open cestu');
+        self::assertMatchesRegularExpression('/catch \(\\\\Throwable/', $code,
+            'Chyba zápisu čítače se musí zachytit, ne propadnout do 500');
     }
 
     // ---- §1.4 — Redis nesmí běžet bez limitu paměti ---------------------------
