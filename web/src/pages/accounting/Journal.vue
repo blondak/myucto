@@ -7,6 +7,7 @@ import {
   type JournalEntry,
   type JournalEntryDetail,
   type AccountingPeriod,
+  type ChartAccount,
 } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -61,6 +62,18 @@ const filters = reactive({
   amount_from: '' as number | '',
   amount_to: '' as number | '',
 })
+
+// Účtová osnova pro našeptávání rozsahu účtu ve filtru. Datalist je stejný vzor,
+// jaký používá editor zápisu — uživatel může dál psát i kód, který v osnově není
+// (třeba zrušenou analytiku), filtr je textový rozsah, ne výběr z číselníku.
+const accounts = ref<ChartAccount[]>([])
+const activeAccounts = computed(() =>
+  accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
+
+function accountName(code: string): string {
+  if (!code) return ''
+  return accounts.value.find(a => a.account_code === code)?.name ?? ''
+}
 
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'bank', 'cash',
@@ -353,6 +366,8 @@ function downloadBlob(blob: Blob, filename: string) {
 
 onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
+  accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
   // Předvyplnění filtrů z query (drill-down z uzávěrky / sestav).
   const qPeriod = Number(route.query.period_id || 0)
   if (qPeriod > 0) filters.period_id = qPeriod
@@ -696,13 +711,21 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
-          <input v-model.trim="filters.account_from" type="text" @change="applyFilters"
+          <input v-model.trim="filters.account_from" type="text" list="journal-coa" @change="applyFilters"
+            :title="accountName(filters.account_from) || undefined"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+          <div v-if="accountName(filters.account_from)" class="mt-1 text-xs text-neutral-500 truncate">
+            {{ accountName(filters.account_from) }}
+          </div>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_to') }}</label>
-          <input v-model.trim="filters.account_to" type="text" @change="applyFilters"
+          <input v-model.trim="filters.account_to" type="text" list="journal-coa" @change="applyFilters"
+            :title="accountName(filters.account_to) || undefined"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+          <div v-if="accountName(filters.account_to)" class="mt-1 text-xs text-neutral-500 truncate">
+            {{ accountName(filters.account_to) }}
+          </div>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_amount_from') }}</label>
@@ -888,5 +911,11 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
+
+    <datalist id="journal-coa">
+      <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
+        {{ a.account_code }} — {{ a.name }}
+      </option>
+    </datalist>
   </div>
 </template>
