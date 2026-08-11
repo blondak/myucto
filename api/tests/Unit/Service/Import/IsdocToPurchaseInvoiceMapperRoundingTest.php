@@ -130,6 +130,16 @@ final class IsdocToPurchaseInvoiceMapperRoundingTest extends TestCase
         $this->invoke(42, 1, ['payable_amount' => 1000.00], false);
     }
 
+    // ── normalizeIc (BUG 2, vendor bugreport 2026-08-06) — stejná zero-pad
+    // ochrana jako u AI cesty (AiPdfExtractorUnitTest), aby buyer.ic vs tenant.ic
+    // guard neodmítl legitimní ISDOC doklad s IČO začínajícím nulou.
+
+    public function testNormalizeIc_padsLeadingZero(): void
+    {
+        $ref = new \ReflectionMethod($this->mapper, 'normalizeIc');
+        self::assertSame('01234567', $ref->invoke($this->mapper, '1234567'));
+    }
+
     private function invoke(int $id, int $supplierId, array $parsed, bool $isCredit): void
     {
         $ref = new \ReflectionMethod($this->mapper, 'applyRoundingFromPayable');

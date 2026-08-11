@@ -385,10 +385,14 @@ final class AiIssuedInvoiceExtractor
         return substr($clean, 0, 20);
     }
 
+    /**
+     * Zero-pad na 8 míst (kanonický tvar IČO) — {@see \MyInvoice\Support\CompanyIdNormalizer}.
+     * Stejná třída dokladů (AI extrakce) je stejně náchylná ke ztrátě úvodní nuly
+     * IČO jako přijatá strana (BUG 2, vendor bugreport 2026-08-06).
+     */
     private function normalizeIc(string $ic): ?string
     {
-        $digits = preg_replace('/\D/', '', $ic) ?? '';
-        return $digits !== '' ? $digits : null;
+        return \MyInvoice\Support\CompanyIdNormalizer::ic($ic);
     }
 
     private function fetchTenantIc(int $supplierId): ?string

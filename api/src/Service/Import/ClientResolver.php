@@ -78,10 +78,12 @@ final class ClientResolver
     {
         $ic = $this->normalizeIc($parsed['ic'] ?? null);
 
-        // 1a. Lookup podle (supplier_id, ic) — primární klíč pro CZ entity
+        // 1a. Lookup podle (supplier_id, ic) — primární klíč pro CZ entity. Uložené
+        // IČO normalizujeme stejně jako vstup (LPAD na 8 míst) — starší karty
+        // založené před opravou BUG 2/FR 2 mohly mít IČO uložené bez úvodní nuly.
         if ($ic !== null) {
             $stmt = $this->db->pdo()->prepare(
-                'SELECT id FROM clients WHERE supplier_id = ? AND ic = ? LIMIT 1'
+                "SELECT id FROM clients WHERE supplier_id = ? AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ? LIMIT 1"
             );
             $stmt->execute([$supplierId, $ic]);
             $existing = $stmt->fetchColumn();
@@ -90,13 +92,17 @@ final class ClientResolver
             }
         }
 
-        // 1b. Lookup podle DIČ (pro EU dodavatele bez CZ IČO — Anthropic PBC, Stripe, ...)
-        $dic = trim((string) ($parsed['dic'] ?? ''));
-        if ($ic === null && $dic !== '') {
+        // 1b. Lookup podle DIČ (pro EU dodavatele bez CZ IČO — Anthropic PBC, Stripe, ...).
+        // Porovnání normalizované na obou stranách (bez mezer/pomlček, velká
+        // písmena) — jinak stejné DIČ zapsané jednou s mezerou a podruhé bez ní
+        // založí duplicitní kartu (FR 2, vendor bugreport 2026-08-06).
+        $dicRaw = trim((string) ($parsed['dic'] ?? ''));
+        $dicNormalized = \MyInvoice\Support\CompanyIdNormalizer::dic($dicRaw);
+        if ($ic === null && $dicNormalized !== null) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id FROM clients WHERE supplier_id = ? AND dic = ? LIMIT 1"
+                "SELECT id FROM clients WHERE supplier_id = ? AND UPPER(REGEXP_REPLACE(dic, '[^A-Za-z0-9]', '')) = ? LIMIT 1"
             );
-            $stmt->execute([$supplierId, $dic]);
+            $stmt->execute([$supplierId, $dicNormalized]);
             $existing = $stmt->fetchColumn();
             if ($existing !== false) {
                 return ['id' => (int) $existing, 'created' => false];
@@ -106,7 +112,7 @@ final class ClientResolver
         // 1c. Last resort — exact company_name match (pro zahraniční bez IČO i DIČ).
         // Bez tohoto by AI/inbox scan vytvořila duplikát pro každou fakturu.
         $companyName = trim((string) ($parsed['company_name'] ?? ''));
-        if ($ic === null && $dic === '' && $companyName !== '') {
+        if ($ic === null && $dicRaw === '' && $companyName !== '') {
             $stmt = $this->db->pdo()->prepare(
                 "SELECT id FROM clients
                   WHERE supplier_id = ?
@@ -177,10 +183,14 @@ final class ClientResolver
         return ['id' => $id, 'created' => true];
     }
 
+    /**
+     * Zero-pad na 8 míst (kanonický tvar IČO) — {@see \MyInvoice\Support\CompanyIdNormalizer}.
+     * Bez toho by AI/ISDOC import u firmy s IČO začínajícím nulou nenašel existující
+     * kartu (lookup podle (supplier_id, ic) v resolveAny() níže) a založil duplicitní
+     * kartu dodavatele (FR 2, vendor bugreport 2026-08-06).
+     */
     private function normalizeIc(?string $ic): ?string
     {
-        if ($ic === null) return null;
-        $clean = preg_replace('/\D/', '', $ic) ?? '';
-        return $clean !== '' ? $clean : null;
+        return \MyInvoice\Support\CompanyIdNormalizer::ic($ic);
     }
 }

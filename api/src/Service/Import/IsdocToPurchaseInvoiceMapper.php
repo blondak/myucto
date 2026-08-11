@@ -238,10 +238,15 @@ final class IsdocToPurchaseInvoiceMapper
         return $this->normalizeIc((string) $ic);
     }
 
+    /**
+     * Zero-pad na 8 míst (kanonický tvar IČO) — {@see \MyInvoice\Support\CompanyIdNormalizer}.
+     * ISDOC je strukturované, ale zdrojová data dodavatele mohou IČO uvádět bez
+     * úvodní nuly stejně jako AI extrakce (BUG 2, vendor bugreport 2026-08-06) —
+     * srovnání s tenant IČO musí být robustní i tady.
+     */
     private function normalizeIc(string $ic): ?string
     {
-        $clean = preg_replace('/\D/', '', $ic) ?? '';
-        return $clean !== '' ? $clean : null;
+        return \MyInvoice\Support\CompanyIdNormalizer::ic($ic);
     }
 
     /**

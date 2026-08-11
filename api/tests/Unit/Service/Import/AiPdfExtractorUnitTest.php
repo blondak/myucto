@@ -947,6 +947,32 @@ final class AiPdfExtractorUnitTest extends TestCase
         self::assertArrayNotHasKey('tax_date', $out);
     }
 
+    // ── normalizeIc (BUG 2, vendor bugreport 2026-08-06) ────────────────────
+    // Guard „Faktura adresovaná jinému plátci" (extractAndCreate) porovnává
+    // customer.ic vs tenant.ic jako řetězec po normalizaci. AI extrakce u IČO
+    // začínajícího nulou vrátí jen 7 číslic — bez zero-padu na 8 míst by dvě
+    // stejná IČO (`01234567` vs `1234567`) vypadala jako neshoda a guard by
+    // legitimní doklad odmítl.
+
+    public function testNormalizeIc_padsLeadingZero(): void
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'normalizeIc');
+        self::assertSame('01234567', $ref->invoke($this->extractor, '1234567'));
+        self::assertSame('01234567', $ref->invoke($this->extractor, '01234567'));
+    }
+
+    public function testNormalizeIc_regularEightDigitIcUnchanged(): void
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'normalizeIc');
+        self::assertSame('21370362', $ref->invoke($this->extractor, '21370362'));
+    }
+
+    public function testNormalizeIc_emptyReturnsNull(): void
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'normalizeIc');
+        self::assertNull($ref->invoke($this->extractor, ''));
+    }
+
     // ── Helper: reflection invokers ────────────────────────────────────────
 
     private function invokeResolvePricesInclVat(array $data, string $documentKind): bool

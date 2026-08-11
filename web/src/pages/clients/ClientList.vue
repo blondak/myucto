@@ -3,7 +3,8 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { clientsApi, type Client } from '@/api/clients'
+import { clientsApi, type Client, type ClientDuplicateGroup } from '@/api/clients'
+import Modal from '@/components/ui/Modal.vue'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { formatMoney, formatDate, paymentDueLabel } from '@/composables/useFormat'
 import { useSupplierStore } from '@/stores/supplier'
@@ -68,6 +69,25 @@ function clearFiltersAndSearch() {
 const roleCounts = ref<{ all: number; customers: number; vendors: number }>({
   all: 0, customers: 0, vendors: 0,
 })
+
+// FR 2 (vendor bugreport 2026-08-06) — report existujících duplicit (stejné IČO/DIČ
+// po normalizaci). Nezávislé na aktuálním filtru/stránkování seznamu — počítá se
+// přes všechny aktivní karty tenanta, banner se zobrazí jen když nějaké najde.
+const duplicateGroups = ref<ClientDuplicateGroup[]>([])
+const showDuplicatesModal = ref(false)
+async function loadDuplicates() {
+  try {
+    const r = await clientsApi.duplicates()
+    duplicateGroups.value = r.groups
+  } catch {
+    duplicateGroups.value = []
+  }
+}
+function duplicateGroupLabel(g: ClientDuplicateGroup): string {
+  return g.key_type === 'ic'
+    ? t('client.duplicates.group_by_ic', { value: g.key_value })
+    : t('client.duplicates.group_by_dic', { value: g.key_value })
+}
 
 async function load(reset = true) {
   if (reset) {
@@ -168,6 +188,7 @@ function onSortToggle(key: string) {
 
 onMounted(async () => {
   expenseCategories.value = await expenseCategoriesApi.list(false).catch(() => [])
+  loadDuplicates()
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   load(true)
 })
@@ -219,6 +240,36 @@ function formatPaymentDue(c: Client): string {
         {{ roleFilter === 'vendors' ? t('purchase_invoice.new_vendor') : t('client.new') }}
       </RouterLink>
     </div>
+
+    <!-- FR 2 — report existujících duplicit (stejné IČO/DIČ v jiném zápisu). -->
+    <div v-if="duplicateGroups.length" class="mb-4 px-4 py-2.5 bg-warning-50 border border-warning-200 rounded-lg flex flex-wrap items-center gap-2 text-sm">
+      <svg class="w-4 h-4 shrink-0 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+      </svg>
+      <span class="text-warning-800 font-medium">{{ t('client.duplicates.banner_title', { count: duplicateGroups.length }) }}</span>
+      <span class="text-warning-700">{{ t('client.duplicates.banner_hint') }}</span>
+      <button type="button" @click="showDuplicatesModal = true"
+        class="cursor-pointer ml-auto shrink-0 text-warning-800 font-medium underline hover:no-underline whitespace-nowrap">
+        {{ t('client.duplicates.view_link') }}
+      </button>
+    </div>
+
+    <Modal v-if="showDuplicatesModal" :title="t('client.duplicates.modal_title')" @close="showDuplicatesModal = false">
+      <div v-if="!duplicateGroups.length" class="text-sm text-neutral-500">{{ t('client.duplicates.no_duplicates') }}</div>
+      <div v-else class="space-y-4">
+        <div v-for="(g, gi) in duplicateGroups" :key="gi" class="border border-neutral-200 rounded-lg p-3">
+          <div class="text-sm font-medium text-neutral-700 mb-2">{{ duplicateGroupLabel(g) }}</div>
+          <ul class="space-y-1">
+            <li v-for="c in g.clients" :key="c.id" class="flex items-center justify-between gap-2 text-sm">
+              <span class="truncate">{{ c.company_name }}</span>
+              <RouterLink :to="`/clients/${c.id}`" class="shrink-0 text-primary-600 hover:underline" @click="showDuplicatesModal = false">
+                {{ t('client.duplicates.open_card') }}
+              </RouterLink>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </Modal>
 
     <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
          osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->

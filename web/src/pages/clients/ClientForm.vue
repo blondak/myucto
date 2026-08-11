@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { clientsApi, TAX_NUMBER_LABELS, type ClientPayload, type Client, type ClientEmailContact, type EmailContactUsageCode, type EmailContactRecipient } from '@/api/clients'
+import { clientsApi, TAX_NUMBER_LABELS, type ClientPayload, type Client, type ClientEmailContact, type EmailContactUsageCode, type EmailContactRecipient, type ClientDuplicateMatch } from '@/api/clients'
 import { PAYMENT_METHODS } from '@/api/invoices'
 import { codebooksApi, type Country, type Currency } from '@/api/codebooks'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
@@ -408,6 +408,17 @@ async function checkVies() {
   }
 }
 
+/**
+ * FR 2 (vendor bugreport 2026-08-06) — non-blocking upozornění, že karta se stejným
+ * IČO/DIČ už existuje (typicky vznikne z mezery v DIČ nebo chybějící úvodní nuly
+ * v IČO). Neblokuje uložení — jen dá obsluze šanci rozpoznat duplicitu hned.
+ */
+function warnDuplicateCandidates(candidates?: ClientDuplicateMatch[]) {
+  for (const c of candidates ?? []) {
+    toast.warning(t('client.duplicate_candidate_warning', { name: c.company_name }))
+  }
+}
+
 async function submit() {
   if (blockDemoMutation()) return
   submitting.value = true
@@ -441,6 +452,7 @@ async function submit() {
       for (const code of updated._warnings ?? []) {
         toast.warning(t(`client.warning.${code}`))
       }
+      warnDuplicateCandidates(updated._duplicate_candidates)
       if (props.embedded) { emit('created', updated); return }
       router.push(`/clients/${clientId.value}`)
     } else {
@@ -448,6 +460,7 @@ async function submit() {
       for (const code of created._warnings ?? []) {
         toast.warning(t(`client.warning.${code}`))
       }
+      warnDuplicateCandidates(created._duplicate_candidates)
       if (props.embedded) { emit('created', created); return }
       router.push(`/clients/${created.id}`)
     }

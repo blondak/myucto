@@ -1560,10 +1560,14 @@ final class AiPdfExtractor
         return $s === '' ? null : $s;
     }
 
+    /**
+     * Zero-pad na 8 míst (kanonický tvar IČO) — {@see \MyInvoice\Support\CompanyIdNormalizer}.
+     * Bez toho AI extrakce u IČO začínajícího nulou vrátí jen 7 číslic a cross-tenant
+     * guard níže legitimní doklad mylně odmítne (BUG 2, vendor bugreport 2026-08-06).
+     */
     private function normalizeIc(string $ic): ?string
     {
-        $clean = preg_replace('/\D/', '', $ic) ?? '';
-        return $clean !== '' ? $clean : null;
+        return \MyInvoice\Support\CompanyIdNormalizer::ic($ic);
     }
 
     private function resolveCurrencyId(string $code, int $supplierId): int

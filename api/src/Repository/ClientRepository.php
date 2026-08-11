@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Client\VendorDuplicateFinder;
 use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -299,6 +300,45 @@ final class ClientRepository
             $this->resolveBrandingProfileId($data['default_branding_profile_id'] ?? null, $supplierId),
         ]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * FR 2 (vendor bugreport 2026-08-06) — non-blocking guard při zakládání/editaci
+     * karty: existuje už v tomtéž tenantovi karta se stejným IČO/DIČ po normalizaci
+     * (bez mezer, bez úvodní nuly)? `$excludeClientId` vyřadí editovanou kartu samotnou.
+     *
+     * @return list<array{id:int, company_name:string, match_field:'ic'|'dic'}>
+     */
+    public function findDuplicateCandidates(int $supplierId, ?string $ic, ?string $dic, ?int $excludeClientId = null): array
+    {
+        if (($ic === null || trim($ic) === '') && ($dic === null || trim($dic) === '')) {
+            return [];
+        }
+        return VendorDuplicateFinder::findMatches($this->activeIdentityRows($supplierId), $ic, $dic, $excludeClientId);
+    }
+
+    /**
+     * FR 2 — report existujících duplicit pro přehled dodavatelů: skupiny karet
+     * tenanta se shodným normalizovaným IČO nebo DIČ (typicky vzniklé PŘED opravou
+     * BUG 2 — mezera v DIČ, chybějící úvodní nula IČO).
+     *
+     * @return list<array{key_type:'ic'|'dic', key_value:string, clients:list<array{id:int, company_name:string, ic:?string, dic:?string}>}>
+     */
+    public function findDuplicateGroups(int $supplierId): array
+    {
+        return VendorDuplicateFinder::findGroups($this->activeIdentityRows($supplierId));
+    }
+
+    /**
+     * @return list<array{id:int, company_name:string, ic:?string, dic:?string}>
+     */
+    private function activeIdentityRows(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, company_name, ic, dic FROM clients WHERE supplier_id = ? AND archived_at IS NULL'
+        );
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**

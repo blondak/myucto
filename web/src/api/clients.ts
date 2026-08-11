@@ -118,6 +118,22 @@ export interface Client {
   updated_at?: string
   /** Jen v odpovědi POST/PUT — non-blocking varování (IČO mod 11 / DIČ formát — audit 2026-07). */
   _warnings?: string[]
+  /** Jen v odpovědi POST/PUT, jen když existuje — jiná karta se stejným IČO/DIČ po normalizaci (FR 2, 2026-08-06). */
+  _duplicate_candidates?: ClientDuplicateMatch[]
+}
+
+/** Jiná karta tenanta se stejným normalizovaným IČO nebo DIČ (FR 2, vendor bugreport 2026-08-06). */
+export interface ClientDuplicateMatch {
+  id: number
+  company_name: string
+  match_field: 'ic' | 'dic'
+}
+
+/** Skupina karet se shodným IČO/DIČ po normalizaci — report v přehledu dodavatelů (FR 2). */
+export interface ClientDuplicateGroup {
+  key_type: 'ic' | 'dic'
+  key_value: string
+  clients: Array<{ id: number; company_name: string; ic: string | null; dic: string | null }>
 }
 
 export interface ProjectSummary {
@@ -293,6 +309,10 @@ export const clientsApi = {
       .then((r) => r.data),
 
   get: (id: number) => api.get<Client>(`/clients/${id}`).then((r) => r.data),
+
+  /** Report existujících duplicitních karet (stejné IČO/DIČ po normalizaci) — FR 2. */
+  duplicates: () =>
+    api.get<{ groups: ClientDuplicateGroup[]; count: number }>('/clients/duplicates').then((r) => r.data),
 
   /** Online ověření plátcovství DPH dodavatele (ARES dle IČO / VIES dle DIČ); uloží na klienta. */
   getVatStatus: (id: number) =>

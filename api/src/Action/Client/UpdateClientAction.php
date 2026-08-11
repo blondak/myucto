@@ -87,6 +87,13 @@ final class UpdateClientAction
             $client['_warnings'] = $warnings;
         }
 
+        // FR 2 (vendor bugreport 2026-08-06) — non-blocking upozornění na JINOU kartu
+        // se stejným IČO/DIČ po normalizaci (sama editovaná karta je vyřazená).
+        $duplicates = $this->repo->findDuplicateCandidates($supplierId, $body['ic'] ?? null, $body['dic'] ?? null, $id);
+        if (!empty($duplicates)) {
+            $client['_duplicate_candidates'] = $duplicates;
+        }
+
         return Json::ok($response, $client);
     }
 }

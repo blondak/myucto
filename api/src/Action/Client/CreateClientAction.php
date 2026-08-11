@@ -85,6 +85,15 @@ final class CreateClientAction
             $client['_warnings'] = $warnings;
         }
 
+        // FR 2 (vendor bugreport 2026-08-06) — non-blocking upozornění na kartu se
+        // stejným IČO/DIČ po normalizaci. Nezablokuje založení (může jít o vědomý
+        // duplicitní záznam), ale uživatel dostane šanci to zjistit hned, ne až
+        // z rozpadlého salda.
+        $duplicates = $this->repo->findDuplicateCandidates($supplierId, $body['ic'] ?? null, $body['dic'] ?? null);
+        if (!empty($duplicates)) {
+            $client['_duplicate_candidates'] = $duplicates;
+        }
+
         return Json::ok($response, $client, 201);
     }
 }
