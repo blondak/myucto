@@ -431,11 +431,23 @@ async function onFileSelected(e: Event) {
       }
     }
   }
+  // #19: `duplicate=true` = celý soubor (file_hash) je znovunahraný — očekávaná
+  // duplicita, klidně jen do `duplicateCount` v souhrnu/banneru. Naproti tomu `warnings`
+  // s kódem transactions_skipped_as_duplicate znamená JINAK NOVÝ výpis, u kterého
+  // se ale část pohybů shodovala s už evidovanými a nezaložila se — to je podezřelé
+  // (typicky se to stane u tiše zahozených pohybů, viz oprava 6d09abe6) a nesmí to
+  // zůstat jen v odpovědi API / activity_logu.
   let attachedCount = 0
+  let skippedDuplicateCount = 0
   for (const r of results) {
     if (r.duplicate) duplicateCount++
-    else if (r.attached_to_existing) { attachedCount++; lastNonDuplicate = r }
-    else { okCount++; lastNonDuplicate = r }
+    else {
+      if (r.attached_to_existing) { attachedCount++; lastNonDuplicate = r }
+      else { okCount++; lastNonDuplicate = r }
+      for (const w of r.warnings ?? []) {
+        if (w.code === 'transactions_skipped_as_duplicate') skippedDuplicateCount += w.skipped ?? 0
+      }
+    }
   }
 
   await load()
@@ -446,9 +458,18 @@ async function onFileSelected(e: Event) {
     // PDF k už existujícímu (GPC) výpisu se jen přiložilo — dej to najevo, ať to
     // uživatel nečte jako „import se nepovedl, transakcí je nula".
     if (attachedCount > 0) toast.success(t('bank.pdf_attached_to_existing'))
+    const skippedWarning = lastNonDuplicate.warnings?.find(w => w.code === 'transactions_skipped_as_duplicate')
+    if (skippedWarning) {
+      toast.warning(t('bank.warning.transactions_skipped_as_duplicate', {
+        parsed: skippedWarning.parsed ?? lastNonDuplicate.parsed_transactions ?? 0,
+        inserted: skippedWarning.inserted ?? lastNonDuplicate.transactions,
+        skipped: skippedWarning.skipped ?? lastNonDuplicate.skipped_duplicates ?? 0,
+      }))
+    }
     router.push(`/bank/${lastNonDuplicate.statement_id}`)
   } else {
-    // Batch mode: souhrnný report
+    // Batch mode: souhrnný report — počet přeskočených duplicit se do jednořádkového
+    // souhrnu NEmíchá (bylo by to zase tiché), jde jako samostatné varování.
     if (errorCount > 0) {
       error.value = t('bank.upload_batch_error', { ok: okCount, dup: duplicateCount, err: errorCount })
         + (errors.length > 0 ? '\n' + errors.slice(0, 5).join('\n') : '')
@@ -457,6 +478,9 @@ async function onFileSelected(e: Event) {
         t('bank.upload_batch_done', { ok: okCount, dup: duplicateCount })
         + (attachedCount > 0 ? ' ' + t('bank.upload_batch_attached', { n: attachedCount }) : ''),
       )
+    }
+    if (skippedDuplicateCount > 0) {
+      toast.warning(t('bank.warning.transactions_skipped_as_duplicate_batch', { count: skippedDuplicateCount }))
     }
   }
 

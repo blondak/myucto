@@ -219,14 +219,38 @@ export interface BankTransactionsParams {
   posting_status?: PostingFilter | ''
 }
 
+/**
+ * Varování z importu výpisu — dnes jen jeden kód: soubor obsahoval pohyby, které
+ * se shodují (fingerprint) s už evidovanými, takže se nezaložily. `parsed/inserted/
+ * skipped` jsou přesná čísla ze StatementImporter, FE si z nich sám poskládá hlášku
+ * (viz `bank.warning.transactions_skipped_as_duplicate` v i18n) — `message` je
+ * jen český text pro activity_log, na UI se nepoužívá (chybí EN varianta).
+ */
+export interface ImportWarning {
+  code: 'transactions_skipped_as_duplicate'
+  message?: string
+  parsed?: number
+  inserted?: number
+  skipped?: number
+}
+
 export interface ImportResult {
   statement_id: number
   transactions: number
   matched: number
+  /** Celý soubor (file_hash) už byl dřív naimportovaný — očekávaná duplicita při
+   *  opětovném nahrání téhož výpisu, nic se nezaložilo. Klidné hlášení. */
   duplicate: boolean
   /** PDF patřilo k už existujícímu výpisu (typicky GPC) — jen se k němu přiložilo. */
   attached_to_existing?: boolean
   pdf_name?: string
+  /** Počet řádků 075 v souboru (i když je `duplicate` a nic se nezaložilo). */
+  parsed_transactions?: number
+  /** Počet pohybů přeskočených jako duplicita UVNITŘ jinak nového výpisu (viz `warnings`). */
+  skipped_duplicates?: number
+  /** Neprázdné jen když `skipped_duplicates > 0` a výpis NENÍ celý duplicitní —
+   *  to je podezřelé (přeskočené pohyby v jinak novém souboru), ne očekávaná duplicita. */
+  warnings?: ImportWarning[]
 }
 
 /** Kandidát účtu při shodném čísle ve více měnách nebo bankách (#167/#206). */

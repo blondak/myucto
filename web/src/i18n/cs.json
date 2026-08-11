@@ -4695,6 +4695,7 @@
       "disposed": "Karta vyřazena.",
       "restore": "Vrátit do užívání",
       "restored": "Karta vrácena do užívání.",
+      "already_settled": "Karta už není v užívání — je vyřazená nebo prodaná.",
       "status_sold": "Prodáno",
       "sell": "Prodat",
       "sell_hint": "Prodej karty „{name}“. Prodej je běžná vydaná faktura (výnos 602/604 + DPH); z karty se nic neúčtuje — jen se propojí s dokladem prodeje.",
@@ -5810,7 +5811,12 @@
       "stock_card": "Skladová karta",
       "stock_card_placeholder": "bez karty",
       "remove": "Smazat řádek",
-      "empty": "Žádné položky — přidej alespoň jednu pro výpočet souhrnu."
+      "empty": "Žádné položky — přidej alespoň jednu pro výpočet souhrnu.",
+      "small_asset_sell": "Vyřadit prodejem"
+    },
+    "unsettled_notice": {
+      "title": "Nespárovaná záloha",
+      "open_candidate": "Otevřít fakturu"
     },
     "totals": {
       "without_vat": "Celkem bez DPH",
@@ -8420,6 +8426,10 @@
     "upload_batch_error": "Hromadný upload: {ok} importováno, {dup} duplicit, {err} chyb.",
     "upload_batch_attached": "{n}× PDF přiloženo k existujícímu výpisu.",
     "pdf_attached_to_existing": "Výpis už byl v systému z GPC — PDF se k němu přiložilo.",
+    "warning": {
+      "transactions_skipped_as_duplicate": "Ve výpisu bylo {parsed} pohybů, založeno {inserted}. {skipped} pohybů se shoduje s už evidovanými (překrývající se výpis) a nebylo založeno — zkontroluj prosím, že jde skutečně o duplicity.",
+      "transactions_skipped_as_duplicate_batch": "Z nahraných výpisů bylo přeskočeno {count} pohybů jako duplicity s už evidovanými — zkontroluj prosím, že jde skutečně o duplicity."
+    },
     "choose_account_title": "Vyberte bankovní účet",
     "choose_account_hint": "Soubor „{file}\" odpovídá číslu účtu vedenému ve více měnách nebo bankách. Výpis účet jednoznačně neurčuje — zvolte cílový účet.",
     "choose_account_confirm": "Importovat",
@@ -10385,10 +10395,12 @@
     "health_overdue_and_failing": "Stáří + selhává",
     "health_never_ran": "Neběželo",
     "health_idle": "Nemá práci",
+    "health_pending": "Čeká na první běh",
     "tooltip_overdue": "Poslední úspěšný běh je starší než {hours} h.",
     "tooltip_failing": "Poslední běh skončil chybou.",
     "tooltip_never_ran": "Skript nikdy neběžel — pravděpodobně není naplánovaný v crontab / Task Scheduleru.",
     "tooltip_idle": "Úloha se spouští jen když má co dělat, a teď nemá — proto poslední běh stárne. Že plánování funguje, hlídá {script}.",
+    "tooltip_pending": "Instalace je nová a tahle úloha ještě nestihla ani jednu periodu ({hours} h) — zatím nejde o problém.",
     "freq_daily_0030": "denně v 00:30",
     "freq_daily_0200": "denně v 02:00",
     "freq_daily_0230": "denně v 02:30",

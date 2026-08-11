@@ -1,0 +1,212 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { BankStatementPage, ImportResult } from '@/api/bank'
+
+// #19: dnes se v BE opravila tichá ztráta pohybů při GPC importu (commit 6d09abe6) —
+// `/bank-statements/upload` teď vrací `parsed_transactions`/`skipped_duplicates`/
+// `warnings[]`, ale FE to dřív ignoroval. Testy ověřují, že se to dotáhlo do UI a že
+// jde rozlišit dva různé případy:
+//   - celý soubor je znovunahraný (duplicate=true) → klidné, žádné varování navíc,
+//   - jinak nový výpis, ale část pohybů uvnitř se s něčím shoduje a přeskočila se
+//     (warnings: transactions_skipped_as_duplicate) → musí to být toast.warning,
+//     ne jen tichá součást jednořádkového souhrnu.
+
+const m = vi.hoisted(() => ({
+  list: vi.fn(),
+  upload: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
+  toastError: vi.fn(),
+  push: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: m.push, replace: vi.fn() }),
+  useRoute: () => ({ query: {} }),
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+}))
+
+vi.mock('vue-i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-i18n')>()
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, unknown>) =>
+        params ? `${key}:${JSON.stringify(params)}` : key,
+      tm: () => [],
+      rt: (v: unknown) => v,
+      locale: { value: 'cs' },
+    }),
+  }
+})
+
+vi.mock('@/api/bank', () => ({
+  bankApi: {
+    list: m.list,
+    upload: m.upload,
+    importPdf: vi.fn(),
+    scan: vi.fn(),
+    delete: vi.fn(),
+    downloadUrl: () => '',
+    pdfUrl: () => '',
+  },
+}))
+
+vi.mock('@/api/clients', () => ({
+  clientsApi: { list: vi.fn().mockResolvedValue({ data: [], meta: { pages: 1 } }) },
+}))
+
+vi.mock('@/api/errors', () => ({
+  apiErrorMessage: (e: unknown) => String((e as { message?: string })?.message ?? e),
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({
+    success: m.toastSuccess,
+    warning: m.toastWarning,
+    error: m.toastError,
+    info: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    canWrite: () => true,
+    isSuperadmin: false,
+    hasCommercialFeatures: false,
+  }),
+}))
+
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: null }),
+}))
+
+vi.mock('@/composables/useSavedFilters', () => ({
+  useSavedFilters: () => ({
+    filters: { value: [] },
+    activeId: { value: null },
+    clearActive: vi.fn(),
+    apply: vi.fn(),
+    applyDefaultIfAny: vi.fn().mockResolvedValue(false),
+  }),
+  savedFilterTone: () => 'neutral',
+}))
+
+import StatementList from '@/pages/bank/StatementList.vue'
+
+const stubs = {
+  FilterBar: true,
+  SavedFiltersMenu: true,
+  EmptyState: true,
+}
+
+function emptyPage(): BankStatementPage {
+  return { items: [], total: 0, page: 1, limit: 50, years: [], accounts: [], scan_configured: false }
+}
+
+function gpcFile(name = 'vypis.gpc'): File {
+  return new File(['some gpc content'], name, { type: 'text/plain' })
+}
+
+async function selectFiles(wrapper: ReturnType<typeof mount>, files: File[]) {
+  const input = wrapper.get('input[type="file"]')
+  Object.defineProperty(input.element, 'files', { configurable: true, value: files })
+  await input.trigger('change')
+  await flushPromises()
+}
+
+describe('StatementList.vue — varování z importu bankovního výpisu (#19)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.list.mockResolvedValue(emptyPage())
+  })
+
+  it('jinak nový výpis s přeskočenými duplicitami uvnitř → toast.warning s přesnými čísly, ne tichý souhrn', async () => {
+    const result: ImportResult = {
+      statement_id: 42,
+      transactions: 7,
+      matched: 3,
+      duplicate: false,
+      parsed_transactions: 10,
+      skipped_duplicates: 3,
+      warnings: [{
+        code: 'transactions_skipped_as_duplicate',
+        message: 'Soubor obsahuje 10 pohybů, založeno 7. 3 pohybů se shoduje s už evidovanými a nebylo založeno.',
+        parsed: 10,
+        inserted: 7,
+        skipped: 3,
+      }],
+    }
+    m.upload.mockResolvedValue(result)
+
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    await selectFiles(wrapper, [gpcFile()])
+
+    expect(m.upload).toHaveBeenCalledOnce()
+    expect(m.toastWarning).toHaveBeenCalledWith(
+      'bank.warning.transactions_skipped_as_duplicate:' + JSON.stringify({ parsed: 10, inserted: 7, skipped: 3 }),
+    )
+    // Single-file redirect na detail zůstává zachovaný i s varováním navíc.
+    expect(m.push).toHaveBeenCalledWith('/bank/42')
+  })
+
+  it('znovunahraný TÝŽ výpis (duplicate=true) → žádné toast.warning navíc, jen klidný souhrn', async () => {
+    const result: ImportResult = {
+      statement_id: 42,
+      transactions: 0,
+      matched: 0,
+      duplicate: true,
+      parsed_transactions: 10,
+      skipped_duplicates: 0,
+      warnings: [],
+    }
+    m.upload.mockResolvedValue(result)
+
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    await selectFiles(wrapper, [gpcFile()])
+
+    expect(m.upload).toHaveBeenCalledOnce()
+    expect(m.toastWarning).not.toHaveBeenCalled()
+    // Celý soubor je duplicitní → žádný redirect na nový výpis (lastNonDuplicate zůstává null).
+    expect(m.push).not.toHaveBeenCalled()
+  })
+
+  it('hromadný upload: agreguje přeskočené duplicity napříč soubory do JEDNOHO samostatného varování', async () => {
+    const withSkips: ImportResult = {
+      statement_id: 1,
+      transactions: 4,
+      matched: 2,
+      duplicate: false,
+      parsed_transactions: 6,
+      skipped_duplicates: 2,
+      warnings: [{ code: 'transactions_skipped_as_duplicate', parsed: 6, inserted: 4, skipped: 2 }],
+    }
+    const clean: ImportResult = {
+      statement_id: 2,
+      transactions: 5,
+      matched: 5,
+      duplicate: false,
+      parsed_transactions: 5,
+      skipped_duplicates: 0,
+      warnings: [],
+    }
+    m.upload.mockResolvedValueOnce(withSkips).mockResolvedValueOnce(clean)
+
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    await selectFiles(wrapper, [gpcFile('a.gpc'), gpcFile('b.gpc')])
+
+    expect(m.upload).toHaveBeenCalledTimes(2)
+    // Souhrnný toast beze zmínky o přeskočených duplicitách...
+    expect(m.toastSuccess).toHaveBeenCalledWith('bank.upload_batch_done:' + JSON.stringify({ ok: 2, dup: 0 }))
+    // ...a samostatné varování s agregovaným počtem 2.
+    expect(m.toastWarning).toHaveBeenCalledWith(
+      'bank.warning.transactions_skipped_as_duplicate_batch:' + JSON.stringify({ count: 2 }),
+    )
+  })
+})

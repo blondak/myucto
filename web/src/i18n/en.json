@@ -4695,6 +4695,7 @@
       "disposed": "Card disposed.",
       "restore": "Return to use",
       "restored": "Card returned to use.",
+      "already_settled": "Card is no longer in use — it was disposed or sold.",
       "status_sold": "Sold",
       "sell": "Sell",
       "sell_hint": "Selling card “{name}”. A sale is an ordinary issued invoice (revenue 602/604 + VAT); nothing is posted from the card — it is only linked to the sale document.",
@@ -5810,7 +5811,12 @@
       "stock_card": "Stock card",
       "stock_card_placeholder": "no card",
       "remove": "Remove row",
-      "empty": "No items — add at least one to calculate totals."
+      "empty": "No items — add at least one to calculate totals.",
+      "small_asset_sell": "Dispose by sale"
+    },
+    "unsettled_notice": {
+      "title": "Unsettled advance",
+      "open_candidate": "Open invoice"
     },
     "totals": {
       "without_vat": "Total without VAT",
@@ -8420,6 +8426,10 @@
     "upload_batch_error": "Batch upload: {ok} imported, {dup} duplicates, {err} errors.",
     "upload_batch_attached": "{n} PDF attached to an existing statement.",
     "pdf_attached_to_existing": "The statement was already imported from GPC — the PDF was attached to it.",
+    "warning": {
+      "transactions_skipped_as_duplicate": "The statement had {parsed} transactions, {inserted} were imported. {skipped} matched transactions already on record (overlapping statement) and were not imported — please verify these are genuine duplicates.",
+      "transactions_skipped_as_duplicate_batch": "{count} transactions from the uploaded statements were skipped as duplicates of already recorded ones — please verify these are genuine duplicates."
+    },
     "choose_account_title": "Choose bank account",
     "choose_account_hint": "The file “{file}” matches an account number used in multiple currencies or banks. The statement does not identify it unambiguously — choose the target account.",
     "choose_account_confirm": "Import",
@@ -10385,10 +10395,12 @@
     "health_overdue_and_failing": "Stale + failing",
     "health_never_ran": "Never ran",
     "health_idle": "Idle",
+    "health_pending": "Waiting for first run",
     "tooltip_overdue": "Last successful run is older than {hours} h.",
     "tooltip_failing": "The last run ended with an error.",
     "tooltip_never_ran": "Script never ran — most likely it isn't scheduled in crontab / Task Scheduler.",
     "tooltip_idle": "This job only runs when there is work to do, and right now there isn't — that's why the last run is ageing. {script} is what proves scheduling still works.",
+    "tooltip_pending": "The installation is new and this job hasn't had a full period ({hours} h) yet — not a problem for now.",
     "freq_daily_0030": "daily at 00:30",
     "freq_daily_0200": "daily at 02:00",
     "freq_daily_0230": "daily at 02:30",
