@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Bank;
 
-use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 
 /**
@@ -19,27 +18,33 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
  * účtu ≠ Kč hodnota cizoměnových řádků. Cizoměnový zůstatek se pak musí
  * přeceňovat ručně (viz dřívější ruční doúčtování Creditas EUR).
  *
- * Řešení: každý vlastní bankovní účet (supplier_bank_accounts) může mít
- * `analytic_suffix` (1–6 číslic, nastavuje se v FE). Bankovní noha jeho pohybů
- * pak nepadá na holé 221, ale na 221<suffix> (Creditas EUR → 221500, ČSOB EUR →
- * 221510). Tím vznikne ČISTÝ jednoměnový účet, který bankProposals nabídne a
- * FxRevaluationService přecení automaticky per účet, bez míchání měn.
+ * Řešení: KAŽDÝ vlastní bankovní účet (supplier_bank_accounts) má vlastní
+ * `analytic_suffix`. Bankovní noha jeho pohybů pak nepadá na holé 221, ale na
+ * 221<suffix> (221100, 221200 …). Tím vznikne ČISTÝ jednoúčtový (a tím i
+ * jednoměnový) účet: zůstatek sedí na výpis, inventarizace k rozvahovému dni je
+ * doložitelná, bankProposals ho nabídne a FxRevaluationService přecení
+ * automaticky per účet, bez míchání měn.
+ *
+ * Suffix se nezadává ručně — chybí-li, přidělí ho {@see BankAnalyticAssigner}
+ * (první volné číslo, bez kolize s osnovou i s ostatními účty firmy) a rovnou
+ * dohraje analytiku do osnovy. Ruční přiřazení v nastavení má přednost a nikdy
+ * se nepřepisuje.
  *
  * Přepisuje se JEN řádek s PŘESNÝM kódem '221' (default bankovní nohy z
  * BankPostingRule). Konkrétní analytiky (221100 termínovaný vklad) zůstávají
- * nedotčené. Bez suffixu / bez shody vlastního účtu = beze změny (no-op).
+ * nedotčené. Bez shody vlastního účtu výpisu = beze změny (no-op).
  */
 final class BankAnalyticResolver
 {
     /** Syntetický účet banky, jehož default se přesměrovává na analytiku. */
-    private const BANK_SYNTHETIC = '221';
+    private const BANK_SYNTHETIC = BankAnalyticAssigner::BANK_SYNTHETIC;
 
     /** @var array<string, array<string,mixed>|null> cache shody vlastního účtu v rámci requestu */
     private array $ownCache = [];
 
     public function __construct(
         private readonly SupplierBankAccountRepository $bankAccounts,
-        private readonly ChartOfAccountsRepository $chart,
+        private readonly BankAnalyticAssigner $assigner,
     ) {}
 
     /**
@@ -65,9 +70,10 @@ final class BankAnalyticResolver
     }
 
     /**
-     * Analytický kód banky pro účet daného výpisu (221<suffix>) nebo null, když
-     * účet nemá suffix / nejde jednoznačně dohledat. Vedlejší efekt: dohraje
-     * chybějící analytiku do osnovy (idempotentně), aby na ni šlo účtovat.
+     * Analytický kód banky pro účet daného výpisu (221<suffix>), nebo null, když
+     * vlastní účet výpisu nejde jednoznačně dohledat (cizí/neznámé číslo). Vedlejší
+     * efekt: chybějící suffix přidělí a chybějící analytiku dohraje do osnovy
+     * (obojí idempotentně), aby na ni šlo účtovat.
      *
      * @param array<string,mixed> $tx
      */
@@ -80,46 +86,29 @@ final class BankAnalyticResolver
         $bankRaw = $tx['recipient_bank'] ?? null;
         $bank = ($bankRaw === null || (string) $bankRaw === '') ? null : (string) $bankRaw;
 
-        $own = $this->ownAccount($supplierId, $account, $bank);
-        $suffix = is_array($own) ? ($own['analytic_suffix'] ?? null) : null;
-        if (!is_string($suffix) || preg_match('/^[0-9]{1,6}$/', $suffix) !== 1) {
+        $key = $supplierId . '|' . $account . '|' . ($bank ?? '');
+        $own = $this->ownAccount($key, $supplierId, $account, $bank);
+        if (!is_array($own)) {
             return null;
         }
-        $code = self::BANK_SYNTHETIC . $suffix;
-        $this->ensureAnalytic($supplierId, $code, (string) ($own['label'] ?? ''));
-        return $code;
+        $suffix = $this->assigner->ensureSuffix($supplierId, $own);
+        if ($suffix === null) {
+            return null;
+        }
+        // Cache drží řádek načtený PŘED přidělením — bez téhle aktualizace by další
+        // řádek téhož zápisu viděl prázdný suffix a přidělil účtu druhé číslo.
+        $this->ownCache[$key]['analytic_suffix'] = $suffix;
+        return $this->assigner->ensureChartAccount($supplierId, $suffix, (string) ($own['label'] ?? ''));
     }
 
     /**
      * @return array<string,mixed>|null
      */
-    private function ownAccount(int $supplierId, string $account, ?string $bank): ?array
+    private function ownAccount(string $key, int $supplierId, string $account, ?string $bank): ?array
     {
-        $key = $supplierId . '|' . $account . '|' . ($bank ?? '');
         if (array_key_exists($key, $this->ownCache)) {
             return $this->ownCache[$key];
         }
         return $this->ownCache[$key] = $this->bankAccounts->matchCounterparty($supplierId, $account, $bank);
-    }
-
-    /**
-     * Dohraje analytiku banky pod syntetický 221, pokud v osnově chybí — jinak by
-     * postDocument spadl na `unknown_account`. Dědí typ/stranu ze syntetiky 221.
-     */
-    private function ensureAnalytic(int $supplierId, string $code, string $label): void
-    {
-        if ($this->chart->findByCode($supplierId, $code) !== null) {
-            return;
-        }
-        $parent = $this->chart->findByCode($supplierId, self::BANK_SYNTHETIC);
-        $this->chart->insert($supplierId, [
-            'account_code' => $code,
-            'name'         => $label !== '' ? $label : ('Bankovní účet ' . $code),
-            'account_type' => $parent['account_type'] ?? 'asset',
-            'normal_side'  => $parent['normal_side'] ?? 'debit',
-            'is_synthetic' => false,
-            'parent_id'    => $parent !== null ? (int) $parent['id'] : null,
-            'is_active'    => true,
-        ]);
     }
 }

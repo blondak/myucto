@@ -411,6 +411,15 @@ final class BalanceInventoryService
         if (isset($exact[$accountCode])) {
             return $exact[$accountCode];
         }
+        // Analytika dědí návrh po své syntetice: bankovní účty (221100, 221200 …),
+        // valutové pokladny (211xxx) i saldokonta se doloží stejně jako jejich
+        // syntetický účet. Bez toho by každý analytický účet spadl na obecné
+        // „Analytická evidence" — a od zavedení analytik banky by tak byl BEZ hintu
+        // „Bankovní výpis k rozvahovému dni" úplně každý bankovní účet.
+        $synthetic = substr($accountCode, 0, 3);
+        if (isset($exact[$synthetic])) {
+            return $exact[$synthetic];
+        }
 
         $prefix2 = substr($accountCode, 0, 2);
         $prefix1 = substr($accountCode, 0, 1);

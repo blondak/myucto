@@ -44,6 +44,47 @@ Pokud mají dva účty stejné číslo před lomítkem, rozlišují se kódem ba
 Starý výpis bez uloženého kódu banky se při více možných bankách do zůstatku
 nezapočte, protože jej nelze bezpečně přiřadit.
 
+### 29.1.2 Kontace účtů — analytika 221 (jen podvojné účetnictví)
+
+Záložka **Kontace účtů** drží účetní pohled na tytéž účty. **Každý bankovní
+účet má vlastní analytiku syntetického účtu 221** — 221100, 221200, 221300 …
+Číslo se přiděluje **automaticky** (první volné, které v
+[účtovém rozvrhu](62_Ucetni_osnova.md) nekoliduje s už existujícím účtem) a
+analytika se zároveň založí v rozvrhu pod 221.
+
+Proč to tak je:
+
+- **zůstatek analytiky sedí na výpis** konkrétního účtu — na ploché 221 leží
+  několik reálných účtů najednou a zůstatek pak neodpovídá ničemu,
+- **inventarizace k rozvahovému dni** (§ 29–30 zákona o účetnictví) se dá doložit
+  výpisem daného účtu,
+- **cizoměnové účty se přeceňují automaticky** — jednoměnová analytika už
+  nemíchá měny, takže ji [uzávěrkové přecenění](66_Uzaverka.md) nabídne samo,
+- **převod mezi vlastními účty** je v deníku vidět (obě nohy jsou různé účty).
+
+V tabulce u každého účtu nastavíš:
+
+| Pole | Význam |
+|---|---|
+| Název | Vlastní pojmenování účtu (použije se i jako název analytiky v rozvrhu) |
+| Druh | Běžný účet / spořicí účet / termínovaný vklad |
+| Analytika | Číslo za 221 — vedle se hned ukáže výsledný účet (např. `221200`) |
+| Aktivní | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
+
+Číslo můžeš **přepsat** — typicky když už některý účet v rozvrhu vedeš pod
+konkrétní analytikou a chceš na ni bankovní účet **namapovat** (např.
+termínovaný vklad na 221100). Analytiku, kterou už používá jiný účet,
+systém odmítne, a jednou přidělenou analytiku **nelze zrušit** — jde ji jen
+změnit na jiné číslo. Analytika, na které už leží účetní zápisy, se sama
+nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
+
+> [!NOTE]
+> Zápisy zaúčtované dřív, než účet analytiku dostal, zůstávají na syntetice 221.
+> Jejich přesun je **účetní reklasifikace k datu** — účtuje se ručně jako interní
+> doklad (221xxx / 221) v **otevřeném** období; do uzavřených a schválených let se
+> nezasahuje a rozvahový řádek „Peněžní prostředky na účtech" se rozpadem uvnitř
+> 221 stejně nemění.
+
 ## 29.2 Mapování bankovních avíz
 
 Sekce **Mapování bankovních avíz** určuje, jak se vytěžený e-mail napojí na
@@ -375,7 +416,10 @@ Pravidlo musí mít **aspoň jedno kritérium** (protiúčet, VS nebo fragment z
 — samotný rozsah částky nestačí. Kontace má dvě záměrná omezení:
 
 - **Bankovní strana musí být účet 221** (dle směru — příchozí = MD 221,
-  odchozí = D 221). Pravidlo vždy účtuje proti bankovnímu účtu.
+  odchozí = D 221). Pravidlo vždy účtuje proti bankovnímu účtu. Zadává se
+  syntetika **221**; při zaúčtování ji MyÚčto samo nahradí **analytikou účtu,
+  ze kterého je výpis** ([§ 29.1.2](#2912-kontace-uctu-analytika-221-jen-podvojne-ucetnictvi)),
+  takže jedno pravidlo funguje pro všechny bankovní účty firmy.
 - **Druhá strana nesmí být saldokontní účet** (311, 321, 314, 324, 325) —
   platby faktur se **párují** (§ 24.4), ne účtují pravidlem.
 

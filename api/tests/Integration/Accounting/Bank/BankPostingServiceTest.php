@@ -355,6 +355,12 @@ final class BankPostingServiceTest extends TestCase
     // ── asserts / lookups ────────────────────────────────────────────────────
 
     /**
+     * Řádky zápisu podle kódu účtu. Bankovní noha padá na analytiku vlastního účtu
+     * (221100, 221200 …), ne na plochou syntetiku — jedinou analytiku 221xxx proto
+     * zpřístupníme i pod klíčem '221'. Při víc účtech skupiny 221 v jednom zápisu
+     * (převod mezi vlastními účty) se alias záměrně nepoužije. Stejná logika žije ve
+     * sdíleném {@see BankPostingTestCase::linesByAccountCode()}.
+     *
      * @return array<string,array{debit:float,credit:float}>
      */
     private function linesByAccountCode(int $entryId): array
@@ -365,6 +371,16 @@ final class BankPostingServiceTest extends TestCase
             $code = $this->accountCode((int) $l['account_id']);
             $out[$code] ??= ['debit' => 0.0, 'credit' => 0.0];
             $out[$code][$l['side']] += (float) $l['amount'];
+        }
+        // array_keys() vrací číselné kódy jako INT — bez přetypování filtr nic nenajde.
+        if (!isset($out['221'])) {
+            $bankCodes = array_values(array_filter(
+                array_keys($out),
+                static fn (int|string $code): bool => str_starts_with((string) $code, '221'),
+            ));
+            if (count($bankCodes) === 1) {
+                $out['221'] = $out[$bankCodes[0]];
+            }
         }
         return $out;
     }

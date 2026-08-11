@@ -311,6 +311,18 @@ zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 - **vrácení vydaného dobropisu odběrateli** → **MD 311 / D 221**,
 - **refundace přijatého dobropisu od dodavatele** → **MD 221 / D 321**.
 
+> [!NOTE]
+> **Každý bankovní účet má svou analytiku.** Účet 221 se nikdy nepoužívá plochý:
+> bankovní strana zápisu padá na analytiku toho účtu, ze kterého je výpis —
+> **221100**, **221200**, **221300** … Číslo se přiděluje automaticky (první volné,
+> které v účtovém rozvrhu nekoliduje) a najdeš i změníš ho v
+> **Nastavení → Bankovní účty → Kontace účtů**. Díky tomu sedí zůstatek každé
+> analytiky přesně na výpis daného účtu, inventarizace k rozvahovému dni se dá
+> doložit výpisem a cizoměnové účty se přeceňují automaticky, bez míchání měn.
+> Tam, kde text níž mluví o účtu **221**, jde tedy o analytiku konkrétního účtu.
+> Historické zápisy, které vznikly dřív, zůstávají na syntetice 221 — přesun na
+> analytiky je účetní reklasifikace k datu a dělá se ručně, v otevřeném období.
+
 U **sloučené úhrady** nebo částečných plateb rozdělených na víc faktur vznikne
 zápis s tolika řádky na straně 311/321 (resp. 324/314 u záloh), kolik je alokací;
 rozdíl do **1 Kč** (zaokrouhlení, bankovní poplatek v alokaci) se dorovná automaticky

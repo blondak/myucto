@@ -296,7 +296,18 @@ abstract class BankPostingTestCase extends TestCase
 
     // ── asserts / lookups ────────────────────────────────────────────────────
 
-    /** @return array<string,array{debit:float,credit:float}> */
+    /**
+     * Řádky zápisu podle kódu účtu.
+     *
+     * Bankovní noha od migrace 1318 nepadá na plochou syntetiku 221, ale na analytiku
+     * vlastního účtu (221100, 221200 …). Testy okolo mluví o „bankovní noze", ne o
+     * konkrétním čísle, takže jedinou analytiku 221xxx v zápisu zpřístupníme i pod
+     * klíčem '221'. Alias se ZÁMĚRNĚ nepoužije, když v zápisu leží víc účtů skupiny 221
+     * (převod mezi vlastními účty, termínovaný vklad) — tam by sloučení dvou různých
+     * účtů do jednoho klíče zamlčelo, na kterém z nich částka reálně je.
+     *
+     * @return array<string,array{debit:float,credit:float}>
+     */
     protected function linesByAccountCode(int $entryId): array
     {
         $entry = $this->journal->find($entryId, $this->supplierId);
@@ -305,6 +316,17 @@ abstract class BankPostingTestCase extends TestCase
             $code = $this->accountCode((int) $l['account_id']);
             $out[$code] ??= ['debit' => 0.0, 'credit' => 0.0];
             $out[$code][$l['side']] += (float) $l['amount'];
+        }
+        // Pozor: array_keys() vrací číselné kódy účtů jako INT — porovnávat se musí
+        // přes explicitní přetypování, jinak filtr nic nenajde.
+        if (!isset($out['221'])) {
+            $bankCodes = array_values(array_filter(
+                array_keys($out),
+                static fn (int|string $code): bool => str_starts_with((string) $code, '221'),
+            ));
+            if (count($bankCodes) === 1) {
+                $out['221'] = $out[$bankCodes[0]];
+            }
         }
         return $out;
     }

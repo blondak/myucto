@@ -459,15 +459,31 @@ final class FxPaymentTest extends BankPostingTestCase
 
     // ── fixtury ──────────────────────────────────────────────────────────────
 
-    /** @return array<string,mixed> */
+    /**
+     * Řádek zápisu na daném účtu. U bankovní nohy ('221') se hledá i analytika
+     * vlastního účtu (221100, 221200 …) — tam noha od migrace 1318 reálně padá.
+     * Musí být právě jedna, jinak by nebylo jasné, o kterou banku jde.
+     *
+     * @return array<string,mixed>
+     */
     private function lineForAccount(int $entryId, string $code): array
     {
-        foreach ($this->journal->find($entryId, $this->supplierId)['lines'] as $l) {
-            if ($this->accountCode((int) $l['account_id']) === $code) {
-                return $l;
+        $lines = $this->journal->find($entryId, $this->supplierId)['lines'];
+        $matches = [];
+        foreach ($lines as $l) {
+            $lineCode = $this->accountCode((int) $l['account_id']);
+            if ($lineCode === $code
+                || ($code === '221' && str_starts_with($lineCode, '221'))
+            ) {
+                $matches[] = $l;
             }
         }
-        self::fail('Řádek s účtem ' . $code . ' v zápisu není.');
+        if (count($matches) === 1) {
+            return $matches[0];
+        }
+        self::fail(count($matches) > 1
+            ? 'Účet ' . $code . ' je v zápisu víckrát — nelze rozhodnout, který řádek je bankovní noha.'
+            : 'Řádek s účtem ' . $code . ' v zápisu není.');
     }
 
     private function fxIncoming(int $invoiceId, float $foreignAmount): int

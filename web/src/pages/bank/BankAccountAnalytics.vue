@@ -72,7 +72,20 @@ async function saveAll() {
     for (const a of accounts.value.filter(isDirty)) {
       const d = drafts.value[a.id]
       if (d.analytic_suffix !== '' && !/^[0-9]{1,6}$/.test(d.analytic_suffix)) {
-        toast.error(t('bank.analytics.suffix_invalid', { account: a.account_number ?? a.iban ?? a.id }))
+        toast.error(t('bank.analytics.suffix_invalid', { account: accountLabel(a) }))
+        return
+      }
+      // Analytiku nelze zrušit — účet ji mít musí, jinak se jeho pohyby vrátí na ploché 221.
+      if (d.analytic_suffix === '' && (a.analytic_suffix ?? '') !== '') {
+        toast.error(t('bank.analytics.suffix_required', { account: accountLabel(a) }))
+        return
+      }
+      // Dvě čísla na jednom účtu = promíchaný zůstatek; server to odmítne taky.
+      const clash = accounts.value.find(
+        (o) => o.id !== a.id && (drafts.value[o.id]?.analytic_suffix ?? '') === d.analytic_suffix && d.analytic_suffix !== '',
+      )
+      if (clash) {
+        toast.error(t('bank.analytics.suffix_taken', { suffix: '221' + d.analytic_suffix, account: accountLabel(clash) }))
         return
       }
       await bankPostingApi.updateAccount(a.id, {
@@ -150,11 +163,16 @@ onMounted(load)
                   </select>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex items-center gap-1 font-mono">
-                    <span class="text-neutral-400">221.</span>
-                    <input v-model="drafts[a.id].analytic_suffix" type="text" maxlength="6" :disabled="!canWrite"
-                           placeholder="—"
-                           class="w-20 h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface font-mono disabled:bg-neutral-50" />
+                  <div class="flex items-center gap-2 font-mono">
+                    <div class="flex items-center gap-1">
+                      <span class="text-neutral-400">221</span>
+                      <input v-model="drafts[a.id].analytic_suffix" type="text" maxlength="6" :disabled="!canWrite"
+                             placeholder="—"
+                             class="w-20 h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface font-mono disabled:bg-neutral-50" />
+                    </div>
+                    <span v-if="drafts[a.id].analytic_suffix" class="text-neutral-500 whitespace-nowrap">
+                      = {{ '221' + drafts[a.id].analytic_suffix }}
+                    </span>
                   </div>
                 </td>
                 <td class="px-3 py-2 text-center">

@@ -174,6 +174,57 @@ final class SupplierBankAccountRepository
         return $row === false ? null : $row;
     }
 
+    /**
+     * Suffixy analytiky 221, které už drží nějaký účet firmy — VČETNĚ neaktivních.
+     * Neaktivní účet si číslo drží dál, jinak by nový účet zdědil jeho historii.
+     *
+     * @return array<string,true>
+     */
+    public function usedSuffixes(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT analytic_suffix FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND analytic_suffix IS NOT NULL AND analytic_suffix <> ''"
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $suffix) {
+            $out[(string) $suffix] = true;
+        }
+        return $out;
+    }
+
+    /** Účet firmy držící daný suffix (unikátní přes uq_sba_analytic), nebo null. */
+    public function findBySuffix(int $supplierId, string $suffix): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM supplier_bank_accounts
+              WHERE supplier_id = ? AND analytic_suffix = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $suffix]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
+    /**
+     * Přidělí suffix účtu, který ho ještě NEMÁ (existující se nikdy nepřepíše).
+     * Vrací false při souběhu — jiný proces stihl přidělit dřív (unique index) —
+     * i když účet mezitím suffix získal; volající si ho přečte znovu.
+     */
+    public function assignSuffix(int $supplierId, int $id, string $suffix): bool
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                "UPDATE supplier_bank_accounts SET analytic_suffix = ?
+                  WHERE supplier_id = ? AND id = ? AND (analytic_suffix IS NULL OR analytic_suffix = '')"
+            );
+            $stmt->execute([$suffix, $supplierId, $id]);
+            return $stmt->rowCount() > 0;
+        } catch (\PDOException) {
+            return false;
+        }
+    }
+
     /** @param array{kind?:string,label?:?string,is_active?:bool,analytic_suffix?:?string} $patch */
     public function update(int $supplierId, int $id, array $patch): bool
     {
