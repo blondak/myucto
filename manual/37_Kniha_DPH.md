@@ -35,9 +35,34 @@ skupinu a řádek přiznání, například:
 - `47.047` — doplňující hodnota pořízeného dlouhodobého majetku; do odpočtu se
   podruhé nepřičítá.
 
-Každý řádek uvádí datum plnění, datum zaúčtování, typ a číslo dokladu, popis,
-základ, DPH a celkem v Kč, protistranu a DIČ, původní číslo dokladu a účinnou
+Každý řádek uvádí datum plnění, datum zaúčtování, období odpočtu, typ a číslo dokladu,
+popis, základ, DPH a celkem v Kč, protistranu a DIČ, původní číslo dokladu a účinnou
 sekci KH. Doklady se řadí přirozeně podle čísla.
+
+## Období odpočtu u přijatých dokladů
+
+Sloupec **Období odpočtu** ukazuje datum, podle kterého přijatý doklad spadl do
+zobrazeného období, a pod ním důvod: *dle DUZP*, *dle data vystavení*, nebo
+*dle data přijetí*. U vystavených plnění a u oprav podle § 74b se neuvádí.
+
+Nárok na odpočet lze podle § 73 odst. 1 písm. a) ZDPH uplatnit nejdříve za období,
+ve kterém má plátce doklad k dispozici. Samotné DUZP proto doklad do svého měsíce
+nestáhne:
+
+- doklad s DUZP 30. 6., ale vystavený 2. 7., patří do **července** — dřív než byl
+  vystaven jsi ho mít nemohl(a) a posunutí data přijetí do minulosti na tom nic nezmění,
+- doklad, který ti dorazil až v srpnu a datum přijetí jsi na něm vyplnil(a), patří do
+  **srpna**; v tabulce je označený hvězdičkou a v PDF je za ní rozhodné datum.
+
+Datum přijetí ovlivní zařazení jen tehdy, když ho zadáš ty. U dokladu z importu nebo
+z AI extrakce je předvyplněné dnem zpracování, a dokud na pole nesáhneš, do období
+odpočtu nevstupuje — doklad, který jsi po vytěžení upravil(a), tak skončí ve stejném
+období jako ten, kterého ses nedotkl(a). Když datum přijetí neodpovídá skutečnosti,
+oprav ho na dokladu; editor přijaté faktury u dat rovnou píše, do jakého období
+odpočet půjde a proč.
+
+Přijaté zahraniční reverse charge se řídí DUZP bez ohledu na datum přijetí (§ 25, § 24)
+— viz [Výkazy DPH](36_Vykazy_DPH.md).
 
 U poměrného odpočtu (§ 75) se základ a DPH na vstupu krátí zadaným procentem.
 U kráceného odpočtu (§ 76) kniha oddělí částku do krácené skupiny; zálohový

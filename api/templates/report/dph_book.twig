@@ -59,6 +59,9 @@
         border-radius: 2pt;
         margin-right: 1mm;
     }
+    /* issue #9: odpočet posunutý datem přijetí (§ 73/1/a) — v tisku ho nejde
+       vysvětlit tooltipem, tak aspoň hvězdička + legenda pod tabulkami. */
+    .claim-shift { font-size: 7pt; color: #92400e; }
     .disclaimer {
         text-align: center;
         font-size: 7pt;
@@ -124,7 +127,12 @@
         <tbody>
             {% for row in section.rows %}
                 <tr class="{{ row.is_draft ? 'row-draft' : '' }}">
-                    <td>{{ row.tax_date|cz_date }}</td>
+                    <td>
+                        {{ row.tax_date|cz_date }}
+                        {% if row.claim_basis == 'received_at' %}
+                            <br><span class="claim-shift">* {{ row.claim_date|cz_date }}</span>
+                        {% endif %}
+                    </td>
                     <td>{{ row.accounting_date|cz_date }}</td>
                     <td>
                         {% if row.is_draft %}<span class="draft-badge">KONCEPT</span>{% endif %}
@@ -154,6 +162,11 @@
     </table>
 {% endfor %}
 
+<div class="disclaimer">
+    Přijatá plnění jsou zařazena podle období odpočtu (§ 73 odst. 1 písm. a ZDPH): nárok lze uplatnit
+    nejdříve za období, ve kterém je doklad k dispozici. Hvězdička u data plnění označuje doklad,
+    jehož období odpočtu určilo datum přijetí — za hvězdičkou je toto rozhodné datum.
+</div>
 <div class="disclaimer">(Je-li za částkou DPH kód D, je DPH oceněno odlišným kursem, než je základní účetní kurs)</div>
 
 </body>

@@ -135,7 +135,10 @@ final class CreatePurchaseInvoiceAction
         // C6 (§ 73/1/a): ruční zadání data přijetí ve formuláři je vědomý úkon účetní
         // (i default dnešek z UI), ne slepý otisk importu → 'manual'. VatLedgerService pak
         // smí uplatnit odpočet dle skutečného držení dokladu. Importy zůstávají 'import'.
-        if (array_key_exists('received_at', $body)) {
+        // NEPRÁZDNÁ hodnota (issue #9): `received_at: null/""` znamená „nevím, kdy dorazil",
+        // ne vědomé zadání — repo takový doklad stejně dopadne datem vystavení, takže by
+        // příznak 'manual' jen předstíral informaci, kterou nikdo nezadal.
+        if (array_key_exists('received_at', $body) && trim((string) ($body['received_at'] ?? '')) !== '') {
             $body['received_at_source'] = 'manual';
         }
 

@@ -190,6 +190,114 @@ final class VatLedgerDeductionPeriodTest extends TestCase
         $this->assertNotContains($id, $may, 'RC z položkového kódu nesmí utéct do měsíce vystavení');
     }
 
+    /**
+     * (f) DUZP = datum přijetí (manual) a obojí po vystavení: období se řídí tímhle
+     *     společným datem, `claim_basis` ho pojmenuje jako DUZP — z pohledu uživatele
+     *     je to ta srozumitelnější polovina shody.
+     */
+    public function testTaxDateEqualToReceivedAtKeepsPeriodAndReportsTaxDateBasis(): void
+    {
+        $vend = $this->vendor('CZ dodavatel shoda', $this->czId, 'CZ10000044');
+
+        $issue = sprintf('%04d-03-10', self::YEAR);
+        $same  = sprintf('%04d-03-20', self::YEAR);
+
+        $id = $this->purchase('C6-F-equal', $vend, $same, $issue, $same, 'manual', false);
+
+        self::assertContains($id, $this->purchaseIdsIn(3));
+        self::assertSame($same, $this->claimDateOf($id));
+        self::assertSame('tax_date', $this->claimBasisOf($id));
+    }
+
+    /**
+     * (g) Datum přijetí DŘÍV než vystavení — přesně druhé pozorování z issue #9. DUZP na
+     *     konci června, vystaveno 2. července, přijetí ručně posunuté na DUZP. Odpočet
+     *     zůstává v ČERVENCI: § 73 odst. 1 písm. a) ZDPH váže nárok na období, ve kterém
+     *     má plátce doklad k dispozici, a dřív než byl vystaven ho mít nemohl.
+     *     `claim_basis` to musí přiznat, jinak uživatel jen marně hýbe datem přijetí.
+     */
+    public function testReceivedAtBeforeIssueDateKeepsIssueDatePeriod(): void
+    {
+        $vend = $this->vendor('CZ dodavatel zpětně', $this->czId, 'CZ10000052');
+
+        $tax   = sprintf('%04d-06-30', self::YEAR);
+        $issue = sprintf('%04d-07-02', self::YEAR);
+
+        $id = $this->purchase('C6-G-backdated', $vend, $tax, $issue, $tax, 'manual', false);
+
+        self::assertNotContains($id, $this->purchaseIdsIn(6), 'Datum přijetí nemůže odpočet vrátit před vystavení.');
+        self::assertContains($id, $this->purchaseIdsIn(7));
+        self::assertSame($issue, $this->claimDateOf($id));
+        self::assertSame('issue_date', $this->claimBasisOf($id));
+    }
+
+    /**
+     * (h) Doklad bez zadaného data přijetí. Sloupec je NOT NULL a repozitář ho dopadá
+     *     datem vystavení, takže „nevím, kdy dorazil" nesmí období nijak posunout —
+     *     ani když se doklad označí za ručně zadaný.
+     */
+    public function testMissingReceivedAtFallsBackToIssueDateWithoutShiftingPeriod(): void
+    {
+        $vend = $this->vendor('CZ dodavatel bez přijetí', $this->czId, 'CZ10000060');
+
+        $tax   = sprintf('%04d-03-20', self::YEAR);
+        $issue = sprintf('%04d-03-25', self::YEAR);
+
+        $manual = $this->purchase('C6-H-manual', $vend, $tax, $issue, $issue, 'manual', false);
+        $import = $this->purchase('C6-H-import', $vend, $tax, $issue, $issue, 'import', false);
+
+        $march = $this->purchaseIdsIn(3);
+        self::assertContains($manual, $march);
+        self::assertContains($import, $march);
+        self::assertSame($this->claimDateOf($import), $this->claimDateOf($manual),
+            'Bez skutečného data přijetí musí obě větve dát TOTÉŽ období.');
+    }
+
+    /**
+     * (i) Období odpočtu posunuté datem přijetí se musí dát vysvětlit — kanonický řádek
+     *     nese claim_date i claim_basis, jinak uživatel v Knize DPH vidí doklad v „cizím"
+     *     měsíci bez jakéhokoli vodítka (jádro stížnosti v issue #9).
+     */
+    public function testShiftedPeriodExposesReceivedAtBasis(): void
+    {
+        $vend = $this->vendor('CZ dodavatel posun', $this->czId, 'CZ10000079');
+
+        $tax   = sprintf('%04d-03-20', self::YEAR);
+        $issue = sprintf('%04d-03-25', self::YEAR);
+        $recv  = sprintf('%04d-05-10', self::YEAR);
+
+        $id = $this->purchase('C6-I-shift', $vend, $tax, $issue, $recv, 'manual', false);
+
+        self::assertSame($recv, $this->claimDateOf($id));
+        self::assertSame('received_at', $this->claimBasisOf($id));
+    }
+
+    /** claim_date z kanonického řádku (rok YEAR, vč. draftů). */
+    private function claimDateOf(int $invoiceId): ?string
+    {
+        return $this->ledgerRow($invoiceId)['claim_date'] ?? null;
+    }
+
+    /** claim_basis z kanonického řádku. */
+    private function claimBasisOf(int $invoiceId): ?string
+    {
+        return $this->ledgerRow($invoiceId)['claim_basis'] ?? null;
+    }
+
+    /** @return array<string,mixed> */
+    private function ledgerRow(int $invoiceId): array
+    {
+        $start = sprintf('%04d-01-01', self::YEAR);
+        $end   = sprintf('%04d-12-31', self::YEAR);
+        foreach ($this->ledger->rows($this->supplierId, $start, $end, includeDrafts: true) as $r) {
+            if (($r['source'] ?? '') === 'purchase' && (int) $r['invoice_id'] === $invoiceId) {
+                return $r;
+            }
+        }
+
+        return [];
+    }
+
     /** invoice_id přijatých plnění, které VatLedgerService zařadil do daného měsíce roku YEAR. */
     private function purchaseIdsIn(int $month): array
     {

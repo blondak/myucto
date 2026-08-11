@@ -46,7 +46,7 @@ import { useSupplierStore } from '@/stores/supplier'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
 const auth = useAuthStore()
@@ -134,6 +134,12 @@ const expenseSuggestions = ref<Record<number, ExpenseKindSuggestion>>({})
 const dismissedSuggestions = ref<Set<number>>(new Set())
 const vatClassifications = ref<VatClassification[]>([])
 const accountingAccounts = ref<ChartAccount[]>([])
+
+// Uložený stav data přijetí (issue #9). Backend překlápí `received_at_source` na 'manual'
+// jen při SKUTEČNÉ změně pole — bez těchhle dvou hodnot by editor neuměl předpovědět,
+// jestli datum přijetí po uložení do období odpočtu vstoupí, nebo zůstane jen otiskem importu.
+const savedReceivedAt = ref<string | null>(null)
+const savedReceivedAtSource = ref<'manual' | 'import' | null>(null)
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -275,7 +281,10 @@ watch(
 
 // PDF state
 const existingPdf = ref<{ path: string; hash: string; size: number; name: string; uploadedAt: string } | null>(null)
-const pdfPreviewOpen = ref(false) // default collapsed — user explicitně otevře
+// Výchozí stav: zavřeno. FR5 (audit 2026-08) — u konceptu z AI extrakce (source_format
+// mimo isdoc/isdocx) ho `populate()` přepne na otevřeno, ať má uživatel originál rovnou
+// na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
+const pdfPreviewOpen = ref(false)
 const pdfUploading = ref(false)
 const dropzoneVisible = ref(true)
 
@@ -597,6 +606,42 @@ async function rejectAiPostingSuggestion() {
   }
 }
 
+/**
+ * Období odpočtu DPH (§ 73 odst. 1 písm. a ZDPH) — issue #9.
+ *
+ * Nárok na odpočet lze uplatnit NEJDŘÍVE za období, ve kterém má plátce doklad k dispozici,
+ * takže o zařazení nerozhoduje samotné DUZP. Uživatel to ale z formuláře nevyčetl a doklad
+ * s červnovým DUZP mu „záhadně" vyskočil v červenci. Zrcadlí `purchaseClaimDateExpr()`
+ * (tuzemská větev) — je to VÝKLAD pro uživatele, výpočet výkazů zůstává na backendu.
+ *
+ * Reverse charge má vlastní pravidlo (§ 25 / § 24 — vždy podle DUZP) a vlastní hint pod
+ * poli, proto ho tenhle výklad vůbec nekomentuje, ať uživateli neříká dvě různé věci.
+ */
+const vatClaim = computed<{ date: string; basis: 'tax_date' | 'issue_date' | 'received_at' } | null>(() => {
+  if (form.value.reverse_charge) return null
+  const issue = form.value.issue_date
+  if (!issue) return null
+  const tax = form.value.tax_date || issue
+  const received = form.value.received_at || null
+  // Po uložení bude 'manual', pokud jím doklad už je, nebo pokud uživatel datum právě mění
+  // (viz Create/UpdatePurchaseInvoiceAction). Nový doklad zadává účetní vždy vědomě.
+  const willBeManual = received !== null
+    && (!isEdit.value || savedReceivedAtSource.value === 'manual' || received !== savedReceivedAt.value)
+
+  const candidates = willBeManual && received ? [tax, issue, received] : [tax, issue]
+  const date = candidates.reduce((a, b) => (b > a ? b : a))
+  const basis = date === tax ? 'tax_date' : date === issue ? 'issue_date' : 'received_at'
+  return { date, basis }
+})
+
+const vatClaimPeriodLabel = computed(() => {
+  const d = vatClaim.value?.date
+  if (!d) return ''
+  const parsed = new Date(d)
+  if (isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ', { month: 'long', year: 'numeric' })
+})
+
 function populate(inv: PurchaseInvoice) {
   form.value.vendor_id = inv.vendor_id
   form.value.vendor_invoice_number = inv.vendor_invoice_number
@@ -606,6 +651,8 @@ function populate(inv: PurchaseInvoice) {
   form.value.tax_date = inv.tax_date || inv.issue_date
   form.value.due_date = inv.due_date
   form.value.received_at = inv.received_at
+  savedReceivedAt.value = inv.received_at ? inv.received_at.slice(0, 10) : null
+  savedReceivedAtSource.value = inv.received_at_source ?? 'import'
   form.value.currency_id = inv.currency_id
   form.value.exchange_rate = inv.exchange_rate
   form.value.exchange_rate_date = inv.exchange_rate_date || inv.issue_date
@@ -669,6 +716,17 @@ function populate(inv: PurchaseInvoice) {
       uploadedAt: inv.pdf_uploaded_at || '',
     }
     dropzoneVisible.value = false
+    // FR5 (vendor audit 2026-08): u konceptu založeného z hodnot, které NEJSOU
+    // ze strukturovaného ISDOC (tedy 'isdocx' — taky strojově parsované, beze ztráty —
+    // nebo 'isdoc' samotné), otevři náhled originálu defaultně. Lidská kontrola má
+    // probíhat proti originálu právě u AI-vytěžených dat (BUG 1: AI extrakce s chybnou
+    // nulovou DPH a nepravdivým odůvodněním „dodavatel je neplátce"), ne u dat, která
+    // strukturovaný formát dodal přesně. Jen na 'draft' — jakmile doklad postoupil dál,
+    // uživatel ho už jednou zkontroloval, nemá smysl mu náhled vnucovat při každém otevření.
+    const structuredSource = inv.source_format === 'isdoc' || inv.source_format === 'isdocx'
+    if (inv.status === 'draft' && !structuredSource) {
+      pdfPreviewOpen.value = true
+    }
   }
 }
 
@@ -1460,6 +1518,22 @@ function fieldErr(key: string): string | null {
         <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2">
           {{ t('purchase_invoice.fields.tax_date_rc_hint') }}
         </p>
+        <!-- Období odpočtu (§ 73/1/a) — issue #9: uživatel musí z formuláře poznat, do
+             kterého období DPH doklad půjde a proč, ne to zjišťovat až z Knihy DPH. -->
+        <div v-else-if="vatClaim" class="-mt-2 text-xs rounded-md px-3 py-2"
+             :class="vatClaim.basis === 'received_at'
+               ? 'bg-warning-50 text-warning-700 border border-warning-500/30'
+               : 'bg-neutral-50 text-neutral-600 border border-neutral-200'">
+          <p>
+            {{ t('purchase_invoice.fields.vat_claim_hint', {
+              period: vatClaimPeriodLabel,
+              basis: t('purchase_invoice.fields.vat_claim_basis.' + vatClaim.basis),
+            }) }}
+          </p>
+          <p v-if="vatClaim.basis === 'received_at'" class="mt-1">
+            {{ t('purchase_invoice.fields.vat_claim_received_note') }}
+          </p>
+        </div>
 
         <!-- Currency + exchange rate -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

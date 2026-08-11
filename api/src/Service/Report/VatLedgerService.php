@@ -539,6 +539,12 @@ final class VatLedgerService
                    pi.parent_purchase_invoice_id,
                    parent.vendor_invoice_number AS parent_vendor_invoice_number,
                    COALESCE(pi.tax_date, pi.issue_date) AS tax_date, pi.issue_date,
+                   -- Období odpočtu POJMENOVANĚ v řádku (issue #9), týmž sdíleným výrazem,
+                   -- kterým se filtruje a řadí — konzumenti (Kniha DPH, UI dokladu) tak
+                   -- ukážou, ZA JAKÉ období doklad jde, místo aby to uživatel dedukoval
+                   -- z toho, v jakém měsíci mu sestava řádek zobrazila.
+                   {$periodExpr} AS claim_date,
+                   pi.received_at, pi.received_at_source,
                    -- RAW kurz (bez COALESCE ...,1) — viz fetchSales / normalize() (issue #238).
                    pi.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
                    -- Přijatý dobropis snižuje odpočet → do DPH evidence musí vstoupit
@@ -807,6 +813,15 @@ final class VatLedgerService
             'is_draft'              => $r['status'] === 'draft',
             'tax_date'              => $r['tax_date'] !== null ? (string) $r['tax_date'] : null,
             'issue_date'            => $r['issue_date'] !== null ? (string) $r['issue_date'] : null,
+            // Období odpočtu (§ 73) + jeho DŮVOD — issue #9. claim_date jde ze sdíleného
+            // SQL výrazu, claim_basis se z něj jen ODVODÍ porovnáním se vstupními daty,
+            // takže tu nevzniká druhá kopie pravidla, která by se mohla rozejít.
+            'claim_date'            => self::dateOnly($r['claim_date'] ?? null),
+            'claim_basis'           => $source === 'purchase' ? self::claimBasis($r) : null,
+            'received_at'           => self::dateOnly($r['received_at'] ?? null),
+            'received_at_source'    => isset($r['received_at_source']) && $r['received_at_source'] !== null
+                ? (string) $r['received_at_source']
+                : null,
             'counterparty_name'     => (string) ($r['counterparty_name'] ?? ''),
             'counterparty_dic'      => $r['counterparty_dic'] !== null ? (string) $r['counterparty_dic'] : null,
             'country_iso2'          => $r['country_iso2'] !== null ? strtoupper((string) $r['country_iso2']) : null,
@@ -837,6 +852,47 @@ final class VatLedgerService
             'exchange_rate'         => $rate,
             'exchange_rate_missing' => $exchangeRateMissing,
         ];
+    }
+
+    /** Datum (DATE i DATETIME z PDO) na `YYYY-MM-DD`; prázdno → null. */
+    private static function dateOnly(mixed $value): ?string
+    {
+        $s = trim((string) ($value ?? ''));
+        return $s === '' ? null : substr($s, 0, 10);
+    }
+
+    /**
+     * Které datum období odpočtu reálně určilo (issue #9) — čistě POROVNÁNÍM výsledku
+     * {@see purchaseClaimDateExpr()} se vstupy, ne druhou implementací pravidla.
+     *
+     * Pořadí odpovědí je záměrné: nejdřív DUZP, pak vystavení, teprve nakonec datum
+     * přijetí. Když je datum přijetí ve shodě s dnem vystavení, je totiž **vystavení**
+     * ta zajímavá informace — doklad nelze držet dřív, než vůbec vznikl (§ 73 odst. 1
+     * písm. a ZDPH), takže dřívější DUZP odpočet do svého měsíce nestáhne. Uživatel,
+     * který si datum přijetí ručně posune do minulosti, jinak marně hledá, proč se
+     * období nehne.
+     *
+     * @param array<string,mixed> $r syrový řádek fetchPurchases
+     * @return 'tax_date'|'issue_date'|'received_at'|null
+     */
+    private static function claimBasis(array $r): ?string
+    {
+        $claim = self::dateOnly($r['claim_date'] ?? null);
+        if ($claim === null) {
+            return null;
+        }
+        if ($claim === self::dateOnly($r['tax_date'] ?? null)) {
+            return 'tax_date';
+        }
+        if ($claim === self::dateOnly($r['issue_date'] ?? null)) {
+            return 'issue_date';
+        }
+        if (($r['received_at_source'] ?? null) === 'manual'
+            && $claim === self::dateOnly($r['received_at'] ?? null)
+        ) {
+            return 'received_at';
+        }
+        return null;
     }
 
     /**

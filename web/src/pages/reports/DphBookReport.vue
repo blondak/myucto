@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { reportsApi, type DphBookPreview } from '@/api/reports'
+import { reportsApi, type DphBookPreview, type DphBookRow } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -66,6 +66,26 @@ function fmtDate(iso: string | null | undefined): string {
   return d.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ')
 }
 
+// Období odpočtu (§ 73 ZDPH) — issue #9. Doklad se v Knize objevil podle claim_date,
+// ne podle DUZP; bez pojmenovaného důvodu vypadalo zařazení do „cizího" měsíce jako chyba.
+function claimBasisLabel(basis: DphBookRow['claim_basis']): string {
+  return basis ? t(`reports.dph_book.claim_basis.${basis}`) : ''
+}
+
+function claimBasisHint(basis: DphBookRow['claim_basis']): string {
+  return basis ? t(`reports.dph_book.claim_hint.${basis}`) : ''
+}
+
+// Zvýrazníme jen případ, kdy odpočet posunulo datum přijetí — to je jediná varianta,
+// kterou uživatel z dokladu nevyčte a která ho překvapí.
+function claimShifted(row: DphBookRow): boolean {
+  return row.claim_basis === 'received_at'
+}
+
+const anyClaimShifted = computed(() =>
+  (preview.value?.sections ?? []).some(s => s.rows.some(claimShifted))
+)
+
 watch([year, month, periodType], loadPreview)
 onMounted(loadPreview)
 </script>
@@ -125,6 +145,10 @@ onMounted(loadPreview)
           {{ t('reports.dph_book.period_label') }}
         </div>
         <div class="text-lg font-semibold font-mono">{{ preview.period.label }}</div>
+        <!-- issue #9: pravidlo pro zařazení přijatého dokladu do období odpočtu musí být
+             vidět v sestavě, ne jen v zákoně — jinak vypadá červnové DUZP v červenci jako chyba. -->
+        <p class="text-xs text-neutral-500 mt-2">{{ t('reports.dph_book.claim_period_note') }}</p>
+        <p v-if="anyClaimShifted" class="text-xs text-warning-700 mt-1">{{ t('reports.dph_book.claim_shift_legend') }}</p>
       </div>
 
       <!-- No data -->
@@ -147,6 +171,9 @@ onMounted(loadPreview)
               <tr>
                 <th class="px-2 py-2 text-left font-medium whitespace-nowrap">{{ t('reports.dph_book.col.tax_date') }}</th>
                 <th class="px-2 py-2 text-left font-medium whitespace-nowrap">{{ t('reports.dph_book.col.accounting_date') }}</th>
+                <th class="px-2 py-2 text-left font-medium whitespace-nowrap" :title="t('reports.dph_book.col.claim_date_hint')">
+                  {{ t('reports.dph_book.col.claim_date') }}
+                </th>
                 <th class="px-2 py-2 text-left font-medium whitespace-nowrap">{{ t('reports.dph_book.col.doc_number') }}</th>
                 <th class="px-2 py-2 text-left font-medium">{{ t('reports.dph_book.col.description') }}</th>
                 <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.dph_book.col.base_czk') }}</th>
@@ -164,6 +191,17 @@ onMounted(loadPreview)
                 :class="row.is_draft ? 'bg-neutral-50 text-neutral-500 italic' : ''">
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono">{{ fmtDate(row.tax_date) }}</td>
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono">{{ fmtDate(row.accounting_date) }}</td>
+                <td class="px-2 py-1.5 whitespace-nowrap" :title="claimBasisHint(row.claim_basis)">
+                  <template v-if="row.claim_date">
+                    <span class="font-mono" :class="claimShifted(row) ? 'text-warning-700 font-semibold' : ''">
+                      {{ fmtDate(row.claim_date) }}<template v-if="claimShifted(row)">&nbsp;*</template>
+                    </span>
+                    <span v-if="row.claim_basis" class="block text-[10px] text-neutral-500 leading-tight">
+                      {{ claimBasisLabel(row.claim_basis) }}
+                    </span>
+                  </template>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
                 <td class="px-2 py-1.5 whitespace-nowrap">
                   <span v-if="row.is_draft"
                     class="inline-block bg-warning-100 text-warning-700 text-[10px] font-bold px-1 py-px rounded mr-1">
@@ -184,7 +222,7 @@ onMounted(loadPreview)
             </tbody>
             <tfoot class="bg-neutral-50 font-semibold">
               <tr>
-                <td colspan="4" class="px-2 py-2 text-xs">
+                <td colspan="5" class="px-2 py-2 text-xs">
                   {{ t('reports.dph_book.subtotal') }} {{ section.key }}
                 </td>
                 <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(section.subtotal_base) }}</td>

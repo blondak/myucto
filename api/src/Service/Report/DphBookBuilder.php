@@ -283,6 +283,13 @@ final class DphBookBuilder
             'original_doc_number'     => $doc !== '' ? $doc : null,
             'tax_date'                => $inv['tax_date'],
             'accounting_date'         => $inv['tax_date'],
+            // Korekce § 74b se do období nezařazuje přes § 73 (rozhoduje období, kdy
+            // nastaly rozhodné skutečnosti u dlužníka) → žádné claim_basis; sloupec
+            // období odpočtu zůstává u tohoto řádku prázdný, ať nepředstírá pravidlo,
+            // které se na něj nevztahuje.
+            'claim_date'              => null,
+            'claim_basis'             => null,
+            'received_at'             => null,
             'description'             => $desc,
             'counterparty_name'       => '',
             'counterparty_dic'        => (string) ($inv['vendor_dic'] ?? ''),
@@ -338,6 +345,11 @@ final class DphBookBuilder
             'original_doc_number'     => $g['source'] === 'purchase' ? $g['vendor_invoice_number'] : null,
             'tax_date'                => $g['tax_date'],
             'accounting_date'         => $g['issue_date'],
+            // Období odpočtu a jeho důvod (issue #9). Bez toho Kniha ukazovala doklad
+            // s červnovým DUZP v červenci a jediné vysvětlení bylo „takhle to vyšlo".
+            'claim_date'              => $g['claim_date'] ?? null,
+            'claim_basis'             => $g['claim_basis'] ?? null,
+            'received_at'             => $g['received_at'] ?? null,
             'description'             => (string) ($g['description'] ?? ''),
             'counterparty_name'       => (string) ($g['counterparty_name'] ?? ''),
             'counterparty_dic'        => (string) ($g['counterparty_dic'] ?? ''),

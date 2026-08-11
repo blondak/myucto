@@ -202,11 +202,24 @@ final class UpdatePurchaseInvoiceAction
         // Auto-default VAT klasifikace pokud uživatel nezadal — na header i items (s multi-tenant scope).
         $this->applyVatClassificationDefaults($body, $supplierId);
 
-        // C6 (§ 73/1/a): ruční editace data přijetí ve formuláři je vědomý úkon účetní
-        // (i default dnešek z UI), ne slepý otisk importu → 'manual'. VatLedgerService pak
-        // smí uplatnit odpočet dle skutečného držení dokladu. Importy zůstávají 'import'.
+        // C6 (§ 73/1/a) — issue #9: na 'manual' překlápíme jen SKUTEČNOU změnu data přijetí.
+        //
+        // Editor posílá `received_at` v KAŽDÉM uložení, i když na pole nikdo nesáhl. Původní
+        // `array_key_exists` proto označilo za „vědomé zadání účetní" i pouhé přeuložení AI
+        // vytěženého dokladu (kde je received_at jen otisk dne skenování) — a tenhle otisk
+        // pak přes VatLedgerService tiše převzal řízení období odpočtu. Doklad, který uživatel
+        // otevřel a uložil, tak skončil v jiném období DPH než jeho neupravené dvojče se
+        // stejnými daty. To je ta nekonzistence, ne § 73: pravidlo pro odvození období musí
+        // platit stejně pro upravený i neupravený doklad a rozhodovat smí jen to, zda účetní
+        // datum přijetí opravdu zadala.
         if (array_key_exists('received_at', $body)) {
-            $body['received_at_source'] = 'manual';
+            if (self::dateOnly($body['received_at']) !== self::dateOnly($existing['received_at'] ?? null)) {
+                $body['received_at_source'] = 'manual';
+            } else {
+                // Beze změny → sloupec vůbec nepřepisovat (repo ho bez klíče nechá být),
+                // ať se dřívější vědomé 'manual' nedegraduje ani otisk 'import' nepovýší.
+                unset($body['received_at_source']);
+            }
         }
 
         // Forma úhrady (migrace 1128): přišla-li z formuláře, je to vědomá volba účetní →
@@ -457,6 +470,17 @@ final class UpdatePurchaseInvoiceAction
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice);
+    }
+
+    /**
+     * Datum na tvar `YYYY-MM-DD` pro porovnání „změnil uživatel pole?". DB vrací DATE,
+     * klient posílá string z `<input type="date">`, ale přes API může dorazit i DATETIME
+     * nebo prázdno — bez normalizace by se tvarový rozdíl vydával za změnu hodnoty.
+     */
+    private static function dateOnly(mixed $value): ?string
+    {
+        $s = trim((string) ($value ?? ''));
+        return $s === '' ? null : substr($s, 0, 10);
     }
 
     /**
