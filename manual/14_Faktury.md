@@ -35,6 +35,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Zakázka | Závisí na vybraném klientovi |
 | Měna | CZK / EUR / … |
 | Období | Tento měsíc / minulý měsíc / tento rok / minulý rok / vlastní rozsah |
+| Neuhrazené k datu | Datum — vypíše doklady vystavené do zvoleného dne, u kterých k tomu dni nebyla uhrazena celá částka |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
 | Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
@@ -43,6 +44,13 @@ Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
 filtrů](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
+
+Filtr **Neuhrazené k datu** je jiná otázka než checkbox „Nezaplacené" — ten se
+dívá na **dnešní** stav dokladu, kdežto „Neuhrazené k datu" na stav **k
+historickému dni** (např. „kdo mi k 30. 6. dlužil"). Doklad zaplacený až po
+tomto dni se proto ve výpisu objeví (k danému dni ještě nebyl uhrazen), i
+když má dnes stav „Zaplaceno". Používá stejnou definici úhrady jako
+[Saldokonto](53_Saldokonto.md), takže si obě sestavy neodporují.
 
 #### Nejisté místo plnění (OSS)
 

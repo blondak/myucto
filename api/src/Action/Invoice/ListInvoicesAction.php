@@ -25,20 +25,32 @@ final class ListInvoicesAction
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
 
+        // Neuhrazené K DATU X (task #4) — na rozdíl od `unpaid_only` (dnešní status) jde
+        // o historický dotaz: doklad vystavený do X, u kterého k X nebyl uhrazen celý
+        // amount_to_pay. Validace shodná se SaldoAction::isDate — chybný formát je 422,
+        // ne tiché "nefiltrovat" (uživatel by si myslel, že vidí správný řez).
+        $unpaidAsOf = isset($filter['unpaid_as_of']) && is_scalar($filter['unpaid_as_of'])
+            ? trim((string) $filter['unpaid_as_of'])
+            : '';
+        if ($unpaidAsOf !== '' && !$this->isDate($unpaidAsOf)) {
+            return Json::error($response, 'validation_failed', "filter[unpaid_as_of] musí být datum (YYYY-MM-DD).", 422);
+        }
+
         $filters = [
-            'q'           => isset($q['q']) ? trim((string) $q['q']) : '',
-            'status'      => $filter['status']      ?? null,
-            'type'        => $filter['type']        ?? null,
-            'client_id'   => $filter['client_id']   ?? null,
-            'project_id'  => $filter['project_id']  ?? null,
-            'year'        => $filter['year']        ?? null,
-            'month'       => $filter['month']       ?? null,
-            'date_from'   => $filter['date_from']   ?? null,
-            'date_to'     => $filter['date_to']     ?? null,
-            'currency'    => $filter['currency']    ?? null,
-            'unpaid_only' => !empty($filter['unpaid_only']),
-            'overdue'     => !empty($filter['overdue']),
-            'booked'      => $filter['booked']      ?? null,
+            'q'             => isset($q['q']) ? trim((string) $q['q']) : '',
+            'status'        => $filter['status']      ?? null,
+            'type'          => $filter['type']        ?? null,
+            'client_id'     => $filter['client_id']   ?? null,
+            'project_id'    => $filter['project_id']  ?? null,
+            'year'          => $filter['year']        ?? null,
+            'month'         => $filter['month']       ?? null,
+            'date_from'     => $filter['date_from']   ?? null,
+            'date_to'       => $filter['date_to']     ?? null,
+            'currency'      => $filter['currency']    ?? null,
+            'unpaid_only'   => !empty($filter['unpaid_only']),
+            'overdue'       => !empty($filter['overdue']),
+            'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
+            'booked'        => $filter['booked']      ?? null,
             // Doklady s řádkem k ručnímu posouzení místa plnění (OSS). Rozsah říká, kde
             // řádek leží: 'domestic' = mimo OSS (tiše v přiznání na ř. 1/2), 'oss' = v OSS
             // podání s otazníkem nad zemí či typem sazby, 'any' = obojí. Legacy `1`/`true`
@@ -86,5 +98,11 @@ final class ListInvoicesAction
         }
 
         return Json::ok($response, $result);
+    }
+
+    private function isDate(string $v): bool
+    {
+        $d = \DateTimeImmutable::createFromFormat('Y-m-d', $v);
+        return $d !== false && $d->format('Y-m-d') === $v;
     }
 }

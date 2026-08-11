@@ -511,6 +511,13 @@ export interface ListFilters {
   currency?: string
   unpaid_only?: boolean
   overdue?: boolean
+  /**
+   * Neuhrazené K DATU X (YYYY-MM-DD) — na rozdíl od `unpaid_only` (dnešní status) jde
+   * o stav, jaký doklad měl k historickému dni: vystavený do X, u kterého k X nebyl
+   * uhrazen celý `amount_to_pay`. Stejná definice jako v Saldokontu (BE zdroj pravdy
+   * je společný), ať si sestavy neodporují.
+   */
+  unpaid_as_of?: string
   /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
   booked?: '1' | '0'
   /**
@@ -624,6 +631,7 @@ export const invoicesApi = {
     if (filters.currency)    params['filter[currency]']    = filters.currency
     if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
     if (filters.overdue)     params['filter[overdue]']     = 1
+    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
     if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
     if (filters.page)        params.page                   = filters.page

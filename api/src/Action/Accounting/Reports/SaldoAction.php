@@ -24,7 +24,12 @@ use Psr\Log\LoggerInterface;
  * účtů pohledávek/závazků per partner + konfrontace se zůstatkem účtu z deníku.
  *
  *   GET /api/accounting/reports/saldo         — data sestavy
- *   GET /api/accounting/reports/saldo/export  — PDF / XLSX (?format=pdf|xlsx)
+ *   GET /api/accounting/reports/saldo/export  — PDF / XLSX (?format=pdf|xlsx&view=grouped|flat)
+ *
+ * `as_of` smí ležet mimo `period_id` (task #3, D6/2) — SaldoService si k němu
+ * dohledá skutečné období samo. `view` (jen export/XLSX) přepíná grouped
+ * (výchozí, per partner — inventarizační protokol) vs. flat (plochý seznam
+ * dokladů, task #2, D6/2); PDF je vždy grouped.
  */
 final class SaldoAction
 {
@@ -72,6 +77,12 @@ final class SaldoAction
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
+        // Task #2 (plochý seznam dokladů): PDF zůstává vždy grouped (inventarizační
+        // protokol per partner, §29–30 ZoÚ) — view ovlivňuje jen pracovní XLSX export.
+        $view = strtolower(trim((string) ($request->getQueryParams()['view'] ?? 'grouped')));
+        if (!in_array($view, ['grouped', 'flat'], true)) {
+            return Json::error($response, 'validation_failed', "view musí být 'grouped' nebo 'flat'.", 422);
+        }
 
         try {
             $data = $this->saldo->build($supplierId, $params['period_id'], $params['as_of'], $params['account'], $params['partner_id']);
@@ -81,7 +92,7 @@ final class SaldoAction
                     'filename' => sprintf('saldokonto-%s.pdf', (string) ($data['as_of'] ?? '')),
                     'mime'     => 'application/pdf',
                 ]
-                : $this->xlsx->saldo($data);
+                : $this->xlsx->saldo($data, $view === 'flat');
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -90,7 +101,7 @@ final class SaldoAction
         }
 
         $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
-            ['report' => 'saldo', 'format' => $format],
+            ['report' => 'saldo', 'format' => $format, 'view' => $view],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $supplierId);
 
@@ -126,10 +137,12 @@ final class SaldoAction
                 $err = Json::error($response, 'validation_failed', 'as_of musí být datum (YYYY-MM-DD).', 422);
                 return null;
             }
-            if ($asOf < (string) $period['starts_on'] || $asOf > (string) $period['ends_on']) {
-                $err = Json::error($response, 'validation_failed', 'as_of musí ležet uvnitř zvoleného období.', 422);
-                return null;
-            }
+            // Task #3 (D6/2): asOf SMÍ ležet mimo vybrané $period — účetní chce
+            // saldokonto k libovolnému rozvahovému dni napříč obdobími (typicky
+            // 31.12. uzavřeného roku při pohledu z nového otevřeného období).
+            // SaldoService::build() si k asOf dohledá skutečné období samo
+            // (AccountingPeriodRepository::findForDate) a vrátí ho v 'as_of_period';
+            // $period tady dál řídí jen výchozí asOf, když parametr chybí.
         }
 
         $account = trim((string) ($q['account'] ?? 'all'));

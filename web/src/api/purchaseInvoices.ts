@@ -270,6 +270,12 @@ export interface PurchaseInvoice {
   tax_date: string | null
   due_date: string
   received_at: string
+  /**
+   * Odkud se datum přijetí vzalo (migrace 1037): 'manual' = účetní ho vědomě zadala,
+   * 'import' = jen otisk dne importu / AI vytěžení. Řídí, zda datum přijetí vstoupí
+   * do období odpočtu podle § 73 odst. 1 písm. a) ZDPH (issue #9).
+   */
+  received_at_source?: 'manual' | 'import'
   currency_id: number
   currency: string
   currency_symbol?: string
@@ -551,6 +557,13 @@ export interface PurchaseListFilters {
   currency?: string
   unpaid_only?: boolean
   overdue?: boolean
+  /**
+   * Neuhrazené K DATU X (YYYY-MM-DD) — na rozdíl od `unpaid_only` (dnešní status) jde
+   * o stav, jaký doklad měl k historickému dni: vystavený do X, u kterého k X nebyl
+   * uhrazen celý `amount_to_pay`. Stejná definice jako v Saldokontu (BE zdroj pravdy
+   * je společný), ať si sestavy neodporují.
+   */
+  unpaid_as_of?: string
   /** Bez zaúčtované úhrady (banka ani pokladna) — odhalí ručně/legacy uhrazené doklady. */
   unmatched?: boolean
   needs_review?: boolean
@@ -616,6 +629,7 @@ export const purchaseInvoicesApi = {
     if (filters.currency)    params['filter[currency]']    = filters.currency
     if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
     if (filters.overdue)      params['filter[overdue]']      = 1
+    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
     if (filters.unmatched)    params['filter[unmatched]']    = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered

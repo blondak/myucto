@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
 /**
@@ -584,7 +585,9 @@ final class PurchaseInvoiceRepository
      *
      * Filtry:
      *   supplier_id (povinné — tenant scope)
-     *   q, status, document_kind, vendor_id, year, month, date_from, date_to, currency, unpaid_only, overdue
+     *   q, status, document_kind, vendor_id, year, month, date_from, date_to, currency, unpaid_only, overdue,
+     *   unpaid_as_of (YYYY-MM-DD — neuhrazeno K DATU X, ne dnešní status; stejný zdroj
+     *   pravdy o úhradě jako SaldoRepository::fetchOpenPurchases, viz komentář u filtru)
      */
     public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
     {
@@ -641,6 +644,38 @@ final class PurchaseInvoiceRepository
         }
         if (!empty($filters['overdue'])) {
             $where[] = "pi.status IN ('received','booked') AND pi.due_date <= CURDATE()";
+        }
+        // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`/`overdue`
+        // výše. Přijaté faktury NEMAJÍ obdobu `invoice_payments` — zdroj pravdy o úhradě
+        // je proto STEJNÝ jako v SaldoRepository::fetchOpenPurchases (audit 2026-07, H2/H3):
+        // plná úhrada K asOf je autoritativní jen přes `status='paid' AND paid_at <= asOf`
+        // (kryje bankovní, hotovostní i ruční úhradu — paid_at nastaví i CashDocumentService::
+        // applySideEffects). Jinak best-effort ze Σ payment_matches s bank_transactions.
+        // posted_at <= asOf (jen bankovní párování — KNOWN GAP H3 u cizoměnové ČÁSTEČNÉ
+        // úhrady, shodně se saldokontem, ať si sestavy neodporují).
+        if (!empty($filters['unpaid_as_of'])) {
+            $asOf = (string) $filters['unpaid_as_of'];
+            // Vystavená do X — koncept ještě není závazek.
+            $where[] = 'pi.issue_date <= ?';
+            $params[] = $asOf;
+            $where[] = "pi.status <> 'draft'";
+            // Storno platí, jen když k X už proběhlo (H4b, shodně se SaldoRepository).
+            $where[] = "(pi.status <> 'cancelled' OR pi.cancelled_at IS NULL OR DATE(pi.cancelled_at) > ?)";
+            $params[] = $asOf;
+            // DDKP (§ 28 ZDPH) nikdy nezakládá závazek na 321 — jeho amount_to_pay je
+            // GENERATED sloupec s plným brutto už zaplacené zálohy (viz PayablePredicate
+            // + PayablePredicateCoverageTest B-13); bez vyloučení by tu vyšel jako fantomový
+            // dluh v plné výši zálohy.
+            $where[] = PayablePredicate::advanceVatDocumentCondition('pi');
+            // NOT (plně uhrazeno k asOf podle autoritativního stavu) AND (zbývá k úhradě
+            // podle bankovního párování k asOf) > tolerance.
+            $where[] = "NOT (pi.status = 'paid' AND pi.paid_at IS NOT NULL AND DATE(pi.paid_at) <= ?)";
+            $params[] = $asOf;
+            $where[] = "(pi.amount_to_pay - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm"
+                . " JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id"
+                . " WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id"
+                . " AND bt.posted_at <= ?), 0)) > 0.005";
+            $params[] = $asOf;
         }
         // „Bez párování úhrady" — doklad NEMÁ žádnou zaúčtovanou úhradu: ani bankovní
         // match (payment_matches), ani hotovostní pokladní doklad (cash_documents POSTED).

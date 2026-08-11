@@ -807,7 +807,16 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                     </span>
                   </div>
                 </td>
-                <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono">{{ formatMoney(e.amount ?? 0) }}</td>
+                <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono">
+                  {{ formatMoney(e.amount ?? 0) }}
+                  <!-- Jen při filtru na účet (account_from/account_to) — jinak by MD/Dal
+                       značka naznačovala stranu SOUČTU zápisu, který žádnou jednoznačnou
+                       stranu nemá (Σ MD = Σ Dal u vyváženého zápisu). -->
+                  <span v-if="e.amount_side" class="ml-1 text-xs font-sans text-neutral-400"
+                    :title="t('accounting.journal.filter_account_amount_hint')">
+                    {{ t(`accounting.journal.side.${e.amount_side}`) }}
+                  </span>
+                </td>
                 <td v-if="tbl.isVisible('status')" class="px-3 py-2 text-center">
                   <span v-if="e.posted_at" class="text-xs px-2 py-0.5 rounded font-medium bg-success-50 text-success-600">{{ t('accounting.journal.posted') }}</span>
                   <span v-else class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('accounting.journal.draft') }}</span>

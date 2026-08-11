@@ -333,6 +333,50 @@ paths:
         '403':
           $ref: '#/components/responses/InsufficientScope'
 
+  /api/v1/clients/duplicates:
+    get:
+      tags: [Clients]
+      summary: Report duplicitních karet dodavatele/odběratele
+      description: |
+        Skupiny karet tenanta se shodným IČO nebo DIČ po normalizaci (bez mezer,
+        bez úvodní nuly u IČO) — typicky vzniklé před zavedením kontroly duplicit
+        při zakládání karty (mezera v DIČ, chybějící úvodní nula v IČO).
+        Zakládání nové karty samo o sobě takové duplicitě předchází; tento report
+        pokrývá karty založené dřív.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups, count]
+                properties:
+                  count:
+                    type: integer
+                    description: Počet nalezených skupin duplicit
+                  groups:
+                    type: array
+                    items:
+                      type: object
+                      required: [key_type, key_value, clients]
+                      properties:
+                        key_type: { type: string, enum: [ic, dic] }
+                        key_value: { type: string, description: Normalizovaná hodnota, na které se karty shodují }
+                        clients:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id: { type: integer, format: int64 }
+                              company_name: { type: string }
+                              ic: { type: string, nullable: true }
+                              dic: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/clients/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -581,6 +625,14 @@ paths:
           name: filter[overdue]
           description: Pouze po splatnosti
           schema: { type: boolean }
+        - in: query
+          name: filter[unpaid_as_of]
+          description: >
+            Neuhrazené K DATU X (na rozdíl od `filter[unpaid_only]`, který se dívá na
+            dnešní status/zůstatek): doklad vystavený do X (`issue_date <= X`), u kterého
+            k X nebyl uhrazen celý `amount_to_pay` — součet `invoice_payments.amount`
+            s `paid_on <= X`. Stejná definice jako v saldokontu.
+          schema: { type: string, format: date, example: "2026-06-30" }
         - in: query
           name: filter[booked]
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
@@ -3904,6 +3956,12 @@ paths:
         víceznačné, server vrátí `409` s kódem `ambiguous_account_currency` a polem
         `candidates` (seznam měnových variant). Při jednoznačném čísle je `account_id`
         nepovinné (zpětně kompatibilní).
+
+        Odpověď nese kromě `statement_id` také `parsed_transactions` (počet pohybů
+        v souboru), `transactions` (skutečně založených), `skipped_duplicates` a
+        `warnings`. Rozdíl mezi `parsed_transactions` a `transactions` je normální
+        u překrývajících se výpisů (týž pohyb už je v evidenci), ale nikdy není tichý —
+        vždy k němu přibude varování `transactions_skipped_as_duplicate`.
       requestBody:
         required: true
         content:
@@ -4736,6 +4794,17 @@ paths:
         - in: query
           name: filter[overdue]
           schema: { type: boolean }
+        - in: query
+          name: filter[unpaid_as_of]
+          description: >
+            Neuhrazené K DATU X (na rozdíl od `filter[unpaid_only]`, který se dívá na
+            dnešní status): doklad vystavený do X (`issue_date <= X`), u kterého k X
+            nebyl uhrazen celý `amount_to_pay`. Přijaté faktury nemají obdobu
+            `invoice_payments` — plná úhrada k X je autoritativní jen přes
+            `status='paid' AND paid_at <= X`, jinak best-effort ze součtu
+            `payment_matches.amount` s `bank_transactions.posted_at <= X` (jen bankovní
+            párování). Stejná definice jako v saldokontu.
+          schema: { type: string, format: date, example: "2026-06-30" }
         - in: query
           name: filter[booked]
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
@@ -7041,6 +7110,18 @@ paths:
         '200': { description: "OK {from, to, threshold_percent, items, missing_cnb_count, fixed_mode_skipped}", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/reports/invoice-series-completeness:
+    get:
+      tags: [Reports]
+      summary: Úplnost číselné řady vydaných dokladů — mezera je auditní signál pro FÚ
+      description: Read-only, nic neopravuje. Faktury a dobropisy sdílející jednu šablonu (stejný digit skeleton) se posuzují jako jedna řada, aby se nehlásily falešné mezery způsobené tím druhým typem dokladu.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer, minimum: 2000, maximum: 2100 }, description: "Default aktuální rok. Řady s period='none' (bez ročního resetu counteru) se skenují vždy celé bez ohledu na year." }
+      responses:
+        '200': { description: "OK {year, series, total_missing}", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/reports/dph-book/preview:
     get:
       tags: [Reports]
@@ -8639,7 +8720,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
-        - { in: query, name: as_of, description: "Rozvahový den (default min(konec období, dnešek))", schema: { type: string, format: date } }
+        - { in: query, name: as_of, description: "Rozvahový den (default min(konec období, dnešek)). Smí ležet mimo period_id (i v uzavřeném období) — odpověď nese as_of_period se skutečným obdobím.", schema: { type: string, format: date } }
         - { in: query, name: account, description: "Kód účtu (např. 311) nebo 'all' pro default sadu", schema: { type: string, default: all } }
         - { in: query, name: partner_id, description: "Volitelný filtr na jednoho partnera", schema: { type: integer } }
       responses:
@@ -8658,6 +8739,7 @@ paths:
         - { in: query, name: account, schema: { type: string, default: all } }
         - { in: query, name: partner_id, schema: { type: integer } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+        - { in: query, name: view, description: "Jen pro format=xlsx: grouped (default, per partner) nebo flat (plochý seznam dokladů). PDF je vždy grouped.", schema: { type: string, enum: [grouped, flat], default: grouped } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -9282,7 +9364,14 @@ paths:
               properties:
                 kind: { type: string, enum: [current, savings, term_deposit] }
                 label: { type: [string, "null"], maxLength: 120 }
-                analytic_suffix: { type: [string, "null"], pattern: '^[0-9]{1,6}$' }
+                analytic_suffix:
+                  type: [string, "null"]
+                  pattern: '^[0-9]{1,6}$'
+                  description: >-
+                    Analytika účtu 221 (221<suffix>). Musí být v rámci firmy jedinečná —
+                    obsazené číslo vrací 422. Prázdná hodnota u účtu BEZ analytiky znamená
+                    „přiděl automaticky"; u účtu, který analytiku už má, je odmítnutá (422) —
+                    analytiku lze jen změnit na jiné číslo, ne zrušit.
                 is_active: { type: boolean }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierBankAccount' } } } }
@@ -15791,7 +15880,11 @@ components:
         posted_by: { type: [integer, "null"] }
         reversed_by: { type: [integer, "null"] }
         row_version: { type: integer }
-        amount: { type: number, format: float, description: "Σ MD řádků zápisu (jen v listu, audit 2026-07)." }
+        amount: { type: number, format: float, description: "Jen v listu. Bez filtru account_from/account_to: Σ MD řádků zápisu. S filtrem: absolutní částka připadající na filtrovaný rozsah účtů v tomto zápisu (viz amount_side)." }
+        amount_side:
+          type: [string, "null"]
+          enum: [debit, credit, null]
+          description: "Jen v listu a jen když je aktivní filtr account_from/account_to — strana (MD/D), na kterou amount připadá u filtrovaného rozsahu účtů. Null bez filtru na účet."
         source_statement_id: { type: [integer, "null"], description: "Jen source_type=bank — ID bankovního výpisu pro drill-down (audit 2026-07)." }
         source_doc_number: { type: [string, "null"], description: "Jen source_type=cash — číslo pokladního dokladu pro drill-down (audit 2026-07)." }
         source_register_id: { type: [integer, "null"], description: "Jen source_type=cash — ID pokladny (audit 2026-07)." }
@@ -16428,6 +16521,15 @@ components:
           type: array
           items: { type: string }
           description: "Jen v odpovědi POST/PUT — non-blocking varování (např. ic_checksum_invalid, dic_format_invalid, dic_ic_mismatch — audit 2026-07), uložení neblokují."
+        _duplicate_candidates:
+          type: array
+          description: "Jen v odpovědi POST/PUT, jen když existuje — jiná karta tenanta se stejným IČO/DIČ po normalizaci (FR 2, vendor bugreport 2026-08-06). Non-blocking, uložení neblokuje."
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              company_name: { type: string }
+              match_field: { type: string, enum: [ic, dic] }
 
     ClientEmailContact:
       type: object
@@ -17477,7 +17579,7 @@ components:
         iban: { type: [string, "null"] }
         currency: { type: [string, "null"], minLength: 3, maxLength: 3 }
         kind: { type: string, enum: [current, savings, term_deposit] }
-        analytic_suffix: { type: [string, "null"] }
+        analytic_suffix: { type: [string, "null"], description: 'Analytika účtu 221 (221<suffix>); přiděluje se automaticky každému aktivnímu účtu.' }
         is_active: { type: boolean }
         source: { type: string, enum: [currencies, statement, manual] }
         currency_id: { type: [integer, "null"] }
@@ -18302,6 +18404,7 @@ components:
         tax_date: { type: [string, "null"], format: date }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
+        received_at_source: { type: string, enum: [manual, import], description: "Odkud pochází datum přijetí. 'manual' = zadal ho uživatel → vstupuje do období odpočtu (§ 73 odst. 1 písm. a ZDPH); 'import' = jen otisk dne importu / AI extrakce → do zařazení se nepočítá. Překlápí se až SKUTEČNOU změnou pole, ne pouhým přeuložením dokladu." }
         prices_include_vat: { type: boolean, description: "Ceny položek zadané včetně DPH (migrace 0083)" }
         expense_category_id: { type: [integer, "null"], description: "FK do /expense-categories — kategorie nákladu pro CRM/dashboard" }
         expense_category_label: { type: [string, "null"] }

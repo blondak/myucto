@@ -96,8 +96,16 @@ export interface JournalEntry {
   updated_at: string
   /** Obohaceno v listu (LEFT JOIN users na posted_by). */
   posted_by_name?: string | null
-  /** Obohaceno v listu (audit 2026-07) — Σ MD řádků zápisu (= Σ Dal u vyváženého zápisu). */
+  /**
+   * Obohaceno v listu (audit 2026-07). Bez filtru account_from/account_to: Σ MD
+   * řádků zápisu (= Σ Dal u vyváženého zápisu). S filtrem na účet: absolutní
+   * částka připadající na filtrovaný rozsah účtů v TOMTO zápisu (viz amount_side) —
+   * jinak by u zápisu s víc nohama na různých účtech sloupec Částka ukazoval součet
+   * celého zápisu místo částky vybraného účtu (nález „ČÁSTKA u filtru na účet").
+   */
   amount?: number
+  /** Strana (MD/D), na kterou `amount` připadá — jen když je aktivní filtr account_from/account_to, jinak null. */
+  amount_side?: JournalSide | null
   /** Obohaceno v listu jen pro source_type='bank' — drill-down na bankovní výpis. */
   source_statement_id?: number | null
   /** Obohaceno v listu jen pro source_type='cash' — drill-down na pokladní doklad. */
@@ -1084,10 +1092,17 @@ export interface SaldoAccountBlock {
   partners: SaldoPartner[]
 }
 
+/** Období vč. stavu (report ReportPeriod status nenese — saldokonto ho pro UI hint potřebuje). */
+export interface SaldoPeriodInfo extends ReportPeriod {
+  status: string
+}
+
 export interface SaldoReport {
   as_of: string
   entity: { name: string; ico: string | null; address: string; prepared_at: string }
-  period: ReportPeriod
+  period: SaldoPeriodInfo
+  /** Období, do kterého as_of skutečně spadá — liší se od `period`, když si uživatel zvolí datum mimo vybrané období z dropdownu (task #3, D6/2). null = pro as_of není založené žádné období. */
+  as_of_period: SaldoPeriodInfo | null
   accounts: SaldoAccountBlock[]
 }
 

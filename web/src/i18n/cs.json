@@ -467,6 +467,7 @@
     "reports_shv": "Souhrnné hlášení",
     "reports_income_tax": "Daň z příjmů",
     "reports_cnb_audit": "Audit kurzů (ČNB)",
+    "reports_series_completeness": "Úplnost číselné řady",
     "reports_submissions": "EPO podání a archív",
     "reports_monthly_export": "Hromadný export",
     "tax_optimizer": "Daňový optimalizátor",
@@ -3991,6 +3992,7 @@
         "version_conflict": "Zápis mezitím změnil jiný uživatel — načetl jsem aktuální stav, zkuste to prosím znovu.",
         "invalid_if_match": "Neplatná verze pro kontrolu souběhu — načtěte aktuální stav a zkuste to znovu."
       },
+      "filter_account_amount_hint": "Při filtru na účet je zobrazená částka připadající na tento účet, ne součet celého zápisu.",
       "side": {
         "debit": "MD",
         "credit": "Dal"
@@ -4519,7 +4521,18 @@
       "col_overdue": "Dní po splatnosti",
       "col_amount": "Částka",
       "col_paid": "Uhrazeno",
-      "col_remaining": "Zbývá"
+      "col_remaining": "Zbývá",
+      "col_account": "Účet",
+      "view_group_label": "Zobrazení sestavy",
+      "view_by_document": "Podle dokladů",
+      "view_by_partner": "Podle partnera",
+      "filter_partner": "Partner",
+      "filter_partner_all": "Všichni partneři",
+      "filter_overdue_min": "Po splatnosti (dní, min.)",
+      "flat_empty": "Žádné otevřené položky neodpovídají zvoleným filtrům.",
+      "period_mismatch_hint": "Zvolený rozvahový den spadá do účetního období {fiscal_year}, ne do vybraného období v dropdownu — sestava je i tak spočtená správně.",
+      "period_mismatch_switch": "Přepnout na období {fiscal_year}",
+      "period_missing_hint": "Pro zvolený rozvahový den není založené žádné účetní období — zůstatky se počítají kumulativně od počátku historie."
     },
     "account_statement": {
       "title": "Opis účtu",
@@ -5718,6 +5731,13 @@
       "tax_date_rc_hint": "U reverse charge se doklad zařazuje do DPH období podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu). U pořízení zboží z EU je DUZP dle § 25 ZDPH 15. den měsíce následujícího po dodání, pokud doklad nebyl vystaven dříve.",
       "due_date": "Splatnost",
       "received_at": "Datum přijetí",
+      "vat_claim_hint": "Nárok na odpočet DPH z tohoto dokladu spadá do období {period} — {basis}. Podle § 73 odst. 1 písm. a) ZDPH lze odpočet uplatnit nejdříve za období, ve kterém máte doklad k dispozici; samotné DUZP proto doklad do svého měsíce nestáhne, pokud byl vystaven nebo přijat později.",
+      "vat_claim_basis": {
+        "tax_date": "rozhoduje DUZP",
+        "issue_date": "rozhoduje datum vystavení (dřív doklad nemůžete mít)",
+        "received_at": "rozhoduje datum přijetí"
+      },
+      "vat_claim_received_note": "Zkontroluj, že datum přijetí odpovídá dni, kdy jsi doklad skutečně dostal — po vytěžení AI je předvyplněné dnem zpracování. Dokud na pole nesáhneš, do období odpočtu nevstupuje.",
       "currency": "Měna faktury",
       "currency_purchase_only": "jen pro nákup",
       "currency_add_hint": "Přidat novou měnu pro přijaté faktury (zakládá se jako neaktivní pro vystavené)",
@@ -6059,6 +6079,9 @@
       "overdue": "Po splatnosti",
       "unmatched": "Bez párování úhrady",
       "unmatched_hint": "Doklady označené jako uhrazené, ale bez zaúčtované úhrady (banka ani pokladna) — závazek 321 zůstává v deníku otevřený.",
+      "unpaid_as_of_label": "Neuhrazené k datu",
+      "unpaid_as_of_hint": "Zobrazí doklady vystavené do zvoleného data, u kterých k tomu dni nebyla uhrazena celá částka — bez ohledu na dnešní stav. Stejná definice jako v Saldokontu.",
+      "unpaid_as_of_clear": "Zrušit filtr na datum",
       "needs_review": "Ke kontrole",
       "payment_ordered": "Předání k úhradě",
       "payment_ordered_all": "Předání: vše",
@@ -7442,6 +7465,9 @@
     "month_filter": "Filtr na měsíc (ve zvoleném roce)",
     "overdue_only": "Po splatnosti",
     "unpaid_only": "Nezaplacené",
+    "unpaid_as_of_label": "Neuhrazené k datu",
+    "unpaid_as_of_hint": "Zobrazí doklady vystavené do zvoleného data, u kterých k tomu dni nebyla uhrazena celá částka — bez ohledu na dnešní stav. Stejná definice jako v Saldokontu.",
+    "unpaid_as_of_clear": "Zrušit filtr na datum",
     "oss_review_only_hint": "Doklady s řádkem, u kterého si systém není jistý místem plnění. Část z nich se do OSS zařadila (ověřte zemi a typ sazby), část zůstala v tuzemském přiznání na ř. 1 a 2 (ověřte, jestli tam patří).",
     "oss_review_scope": {
       "off": "Místo plnění (OSS): vše",
@@ -8107,6 +8133,17 @@
       "dic_format_invalid": "DIČ nemá platný formát (tuzemské: CZ + 8-10 číslic, zahraniční: kód země + alfanumerický kód). Zkontroluj prosím zadanou hodnotu.",
       "dic_ic_mismatch": "DIČ neodpovídá zadanému IČO (u tuzemských právnických osob má DIČ nést stejných 8 číslic jako IČO). Zkontroluj prosím obě hodnoty."
     },
+    "duplicate_candidate_warning": "Karta se stejným IČO/DIČ už možná existuje: {name}. Uložení to neblokuje, zkontroluj prosím, jestli nejde o duplicitu.",
+    "duplicates": {
+      "banner_title": "Nalezené duplicity dodavatelů: {count}",
+      "banner_hint": "Karty se shodným IČO nebo DIČ po normalizaci (bez mezer, bez úvodní nuly) — doklady stejného dodavatele se mezi nimi mohou rozdělit.",
+      "view_link": "Zobrazit",
+      "modal_title": "Duplicitní karty dodavatele",
+      "group_by_ic": "Shodné IČO: {value}",
+      "group_by_dic": "Shodné DIČ: {value}",
+      "no_duplicates": "Žádné duplicity nenalezeny.",
+      "open_card": "Otevřít kartu"
+    },
     "street": "Ulice",
     "city": "Město",
     "zip": "PSČ",
@@ -8528,10 +8565,12 @@
     "analytics": {
       "tab": "Kontace účtů",
       "explainer_title": "Analytické členění účtu 221",
-      "explainer_body": "Účty detekuje systém z výpisů a nastavení. Tady jim přiřadíš druh (běžný / spořicí / termínovaný vklad), vlastní název a analytiku 221.xxx — deník a výkazy pak člení peněžní prostředky po účtech.",
+      "explainer_body": "Účty detekuje systém z výpisů a nastavení. Každý bankovní účet má vlastní analytiku 221xxx (221100, 221200 …) — přidělí se automaticky, ale můžeš ji přepsat, například namapovat účet na analytiku, kterou už v osnově vedeš. Deník, rozvaha i inventarizace pak člení peněžní prostředky po jednotlivých účtech.",
       "empty": "Zatím nejsou detekované žádné bankovní účty — objeví se po importu prvního výpisu.",
       "label_placeholder": "Vlastní název účtu",
       "suffix_invalid": "Analytika u účtu {account} musí být 1–6 číslic.",
+      "suffix_required": "Analytiku účtu {account} nelze zrušit — lze ji jen změnit na jiné číslo.",
+      "suffix_taken": "Analytiku {suffix} už používá účet {account}.",
       "saved": "Bankovní účty byly uloženy.",
       "unsaved": "Neuložené změny: {count} účtů",
       "kinds": {
@@ -9788,6 +9827,7 @@
     "hint": "Sazby DPH členských států, proti kterým se ověřují OSS doklady. Je to kontrolní číselník, ne sazby pro doklad — ty se zakládají v Sazbách DPH.",
     "missing_migration": "Číselník v databázi není — chybí migrace 1152. Spusťte migrace (php api/bin/migrate.php); do té doby se neověřuje žádný stát.",
     "missing_management_migration": "Číselník jde zatím jen číst — chybí migrace 1296. Spusťte migrace (php api/bin/migrate.php).",
+    "coverage_gap": "Číselník nemá k dnešnímu dni platnou sazbu pro tyto členské státy: {countries}. Import dokladů do/z nich skončí u ručního posouzení. Spusťte migrace (php api/bin/migrate.php) — sebeopravná migrace 1319 chybějící sazby dotáhne; nezasáhne přitom žádnou vlastní sazbu, kterou jste si tu případně už doplnili.",
     "readonly_for_role": "Číselník je společný pro celou instanci, proto ho může měnit jen její správce.",
     "filter_country": "Stát",
     "show_disabled": "Zobrazit vyřazené",
@@ -10768,6 +10808,25 @@
       "kind_sale": "vydaná",
       "note": "Dopad = celková částka × (kurz ČNB − kurz na dokladu). Jde o účetní přepočet (563/663); korunové částky DPH na dokladu se netýká (§73/6)."
     },
+    "series_completeness": {
+      "title": "Úplnost číselné řady",
+      "subtitle": "Mezera v číselné řadě vydaných dokladů je auditní signál pro finanční úřad. Report jen hlásí — nic neopravuje.",
+      "year_label": "Rok",
+      "no_series": "Pro zvolený rok nejsou nastavené žádné číselné řady vydaných dokladů, nebo v nich nejsou žádné doklady.",
+      "no_gaps": "Bez mezer — číselná řada je kompletní.",
+      "type_invoice": "faktury",
+      "type_credit_note": "dobropisy",
+      "series_supplier": "Řada dodavatele",
+      "series_client": "Řada klienta {name}",
+      "shared_note": "Faktury a dobropisy sdílejí jednu řadu — čísla se posuzují dohromady.",
+      "period_none": "celá historie",
+      "col_period": "Období",
+      "col_range": "Rozsah",
+      "col_used": "Použito",
+      "col_missing": "Chybějící čísla",
+      "missing_count": "{count} chybí",
+      "gaps_found": "Nalezené mezery: {count}"
+    },
     "dph_book": {
       "title": "Kniha DPH",
       "subtitle": "Interní VAT žurnál seskupený podle řádků DPH přiznání. Není to podání FÚ.",
@@ -10779,6 +10838,8 @@
       "col": {
         "tax_date": "Datum plnění",
         "accounting_date": "Zaúčtování",
+        "claim_date": "Období odpočtu",
+        "claim_date_hint": "Datum, podle kterého přijatý doklad spadl do tohoto období. U vystavených plnění a u oprav podle § 74b se neuvádí.",
         "doc_number": "Doklad",
         "description": "Popis",
         "base_czk": "Základ daně CZK",
@@ -10790,6 +10851,18 @@
         "original_tax_date": "Orig. datum plnění",
         "kh_code": "KH"
       },
+      "claim_basis": {
+        "tax_date": "dle DUZP",
+        "issue_date": "dle data vystavení",
+        "received_at": "dle data přijetí"
+      },
+      "claim_hint": {
+        "tax_date": "Období odpočtu se řídí datem uskutečnění zdanitelného plnění — doklad byl vystaven i přijat nejpozději k tomuto dni.",
+        "issue_date": "Období odpočtu se řídí datem vystavení dokladu: nárok na odpočet lze uplatnit nejdříve za období, ve kterém doklad máte k dispozici (§ 73 odst. 1 písm. a ZDPH), a doklad nemůžete mít dřív, než byl vystaven. Dřívější DUZP proto odpočet do svého měsíce nestáhne.",
+        "received_at": "Období odpočtu se řídí datem přijetí dokladu: nárok na odpočet vzniká nejdříve za období, ve kterém doklad máte k dispozici (§ 73 odst. 1 písm. a ZDPH). Pokud datum přijetí neodpovídá skutečnosti, oprav ho na dokladu."
+      },
+      "claim_period_note": "Přijaté doklady jsou zařazeny podle období odpočtu (§ 73 odst. 1 písm. a ZDPH): nárok lze uplatnit nejdříve za období, ve kterém máte doklad k dispozici. Doklad s DUZP na konci měsíce, ale vystavený nebo přijatý až v měsíci následujícím, proto patří do toho následujícího.",
+      "claim_shift_legend": "* Období odpočtu posunulo datum přijetí dokladu. Zkontroluj, že odpovídá dni, kdy jsi doklad skutečně dostal — u dokladu vytěženého AI je předvyplněný dnem zpracování.",
       "subtotal": "CELKEM",
       "summary_issued": "Uskutečněná plnění (daň na výstupu)",
       "summary_received": "Přijatá plnění (odpočet na vstupu)",

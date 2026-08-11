@@ -467,6 +467,7 @@
     "reports_shv": "Recapitulative statement",
     "reports_income_tax": "Income tax",
     "reports_cnb_audit": "FX rate audit (CNB)",
+    "reports_series_completeness": "Numbering series completeness",
     "reports_submissions": "EPO filing & archive",
     "reports_monthly_export": "Bulk export",
     "tax_optimizer": "Tax optimizer",
@@ -3991,6 +3992,7 @@
         "version_conflict": "The entry was changed by another user — the latest state has been loaded, please try again.",
         "invalid_if_match": "Invalid concurrency version — reload the current state and try again."
       },
+      "filter_account_amount_hint": "With an account filter active, the amount shown is the one posted to that account, not the whole entry total.",
       "side": {
         "debit": "Dr",
         "credit": "Cr"
@@ -4519,7 +4521,18 @@
       "col_overdue": "Days overdue",
       "col_amount": "Amount",
       "col_paid": "Paid",
-      "col_remaining": "Remaining"
+      "col_remaining": "Remaining",
+      "col_account": "Account",
+      "view_group_label": "Report view",
+      "view_by_document": "By document",
+      "view_by_partner": "By partner",
+      "filter_partner": "Partner",
+      "filter_partner_all": "All partners",
+      "filter_overdue_min": "Overdue (days, min.)",
+      "flat_empty": "No open items match the selected filters.",
+      "period_mismatch_hint": "The selected balance-sheet date falls into accounting period {fiscal_year}, not the period selected in the dropdown — the report is still computed correctly.",
+      "period_mismatch_switch": "Switch to period {fiscal_year}",
+      "period_missing_hint": "No accounting period is defined for the selected balance-sheet date — balances are computed cumulatively from the beginning of history."
     },
     "account_statement": {
       "title": "Account statement",
@@ -5718,6 +5731,13 @@
       "tax_date_rc_hint": "Under reverse charge the document is assigned to the VAT period by the tax point date (the obligation to declare tax arises regardless of receiving the document). For EU goods acquisitions the tax point is, per § 25 of the Czech VAT Act, the 15th day of the month following delivery, unless the invoice was issued earlier.",
       "due_date": "Due date",
       "received_at": "Received on",
+      "vat_claim_hint": "Input VAT from this document falls into the {period} period — {basis}. Under § 73(1)(a) of the Czech VAT Act the deduction can be claimed no earlier than the period in which you hold the document, so the tax point alone cannot pull the document into its own month if it was issued or received later.",
+      "vat_claim_basis": {
+        "tax_date": "driven by the tax point",
+        "issue_date": "driven by the issue date (you cannot hold the document earlier)",
+        "received_at": "driven by the date received"
+      },
+      "vat_claim_received_note": "Check that the date received matches the day you actually got the document — after AI extraction it is pre-filled with the processing date. Until you edit the field, it does not affect the deduction period.",
       "currency": "Invoice currency",
       "currency_purchase_only": "for purchases only",
       "currency_add_hint": "Add a currency for received invoices (created as inactive for issued)",
@@ -6059,6 +6079,9 @@
       "overdue": "Overdue",
       "unmatched": "No payment matched",
       "unmatched_hint": "Documents marked as paid but with no posted payment (neither bank nor cash) — the 321 payable stays open in the journal.",
+      "unpaid_as_of_label": "Unpaid as of",
+      "unpaid_as_of_hint": "Shows documents issued by the selected date that were not fully paid as of that day — regardless of today's status. Same definition as in the Balance report (Saldokonto).",
+      "unpaid_as_of_clear": "Clear date filter",
       "needs_review": "Needs review",
       "payment_ordered": "Payment handover",
       "payment_ordered_all": "Handover: all",
@@ -7442,6 +7465,9 @@
     "month_filter": "Filter by month (within selected year)",
     "overdue_only": "Overdue",
     "unpaid_only": "Unpaid",
+    "unpaid_as_of_label": "Unpaid as of",
+    "unpaid_as_of_hint": "Shows documents issued by the selected date that were not fully paid as of that day — regardless of today's status. Same definition as in the Balance report (Saldokonto).",
+    "unpaid_as_of_clear": "Clear date filter",
     "oss_review_only_hint": "Documents with a line whose place of supply the system is unsure about. Some ended up in the OSS return (check the country and rate type), some stayed in the Czech VAT return on lines 1 and 2 (check whether they belong there).",
     "oss_review_scope": {
       "off": "Place of supply (OSS): all",
@@ -8107,6 +8133,17 @@
       "dic_format_invalid": "The VAT ID (DIČ) has an invalid format (domestic: CZ + 8-10 digits, foreign: country code + alphanumeric code). Please check the entered value.",
       "dic_ic_mismatch": "The VAT ID (DIČ) does not match the entered Reg. No. (for domestic legal entities, the VAT ID should carry the same 8 digits as the Reg. No.). Please check both values."
     },
+    "duplicate_candidate_warning": "A card with the same Reg. No./VAT ID may already exist: {name}. This does not block saving — please check it is not a duplicate.",
+    "duplicates": {
+      "banner_title": "Duplicate vendor cards found: {count}",
+      "banner_hint": "Cards with a matching Reg. No. or VAT ID after normalization (no spaces, no leading zero) — the same vendor's documents may be split between them.",
+      "view_link": "View",
+      "modal_title": "Duplicate vendor cards",
+      "group_by_ic": "Matching Reg. No.: {value}",
+      "group_by_dic": "Matching VAT ID: {value}",
+      "no_duplicates": "No duplicates found.",
+      "open_card": "Open card"
+    },
     "street": "Street",
     "city": "City",
     "zip": "ZIP",
@@ -8528,10 +8565,12 @@
     "analytics": {
       "tab": "Account posting",
       "explainer_title": "Analytical breakdown of account 221",
-      "explainer_body": "Accounts are detected from statements and settings. Here you assign each a kind (current / savings / term deposit), your own label and the 221.xxx analytic code — the journal and statements then break cash down per account.",
+      "explainer_body": "Accounts are detected from statements and settings. Every bank account has its own 221xxx sub-account (221100, 221200 …) assigned automatically; you can override it, for example to map an account onto a sub-account you already keep in the chart. The journal, balance sheet and stocktaking then break cash down per account.",
       "empty": "No bank accounts detected yet — they appear after the first statement import.",
       "label_placeholder": "Custom account label",
       "suffix_invalid": "The analytic code for account {account} must be 1–6 digits.",
+      "suffix_required": "The sub-account of {account} cannot be removed — it can only be changed to a different number.",
+      "suffix_taken": "Sub-account {suffix} is already used by {account}.",
       "saved": "Bank accounts saved.",
       "unsaved": "Unsaved changes: {count} accounts",
       "kinds": {
@@ -9788,6 +9827,7 @@
     "hint": "VAT rates of EU member states used to verify OSS documents. This is a control codebook, not the rates used on documents — those live under VAT rates.",
     "missing_migration": "The codebook is not in the database — migration 1152 is missing. Run the migrations (php api/bin/migrate.php); until then no country is verified.",
     "missing_management_migration": "The codebook is read-only — migration 1296 is missing. Run the migrations (php api/bin/migrate.php).",
+    "coverage_gap": "The codebook has no rate valid today for these member states: {countries}. Importing documents to/from them will end up needing manual review. Run the migrations (php api/bin/migrate.php) — self-healing migration 1319 will fill in the missing rates without touching any custom rate you may have already added.",
     "readonly_for_role": "The codebook is shared by the whole instance, so only its administrator can change it.",
     "filter_country": "Country",
     "show_disabled": "Show retired",
@@ -10768,6 +10808,25 @@
       "kind_sale": "sale",
       "note": "Impact = total amount × (CNB rate − rate on document). This is the accounting conversion (563/663); it does not affect the CZK VAT amount on the document (§73/6)."
     },
+    "series_completeness": {
+      "title": "Numbering series completeness",
+      "subtitle": "A gap in the issued document numbering series is an audit red flag for the tax authority. The report only reports — it never fixes anything.",
+      "year_label": "Year",
+      "no_series": "No issued-document numbering series are configured for the selected year, or none of them have any documents.",
+      "no_gaps": "No gaps — the numbering series is complete.",
+      "type_invoice": "invoices",
+      "type_credit_note": "credit notes",
+      "series_supplier": "Supplier series",
+      "series_client": "Client series {name}",
+      "shared_note": "Invoices and credit notes share one series — numbers are assessed together.",
+      "period_none": "entire history",
+      "col_period": "Period",
+      "col_range": "Range",
+      "col_used": "Used",
+      "col_missing": "Missing numbers",
+      "missing_count": "{count} missing",
+      "gaps_found": "Gaps found: {count}"
+    },
     "dph_book": {
       "title": "VAT ledger",
       "subtitle": "Internal VAT journal grouped by VAT return rows. Not an official tax submission.",
@@ -10779,6 +10838,8 @@
       "col": {
         "tax_date": "Tax date",
         "accounting_date": "Booking",
+        "claim_date": "Deduction period",
+        "claim_date_hint": "The date that placed this received document into the current period. Not shown for supplied transactions or § 74b corrections.",
         "doc_number": "Document",
         "description": "Description",
         "base_czk": "Base CZK",
@@ -10790,6 +10851,18 @@
         "original_tax_date": "Orig. tax date",
         "kh_code": "KH"
       },
+      "claim_basis": {
+        "tax_date": "by tax date",
+        "issue_date": "by issue date",
+        "received_at": "by date received"
+      },
+      "claim_hint": {
+        "tax_date": "The deduction period follows the tax point — the document was issued and received no later than that day.",
+        "issue_date": "The deduction period follows the issue date: input VAT can be claimed no earlier than the period in which you hold the document (§ 73(1)(a) of the Czech VAT Act), and you cannot hold it before it was issued. An earlier tax point therefore cannot pull the deduction into its own month.",
+        "received_at": "The deduction period follows the date the document was received: input VAT can be claimed no earlier than the period in which you hold the document (§ 73(1)(a) of the Czech VAT Act). If the date received is wrong, correct it on the document."
+      },
+      "claim_period_note": "Received documents are placed by their deduction period (§ 73(1)(a) of the Czech VAT Act): input VAT can be claimed no earlier than the period in which you hold the document. A document with a tax point at the end of a month but issued or received in the next month therefore belongs to that next month.",
+      "claim_shift_legend": "* The deduction period was shifted by the date the document was received. Check it matches the day you actually got the document — for AI-extracted documents it is pre-filled with the processing date.",
       "subtotal": "TOTAL",
       "summary_issued": "Output supplies (output VAT)",
       "summary_received": "Received supplies (input VAT deduction)",

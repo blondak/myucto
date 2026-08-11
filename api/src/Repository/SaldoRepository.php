@@ -229,6 +229,15 @@ final class SaldoRepository
      * Poskytnuté zálohy na 314: bankovní/pokladní platba zálohové přijaté
      * faktury snížená o zúčtování 321/314 z finální přijaté faktury.
      *
+     * Otevřenou položkou je i SAMOSTATNÝ DDKP (`tax_document` BEZ zálohové faktury) —
+     * typicky nákup zaplacený kartou, kde prodejce vystaví jen „daňový doklad ke dni
+     * přijaté úplaty" (§ 28/8) a fakturu pošle až s dodáním. `BankPostingService::
+     * outgoingCounterAccount()` jeho úhradu ZÁMĚRNĚ účtuje na 314 (§ 20a/2), jenže
+     * tahle metoda dřív brala jen `document_kind='advance'`, takže doklad ze saldokonta
+     * vypadl CELÝ — debet z platby i vlastní kredit DPH. Hlavní kniha ho přitom měla,
+     * takže konfrontace ukazovala rozdíl o zaplacenou částku sníženou o daň, aniž by
+     * bylo z čeho poznat proč.
+     *
      * @return list<array<string,mixed>>
      */
     private function fetchPaidAdvances(int $supplierId, int $accountId, string $asOf): array
@@ -282,9 +291,10 @@ final class SaldoRepository
                   ) movements
                  GROUP BY advance_id
             ), settled AS (
-                -- Čerpání zálohy má DVĚ vazební cesty a obě musí do součtu:
+                -- Čerpání zálohy má TŘI vazební cesty a všechny musí do součtu:
                 --   advance_purchase_invoice_id — vyúčtovací faktura (321 MD / 314 D),
-                --   parent_purchase_invoice_id  — přijatý DDKP § 28 (343 MD / 314 D).
+                --   parent_purchase_invoice_id  — přijatý DDKP § 28 (343 MD / 314 D),
+                --   samostatný DDKP bez rodiče  — čerpá SÁM SEBE (343 MD / 314 D).
                 -- DDKP první cestu použít NEMŮŽE: nad advance_purchase_invoice_id je
                 -- UNIQUE index (jedna záloha = jedna vyúčtovací faktura). Bez druhé větve
                 -- proto kredit DDKP na 314 vypadl a záloha svítila jako otevřená o celou
@@ -302,6 +312,16 @@ final class SaldoRepository
                         FROM purchase_invoices
                        WHERE document_kind = 'tax_document'
                          AND parent_purchase_invoice_id IS NOT NULL
+                         AND advance_purchase_invoice_id IS NULL
+                      UNION ALL
+                      -- Samostatný DDKP je sám sobě zálohou i jejím čerpáním: na 314 mu
+                      -- sedí debet z úhrady a kredit vlastní daně, zbytek (základ) čeká
+                      -- na konečnou fakturu. Bez téhle větve by svítil jako otevřený
+                      -- o celou zaplacenou částku včetně daně, kterou už odečetl.
+                      SELECT id, supplier_id, id
+                        FROM purchase_invoices
+                       WHERE document_kind = 'tax_document'
+                         AND parent_purchase_invoice_id IS NULL
                          AND advance_purchase_invoice_id IS NULL
                   ) link
                   CROSS JOIN params x
@@ -331,6 +351,7 @@ final class SaldoRepository
               JOIN currencies cur ON cur.id = p.currency_id
               LEFT JOIN settled s ON s.advance_id = p.id
              WHERE p.document_kind = 'advance'
+                OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL)
              ORDER BY cl.company_name, p.due_date, p.id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $asOf, $accountId]);

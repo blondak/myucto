@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
@@ -9,10 +9,12 @@ import {
   type SaldoAccountBlock,
   type SaldoItem,
 } from '@/api/accounting'
+import type { SortPref } from '@/api/preferences'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -35,6 +37,93 @@ function queryParams() {
     as_of: filters.as_of || undefined,
     account: filters.account || 'all',
   }
+}
+
+// ── Task #2: přepínač "podle partnera" / "podle dokladů" (plochý seznam) ────
+type ViewMode = 'partner' | 'flat'
+const viewMode = ref<ViewMode>('flat')
+
+interface FlatRow extends SaldoItem {
+  account_code: string
+  partner_id: number
+  partner_name: string
+}
+
+/** Plochý rozpad accounts→partners→items, beze seskupení — zdroj pro flat pohled i export. */
+const flatRows = computed<FlatRow[]>(() => {
+  if (!report.value) return []
+  const rows: FlatRow[] = []
+  for (const acc of report.value.accounts) {
+    for (const p of acc.partners) {
+      for (const it of p.items) {
+        rows.push({ ...it, account_code: acc.account.code, partner_id: p.partner_id, partner_name: p.partner_name })
+      }
+    }
+  }
+  return rows
+})
+
+const partnerOptions = computed(() => {
+  const seen = new Map<number, string>()
+  for (const r of flatRows.value) seen.set(r.partner_id, r.partner_name)
+  return Array.from(seen.entries())
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'cs'))
+})
+
+const flatFilters = reactive({
+  partner_id: '' as number | '',
+  min_overdue_days: '' as number | '',
+})
+
+// Vybraný partner v odjeté sestavě zmizel (jiné období/účet) → filtr by tiše
+// vracel prázdno bez vysvětlení; reset je srozumitelnější než mrtvý filtr.
+watch(partnerOptions, (opts) => {
+  if (flatFilters.partner_id !== '' && !opts.some(o => o.id === flatFilters.partner_id)) {
+    flatFilters.partner_id = ''
+  }
+})
+
+const sort = ref<SortPref>({ key: 'due_date', dir: 'asc' })
+function toggleSort(key: string) {
+  sort.value = sort.value.key === key
+    ? { key, dir: sort.value.dir === 'asc' ? 'desc' : 'asc' }
+    : { key, dir: 'asc' }
+}
+
+const filteredFlatRows = computed<FlatRow[]>(() => {
+  let rows = flatRows.value
+  if (flatFilters.partner_id !== '') {
+    rows = rows.filter(r => r.partner_id === flatFilters.partner_id)
+  }
+  const minDays = Number(flatFilters.min_overdue_days) || 0
+  if (minDays > 0) {
+    rows = rows.filter(r => r.days_overdue >= minDays)
+  }
+  const key = sort.value.key as keyof FlatRow
+  const dir = sort.value.dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const av = a[key]
+    const bv = b[key]
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+    return String(av ?? '').localeCompare(String(bv ?? ''), 'cs') * dir
+  })
+})
+
+// ── Task #3: as_of napříč obdobími — UI upozornění, když se liší od výběru ──
+const asOfPeriodNote = computed(() => {
+  const r = report.value
+  if (!r) return null
+  if (r.as_of_period === null) return { kind: 'missing' as const }
+  if (r.as_of_period.id !== r.period.id) return { kind: 'different' as const, period: r.as_of_period }
+  return null
+})
+
+function switchToAsOfPeriod() {
+  const note = asOfPeriodNote.value
+  if (note?.kind !== 'different') return
+  filters.period_id = note.period.id
+  load()
 }
 
 async function load() {
@@ -71,8 +160,12 @@ async function exportFile(format: 'pdf' | 'xlsx') {
   if (!filters.period_id || !report.value) return
   exporting.value = true
   try {
-    const r = await accountingApi.exportReport('/accounting/reports/saldo/export', { ...queryParams(), format })
-    downloadBlob(r.data as unknown as Blob, `saldokonto-${report.value.as_of}.${format}`)
+    // Task #2: PDF zůstává vždy grouped (zákonný inventarizační protokol) —
+    // view ovlivňuje jen pracovní XLSX export dle aktuálního přepínače.
+    const view = viewMode.value === 'flat' ? 'flat' : 'grouped'
+    const r = await accountingApi.exportReport('/accounting/reports/saldo/export', { ...queryParams(), format, view })
+    const suffix = format === 'xlsx' && view === 'flat' ? '-doklady' : ''
+    downloadBlob(r.data as unknown as Blob, `saldokonto${suffix}-${report.value.as_of}.${format}`)
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -114,6 +207,18 @@ onMounted(async () => {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.saldo.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-1.5" role="group" :aria-label="t('accounting.saldo.view_group_label')">
+          <button type="button" @click="viewMode = 'flat'"
+            :class="viewMode === 'flat' ? btnFilled('neutral') : btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+            {{ t('accounting.saldo.view_by_document') }}
+          </button>
+          <button type="button" @click="viewMode = 'partner'"
+            :class="viewMode === 'partner' ? btnFilled('neutral') : btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
+            {{ t('accounting.saldo.view_by_partner') }}
+          </button>
+        </div>
         <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.saldo.export_pdf') }}
@@ -149,6 +254,28 @@ onMounted(async () => {
             </option>
           </select>
         </div>
+        <div v-if="viewMode === 'flat'">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.saldo.filter_partner') }}</label>
+          <select v-model="flatFilters.partner_id" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('accounting.saldo.filter_partner_all') }}</option>
+            <option v-for="p in partnerOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+        <div v-if="viewMode === 'flat'">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.saldo.filter_overdue_min') }}</label>
+          <input v-model="flatFilters.min_overdue_days" type="number" min="0" placeholder="0"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+      </div>
+      <div v-if="asOfPeriodNote" class="mt-3 flex flex-wrap items-center gap-2 text-xs px-3 py-2 rounded-md bg-warning-50 text-warning-700 border border-warning-500/30">
+        <span v-if="asOfPeriodNote.kind === 'different'">
+          {{ t('accounting.saldo.period_mismatch_hint', { fiscal_year: asOfPeriodNote.period.fiscal_year }) }}
+        </span>
+        <span v-else>{{ t('accounting.saldo.period_missing_hint') }}</span>
+        <button v-if="asOfPeriodNote.kind === 'different'" type="button" @click="switchToAsOfPeriod"
+          :class="[btnOutline('warning'), 'h-7 px-2 text-xs']">
+          {{ t('accounting.saldo.period_mismatch_switch', { fiscal_year: asOfPeriodNote.period.fiscal_year }) }}
+        </button>
       </div>
     </div>
 
@@ -156,7 +283,56 @@ onMounted(async () => {
 
     <EmptyState v-else-if="!report || report.accounts.length === 0" boxed accent="neutral" icon="coin" :title="t('accounting.saldo.empty')" />
 
-    <div v-else class="space-y-6">
+    <!-- Task #2: plochý seznam dokladů — jedna tabulka napříč partnery/účty -->
+    <template v-else-if="viewMode === 'flat'">
+      <EmptyState v-if="filteredFlatRows.length === 0" boxed accent="neutral" icon="search" :title="t('accounting.saldo.flat_empty')" />
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <SortableTh :label="t('accounting.saldo.col_account')" sort-key="account_code" :sort="sort" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_doc')" sort-key="doc_no" :sort="sort" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_issue')" sort-key="issue_date" :sort="sort" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_due')" sort-key="due_date" :sort="sort" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_overdue')" sort-key="days_overdue" :sort="sort" align="right" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_amount')" sort-key="booked_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_paid')" sort-key="paid_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                <SortableTh :label="t('accounting.saldo.col_remaining')" sort-key="remaining_czk" :sort="sort" align="right" @toggle="toggleSort" />
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="it in filteredFlatRows" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
+                <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.account_code }}</td>
+                <td class="px-3 py-2">{{ it.partner_name }}</td>
+                <td class="px-3 py-2">
+                  <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
+                    {{ it.doc_no }}
+                  </RouterLink>
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.due_date) }}</td>
+                <td class="px-3 py-2 text-right" :class="it.days_overdue > 0 ? 'text-danger-500 font-medium' : 'text-neutral-400'">
+                  {{ it.days_overdue > 0 ? it.days_overdue : '—' }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono">
+                  {{ formatMoney(it.booked_czk) }}
+                  <span v-if="it.currency_code !== 'CZK'" class="block text-xs text-neutral-400">
+                    {{ formatMoney(it.amount_foreign) }} {{ it.currency_code }}
+                  </span>
+                </td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.paid_czk) }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- Task #2: původní pohled "podle partnera" — beze změny -->
+    <div v-else-if="viewMode === 'partner'" class="space-y-6">
       <div v-for="b in report.accounts" :key="b.account.id"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-neutral-200">

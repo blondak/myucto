@@ -61,10 +61,24 @@ final class SaldoService
             $asOf = min((string) $period['ends_on'], date('Y-m-d'));
         }
 
+        // Saldokonto k libovolnému datu napříč obdobími (task #3, D6/2): asOf smí
+        // ležet MIMO vybrané $periodId (i v uzavřeném/approved období) — SaldoAction
+        // už to nevaliduje proti hranicím vybraného období. Anchor pro
+        // LedgerReportRepository::syntheticBalances() (PS okno R6) proto musí
+        // odpovídat období, do kterého asOf SKUTEČNĚ spadá, ne vybranému
+        // $periodId z dropdownu — jinak by se u výsledkových účtů (revenue/expense)
+        // PS okno počítalo od starts_on cizího období. Rozvahové účty (311/321/…,
+        // DEFAULT_ACCOUNTS) tohle přímo nepostihne (jejich okno řídí
+        // LedgerReportRepository::openingAnchor() odvozený čistě z asOf), ale
+        // sjednocení je bezpečnější než spoléhat na tuhle vlastnost implicitně —
+        // SSOT stejný jako FinancialStatementService::buildStatement().
+        $asOfPeriod = $this->periods->findForDate($supplierId, $asOf);
+        $anchorStartsOn = $asOfPeriod !== null ? (string) $asOfPeriod['starts_on'] : null;
+
         $explicit = $accountFilter !== null && $accountFilter !== '' && $accountFilter !== 'all';
         $codes = $explicit ? [$accountFilter] : self::DEFAULT_ACCOUNTS;
         $balances = [];
-        foreach ($this->ledger->syntheticBalances($supplierId, $asOf, (string) $period['starts_on']) as $balance) {
+        foreach ($this->ledger->syntheticBalances($supplierId, $asOf, $anchorStartsOn) as $balance) {
             $balances[(string) $balance['code']] = round((float) $balance['md'] - (float) $balance['d'], 2);
         }
 
@@ -90,6 +104,18 @@ final class SaldoService
                 'fiscal_year' => (int) $period['fiscal_year'],
                 'starts_on'   => (string) $period['starts_on'],
                 'ends_on'     => (string) $period['ends_on'],
+                'status'      => (string) $period['status'],
+            ],
+            // Období, do kterého asOf skutečně spadá (task #3) — liší se od 'period'
+            // výše, když si účetní zvolí datum mimo vybrané období z dropdownu
+            // (typicky rozvahový den uzavřeného roku při pohledu z otevřeného).
+            // null = pro asOf není v accounting_periods založené žádné období.
+            'as_of_period' => $asOfPeriod === null ? null : [
+                'id'          => (int) $asOfPeriod['id'],
+                'fiscal_year' => (int) $asOfPeriod['fiscal_year'],
+                'starts_on'   => (string) $asOfPeriod['starts_on'],
+                'ends_on'     => (string) $asOfPeriod['ends_on'],
+                'status'      => (string) $asOfPeriod['status'],
             ],
             'accounts' => $accounts,
         ];

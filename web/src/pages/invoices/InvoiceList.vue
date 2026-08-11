@@ -72,6 +72,9 @@ const dateFrom = ref<string>('')
 const dateTo = ref<string>('')
 const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
+// Neuhrazené K DATU X (task #4) — historický protějšek unpaidOnly (dnešní status).
+// Prázdný řetězec = filtr vypnutý.
+const unpaidAsOf = ref<string>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
 /**
@@ -104,6 +107,7 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value || dateTo.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
+  if (unpaidAsOf.value) n++
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
   return n
@@ -136,6 +140,9 @@ const filterChips = computed<FilterChip[]>(() => {
   }
   if (overdueOnly.value) chips.push({ key: 'overdue', value: t('invoice.overdue_only') })
   if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('invoice.unpaid_only') })
+  if (unpaidAsOf.value) {
+    chips.push({ key: 'unpaid_as_of', value: `${t('invoice.unpaid_as_of_label')}: ${formatDate(unpaidAsOf.value)}` })
+  }
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: bookedFilter.value === '1' ? t('common.booked_badge') : t('common.unbooked_badge') })
   }
@@ -157,6 +164,7 @@ function clearFilter(key: string) {
     case 'dates': dateFrom.value = ''; dateTo.value = ''; break
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
+    case 'unpaid_as_of': unpaidAsOf.value = ''; break
     case 'booked': bookedFilter.value = ''; break
     case 'oss_review': ossReviewFilter.value = ''; break
   }
@@ -793,6 +801,7 @@ async function load(reset = true) {
       currency:  currencyFilter.value || undefined,
       overdue: overdueOnly.value || undefined,
       unpaid_only: unpaidOnly.value || undefined,
+      unpaid_as_of: unpaidAsOf.value || undefined,
       booked: bookedFilter.value || undefined,
       oss_review: ossReviewFilter.value || undefined,
       page: page.value,
@@ -884,6 +893,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
+  unpaidAsOf.value   = typeof q.unpaid_as_of === 'string' ? q.unpaid_as_of : ''
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
   // `1` / `true` = uložené filtry a starší odkazy, kdy filtr rozsah neuměl. Mapují se
   // na „vše nejisté", tedy na ROZŠÍŘENÍ původního významu — nic se nesmí schovat.
@@ -895,7 +905,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // jako u „nezaúčtováno".
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -916,6 +926,7 @@ function buildQuery(): Record<string, string> {
   if (currencyFilter.value) q.currency = currencyFilter.value
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
+  if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
   if (bookedFilter.value) q.booked = bookedFilter.value
   if (ossReviewFilter.value) q.oss_review = ossReviewFilter.value
   if (search.value) q.q = search.value
@@ -937,7 +948,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, bookedFilter, ossReviewFilter, currencyFilter], () => {
+       overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter], () => {
   syncFiltersToUrl()
   load(true)
 })
@@ -962,6 +973,7 @@ watch(() => route.query, (newQ) => {
     dateTo.value = ''
     overdueOnly.value = false
     unpaidOnly.value = false
+    unpaidAsOf.value = ''
     bookedFilter.value = ''
     ossReviewFilter.value = ''
     currencyFilter.value = ''
@@ -1188,6 +1200,17 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <input v-model="unpaidOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('invoice.unpaid_only') }}
         </label>
+        <!-- Neuhrazené K DATU X (task #4) — stav úhrady k historickému dni, ne dnešní
+             status. Odlišné od "unpaidOnly" výše, proto vlastní datumové pole s popiskem,
+             ne další zaškrtávátko vedle stejnojmenného filtru. -->
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2" :title="t('invoice.unpaid_as_of_hint')">
+          {{ t('invoice.unpaid_as_of_label') }}
+          <input v-model="unpaidAsOf" type="date"
+            class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </label>
+        <button v-if="unpaidAsOf" @click="unpaidAsOf = ''"
+          :title="t('invoice.unpaid_as_of_clear')"
+          class="cursor-pointer h-9 px-2 text-xs text-neutral-500 hover:text-neutral-700">✕</button>
         <select v-if="isDoubleEntry" v-model="bookedFilter"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('common.booked_filter_all')">

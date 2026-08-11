@@ -9,8 +9,15 @@ inventarizaci pohledávek, závazků a záloh a navazuje na
 
 ## 53.1 Období a účty
 
-Vyberte účetní období a **Rozvahový den** uvnitř jeho hranic. Bez data se
-použije dřívější z posledního dne období a dneška. Filtr **Účet** nabízí:
+Vyberte účetní období a **Rozvahový den**. Bez data se použije dřívější z
+posledního dne období a dneška. Rozvahový den smí ležet i mimo vybrané
+období — třeba když chcete z otevřeného roku nahlédnout na 31. 12. loňska
+(i uzavřeného/schváleného), abyste porovnali počáteční stav nového roku.
+Sestava si skutečné období k datu dohledá sama a spočítá se k němu správně;
+pokud se liší od období vybraného v rozbalovacím seznamu, obrazovka to
+zvýrazní hláškou s možností na dohledané období rovnou přepnout. Pro datum
+bez založeného účetního období se zůstatky počítají kumulativně od počátku
+historie. Filtr **Účet** nabízí:
 
 | Volba | Otevřené položky |
 |---|---|
@@ -70,21 +77,30 @@ nebo nezúčtovanou zálohu.
 Nulový rozdíl sám nepotvrzuje existenci pohledávky, vymahatelnost ani úplnost
 závazků. Tyto skutečnosti je nutné doložit nezávislými podklady.
 
-## 53.5 Partner a doklady
+## 53.5 Dva pohledy: podle partnera / podle dokladů
 
-Partneři jsou řazeni podle názvu. Rozbalení partnera zobrazí číslo dokladu,
-datum vystavení, splatnost, počet dní po splatnosti, původní částku, částku
-zaúčtovanou v Kč, uhrazeno a zbývá. Doklad vede na detail vydané nebo přijaté
-faktury.
+Přepínač nad sestavou volí zobrazení:
+
+- **Podle dokladů** (výchozí) — plochý seznam všech otevřených položek napříč
+  účty a partnery v jedné tabulce: účet, partner, doklad, datum vystavení,
+  splatnost, dní po splatnosti, částka, uhrazeno, zbývá. Sloupce jdou řadit
+  kliknutím na záhlaví (výchozí řazení dle splatnosti), sestavu lze zúžit
+  filtrem na partnera a na minimální počet dní po splatnosti.
+- **Podle partnera** — partneři řazeni podle názvu, rozbalení partnera
+  zobrazí jeho doklady se stejnými sloupci.
+
+Doklad v obou pohledech vede na detail vydané nebo přijaté faktury.
 
 Storno datované až po rozvahovém dni položku k dřívějšímu dni neskrývá.
 K datu storna a později se účetní i dokladová strana vyruší.
 
 ## 53.6 Export
 
-PDF a XLSX vytvoří inventarizační protokol pro aktuální účet, partnera a
-rozvahový den. Obsahují zůstatek hlavní knihy, součet otevřených položek,
-rozdíl a rozpad partnerů s doklady.
+PDF vytvoří inventarizační protokol pro aktuální účet, partnera a rozvahový
+den vždy v podobě podle partnera (zůstatek hlavní knihy, součet otevřených
+položek, rozdíl a rozpad partnerů s doklady). XLSX export respektuje aktuálně
+zvolený pohled — podle partnera stejně jako protokol, podle dokladů jako
+plochý seznam pro další zpracování (např. filtrování v Excelu).
 
 > 💡 Nenulový rozdíl řešte od konfrontačního pruhu přes partnera a doklad; pro
 > ruční či kurzový zápis pokračujte proklikem do opisu účtu v

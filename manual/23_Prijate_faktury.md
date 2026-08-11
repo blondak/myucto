@@ -30,6 +30,19 @@ V hlavním menu **Přijaté faktury**.
 
 Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová auditní stopu).
 
+> ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
+> doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se
+> doklad dostal do podkladů DPH s nejistým obdobím. Blok platí jen pro NOVÝ přechod;
+> doklady zaúčtované ještě před touto kontrolou (typicky z migrace historie) zůstávají
+> beze změny a jdou dál normálně uhradit nebo stornovat.
+
+V seznamu přijatých faktur je filtr **Neuhrazené k datu** — na rozdíl od checkboxu
+„Nezaplacené" (dnešní stav) ukáže doklady vystavené do zvoleného dne, u kterých k
+tomu dni nebyl uhrazen celý závazek. Doklad zaplacený až po tomto dni se proto ve
+výpisu objeví, i když má dnes stav „Uhrazená". Stejná funkce a definice úhrady je
+i u [vystavených faktur](14_Faktury.md#1411-filtry-vlevo) a sedí na
+[Saldokonto](53_Saldokonto.md).
+
 ## 23.2 Nová přijatá faktura
 
 V seznamu klikni **+ Nová přijatá faktura**. Otevře se formulář.
@@ -45,6 +58,14 @@ Nad formulářem je **drag & drop zóna**. Pokud máš PDF od dodavatele:
 - **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat (i kdyby se zpracování v budoucnu změnilo). V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML; originál se nikdy nepřepíše. Formát je univerzální (`source_format`), do budoucna pokryje i další strukturované zdroje.
 
 > 💡 Doklad jde nahrát **už při zakládání nové faktury** (po přetažení se ukáže kartička „soubor připraven, nahraje se po uložení") i **z detailu** faktury, která zatím doklad nemá. Kromě PDF lze přetáhnout i **fotku** (JPG/PNG/WEBP/HEIC) — systém ji převede na PDF — nebo přímo **ISDOC / ISDOCX** balíček: ten se rozbalí a naparsuje deterministicky (bez AI), z `.isdocx` se navíc archivuje zabalené PDF pro náhled.
+
+> 👁️ **Náhled originálu je u konceptu s daty vytěženými AI otevřený automaticky.** U konceptu
+> založeného ze strukturovaného zdroje (ISDOC/ISDOCX) zůstává náhled sbalený — data
+> jsou tam přesná, ověřovat proti originálu není potřeba. U konceptu vytěženého AI
+> z prostého PDF (nebo fotky) editor náhled otevře rovnou, ať máš originál na očích při
+> kontrole vytěžených hodnot (sazba DPH, plátcovství dodavatele apod.). Jakmile doklad
+> jednou potvrdíš (přejde z konceptu dál), náhled se při dalším otevření editoru
+> nevnucuje — panel si můžeš kdykoli sbalit/otevřít tlačítkem nad ním.
 
 Limity:
 - Max 20 MiB per soubor

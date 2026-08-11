@@ -753,10 +753,25 @@ final class ReportXlsxExporter
      * SaldoService::build(). Per účet: blok konfrontace (zůstatek HK vs. Σ otevřených
      * položek + rozdíl) a rozpad otevřených položek per partner.
      *
+     * `$flat` (task #2, D6/2 — plochý seznam dokladů): jeden list se všemi
+     * otevřenými položkami napříč účty/partnery jako řádky (bez seskupení),
+     * seřazený dle splatnosti — pracovní export k saldokontu, ne zákonný
+     * inventarizační protokol (ten zůstává jen v grouped podobě, viz `saldo()`
+     * bez příznaku a `SaldoPdfRenderer`).
+     *
      * @param array<string,mixed> $data
      * @return array{bytes:string, filename:string, mime:string}
      */
-    public function saldo(array $data): array
+    public function saldo(array $data, bool $flat = false): array
+    {
+        return $flat ? $this->saldoFlat($data) : $this->saldoGrouped($data);
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    private function saldoGrouped(array $data): array
     {
         $asOf = (string) ($data['as_of'] ?? '');
         $title = (string) ($data['report_title'] ?? 'Saldokonto');
@@ -820,6 +835,68 @@ final class ReportXlsxExporter
         }
 
         return $this->out($ss, 'saldokonto-' . $asOf . '.xlsx');
+    }
+
+    /**
+     * Plochý seznam otevřených položek napříč účty/partnery (task #2, D6/2) —
+     * jeden řádek na doklad, bez seskupení, seřazeno dle splatnosti (stejné
+     * výchozí řazení jako flat pohled ve Saldokonto.vue).
+     *
+     * @param array<string,mixed> $data
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    private function saldoFlat(array $data): array
+    {
+        $asOf = (string) ($data['as_of'] ?? '');
+        $title = (string) ($data['report_title'] ?? 'Saldokonto');
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle(mb_substr($title . ' — doklady', 0, 31));
+        $sheet->setCellValue('A1', $title . ' — otevřené položky k ' . $this->czDate($asOf));
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $entity = $data['entity'] ?? [];
+        $sheet->setCellValueExplicit('A2', (string) ($entity['name'] ?? '') . ' — IČO: ' . (string) ($entity['ico'] ?? ''), DataType::TYPE_STRING);
+        $sheet->setCellValue('A3', 'Sestaveno: ' . (string) ($entity['prepared_at'] ?? ''));
+        $sheet->getStyle('A3')->getFont()->setSize(9)->setItalic(true);
+
+        /** @var list<array<string,mixed>> $rows */
+        $rows = [];
+        foreach ($data['accounts'] ?? [] as $acc) {
+            $accountCode = (string) ($acc['account']['code'] ?? '');
+            foreach ($acc['partners'] ?? [] as $p) {
+                $partnerName = (string) ($p['partner_name'] ?? '');
+                foreach ($p['items'] ?? [] as $it) {
+                    $rows[] = $it + ['account_code' => $accountCode, 'partner_name' => $partnerName];
+                }
+            }
+        }
+        usort($rows, static fn (array $a, array $b): int => strcmp((string) ($a['due_date'] ?? ''), (string) ($b['due_date'] ?? '')));
+
+        $headers = ['Účet', 'Partner', 'Doklad', 'Vystaveno', 'Splatnost', 'Dní po spl.', 'Měna', 'Částka', 'Uhrazeno', 'Zbývá (Kč)'];
+        $cols = count($headers);
+        $head = 5;
+        $this->headerRow($sheet, $head, $headers);
+
+        $r = $head + 1;
+        foreach ($rows as $it) {
+            $ccy = (string) ($it['currency_code'] ?? 'CZK');
+            $sheet->setCellValueExplicit([1, $r], (string) ($it['account_code'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([2, $r], (string) ($it['partner_name'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], (string) ($it['doc_no'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValue([4, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
+            $sheet->setCellValue([5, $r], $this->czDate((string) ($it['due_date'] ?? '')));
+            $sheet->setCellValue([6, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
+            $sheet->setCellValueExplicit([7, $r], $ccy, DataType::TYPE_STRING);
+            $sheet->setCellValue([8, $r], (float) ($it['booked_czk'] ?? 0));
+            $sheet->setCellValue([9, $r], (float) ($it['paid_czk'] ?? 0));
+            $sheet->setCellValue([10, $r], (float) ($it['remaining_czk'] ?? 0));
+            $r++;
+        }
+        if ($r > $head + 1) {
+            $this->finishTable($sheet, $head, $r - 1, $cols, 6);
+        }
+
+        return $this->out($ss, 'saldokonto-doklady-' . $asOf . '.xlsx');
     }
 
     /**

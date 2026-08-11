@@ -537,6 +537,53 @@ final class SaldoReportTest extends TestCase
         self::assertTrue($acc['matches']);
     }
 
+    // ── T10 (task #3, D6/2): asOf mimo vybrané období — dohledá se skutečné
+    //        období a spočítá se k němu korektně (i uzavřené/approved) ──────────
+
+    /**
+     * Vybrané $periodId je novější rok (self::YEAR); asOf leží v PŘEDCHOZÍM,
+     * samostatném (uzavřeném) roce — typický případ „chci vidět saldo 311
+     * k 31.12. minulého roku, abych porovnala počáteční stav letoška". Před
+     * opravou SaldoAction takový dotaz vůbec nešel poslat (validace as_of proti
+     * hranicím vybraného období) — tenhle test jde na úroveň SaldoService a
+     * ověřuje, že výpočet k cizímu období vyjde správně a `as_of_period` v
+     * odpovědi nese SKUTEČNÉ (ne vybrané) období.
+     */
+    public function testAsOfInDifferentClosedPeriodThanSelectedComputesCorrectly(): void
+    {
+        $prevYear = self::YEAR - 1;
+        $prevPeriodId = $this->periods->create($this->supplierId, $prevYear, $prevYear . '-01-01', $prevYear . '-12-31');
+
+        // Zaúčtovat PŘED uzavřením — PostingService odmítá zápisy do closed období (§35 ZoÚ).
+        $a = $this->client('Alfa s.r.o.');
+        $invA = $this->invoice($a, 1000.00, $prevYear . '-03-10', $prevYear . '-03-24');
+        $this->postInvoice($invA, [
+            self::l('311', 'debit', 1000.00),
+            self::l('602', 'credit', 1000.00),
+        ], $prevYear . '-03-10');
+
+        // Uzavřené/schválené období — přesně scénář z hlášení účetní.
+        // row_version po create() je 1 (DEFAULT 1005), ne 0.
+        $ok = $this->periods->setStatusCas($prevPeriodId, $this->supplierId, 'closed', 1, $this->userId);
+        self::assertTrue($ok, 'Fixture: uzavření testovacího období selhalo (CAS).');
+
+        // periodId = novější (self::YEAR/self::periodId), asOf = konec PŘEDCHOZÍHO roku.
+        $data = $this->saldo->build($this->supplierId, $this->periodId, $prevYear . '-12-31', '311');
+        $acc = $this->accBlock($data, '311');
+        self::assertNotNull($acc, 'Blok 311 musí existovat i při asOf mimo vybrané období.');
+        self::assertSame(self::cents(1000.00), self::cents($acc['gl_balance']), 'Zůstatek HK k 31.12. minulého roku.');
+        self::assertSame(self::cents(1000.00), self::cents($acc['open_items_total']));
+        self::assertSame(0, self::cents($acc['difference']), 'Konfrontace musí sedět i napříč obdobími.');
+        self::assertTrue($acc['matches']);
+        self::assertNotNull($this->partner($acc, $a));
+
+        self::assertSame($this->periodId, $data['period']['id'], 'Vybrané období v odpovědi zůstává to z period_id.');
+        self::assertNotNull($data['as_of_period'], 'as_of_period musí být dohledané.');
+        self::assertSame($prevPeriodId, $data['as_of_period']['id'], 'as_of_period je skutečné období, do kterého asOf spadá.');
+        self::assertSame($prevYear, $data['as_of_period']['fiscal_year']);
+        self::assertSame('closed', $data['as_of_period']['status']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function client(string $name, ?int $supplierId = null): int

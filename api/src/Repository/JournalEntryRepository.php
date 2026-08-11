@@ -476,6 +476,23 @@ final class JournalEntryRepository
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
 
+        // Filtr na účet (Featura D) mění i sémantiku sloupce Částka: bez filtru je to
+        // Σ MD celého zápisu (AMOUNT_SUBQUERY — nález „ČÁSTKA u filtru na účet"), S
+        // filtrem musí jít o částku PŘIPADAJÍCÍ na vybraný účet/rozsah a jeho stranu,
+        // jinak účetní vidí (typicky vyšší) číslo, které s tím, podle čeho filtroval,
+        // vůbec nesouvisí — u zápisu s víc nohama na různých účtech to bylo klidně
+        // několikanásobně nadhodnocené. Select-param(y) MUSÍ jít PŘED $params z
+        // buildWhere(), protože SELECT v SQL textu předchází WHERE.
+        $accountFiltered = self::hasAccountRangeFilter($filters);
+        if ($accountFiltered) {
+            $amountSelect = self::FILTERED_NET_AMOUNT_SUBQUERY . ' AS amount,';
+            [$from, $to] = self::accountRangeBounds($filters);
+            $selectParams = [$from, $to];
+        } else {
+            $amountSelect = self::AMOUNT_SUBQUERY . ' AS amount,';
+            $selectParams = [];
+        }
+
         // Majetek — čitelný label u source_type 'asset'/'asset_disposal' (source_id = ID
         // karty majetku) i 'depreciation' (source_id = ID řádku depreciation_entries, proto
         // se ID karty dohledává přes mezi-JOIN na dep — viz FEATURA C, audit 2026-07 follow-up).
@@ -484,7 +501,7 @@ final class JournalEntryRepository
                        je.description, je.source_type, je.source_id, je.posted_at,
                        je.posted_by, je.reversed_by, je.row_version, je.created_at, je.updated_at,
                        u.name AS posted_by_name,
-                       " . self::AMOUNT_SUBQUERY . " AS amount,
+                       {$amountSelect}
                        bt.statement_id AS source_statement_id,
                        cd.doc_number AS source_doc_number,
                        cd.register_id AS source_register_id,
@@ -516,8 +533,8 @@ final class JournalEntryRepository
                  ORDER BY je.entry_date DESC, je.id DESC
                  LIMIT {$limit} OFFSET {$offset}";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $items = array_map(fn (array $r): array => $this->castListRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $stmt->execute([...$selectParams, ...$params]);
+        $items = array_map(fn (array $r): array => $this->castListRow($r, $accountFiltered), $stmt->fetchAll(PDO::FETCH_ASSOC));
 
         return ['items' => $items, 'total' => $total];
     }
@@ -525,6 +542,25 @@ final class JournalEntryRepository
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
         '(SELECT COALESCE(SUM(jel.amount), 0) FROM journal_entry_lines jel WHERE jel.entry_id = je.id AND jel.side = \'debit\')';
+
+    /**
+     * Korelovaný subselect s ČISTOU částkou zápisu na filtrovaném rozsahu účtů
+     * (Σ MD − Σ D jen na řádcích, které padnou do account_from/account_to daného
+     * zápisu). Znaménko nese stranu (>=0 → MD, <0 → D) — viz castListRow(). Používá
+     * se MÍSTO AMOUNT_SUBQUERY, když je aktivní filtr na účet (viz paginate()); bez
+     * něj zápis s nohou nákladu i nohou zúčtování zálohy na jiných účtech ukazoval
+     * ve sloupci Částka Σ MD celého zápisu, ne částku vybraného účtu.
+     *
+     * Placeholdery (account_from, account_to) MUSÍ nést stejný rozsah jako EXISTS
+     * filtr v buildWhere() — jinak by se řádek v seznamu objevil podle jednoho
+     * rozsahu, ale částka by se počítala z jiného (viz accountRangeBounds()).
+     */
+    private const FILTERED_NET_AMOUNT_SUBQUERY =
+        '(SELECT COALESCE(SUM(CASE WHEN jel.side = \'debit\' THEN jel.amount ELSE -jel.amount END), 0)
+            FROM journal_entry_lines jel
+            JOIN chart_of_accounts c ON c.id = jel.account_id
+           WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
+             AND c.account_code BETWEEN ? AND ?)';
 
     /**
      * Export deníku (audit 2026-07, nález „Export a tisk účetního deníku"): VŠECHNY
@@ -666,6 +702,28 @@ final class JournalEntryRepository
         ];
     }
 
+    /** Je aktivní filtr na rozsah účtu (account_from/account_to)? SSOT pro buildWhere() i paginate(). */
+    private static function hasAccountRangeFilter(array $filters): bool
+    {
+        return !empty($filters['account_from']) || !empty($filters['account_to']);
+    }
+
+    /**
+     * Normalizované meze rozsahu účtu z filtru — chybějící strana se doplní neutrální
+     * hranicí. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
+     * v paginate() (obojí musí vidět STEJNÝ rozsah, jinak by se řádek objevil v seznamu,
+     * ale sloupec Částka by počítal jiný rozsah účtů, než podle kterého se filtrovalo).
+     *
+     * @return array{0:string, 1:string}
+     */
+    private static function accountRangeBounds(array $filters): array
+    {
+        return [
+            (string) ($filters['account_from'] ?? '0'),
+            (string) ($filters['account_to'] ?? 'ZZZZZZZZZZ'),
+        ];
+    }
+
     /**
      * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
      * @return array{0:string, 1:list<mixed>}
@@ -710,15 +768,16 @@ final class JournalEntryRepository
         }
         // Rozsah účtů (Featura D) — EXISTS na journal_entry_lines, indexováno přes
         // idx_jel_supplier_account. Chybějící mez se doplní neutrální hranicí.
-        if (!empty($filters['account_from']) || !empty($filters['account_to'])) {
+        if (self::hasAccountRangeFilter($filters)) {
             $where[] = "EXISTS (
                 SELECT 1 FROM journal_entry_lines jel
                 JOIN chart_of_accounts c ON c.id = jel.account_id
                  WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
                    AND c.account_code BETWEEN ? AND ?
             )";
-            $params[] = (string) ($filters['account_from'] ?? '0');
-            $params[] = (string) ($filters['account_to'] ?? 'ZZZZZZZZZZ');
+            [$from, $to] = self::accountRangeBounds($filters);
+            $params[] = $from;
+            $params[] = $to;
         }
         // Rozsah částky (Featura D) — Σ MD zápisu (zrcadlí AMOUNT_SUBQUERY výše).
         if (isset($filters['amount_from']) || isset($filters['amount_to'])) {
@@ -807,11 +866,26 @@ final class JournalEntryRepository
         return $r;
     }
 
-    /** {@see cast()} + list-only obohacení (Σ MD zápisu, drill-down na banku/pokladnu/majetek). */
-    private function castListRow(array $r): array
+    /**
+     * {@see cast()} + list-only obohacení (Σ MD zápisu nebo — při filtru na účet —
+     * čistá částka a strana toho účtu, drill-down na banku/pokladnu/majetek).
+     *
+     * @param bool $accountFiltered true, pokud SQL vybíralo FILTERED_NET_AMOUNT_SUBQUERY
+     *             (podepsané MD−D na filtrovaném rozsahu účtů) místo AMOUNT_SUBQUERY.
+     */
+    private function castListRow(array $r, bool $accountFiltered = false): array
     {
         $r = $this->cast($r);
-        $r['amount'] = (float) $r['amount'];
+        if ($accountFiltered) {
+            $net = (float) $r['amount'];
+            $r['amount'] = round(abs($net), 2);
+            // Nula (např. účet je v zápisu debetní i kreditní ve stejné výši) se bere
+            // jako MD — neutrální volba, aby strana nikdy nechyběla.
+            $r['amount_side'] = $net < 0 ? 'credit' : 'debit';
+        } else {
+            $r['amount'] = (float) $r['amount'];
+            $r['amount_side'] = null;
+        }
         $r['source_statement_id'] = $r['source_statement_id'] === null ? null : (int) $r['source_statement_id'];
         $r['source_register_id'] = $r['source_register_id'] === null ? null : (int) $r['source_register_id'];
         $r['source_asset_id'] = $r['source_asset_id'] === null ? null : (int) $r['source_asset_id'];

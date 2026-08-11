@@ -1,0 +1,168 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { SaldoReport } from '@/api/accounting'
+
+// ── Mockovaný stav (hoisted) ─────────────────────────────────────────────────
+const m = vi.hoisted(() => ({
+  listPeriods: vi.fn(),
+  getSaldo: vi.fn(),
+  exportReport: vi.fn(),
+  toastError: vi.fn(),
+}))
+
+vi.mock('@/api/accounting', () => ({
+  accountingApi: {
+    listPeriods: m.listPeriods,
+    getSaldo: m.getSaldo,
+    exportReport: m.exportReport,
+  },
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: m.toastError }),
+}))
+
+vi.mock('@/composables/useFormat', () => ({
+  formatMoney: (v: number) => String(v),
+  formatDate: (v: string) => v,
+}))
+
+vi.mock('@/components/ui/buttonStyles', () => ({
+  ICONS: { download: 'M0 0', doc: 'M0 0', user: 'M0 0' },
+  btnOutline: () => 'btn-outline',
+  btnFilled: () => 'btn-filled',
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
+}))
+
+vi.mock('vue-router', () => ({
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+}))
+
+import Saldokonto from '@/pages/accounting/Saldokonto.vue'
+
+function makeReport(overrides: Partial<SaldoReport> = {}): SaldoReport {
+  const period = { id: 6, fiscal_year: 2099, starts_on: '2099-01-01', ends_on: '2099-12-31', status: 'open' }
+  return {
+    as_of: '2099-06-30',
+    entity: { name: 'Test s.r.o.', ico: '123', address: 'Praha', prepared_at: '2099-06-30 10:00' },
+    period,
+    as_of_period: period,
+    accounts: [
+      {
+        account: { id: 1, code: '311', name: 'Odběratelé', normal_side: 'debit' as any },
+        gl_balance: 1500,
+        open_items_total: 1500,
+        difference: 0,
+        matches: true,
+        partners: [
+          {
+            partner_id: 10,
+            partner_name: 'Alfa s.r.o.',
+            total_remaining: 1000,
+            items: [
+              { doc_type: 'invoice', doc_id: 101, doc_no: 'F-101', issue_date: '2099-01-10', due_date: '2099-01-24',
+                currency_code: 'CZK', amount_foreign: 0, booked_czk: 1000, paid_czk: 0, remaining_czk: 1000, days_overdue: 20 },
+            ],
+          },
+          {
+            partner_id: 11,
+            partner_name: 'Beta a.s.',
+            total_remaining: 500,
+            items: [
+              { doc_type: 'invoice', doc_id: 102, doc_no: 'F-102', issue_date: '2099-05-01', due_date: '2099-05-15',
+                currency_code: 'CZK', amount_foreign: 0, booked_czk: 500, paid_czk: 0, remaining_czk: 500, days_overdue: 0 },
+            ],
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  }
+}
+
+describe('Saldokonto.vue', () => {
+  beforeEach(() => {
+    m.listPeriods.mockReset()
+    m.getSaldo.mockReset()
+    m.exportReport.mockReset()
+    m.toastError.mockReset()
+    m.listPeriods.mockResolvedValue([
+      { id: 6, supplier_id: 1, fiscal_year: 2099, starts_on: '2099-01-01', ends_on: '2099-12-31', status: 'open', closed_at: null, created_at: '' },
+    ])
+  })
+
+  it('(a) výchozí pohled je plochý seznam, seřazený dle splatnosti vzestupně napříč partnery', async () => {
+    m.getSaldo.mockResolvedValue(makeReport())
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    // Alfa (splatnost 24.1.) musí být před Beta (15.5.).
+    expect(rows[0].text()).toContain('F-101')
+    expect(rows[0].text()).toContain('Alfa s.r.o.')
+    expect(rows[1].text()).toContain('F-102')
+  })
+
+  it('(b) přepnutí na "podle partnera" vykreslí seskupenou tabulku se dvěma partnery', async () => {
+    m.getSaldo.mockResolvedValue(makeReport())
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const partnerBtn = wrapper.findAll('button').find(b => b.text() === 'accounting.saldo.view_by_partner')
+    expect(partnerBtn).toBeTruthy()
+    await partnerBtn!.trigger('click')
+    await flushPromises()
+
+    // Grouped řádky per partner (bez rozbalení položek).
+    expect(wrapper.text()).toContain('Alfa s.r.o.')
+    expect(wrapper.text()).toContain('Beta a.s.')
+    expect(wrapper.text()).not.toContain('F-101') // dokud se partner nerozbalí
+  })
+
+  it('(c) filtr partnera zúží plochý seznam na jeho doklady', async () => {
+    m.getSaldo.mockResolvedValue(makeReport())
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const partnerSelect = wrapper.findAll('select').find(s => s.findAll('option').some(o => o.text() === 'Alfa s.r.o.'))
+    expect(partnerSelect).toBeTruthy()
+    await partnerSelect!.setValue('10')
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('F-101')
+  })
+
+  it('(d) filtr "po splatnosti (dní, min.)" zúží na doklady po splatnosti', async () => {
+    m.getSaldo.mockResolvedValue(makeReport())
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const overdueInput = wrapper.find('input[type="number"]')
+    expect(overdueInput.exists()).toBe(true)
+    await overdueInput.setValue(1)
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('F-101') // jediný s days_overdue > 0
+  })
+
+  it('(e) upozorní, když as_of_period neodpovídá vybranému období', async () => {
+    const report = makeReport({
+      as_of_period: { id: 5, fiscal_year: 2098, starts_on: '2098-01-01', ends_on: '2098-12-31', status: 'closed' },
+    })
+    m.getSaldo.mockResolvedValue(report)
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('accounting.saldo.period_mismatch_hint')
+    const switchBtn = wrapper.findAll('button').find(b => b.text().includes('period_mismatch_switch'))
+    expect(switchBtn).toBeTruthy()
+  })
+})

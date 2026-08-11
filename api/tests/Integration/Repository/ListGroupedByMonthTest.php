@@ -262,6 +262,103 @@ final class ListGroupedByMonthTest extends TestCase
         self::assertSame([$bookedId, $unbookedId], $this->collectIds($res['data']), 'bez filtru = obě.');
     }
 
+    /**
+     * Task #4 — filtr „neuhrazené k datu X" pro vydané faktury. Zdroj pravdy: SUM
+     * `invoice_payments.amount` s `paid_on <= asOf` proti `amount_to_pay`, stejně jako
+     * SaldoRepository::fetchOpenInvoices — sestava má stejnou definici jako saldokonto.
+     *
+     * Tři povinné větve (viz zadání task #4):
+     *   - plně uhrazeno PŘED asOf → nesmí se objevit (i když je asOf klidně po due_date),
+     *   - uhrazeno AŽ PO asOf → musí se objevit (byl neuhrazený K TOMU DNI, i když dnes
+     *     už zaplacený),
+     *   - částečná úhrada PŘED asOf → musí se objevit (zbývá k doplacení).
+     * Plus kontrolní větve: koncept (draft) a doklad vystavený AŽ PO asOf se nesmí objevit
+     * vůbec, bez ohledu na platby.
+     */
+    public function testInvoicesUnpaidAsOfFilter(): void
+    {
+        $client = $this->client('UnpaidAsOf Klient', true, false);
+        $asOf = '2003-01-31';
+
+        // A) plně uhrazeno PŘED asOf → vypadne.
+        $paidBefore = $this->invoice($client, '2003-01-05', '2003-01-05', 1000.0, 210.0, 1210.0, 'paid');
+        $this->invoicePayment($paidBefore, '2003-01-20', 1210.0);
+
+        // B) uhrazeno AŽ PO asOf → k asOf byl neuhrazený, musí zůstat.
+        $paidAfter = $this->invoice($client, '2003-01-06', '2003-01-06', 1000.0, 210.0, 1210.0, 'paid');
+        $this->invoicePayment($paidAfter, '2003-02-05', 1210.0);
+
+        // C) částečná úhrada PŘED asOf → zbývá doplatit, musí zůstat.
+        $partial = $this->invoice($client, '2003-01-07', '2003-01-07', 1000.0, 210.0, 1210.0, 'issued');
+        $this->invoicePayment($partial, '2003-01-10', 500.0);
+
+        // D) koncept — není dluh, nesmí se objevit bez ohledu na platby.
+        $this->invoice($client, '2003-01-08', '2003-01-08', 1000.0, 210.0, 1210.0, 'draft');
+
+        // E) vystaveno AŽ PO asOf — k asOf ještě neexistoval, nesmí se objevit.
+        $this->invoice($client, '2003-02-10', '2003-02-10', 1000.0, 210.0, 1210.0, 'issued');
+
+        $res = $this->invoices->listGroupedByMonth([
+            'supplier_id'  => $this->supplierId,
+            'client_id'    => $client,
+            'unpaid_as_of' => $asOf,
+        ]);
+
+        self::assertSame(
+            [$paidAfter, $partial],
+            $this->collectIds($res['data']),
+            'K asOf neuhrazeno jen B (platba přišla pozdě) a C (částečná úhrada); '
+                . 'A (plně uhrazeno včas), D (koncept) a E (vystaveno po asOf) chybí.'
+        );
+    }
+
+    /**
+     * Task #4 — filtr „neuhrazené k datu X" pro přijaté faktury. Přijaté faktury
+     * NEMAJÍ obdobu `invoice_payments` — zdroj pravdy je stejný jako
+     * SaldoRepository::fetchOpenPurchases: plná úhrada k asOf je autoritativní jen
+     * přes `status='paid' AND paid_at <= asOf`, jinak best-effort ze
+     * Σ `payment_matches.amount` s `bank_transactions.posted_at <= asOf`.
+     */
+    public function testPurchasesUnpaidAsOfFilter(): void
+    {
+        $vendor = $this->client('UnpaidAsOf Dodavatel', false, true);
+        $asOf = '2003-01-31';
+
+        // A) status='paid' s paid_at PŘED asOf → plně uhrazeno k asOf, vypadne.
+        $paidBefore = $this->purchase($vendor, '2003-01-05', '2003-01-05', 1000.0, 210.0, 1210.0, 'paid');
+        $this->pdo->prepare('UPDATE purchase_invoices SET paid_at = ? WHERE id = ?')
+            ->execute(['2003-01-20', $paidBefore]);
+
+        // B) status='paid', ale paid_at AŽ PO asOf → k asOf ještě nebylo uhrazeno, zůstává.
+        $paidAfter = $this->purchase($vendor, '2003-01-06', '2003-01-06', 1000.0, 210.0, 1210.0, 'paid');
+        $this->pdo->prepare('UPDATE purchase_invoices SET paid_at = ? WHERE id = ?')
+            ->execute(['2003-02-05', $paidAfter]);
+
+        // C) částečná bankovní úhrada PŘED asOf (payment_matches) → zbývá doplatit, zůstává.
+        $partial = $this->purchase($vendor, '2003-01-07', '2003-01-07', 1000.0, 210.0, 1210.0, 'received');
+        $tx = $this->bankTransaction('2003-01-10', 500.0);
+        $this->paymentMatch($tx, $partial, 500.0);
+
+        // D) koncept — nesmí se objevit.
+        $this->purchase($vendor, '2003-01-08', '2003-01-08', 1000.0, 210.0, 1210.0, 'draft');
+
+        // E) vystaveno AŽ PO asOf — nesmí se objevit.
+        $this->purchase($vendor, '2003-02-10', '2003-02-10', 1000.0, 210.0, 1210.0, 'received');
+
+        $res = $this->purchases->listGroupedByMonth([
+            'supplier_id'  => $this->supplierId,
+            'vendor_id'    => $vendor,
+            'unpaid_as_of' => $asOf,
+        ]);
+
+        self::assertSame(
+            [$paidAfter, $partial],
+            $this->collectIds($res['data']),
+            'K asOf neuhrazeno jen B (paid_at přišel pozdě) a C (částečná bankovní úhrada); '
+                . 'A (paid_at před asOf), D (koncept) a E (vystaveno po asOf) chybí.'
+        );
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /**
@@ -362,5 +459,40 @@ final class ListGroupedByMonthTest extends TestCase
                  vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
              VALUES (?, ?, 1, 'ks', ?, ?, 21.00, ?, 0, ?, 0)"
         )->execute([$invoiceId, $description, $net, $vatRateId, $net, $net]);
+    }
+
+    /** Evidovaná platba vydané faktury (invoice_payments) — zdroj pravdy pro `unpaid_as_of`. */
+    private function invoicePayment(int $invoiceId, string $paidOn, float $amount): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source)
+             VALUES (?, ?, ?, ?, "CZK", "manual")'
+        )->execute([$this->supplierId, $invoiceId, $paidOn, $amount]);
+    }
+
+    /** Bankovní transakce (jen minimální data pro payment_matches FK) — vrací id. */
+    private function bankTransaction(string $postedAt, float $amount): int
+    {
+        $statementStmt = $this->pdo->prepare(
+            'INSERT INTO bank_statements (file_name, file_hash, account_number, statement_date)
+             VALUES (?, ?, "1000000005/0100", ?)'
+        );
+        $statementStmt->execute(['test-' . uniqid() . '.gpc', hash('sha256', uniqid('', true)), $postedAt]);
+        $statementId = (int) $this->pdo->lastInsertId();
+
+        $this->pdo->prepare(
+            'INSERT INTO bank_transactions (statement_id, posted_at, amount, currency)
+             VALUES (?, ?, ?, "CZK")'
+        )->execute([$statementId, $postedAt, $amount]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /** Bankovní párování přijaté faktury (payment_matches) — zdroj pravdy pro `unpaid_as_of`. */
+    private function paymentMatch(int $bankTransactionId, int $purchaseInvoiceId, float $amount): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type)
+             VALUES (?, ?, ?, ?, "manual")'
+        )->execute([$this->supplierId, $bankTransactionId, $purchaseInvoiceId, $amount]);
     }
 }

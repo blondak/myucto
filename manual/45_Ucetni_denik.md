@@ -93,7 +93,11 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
   automatického zápisu zobrazuje přímo v tomto sloupci, stejně jako ikona
   řetězu u zápisů, které mají protějšek (doklad ↔ jeho úhrada — viz
   [Souvisí: doklad a jeho úhrada](#souvisí-doklad-a-jeho-úhrada)),
-- **Částka** — celková částka zápisu (Σ MD, u vyváženého zápisu shodná se Σ Dal),
+- **Částka** — bez filtru **Účet od / Účet do** celková částka zápisu (Σ MD, u
+  vyváženého zápisu shodná se Σ Dal); s aktivním filtrem na účet naopak částka
+  PŘIPADAJÍCÍ na filtrovaný rozsah účtů v daném zápisu, se značkou **MD**/**Dal**
+  za částkou — u zápisu s víc nohama na různých účtech (např. náklad + zúčtování
+  zálohy) by jinak sloupec ukazoval součet celého zápisu, ne částku vybraného účtu,
 - **Stav** — badge **Zaúčtováno** (zeleně) nebo **Koncept** (šedě),
 - **Zaúčtováno dne** a **Zaúčtoval** *(skryto ve výchozím zobrazení)*.
 

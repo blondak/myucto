@@ -72,6 +72,9 @@ const dateFrom = ref('')
 const dateTo = ref('')
 const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
+// Neuhrazené K DATU X (task #4) — historický protějšek unpaidOnly (dnešní status).
+// Prázdný řetězec = filtr vypnutý.
+const unpaidAsOf = ref<string>('')
 // „Bez párování úhrady" — doklady bez zaúčtované úhrady (banka ani pokladna).
 const unmatchedOnly = ref(false)
 const needsReviewOnly = ref(false)
@@ -95,6 +98,7 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value || dateTo.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
+  if (unpaidAsOf.value) n++
   if (unmatchedOnly.value) n++
   if (needsReviewOnly.value) n++
   if (paymentOrderedFilter.value) n++
@@ -126,6 +130,9 @@ const filterChips = computed<FilterChip[]>(() => {
   }
   if (overdueOnly.value) chips.push({ key: 'overdue', value: t('purchase_invoice.filters.overdue') })
   if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('purchase_invoice.filters.unpaid_only') })
+  if (unpaidAsOf.value) {
+    chips.push({ key: 'unpaid_as_of', value: `${t('purchase_invoice.filters.unpaid_as_of_label')}: ${formatDate(unpaidAsOf.value)}` })
+  }
   if (unmatchedOnly.value) chips.push({ key: 'unmatched', value: t('purchase_invoice.filters.unmatched') })
   if (needsReviewOnly.value) chips.push({ key: 'needsReview', value: t('purchase_invoice.filters.needs_review') })
   if (paymentOrderedFilter.value) {
@@ -148,6 +155,7 @@ function clearFilter(key: string) {
     case 'dates': dateFrom.value = ''; dateTo.value = ''; break
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
+    case 'unpaid_as_of': unpaidAsOf.value = ''; break
     case 'unmatched': unmatchedOnly.value = false; break
     case 'needsReview': needsReviewOnly.value = false; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
@@ -322,6 +330,7 @@ onMounted(async () => {
 function loadFiltersFromQuery(q: typeof route.query) {
   overdueOnly.value = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value  = q.unpaid === '1' || q.unpaid === 'true'
+  unpaidAsOf.value  = typeof q.unpaid_as_of === 'string' ? q.unpaid_as_of : ''
   unmatchedOnly.value = q.unmatched === '1' || q.unmatched === 'true'
   needsReviewOnly.value = q.needs_review === '1' || q.needs_review === 'true'
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
@@ -330,7 +339,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || unmatchedOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || unmatchedOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -357,6 +366,7 @@ function buildQuery(): Record<string, string> {
   if (vendorFilter.value !== '') q.vendor = String(vendorFilter.value)
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
+  if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
   if (unmatchedOnly.value) q.unmatched = '1'
   if (needsReviewOnly.value) q.needs_review = '1'
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
@@ -381,7 +391,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unmatchedOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
        currencyFilter, vendorFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
@@ -405,6 +415,7 @@ watch(() => route.query, (newQ) => {
     dateTo.value = ''
     overdueOnly.value = false
     unpaidOnly.value = false
+    unpaidAsOf.value = ''
     unmatchedOnly.value = false
     needsReviewOnly.value = false
     paymentOrderedFilter.value = ''
@@ -466,6 +477,7 @@ async function load(reset = true) {
       vendor_id:     vendorFilter.value   || undefined,
       unpaid_only:   unpaidOnly.value   || undefined,
       overdue:       overdueOnly.value  || undefined,
+      unpaid_as_of:  unpaidAsOf.value   || undefined,
       unmatched:     unmatchedOnly.value || undefined,
       needs_review:  needsReviewOnly.value || undefined,
       payment_ordered: paymentOrderedFilter.value || undefined,
@@ -905,6 +917,17 @@ async function bulkSetKind() {
           <input v-model="unpaidOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('purchase_invoice.filters.unpaid_only') }}
         </label>
+        <!-- Neuhrazené K DATU X (task #4) — stav úhrady k historickému dni, ne dnešní
+             status. Odlišné od "unpaidOnly" výše, proto vlastní datumové pole s popiskem,
+             ne další zaškrtávátko vedle stejnojmenného filtru. -->
+        <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2" :title="t('purchase_invoice.filters.unpaid_as_of_hint')">
+          {{ t('purchase_invoice.filters.unpaid_as_of_label') }}
+          <input v-model="unpaidAsOf" type="date"
+            class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </label>
+        <button v-if="unpaidAsOf" @click="unpaidAsOf = ''"
+          :title="t('purchase_invoice.filters.unpaid_as_of_clear')"
+          class="cursor-pointer h-9 px-2 text-xs text-neutral-500 hover:text-neutral-700">✕</button>
         <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2"
           :title="t('purchase_invoice.filters.unmatched_hint')">
           <input v-model="unmatchedOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />

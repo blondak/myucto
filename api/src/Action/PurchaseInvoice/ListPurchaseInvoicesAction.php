@@ -16,7 +16,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * GET /api/purchase-invoices
  *
  * Vrací seznam přijatých faktur seskupený po měsících (per tenant).
- * Filtry: status, document_kind, vendor_id, year, month, date_from, date_to, currency, q, unpaid_only, overdue
+ * Filtry: status, document_kind, vendor_id, year, month, date_from, date_to, currency, q, unpaid_only, overdue,
+ * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth)
  */
 final class ListPurchaseInvoicesAction
 {
@@ -31,6 +32,15 @@ final class ListPurchaseInvoicesAction
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
 
+        // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`. Validace
+        // shodná se SaldoAction::isDate — chybný formát je 422, ne tiché "nefiltrovat".
+        $unpaidAsOf = isset($filter['unpaid_as_of']) && is_scalar($filter['unpaid_as_of'])
+            ? trim((string) $filter['unpaid_as_of'])
+            : '';
+        if ($unpaidAsOf !== '' && !$this->isDate($unpaidAsOf)) {
+            return Json::error($response, 'validation_failed', "filter[unpaid_as_of] musí být datum (YYYY-MM-DD).", 422);
+        }
+
         $filters = [
             'q'             => isset($q['q']) ? trim((string) $q['q']) : '',
             'status'        => $filter['status']        ?? null,
@@ -43,6 +53,7 @@ final class ListPurchaseInvoicesAction
             'currency'      => $filter['currency']      ?? null,
             'unpaid_only'   => !empty($filter['unpaid_only']),
             'overdue'       => !empty($filter['overdue']),
+            'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
             'unmatched'     => !empty($filter['unmatched']),
             'needs_review'  => !empty($filter['needs_review']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
@@ -86,5 +97,11 @@ final class ListPurchaseInvoicesAction
         }
 
         return Json::ok($response, $result);
+    }
+
+    private function isDate(string $v): bool
+    {
+        $d = \DateTimeImmutable::createFromFormat('Y-m-d', $v);
+        return $d !== false && $d->format('Y-m-d') === $v;
     }
 }

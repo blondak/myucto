@@ -106,6 +106,69 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertEqualsWithDelta(1234.56, (float) $row['amount'], 0.001, 'amount = Σ MD řádků zápisu.');
     }
 
+    /**
+     * Regresní test na nález „ČÁSTKA u filtru na účet": zápis s nohou nákladu i nohou
+     * zúčtování zálohy na RŮZNÝCH účtech — filtr na jeden z nich musí ukázat částku
+     * TOHO účtu (a jeho stranu MD/D), ne Σ MD celého zápisu (dřív AMOUNT_SUBQUERY
+     * sčítalo všechny debetní řádky bez ohledu na filtrovaný účet).
+     */
+    public function testListAccountFilteredAmountShowsAccountPortionNotEntryTotal(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 300.0],
+            ['account_code' => '314', 'side' => 'credit', 'amount' => 200.0],
+        ], ['entry_date' => self::YEAR . '-04-01', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        // Bez filtru na účet — beze změny oproti dosavadnímu chování: Σ MD celého zápisu.
+        $all = $this->call('list', 'GET', 'accountant');
+        $rowAll = $this->findItem($all['body']['items'], $entryId);
+        self::assertNotNull($rowAll);
+        self::assertEqualsWithDelta(500.0, (float) $rowAll['amount'], 0.001, 'Bez filtru: Σ MD celého zápisu (dosavadní chování).');
+        self::assertNull($rowAll['amount_side'] ?? null, 'Bez filtru na účet strana nic neurčuje.');
+
+        // Filtr na účet 314 (jen jedna noha zápisu, 200 Kč) — MUSÍ vrátit 200, ne 500.
+        $filtered314 = $this->call('list', 'GET', 'accountant', [], [], [], ['account_from' => '314', 'account_to' => '314']);
+        $row314 = $this->findItem($filtered314['body']['items'], $entryId);
+        self::assertNotNull($row314, 'Zápis má nohu na 314, musí projít filtrem.');
+        self::assertEqualsWithDelta(200.0, (float) $row314['amount'], 0.001, 'Filtrováno na 314: jen částka TÉTO nohy, ne Σ MD celého zápisu.');
+        self::assertSame('credit', $row314['amount_side']);
+
+        // Filtr na druhou nohu (321, jiná částka) potvrzuje, že se nepočítá z celku.
+        $filtered321 = $this->call('list', 'GET', 'accountant', [], [], [], ['account_from' => '321', 'account_to' => '321']);
+        $row321 = $this->findItem($filtered321['body']['items'], $entryId);
+        self::assertNotNull($row321);
+        self::assertEqualsWithDelta(300.0, (float) $row321['amount'], 0.001);
+        self::assertSame('credit', $row321['amount_side']);
+
+        // Filtr na debetní nohu (518) — MD strana, plná částka 500.
+        $filtered518 = $this->call('list', 'GET', 'accountant', [], [], [], ['account_from' => '518', 'account_to' => '518']);
+        $row518 = $this->findItem($filtered518['body']['items'], $entryId);
+        self::assertNotNull($row518);
+        self::assertEqualsWithDelta(500.0, (float) $row518['amount'], 0.001);
+        self::assertSame('debit', $row518['amount_side']);
+    }
+
+    /**
+     * Edge case: filtrovaný účet se v JEDNOM zápisu objeví na obou stranách (korekce).
+     * Sloupec Částka ukáže NETTO (Σ MD − Σ D na filtrovaném účtu) a stranu podle
+     * znaménka — jinak by dvě protichůdné nohy stejného účtu ukázaly zavádějící součet.
+     */
+    public function testListAccountFilteredAmountNetsBothSidesOfSameAccountInOneEntry(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 1000.0],
+            ['account_code' => '211', 'side' => 'credit', 'amount' => 400.0],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 600.0],
+        ], ['entry_date' => self::YEAR . '-04-02', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $res = $this->call('list', 'GET', 'accountant', [], [], [], ['account_from' => '211', 'account_to' => '211']);
+        $row = $this->findItem($res['body']['items'], $entryId);
+        self::assertNotNull($row);
+        self::assertEqualsWithDelta(600.0, (float) $row['amount'], 0.001, 'Netto na 211: 1000 MD - 400 D = 600.');
+        self::assertSame('debit', $row['amount_side']);
+    }
+
     public function testListEnrichesBankDrillDownWithStatementId(): void
     {
         $statementId = $this->bankStatement();

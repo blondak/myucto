@@ -575,6 +575,9 @@ final class InvoiceRepository
      *
      * Pokud je $perPage > 0, vrací jen daný řez řádků (LIMIT/OFFSET); meta obsahuje
      * total/page/per_page/pages. Pro export CSV / sumy přes celý dataset volat s $perPage = 0.
+     *
+     * Filtr `unpaid_as_of` (YYYY-MM-DD) — neuhrazeno K DATU X, ne dnešní status; stejný
+     * zdroj pravdy o úhradě jako SaldoRepository::fetchOpenInvoices, viz komentář u filtru.
      */
     /**
      * Rychlé hledání vystavených faktur podle čísla dokladu (varsymbol) pro globální
@@ -708,6 +711,38 @@ final class InvoiceRepository
                 . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
                 . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
             $where[] = "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
+        }
+        // Neuhrazené K DATU X (task #4, účetní sestava „saldo bez saldokonta") — na rozdíl
+        // od `unpaid_only`/`overdue` výše NEJDE o dnešní status/amount_to_pay, ale o stav,
+        // jaký doklad měl k historickému dni. Zdroj pravdy o úhradě je STEJNÝ jako
+        // v SaldoRepository::fetchOpenInvoices (audit 2026-07, H2): SUM invoice_payments.amount
+        // s paid_on <= asOf proti amount_to_pay, stejnoměrně v měně faktury (invoice_payments
+        // pokrývá bankovní, hotovostní i ruční platby jednotně — žádný zvláštní gap jako u PF).
+        // Díky tomu doklad, který je DNES 'paid' ale platba přišla AŽ PO asOf, správně
+        // vypadne jako neuhrazený k asOf (a naopak doklad splacený PŘED asOf zmizí, i když
+        // dnešní status ještě 'issued' nestihl překlopit).
+        if (!empty($filters['unpaid_as_of'])) {
+            $asOf = (string) $filters['unpaid_as_of'];
+            // Vystavený do X — koncept ještě není dluh, k X musí existovat jako doklad.
+            $where[] = 'i.issue_date <= ?';
+            $params[] = $asOf;
+            $where[] = "i.status <> 'draft'";
+            // Storno platí, jen když k X už proběhlo (H4b — cancelled_at jako den vyrovnání,
+            // shodně se SaldoRepository).
+            $where[] = "(i.status <> 'cancelled' OR i.cancelled_at IS NULL OR DATE(i.cancelled_at) > ?)";
+            $params[] = $asOf;
+            // Stejná pohledávková sémantika jako unpaid_only/overdue: spárovaná proforma dluh
+            // nenese, dluh nese ostrý doklad.
+            $where[] = "(i.invoice_type != 'proforma'"
+                . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
+                . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
+            // Guard „amount_to_pay > 0" (viz AGENTS.md) je tu implicitní: je-li amount_to_pay
+            // už dnes 0 (finál kryt zálohou), rozdíl proti Σ plateb do asOf nikdy nepřekročí
+            // toleranci a doklad se nevybere sám od sebe.
+            $where[] = "(i.amount_to_pay - COALESCE((SELECT SUM(ip.amount) FROM invoice_payments ip"
+                . " WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id"
+                . " AND ip.paid_on <= ?), 0)) > 0.005";
+            $params[] = $asOf;
         }
         // Zaúčtováno / nezaúčtováno (podvojné účetnictví) — '1' = zaúčtováno (booked_at IS NOT NULL),
         // '0' = nezaúčtováno (IS NULL). V daňové evidenci je booked_at vždy NULL, filtr tam nemá smysl

@@ -619,6 +619,9 @@
     "reports-cnb-rate-audit": [
       "reports"
     ],
+    "reports-invoice-series-completeness": [
+      "reports"
+    ],
     "reports-submissions": [
       "reports"
     ],
