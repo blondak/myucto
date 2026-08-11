@@ -39,6 +39,66 @@ final class CronHealthTest extends TestCase
         );
     }
 
+    /**
+     * Jádro issue #6: čerstvá instalace, kde úloha ještě neměla ani jednu
+     * periodu na to, aby proběhla, nesmí svítit jako "nikdy neběželo" — to by
+     * z varování udělalo šum, který každý začne ignorovat.
+     */
+    public function testFreshInstallWithNoHeartbeatIsPendingNotNeverRan(): void
+    {
+        self::assertSame(
+            [CronHealth::PENDING, CronHealth::SOURCE_SELF],
+            CronHealth::evaluate(null, null, self::HOUR, false, false, 30 * 60)
+        );
+    }
+
+    /** Přesně na hranici periody se instalace ještě bere jako "měla šanci, ale ne víc". */
+    public function testInstallExactlyAtOnePeriodIsStillPending(): void
+    {
+        self::assertSame(
+            [CronHealth::PENDING, CronHealth::SOURCE_SELF],
+            CronHealth::evaluate(null, null, self::HOUR, false, false, self::HOUR)
+        );
+    }
+
+    /**
+     * Opačný scénář (issue #6 samo): instalace už úlohu měla stihnout aspoň
+     * jednou, heartbeat pořád chybí — tohle MUSÍ zůstat NEVER_RAN, ne PENDING.
+     */
+    public function testInstallOlderThanPeriodWithNoHeartbeatIsNeverRan(): void
+    {
+        self::assertSame(
+            [CronHealth::NEVER_RAN, CronHealth::SOURCE_SELF],
+            CronHealth::evaluate(null, null, self::HOUR, false, false, 2 * self::HOUR)
+        );
+    }
+
+    /** Bez znalosti stáří instalace se chová jako dřív — žádná relaxace. */
+    public function testUnknownInstallAgeKeepsLegacyNeverRanBehaviour(): void
+    {
+        self::assertSame(
+            [CronHealth::NEVER_RAN, CronHealth::SOURCE_SELF],
+            CronHealth::evaluate(null, null, self::HOUR, false, false, null)
+        );
+    }
+
+    /** Chyba na čerstvé instalaci je pořád chyba, ne "overdue_and_failing". */
+    public function testFailingOnFreshInstallIsFailingNotOverdueAndFailing(): void
+    {
+        self::assertSame(
+            [CronHealth::FAILING, CronHealth::SOURCE_SELF],
+            CronHealth::evaluate(null, 'error', self::HOUR, false, false, 30 * 60)
+        );
+    }
+
+    public function testInstallAgeSecComputesFromFirstMigrationTimestamp(): void
+    {
+        $now = 1_700_000_000;
+        self::assertSame(3600, CronHealth::installAgeSec(date('Y-m-d H:i:s', $now - 3600), $now));
+        self::assertNull(CronHealth::installAgeSec(null, $now));
+        self::assertNull(CronHealth::installAgeSec('not-a-date', $now));
+    }
+
     public function testGatedJobWithLiveDispatcherIsIdleInsteadOfOverdue(): void
     {
         self::assertSame(

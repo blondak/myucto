@@ -72,6 +72,21 @@ final class CronJobsAction
 
         $now = time();
 
+        // Stáří instalace (od první migrace) — brána proti falešným poplachům
+        // "nikdy neběželo" na čerstvé instalaci. Viz CronHealth::installAgeSec().
+        $installAgeSec = null;
+        try {
+            $firstMigratedAt = $pdo->query('SELECT MIN(applied_at) FROM migrations')->fetchColumn();
+            $installAgeSec = CronHealth::installAgeSec(
+                is_string($firstMigratedAt) ? $firstMigratedAt : null,
+                $now,
+            );
+        } catch (\Throwable) {
+            // Tabulka migrations by měla existovat vždy (migrate.php ji zakládá
+            // při prvním běhu) — pokud přesto dotaz selže, radši se chováme jako
+            // dřív (bez PENDING relaxace) než abychom shodili celou stránku.
+        }
+
         // V režimu dispatcheru je jeho heartbeat důkazem, že plánovací smyčka
         // žije — a tím pádem že ticho gatované úlohy (`cron-epo-status`,
         // `cron-ai-worker`) znamená „není práce", ne výpadek. Viz CronHealth.
@@ -114,6 +129,7 @@ final class CronJobsAction
                 (int) $job['max_age_hours'] * 3600,
                 in_array($script, $gatedScripts, true),
                 $dispatcherAlive,
+                $installAgeSec,
             );
 
             $report = null;
@@ -129,7 +145,7 @@ final class CronJobsAction
                 'weekdays_only'       => (bool) $job['weekdays_only'],
                 'critical'            => (bool) $job['critical'],
                 'max_age_hours'       => (int) $job['max_age_hours'],
-                'health'              => $health,                          // ok | idle | overdue | failing | overdue_and_failing | never_ran
+                'health'              => $health,                          // ok | idle | pending | overdue | failing | overdue_and_failing | never_ran
                 // Podle čeho se stav určil: 'self' = vlastní heartbeat úlohy,
                 // 'dispatcher' = úloha nemá práci a živý je za ni dispatcher.
                 'health_source'       => $healthSource,

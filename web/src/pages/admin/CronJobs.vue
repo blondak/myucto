@@ -136,9 +136,14 @@ function healthBadgeClass(h: CronJobHealth): string {
     case 'ok': return 'bg-success-50 text-success-600'
     // Nečinnost není varování — je to normální provozní stav gatované úlohy.
     case 'idle': return 'bg-neutral-100 text-neutral-600'
+    // Čerstvá instalace ještě nestihla ani jednu periodu téhle úlohy — "nikdy
+    // neběželo" je tu očekávaný stav, ne poplach (viz never_ran níž).
+    case 'pending': return 'bg-neutral-100 text-neutral-600'
     case 'overdue': return 'bg-warning-50 text-warning-600'
     case 'failing':
     case 'overdue_and_failing':
+    // Instalace už periodu úlohy přerostla a heartbeat pořád chybí — skutečný
+    // nález (viz issue #6), ne prázdný sloupec. Musí být vidět na první pohled.
     case 'never_ran': return 'bg-danger-50 text-danger-500'
   }
 }
@@ -149,6 +154,7 @@ function healthLabel(h: CronJobHealth): string {
 
 function healthTooltip(j: CronJob): string {
   if (j.health === 'idle') return t('cron_jobs.tooltip_idle', { script: schedule.value?.dispatcher_script ?? 'cron-dispatch' })
+  if (j.health === 'pending') return t('cron_jobs.tooltip_pending', { hours: j.max_age_hours })
   if (j.health === 'overdue' || j.health === 'overdue_and_failing') {
     return t('cron_jobs.tooltip_overdue', { hours: j.max_age_hours })
   }
@@ -157,7 +163,8 @@ function healthTooltip(j: CronJob): string {
   return ''
 }
 
-const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok' && j.health !== 'idle'))
+// Pending ani idle nejsou problém — jsou to normální provozní/přechodné stavy.
+const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok' && j.health !== 'idle' && j.health !== 'pending'))
 
 // ── Návod na naplánování úloh ───────────────────────────────────────────────
 // Skládá se z KATALOGU (frekvence) a ze SKUTEČNÝCH cest běžícího nasazení
@@ -401,8 +408,23 @@ async function copySetup() {
                       <span class="font-mono text-neutral-700">{{ fmtTime(j.last_ok_started_at) }}</span>
                     </div>
                   </div>
-                  <div v-if="j.health === 'idle'" class="mt-2 text-xs text-neutral-500">
+                  <div
+                    v-if="j.health === 'idle' || j.health === 'pending'"
+                    class="mt-2 text-xs text-neutral-500"
+                  >
                     {{ healthTooltip(j) }}
+                  </div>
+                  <div
+                    v-else-if="j.health === 'overdue'"
+                    class="mt-2 text-xs text-warning-600 font-medium"
+                  >
+                    ⚠ {{ healthTooltip(j) }}
+                  </div>
+                  <div
+                    v-else-if="j.health === 'never_ran' || j.health === 'failing' || j.health === 'overdue_and_failing'"
+                    class="mt-2 text-xs text-danger-600 font-medium"
+                  >
+                    ⚠ {{ healthTooltip(j) }}
                   </div>
                   <div v-if="j.last_message" class="mt-2 text-xs">
                     <span class="text-neutral-500">{{ t('cron_jobs.message_label') }}: </span>

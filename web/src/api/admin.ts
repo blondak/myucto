@@ -277,8 +277,12 @@ export interface SampleDataStatus {
  * `idle` = úloha se v režimu dispatcheru nespouští, protože pro ni není práce.
  * Není to problém — zdraví se u ní posuzuje podle heartbeatu dispatcheru
  * (`health_source: 'dispatcher'`).
+ *
+ * `pending` = nikdy neběžela, ale instalace ještě nestihla ani jednu její
+ * periodu (`max_age_hours`) — čerstvý stav, ne poplach. Teprve když instalace
+ * periodu přeroste a heartbeat pořád chybí, přepne se na `never_ran`.
  */
-export type CronJobHealth = 'ok' | 'idle' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
+export type CronJobHealth = 'ok' | 'idle' | 'pending' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
 
 export interface CronJob {
   script: string

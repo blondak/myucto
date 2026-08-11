@@ -26,6 +26,16 @@ namespace MyInvoice\Service\Cron;
  * pořád platný poplach (například proces, který zemře dřív, než stihne cokoli
  * zapsat). A chybu ({@see self::FAILING}) nepřebíjí nikdy nic — ta se hlásí
  * v obou režimech stejně.
+ *
+ * Druhá relaxace, ze stejného důvodu jako IDLE, řeší opačný extrém:
+ * {@see self::NEVER_RAN} bez ohledu na stáří instalace by na čerstvém nasazení
+ * svítilo červeně u KAŽDÉ úlohy hned od prvního přihlášení do admina — takže by
+ * z varování udělalo šum, který se přestane číst. Instalace, která neběží ani
+ * jednu periodu úlohy (`max_age_hours`), na "nikdy neběželo" nárok nemá — {@see
+ * self::PENDING}. Teprve když instalace tuhle periodu přeroste a heartbeat
+ * pořád chybí, je to skutečný nález (viz issue #6 — špatné jméno wrapperu
+ * v Dockeru shodilo VŠECHNY plánované úlohy a stránka to celou dobu tiše
+ * ukazovala jako "ještě neběželo", bez jediného varování).
  */
 final class CronHealth
 {
@@ -36,10 +46,12 @@ final class CronHealth
     /** Poslední běh skončil chybou. */
     public const FAILING = 'failing';
     public const OVERDUE_AND_FAILING = 'overdue_and_failing';
-    /** Žádný běh v historii — nejspíš není naplánováno. */
+    /** Žádný běh v historii a instalace už měla na první běh dost času — poplach. */
     public const NEVER_RAN = 'never_ran';
     /** Dispatcher žije, ale úloha nemá co dělat, tak ji nespouští. */
     public const IDLE = 'idle';
+    /** Žádný běh v historii, ale instalace ještě nestihla ani jednu periodu úlohy. */
+    public const PENDING = 'pending';
 
     /** Zdroj, ze kterého stav vychází — kvůli srozumitelnému tooltipu v UI. */
     public const SOURCE_SELF = 'self';
@@ -48,9 +60,12 @@ final class CronHealth
     /**
      * @param int|null $ageSecSinceOk Stáří posledního úspěšného (i prázdného) běhu; null = nikdy neběželo.
      * @param string|null $lastStatus Stav posledního doběhu: ok | noop | error | null.
-     * @param int $maxAgeSec Limit z katalogu (`max_age_hours` × 3600).
+     * @param int $maxAgeSec Limit z katalogu (`max_age_hours` × 3600) — zároveň bere
+     *                       jako "perioda" úlohy pro účely {@see self::PENDING}.
      * @param bool $dispatcherGated Spouští tuhle úlohu dispatcher jen když má práci?
      * @param bool $dispatcherAlive Žije sám dispatcher (jeho vlastní heartbeat je čerstvý)?
+     * @param int|null $installAgeSec Stáří instalace (od první migrace). Null = neznámé —
+     *                                chová se jako dřív (bez PENDING relaxace).
      *
      * @return array{0:string,1:string} [health, source]
      */
@@ -60,17 +75,23 @@ final class CronHealth
         int $maxAgeSec,
         bool $dispatcherGated = false,
         bool $dispatcherAlive = false,
+        ?int $installAgeSec = null,
     ): array {
         $health = self::NEVER_RAN;
         if ($ageSecSinceOk !== null) {
             $health = $ageSecSinceOk > $maxAgeSec ? self::OVERDUE : self::OK;
+        } elseif ($installAgeSec !== null && $installAgeSec <= $maxAgeSec) {
+            // Instalace ještě nedoběhla ani jednu periodu téhle úlohy — "nikdy
+            // neběželo" je tu očekávaný přechodný stav, ne poplach.
+            $health = self::PENDING;
         }
 
         // Chyba posledního běhu má přednost před vším ostatním — i před relaxací
-        // níž. Když úloha spadla, není „nečinná", ale rozbitá.
+        // níž. Když úloha spadla, není „nečinná", ale rozbitá — bez ohledu na to,
+        // jak čerstvá je instalace.
         if ($lastStatus === 'error') {
             return [
-                $health === self::OK || $health === self::NEVER_RAN
+                $health === self::OK || $health === self::NEVER_RAN || $health === self::PENDING
                     ? self::FAILING
                     : self::OVERDUE_AND_FAILING,
                 self::SOURCE_SELF,
@@ -82,6 +103,30 @@ final class CronHealth
         }
 
         return [$health, self::SOURCE_SELF];
+    }
+
+    /**
+     * Stáří instalace v sekundách — od úplně první aplikované migrace.
+     *
+     * Vybráno záměrně místo `cron_heartbeat`/`cron_runs`: ty jsou prázdné přesně
+     * v tu chvíli, kdy potřebujeme vědět "je tahle instalace nová?" (žádný tick
+     * ještě neproběhl), takže by se nedaly použít jako zdroj. `migrations` naproti
+     * tomu existuje od prvního spuštění `migrate.php` (= od instalace) a řádek
+     * s nejstarším `applied_at` přežije restart kontejneru i přeinstalaci image —
+     * je to čistě databázový fakt.
+     *
+     * @param string|null $firstMigratedAt `MIN(applied_at)` z tabulky `migrations`, nebo null.
+     */
+    public static function installAgeSec(?string $firstMigratedAt, int $now): ?int
+    {
+        if ($firstMigratedAt === null) {
+            return null;
+        }
+        $ts = strtotime($firstMigratedAt);
+        if ($ts === false) {
+            return null;
+        }
+        return max(0, $now - $ts);
     }
 
     /**
