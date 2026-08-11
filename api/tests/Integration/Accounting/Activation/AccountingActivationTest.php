@@ -260,6 +260,157 @@ final class AccountingActivationTest extends TestCase
         self::assertEqualsWithDelta(100.00, $after - $before, 0.001);
     }
 
+    /**
+     * Počáteční stav banky se rozpadá na analytiky vlastních účtů (#35). Zdroj dat to
+     * unese: každá transakce visí na hlavičce výpisu, a ta nese číslo vlastního účtu —
+     * tutéž dvojici, ze které bankovní nohu odvozuje běžný provoz.
+     */
+    public function testOpeningBankBalanceSplitsPerOwnAccountAnalytic(): void
+    {
+        $asOf = '2098-12-31';
+        $before = $this->bankSplit($asOf);
+
+        // 1) Firma s JEDINÝM bankovním účtem — i ta musí dostat vlastní analytiku.
+        $first = $this->ownBankAccount('9990981017');
+        $this->bankStatementWithTx('9990981017', 100.00, $asOf);
+        $single = $this->bankSplit($asOf);
+        $firstCode = $this->analyticCode($first);
+        self::assertNotNull($firstCode, 'Jediný bankovní účet dostal analytiku.');
+        self::assertArrayHasKey($firstCode, $single, 'Počáteční stav leží na analytice účtu.');
+        self::assertEqualsWithDelta(100.00, $single[$firstCode]['amount'] - ($before[$firstCode]['amount'] ?? 0.0), 0.001);
+        self::assertEqualsWithDelta(
+            $before['221']['amount'] ?? 0.0,
+            $single['221']['amount'] ?? 0.0,
+            0.001,
+            'Zůstatek přiřazeného účtu se na syntetice 221 neobjeví.',
+        );
+
+        // 2) Druhý účet nesmí skončit ve stejném kbelíku — jinak by se zůstatky promíchaly.
+        $second = $this->ownBankAccount('9990981021');
+        $this->bankStatementWithTx('9990981021', 250.00, $asOf);
+        $both = $this->bankSplit($asOf);
+        $secondCode = $this->analyticCode($second);
+        self::assertNotNull($secondCode);
+        self::assertNotSame($firstCode, $secondCode, 'Každý bankovní účet má vlastní analytiku.');
+        self::assertEqualsWithDelta(100.00, $both[$firstCode]['amount'] - ($before[$firstCode]['amount'] ?? 0.0), 0.001);
+        self::assertEqualsWithDelta(250.00, $both[$secondCode]['amount'] - ($before[$secondCode]['amount'] ?? 0.0), 0.001);
+    }
+
+    /**
+     * Výpis, ke kterému vlastní účet dohledat nejde, se NEROZDĚLUJE odhadem — zůstane
+     * na syntetice, ale s poznámkou, že ho účetní musí rozúčtovat ručně.
+     */
+    public function testUnmatchedStatementStaysOnSyntheticWithManualSplitNote(): void
+    {
+        $asOf = '2098-12-31';
+        $before = $this->bankSplit($asOf);
+        $this->bankStatementWithTx('9990981036', 70.00, $asOf);
+        $after = $this->bankSplit($asOf);
+
+        self::assertArrayHasKey('221', $after, 'Nepřiřazený výpis zůstává na syntetice 221.');
+        self::assertEqualsWithDelta(70.00, $after['221']['amount'] - ($before['221']['amount'] ?? 0.0), 0.001);
+        self::assertStringContainsString(
+            'rozúčtujte ručně',
+            (string) $after['221']['note'],
+            'Souhrn na syntetice nesmí být tichý — poznámka volá po ručním rozúčtování.',
+        );
+    }
+
+    /** Rozpad nesmí žádný pohyb ztratit ani přidat — součet sedí na plochý souhrn. */
+    public function testBankSplitSumsToFlatBalance(): void
+    {
+        $asOf = '2098-12-31';
+        $this->ownBankAccount('9990981040');
+        $this->bankStatementWithTx('9990981040', 1234.50, $asOf);
+        $this->bankStatementWithTx('9990981055', -34.50, $asOf);
+
+        $flat = (float) (new \ReflectionMethod($this->opening, 'bankBalance'))
+            ->invoke($this->opening, $this->supplierId, $asOf);
+        $split = array_sum(array_column($this->bankSplit($asOf), 'amount'));
+
+        self::assertEqualsWithDelta($flat, $split, 0.011);
+    }
+
+    /** Firma bez bankovních dat: žádný bankovní řádek, žádná analytika navíc. */
+    public function testSupplierWithoutBankAccountsHasNoBankOpeningRow(): void
+    {
+        $empty = (int) $this->db->pdo()->query('SELECT MAX(id) + 1000 FROM supplier')->fetchColumn();
+        self::assertSame([], $this->bankSplit('2098-12-31', $empty));
+    }
+
+    /** Konec konců rozhoduje draft: prefill uloží bankovní stav na analytiku, ne na 221. */
+    public function testPrefillWritesBankOpeningToOwnAccountAnalytic(): void
+    {
+        $asOf = '2098-12-31';
+        $account = $this->ownBankAccount('9990981074');
+        $this->bankStatementWithTx('9990981074', 500.00, $asOf);
+
+        $draft = $this->opening->prefill($this->supplierId, $asOf);
+        $bankRows = array_values(array_filter(
+            $draft['rows'],
+            static fn (array $row): bool => preg_match('/^221[0-9]+$/', (string) $row['account_code']) === 1
+                && abs((float) $row['amount'] - 500.00) < 0.005,
+        ));
+
+        self::assertCount(1, $bankRows, 'Počáteční stav banky patří na analytiku vlastního účtu, ne na plochou 221.');
+        self::assertSame($this->analyticCode($account), $bankRows[0]['account_code']);
+        self::assertSame('debit', $bankRows[0]['side']);
+        self::assertSame('transition_report', $bankRows[0]['source']);
+        self::assertStringContainsString('9990981074', (string) $bankRows[0]['note'], 'Poznámka pojmenuje účet.');
+    }
+
+    /**
+     * Rozpad počátečního stavu banky podle vlastních účtů.
+     *
+     * @return array<string, array{account_code:string, amount:float, note:string}>
+     */
+    private function bankSplit(string $asOf, ?int $supplierId = null): array
+    {
+        $rows = (new \ReflectionMethod($this->opening, 'bankBalancesByAccount'))
+            ->invoke($this->opening, $supplierId ?? $this->supplierId, $asOf);
+        return array_column($rows, null, 'account_code');
+    }
+
+    /** Vlastní bankovní účet firmy BEZ analytiky — tu má přidělit sám mechanismus. */
+    private function ownBankAccount(string $account, string $bank = '0100'): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, currency,
+                 account_canonical, kind, source, is_active)
+             VALUES (?, ?, ?, ?, ?, "CZK", ?, "current", "manual", 1)'
+        )->execute([$this->supplierId, 'TEST opening ' . $account, $account, $bank, $bank, $account]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function bankStatementWithTx(string $account, float $amount, string $asOf, string $bank = '0100'): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date)
+             VALUES (?, ?, ?, ?, ?, "CZK", ?)'
+        )->execute([
+            $this->supplierId,
+            "__test_split_{$account}_{$amount}.gpc",
+            hash('sha256', "split-{$this->supplierId}-{$account}-{$amount}"),
+            $account,
+            $bank,
+            $asOf,
+        ]);
+        $pdo->prepare('INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, ?, ?, "CZK")')
+            ->execute([(int) $pdo->lastInsertId(), $asOf, $amount]);
+    }
+
+    private function analyticCode(int $bankAccountId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT analytic_suffix FROM supplier_bank_accounts WHERE id = ?');
+        $stmt->execute([$bankAccountId]);
+        $suffix = (string) ($stmt->fetchColumn() ?: '');
+        return $suffix === '' ? null : '221' . $suffix;
+    }
+
     private function request(string $method, ?int $supplierId = null): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())

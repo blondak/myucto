@@ -6,7 +6,10 @@ namespace MyInvoice\Service\Accounting\Activation;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -22,6 +25,7 @@ final class OpeningBalanceService
         private readonly AccountingPeriodRepository $periods,
         private readonly TransitionReportService $transition,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly BankAnalyticResolver $bankAnalytics,
     ) {}
 
     public function prefill(int $supplierId, string $asOf): array
@@ -37,8 +41,9 @@ final class OpeningBalanceService
 
         $cashBalance = $this->cashBalance($supplierId, $asOf);
         $this->addSignedBalance($rows, '211', $cashBalance, 'Stav pokladny k datu přechodu');
-        $bankBalance = $this->bankBalance($supplierId, $asOf);
-        $this->addSignedBalance($rows, '221', $bankBalance, 'Stav bankovních účtů k datu přechodu');
+        foreach ($this->bankBalancesByAccount($supplierId, $asOf) as $bank) {
+            $this->addSignedBalance($rows, $bank['account_code'], $bank['amount'], $bank['note']);
+        }
 
         $rows = array_values(array_filter($rows, fn (array $row) => $this->accounts->findByCode($supplierId, $row['account_code']) !== null));
         return $this->replace($supplierId, $rows, 'transition_report');
@@ -226,21 +231,132 @@ final class OpeningBalanceService
         return (float) $stmt->fetchColumn();
     }
 
+    /**
+     * Plochý souhrn počátečního stavu banky přes všechny vlastní účty. Rozvaha se
+     * takhle od #35 NEúčtuje (knihuje se per analytika, viz
+     * {@see bankBalancesByAccount()}) — zůstává jako kontrolní součet: rozpad musí
+     * dát tutéž částku jako souhrn, jinak se při rozpadu ztratil nebo přibyl pohyb.
+     */
     private function bankBalance(int $supplierId, string $asOf): float
     {
+        $total = 0.0;
+        foreach ($this->bankRowsByStatementAccount($supplierId, $asOf) as $row) {
+            $total += (float) $row['balance'];
+        }
+        return round($total, 2);
+    }
+
+    /**
+     * Počáteční stav banky ROZPADNUTÝ na analytiky vlastních účtů (221100, 221200 …).
+     *
+     * Rozpad je možný, protože zdrojem není jedno souhrnné číslo: každá transakce
+     * visí na hlavičce výpisu, a ta nese číslo vlastního účtu
+     * (`bank_statements.account_number` / `bank_code`). Je to TÁŽ dvojice, ze které
+     * běžný provoz odvozuje bankovní nohu zápisu — BankPostingService ji do `$tx`
+     * promítá jako `recipient_account` / `recipient_bank`. Proto se tu na
+     * analytiku nepřekládá vlastním pravidlem, ale sdíleným
+     * {@see BankAnalyticResolver::analyticCodeFor()}: kdyby aktivace přidělovala čísla
+     * po svém, počáteční stav by skončil na jiné analytice než pohyby, které po něm
+     * následují.
+     *
+     * Výpis, u kterého se vlastní účet dohledat NEDÁ (cizí/neznámé číslo, účet
+     * smazaný z nastavení), zůstává na syntetice 221 — vymýšlet mu rozdělení by bylo
+     * horší než souhrn. Aby to nebyl tichý nesoulad, nese takový řádek v poznámce
+     * výzvu k ručnímu rozúčtování; poznámka je v průvodci aktivací vidět i editovatelná.
+     *
+     * @return list<array{account_code:string, amount:float, note:string}>
+     */
+    private function bankBalancesByAccount(int $supplierId, string $asOf): array
+    {
+        $synthetic = BankAnalyticAssigner::BANK_SYNTHETIC;
+        // Bez syntetiky 221 v osnově se analytiky NEZAKLÁDAJÍ — analyticCodeFor je do
+        // osnovy sám dohrává a u nezaseedované firmy by 221xxx vzniklo bez rodiče.
+        // Zůstatek pak spadne na 221 a prefill ho stejně odfiltruje (účet není v osnově).
+        $canResolve = $this->accounts->findByCode($supplierId, $synthetic) !== null;
+
+        $buckets = [];
+        foreach ($this->bankRowsByStatementAccount($supplierId, $asOf) as $row) {
+            $code = $canResolve ? $this->bankAnalytics->analyticCodeFor($supplierId, $row) : null;
+            if ($code !== null && !$this->isPostableAccount($supplierId, $code)) {
+                // Analytiku, kterou si uživatel v osnově vypnul, by replace() odmítl
+                // ('validation_failed') a shodil celý prefill. Zůstatek radši spadne do
+                // souhrnu k ručnímu rozúčtování než aby aktivace přestala jít dokončit.
+                $code = null;
+            }
+            $key = $code ?? $synthetic;
+            if (!isset($buckets[$key])) {
+                $buckets[$key] = ['amount' => 0.0, 'accounts' => [], 'resolved' => $code !== null];
+            }
+            $buckets[$key]['amount'] += (float) $row['balance'];
+            // Dvě různá zapsání téhož účtu (GPC padding, předčíslí) spadnou na jeden kód —
+            // proto se sčítá do bucketu podle KÓDU, ne podle hlavičky výpisu. Řádek se
+            // stejným account_code na téže straně by replace() odmítl jako duplicitu.
+            $label = $this->statementAccountLabel($row);
+            if ($label !== '' && !in_array($label, $buckets[$key]['accounts'], true)) {
+                $buckets[$key]['accounts'][] = $label;
+            }
+        }
+        ksort($buckets, SORT_STRING);
+
+        $out = [];
+        foreach ($buckets as $code => $bucket) {
+            $accounts = implode(', ', $bucket['accounts']);
+            $note = $bucket['resolved']
+                ? trim('Stav bankovního účtu ' . $accounts) . ' k datu přechodu'
+                : 'Stav bankovních účtů k datu přechodu — výpisy bez vlastního účtu v nastavení'
+                    . ($accounts !== '' ? ' (' . $accounts . ')' : '')
+                    . '; rozúčtujte ručně na analytiky ' . $code . 'xxx';
+            $out[] = [
+                'account_code' => (string) $code,
+                'amount' => round($bucket['amount'], 2),
+                'note' => mb_substr($note, 0, 255),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Zůstatky k datu po hlavičkách výpisů. Klíče `recipient_account` /
+     * `recipient_bank` jsou schválně pojmenované jako v BankPostingService, aby řádek
+     * šel předat rovnou {@see BankAnalyticResolver}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function bankRowsByStatementAccount(int $supplierId, string $asOf): array
+    {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(bt.amount), 0)
+            "SELECT bs.account_number AS recipient_account,
+                    bs.bank_code      AS recipient_bank,
+                    COALESCE(SUM(bt.amount), 0) AS balance
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.source = 'statement' AND bt.posted_at <= ?
                 AND UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''), 'CZK')) = 'CZK'
-                AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
+                AND " . BankStatementOwnershipResolver::sql() . "
+              GROUP BY bs.account_number, bs.bank_code"
         );
         // SEC-01: počáteční zůstatek se nesmí počítat z cizích výpisů.
         $stmt->execute(array_merge(
             [$asOf],
-            \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+            BankStatementOwnershipResolver::params($supplierId),
         ));
-        return (float) $stmt->fetchColumn();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function isPostableAccount(int $supplierId, string $code): bool
+    {
+        $account = $this->accounts->findByCode($supplierId, $code);
+        return $account !== null && (bool) $account['is_active'];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function statementAccountLabel(array $row): string
+    {
+        $account = trim((string) ($row['recipient_account'] ?? ''));
+        if ($account === '') {
+            return '';
+        }
+        $bank = trim((string) ($row['recipient_bank'] ?? ''));
+        return $bank === '' ? $account : $account . '/' . $bank;
     }
 }
