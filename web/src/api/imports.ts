@@ -5,6 +5,8 @@ export type ImportKind = 'auto' | 'issued' | 'purchase'
 export interface ImportResultRow {
   file: string
   status: 'created' | 'skipped' | 'failed'
+  /** Doklad už v systému byl — status zůstává 'created' (v systému je), ale nevznikl teď. */
+  duplicate?: boolean
   reason?: string
   kind?: 'issued' | 'purchase' | null   // backend dispatch route (auto → konkrétní)
   invoice_id?: number          // pro issued
@@ -41,6 +43,8 @@ export interface ImportResultRow {
  */
 export interface ImportSummary {
   created: number
+  /** Doklad v souboru už v systému byl — do `created` se nepočítá, jinak by opakovaná dávka hlásila stovky „vytvořených". */
+  duplicates?: number
   skipped: number
   failed: number
   /** ŘÁDKŮ zařazených do OSS (jen z vytvořených dokladů). */

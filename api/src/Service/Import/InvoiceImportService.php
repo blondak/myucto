@@ -297,6 +297,7 @@ final class InvoiceImportService
         // 5. Dispatch + processing.
         $results = [];
         $created = 0;
+        $duplicates = 0;
         $skipped = 0;
         $failed = 0;
         // Souhrnné čítače za celý běh — viz kontrakt v docblocku metody.
@@ -353,7 +354,14 @@ final class InvoiceImportService
                     $r['kind'] = $route === 'issued' || $route === 'purchase' ? $route : null;
                     $results[] = ['file' => $label, 'status' => $r['status']] + $r;
                     $this->accumulate($totals, $r);
-                    if ($r['status'] === 'created') {
+                    // Duplicita se do „vytvořeno" nepočítá. Doklad existoval už před
+                    // importem, takže hlásit ho jako založený zkresluje jediné číslo,
+                    // podle kterého se dávka vyhodnocuje — u opakovaně nahrané dávky
+                    // by souhrn tvrdil, že vznikly stovky dokladů, a nešlo by poznat,
+                    // že nevznikl ani jeden.
+                    if (!empty($r['duplicate'])) {
+                        $duplicates++;
+                    } elseif ($r['status'] === 'created') {
                         $created++;
                         if ($route === 'issued') {
                             $type = (string) ($inv['invoice_type'] ?? 'invoice');
@@ -390,7 +398,7 @@ final class InvoiceImportService
         }
 
         return [
-            'summary' => ['created' => $created, 'skipped' => $skipped, 'failed' => $failed] + $totals,
+            'summary' => ['created' => $created, 'duplicates' => $duplicates, 'skipped' => $skipped, 'failed' => $failed] + $totals,
             'results' => $results,
         ];
     }

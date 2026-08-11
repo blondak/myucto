@@ -141,6 +141,34 @@ final class ImportStructuredPurchaseInvoiceAction
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
+
+        // Cross-tenant guard v IsdocToPurchaseInvoiceMapper porovnává IČO odběratele
+        // z ISDOC proti IČO tenanta, ale jen když ho doklad UVÁDÍ — bez něj mlčky
+        // projde. U administrátorského dávkového importu je ta shovívavost záměr
+        // (migrační nástroj), tady je endpoint dostupný i roli `client`, takže si
+        // aspoň zaznamenáme, že se guard neuplatnil. Blokovat to nechceme: ISDOC bez
+        // IČO odběratele je legitimní doklad a odmítat ho by rozbilo funkční import
+        // kvůli riziku, které uživatel s právem `purchase_invoices.create` stejně
+        // naplní ručním založením dokladu.
+        foreach ((array) (($decision->parsed ?? [])['invoices'] ?? []) as $invoice) {
+            if (!is_array($invoice)) {
+                continue;
+            }
+            $buyerIc = preg_replace('/\D+/', '', (string) ($invoice['client']['ic'] ?? ''));
+            if ($buyerIc === null || $buyerIc === '') {
+                $this->logger->log(
+                    'purchase_invoice.structured_import_without_buyer_ic',
+                    $userId,
+                    'purchase_invoice',
+                    null,
+                    ['filename' => $originalName, 'source' => $decision->source],
+                    $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    $request->getHeaderLine('User-Agent'),
+                );
+                break;
+            }
+        }
+
         try {
             $report = $this->importer->importBundle(
                 [['name' => $originalName, 'content' => $bytes]],

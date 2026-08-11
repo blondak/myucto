@@ -76,6 +76,7 @@ function foreignDocNumber(r: ImportResultRow): string | null {
   <div class="mt-6 bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-w-3xl">
     <div class="flex flex-wrap items-center gap-4 mb-4 text-sm">
       <div><span class="font-semibold text-success-600">{{ report.summary.created }}</span> {{ t('imports.summary_created') }}</div>
+      <div v-if="report.summary.duplicates"><span class="font-semibold text-neutral-600">{{ report.summary.duplicates }}</span> {{ t('imports.summary_duplicates') }}</div>
       <div><span class="font-semibold text-warning-600">{{ report.summary.skipped }}</span> {{ t('imports.summary_skipped') }}</div>
       <div><span class="font-semibold text-danger-500">{{ report.summary.failed }}</span> {{ t('imports.summary_failed') }}</div>
     </div>
@@ -135,8 +136,12 @@ function foreignDocNumber(r: ImportResultRow): string | null {
             ]">
               <td class="py-2 pr-3 font-mono text-xs truncate max-w-xs">{{ r.file }}</td>
               <td class="py-2 pr-3 whitespace-nowrap">
-                <span class="inline-block px-2 py-0.5 text-xs rounded border" :class="statusBadge(r.status)">
-                  {{ t('imports.status_' + r.status) }}
+                <!-- Duplicita má vlastní štítek: stav zůstává 'created' (doklad
+                     v systému je), ale zelené „vytvořeno" u dokladu, který už
+                     existoval, si protiřečí s vlastním popiskem řádku. -->
+                <span class="inline-block px-2 py-0.5 text-xs rounded border"
+                  :class="r.duplicate ? 'bg-neutral-100 text-neutral-600 border-neutral-300' : statusBadge(r.status)">
+                  {{ r.duplicate ? t('imports.status_duplicate') : t('imports.status_' + r.status) }}
                 </span>
                 <span
                   v-if="warningsOf(r).length > 0"
