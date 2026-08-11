@@ -120,6 +120,9 @@ final class LicenseService
                 $this->nonceOf($payload),
             ],
         );
+        // Aktivace je nový začátek — stav předplatného z předchozího klíče nesmí
+        // přežít, proto se ukládá i prázdná hodnota (server ho nemusí hlásit).
+        $this->storeSubscription(['subscription' => $resp['subscription'] ?? null]);
 
         return ['ok' => true, 'state' => $this->current()];
     }
@@ -233,6 +236,7 @@ final class LicenseService
                   WHERE id = 1',
                 [$token, json_encode($payload, JSON_UNESCAPED_UNICODE), $this->nonceOf($payload), $counter],
             );
+            $this->storeSubscription($resp);
             return;
         }
 
@@ -240,6 +244,50 @@ final class LicenseService
         // stávající token necháme doběhnout, stav se degraduje až vyprší.
         $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+    }
+
+    /**
+     * Vypnutí automatického prodlužování licence (admin instalace).
+     *
+     * NENÍ to deaktivace: licenční klíč, token ani vazba instalace se nemění a
+     * licence běží dál až do konce zaplaceného období (`valid_until`) — jen se
+     * nestrhne další platba. Obnovit se dá novým nákupem.
+     *
+     * Idempotentní: opakované volání nad už zrušeným předplatným vrátí úspěch
+     * (server odpoví `already_cancelled`).
+     *
+     * @return array{ok:bool,error?:string,already_cancelled?:bool,valid_until?:?int,state?:LicenseState}
+     */
+    public function cancelRenewal(): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->cancelRenewal($key, (string) $row['instance_id']);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.cancel_renewal.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->warning('license.cancel_renewal.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'cancel_failed')];
+        }
+
+        // Stav předplatného ze serveru uložíme hned, ať admin vidí výsledek bez
+        // čekání na denní obnovu tokenu. Token se nesahá — období běží dál.
+        $this->storeSubscription($resp);
+
+        return [
+            'ok'                => true,
+            'already_cancelled' => (bool) ($resp['already_cancelled'] ?? false),
+            'valid_until'       => isset($resp['valid_until']) ? (int) $resp['valid_until'] : null,
+            'state'             => $this->current(),
+        ];
     }
 
     /**
@@ -383,6 +431,48 @@ final class LicenseService
         return $stmt->rowCount();
     }
 
+    /**
+     * Uloží stav předplatného z odpovědi licenčního serveru (aditivní pole
+     * `subscription`). Ukládá se JEN když ho odpověď opravdu nese — odmítnutý
+     * renew ani starší server bez tohoto pole nesmí přepsat poslední známý stav.
+     *
+     * @param array<string,mixed> $resp
+     */
+    private function storeSubscription(array $resp): void
+    {
+        if (!array_key_exists('subscription', $resp)) {
+            return;
+        }
+        // Instalace, kde ještě neproběhla migrace 1321 — stav se doplní po ní.
+        if (!$this->db->hasColumn('license', 'subscription_info')) {
+            return;
+        }
+        $sub = $resp['subscription'];
+        $this->writeLicense(
+            'UPDATE license SET subscription_info = ? WHERE id = 1',
+            [is_array($sub) ? json_encode($sub, JSON_UNESCAPED_UNICODE) : null],
+        );
+    }
+
+    /**
+     * Poslední známý stav předplatného z licenčního serveru.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>|null
+     */
+    private function subscriptionOf(array $row): ?array
+    {
+        $raw = $row['subscription_info'] ?? null;
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
     /** @param array<string,mixed> $row */
     private function computeState(array $row): LicenseState
     {
@@ -406,12 +496,14 @@ final class LicenseService
 
         $token = (string) ($row['token'] ?? '');
         $payload = $token !== '' ? $this->verifier->verify($token, $this->publicKey()) : null;
+        // Poslední známý stav předplatného ze serveru (automatické prodlužování).
+        $subscription = $this->subscriptionOf($row);
 
         // Klíč je, ale token chybí / má neplatný podpis / patří jiné instanci → degraded.
         if ($payload === null || (string) ($payload['iid'] ?? '') !== $instanceId) {
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, null, null, 0, $usersActive, $companiesActive,
-                null, null, null, $key, $lastCheckAt, $lastCheckOk,
+                null, null, null, $key, $lastCheckAt, $lastCheckOk, false, $subscription,
             );
         }
 
@@ -431,7 +523,8 @@ final class LicenseService
         if ($now > $validUntil) {
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,
-                $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk, $perpetual,
+                $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
+                $perpetual, $subscription,
             );
         }
 
@@ -441,7 +534,8 @@ final class LicenseService
 
         return new LicenseState(
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
-            $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk, $perpetual,
+            $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
+            $perpetual, $subscription,
         );
     }
 

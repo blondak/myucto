@@ -19,6 +19,21 @@ export interface LicenseSummary {
   max_companies: number | null
 }
 
+/**
+ * Stav předplatného za licencí (z licenčního serveru). `null` = licence se
+ * automaticky neprodlužuje (trial, doživotní licence) nebo to server nehlásí.
+ * Časy jsou unix timestampy.
+ */
+export interface SubscriptionInfo {
+  state: 'active' | 'past_due' | 'cancelled' | 'expired'
+  period: 'month' | 'year'
+  /** Chystá se další stržení? */
+  auto_renew: boolean
+  next_charge_at: number | null
+  cancelled_at: number | null
+  valid_until: number | null
+}
+
 /** Plný stav licence z /api/license/status (admin). */
 export interface LicenseStatus {
   state: LicenseStateKind
@@ -38,6 +53,8 @@ export interface LicenseStatus {
   last_check_at: string | null
   last_check_ok: boolean
   buy_url: string
+  /** Automatické prodlužování a datum dalšího stržení; null = neprodlužuje se. */
+  subscription: SubscriptionInfo | null
   /** Fakturační údaje aktuální firmy — předvyplnění webového checkoutu (nevynucené). */
   company: LicenseCompany
 }
@@ -54,6 +71,15 @@ export interface LicenseCompany {
 
 export interface DeactivateResult {
   transfers_remaining: number | null
+  state: LicenseStatus
+}
+
+/** Výsledek vypnutí automatického prodlužování — licence běží dál do valid_until. */
+export interface CancelRenewalResult {
+  /** Předplatné už zrušené bylo (opakované volání) — pořád úspěch. */
+  already_cancelled: boolean
+  /** Konec zaplaceného období, do kterého licence poběží. */
+  valid_until: number | null
   state: LicenseStatus
 }
 
@@ -83,6 +109,11 @@ export const licenseApi = {
 
   /** Admin — deaktivace (uvolní vazbu, smaže klíč lokálně). */
   deactivate: () => api.post<DeactivateResult>('/license/deactivate').then((r) => r.data),
+
+  /** Admin — vypnutí automatického prodlužování. NENÍ deaktivace: licence běží
+   *  do konce zaplaceného období, jen se nestrhne další platba. Idempotentní. */
+  cancelRenewal: () =>
+    api.post<CancelRenewalResult>('/license/cancel-renewal').then((r) => r.data),
 
   /** Admin — kalkulace poměrného doplatku za navýšení na `users` (nic se nestrhává). */
   upgradeQuote: (users: number) =>

@@ -20,6 +20,7 @@ use Psr\Log\NullLogger;
  *   POST {server}/api/license/renew
  *   POST {server}/api/license/deactivate
  *   POST {server}/api/license/upgrade
+ *   POST {server}/api/license/cancel-renewal
  */
 final class LicenseClient
 {
@@ -82,6 +83,21 @@ final class LicenseClient
     public function deactivate(string $licenseKey, string $instanceId): array
     {
         return $this->post('/api/license/deactivate', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+        ]);
+    }
+
+    /**
+     * Vypnutí automatického prodlužování předplatného. NENÍ to deaktivace —
+     * licence doběhne do konce zaplaceného období, jen se nestrhne další platba.
+     *
+     * @return array<string,mixed> {ok,already_cancelled,valid_until,subscription} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function cancelRenewal(string $licenseKey, string $instanceId): array
+    {
+        return $this->post('/api/license/cancel-renewal', [
             'license_key' => $licenseKey,
             'instance_id' => $instanceId,
         ]);

@@ -30,6 +30,19 @@ const quote = ref<UpgradeQuote | null>(null)
 const upgradeError = ref<string | null>(null)
 const upgradeSuccess = ref<string | null>(null)
 
+// Automatické prodlužování předplatného (vypnutí = licence doběhne do valid_until).
+const cancellingRenewal = ref(false)
+const renewalSuccess = ref<string | null>(null)
+const renewalError = ref<string | null>(null)
+
+/** Stav předplatného z licenčního serveru; null = licence se neprodlužuje. */
+const subscription = computed(() => status.value?.subscription ?? null)
+/** Konec zaplaceného období — do něj licence poběží i po zrušení obnovy. */
+const paidUntil = computed(() => subscription.value?.valid_until ?? status.value?.valid_until ?? null)
+const periodLabel = computed(() =>
+  subscription.value?.period === 'year' ? t('license.renewal_period_year') : t('license.renewal_period_month'),
+)
+
 /** Navýšení má smysl jen u aktivního placeného předplatného (aktivní klíč). */
 const canUpgrade = computed(() => {
   const s = status.value
@@ -171,6 +184,31 @@ async function doUpgrade() {
   }
 }
 
+/**
+ * Vypnutí automatického prodlužování. Není to deaktivace — licence běží dál do
+ * konce zaplaceného období, jen se nestrhne další platba.
+ */
+async function cancelRenewal() {
+  if (cancellingRenewal.value) return
+  if (!confirm(t('license.renewal_cancel_confirm', { date: fmtDate(paidUntil.value) }))) return
+  cancellingRenewal.value = true
+  renewalError.value = null
+  renewalSuccess.value = null
+  try {
+    const res = await licenseApi.cancelRenewal()
+    status.value = res.state
+    const date = fmtDate(res.valid_until ?? paidUntil.value)
+    renewalSuccess.value = res.already_cancelled
+      ? t('license.renewal_cancel_already', { date })
+      : t('license.renewal_cancel_success', { date })
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: { message?: string } } } }
+    renewalError.value = err.response?.data?.error?.message ?? t('license.renewal_cancel_failed')
+  } finally {
+    cancellingRenewal.value = false
+  }
+}
+
 async function activate(takeover = false) {
   const key = keyInput.value.trim()
   if (!key || activating.value) return
@@ -308,6 +346,52 @@ onMounted(load)
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ deactivating ? '…' : t('license.deactivate') }}
           </button>
+        </div>
+      </section>
+
+      <!-- Automatické prodlužování předplatného -->
+      <section
+        v-if="subscription"
+        class="rounded-lg border p-5"
+        :class="subscription.auto_renew ? 'border-neutral-200 bg-surface' : 'border-warning-200 bg-warning-50/30'"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.renewal_title') }}</h2>
+            <p
+              class="mt-1 text-sm font-medium"
+              :class="subscription.auto_renew ? 'text-success-700' : 'text-warning-800'"
+            >
+              {{ subscription.auto_renew ? t('license.renewal_on') : t('license.renewal_off') }}
+            </p>
+          </div>
+          <div v-if="subscription.auto_renew && subscription.next_charge_at" class="text-sm sm:text-right">
+            <span class="block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.renewal_next_charge') }}</span>
+            <span class="mt-0.5 block font-medium text-neutral-900">{{ fmtDate(subscription.next_charge_at) }}</span>
+          </div>
+          <div v-else-if="subscription.cancelled_at" class="text-sm sm:text-right text-warning-800">
+            {{ t('license.renewal_cancelled_at', { date: fmtDate(subscription.cancelled_at) }) }}
+          </div>
+        </div>
+
+        <p class="mt-2 text-sm text-neutral-600">
+          {{ subscription.auto_renew
+            ? t('license.renewal_on_desc', { period: periodLabel })
+            : t('license.renewal_off_desc', { date: fmtDate(paidUntil) }) }}
+        </p>
+
+        <div v-if="subscription.auto_renew" class="mt-4 flex flex-wrap gap-2">
+          <button type="button" @click="cancelRenewal" :disabled="cancellingRenewal" :class="btnOutline('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
+            {{ cancellingRenewal ? t('license.renewal_cancelling') : t('license.renewal_cancel_cta') }}
+          </button>
+        </div>
+
+        <div v-if="renewalSuccess" class="mt-3 rounded-md bg-success-50 border border-success-300 p-3 text-sm text-success-700">
+          {{ renewalSuccess }}
+        </div>
+        <div v-if="renewalError" class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 p-3 text-sm text-danger-600">
+          {{ renewalError }}
         </div>
       </section>
 

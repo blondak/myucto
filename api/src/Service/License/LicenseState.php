@@ -40,7 +40,21 @@ final class LicenseState
         public readonly bool $lastCheckOk,
         /** Doživotní (perpetual) licence — neomezená platnost; valid_until je jen 14denní TTL tokenu. */
         public readonly bool $perpetual = false,
+        /**
+         * Poslední známý stav předplatného z licenčního serveru — automatické
+         * prodlužování a datum dalšího stržení. `null` = server ho nehlásil
+         * (doživotní licence, trial, starší server).
+         *
+         * @var array<string,mixed>|null
+         */
+        public readonly ?array $subscription = null,
     ) {}
+
+    /** Prodlužuje se licence automaticky (chystá se další stržení)? */
+    public function autoRenews(): bool
+    {
+        return (bool) ($this->subscription['auto_renew'] ?? false);
+    }
 
     /** Je dostupná komerční účetní nadstavba MyÚčto? */
     public function hasCommercialFeatures(): bool
@@ -105,6 +119,10 @@ final class LicenseState
             'last_check_ok'   => $this->lastCheckOk,
             'commercial_features' => $this->hasCommercialFeatures(),
             'buy_url'         => $buyUrl,
+            // Stav předplatného ze serveru: {state, period, auto_renew, next_charge_at,
+            // cancelled_at, valid_until}. null = licence se automaticky neprodlužuje
+            // (doživotní, trial) nebo to server nehlásí.
+            'subscription'    => $this->subscription,
         ];
     }
 

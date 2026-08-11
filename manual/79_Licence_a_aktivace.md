@@ -41,7 +41,7 @@ tři stránky:
 |---|---|
 | **Licence** | Přehled bezplatných a komerčních funkcí, zkušebního období a tarifů. |
 | **Obchodní podmínky** | Shrnutí hlavních článků podmínek předplatného (závazné je plné znění na myucto.cz). |
-| **Zakoupení** | Provozní stránka — aktuální stav licence, zakoupení předplatného, aktivace klíčem, navýšení uživatelů a deaktivace. |
+| **Zakoupení** | Provozní stránka — aktuální stav licence, zakoupení předplatného, aktivace klíčem, navýšení uživatelů, zrušení automatického prodlužování a deaktivace. |
 
 > 🛈 Správu licence (stránku **Zakoupení**) vidí a ovládá jen **administrátor**.
 > Běžný uživatel stránku otevře, ale operace nejsou dostupné.
@@ -148,12 +148,20 @@ Licenci lze přesunout na jinou instalaci (nový server, přeinstalace) —
 - **Daňový doklad** za každou platbu chodí **e-mailem**.
 - **Opakované platby** (kartou přes platební bránu) běží automaticky v pevné
   výši, měsíčně nebo ročně, s tvým souhlasem. **Zrušit je můžeš kdykoli** ke
-  konci zaplaceného období — správu opakovaných plateb, přehled objednávek i
-  fakturačních údajů řeší web
-  [myucto.cz](https://myucto.cz/), ne aplikace.
+  konci zaplaceného období — buď přímo v aplikaci (viz níže), nebo přes odkaz
+  v e-mailu. Přehled objednávek, změnu karty a fakturační údaje řeší web
+  [myucto.cz](https://myucto.cz/).
 
-Po zrušení licence doběhne do konce zaplaceného období; poměrná část se
-nevrací. Detailní pravidla jsou v **Aktivace → Obchodní podmínky**.
+**Zrušení automatického prodlužování v aplikaci.** Na stránce
+**Aktivace → Zakoupení** je sekce **Automatické prodlužování**: vidíš v ní, zda
+se licence prodlužuje sama a kdy je **další platba**. Tlačítkem
+**Zrušit automatické prodlužování** obnovu vypneš.
+
+> 🛈 **Není to deaktivace.** Licence běží dál až **do konce zaplaceného období**
+> (datum *Platnost do*) a klíč zůstává navázaný na tuto instalaci — jen se už
+> nestrhne další platba. Poměrná část se nevrací. Prodlužování se po zrušení
+> nedá zapnout zpět; obnovíš ho **novým nákupem předplatného**. Detailní
+> pravidla jsou v **Aktivace → Obchodní podmínky**.
 
 ## 79.9 Řešení potíží
 

@@ -265,6 +265,7 @@ use MyInvoice\Action\Accounting\Reports\TrialBalanceAction;
 use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
+use MyInvoice\Action\License\CancelRenewalLicenseAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
 use MyInvoice\Action\License\UpgradeLicenseAction;
 use MyInvoice\Action\System\HealthAction;
@@ -363,6 +364,8 @@ final class Routes
         $app->get ('/api/license/status',        LicenseStatusAction::class);
         $app->post('/api/license/activate',      ActivateLicenseAction::class);
         $app->post('/api/license/deactivate',    DeactivateLicenseAction::class);
+        // Vypnutí automatického prodlužování — licence doběhne do valid_until.
+        $app->post('/api/license/cancel-renewal', CancelRenewalLicenseAction::class);
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
