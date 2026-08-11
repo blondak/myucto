@@ -18,6 +18,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface as Handler;
+use Psr\Log\LoggerInterface;
 use Slim\Psr7\Factory\ResponseFactory;
 
 /**
@@ -81,6 +82,7 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly IpMatcher $ipMatcher,
         private readonly UserRoleProfile $roleProfile,
         private readonly ApiRequestLogger $apiRequestLog,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -129,11 +131,26 @@ final class AuthMiddleware implements MiddlewareInterface
                     'tool'           => $request->getHeaderLine('X-MyUcto-Tool'),
                     'error_code'     => 'token_ip_forbidden',
                 ]);
+                // …a ještě do aplikačního logu. `api_request_log` je provozní přehled
+                // volání tokenu, kdežto tohle je bezpečnostní událost: majitel
+                // instalace ji hledá v log/app.log vedle ostatních odmítnutých
+                // přístupů, ne v přehledu API. Bez uvedené IP je hláška k ničemu —
+                // právě ta adresa se buď povoluje, nebo prošetřuje.
+                $this->logger?->warning('API token odmítnut: IP adresa není v allowlistu tokenu.', [
+                    'ip'       => $ip,
+                    'token_id' => (int) $tokenRow['id'],
+                    'user_id'  => (int) $tokenRow['user_id'],
+                    'method'   => $request->getMethod(),
+                    'route'    => $request->getUri()->getPath(),
+                ]);
                 $response = $this->responseFactory->createResponse(403);
                 return Json::error(
                     $response,
                     'token_ip_forbidden',
-                    'API token není povolen z této IP adresy.',
+                    // IP je v hlášce schválně: volající je držitel platného tokenu
+                    // a svou odchozí adresu za NATem/proxy jinak nezjistí, takže
+                    // bez ní neví, co si má do allowlistu doplnit.
+                    'API token není povolen z této IP adresy (' . $ip . ').',
                     403,
                 );
             }
