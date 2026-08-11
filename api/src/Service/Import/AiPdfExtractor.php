@@ -611,7 +611,44 @@ final class AiPdfExtractor
         // Sledujeme, jestli řádky nahradil jediný součtový řádek — per-položkový druh výdaje
         // tím ztrácí smysl (viz AiExpenseKindProposal::mergeForCollapsedLine()).
         $itemsCollapsed = false;
-        if (!$vendorNonPayer) {
+
+        // Issue #8 — doklad, který jednotkové ceny VŮBEC NEUVÁDÍ (jen množství a řádkovou
+        // částku, případně rovnou jen souhrn), se zakládá ZE SOUHRNNÉ DAŇOVÉ REKAPITULACE:
+        // jeden řádek na sazbu, `1 ks × základ daně`. Rekonstrukce položek by tu znamenala
+        // vyrobit jednotkovou cenu, která na dokladu není — a u dokladu s předslevovými
+        // i poslevovými částkami model sáhne po těch špatných, takže se doklad rozejde
+        // s rekapitulací a uživateli nezbude než všechny částky přepsat ručně. Takhle
+        // základ i daň sedí na doklad z definice, ne shodou okolností; cenu za to
+        // (chybějící rozpad na položky) uživateli řekneme varováním u konceptu.
+        $recapOnlyRates = $vendorNonPayer ? null : self::recapOnlyRates($data, $isCredit);
+        $recapOnlyWarning = null;
+        if ($recapOnlyRates !== null) {
+            $recapItems = [];
+            foreach ($recapOnlyRates as $i => $r) {
+                $recapItems[] = [
+                    'description'            => self::recapLineDescription($r['rate'], $data),
+                    'quantity'               => 1.0,
+                    'unit'                   => 'ks',
+                    'unit_price_without_vat' => round($r['base'], 2),
+                    'vat_rate_id'            => $this->matchVatRateId($supplierId, $r['rate'], $rateDate) ?? $defaultVatRateId,
+                    'order_index'            => $i,
+                ];
+            }
+            $this->logger->info('AI extractor: doklad bez jednotkových cen → založeno ze souhrnné daňové rekapitulace', [
+                'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
+                'lines_before'          => count($items),
+                'recap_rates'           => array_column($recapOnlyRates, 'rate'),
+            ]);
+            $items = $recapItems;
+            $itemsCollapsed = true;
+            // Základ je základ; přesnou daň dle dokladu připne seedVatOverridesFromDocument.
+            $pricesIncludeVat = false;
+            $recapOnlyWarning = 'Doklad neuvádí jednotkové ceny — položky nebyly vytěženy. '
+                . 'Doklad je založený ze souhrnné daňové rekapitulace (jeden řádek na sazbu DPH), '
+                . 'takže základ daně i daň odpovídají dokladu. Zkontrolujte a případně rozepište položky ručně.';
+        }
+
+        if (!$vendorNonPayer && $recapOnlyRates === null) {
             if (!$pricesIncludeVat && count($items) > 1 && self::linesAreGrossSingleRate($items, $data, $isCredit)) {
                 $this->logger->info('AI extractor: víceřádkové brutto ceny dle rekapitulace → režim ceny s DPH, řádky zachovány', [
                     'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
@@ -642,7 +679,7 @@ final class AiPdfExtractor
         // gross→net × množství neround-tripuje na základ z REKAPITULACE) → sluč na 1 řádek
         // 1 ks × základ daně z rekapitulace. Tím základ/daň/celkem sedí na doklad bez
         // umělého „zaokrouhlení". V režimu shora (prices_include_vat) netřeba — celek sedí.
-        if (!$pricesIncludeVat) {
+        if (!$pricesIncludeVat && $recapOnlyRates === null) {
             $collapsed = self::collapseToSummaryBaseLine($items, $data, $isCredit);
             if ($collapsed !== null) {
                 $this->logger->info('AI extractor: sloučeno na 1 řádek dle rekapitulace DPH (haléřový drift)', [
@@ -659,7 +696,12 @@ final class AiPdfExtractor
         // součet věcně různých plnění, takže se návrh udrží jen při shodě všech původních
         // řádků; jinak zůstane doklad neurčený (= 518, dnešní chování).
         if ($itemsCollapsed) {
-            $merged = AiExpenseKindProposal::mergeForCollapsedLine($kindProposals);
+            // Sloučení na JEDINÝ řádek umí návrh podržet (mergeForCollapsedLine ho vydá jen
+            // při shodě všech původních řádků). Rozpad po sazbách (issue #8) ne — jedna sazba
+            // může nést věcně různá plnění a přiřadit sloučený návrh k řádku 1 by lhalo.
+            $merged = count($items) === 1
+                ? AiExpenseKindProposal::mergeForCollapsedLine($kindProposals)
+                : null;
             $this->logger->info('AI extractor: řádky sloučeny → druh výdaje ' . ($merged !== null ? 'sjednocen' : 'zahozen'), [
                 'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
                 'proposals_before'      => count($kindProposals),
@@ -913,6 +955,15 @@ final class AiPdfExtractor
         if ($rcWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $rcWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        // Issue #8 — doklad založený ze souhrnné rekapitulace (bez jednotkových cen na dokladu).
+        // Append ze stejného důvodu jako výš: uživatel to musí vidět v editoru konceptu, ne v logu.
+        if ($recapOnlyWarning !== null) {
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, $recapOnlyWarning);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }
@@ -1196,6 +1247,93 @@ final class AiPdfExtractor
         $gross = round($recap['base'] + $recap['vat'], 2);
         // Řádky odpovídají CELKEM s DPH (brutto) a NE základu (jinak jsou už netto → nech být).
         return abs($sumLines - $gross) <= $tol && abs($sumLines - round($recap['base'], 2)) > $tol;
+    }
+
+    /**
+     * Issue #8 — doklad BEZ jednotkových cen se zakládá ze souhrnné daňové rekapitulace.
+     * Vrací sazby z `vat_recap` (kladné, jedna položka na sazbu), ze kterých volající
+     * složí řádky `1 ks × základ daně`; nebo null, když se tahle cesta nemá použít.
+     *
+     * Spouští se ZÁMĚRNĚ jen na EXPLICITNÍ signál z dokladu (`unit_prices_stated === false`,
+     * viz {@see InvoiceExtractionPrompt}) — chybějící/`true`/`null` hodnota nechává dnešní
+     * tok beze změny, aby doklady s normálními položkami nepřišly o rozpad na položky.
+     * Rekonstrukce položek je tu horší volba než jejich absence: jednotková cena, kterou
+     * doklad neuvádí, vzniká dělením částky množstvím a u dokladu s předslevovými
+     * i poslevovými sloupci vyjde ze špatných čísel.
+     *
+     * Duplicitní řádek téže sazby (doklad má „21 %" i „Celkem 21 %") se ignoruje —
+     * platí PRVNÍ výskyt, sčítat by znamenalo započítat základ dvakrát.
+     *
+     * @param array<string,mixed> $data
+     * @return list<array{rate:float,base:float,vat:float}>|null
+     */
+    public static function recapOnlyRates(array $data, bool $isCredit): ?array
+    {
+        if ($isCredit) {
+            return null; // dobropisy neslučujeme (znaménka)
+        }
+        if (!array_key_exists('unit_prices_stated', $data) || $data['unit_prices_stated'] !== false) {
+            return null; // doklad jednotkové ceny uvádí (nebo to AI neposoudila) → dnešní tok
+        }
+        if (!isset($data['vat_recap']) || !is_array($data['vat_recap'])) {
+            return null;
+        }
+        $byRate = [];
+        foreach ($data['vat_recap'] as $r) {
+            if (!is_array($r) || !isset($r['rate'], $r['base'], $r['vat'])) {
+                continue;
+            }
+            $rate = abs((float) $r['rate']);
+            $base = abs((float) $r['base']);
+            if ($rate <= 0.0 || $base <= 0.0) {
+                continue; // 0 % / osvobozeno / prázdný řádek šablony
+            }
+            $key = number_format($rate, 2, '.', '');
+            if (isset($byRate[$key])) {
+                continue;
+            }
+            $byRate[$key] = ['rate' => $rate, 'base' => $base, 'vat' => abs((float) $r['vat'])];
+        }
+        if ($byRate === []) {
+            return null; // bez rekapitulace není z čeho doklad složit → dnešní tok
+        }
+        return array_values($byRate);
+    }
+
+    /**
+     * Popis řádku odvozeného z rekapitulace. Za obecný text ještě připojíme názvy
+     * původních plnění dané sazby — částky z nich nebereme (proto se doklad zakládá
+     * z rekapitulace), ale TEXT je jediné, co o povaze plnění zbylo. Bez něj by
+     * doklad přišel o rozpoznání PHM v knize jízd ({@see \MyInvoice\Service\Logbook\Fuel\SummaryFuelParser})
+     * i o auto-klasifikaci nákladu podle popisu.
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function recapLineDescription(float $rate, array $data): string
+    {
+        $base = sprintf('Plnění dle daňové rekapitulace dokladu — sazba DPH %g %%', $rate);
+
+        $names = [];
+        foreach ((array) ($data['items'] ?? []) as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            if (abs((float) ($line['vat_rate'] ?? -1)) !== $rate) {
+                continue;
+            }
+            $desc = trim((string) ($line['description'] ?? ''));
+            if ($desc !== '' && !in_array($desc, $names, true)) {
+                $names[] = $desc;
+            }
+        }
+        if ($names === []) {
+            return $base;
+        }
+        $joined = implode(', ', $names);
+        if (mb_strlen($joined) > 300) {
+            $joined = mb_substr($joined, 0, 297) . '…';
+        }
+        return $base . ' (' . $joined . ')';
     }
 
     public static function authoritativeRecapBaseLine(array $items, array $data, bool $isCredit): ?array

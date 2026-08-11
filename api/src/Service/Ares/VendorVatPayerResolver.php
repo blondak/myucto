@@ -11,6 +11,10 @@ use MyInvoice\Repository\ClientRepository;
  * na klienta (`clients.is_vat_payer`). Sdílí ho AI import, online refresh endpoint
  * i backfill skript — jediné místo s pravidlem.
  *
+ * Rozhodné DIČ: když doklad uvádí NAVÍC „DIČ k DPH" (`$vatDic`, typicky skupinová
+ * registrace odštěpného závodu), použije se pro registry ONO — `dic` zůstává DIČ
+ * subjektu kvůli párování karty dodavatele.
+ *
  * Zdroj podle typu dodavatele (precedence):
  *  1. CZ (IČO 8 číslic) → ARES `is_vat_payer` (stavZdrojeDph === 'AKTIVNI').
  *     - Pozitivní výsledek je vždy konečný.
@@ -44,11 +48,12 @@ final class VendorVatPayerResolver
     /**
      * Zjistí plátcovství a (pokud je výsledek jednoznačný) uloží ho na klienta.
      *
+     * @param ?string $vatDic DIČ k DPH z dokladu (skupinová registrace), viz {@see resolve()}
      * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'unknown'}
      */
-    public function resolveAndPersist(int $clientId, ?string $ic, ?string $dic): array
+    public function resolveAndPersist(int $clientId, ?string $ic, ?string $dic, ?string $vatDic = null): array
     {
-        $res = $this->resolve($ic, $dic);
+        $res = $this->resolve($ic, $dic, $vatDic);
         if ($res['is_vat_payer'] !== null) {
             $this->clients->setVatPayer($clientId, $res['is_vat_payer']);
         }
@@ -58,12 +63,20 @@ final class VendorVatPayerResolver
     /**
      * Pure lookup bez zápisu — vrací is_vat_payer (true/false) nebo null (nezjištěno).
      *
+     * @param ?string $vatDic „DIČ k DPH" z dokladu, když ho doklad uvádí NAVÍC vedle `dic`
+     *        (odštěpný závod fakturující pod skupinovou registrací — issue #8: hlavička nese
+     *        „DIČ: CZ27597075, DIČ k DPH: CZ699000139"). Pro dotaz do registru plátců je
+     *        rozhodující právě tohle DIČ; `dic` zůstává DIČ subjektu, protože na něm stojí
+     *        dohledání karty dodavatele ({@see \MyInvoice\Service\Import\ClientResolver}).
+     *        Bez něj by krok 1 níže viděl „DIČ = CZ + IČO", vzal ARES negativum jako konečné
+     *        a doklad by se vytěžil jako od neplátce (nulová daň, žádný odpočet).
      * @return array{is_vat_payer:?bool, source:'ares'|'vies'|'unknown'}
      */
-    public function resolve(?string $ic, ?string $dic): array
+    public function resolve(?string $ic, ?string $dic, ?string $vatDic = null): array
     {
         $icDigits = preg_replace('/\D/', '', (string) $ic) ?? '';
-        $dicTrim = trim((string) $dic);
+        // DIČ k DPH má přednost před DIČ subjektu — právě pod ním je subjekt registrovaný.
+        $dicTrim = trim((string) $vatDic) !== '' ? trim((string) $vatDic) : trim((string) $dic);
         $dicDigits = preg_replace('/\D/', '', $dicTrim) ?? '';
 
         // 1. CZ subjekt dle IČO → ARES (autoritativní stav VLASTNÍ registrace).

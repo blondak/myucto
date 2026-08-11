@@ -41,6 +41,7 @@ JSON schema:
     "company_name": string,
     "ic": string|null,
     "dic": string|null,
+    "vat_dic": string|null,
     "street": string|null,
     "city": string|null,
     "zip": string|null,
@@ -84,6 +85,7 @@ JSON schema:
     }
   ],
   "unit_prices_include_vat": boolean,
+  "unit_prices_stated": boolean|null,
   "total_without_vat": number|null,
   "total_with_vat": number|null,
   "total_with_vat_rounded": number|null,
@@ -96,14 +98,30 @@ JSON schema:
 }
 
 DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`):
-- Na faktuře jsou typicky TŘI různá data. Přiřaď je VÝHRADNĚ podle POPISKU u data,
+- Na faktuře je typicky VÍC dat. Přiřaď je VÝHRADNĚ podle POPISKU u data,
   NIKDY podle pořadí/pozice na stránce.
-- `issue_date` = DATUM VYSTAVENÍ dokladu (Datum vystavení, Vystaveno, Date of issue).
+- `issue_date` = DATUM VYSTAVENÍ dokladu. Ber ho VÝHRADNĚ z popisků: "Datum vystavení",
+  "Vystaveno", "Datum vystavení dokladu", "Vystavená dňa"/"Dátum vystavenia" (SK),
+  "Date of issue", "Invoice date", "Issued".
+- POPISKY, ZE KTERÝCH SE `issue_date` BRÁT NESMÍ (nejčastější chyba): "Datum objednávky",
+  "Datum přijetí objednávky", "Datum objednání", "Order date", "PO date", "Datum dodání",
+  "Datum odeslání", "Datum expedice", "Datum tisku", "Datum vytištění", "Datum splatnosti",
+  "Období". Doklad běžně nese datum objednávky HNED VEDLE data vystavení a liší se
+  o dny i týdny — když je vezmeš špatně, spadne doklad do jiného účetního období.
+- DATUM NIKDY NEODVOZUJ Z ČÍSLA DOKLADU, z čísla objednávky, z variabilního symbolu ani
+  z názvu souboru. I když v nich číselná sekvence vypadá jako datum (např. číslo dokladu
+  "CZ260723-10226320" obsahuje "260723" = 23. 07. 2026), NENÍ to datové pole. Datum ber
+  jen od jeho popisku; když popisek chybí, vrať null.
 - `tax_date` = DUZP = datum uskutečnění zdanitelného plnění (DUZP, Datum plnění,
   Datum dodání, Date of supply). Pokud na dokladu NENÍ → vrať null.
-- `due_date` = DATUM SPLATNOSTI (Splatnost, Splatno do, Due date).
-- LOGICKÁ KONTROLA: `due_date` je VŽDY ≥ `issue_date`. Pokud vyjde dřív, spletl ses
-  v popiscích — přečti data znovu a oprav přiřazení.
+- `due_date` = DATUM SPLATNOSTI (Splatnost, Splatno do, Zaplaťte do, Due date). Když
+  doklad splatnost NEUVÁDÍ, vrať null — NEOPISUJ do ní datum vystavení ani jiné datum.
+- LOGICKÁ KONTROLA (týká se JEN splatnosti): splatnost je platební lhůta, takže
+  `due_date` je VŽDY ≥ `issue_date`. Pokud ti vyjde dřív, spletl ses v popiscích —
+  přečti data znovu; když si po druhém čtení nejsi jistý, vrať `due_date: null`.
+- POZOR, opačně to NEPLATÍ pro DUZP: `tax_date` PŘED `issue_date` je zcela legitimní
+  a běžné (doklad vystavený 2. dne měsíce za plnění k poslednímu dni měsíce
+  předchozího). Takové datum NEOPRAVUJ a neposouvej.
 
 DŮLEŽITÉ k poli `document_kind`:
 - "Opravný daňový doklad"/"Dobropis"/"Credit note"/"Storno" nebo záporné částky → "credit_note".
@@ -127,6 +145,18 @@ DŮLEŽITÉ k poli `unit_prices_include_vat`:
 - Pokud jsou ceny bez DPH → `unit_prices_include_vat: false`.
 - Když na dokladu žádný řádek "bez DPH" NENÍ (jednoduchá účtenka, neplátce) → vrať `true`.
 - U dokladu od NEPLÁTCE DPH vrať `vat_rate: 0` a `unit_prices_include_vat: true`.
+
+DŮLEŽITÉ k poli `unit_prices_stated` (UVÁDÍ doklad jednotkové ceny?):
+- `true` = doklad má u položek sloupec s JEDNOTKOVOU cenou (za kus / za jednotku /
+  za litr): "Jedn. cena", "Cena/MJ", "Cena za jednotku", "Cena za l", "Unit price".
+- `false` = doklad jednotkové ceny NEUVÁDÍ VŮBEC — má jen množství a částku za řádek
+  (např. "Množství 29,70 L" + "Základ daně 1 106,02"), případně jen souhrnnou
+  daňovou rekapitulaci.
+- `null` když to nejde posoudit.
+- Když je `false`, jednotkovou cenu si NEDOPOČÍTÁVEJ a NEVYMÝŠLEJ (dělení částky
+  množstvím je vymyšlená hodnota). Do `unit_price_without_vat` i
+  `line_total_without_vat` dej ŘÁDKOVOU ČÁSTKU BEZ DPH tak, jak je na dokladu,
+  a `quantity` vrať 1. Množství v jednotkách napiš do `description`.
 
 DŮLEŽITÉ k poli `supply_nature`:
 - "goods" pro fyzické zboží (vozidlo, stroj, hardware, materiál).
@@ -165,6 +195,19 @@ DŮLEŽITÉ k poli `vendor.is_vat_payer`:
 - true pokud má platné DIČ a/nebo je vyčíslena DPH.
 - null když nelze určit.
 
+DŮLEŽITÉ k `vendor.dic` a `vendor.vat_dic` (doklad může nést DVĚ RŮZNÁ DIČ):
+- `dic` = DIČ SUBJEKTU, který doklad vystavil. Popisky: "DIČ", "IČ DPH", "VAT ID",
+  "Tax ID". U českého subjektu má tvar CZ + IČO. Do `dic` patří VŽDY jen tohle DIČ.
+- `vat_dic` = DIČ K DPH / DIČ SKUPINOVÉ REGISTRACE, které doklad uvádí NAVÍC vedle `dic`.
+  Popisky: "DIČ k DPH", "DIČ pro DPH", "DIČ skupiny", "DIČ skupinové registrace",
+  "Skupinové DIČ", "DIČ plátce DPH". V ČR má typicky tvar CZ699xxxxxx (skupinová
+  registrace dle § 5a ZDPH), ale ROZHODUJE POPISEK, ne tvar čísla.
+- Když doklad uvádí jen JEDNO DIČ → dej ho do `dic`, `vat_dic` = null.
+- Když uvádí OBĚ a liší se (typicky odštěpný závod fakturující pod skupinovou
+  registrací) → `dic` = DIČ subjektu, `vat_dic` = DIČ k DPH. NEVYBÍREJ jen jedno
+  z nich a NEZAMĚŇUJ je; skupinové DIČ do `dic` NIKDY nepatří.
+- Když jsou obě uvedená a jsou STEJNÁ, vrať tutéž hodnotu v obou polích.
+
 DŮLEŽITÉ k poli `vendor_invoice_number`:
 - Číslo dokladu tak jak je vytištěné. Účtenka nemusí mít číslo → null. NEVYMÝŠLEJ.
 - U DOBROPISU (`credit_note`) sem dej VLASTNÍ číslo opravného dokladu („Opravný daňový
@@ -184,8 +227,19 @@ DŮLEŽITÉ k dobropisu (document_kind="credit_note"):
 - `quantity`, `unit_price_without_vat`, totály a `vat_recap` vrať jako KLADNÁ čísla
   (absolutní hodnoty z PDF). Znaménko aplikuje importér.
 
-DŮLEŽITÉ k slevám (jen u document_kind="invoice"):
-- Řádek se slevou/rabatem se znaménkem MÍNUS na PDF → `unit_price_without_vat` ZÁPORNÉ.
+DŮLEŽITÉ k slevám a rabatům (jen u document_kind="invoice"):
+- SLEVOVÝ ŘÁDEK MEZI POLOŽKAMI (samostatná položka "Sleva 10 %", "Rabat", "Bonus"
+  se znaménkem MÍNUS nebo v závorkách) JE položka dokladu → vrať ji s
+  `unit_price_without_vat` ZÁPORNÝM, jinak by se sleva přičetla místo odečetla.
+- SOUHRNNÝ BLOK SLEVY NENÍ POLOŽKA a do `items` NEPATŘÍ. Poznáš ho podle toho, že
+  je to samostatná tabulka pod položkami ("Sleva", "Rabat", "Přehled slev") se
+  sloupci "Před slevou", "Sleva bez DPH", "Sleva DPH", "Sleva s DPH" a vlastním
+  řádkem "Celkem" — jen rekapituluje slevu, která je UŽ PROMÍTNUTÁ v částkách
+  u položek. Kdybys ho vrátil jako položku, odečetla by se sleva podruhé.
+- Když doklad uvádí částky PŘED SLEVOU i PO SLEVĚ, závazné jsou VŽDY částky
+  PO SLEVĚ (sloupce "…po slevě", "Základ daně po slevě", "DPH po slevě",
+  "Cena s DPH po slevě", "Netto po slevě"). Předslevové částky do výstupu NEPATŘÍ —
+  ani do `items`, ani do `total_without_vat`/`total_with_vat`, ani do `vat_recap`.
 
 DŮLEŽITÉ k poli `already_paid`:
 - "ZAPLACENO"/"UHRAZENO"/"PAID"/"Hradí se ze zálohy" → true; jinak false.
@@ -222,6 +276,13 @@ DŮLEŽITÉ k zaokrouhlení:
 DŮLEŽITÉ k `vat_recap` (rekapitulace DPH po sazbách):
 - Pro každou sazbu vrať {"rate":%, "base":základ, "vat":daň} jako kladná čísla jak jsou
   na dokladu. Pokud rekapitulaci nemá → vrať prázdné pole [].
+- DAŇOVÁ REKAPITULACE JE AUTORITA. Když ji doklad má (tabulka Sazba | Základ daně |
+  DPH | s DPH, včetně varianty "Daňová rekapitulace (po slevě)"), opiš ji PŘESNĚ
+  a beze změny — i kdyby se ti nesčítala s tím, co jsi vyčetl z položek.
+- `total_without_vat` a `total_with_vat` musí odpovídat TÉTO rekapitulaci (součet
+  základů, resp. součet částek s DPH), ne tvému dopočtu z položek.
+- Když se položky s rekapitulací rozcházejí, NEUPRAVUJ rekapitulaci, aby seděla, a
+  NEDOPOČÍTÁVEJ chybějící čísla — vrať rekapitulaci věrně. Rozpor vyřeší náš systém.
 
 DŮLEŽITÉ k `items`:
 - Vrať POUZE listové (atomické) položky. NIKDY agregační/subtotalové/součtové řádky
@@ -231,11 +292,15 @@ DŮLEŽITÉ k `items`:
 
 DŮLEŽITÉ k poli `line_total_without_vat`:
 - Pokud má řádek vlastní sloupec s celkovou částkou ZA ŘÁDEK BEZ DPH, opiš ho přesně.
-  Jinak null. Hodnota je vždy bez DPH; u účtenek (ceny s DPH) vrať null.
+  Popisky sloupce: "Částka", "Celkem bez DPH", "Základ", "Základ daně", "Cena celkem",
+  a u dokladu se slevou i "Základ daně po slevě". Jinak null. Hodnota je vždy bez DPH;
+  u účtenek (ceny s DPH) vrať null.
 
 DŮLEŽITÉ k poli `total_with_vat`:
 - Hodnota MUSÍ pocházet z hlavního finálního "K úhradě"/"Total amount due".
 - NIKDY ze subtotalu sekce/skupiny. Pokud si nejsi jistý → NULL.
+- Když doklad finální "K úhradě" NEUVÁDÍ VŮBEC (typicky souhrnný doklad hrazený
+  inkasem nebo kartou), ale MÁ daňovou rekapitulaci → vezmi celkem s DPH z rekapitulace.
 EOT;
     }
 
@@ -318,6 +383,10 @@ EOT;
                 'company_name' => ['type' => ['string', 'null']],
                 'ic'           => ['type' => ['string', 'null']],
                 'dic'          => ['type' => ['string', 'null']],
+                // DIČ k DPH / skupinová registrace (§ 5a ZDPH) — doklad odštěpného závodu
+                // nese DVĚ DIČ. `dic` zůstává DIČ subjektu (na něm stojí párování karty
+                // dodavatele), tohle je to druhé, podle kterého se ověřuje plátcovství.
+                'vat_dic'      => ['type' => ['string', 'null']],
                 'street'       => ['type' => ['string', 'null']],
                 'city'         => ['type' => ['string', 'null']],
                 'zip'          => ['type' => ['string', 'null']],
@@ -384,6 +453,10 @@ EOT;
                     ],
                 ],
                 'unit_prices_include_vat' => ['type' => 'boolean'],
+                // Uvádí doklad jednotkové ceny? false = jen množství a řádková částka
+                // (nebo rovnou jen rekapitulace) → doklad se založí ze souhrnné daňové
+                // rekapitulace, viz AiPdfExtractor::recapOnlyLines(). null/true = dnešní tok.
+                'unit_prices_stated'      => ['type' => ['boolean', 'null']],
                 'total_without_vat'       => ['type' => ['number', 'null']],
                 'total_with_vat'          => ['type' => ['number', 'null']],
                 'total_with_vat_rounded'  => ['type' => ['number', 'null']],

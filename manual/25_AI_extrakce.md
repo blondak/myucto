@@ -71,6 +71,37 @@ z dokladu „DIČ: Neplátce DPH"). U neplátce se automaticky nastaví **Bez n�
 na odpočet**, vynulují sazby a doplní varování — aby se neoprávněný odpočet
 nedostal do přiznání. Detail viz [§ 23.2.4](23_Prijate_faktury.md#2324-danova-uznatelnost-a-narok-na-odpocet).
 
+### Doklad bez jednotkových cen — založení ze souhrnné rekapitulace
+
+Souhrnné doklady za období (typicky měsíční vyúčtování palivových karet) často
+**jednotkovou cenu vůbec neuvádějí** — mají jen množství, částku za řádek a dole
+daňovou rekapitulaci. Když je navíc doklad uvádí ve dvou variantách, před slevou
+a po slevě, dopočítaná jednotková cena vyjde z těch nesprávných čísel a doklad
+se rozejde s rekapitulací.
+
+MyÚčto.cz proto takový doklad **neskládá z položek**, ale založí ho ze souhrnné
+daňové rekapitulace: **jeden řádek na sazbu DPH** (`1 ks × základ daně`). Základ
+i daň tím odpovídají dokladu přesně. Do popisu řádku se přenesou názvy plnění
+z dokladu, takže zůstane poznat, o co šlo (PHM, poplatky).
+
+Koncept nese **varování**, že položky nebyly vytěženy — pokud potřebuješ doklad
+rozepsaný, doplň řádky ručně. Doklady, které jednotkové ceny uvádějí, se
+extrahují **beze změny** i nadále včetně rozpadu na položky.
+
+### Dodavatel se skupinovou registrací k DPH (dvě DIČ na dokladu)
+
+Doklad odštěpného závodu nebo člena **skupinové registrace k DPH** má v hlavičce
+dvě různá čísla: **DIČ** samotného subjektu (typicky `CZ` + IČO) a **DIČ k DPH**
+skupiny (typicky ve tvaru `CZ699xxxxxx`). Extrakce je vytěží odděleně:
+
+- podle **DIČ subjektu** se dohledá karta dodavatele v adresáři (proto se karta
+  napáruje pořád stejně a nevznikají duplicity),
+- podle **DIČ k DPH** se ověří **plátcovství** v registru plátců.
+
+Bez toho by ARES podle IČO vrátil zaniklou registraci (vlastní registrace člena
+skupiny vstupem do skupiny zaniká) a doklad by se vytěžil jako od neplátce —
+tedy s nulovou daní a bez nároku na odpočet.
+
 ### Reverse charge ze zahraničí — automatika
 
 Když extraktor detekuje **reverse charge** (zahraniční dodavatel + všechny řádky

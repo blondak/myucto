@@ -171,6 +171,78 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
     }
 
     /**
+     * Issue #8 — doklad nese OBĚ DIČ: „DIČ: CZ<IČO>" (subjekt) i „DIČ k DPH: CZ699xxxxxx"
+     * (skupina). Extrakce vrátí do `dic` DIČ subjektu (na něm stojí párování karty
+     * dodavatele) a skupinové DIČ zvlášť ve `vat_dic`. Pro registr plátců je rozhodující
+     * to DRUHÉ — bez něj by krok 1 viděl „DIČ = CZ + IČO", vzal ARES negativum jako
+     * konečné a doklad by se vytěžil jako od neplátce (nulová DPH, žádný odpočet).
+     */
+    public function testVatDicFromDocumentDecidesRegistryLookupWhileDicStaysEntity(): void
+    {
+        $config = $this->baseConfig();
+
+        $aresConn = $this->connectionWithCachedRow($config, [
+            'found' => true,
+            'data'  => [
+                'company_name' => 'Test Group Member s.r.o.',
+                'ic'            => '69900012',
+                'dic'           => 'CZ69900012',
+                'is_vat_payer'  => false, // vlastní registrace ZANIKLA vstupem do skupiny
+            ],
+        ]);
+        $ares = new AresClient($config, $aresConn, new NullLogger());
+
+        $crpdph = new CrpDphClient($config, $this->connectionWithCachedRow($config, [
+            'found'      => true,
+            'unreliable' => false,
+            'accounts'   => [],
+            'fu_code'    => '',
+        ]), new NullLogger());
+        $vies = new ViesClient($config, $this->connectionWithCachedRow($config, null), new NullLogger(), $ares, $crpdph);
+
+        $resolver = new VendorVatPayerResolver($ares, $vies, $this->clientRepositoryStub());
+
+        // dic = DIČ subjektu (CZ + IČO), vat_dic = skupinové DIČ z popisku „DIČ k DPH".
+        $result = $resolver->resolve('69900012', 'CZ69900012', 'CZ699000123');
+
+        self::assertTrue(
+            $result['is_vat_payer'],
+            'DIČ k DPH z dokladu musí rozhodnout dotaz do registru — jinak doklad vyjde jako od neplátce.',
+        );
+        self::assertSame('vies', $result['source']);
+    }
+
+    /**
+     * Prázdné / chybějící `vat_dic` nesmí nic měnit — doklad s jedním DIČ se chová
+     * PŘESNĚ jako dosud (ARES negativum u shodného DIČ je konečné).
+     */
+    public function testMissingVatDicKeepsPreviousBehaviour(): void
+    {
+        $config = $this->baseConfig();
+
+        $aresConn = $this->connectionWithCachedRow($config, [
+            'found' => true,
+            'data'  => [
+                'company_name' => 'Test Real Nonpayer s.r.o.',
+                'ic'            => '69900012',
+                'dic'           => 'CZ69900012',
+                'is_vat_payer'  => false,
+            ],
+        ]);
+        $ares = new AresClient($config, $aresConn, new NullLogger());
+        $crpdph = new CrpDphClient($config, $this->connectionWithCachedRow($config, null), new NullLogger());
+        $vies = new ViesClient($config, $this->connectionWithCachedRow($config, null), new NullLogger(), $ares, $crpdph);
+
+        $resolver = new VendorVatPayerResolver($ares, $vies, $this->clientRepositoryStub());
+
+        foreach ([null, '', '   '] as $vatDic) {
+            $result = $resolver->resolve('69900012', 'CZ69900012', $vatDic);
+            self::assertFalse($result['is_vat_payer'], 'vat_dic=' . var_export($vatDic, true));
+            self::assertSame('ares', $result['source'], 'vat_dic=' . var_export($vatDic, true));
+        }
+    }
+
+    /**
      * DIČ skupinové registrace, ale CRPDPH nedostupný/bez nálezu → konzervativní
      * fallback na ARES negativum (nezhoršuje dnešní stav, nevrací "unknown").
      */

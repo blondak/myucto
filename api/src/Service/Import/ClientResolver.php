@@ -65,7 +65,17 @@ final class ClientResolver
 
         // Plátcovství DPH dodavatele z ARES (CZ) / VIES (zahraniční) — uloží na klienta
         // (nový i existující). Z toho pak import vynutí vat_deduction='none' u neplátce.
-        $vat = $this->vatPayer->resolveAndPersist($r['id'], $parsedVendor['ic'] ?? null, $parsedVendor['dic'] ?? null);
+        //
+        // `vat_dic` (DIČ k DPH / skupinová registrace, issue #8) jde ZÁMĚRNĚ jen sem, do
+        // ověření plátcovství. Dohledání i zakládání karty výše zůstává na `dic` (DIČ
+        // subjektu) — kdyby se do lookupu dostalo skupinové DIČ, přestala by se párovat
+        // existující karta dodavatele a založila by se duplicitní.
+        $vat = $this->vatPayer->resolveAndPersist(
+            $r['id'],
+            $parsedVendor['ic'] ?? null,
+            $parsedVendor['dic'] ?? null,
+            $parsedVendor['vat_dic'] ?? null,
+        );
 
         return ['id' => $r['id'], 'created' => $r['created'], 'role_added' => $roleAdded, 'is_vat_payer' => $vat['is_vat_payer']];
     }
