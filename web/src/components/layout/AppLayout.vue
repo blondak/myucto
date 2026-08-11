@@ -320,6 +320,17 @@ const navSections = computed<NavSection[]>(() => {
         // superadmina, zrcadlí dřívější gating tabu v DataExchange.vue.
         { to: '/purchase-invoices/export',   label: t('nav.export'),             icon: ICONS.exports },
         ...(isAdmin ? [{ to: '/purchase-invoices/import', label: t('nav.import'), icon: ICONS.imports }] : []),
+        // Majetek patří logicky k nákupu — pořizuje se přijatou fakturou. Zůstává
+        // ale účetní funkcí (odpisy, 042/02x), takže se ukazuje jen firmám s aktivním
+        // účetnictvím; stejná podmínka jako u sekce Účetnictví níž.
+        // Drobný majetek stojí před Majetkem — je to jeho levnější varianta pod
+        // hranicí §26/2 a uživatel volí mezi nimi, takže patří vedle sebe.
+        // Explicitní `permission`: navPermission() by z prefixu /accounting/ vrátil
+        // totéž, jenže spoléhat na odvození z cesty je křehké.
+        ...(auth.hasCommercialFeatures && isDoubleEntry ? [
+          { to: '/accounting/small-assets', label: t('nav.small_assets'),      icon: ICONS.tag,        permission: 'accounting' as PermissionKey },
+          { to: '/accounting/assets',       label: t('nav.accounting_assets'), icon: ICONS.accounting, newTo: '/accounting/assets/new' },
+        ] : []),
       ],
     },
     {
@@ -423,17 +434,13 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },
         { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
-        // Mzdy a Majetek zůstávají ZDE záměrně: položky nejdou přetáhnout mezi
+        // Mzdová rekapitulace zůstává ZDE záměrně: položky nejdou přetáhnout mezi
         // sekcemi (useNavOrder), takže přesun do Nástrojů by byl nevratný.
-        // Mzdová rekapitulace je v demu skrytá — počítá odvody za konkrétního
-        // poplatníka a na sdílených ukázkových datech nedává smysl.
+        // V demu je skrytá — počítá odvody za konkrétního poplatníka a na sdílených
+        // ukázkových datech nedává smysl.
         ...(auth.isDemo ? [] : [{ to: '/accounting/payroll', label: t('nav.accounting_payroll'), icon: ICONS.users }]),
-        // Drobný majetek stojí před Majetkem — je to jeho levnější varianta pod
-        // hranicí §26/2 a uživatel volí mezi nimi, takže patří vedle sebe.
-        // Explicitní `permission`: navPermission() by z prefixu /accounting/ vrátil
-        // totéž, jenže spoléhat na odvození z cesty je křehké.
-        { to: '/accounting/small-assets',     label: t('nav.small_assets'),                icon: ICONS.tag, permission: 'accounting' as PermissionKey },
-        { to: '/accounting/assets',           label: t('nav.accounting_assets'),           icon: ICONS.accounting, newTo: '/accounting/assets/new' },
+        // Majetek a Drobný majetek se přesunuly do sekce Nákup (pořizují se přijatou
+        // fakturou), pořád ale jen pro firmy s aktivním účetnictvím — viz tam.
       ],
     })
     // Účetní nástroje — méně používané / setup a periodické funkce vyčleněné
