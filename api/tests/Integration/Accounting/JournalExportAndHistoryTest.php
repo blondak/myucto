@@ -14,7 +14,9 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\JournalExportService;
+use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -41,6 +43,7 @@ final class JournalExportAndHistoryTest extends TestCase
     private AccountingPeriodRepository $periods;
     private PostingService $posting;
     private JournalExportService $journalExport;
+    private ReportXlsxExporter $xlsx;
 
     private int $supplierId = 0;
     private int $userId = 0;
@@ -61,6 +64,7 @@ final class JournalExportAndHistoryTest extends TestCase
             $this->periods       = $container->get(AccountingPeriodRepository::class);
             $this->posting       = $container->get(PostingService::class);
             $this->journalExport = $container->get(JournalExportService::class);
+            $this->xlsx           = $container->get(ReportXlsxExporter::class);
             $seeder               = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -277,6 +281,99 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertSame(200, $res['status']);
         self::assertStringContainsString('spreadsheetml', $res['contentType']);
         self::assertGreaterThan(500, strlen($res['raw']));
+    }
+
+    /**
+     * Regresní test na task #18: export deníku měl STEJNOU chybu částky, jaká byla
+     * opravena u list() (nález „ČÁSTKA u filtru na účet"). forExport() dřív pořád
+     * počítal AMOUNT_SUBQUERY (Σ MD celého zápisu) bez ohledu na filtr účtu, takže
+     * export s filtrem na účet vypsal cizí číslo — reálný dopad: řádek „Otevření
+     * účetních knih" patnáct milionů místo tisícovky. Zápis s nohou nákladu i nohou
+     * zúčtování zálohy na RŮZNÝCH účtech: filtr na jeden z nich musí ve forExport()
+     * vrátit částku TOHO účtu (a jeho stranu), ne Σ MD celého zápisu.
+     */
+    public function testForExportAccountFilteredAmountShowsAccountPortionNotEntryTotal(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 300.0],
+            ['account_code' => '314', 'side' => 'credit', 'amount' => 200.0],
+        ], ['entry_date' => self::YEAR . '-04-03', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        // Bez filtru na účet — beze změny: Σ MD celého zápisu.
+        $all = $this->journalRepo->forExport($this->supplierId, ['entry_id' => $entryId], 10);
+        $rowAll = $this->findItem($all, $entryId);
+        self::assertNotNull($rowAll);
+        self::assertEqualsWithDelta(500.0, (float) $rowAll['amount'], 0.001, 'Bez filtru na účet: Σ MD celého zápisu (dosavadní chování).');
+        self::assertNull($rowAll['amount_side'] ?? null, 'Bez filtru na účet strana nic neurčuje.');
+
+        // Filtr na účet 314 (jen jedna noha zápisu, 200 Kč) — export MUSÍ vrátit 200, ne 500.
+        $filtered = $this->journalRepo->forExport(
+            $this->supplierId,
+            ['entry_id' => $entryId, 'account_from' => '314', 'account_to' => '314'],
+            10,
+        );
+        $row314 = $this->findItem($filtered, $entryId);
+        self::assertNotNull($row314, 'Zápis má nohu na 314, musí projít filtrem i v exportu.');
+        self::assertEqualsWithDelta(200.0, (float) $row314['amount'], 0.001, 'Export filtrovaný na 314: jen částka TÉTO nohy, ne Σ MD celého zápisu.');
+        self::assertSame('credit', $row314['amount_side']);
+    }
+
+    /**
+     * Stejný nález, ale end-to-end přes XLSX exportér (JournalExportService::build()
+     * → ReportXlsxExporter::journal()): souhrnný řádek zápisu s filtrem na účet
+     * NESMÍ dublovat NETTO částku filtrovaného účtu do obou sloupců MD i Dal —
+     * to by tvrdilo Σ MD = Σ Dal i pro jeden účet, což u víc-nohého zápisu neplatí
+     * (na rozdíl od nefiltrovaného řádku, kde je duplikace správná, protože
+     * u vyváženého zápisu Σ MD = Σ Dal). Musí jít jen do sloupce odpovídajícího
+     * straně (zde: kreditní noha 314 → sloupec Dal, MD prázdný).
+     */
+    public function testExportXlsxAccountFilteredEntryRowShowsAccountAmountInCorrectColumnOnly(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 300.0],
+            ['account_code' => '314', 'side' => 'credit', 'amount' => 200.0],
+        ], ['entry_date' => self::YEAR . '-04-04', 'description' => 'XLSX filtr na ucet', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $data = $this->journalExport->build($this->supplierId, [
+            'entry_id' => $entryId, 'account_from' => '314', 'account_to' => '314',
+        ]);
+        $out = $this->xlsx->journal($data);
+
+        $path = tempnam(sys_get_temp_dir(), 'jexp');
+        self::assertNotFalse($path);
+        file_put_contents($path, $out['bytes']);
+        $sheet = IOFactory::load($path)->getActiveSheet();
+        unlink($path);
+
+        // Hlavičkový řádek jediného zápisu: head=5 (viz ReportXlsxExporter::journal()) → r=6.
+        $mdCell = $sheet->getCell('G6')->getValue();
+        $dalCell = $sheet->getCell('H6')->getValue();
+
+        self::assertTrue($mdCell === null || $mdCell === 0, 'Filtrováno na kreditní nohu 314 — sloupec MD nesmí dublovat 500 (Σ MD celého zápisu).');
+        self::assertEqualsWithDelta(200.0, (float) $dalCell, 0.001, 'Sloupec Dal ukazuje NETTO částku filtrovaného účtu (200), ne Σ MD celého zápisu (500).');
+    }
+
+    /**
+     * PDF jde přes stejnou cestu (JournalExportService::build() → journal.twig),
+     * jen s jinou šablonou — nález i oprava jsou identické jako u XLSX. Test
+     * ověřuje aspoň, že export s filtrem na účet (amount_side != null) neshodí
+     * renderer (šablona musí umět zpracovat i tuhle větev podmínky).
+     */
+    public function testExportPdfWithAccountFilterRendersSuccessfully(): void
+    {
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 300.0],
+            ['account_code' => '314', 'side' => 'credit', 'amount' => 200.0],
+        ], ['entry_date' => self::YEAR . '-04-05', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $res = $this->call('export', 'GET', 'accountant', [], [], [], [
+            'format' => 'pdf', 'account_from' => '314', 'account_to' => '314',
+        ]);
+        self::assertSame(200, $res['status']);
+        self::assertStringStartsWith('%PDF', $res['raw']);
     }
 
     public function testExportRejectsInvalidFormat(): void

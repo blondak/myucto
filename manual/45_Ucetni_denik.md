@@ -181,8 +181,12 @@ nastavenými filtry** (fulltext, číslo dokladu, období, rozsah dat, zdroj, p�
 stav, rozsah účtů a částek) — deník je totiž jako jediná
 zákonná kniha (§13 zákona o účetnictví), kterou je potřeba mít i mimo aplikaci (archivace,
 předložení auditorovi nebo finančnímu úřadu). Export obsahuje zápisy **chronologicky**
-(od nejstaršího), u každého řádky **MD/Dal** s kódem a názvem účtu a celkovou částkou
-zápisu a sloupec **Původ**; PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
+(od nejstaršího), u každého hlavičkový řádek se sloupcem **Původ** a řádky **MD/Dal**
+s kódem a názvem účtu za VŠECHNY účty zápisu. Částka v hlavičkovém řádku se řídí stejným
+pravidlem jako sloupec Částka v seznamu: bez filtru na účet je to celková částka zápisu
+(Σ MD, u vyváženého zápisu shodná se Σ Dal, proto je v obou sloupcích), s aktivním filtrem
+na účet naopak jen částka připadající na filtrovaný rozsah účtů, ve sloupci MD nebo Dal
+podle strany. PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
 — při větším rozsahu zúži filtr (typicky Datum od/do) a export zopakuj po částech.
 
 ### Rozklik na detail zápisu

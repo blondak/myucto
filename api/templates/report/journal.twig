@@ -84,8 +84,13 @@
             </td>
             <td>{{ e.automation_origin ?: 'ručně' }}</td>
             <td colspan="2"></td>
-            <td class="num">{{ e.amount|cz_money }}</td>
-            <td class="num">{{ e.amount|cz_money }}</td>
+            {# Bez filtru na účet je e.amount Σ MD = Σ Dal celého (vyváženého) zápisu
+               (obě buňky pravdivě duplikují). S filtrem na účet (e.amount_side != null)
+               jde o NETTO částku a stranu JEN filtrovaného účtu — psát ji do obou
+               sloupců by tvrdilo Σ MD = Σ Dal i pro ten jeden účet, což u víc-nohého
+               zápisu neplatí (nález „ČÁSTKA u filtru na účet"). #}
+            <td class="num">{% if e.amount_side is null or e.amount_side == 'debit' %}{{ e.amount|cz_money }}{% endif %}</td>
+            <td class="num">{% if e.amount_side is null or e.amount_side == 'credit' %}{{ e.amount|cz_money }}{% endif %}</td>
         </tr>
         {% for l in e.lines %}
             <tr class="entry-line">

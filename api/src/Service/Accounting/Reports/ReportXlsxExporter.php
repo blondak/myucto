@@ -938,8 +938,21 @@ final class ReportXlsxExporter
             $sheet->setCellValueExplicit([2, $r], (string) ($entry['document_no'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], $desc, DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([4, $r], (string) ($entry['automation_origin'] ?? 'ručně'), DataType::TYPE_STRING);
-            $sheet->setCellValue([7, $r], (float) $entry['amount']);
-            $sheet->setCellValue([8, $r], (float) $entry['amount']);
+            // Bez filtru na účet je entry['amount'] Σ MD = Σ Dal celého (vyváženého)
+            // zápisu — duplikace do obou sloupců je tedy pravdivá. S filtrem na účet
+            // (amount_side != null, JournalEntryRepository::forExport) jde o NETTO
+            // částku a stranu JEN filtrovaného účtu — psát ji do obou sloupců by
+            // tvrdilo Σ MD = Σ Dal i pro tenhle jeden účet, což u zápisu s víc nohama
+            // na různých účtech neplatí (nález „ČÁSTKA u filtru na účet"). Proto jde
+            // vždy jen do sloupce odpovídajícího straně; řádky pod ní ukazují detail
+            // za VŠECHNY účty zápisu beze změny.
+            $amountSide = $entry['amount_side'] ?? null;
+            if ($amountSide === null || $amountSide === 'debit') {
+                $sheet->setCellValue([7, $r], (float) $entry['amount']);
+            }
+            if ($amountSide === null || $amountSide === 'credit') {
+                $sheet->setCellValue([8, $r], (float) $entry['amount']);
+            }
             $this->boldRow($sheet, $r, $cols);
             $r++;
 

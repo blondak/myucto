@@ -569,6 +569,12 @@ final class JournalEntryRepository
      * `$limit` je tvrdý strop (viz JournalExportService) — vrátí max `$limit + 1`
      * hlaviček, aby volající poznal překročení bez druhého COUNT dotazu.
      *
+     * Sloupec Částka řeší STEJNÝ nález jako paginate() („ČÁSTKA u filtru na účet"):
+     * bez filtru na účet je to Σ MD celého zápisu (AMOUNT_SUBQUERY), s filtrem
+     * FILTERED_NET_AMOUNT_SUBQUERY + amount_side — jinak export s filtrem na účet
+     * ukazoval v hlavičkovém řádku (ReportXlsxExporter::journal(), journal.twig)
+     * cizí číslo (Σ MD celého zápisu), ne částku vybraného účtu.
+     *
      * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
      * @return list<array<string,mixed>> hlavičky BEZ lines (viz linesForEntries)
      */
@@ -576,12 +582,24 @@ final class JournalEntryRepository
     {
         [$whereSql, $params] = $this->buildWhere($supplierId, $filters);
 
+        // Select-param(y) MUSÍ jít PŘED $params z buildWhere() — viz stejná poznámka
+        // v paginate().
+        $accountFiltered = self::hasAccountRangeFilter($filters);
+        if ($accountFiltered) {
+            $amountSelect = self::FILTERED_NET_AMOUNT_SUBQUERY . ' AS amount';
+            [$from, $to] = self::accountRangeBounds($filters);
+            $selectParams = [$from, $to];
+        } else {
+            $amountSelect = self::AMOUNT_SUBQUERY . ' AS amount';
+            $selectParams = [];
+        }
+
         $sql = "SELECT je.id, je.entry_date, je.document_date,
                        COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
                        je.description,
                        je.source_type, je.source_id, je.posted_at, je.reversed_by,
                        u.name AS posted_by_name,
-                       " . self::AMOUNT_SUBQUERY . " AS amount
+                       {$amountSelect}
                   FROM journal_entries je
              LEFT JOIN users u ON u.id = je.posted_by
              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
@@ -592,14 +610,23 @@ final class JournalEntryRepository
                  ORDER BY je.entry_date ASC, je.id ASC
                  LIMIT " . ($limit + 1);
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute([...$selectParams, ...$params]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return array_map(static function (array $r): array {
+        return array_map(static function (array $r) use ($accountFiltered): array {
             $r['id'] = (int) $r['id'];
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
             $r['reversed_by'] = $r['reversed_by'] === null ? null : (int) $r['reversed_by'];
-            $r['amount'] = (float) $r['amount'];
+            if ($accountFiltered) {
+                $net = (float) $r['amount'];
+                $r['amount'] = round(abs($net), 2);
+                // Nula (viz castListRow) se bere jako MD — neutrální volba, aby strana
+                // nikdy nechyběla.
+                $r['amount_side'] = $net < 0 ? 'credit' : 'debit';
+            } else {
+                $r['amount'] = (float) $r['amount'];
+                $r['amount_side'] = null;
+            }
             return $r;
         }, $rows);
     }
