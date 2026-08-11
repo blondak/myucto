@@ -151,6 +151,57 @@ final class GpcParserTest extends TestCase
         self::assertNull($t['counterparty_account']);
     }
 
+    /**
+     * BUG 0: číslo dokladu (pozice 36-48) je ID pohybu od banky a MUSÍ se dostat do
+     * `bank_ref`. Bez něj StatementImporter skládá identitu pohybu z VS/KS/SS/popisu,
+     * takže dvě legitimní platby téže částky, dne a VS splynou a druhá se tiše zahodí.
+     */
+    public function testDocumentNumberIsExposedAsBankReference(): void
+    {
+        $header = '074' . str_pad('1', 16) . str_pad('', 20) . '010126'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . '001' . '010126';
+        $mkTx = fn (string $doc): string => '075'
+            . str_pad('1', 16) . str_pad('1', 16)
+            . str_pad($doc, 13, '0', STR_PAD_LEFT)                 // číslo dokladu = ID pohybu
+            . str_pad('12300', 12, '0', STR_PAD_LEFT) . '1'
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '00' . '0100' . '0000'
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '010126'
+            . str_pad('Poplatek', 20) . '00203' . '010126';
+
+        $r = (new GpcParser())->parse($header . "\n" . $mkTx('26001234567') . "\n" . $mkTx('26001234568'));
+
+        self::assertSame('26001234567', $r['transactions'][0]['bank_ref'], 'Vodicí nuly paddingu se strhávají, ID pohybu zůstává.');
+        self::assertSame('26001234568', $r['transactions'][1]['bank_ref']);
+    }
+
+    /**
+     * Banka ID pohybu neposlala (pole samé nuly / prázdné) → NULL, ať importér ví,
+     * že musí sáhnout po náhradní identitě, a neschová si prázdnou referenci.
+     */
+    public function testMissingDocumentNumberYieldsNullBankReference(): void
+    {
+        $header = '074' . str_pad('1', 16) . str_pad('', 20) . '010126'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . str_pad('0', 14, '0') . '+' . str_pad('0', 14, '0') . '+'
+            . '001' . '010126';
+        $mkTx = fn (string $doc): string => '075'
+            . str_pad('1', 16) . str_pad('1', 16) . $doc
+            . str_pad('100', 12, '0', STR_PAD_LEFT) . '2'
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '00' . '0100' . '0000'
+            . str_pad('0', 10, '0', STR_PAD_LEFT)
+            . '010126'
+            . str_pad('Test', 20) . '00203' . '010126';
+
+        $parser = new GpcParser();
+        self::assertNull($parser->parse($header . "\n" . $mkTx(str_pad('', 13, '0')))['transactions'][0]['bank_ref']);
+        self::assertNull($parser->parse($header . "\n" . $mkTx(str_pad('', 13, ' ')))['transactions'][0]['bank_ref']);
+    }
+
     public function testCurrencyMappingFromIsoNumeric(): void
     {
         // 00203 = CZK, 00978 = EUR, 00840 = USD — verify normalize ltrim works

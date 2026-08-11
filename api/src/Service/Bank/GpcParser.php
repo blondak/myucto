@@ -137,6 +137,11 @@ final class GpcParser
     {
         $pad = str_pad($line, 160, ' ');
         $counterpartyAccount = trim(substr($pad, 19, 16));
+        // Číslo dokladu (pozice 36-48) = ID pohybu, které banka pohybu přidělila (Fio,
+        // ČSOB, KB i Air Bank ho sem plní). Je to JEDINÁ bankovní identita pohybu, kterou
+        // GPC nese — bez ní dva legitimní pohyby stejné částky, dne, VS a popisu dostanou
+        // v StatementImporter identický otisk a druhý se zahodí jako duplicita.
+        $documentNumber = $this->normalizeDocumentNumber(trim(substr($pad, 35, 13)));
         $amountCents = (int) trim(substr($pad, 48, 12));
         $postingCode = trim(substr($pad, 60, 1));
         // VS/KS/SS jsou zleva doplněné nulami (right-justified). Strhni JEN vedoucí nuly
@@ -179,8 +184,23 @@ final class GpcParser
             'counterparty_bank'    => $bankCode ?: null,
             'counterparty_name'    => $description ?: null,  // GPC client_name = jméno protistrany
             'description'          => $description ?: null,
-            'bank_ref'             => null,
+            'bank_ref'             => $documentNumber,
         ];
+    }
+
+    /**
+     * Číslo dokladu z 075 → bankovní reference. Pole je zleva doplněné nulami
+     * (right-justified), takže vodicí nuly strháváme, aby byla hodnota stabilní
+     * napříč výpisy i zdroji (PDF parsery vracejí referenci bez paddingu).
+     * Samé nuly / prázdné pole = banka ID pohybu neposlala → NULL (fallback otisk).
+     */
+    private function normalizeDocumentNumber(string $raw): ?string
+    {
+        $raw = trim($raw);
+        if ($raw === '') return null;
+        $stripped = ltrim($raw, '0');
+        if ($stripped === '') return null;
+        return mb_substr($stripped, 0, 40);
     }
 
     /**

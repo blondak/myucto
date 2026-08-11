@@ -37,7 +37,9 @@ final class StatementImporter
      *   čísla účtu; tady už jen načteme code/bank_code. NULL = dnešní chování
      *   (lookup podle account_number — folder scan, jednoznačný účet).
      *
-     * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool}
+     * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool,
+     *               parsed_transactions:int, skipped_duplicates:int,
+     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
      */
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null): array
     {
@@ -73,7 +75,15 @@ final class StatementImporter
         $exists->execute([$hash]);
         $existingId = $exists->fetchColumn();
         if ($existingId !== false) {
-            return ['statement_id' => (int) $existingId, 'transactions' => 0, 'matched' => 0, 'duplicate' => true];
+            return [
+                'statement_id' => (int) $existingId,
+                'transactions' => 0,
+                'matched' => 0,
+                'duplicate' => true,
+                'parsed_transactions' => count($parsed['transactions']),
+                'skipped_duplicates' => 0,
+                'warnings' => [],
+            ];
         }
 
         $h = $parsed['header'];
@@ -157,8 +167,22 @@ final class StatementImporter
             'SELECT id FROM bank_transactions WHERE import_fingerprint = ? LIMIT 1'
         );
 
+        // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
+        // Některé banky do pole čísla dokladu píšou konstantu nebo denní pořadí — kdyby
+        // se taková hodnota vzala jako identita, splynuly by v otisku dva různé pohyby.
+        $referenceCounts = [];
+        foreach ($parsed['transactions'] as $tx) {
+            $ref = trim((string) ($tx['bank_ref'] ?? ''));
+            if ($ref !== '') {
+                $referenceCounts[$ref] = ($referenceCounts[$ref] ?? 0) + 1;
+            }
+        }
+        /** @var array<string,int> $identitySeen Pořadí pohybu se shodným náhradním otiskem V RÁMCI souboru. */
+        $identitySeen = [];
+
         $matched = 0;
         $inserted = 0;
+        $skipped = 0;
         foreach ($parsed['transactions'] as $tx) {
             // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
             // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
@@ -166,14 +190,56 @@ final class StatementImporter
             // jen jako fallback, když účet není registrovaný (CREDITAS/KB ho
             // plní reálně) — aby se EUR transakce neztratila.
             $txCurrency = $accountCurrency ?? $tx['currency'] ?? $statementCurrency;
+
+            // Pořadí pohybu se shodným náhradním otiskem v souboru: tři legitimní platby
+            // téže částky, dne a VS dostanou pořadí 0, 1, 2 a přestanou splývat. Pořadí 0
+            // otisk NEMĚNÍ, takže překrývající se výpisy dedup dál drží (týž pohyb je
+            // v obou souborech pod stejným pořadím) a historické otisky zůstávají platné.
+            $identityKey = implode("\x1f", $this->fallbackIdentity($tx, 0));
+            $ordinal = $identitySeen[$identityKey] ?? 0;
+            $identitySeen[$identityKey] = $ordinal + 1;
+
+            $reference = trim((string) ($tx['bank_ref'] ?? ''));
+            $useReference = $reference !== '' && ($referenceCounts[$reference] ?? 0) === 1;
+            $identity = $useReference
+                ? ['bank_ref', $reference]
+                : $this->fallbackIdentity($tx, $ordinal);
             $fingerprint = $this->transactionFingerprint(
                 (string) $h['account_number'],
                 $accountBankCode,
                 $txCurrency,
                 $tx,
+                $identity,
             );
-            $findDuplicateTx->execute([$fingerprint]);
-            if ($findDuplicateTx->fetchColumn() !== false) {
+
+            // Zpětná kompatibilita: pohyby naimportované DŘÍV (kdy GPC bank_ref neplnil)
+            // nesou otisk z náhradní identity bez pořadí. Bez tohohle kandidáta by je
+            // překrývající se výpis po upgradu založil ZNOVU — z opravy tiché ztráty dat
+            // by se stalo tiché zdvojení. Legacy otisk platí jen pro PRVNÍ výskyt identity
+            // v souboru, aby druhá legitimní platba dál prošla.
+            $candidates = [$fingerprint];
+            if ($ordinal === 0) {
+                $legacy = $this->transactionFingerprint(
+                    (string) $h['account_number'],
+                    $accountBankCode,
+                    $txCurrency,
+                    $tx,
+                    $this->fallbackIdentity($tx, 0),
+                );
+                if ($legacy !== $fingerprint) {
+                    $candidates[] = $legacy;
+                }
+            }
+            $alreadyStored = false;
+            foreach ($candidates as $candidate) {
+                $findDuplicateTx->execute([$candidate]);
+                if ($findDuplicateTx->fetchColumn() !== false) {
+                    $alreadyStored = true;
+                    break;
+                }
+            }
+            if ($alreadyStored) {
+                $skipped++;
                 continue;
             }
             try {
@@ -186,6 +252,7 @@ final class StatementImporter
             } catch (\PDOException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000'
                     && str_contains($e->getMessage(), 'uq_bt_import_fingerprint')) {
+                    $skipped++;
                     continue;
                 }
                 throw $e;
@@ -213,41 +280,81 @@ final class StatementImporter
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
             ->execute([$matched, $inserted, $statementId]);
 
+        // Rozdíl „řádků v souboru" × „založených pohybů" se nesmí ztratit v tichu: přesně
+        // tohle skrývalo tichou ztrátu dat, protože jediný způsob, jak si toho všimnout,
+        // bylo ručně přepočítat 075 řádky proti databázi.
+        $parsedCount = count($parsed['transactions']);
+        $warnings = [];
+        if ($skipped > 0) {
+            $warnings[] = [
+                'code'     => 'transactions_skipped_as_duplicate',
+                'message'  => sprintf(
+                    'Soubor obsahuje %d pohybů, založeno %d. %d pohybů se shoduje s už evidovanými (překrývající se výpis) a nebylo založeno.',
+                    $parsedCount,
+                    $inserted,
+                    $skipped,
+                ),
+                'parsed'   => $parsedCount,
+                'inserted' => $inserted,
+                'skipped'  => $skipped,
+            ];
+        }
+
         return [
-            'statement_id' => $statementId,
-            'transactions' => $inserted,
-            'matched'      => $matched,
-            'duplicate'    => false,
+            'statement_id'        => $statementId,
+            'transactions'        => $inserted,
+            'matched'             => $matched,
+            'duplicate'           => false,
+            'parsed_transactions' => $parsedCount,
+            'skipped_duplicates'  => $skipped,
+            'warnings'            => $warnings,
         ];
     }
 
     /**
-     * Stabilní identita pohybu napříč překrývajícími se výpisy. Bankovní reference
-     * je nejsilnější klíč; bez ní použijeme celý konzervativní otisk pohybu, aby dvě
-     * legitimní platby stejné částky a dne nesplynuly jen kvůli částce/VS.
+     * Náhradní identita pohybu, když banka nepošle použitelné ID pohybu. Sama o sobě
+     * NENÍ jedinečná — dvě legitimní platby téže částky, dne, VS a popisu (opakované
+     * mikroplatby, poplatky, karetní pohyby bez protiúčtu) mají identickou. Proto
+     * dostane pořadí výskytu v rámci souboru; pořadí 0 se do otisku nepromítá, aby
+     * zůstal shodný s otisky vyrobenými před touto opravou.
      *
      * @param array<string,mixed> $tx
+     * @return list<string>
+     */
+    private function fallbackIdentity(array $tx, int $ordinal): array
+    {
+        $identity = [
+            'fallback',
+            trim((string) ($tx['variable_symbol'] ?? '')),
+            trim((string) ($tx['constant_symbol'] ?? '')),
+            trim((string) ($tx['specific_symbol'] ?? '')),
+            AccountNumberNormalizer::normalize((string) ($tx['counterparty_account'] ?? '')),
+            trim((string) ($tx['counterparty_bank'] ?? '')),
+            mb_strtoupper(trim((string) ($tx['counterparty_name'] ?? '')), 'UTF-8'),
+            mb_strtoupper(trim((string) ($tx['description'] ?? '')), 'UTF-8'),
+        ];
+        if ($ordinal > 0) {
+            $identity[] = '#' . $ordinal;
+        }
+        return $identity;
+    }
+
+    /**
+     * Stabilní identita pohybu napříč překrývajícími se výpisy. Bankovní reference
+     * je nejsilnější klíč; bez ní použijeme celý konzervativní otisk pohybu doplněný
+     * o pořadí v souboru, aby dvě legitimní platby stejné částky a dne nesplynuly.
+     *
+     * @param array<string,mixed> $tx
+     * @param list<string> $identity Identita pohybu — {@see fallbackIdentity()} nebo `['bank_ref', …]`.
      */
     private function transactionFingerprint(
         string $accountNumber,
         ?string $bankCode,
         ?string $currency,
         array $tx,
+        array $identity,
     ): string {
         $account = AccountNumberNormalizer::normalize($accountNumber);
-        $reference = trim((string) ($tx['bank_ref'] ?? ''));
-        $identity = $reference !== ''
-            ? ['bank_ref', $reference]
-            : [
-                'fallback',
-                trim((string) ($tx['variable_symbol'] ?? '')),
-                trim((string) ($tx['constant_symbol'] ?? '')),
-                trim((string) ($tx['specific_symbol'] ?? '')),
-                AccountNumberNormalizer::normalize((string) ($tx['counterparty_account'] ?? '')),
-                trim((string) ($tx['counterparty_bank'] ?? '')),
-                mb_strtoupper(trim((string) ($tx['counterparty_name'] ?? '')), 'UTF-8'),
-                mb_strtoupper(trim((string) ($tx['description'] ?? '')), 'UTF-8'),
-            ];
         return hash('sha256', json_encode([
             'v' => 1,
             'account' => $account,
