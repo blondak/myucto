@@ -393,6 +393,20 @@ z příjmů). Proto je lze spárovat.
 
 Jedna záloha může být navázaná **jen na jednu** finální fakturu.
 
+**Nákup zaplacený kartou (bez zálohové faktury).** Když dodavatel žádnou zálohovou
+fakturu nevystaví a místo ní pošle rovnou **daňový doklad k platbě** (typ dokladu
+*Daňový doklad k platbě*, § 28/8 ZDPH) — typicky u platby kartou — chová se tento
+samostatný DDKP jako záloha: box **Zálohová faktura** ho na finální faktuře nabídne
+mezi kandidáty stejně jako zálohovou fakturu, spáruje se stejným tlačítkem a
+propojení funguje symetricky (z detailu DDKP i z detailu finální faktury). DDKP,
+který už patří k jiné zálohové faktuře, se mezi kandidáty nenabízí — vyúčtovává se
+přes tu zálohu, ne přímo.
+
+Dokud propojení nevznikne, zůstává na DDKP viditelné **upozornění**, pokud je z něj
+na účtu 314 otevřený zůstatek a od stejného dodavatele existuje nespárovaná faktura,
+která k němu pravděpodobně patří — s odkazem na tu fakturu a rovnou spočítanou částkou
+DPH (viz níže), aby nezůstal viset beze stopy.
+
 > [!NOTE]
 > **Zaúčtování zálohového cyklu.** Zaplacení zálohové přijaté faktury se do
 > [Účetního deníku](45_Ucetni_denik.md) zaúčtuje jako **poskytnutá záloha** (MD 314
@@ -403,6 +417,15 @@ Jedna záloha může být navázaná **jen na jednu** finální fakturu.
 > zálohové faktury — takže i částečně zaplacená záloha se zúčtuje správně. Mimo
 > automatiku zůstává vazba záloha↔víc než jedna finální faktura — takový případ
 > zaúčtuj ručním zápisem.
+>
+> **Záloha (nebo samostatný DDKP) s vlastním daňovým dokladem k platbě.** Má-li
+> navázaná záloha svůj DDKP — nebo je-li zálohou přímo samostatný DDKP — část účtu
+> 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Automatické
+> zúčtování na plnou zaplacenou částku by pak 314 přečerpalo do minusu o tuhle už
+> uplatněnou daň, takže se v tomto případě **nezaúčtuje automaticky**. Hláška u
+> zaúčtování rovnou spočítá, kolik DPH z finální faktury zbývá doúčtovat na 343 nad
+> rámec toho, co DDKP uplatnil už při platbě — zúčtování zálohy pak zapiš ručním
+> zápisem podle této částky.
 
 ### 23.3.2 Zaplatit pomocí QR
 

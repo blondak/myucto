@@ -18311,6 +18311,13 @@ components:
           description: "FK na skladovou kartu (Epic SKLAD). NULL = volný text/služba, bez vazby na sklad."
         stock_sku: { type: [string, "null"], description: "SKU navázané skladové karty (jen pro zobrazení, denormalizováno)" }
         stock_name: { type: [string, "null"], description: "Název navázané skladové karty (jen pro zobrazení, denormalizováno)" }
+        small_asset:
+          type: [object, "null"]
+          description: "Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — jen pro zobrazení (proklik + nabídka vyřazení prodejem)."
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            status: { type: string, enum: [in_use, disposed, sold] }
 
     PurchaseInvoiceItemPayload:
       type: object
@@ -18528,6 +18535,24 @@ components:
         settled_by: { type: [object, "null"], description: "Jen u zálohy — brief finální faktury, která ji vyúčtovává" }
         has_advance_candidates: { type: boolean }
         has_settlement_candidates: { type: boolean }
+        unsettled_notice:
+          type: [object, "null"]
+          description: |
+            Jen u zálohy/samostatného DDKP bez vyúčtování: na 314 je otevřený zůstatek a od
+            stejného dodavatele existuje pravděpodobná nespárovaná faktura. `remaining_vat_on_343`
+            je vyplněné jen u DDKP — kolik DPH kandidátní faktury zbývá doúčtovat na 343 nad
+            rámec už uplatněné DPH z DDKP.
+          properties:
+            paid_amount: { type: number }
+            candidate:
+              type: object
+              properties:
+                id: { type: integer }
+                varsymbol: { type: [string, "null"] }
+                vendor_invoice_number: { type: [string, "null"] }
+                total_with_vat: { type: number }
+            remaining_vat_on_343: { type: [number, "null"] }
+            message: { type: string }
         items:
           type: array
           items: { $ref: '#/components/schemas/PurchaseInvoiceItem' }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting;
 
+use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
@@ -409,6 +410,91 @@ final class AdvanceCycleTest extends BankPostingTestCase
         } catch (PostingException $e) {
             self::assertSame('advance_settlement_ambiguous', $e->errorCode);
         }
+    }
+
+    // (f3b, task #17) — advance_settlement_ambiguous dřív řeklo jen "zaúčtuj ručně"; teď
+    // rovnou spočítá, kolik DPH z finální faktury zbývá doúčtovat na 343 nad rámec toho,
+    // co DDKP uplatnil už při platbě (DPH finální 210,00 − DPH DDKP 105,00 = 105,00).
+    public function testPurchaseFinalWithTaxDocumentAmbiguousMessageStatesRemainingVat(): void
+    {
+        $vendor  = $this->client('Dodavatel s.r.o.');
+        $advance = $this->purchaseInvoice('ZPF-F3B', $vendor, 605.00, 'advance');
+        $this->payAdvancePfViaBank($advance, 605.00);
+        $this->purchaseTaxDocument('DDKP-F3B', $vendor, 500.00, 105.00, $advance);
+        $final = $this->purchaseWithItem('PF-F3B', $vendor, 1000.00, 210.00, 'invoice', $advance);
+
+        try {
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final);
+            self::fail('DDKP + vyúčtování má vyhodit advance_settlement_ambiguous.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+            self::assertStringContainsString('105,00', $e->getMessage(),
+                'Hláška musí obsahovat spočítaný doplatek DPH (210,00 − 105,00), ne jen "zaúčtuj ručně".');
+        }
+    }
+
+    // (f3c, task #17) — finální PF navázaná PŘÍMO na SAMOSTATNÝ DDKP (nákup kartou bez
+    // zálohové faktury, § 28/8 ZDPH — linkAdvance() to dovoluje, viz PurchaseAdvanceLinkTest::
+    // testStandaloneTaxDocumentCanSettleFinalInvoice). appendAdvanceSettlementPurchase dřív
+    // tenhle tvar vazby vůbec nerozpoznal (čekal jen document_kind='advance') → zaúčtování
+    // tiše proběhlo BEZE zúčtování 321/314 a zůstatek na 314 zůstal navždy otevřený beze
+    // stopy chyby. Teď musí vyhodit STEJNOU hlasitou chybu jako záloha s DDKP dítětem.
+    public function testPurchaseFinalLinkedDirectlyToStandaloneTaxDocumentThrowsAmbiguous(): void
+    {
+        $vendor = $this->client('Dodavatel karta s.r.o.');
+        // Samostatný DDKP = document_kind='tax_document' BEZ parent_purchase_invoice_id.
+        $ddkp  = $this->purchaseWithItem('DDKP-F3C', $vendor, 500.00, 105.00, 'tax_document', null);
+        $final = $this->purchaseWithItem('PF-F3C', $vendor, 1000.00, 210.00, 'invoice', $ddkp);
+
+        try {
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final);
+            self::fail('Finální PF navázaná přímo na samostatný DDKP má vyhodit advance_settlement_ambiguous, ne se tiše zaúčtovat.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+            self::assertStringContainsString('105,00', $e->getMessage(),
+                'Hláška musí obsahovat spočítaný doplatek DPH (210,00 − 105,00).');
+        }
+    }
+
+    // (f3d, task #17) — reálný případ: nákup kartou vytvoří samostatný DDKP, žádná faktura
+    // se s ním hned nespáruje. PurchaseInvoiceRepository::find() musí na DDKP samotném
+    // ukázat, že na 314 zůstává otevřený zůstatek a existuje pravděpodobný kandidát k
+    // spárování (has_settlement_candidates) — a spočítat, kolik DPH zbývá na 343. Zrcadlově
+    // na finální faktuře musí najít DDKP jako kandidáta (has_advance_candidates) — dřív ho
+    // vidělo jen document_kind='advance', takže tlačítko „spárovat se zálohou" se u
+    // samostatného DDKP nikdy nezobrazilo.
+    public function testStandaloneTaxDocumentShowsUnsettledNoticeAndAdvanceCandidateFlag(): void
+    {
+        $vendor = $this->client('Dodavatel karta N1');
+        // Samostatný DDKP zaplacený kartou (bez zálohové faktury) — 605 Kč (základ 500 / DPH 105).
+        $ddkp = $this->purchaseWithItem('DDKP-N1', $vendor, 500.00, 105.00, 'tax_document', null);
+        $this->payAdvancePfViaBank($ddkp, 605.00);
+        // Konečná faktura od téhož dodavatele, zatím NEspárovaná (přesně reálný případ #17).
+        $final = $this->purchaseWithItem('PF-N1', $vendor, 1000.00, 210.00, 'invoice', null);
+
+        $repo = $this->container->get(PurchaseInvoiceRepository::class);
+
+        $ddkpRow = $repo->find($ddkp, $this->supplierId);
+        self::assertTrue(
+            $ddkpRow['has_settlement_candidates'],
+            'DDKP musí nabídnout spárování s nespárovanou fakturou téhož dodavatele.',
+        );
+        self::assertNotNull($ddkpRow['unsettled_notice'], '314 zůstává otevřené a existuje kandidát — musí se to ukázat.');
+        self::assertSame($final, $ddkpRow['unsettled_notice']['candidate']['id']);
+        self::assertEqualsWithDelta(605.00, $ddkpRow['unsettled_notice']['paid_amount'], 0.01);
+        self::assertEqualsWithDelta(
+            105.00,
+            $ddkpRow['unsettled_notice']['remaining_vat_on_343'],
+            0.01,
+            'Zbývající DPH na 343 = DPH finální faktury (210,00) − už uplatněná DPH z DDKP (105,00).',
+        );
+        self::assertStringContainsString('105,00', $ddkpRow['unsettled_notice']['message']);
+
+        $finalRow = $repo->find($final, $this->supplierId);
+        self::assertTrue(
+            $finalRow['has_advance_candidates'],
+            'Finální faktura musí najít samostatný DDKP jako kandidáta k spárování (root cause #17).',
+        );
     }
 
     // ── fixtury ──────────────────────────────────────────────────────────────

@@ -129,6 +129,8 @@ export interface PurchaseInvoiceItem {
   /** Joined (read-only, jen v GET odpovědi) — pro label vybrané karty po reloadu. */
   stock_sku?: string | null
   stock_name?: string | null
+  /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
+  small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }
 
 export interface PurchaseVatBreakdownRow {
@@ -380,6 +382,23 @@ export interface PurchaseInvoice {
   has_advance_candidates?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */
   has_settlement_candidates?: boolean
+  /**
+   * Záloha/DDKP zůstává nespárovaná, ale na 314 je otevřený zůstatek a od stejného
+   * dodavatele existuje nespárovaná faktura, která k němu pravděpodobně patří (task #17).
+   * `remaining_vat_on_343` je vyplněné jen u DDKP (document_kind='tax_document') — kolik
+   * DPH z kandidátní faktury zbývá doúčtovat na 343 nad rámec už uplatněné DPH z DDKP.
+   */
+  unsettled_notice?: {
+    paid_amount: number
+    candidate: {
+      id: number
+      varsymbol: string | null
+      vendor_invoice_number: string | null
+      total_with_vat: number
+    }
+    remaining_vat_on_343: number | null
+    message: string
+  } | null
   /**
    * Diagnostický popis problému z AI extrakce (např. AI sečetla mezisoučty
    * jako další položky → suma řádků se výrazně liší od AI-vráceného totalu).

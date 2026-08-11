@@ -778,6 +778,21 @@ const purchaseActions = computed<ActionItem[]>(() => {
       {{ t('purchase_invoice.tax_document_link.missing') }}
     </div>
 
+    <!-- ═══ Záloha/DDKP nespárovaná, ale zůstatek na 314 + pravděpodobná faktura existuje (task #17) ═══ -->
+    <div v-if="invoice.unsettled_notice"
+      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
+      <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      </svg>
+      <div class="text-amber-800 min-w-0">
+        <div class="font-medium">{{ t('purchase_invoice.unsettled_notice.title') }}</div>
+        <div class="mt-1">{{ invoice.unsettled_notice.message }}</div>
+        <RouterLink :to="`/purchase-invoices/${invoice.unsettled_notice.candidate.id}`" class="inline-block mt-1 font-medium hover:underline">
+          {{ t('purchase_invoice.unsettled_notice.open_candidate') }} →
+        </RouterLink>
+      </div>
+    </div>
+
     <!-- ═══ Varování: vyúčtovací faktura na zálohu s DDKP → hrozí dvojí odpočet DPH ═══ -->
     <div v-if="invoice._warnings?.includes('advance_has_tax_document')"
       class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
@@ -975,7 +990,24 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </thead>
         <tbody class="divide-y divide-neutral-100">
           <tr v-for="it in invoice.items" :key="it.id">
-            <td class="py-2 px-5">{{ it.description }}</td>
+            <td class="py-2 px-5">
+              {{ it.description }}
+              <!-- Karta drobného majetku vzniklá z téhle položky (§DM) — proklik + nabídka
+                   vyřazení prodejem, ať se karta nemusí dohledávat ručně (task #17). -->
+              <div v-if="it.small_asset" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                <span class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">
+                  {{ t('accounting.small_assets.title') }}: {{ it.small_asset.name }}
+                </span>
+                <RouterLink v-if="it.small_asset.status === 'in_use'"
+                  :to="{ name: 'accounting-small-assets', query: { sell: String(it.small_asset.id) } }"
+                  class="text-primary-600 hover:underline">
+                  {{ t('purchase_invoice.items.small_asset_sell') }}
+                </RouterLink>
+                <RouterLink v-else :to="{ name: 'accounting-small-assets' }" class="text-neutral-500 hover:underline">
+                  {{ t(`accounting.small_assets.status_${it.small_asset.status}`) }}
+                </RouterLink>
+              </div>
+            </td>
             <td class="py-2 px-2 text-right font-mono">{{ it.quantity }}</td>
             <td class="py-2 px-2">{{ it.unit }}</td>
             <td class="py-2 px-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), invoice.currency) }}</td>

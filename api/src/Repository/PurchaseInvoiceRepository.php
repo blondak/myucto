@@ -130,17 +130,33 @@ final class PurchaseInvoiceRepository
 
         // Příznaky pro UI tlačítka „spárovat" (zobrazit jen když existuje protějšek):
         //  - has_advance_candidates    = vyúčtovací faktura bez vazby a existuje nespárovaná záloha
-        //  - has_settlement_candidates = záloha bez vyúčtování a existuje nepropojená finální faktura
+        //                                (zálohová faktura NEBO samostatný DDKP, viz advanceCandidates())
+        //  - has_settlement_candidates = záloha (nebo samostatný DDKP) bez vyúčtování a existuje
+        //                                nepropojená finální faktura
+        //
+        // Kandidáti musí zrcadlit advanceCandidates()/settlementCandidates() — jinak tlačítko
+        // zůstane skryté i tam, kde by párování prošlo. Přesně tohle byla příčina #17: samostatný
+        // DDKP (nákup kartou, bez zálohové faktury) linkAdvance()/advanceCandidates() propojit umí
+        // (viz 7c59a643), ale tenhle příznak počítal jen s document_kind='advance' → tlačítko
+        // „spárovat se zálohou" se u DDKP nikdy nezobrazilo a uživatel neměl jak vazbu založit.
         $row['has_advance_candidates'] = false;
         $row['has_settlement_candidates'] = false;
         $vendorId = (int) ($row['vendor_id'] ?? 0);
-        if (($row['document_kind'] ?? '') !== 'advance') {
+        $documentKind = (string) ($row['document_kind'] ?? '');
+        // "Zálohou" se pro účely párování chová i samostatný DDKP (bez rodičovské zálohy) —
+        // DDKP navázaný NA zálohu (parent_purchase_invoice_id != null) se vyúčtovává přes ni,
+        // proto se sem NEPOČÍTÁ (viz linkAdvance()).
+        $isAdvanceLike = $documentKind === 'advance'
+            || ($documentKind === 'tax_document' && $row['parent_purchase_invoice_id'] === null);
+        if (!in_array($documentKind, ['advance', 'tax_document'], true)) {
             if ($row['advance_purchase_invoice_id'] === null) {
                 $q = $this->db->pdo()->prepare(
                     "SELECT EXISTS (
                               SELECT 1 FROM purchase_invoices pi
                                WHERE pi.supplier_id = ? AND pi.vendor_id = ?
-                                 AND pi.document_kind = 'advance' AND pi.status != 'cancelled'
+                                 AND (pi.document_kind = 'advance'
+                                      OR (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NULL))
+                                 AND pi.status != 'cancelled'
                                  AND pi.id <> ?
                                  AND NOT EXISTS (SELECT 1 FROM purchase_invoices s
                                                   WHERE s.advance_purchase_invoice_id = pi.id)
@@ -149,7 +165,7 @@ final class PurchaseInvoiceRepository
                 $q->execute([$supplierId, $vendorId, $id]);
                 $row['has_advance_candidates'] = (bool) $q->fetchColumn();
             }
-        } elseif ($row['settled_by'] === null) {
+        } elseif ($isAdvanceLike && $row['settled_by'] === null) {
             $q = $this->db->pdo()->prepare(
                 "SELECT EXISTS (
                           SELECT 1 FROM purchase_invoices pi
@@ -160,6 +176,55 @@ final class PurchaseInvoiceRepository
             );
             $q->execute([$supplierId, $vendorId, $id]);
             $row['has_settlement_candidates'] = (bool) $q->fetchColumn();
+        }
+
+        // Upozornění na dokladu se zálohou/DDKP, který zůstává NESPÁROVANÝ, i když k němu
+        // pravděpodobně patří konkrétní nespárovaná faktura téhož dodavatele: dnes se rozdíl
+        // (zaplaceno kartou/zálohou vs. co fakturuje konečná faktura) tiše drží na 314 beze
+        // stopy. U DDKP rovnou spočítá, kolik DPH zbývá doúčtovat na 343 — stejné číslo, které
+        // dnes uživatel dostane až z hlášky advance_settlement_ambiguous při neúspěšném pokusu
+        // o zaúčtování (viz PostingService::appendAdvanceSettlementPurchase).
+        $row['unsettled_notice'] = null;
+        if ($isAdvanceLike && $row['status'] !== 'cancelled' && $row['settled_by'] === null) {
+            $paid = $this->paidAdvanceAmount($id, $supplierId);
+            if ($paid > 0.0) {
+                $candidate = null;
+                $candidatesForNotice = $this->settlementCandidatesFor(
+                    $id, $vendorId, (int) ($row['currency_id'] ?? 0), (float) ($row['total_with_vat'] ?? 0), $supplierId,
+                );
+                foreach ($candidatesForNotice as $c) {
+                    if ($c['document_kind'] === 'invoice') {
+                        $candidate = $c;
+                        break;
+                    }
+                }
+                if ($candidate !== null) {
+                    $remainingVat = $documentKind === 'tax_document'
+                        ? round((float) $candidate['total_vat'] - (float) $row['total_vat'], 2)
+                        : null;
+                    $label = $candidate['varsymbol'] ?? $candidate['vendor_invoice_number'] ?? ('#' . $candidate['id']);
+                    $message = 'Na účtu 314 zůstává z tohoto dokladu otevřených '
+                        . number_format($paid, 2, ',', ' ') . ' Kč. Od stejného dodavatele existuje '
+                        . 'nespárovaná faktura ' . $label . ' (' . number_format((float) $candidate['total_with_vat'], 2, ',', ' ')
+                        . ' Kč) — pravděpodobně k sobě patří, spárujte je tlačítkem výše.';
+                    if ($remainingVat !== null) {
+                        $message .= ' Po spárování zbývá na 343 doúčtovat ' . number_format($remainingVat, 2, ',', ' ')
+                            . ' Kč (DPH faktury ' . number_format((float) $candidate['total_vat'], 2, ',', ' ')
+                            . ' Kč − už uplatněná DPH z DDKP ' . number_format((float) $row['total_vat'], 2, ',', ' ') . ' Kč).';
+                    }
+                    $row['unsettled_notice'] = [
+                        'paid_amount' => round($paid, 2),
+                        'candidate' => [
+                            'id'                    => (int) $candidate['id'],
+                            'varsymbol'             => $candidate['varsymbol'],
+                            'vendor_invoice_number' => $candidate['vendor_invoice_number'],
+                            'total_with_vat'        => (float) $candidate['total_with_vat'],
+                        ],
+                        'remaining_vat_on_343' => $remainingVat,
+                        'message'              => $message,
+                    ];
+                }
+            }
         }
 
         // Bankovní úhrady dokladu — proklik z detailu na příslušný bankovní výpis.
@@ -381,10 +446,15 @@ final class PurchaseInvoiceRepository
                     pii.expense_kind, pii.expense_account_code,
                     pii.accrual_from, pii.accrual_to,
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
-                    vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
+                    vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
+                    sa.id AS small_asset_id, sa.name AS small_asset_name, sa.status AS small_asset_status
                FROM purchase_invoice_items pii
                JOIN vat_rates vr ON vr.id = pii.vat_rate_id
                LEFT JOIN stock_items si ON si.id = pii.stock_item_id
+               -- Karta drobného majetku vzniklá z téhle položky (§DM) — vazba
+               -- purchase_invoice_item_id → small_assets existovala, ale bez ní se karta
+               -- musela dohledávat ručně. Detail dokladu teď rovnou nabídne vyřazení prodejem.
+               LEFT JOIN small_assets sa ON sa.purchase_invoice_item_id = pii.id
               WHERE pii.purchase_invoice_id = ?
               ORDER BY pii.order_index, pii.id'
         );
@@ -2071,9 +2141,25 @@ final class PurchaseInvoiceRepository
     {
         $advance = $this->find($advanceId, $supplierId);
         if ($advance === null) return [];
+        return $this->settlementCandidatesFor(
+            $advanceId, (int) $advance['vendor_id'], (int) $advance['currency_id'],
+            (float) $advance['total_with_vat'], $supplierId,
+        );
+    }
+
+    /**
+     * Jádro {@see settlementCandidates()} bez volání find() — používá i unsettled_notice
+     * v {@see find()} samotném, kde by volání settlementCandidates($id, ...) rekurzivně
+     * zavolalo find($id, ...) znovu (nekonečná rekurze). Volající si vendor/currency/total
+     * nese v ruce (buď z už načteného řádku, nebo z find() ve veřejné metodě výše).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function settlementCandidatesFor(int $advanceId, int $vendorId, int $currencyId, float $totalWithVat, int $supplierId): array
+    {
         $stmt = $this->db->pdo()->prepare(
             "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
-                    pi.status, pi.issue_date, pi.total_with_vat, cur.code AS currency
+                    pi.status, pi.issue_date, pi.total_with_vat, pi.total_vat, cur.code AS currency
                FROM purchase_invoices pi
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
@@ -2087,10 +2173,7 @@ final class PurchaseInvoiceRepository
                        pi.issue_date DESC, pi.id DESC
               LIMIT 50"
         );
-        $stmt->execute([
-            $supplierId, (int) $advance['vendor_id'], $advanceId,
-            (int) $advance['currency_id'], (float) $advance['total_with_vat'],
-        ]);
+        $stmt->execute([$supplierId, $vendorId, $advanceId, $currencyId, $totalWithVat]);
         return array_map(fn (array $r) => [
             'id'                    => (int) $r['id'],
             'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
@@ -2099,6 +2182,7 @@ final class PurchaseInvoiceRepository
             'status'                => (string) $r['status'],
             'issue_date'            => $r['issue_date'] !== null ? (string) $r['issue_date'] : null,
             'total_with_vat'        => (float) $r['total_with_vat'],
+            'total_vat'             => (float) $r['total_vat'],
             'currency'              => (string) $r['currency'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
@@ -2881,6 +2965,14 @@ final class PurchaseInvoiceRepository
             if (isset($row[$f])) $row[$f] = (float) $row[$f];
         }
         $row['is_fixed_asset'] = isset($row['is_fixed_asset']) ? (bool) $row['is_fixed_asset'] : false;
+        // Karta drobného majetku vzniklá z téhle položky (LEFT JOIN v itemsFor()) —
+        // sbal do vnořeného objektu a syrové sa_* sloupce ze čtecího řádku odstraň.
+        $row['small_asset'] = $row['small_asset_id'] !== null ? [
+            'id'     => (int) $row['small_asset_id'],
+            'name'   => (string) $row['small_asset_name'],
+            'status' => (string) $row['small_asset_status'],
+        ] : null;
+        unset($row['small_asset_id'], $row['small_asset_name'], $row['small_asset_status']);
         return $row;
     }
 }

@@ -131,6 +131,11 @@ Vyřazenou nebo prodanou kartu lze vrátit do stavu v používání. Obnovení v
 údaje vyřazení/prodeje na kartě, ale nestornuje zdrojovou fakturu ani jiné
 ruční účetní zápisy. Ty musí účetní posoudit samostatně.
 
+Kartu lze otevřít k prodeji i z opačné strany — z **detailu přijaté faktury**, ze
+které vznikla. U položky s vazbou na kartu se zobrazí její název a stav; u karty
+v používání odkaz **Vyřadit prodejem** otevře v evidenci drobného majetku rovnou
+okno prodeje pro tuto kartu, takže ji není třeba dohledávat ručně v seznamu.
+
 Fyzické smazání používej jen pro chybně založenou kartu. Běžné vyřazení se
 eviduje stavem.
 

@@ -8,7 +8,7 @@
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   smallAssetsApi,
   type SmallAsset,
@@ -24,6 +24,8 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm, btnIconSm } from '@/compone
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -358,7 +360,24 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-onMounted(load)
+// Proklik z detailu přijaté faktury ("Vyřadit prodejem" u položky s kartou drobného
+// majetku, viz InvoiceDetail.vue) — otevře rovnou modal prodeje pro danou kartu, ať ji
+// uživatel nemusí dohledávat ručně v seznamu (task #17). `status=''` obchází výchozí
+// filtr „v užívání", kdyby karta z nějakého důvodu nebyla na první stránce defaultu.
+onMounted(async () => {
+  const sellId = route.query.sell ? Number(route.query.sell) : null
+  if (sellId) filters.status = ''
+  await load()
+  if (sellId) {
+    const card = items.value.find(c => c.id === sellId)
+    if (card && card.status === 'in_use') {
+      openSell(card)
+    } else if (card) {
+      toast.error(t('accounting.small_assets.already_settled'))
+    }
+    router.replace({ query: {} })
+  }
+})
 </script>
 
 <template>

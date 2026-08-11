@@ -1409,19 +1409,41 @@ final class PostingService
             return;
         }
         $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
-        if ($adv === null || (string) ($adv['document_kind'] ?? '') !== 'advance') {
+        if ($adv === null) {
+            return;
+        }
+        $advKind = (string) ($adv['document_kind'] ?? '');
+        // Vyúčtovat lze zálohovou fakturu (advance), ale i SAMOSTATNÝ daňový doklad k platbě
+        // (§28/8 ZDPH — typicky nákup kartou, kdy žádná zálohová faktura nevzniká).
+        // PurchaseInvoiceRepository::linkAdvance() dovoluje navázat oba (viz tamní
+        // $advanceIsStandaloneDdkp) — PostingService je musí rozeznat stejně, jinak
+        // zúčtování finální PF navázané na samostatný DDKP tiše proběhne BEZ zúčtování
+        // 321/314 a zůstatek na 314 zůstane navždy otevřený beze stopy chyby.
+        $advIsStandaloneDdkp = $advKind === 'tax_document' && ($adv['parent_purchase_invoice_id'] ?? null) === null;
+        if ($advKind !== 'advance' && !$advIsStandaloneDdkp) {
             return;
         }
 
-        // Má-li záloha DDKP (daňový doklad k platbě), byla už část 314 vyčerpána o DPH
+        // Je-li záloha (nebo je-li sama zálohou) DDKP, byla už část 314 vyčerpána o DPH
         // (343/314). Automatické zúčtování 321/314 na PLNOU zaplacenou zálohu by pak
-        // přečerpalo 314 do minusu → ve v1 (symetricky k vydané straně) neúčtujeme
-        // automaticky a necháme účetní zúčtovat ručně.
-        if ($this->hasActivePurchaseTaxDocument($supplierId, $advId)) {
+        // přečerpalo 314 do minusu o už uplatněnou daň → ve v1 (symetricky k vydané straně)
+        // neúčtujeme automaticky a necháme účetní zúčtovat ručně. Hláška rovnou spočítá,
+        // kolik daně má na 343 zbýt doúčtovat — "zaúčtuj ručně" bez čísla nutí účetní
+        // dopočítávat totéž z hlavy z dvou různých dokladů.
+        $ddkp = $advIsStandaloneDdkp ? $adv : $this->activePurchaseTaxDocument($supplierId, $advId);
+        if ($ddkp !== null) {
+            $finalVat = abs((float) ($pi['total_vat'] ?? 0));
+            $ddkpVat  = abs((float) ($ddkp['total_vat'] ?? 0));
+            $remaining = round($finalVat - $ddkpVat, 2);
             throw new PostingException(
                 'advance_settlement_ambiguous',
-                'Poskytnutá záloha #' . $advId . ' má daňový doklad k platbě (DDKP) — kombinace '
-                    . 'DDKP + vyúčtování se ve v1 neúčtuje automaticky, zúčtování zálohy zaúčtuj ručně.',
+                ($advIsStandaloneDdkp
+                    ? 'Doklad #' . $advId . ' je samostatný daňový doklad k platbě (DDKP)'
+                    : 'Poskytnutá záloha #' . $advId . ' má daňový doklad k platbě (DDKP)')
+                    . ' — kombinace DDKP + vyúčtování se ve v1 neúčtuje automaticky, zúčtování '
+                    . 'zálohy zaúčtuj ručně. Na 343 zbývá doúčtovat ' . number_format($remaining, 2, ',', ' ')
+                    . ' Kč (DPH finální faktury ' . number_format($finalVat, 2, ',', ' ') . ' Kč − už uplatněná '
+                    . 'DPH z DDKP ' . number_format($ddkpVat, 2, ',', ' ') . ' Kč).',
             );
         }
 
@@ -1586,23 +1608,28 @@ final class PostingService
     }
 
     /**
-     * Má daná poskytnutá záloha (advance) navázaný živý DDKP (daňový doklad k platbě)?
-     * Vazba DDKP → záloha je v parent_purchase_invoice_id (přetíženo dle document_kind,
-     * jako hasActiveTaxDocument na vydané straně přes parent_invoice_id).
+     * Živý DDKP (daňový doklad k platbě) navázaný na danou poskytnutou zálohu jako DÍTĚ
+     * (parent_purchase_invoice_id, přetíženo dle document_kind, jako hasActiveTaxDocument
+     * na vydané straně přes parent_invoice_id). Vrací ID + total_vat (ne jen bool) —
+     * appendAdvanceSettlementPurchase z toho dopočítá, kolik DPH finální faktury ještě
+     * zbývá doúčtovat na 343 nad rámec toho, co DDKP uplatnil už při platbě.
      *
      * „Živý" = NE draft a NE stornovaný — zrcadlo hasActiveTaxDocument. Draft nemá zápis
      * v deníku a z 314 nic neodčerpal, takže kvůli němu nemá co blokovat zúčtování zálohy.
      * Platební vazba (invoice_payments) na přijaté větvi neexistuje, proto jen parent.
+     *
+     * @return array{id:int,total_vat:float}|null
      */
-    private function hasActivePurchaseTaxDocument(int $supplierId, int $advanceId): bool
+    private function activePurchaseTaxDocument(int $supplierId, int $advanceId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM purchase_invoices
+            "SELECT id, total_vat FROM purchase_invoices
               WHERE supplier_id = ? AND parent_purchase_invoice_id = ? AND document_kind = 'tax_document'
                 AND status NOT IN ('draft', 'cancelled') LIMIT 1"
         );
         $stmt->execute([$supplierId, $advanceId]);
-        return $stmt->fetchColumn() !== false;
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : ['id' => (int) $row['id'], 'total_vat' => (float) $row['total_vat']];
     }
 
     /** Kód účtu z kontace (per-tenant override) se strany + fallback. */
@@ -1852,7 +1879,9 @@ final class PostingService
                     " . ($isPurchase ? 'd.is_fixed_asset' : '0 AS is_fixed_asset') . ",
                     " . ($isPurchase ? "'invoice' AS invoice_type" : 'd.invoice_type') . ",
                     " . ($isPurchase ? 'd.document_kind' : "'invoice' AS document_kind") . ",
-                    " . ($isPurchase ? 'd.advance_purchase_invoice_id, NULL AS parent_invoice_id' : 'd.parent_invoice_id, NULL AS advance_purchase_invoice_id') . ",
+                    " . ($isPurchase
+                        ? 'd.advance_purchase_invoice_id, NULL AS parent_invoice_id, d.parent_purchase_invoice_id'
+                        : 'd.parent_invoice_id, NULL AS advance_purchase_invoice_id, NULL AS parent_purchase_invoice_id') . ",
                     " . ($isPurchase ? 'd.vat_deduction, d.vat_deduction_percent' : "'full' AS vat_deduction, 100 AS vat_deduction_percent") . ",
                     " . ($isPurchase ? 'd.received_at, d.received_at_source' : 'NULL AS received_at, NULL AS received_at_source') . ",
                     " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . "
