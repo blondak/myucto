@@ -11,12 +11,13 @@ use Throwable;
  * Režim plánování cronu — čtení a přepínání (migrace 1184).
  *
  *   INDIVIDUAL — 20 samostatných položek v crontabu / Task Scheduleru.
- *                Default a jediné chování do verze, kde vznikl dispatcher.
  *                Průhledné, laditelné po jedné úloze, žádná sdílená komponenta.
+ *                Drží ho každá instalace, která vznikla před migrací 1320.
  *
  *   DISPATCHER — jediná položka `cron-dispatch` každou minutu, která si sama
  *                spočítá, co je na řadě. Míň procesů, ale zavádí jeden bod,
- *                jehož výpadek zastaví všechno.
+ *                jehož výpadek zastaví všechno. Od migrace 1320 je to výchozí
+ *                volba NOVÝCH instalací; existující se nepřepínají.
  *
  * Oba režimy zůstávají plnohodnotné. Přepnutí NENÍ jednosměrné a nemění
  * chování jednotlivých úloh — jen to, kdo je spouští.
@@ -36,7 +37,9 @@ final class CronScheduleMode
     /**
      * Fail-open do INDIVIDUAL: chybí-li tabulka (před migrací) nebo je DB
      * nedostupná, platí původní chování. Tichý přechod na dispatcher u instalace,
-     * která ho nemá naplánovaný, by znamenal, že nepoběží vůbec nic.
+     * která ho nemá naplánovaný, by znamenal, že nepoběží vůbec nic. Platí i po
+     * migraci 1320, která mění jen výchozí HODNOTU v DB — nedostupná DB pořád
+     * musí spadnout do režimu, jehož výpadek zastaví nejmíň.
      */
     public static function current(?PDO $pdo): string
     {
