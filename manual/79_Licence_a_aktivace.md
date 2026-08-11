@@ -110,7 +110,7 @@ serveru myucto.cz a získává kryptograficky podepsané potvrzení s platností
 samo, na pozadí — **nevyžaduje žádné nastavení uživatele**.
 
 > 🛈 **Co se při ověření přenáší.** Jen technické údaje — identifikátor
-> instalace, licenční klíč, verze produktu a souhrnné počty aktivních
+> instalace, licenční klíč, identifikace sestavení a souhrnné počty aktivních
 > uživatelů a firem. **Žádná účetní ani osobní data** se na licenční server
 > neposílají.
 
@@ -159,8 +159,9 @@ se licence prodlužuje sama a kdy je **další platba**. Tlačítkem
 
 > 🛈 **Není to deaktivace.** Licence běží dál až **do konce zaplaceného období**
 > (datum *Platnost do*) a klíč zůstává navázaný na tuto instalaci — jen se už
-> nestrhne další platba. Poměrná část se nevrací. Prodlužování se po zrušení
-> nedá zapnout zpět; obnovíš ho **novým nákupem předplatného**. Detailní
+> nestrhne další platba. Komerční funkce ani přístup k datům se zrušením
+> prodlužování okamžitě nemění. Poměrná část se nevrací. Prodlužování se po
+> zrušení nedá zapnout zpět; obnovíš ho **novým nákupem předplatného**. Detailní
 > pravidla jsou v **Aktivace → Obchodní podmínky**.
 
 ## 79.9 Řešení potíží

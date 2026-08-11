@@ -32,7 +32,7 @@ Detailní popis: [První spuštění (setup wizard)](07_Setup_wizard.md).
 - Nasazuj za **HTTPS** (u Dockeru reverse proxy — viz
   [§ 3.8 HTTPS / TLS terminace](03_Instalace_Docker.md#38-https-tls-terminace)).
 - Zapni **zálohy** a ověř, že běží (Systém → Plánované úlohy).
-- Pinuj konkrétní verzi image a sleduj [Aktualizace](77_Aktualizace.md).
+- Pinuj konkrétní neměnný release tag image a sleduj [Aktualizace](77_Aktualizace.md).
 
 ## 5.4 CLI nástroje
 
@@ -47,19 +47,38 @@ php api/bin/recompute-stats.php      # přepočítá agregované statistiky
 
 ## 5.5 Cron skripty
 
-V `cmd/` jsou připravené `.cmd` (Windows Task Scheduler) i `.sh` (Linux cron) wrappery:
+V `cmd/` jsou připravené `.cmd` (Windows Task Scheduler) i `.sh` (Linux cron)
+wrappery. Zvol **právě jeden** způsob plánování:
+
+- **Jeden dispatcher** — naplánuj pouze `cron-dispatch` každou minutu. Sám
+  spouští úlohy v jejich časech a levnou kontrolou přeskočí ty, které nemají práci.
+- **Jednotlivé úlohy** — naplánuj každý potřebný wrapper samostatně podle tabulky.
+
+Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 
 | Skript | Doporučená frekvence |
 |---|---|
 | `cron-cleanup` | 1× denně 03:00 |
 | `cron-backup` | 1× denně 02:00 |
+| `cron-backup-pdf` | 1× denně 02:30 |
+| `cron-backup-documents` | 1× denně 02:35 |
 | `cron-bank-scan` | každých 30 min |
 | `cron-bank-email-notices` | každých 30 min |
+| `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po–Pá |
+| `cron-send-approval-reminders` | 1× denně 09:15, Po–Pá |
+| `cron-document-request-reminders` | 1× denně 09:30, Po–Pá |
+| `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní odstup |
+| `cron-generate-recurring-invoices` | 1× denně 06:30 |
+| `cron-automation-digest` | každou hodinu v ranním okně 06:00–08:00 |
 | `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
 | `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
+| `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |
+| `cron-license-renew` | 1× denně 05:00 |
+| `cron-version-check` | 1× denně 06:00; kontrola dostupné aktualizace |
+| `cron-dispatch` | každou minutu, pouze v režimu jednoho dispatcheru |
 
 Detaily v `cmd/README.md`.
 

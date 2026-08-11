@@ -174,8 +174,8 @@ php api/bin/reset-mfa.php tvuj@email.cz
 
 Skript vypne TOTP, odvolá všechny passkeys, zruší důvěryhodná zařízení,
 čekající OTP, WebAuthn flow, step-up proofy i **záložní kódy** a invaliduje
-všechny session uživatele. Původní název `reset-2fa.php` zůstává kompatibilním
-aliasem.
+všechny session uživatele. Stejný skript lze spustit také přes alias
+`reset-2fa.php`.
 
 #### Docker
 
@@ -275,7 +275,7 @@ externí účetní — lze zapnout **e-mailové OTP** jako druhý faktor. Kdo ne
 aktivní passkey ani TOTP, dostane po zadání hesla 6místný kód na e-mail a musí
 ho opsat.
 
-Zapnutí v `cfg.php` (výchozí stav je **vypnuto** — nejde o breaking change):
+Zapnutí v `cfg.php` (výchozí stav je **vypnuto**):
 
 ```php
 'auth' => [

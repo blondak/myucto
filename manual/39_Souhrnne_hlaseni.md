@@ -42,14 +42,30 @@ kteří v něm poskytují výhradně služby s kódem `22`. Dodání zboží (`2
 třístranný obchod (`31`) vyžaduje měsíční režim. Aplikace na neslučitelnou kombinaci
 upozorní, export však technicky nezablokuje. Prázdné SH se nepodává.
 
-Generátor vytváří pouze řádnou formu DPHSHV verze 06.01. Opravné či následné
+Generátor vytváří pouze řádnou formu DPHSHV. Opravné či následné
 souhrnné hlášení a zvláštní případy dokonči ručně na portálu podle pokynů správce
 daně. Termín je zpravidla do 25. dne po skončení období.
+
+## Náhled a kontrola před exportem
+
+Po změně období se náhled přepočítá a ukáže počet souhrnných řádků, celkovou
+hodnotu v Kč a termín podání. Tabulka rozepisuje stát, VAT ID, protistranu, kód a
+typ plnění, počet zahrnutých dokladů a jejich součet. Jeden zobrazený řádek tedy
+může zastupovat více faktur; před exportem porovnej počet v tabulce se zdrojovými
+doklady a věnuj pozornost varováním nad náhledem.
+
+Při čtvrtletním režimu se vybírá čtvrtletí, při měsíčním konkrétní měsíc. Pokud
+náhled neobsahuje žádné řádky, ověř nejprve klasifikaci plnění, zemi a VAT ID
+odběratele. Prázdný náhled sám o sobě neprokazuje, že firma neměla vykazované
+plnění.
 
 ## Export a důkaz podání
 
 Stažené XML projde strukturální validací a uloží se do Archivu podání jako stažené.
 Stažení samo neznamená odeslání. Po nahrání na portál zkontroluj jeho výsledek,
 odešli formulář a uschovej potvrzení. Backend umí archivní záznam označit jako
-odeslaný, běžná stránka Archivu podání ale tento krok zatím nenabízí; bez něj
+odeslaný, běžná stránka Archivu podání ale tento krok nenabízí; bez něj
 archiv není spolehlivým dokladem skutečného podání.
+
+Tlačítko pro stažení je dostupné uživateli s právem exportovat výkazy. Uživatel
+bez tohoto práva může náhled zkontrolovat, ale XML nestáhne.

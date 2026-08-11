@@ -131,7 +131,7 @@ Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé sto
 > Současný filtr nerozlišuje vlastní technické uzavření knih od ostatních zápisů se
 > zdrojem `closing`: vyloučí i výsledkové zápisy skladové uzávěrky. Firma se zapnutým
 > skladem proto musí před finalizací DPPO i DPFO v podvojném účetnictví porovnat řádek
-> výsledku hospodaření s výsledovkou a daňový dopad skladu zatím doplnit nebo vysvětlit
+> výsledku hospodaření s výsledovkou a daňový dopad skladu doplnit nebo vysvětlit
 > ručně. Úspěšná XSD validace tuto obsahovou mezeru neodhalí.
 
 Panel uzávěrkových návrhů může upozornit na neodpisovaný drobný majetek, časové rozlišení,
@@ -258,8 +258,8 @@ U DPPO lze v kartě Export nahrát XML DPPDP9, které bylo skutečně podáno ú
 upraveno na EPO. Aplikace nejprve zkontroluje typ formuláře a rok a potom porovná
 formulářové řádky s aktuálním výpočtem. Zobrazí shody, rozdíly a hodnoty přítomné jen
 v podaném souboru. Jde o read-only kontrolu: nahrání nic nezaúčtuje, nepřepíše přiznání
-a soubor samo neoznačí jako přijatý finanční správou. Obdobná importní rekonciliace
-skutečně podaného DPFO, DPHDP3 a KH zatím není k dispozici.
+a soubor samo neoznačí jako přijatý finanční správou. Importní rekonciliace
+skutečně podaného DPFO, DPHDP3 a KH není k dispozici.
 
 ## Roční uzávěrka daňové evidence a snapshot DPFO
 
@@ -312,9 +312,9 @@ k nahrání na ePortál ČSSZ / do datové schránky).
 Pojistné (sociální i zdravotní) se v přehledech zaokrouhluje **na celé koruny nahoru**.
 Shodu s datovou větou ČSSZ lze očekávat jen u podporovaného celoročního režimu.
 
-Odloženo (připravujeme): e-podání pro **zdravotní pojišťovny** (zatím jen PDF pomůcka — ZP
-nemají jednotné veřejné schéma) a přímé odeslání na EPO/ePortál ČSSZ — to zůstává na uživateli.
-Do té doby: stáhnout XML → nahrát na mojedane.gov.cz, resp. ePortál ČSSZ.
+Přehled pro **zdravotní pojišťovny** je pouze PDF pomůcka, protože pojišťovny
+nemají jednotné veřejné schéma. Přímé odeslání na EPO ani ePortál ČSSZ tato
+obrazovka neprovádí: XML stáhni a nahraj na mojedane.gov.cz, resp. ePortál ČSSZ.
 
 Generátor nepokrývá všechny zahraniční příjmy a zápočty zahraniční daně, spolupracující
 osoby, všechny zvláštní přílohy ani neobvyklé režimy. Pokud náhled nebo XSD projde,

@@ -7,29 +7,34 @@ o personální profil a více pracovních vztahů. Nevytváří druhý seznam li
 nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
-> V novém modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
+> **Úplné mzdy jsou testovací alfa a nejsou určené pro produkční zpracování.**
+> V modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
 > účtáren, osobní karty, pracovní vztahy, vstupy, absence, evidence srážek,
 > řízený mzdový běh a archiv výstupů. Zákonné výpočty sociálního a zdravotního
-> pojištění, daně a čisté mzdy jsou napojené do neměnné revize, ale vestavěná
-> pravidla pro rok 2026 zatím nejsou odborně schválená a aktivní. Systém proto
-> výpočet bezpečně zastaví v ruční kontrole. Úplné mzdy, dávková tvorba všech
-> dokumentů a elektronická podání zatím nejsou určeny k ostrému použití.
+> pojištění, daně a čisté mzdy jsou napojené do neměnné revize, ale jejich
+> výsledek, odvody, dokumenty i podání vždy ověř proti jinému důvěryhodnému
+> zdroji. Nepoužívej tento modul jako jediný podklad pro výplatu nebo zákonné
+> podání. Neúplný či nepodporovaný scénář systém zastaví v ruční kontrole.
 > Pro zaúčtování nadále používej [Mzdovou rekapitulaci](57_Mzdy.md).
 
 ## 58.1 Zapnutí pro firmu
 
-V **Firma → Nastavení** je přepínač **Vést mzdy**. Ve výchozím stavu je zapnutý
-a nyní není navázaný na samostatnou licenci. Je-li vypnutý, sekce Mzdy se skryje
-z menu a její přímé adresy nejsou dostupné.
+V **Firma → Nastavení** je přepínač **Vést mzdy**. Je ve výchozím stavu vypnutý,
+není navázaný na samostatnou licenci a doprovází ho výrazné upozornění na
+testovací alfa stav. Je-li vypnutý, sekce Mzdy se skryje z menu a její přímé
+adresy nejsou dostupné. Zapnutí neznamená potvrzení správnosti výpočtů ani
+povolení produkčního použití.
 
-Na přehledu mezd zvolíš první měsíc, který má v budoucnu zpracovat nový modul.
+Na přehledu mezd zvolíš první měsíc, od kterého má firma používat úplný mzdový
+modul. Rok musí být uvedený v matici podporovaného rozsahu; nemusí jít o budoucí
+měsíc.
 Po aktivaci slouží horní část přehledu jako pracovní rozcestník **Tento měsíc**:
 vede přímo na měsíční zadání mezd a odměn, mzdový běh, zaměstnance, platby
 a dokumenty. Technický rozsah podporovaných scénářů zůstává dostupný ve sbalené
 diagnostické části. Starší měsíce mohou zůstat v Mzdové rekapitulaci. Jeden
 měsíc však nelze zpracovat současně oběma cestami.
 
-Rozpracovanou aktivaci lze zrušit, dokud je pouze ve stavu nastavení. Ostrý
+Rozpracovanou aktivaci lze zrušit, dokud je pouze ve stavu nastavení. Aktivní
 začátek se nezruší obyčejným přepínačem, aby nezmizely vazby na uzavřené mzdy,
 platby, dokumenty nebo podání.
 
@@ -43,7 +48,8 @@ Přehled mezd ukazuje podporované roky a schopnosti modulu. Stav má tento výz
 - **Nepodporováno** — funkci nelze použít pro ostrý mzdový běh.
 
 Označení na přehledu je bezpečnostní hranice. Modul nesmí chybějící pravidlo
-nahradit nejbližším rokem nebo odhadem.
+nahradit nejbližším rokem nebo odhadem. Stav **Podporováno** popisuje technicky
+pokrytý scénář, ale neruší testovací alfa označení celého modulu.
 
 ## 58.3 Nastavení zaměstnavatele
 
@@ -644,7 +650,7 @@ a zobrazí konkrétní důvod.
 
 Daňová potvrzení jsou dva samostatné formuláře: `25 5460, MFin 5460 – vzor
 č. 33` pro zálohovou daň a `25 5460/A, MFin 5460/A – vzor č. 12` pro příjmy
-zdaněné srážkou. V této verzi se automaticky vytvářejí pro rok 2026 a českého
+zdaněné srážkou. Automaticky se vytvářejí pro rok 2026 a českého
 daňového rezidenta v podporovaném běžném režimu. Zálohové potvrzení zmrazí
 stav Prohlášení poplatníka i měsíce, ve kterých bylo podepsané; srážkové
 potvrzení uvádí přesné měsíce příjmů. Pro přesná pole tiskopisu musí mít
@@ -655,7 +661,7 @@ také samostatné jméno a příjmení; systém je z celého jména neodhaduje.
 Aplikace jej povolí jen tehdy, když neměnná platební evidence dokládá úplnou
 výplatu všech zahrnutých čistých mezd nejpozději do 31. ledna následujícího
 roku. Chybějící, částečná, pozdní nebo zvrácená úhrada vytvoření zablokuje.
-Stejně bezpečně se odmítnou situace, pro které snapshot zatím nemá všechna
+Stejně bezpečně se odmítnou situace, pro které snapshot nemá všechna
 povinná pole formuláře, například dítě, invalidita, nerezident, podporovaný
 produkt spoření, nepeněžní příjem, doplatek za minulý rok nebo provedené roční
 zúčtování. Údaj se nikdy tiše nedopočítá z dnešní karty zaměstnance.
@@ -679,7 +685,7 @@ pokračující srážky a případné důchodové kategorie před rokem 1993. Č
 srážek se nezadávají — aplikace je přebírá z uzavřené evidence. Každá oprava
 vyžaduje konkrétní důvod a vytvoří novou neměnnou revizi.
 
-Samostatné potvrzení pro Úřad práce (§ 313 odst. 2) zatím zůstává zablokované.
+Samostatné potvrzení pro Úřad práce (§ 313 odst. 2) je zablokované.
 Aplikace v modulu Absence a průměry rozlišuje, zda pro rozhodné čtvrtletí
 chybí schválený snapshot průměrného výdělku, nebo zda snapshot existuje a
 chybí jen ověřený přepočet na čistý měsíční výdělek podle zákona o
@@ -710,7 +716,7 @@ vztahuje i na nezaškrtnuté hodnoty; při každém uložení je proto nutné zn
 výslovně potvrdit, že byly všechny tři údaje ověřeny.
 
 V **Mzdy → Podání a hlášení** lze připravit doplňující údaje zaměstnavatele
-`REGZELDOPL25` ve verzi XSD 1.2. Vyber produkční nebo testovací prostředí a
+`REGZELDOPL25` podle lokálně připnutého oficiálního XSD. Vyber produkční nebo testovací prostředí a
 konkrétní aktivní mzdovou účtárnu. Prostředí jsou striktně oddělená:
 test vyžaduje fiktivní desetimístný variabilní symbol začínající `999`,
 zatímco produkce jej odmítne. Před každou přípravou XML znovu potvrď aktuálnost
@@ -752,7 +758,7 @@ každé stažení používá krátkodobé jednorázové oprávnění.
 
 U schválených běhů může záložka JMHZ nabídnout také **Kontrolní náhled
 PVPOJ**. Zobrazuje vyměřovací základ, pojistné k úhradě, počet zahrnutých osob
-a připnutou verzi XSD; stejný deterministický kontrolní JSON lze stáhnout.
+a identifikaci připnutého XSD; stejný deterministický kontrolní JSON lze stáhnout.
 Náhled vznikne pouze tehdy, když souhlasí neměnný vstup revize, vypočtené
 sociální pojištění, vztahové i osobní součty a odpovídající závazek ČSSZ.
 Viditelné označení **Pouze kontrolní náhled** znamená, že nejde o úplné XML

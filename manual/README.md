@@ -35,12 +35,18 @@ manual/
 # 1. Konverze nových PNG screenshotů na WEBP (smaže PNG po úspěchu)
 php tools/convertImagesToWebp.php
 
-# 2. Regenerace HTML + PDF
+# 2. Regenerace HTML pro lokální kontrolu
 php tools/generateManualHtml.php
-php tools/exportManualToPdf.php
 
 # 3. Otevři v prohlížeči pro kontrolu
 # https://tvoje-domena.cz/manual
+```
+
+PDF se při běžné editaci manuálu negeneruje. Vytváří se při sestavení vydání,
+případně ručně na výslovnou žádost:
+
+```powershell
+php tools/exportManualToPdf.php
 ```
 
 ### Přidání nové kapitoly
@@ -50,7 +56,8 @@ php tools/exportManualToPdf.php
    ### Grafy / ### Prodej / ### Nákup / ### Peníze / ### Dokumenty /
    ### Sklad / ### Daně / ### Účetnictví / ### Nástroje /
    ### Daňová evidence / ### Firma / ### Systém).
-3. `php tools/generateManualHtml.php && php tools/exportManualToPdf.php`.
+3. Spusť `php tools/generateManualHtml.php`. PDF vytvoř jen při sestavení vydání
+   nebo na výslovnou žádost.
 
 ### Reorganizace pořadí
 

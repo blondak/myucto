@@ -105,7 +105,7 @@ Stránka Zisk počítá **živě** z `invoices` / `purchase_invoices` — stejno
 1. **Přiřazuj expense categories** k přijatým fakturám → Náklady podle kategorií ukáže smysluplný rozpad
 2. **Plnit VAT klasifikační kódy** (auto-default už řeší 99% případů) → DPH report v sekci Daně bude přesnější
 3. **Vyrovnávat bank statements** → DSO bude přesné (paid_at = datum úhrady)
-4. **Pravidelné faktury** (`/recurring`) — predikovatelné MRR, plánujeme zobrazit v dalším iter
+4. **Pravidelné faktury** (`/recurring`) — udržuj aktivní šablony aktuální; jejich počet se promítá do KPI a pomáhá odhadnout opakované tržby
 
 ## Zisk vs. Tržby vs. Náklady
 

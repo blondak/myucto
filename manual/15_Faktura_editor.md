@@ -99,8 +99,8 @@ DPH výkazy (přiznání, kontrolní hlášení, kniha DPH) ukazují stejné č�
   řádkového základu.
 - **Předvyplnění per dodavatel:** výchozí režim nové faktury nastavíš v
   **Nastavení → Můj dodavatel → Ceny s DPH** (viz [§ 72.3](72_Multi_supplier.md#723-co-je-per-dodavatel-izolovane)).
-- **Zpětná kompatibilita:** výchozí stav je „bez DPH" a všechny existující
-  faktury zůstávají beze změny.
+- **Výchozí režim:** pokud u dodavatele neurčíš jinak, nová faktura se otevře
+  v režimu „bez DPH". Přepnutí režimu je vždy vědomá volba v editoru.
 
 > 💡 Režim „s DPH" funguje stejně i u **přijatých faktur** (viz [§ 23.2.3](23_Prijate_faktury.md#2323-polozky))
 > a u **šablon pravidelné fakturace** (viz [§ 17.2.2](17_Pravidelne_fakturace.md#1722-sekce-faktura)).

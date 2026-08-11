@@ -59,7 +59,7 @@ Proč to tak je:
 - **inventarizace k rozvahovému dni** (§ 29–30 zákona o účetnictví) se dá doložit
   výpisem daného účtu,
 - **cizoměnové účty se přeceňují automaticky** — jednoměnová analytika už
-  nemíchá měny, takže ji [uzávěrkové přecenění](66_Uzaverka.md) nabídne samo,
+  nemíchá měny, takže ji [uzávěrkové přecenění](68_Uzaverka.md) nabídne samo,
 - **převod mezi vlastními účty** je v deníku vidět (obě nohy jsou různé účty).
 
 V tabulce u každého účtu nastavíš:
@@ -168,7 +168,7 @@ Typy providerů:
 - **Systémový provider** — dodaný aplikací, např. Raiffeisenbank, UniCredit Bank, ČSOB, Česká spořitelna, Fio banka, Banka CREDITAS, MONETA Money Bank nebo Air Bank.
 - **Regex provider** — vlastní provider dodavatele, konfigurovaný v UI.
 
-Předpřipravený společný provider **Česká spořitelna** je nově dodávaný **vypnutý**,
+Předpřipravený společný provider **Česká spořitelna** je ve výchozím stavu **vypnutý**,
 protože nemá vyplněný whitelist odesílatelů (viz *Odesílatel je povinný* níže) a
 bez něj by přijímal avízo od kohokoli. Používáš-li ho, klikni na **Duplikovat**,
 do své kopie doplň skutečnou adresu, ze které ČS avíza posílá, kopii zapni
@@ -385,7 +385,7 @@ plánovaných úloh.
 
 ## 29.8 Automatické zaúčtování bankovních transakcí (jen podvojné účetnictví)
 
-Bankovní výpis (§ 24) i e-mailové avízo (§ 29.1–37.7) řeší jen **párování na
+Bankovní výpis ([kapitola 28](28_Banka.md)) i e-mailové avízo (§ 29.2–29.7) řeší jen **párování na
 faktury**. Transakce, které s fakturou nesouvisí — bankovní poplatky, úroky,
 odvody sociálního a zdravotního pojištění, splátky leasingu, převody mezi
 vlastními účty — potřebují vlastní **účetní zápis** (MD/D dle [Předkontace](69_Ucetni_nastroje.md#693-predkontace)).
@@ -468,7 +468,7 @@ vidíš datum, částku, protistranu, navrhované pravidlo a **kontaci** (MD/D):
   protějšku ukáže, kdy a z jakých účtů byla kontace změněna.
 - Víc řádků najednou vyřídíš přes **hromadné Schválit vybrané**.
 
-Transakce v **cizí měně** se automaticky ani návrhem zatím neúčtují (chybí
+Transakce v **cizí měně** se automaticky ani návrhem neúčtují (chybí
 řešení kurzových rozdílů) — takové řádky nesou štítek **Cizí měna** a řeší se
 ručně v [Předkontace](69_Ucetni_nastroje.md#693-predkontace).
 

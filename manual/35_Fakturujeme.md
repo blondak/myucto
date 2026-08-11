@@ -224,16 +224,17 @@ Aby bylo úplně jasno, kde je hranice:
   souhrnné hlášení, daň z příjmů (DPFO/DPPO, řádné i opravné/dodatečné,
   vč. hospodářského roku)** — jako pomůcka k ověření s účetní
 - Pojistné OSVČ: přehledy sociálního (ČSSZ, včetně XML e-podání) a
-  zdravotního pojištění (zatím PDF pomůcka)
+  zdravotního pojištění (PDF pomůcka)
 
 ### MyÚčto **nedělá**
 
 - IOSS přiznání a automatické podání OSS; MyÚčto připraví kvartální OSS
   přehled a XML `OSSEI1`, ale podání a odbornou kontrolu nechává uživateli
 - Kalkulaci marží, výrobu a kusovníky
-- Mzdy, fakturace s návazností na pracovní smlouvy
+- Produkční zpracování úplných mezd bez nezávislé kontroly; modul
+  [Úplné mzdy](58_Uplne_mzdy.md) je testovací alfa
 - Insolvenční registr, registr ekonomických subjektů
-- E-podání přehledu OSVČ pro zdravotní pojišťovny (zatím jen PDF pomůcka)
+- E-podání přehledu OSVČ pro zdravotní pojišťovny; dostupná je PDF pomůcka
 
 Standardní tok je: **MyÚčto vystaví doklady → vygeneruje výkazy DPH →
 uživatel/účetní jednou měsíčně exportuje (Pohoda XML / Stereo XML / ISDOC) → účetní

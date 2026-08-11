@@ -8,7 +8,7 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 | Směr peněz | Klient → my (příjem) | My → dodavatel (výdaj) |
 | Protistrana | Zákazník (`is_customer=1`) | Dodavatel (`is_vendor=1`) — stejná tabulka klientů, jiný flag |
 | DPH role | Sbíráme od klientů (výstupní DPH) | Odečítáme z dodavatelských (vstupní DPH) |
-| Číslování | Naše `2605001` | Číslo dodavatele (na originálu) + naše interní `PF2605001` (dle daňového typu, viz 10.2.4) |
+| Číslování | Naše `2605001` | Číslo dodavatele (na originálu) + naše interní `PF2605001` (dle daňového typu, viz § 23.2.4) |
 | Status flow | draft → issued → sent → paid | draft → received → booked → paid |
 | Schvalování / odesílání | Ano, klient potvrdí | Ne, doklad jen evidujeme |
 
@@ -16,7 +16,7 @@ V hlavním menu **Přijaté faktury**.
 
 > [!TIP]
 > Samostatné kapitoly k nákupní agendě: [Export přijatých faktur](24_Export_prijatych.md)
-> (naše PDF / ISDOC / Pohoda) a [AI extrakce](25_AI_extrakce.md) (import z PDF přes Claude).
+> (naše PDF / ISDOC / Pohoda) a [AI extrakce](25_AI_extrakce.md) (import z PDF přes nastaveného poskytovatele AI).
 
 ## 23.1 Stavy přijaté faktury
 
@@ -59,7 +59,7 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
   vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
   webroot. Pro nestrukturované PDF lze podle oprávnění použít také
   [AI extrakci](25_AI_extrakce.md).
-- **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat (i kdyby se zpracování v budoucnu změnilo). V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML; originál se nikdy nepřepíše. Formát je univerzální (`source_format`), do budoucna pokryje i další strukturované zdroje.
+- **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat. V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML a originál se nikdy nepřepíše.
 
 > 💡 ISDOC/ISDOCX se importuje při **zakládání nové faktury**. Dropzone na detailu
 > nebo při editaci existující faktury slouží jen k doplnění PDF či fotografie; nový
@@ -88,7 +88,7 @@ Limity:
 |---|---|
 | **Dodavatel** | Vyber z dropdownu (autocomplete). Pokud chybí, klikni „+ Vytvořit nového dodavatele" — využije ARES lookup podle IČO. |
 | **Číslo dokladu dodavatele** | Tak jak je vytištěno na originálu (např. `FA-2026-001`). Max 50 znaků. Unique per (dodavatel, datum vystavení) — nelze importovat 2× stejnou. |
-| **Naše interní číslo** | Volitelné. Pokud necháš prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (např. `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz 10.2.4): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je per měsíc (přeteče na 4+ místa nad 999 dokladů). Šablonu lze změnit v **Nastavení → Číslování faktur → Šablona pro přijatou fakturu** (např. legacy `PF-{YYYY}{MM}-{CCCC}` → `PF-202605-0001`). Při ručním zadání čísla systém hlídá kolize (nepovolí duplicitu) a auto-generátor obsazená čísla přeskakuje. |
+| **Naše interní číslo** | Volitelné. Pokud necháš prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (např. `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz § 23.2.4): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je per měsíc (přeteče na 4+ místa nad 999 dokladů). Šablonu lze změnit v **Nastavení → Číslování faktur → Šablona pro přijatou fakturu** (např. `PF-{YYYY}{MM}-{CCCC}` → `PF-202605-0001`). Při ručním zadání čísla systém hlídá kolize (nepovolí duplicitu) a auto-generátor obsazená čísla přeskakuje. |
 | **Typ dokladu** | Faktura / Doklad o úhradě / Dobropis / Záloha (pro filtrování v seznamu). |
 | **Datum vystavení** | Z faktury. |
 | **DUZP (datum uskutečnění zdanitelného plnění)** | Klíčové pro DPH období. Default = datum vystavení. U **reverse charge** se doklad zařazuje do DPH období právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu); u **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve — editor to připomene hintem. |
@@ -100,7 +100,7 @@ Limity:
 
 > [!NOTE]
 > **Datum přijetí a období odpočtu DPH.** U ručně založené (tzn. **ne** importované)
-> tuzemské přijaté faktury se datum přijetí nově počítá i do určení **období, ve kterém
+> tuzemské přijaté faktury se datum přijetí počítá i do určení **období, ve kterém
 > uplatníš nárok na odpočet DPH** (§ 73 odst. 1 písm. a ZDPH — nárok nelze uplatnit
 > dřív, než doklad fyzicky držíš). Období odpočtu je pozdější z trojice **DUZP / datum
 > vystavení / datum přijetí**. Typický případ: dodavatel pošle doklad s prosincovým
@@ -175,7 +175,7 @@ Oba příznaky jsou vidět i v **detailu** přijaté faktury (box Měna/DPH).
 
 > [!NOTE]
 > **Zaúčtování i u „Bez nároku", „Krácený (§75)" a „Krácený (§76)".** Zaúčtování
-> přijaté faktury do [Účetního deníku](45_Ucetni_denik.md) nově umí zpracovat i doklady
+> přijaté faktury do [Účetního deníku](45_Ucetni_denik.md) umí zpracovat i doklady
 > s nárokem **Bez nároku** (celá částka včetně DPH jde na nákladový účet, žádné 343) a
 > **Krácený (§75)** (na účet 343 jde jen poměrná uplatněná část DPH, zbytek DPH jde
 > spolu se základem do nákladu). U **Krácený (§76)** se do deníku zaúčtuje **celá** DPH
@@ -183,11 +183,11 @@ Oba příznaky jsou vidět i v **detailu** přijaté faktury (box Měna/DPH).
 > jednotlivého zápisu netýká, řeší se souhrnně až v přiznání DPH (ř. 52/53, viz
 > [Výkazy DPH](36_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Kombinace
 > **reverse charge** se **současně** omezeným nárokem (Bez nároku/Krácený §75/Krácený
-> §76) je zatím mimo automatiku — takový doklad je nutné zaúčtovat ručním zápisem
+> §76) se automaticky nezaúčtuje — takový doklad je nutné zaúčtovat ručním zápisem
 > v deníku.
 
 > 💡 **Interní číslo se řídí daňovým typem.** Prefix automaticky generovaného
-> interního čísla (viz 10.2.2) odpovídá těmto dvěma příznakům — **PF/PN** plný
+> interního čísla (viz § 23.2.2) odpovídá těmto dvěma příznakům — **PF/PN** plný
 > nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez
 > nároku. Když u už
 > očíslované faktury daňové uplatnění **změníš**, přepíše se jen **prefix**
@@ -319,7 +319,7 @@ Klíčové principy:
 
 ### 23.2.7 Zaúčtování dobropisu
 
-Přijatý dobropis (typ dokladu **Dobropis**, viz [§ 23.2.2](#2322-povinna-pole)) se dnes
+Přijatý dobropis (typ dokladu **Dobropis**, viz [§ 23.2.2](#2322-povinna-pole)) se
 umí zaúčtovat do [Účetního deníku](45_Ucetni_denik.md) automaticky stejně jako běžná
 faktura — systém pozná opravný doklad (typ Dobropis, nebo záporná celková částka) a
 zápis automaticky **otočí strany MD/Dal** a použije absolutní částku, takže výsledný
@@ -368,7 +368,7 @@ Po uložení / přechodu na detail:
 
 - Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě.
 - Sekce **Originální PDF od dodavatele** — pokud jsi nahrál, můžeš stáhnout zpět.
-- Badge **„ISDOC"** v hlavičce (a akce **Zdrojový doklad** v menu) — u faktur importovaných ze strukturovaného zdroje stáhne původní strojově čitelný originál (důkazní stopa, viz [§ 23.2.1](#2321-drag-drop-pdf)).
+- Badge **„ISDOC"** v hlavičce (a akce **Zdrojový doklad** v menu) — u faktur importovaných ze strukturovaného zdroje stáhne původní strojově čitelný originál (důkazní stopa, viz [§ 23.2.1](#2321-drag-drop-dokladu)).
 - Tlačítka pro **přechod stavu** podle state-machine:
   - Z draft: Označit jako přijaté / Stornovat
   - Z received: Označit jako zaúčtované / uhrazené / Stornovat
@@ -447,7 +447,7 @@ symbolu. Účet se získává v tomto pořadí:
 
 1. **Z ISDOC** — pokud má PDF embedded ISDOC přílohu, vezme se z ní účet/IBAN i VS (zdroj „z ISDOC").
 2. **AI rozpoznání** — když uložený účet není a doklad má PDF, lze ho jednorázově
-   **rozpoznat z faktury** (krátký dotaz na Anthropic Claude jen na platební údaje).
+   **rozpoznat z faktury** (krátký dotaz aktivnímu poskytovateli AI jen na platební údaje).
    Spustí se automaticky při otevření okna (vyžaduje nastavený API klíč — viz
    [AI extrakce](25_AI_extrakce.md)). Proběhne **jen jednou**; pokud účet na dokladu
    není, příště se už neptáme.
@@ -545,17 +545,20 @@ přes `realpath()`). Maximum 500 souborů per běh (DoS protection na velké adr
 
 ## 23.5 Klienti vs. dodavatelé
 
-V tabulce klientů jsme zavedli dva flagy:
+V adresáři protistran se používají dvě role:
 
-- `is_customer` — klient, kterému fakturuješ (default `1` pro všechny existující záznamy)
+- `is_customer` — klient, kterému fakturuješ
 - `is_vendor` — dodavatel, od kterého přijímáš faktury
 
 Některé firmy jsou **současně zákazník i dodavatel** (např. partnerská IT firma, kterou
 fakturuješ za development a od níž kupuješ hosting) — jedna entita = jedna řádka,
 **oba flagy = 1**. ARES synchronizace, kontakty, historie jsou sdílené.
 
-V hlavním menu **Klienti** vidíš defaultně jen `is_customer=1`. V budoucí verzi
-přidáme oddělený view **Dodavatelé** pro `is_vendor=1`.
+V hlavním menu jsou samostatné položky **Klienti** a **Dodavatelé**. V adresáři
+můžeš přepínat karty **Klienti / Dodavatelé / Vše**; při založení z dodavatelské
+karty se role dodavatele předvyplní. Detail jedné protistrany sdílí kontakty,
+ARES údaje i historii, ale přehledy vydaných a přijatých dokladů zůstávají
+oddělené podle role.
 
 ## 23.6 Audit log
 

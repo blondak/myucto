@@ -449,6 +449,6 @@ přepne na firmu a otevře filtrovaný seznam faktur).
 - **Nevynechej Pohoda kódy** pokud plánuješ používat Pohoda XML export.
 - **Per-dodavatel `From:` jméno** je důležitý pro deliverabilitu — klient
   vidí v inboxu „Faktury MyWebdesign" místo „myucto@server-3.hosting.cz".
-- **Sample data se vygenerují jen pro jednoho dodavatele** — pokud máš víc
-  a chceš testovací sadu pro každého, musíš spustit `php api/bin/sample.php`
-  vícekrát s parametrem (TODO).
+- **Ukázková data se generují jen pro první firmu v instalaci.** Příkaz
+  `php api/bin/sample.php` neumí vybrat jinou firmu; pro další firmy založ
+  syntetická testovací data ručně.

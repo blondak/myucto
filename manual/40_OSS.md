@@ -166,11 +166,11 @@ Měnit ho smí jen správce instance a jen z webového rozhraní.
 | **Poznámka** | Volný text |
 | **Původ** | `systémová` (dodaná s aplikací) nebo `vlastní` (přidal uživatel) |
 
-**Kdy do něj sáhnout.** Sazby dodané s aplikací nevyhnutelně stárnou. Když některý
-členský stát sazbu změní dřív, než vyjde nová verze MyÚčta, **zkrať platnost**
-systémové sazby ke dni před účinností změny a **vedle ní založ vlastní** s novým
-procentem. Dokud to neuděláš, bude aplikace u dokladů s novou sazbou hlásit, že
-sazba v číselníku k datu plnění není.
+**Kdy do něj sáhnout.** Jakmile některý členský stát změní sazbu a systémový
+číselník ji ještě neobsahuje, **zkrať platnost** dosavadní systémové sazby ke dni
+před účinností změny a **vedle ní založ vlastní** s novým procentem. Dokud to
+neuděláš, bude aplikace u dokladů s novou sazbou hlásit, že sazba v číselníku k
+datu plnění není.
 
 Systémový řádek nelze přepsat ani smazat — jeho hodnoty používá aktualizační
 migrace k rozpoznání, co je vlastní záznam. Povolené jsou u něj jen dvě akce:
@@ -188,6 +188,12 @@ doklad deklaruje.
 > v číselníku chybí". Znamená, že se po aktualizaci nespustily databázové migrace;
 > spusť je (`php api/bin/migrate.php`). Do té doby se neověří žádný stát a import
 > zahraničních dokladů se vůbec nerozběhne.
+
+Stránka číselníku zároveň kontroluje, zda má každý členský stát k dnešnímu dni
+alespoň jednu platnou sazbu. Pokud zobrazí seznam zemí s chybějícím pokrytím,
+nejde o chybu jednotlivého dokladu: nejprve spusť všechny databázové migrace a
+číselník znovu načti. Přetrvávající mezeru doplň vlastní platnou sazbou až po
+ověření její správnosti. Ručně přidané sazby aktualizační migrace nepřepisuje.
 
 ### 40.2.4 Výchozí nastavení na kartě odběratele
 
@@ -228,7 +234,7 @@ podmínek a OSS je vyloučené:
 | Podmínka | Poznámka |
 |---|---|
 | Chybí nebo je nečitelné **datum plnění** | Bez data nejde ověřit ani platnost registrace, ani platnost sazby |
-| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4023-ciselnik-sazeb-clenskych-statu) |
+| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4023-iselnik-sazeb-clenskych-statu) |
 | Firma **nemá zapnutý OSS režim** | |
 | Datum plnění leží **mimo platnost registrace** | |
 | Doklad je v režimu **přenesené daňové povinnosti** | |
@@ -742,7 +748,7 @@ proti zdrojovému systému — na jednom dokladu jde o haléře, na kvartálním
 o jednotky eur.
 
 Není to chyba importu, je to mez datového modelu. **Při rekonciliaci OSS podání
-proti původnímu systému tyhle rozdíly očekávej** a nehledej za nimi chybu.
+proti zdrojovým dokladům tyhle rozdíly očekávej** a nehledej za nimi chybu.
 
 ### 40.9.4 Země spotřeby se bere z odběratele, ne z měny
 

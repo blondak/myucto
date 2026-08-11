@@ -90,7 +90,7 @@ fakturu do jiné země EU je přitom legislativně povinné jen VAT ID
 (čl. 226 směrnice 2006/112/ES); národní čísla jsou lokální konvence.
 
 Tlačítko **Detaily plátce DPH** u zahraničního DIČ (s jiným prefixem než CZ)
-nově ověřuje přes evropský **VIES** — zobrazí stav registrace k DPH, název
+ověřuje přes evropský **VIES** — zobrazí stav registrace k DPH, název
 a adresu subjektu. Český registr plátců DPH (zveřejněné účty, nespolehlivý
 plátce) se používá dál jen pro česká DIČ.
 
@@ -115,8 +115,7 @@ U každého kontaktu vyplníš:
 **Jak se vybírají příjemci:**
 
 - **Bez kontaktů** vše chodí na **hlavní e-mail** klienta
-  (+ fakturační e-maily zakázky, viz [§ 19](19_Zakazky.md)). Stávající
-  klienti tedy fungují přesně jako dřív. Pokud není vyplněný ani hlavní
+  (+ fakturační e-maily zakázky, viz [§ 19](19_Zakazky.md)). Pokud není vyplněný ani hlavní
   e-mail, odeslání skončí čitelnou validační chybou.
 - **Jakmile má účel přiřazený aktivní kontakt**, použijí se kontakty s tímto
   účelem a hlavní e-mail se už automaticky **nepřidává** (zůstává jen

@@ -126,9 +126,9 @@ a zase **Vrátit**.
 
 Číselník smí měnit jen správce instance, protože je společný pro všechny firmy v ní.
 
-**Kdy do něj sáhnout.** Sazby dodané s aplikací nevyhnutelně stárnou — když některý
-členský stát sazbu změní dřív, než vyjde nová verze MyÚčta, zkrať platnost systémové
-sazby ke dni před účinností a založ vedle ní vlastní s novým procentem. Dokud to
+**Kdy do něj sáhnout.** Když některý členský stát změní sazbu, která v
+systémovém číselníku ještě není, zkrať platnost systémové sazby ke dni před
+účinností a založ vedle ní vlastní s novým procentem. Dokud to
 neuděláš, bude aplikace u dokladů s novou sazbou hlásit, že sazba v číselníku k datu
 plnění není.
 
@@ -532,9 +532,9 @@ Příklady cest:
 - **MailEnable** — `C:\Program Files\Mail Enable\Logging\SMTP\SMTP-Activity-*.log`
   (čte se sada *SMTP-Activity*; *SMTP-Debug* a W3C `ex*` se ignorují)
 
-> 🛈 Podpora dalších serverů (Postfix, Exim…) je připravená architektonicky —
-> stačí doplnit nový konektor; konfigurace zůstává stejná, jen se změní
-> `connector`.
+> 🛈 Uživatelské rozhraní podporuje konektory `hmailserver` a `mailenable`.
+> Pro jiný poštovní server analýzu nezapínej: jeho logy se bez odpovídajícího
+> parseru nenačtou správně.
 
 ## 73.9 Uložené filtry a předvolby zobrazení
 
@@ -602,7 +602,7 @@ vždy aspoň jeden viditelný sloupec navíc k povinným. Tlačítko **Obnovit
 výchozí** dole vrátí sloupce do stavu, v jakém je stránka nabízí ve výchozím
 stavu.
 
-> 🛈 Některé nově přidané „doplňkové" sloupce jsou ve výchozím stavu skryté a
+> 🛈 Některé doplňkové sloupce jsou ve výchozím stavu skryté a
 > zůstanou skryté, dokud si je sám/sama v nabídce **Sloupce** nezaškrtneš —
 > a to i tehdy, pokud sis dřív na stránce sloupce už upravoval(a). Nový
 > doplňkový sloupec se ti tedy sám od sebe „nevnutí" do už nastavené tabulky.

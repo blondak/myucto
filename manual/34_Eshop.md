@@ -12,8 +12,8 @@ zboží** — je to sada **číselníků a nastavení**, které pak využiješ n
 konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie &
 štítky", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
 
-Kapitola má dvě části: **§ 34.1–33.7** popisují číselníky a import na stránce
-`/eshop`, **§ 34.8–33.10** pak cenotvorbu a dodavatele, které se zadávají přímo
+Kapitola má dvě části: **§ 34.1–34.7** popisují číselníky a import na stránce
+`/eshop`, **§ 34.8–34.10** pak cenotvorbu a dodavatele, které se zadávají přímo
 na kartě zboží. Pokud tě zajímá jen nacenění katalogu, začni
 [§ 34.8](#348-cenotvorba).
 
@@ -435,7 +435,7 @@ okamžicích:
 > přirážkou se samy nepřepočtou** — zůstanou na hodnotě z posledního přepočtu.
 > Totéž platí po aktualizaci kurzů u cen v cizí měně. Po naskladnění za jinou
 > nákupní cenu (a po výraznějším pohybu kurzu) je potřeba **projít dotčené
-> karty a kliknout na „Přepočítat"**. Hromadné přecenění zatím v aplikaci není,
+> karty a kliknout na „Přepočítat"**. Hromadné přecenění v aplikaci není,
 > takže se to dělá kartu po kartě.
 
 ### 34.8.8 Co cena obsahuje — DPH a poplatky
@@ -591,4 +591,4 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 | **Import ceníku dodavatele** | Nákupní ceny se zadávají ručně na záložce Dodavatelé |
 | **Automatický přepočet po příjemce / po importu kurzů** | Ruční „Přepočítat" ([§ 34.8.7](#3487-kdy-se-cena-prepocita)) |
 | **Výpočet a reporting marže** | Ručně z nákupní a prodejní ceny |
-| **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je zatím jen označení pro externí systém |
+| **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je jen označení pro externí systém |

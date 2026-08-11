@@ -53,7 +53,9 @@ Vyber soubor (drag & drop nebo klik). Po nahrání:
 
 1. **Kontrola duplicit** — SHA-256 odmítne opakovaný stejný soubor; stabilní otisk
    jednotlivých pohybů navíc přeskočí transakce, které se opakují v překrývajícím
-   se denním a měsíčním výpisu.
+   se denním a měsíčním výpisu. Několik skutečných pohybů se shodným datem,
+   částkou, VS a popisem v jednom souboru se přitom zachová jako samostatné
+   transakce — rozhoduje i pořadí jejich výskytu v souboru.
 2. **Validace bankovního účtu** — server zkontroluje, že číslo účtu z hlavičky
    výpisu patří některé z měn aktuálního dodavatele.
 3. **Parsing transakcí** — přečte všechny řádky.
@@ -64,7 +66,13 @@ Vyber soubor (drag & drop nebo klik). Po nahrání:
    podle bankovní transakce; nižší platba se zapíše jako částečná a sníží
    zbývající částku.
 
-Hláška o výsledku:
+Výsledek rozlišuje počet pohybů nalezených v souboru, počet skutečně založených
+a počet automaticky spárovaných. Jestliže se některé pohyby shodují s již
+evidovanými, zobrazí se samostatné varování s počty **nalezeno / založeno /
+přeskočeno jako duplicita**. U dávkového nahrání se přeskočené pohyby sečtou do
+společného varování. Zkontroluj je, zvlášť pokud nejde o očekávaný překryv výpisů.
+
+Příklad výsledku bez přeskočených duplicit:
 
 ```
 Importováno: 12 transakcí, spárováno: 8, k manuálnímu párování: 4.
@@ -358,7 +366,7 @@ jednotné frontě **Účetnictví → K doúčtování**, i když pro něj nevzn
 > dokladu. Případný přeplatek zůstane na 324/314 do vrácení nebo dalšího vyúčtování;
 > částka se neodvozuje z nominální hodnoty proformy. Kombinace
 > proforma s daňovým dokladem k přijaté platbě **a** vyúčtováním zároveň, nebo
-> proforma s víc než jednou vyúčtovací fakturou, je zatím mimo automatiku — takový
+> proforma s víc než jednou vyúčtovací fakturou, je mimo automatiku — takový
 > zápis zaúčtuj ručně.
 
 > [!NOTE]
@@ -393,7 +401,7 @@ vyrovnání na **548/648**, nikoli jako kurzový rozdíl. Mimo automatiku
 zůstává: **křížová cizí měna** (faktura v EUR placená v USD), **CZK doklad placený cizí
 měnou** a **zálohová (proforma) faktura / zálohová přijatá faktura v cizí měně**.
 Valutová pokladna umí samostatné hotovostní prodeje, nákupy a ostatní pohyby,
-ale úhradu cizoměnové faktury z pokladny zatím záměrně blokuje; viz
+ale úhradu cizoměnové faktury z pokladny záměrně blokuje; viz
 [Pokladna](30_Pokladna.md).
 
 Historické spárované transakce zaúčtuje správce příkazem

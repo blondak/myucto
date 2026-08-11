@@ -166,8 +166,8 @@ Pokud je faktura v jiné měně než CZK, PDF obsahuje navíc:
 
 Kurz se ukládá na fakturu v okamžiku **prvního uložení** a nemění se ani po
 vystavení, ani po editaci items (pokud se nezmění `issue_date` nebo měna).
-Pokud je faktura starší a nemá zafixovaný kurz (legacy data), MyÚčto ho
-**doplní automaticky** při příštím otevření detailu nebo PDF (cache → ČNB →
+Pokud faktura nemá zafixovaný kurz, MyÚčto ho **doplní automaticky** při
+příštím otevření detailu nebo PDF (cache → ČNB →
 poslední známý). Detail viz [§ 15.4.2 Faktura v cizí měně](15_Faktura_editor.md#1542-faktura-v-cizi-mene-eur-usd-prepocet-do-czk).
 
 ### 16.2.2 PDF/A-3b (archivní formát)
@@ -280,7 +280,7 @@ Odchozí e-maily lze volitelně podepisovat S/MIME certifikátem. Nastavuje se v
 Podpis se aplikuje až na sestavený e-mail včetně příloh; příjemce ho ověří v
 běžném e-mailovém klientovi.
 
-Detail nastavení je v [kapitole 49. Elektronické podpisy](74_Elektronicke_podpisy.md).
+Detail nastavení je v [kapitole 74. Elektronické podpisy](74_Elektronicke_podpisy.md).
 
 ## 16.5 Web faktura (trvalý veřejný odkaz)
 
@@ -335,10 +335,10 @@ U odeslaných verzí navíc vidíš **kam to šlo** (seznam příjemců).
 > PDF zachová obě (původní + novou) a u odeslané varianty navíc eviduje,
 > komu konkrétně šla.
 
-> 💡 **Nastavení retention** — historie PDF se nemaže automaticky. Cron
-> `cron-cleanup.sh` standardně odeslané (was_sent=1) verze nikdy nemaže.
-> Pokud potřebuješ ušetřit místo, použij ruční smazání jen u
-> neodeslaných invalidačních verzí (zatím není UI; přes SQL).
+> 💡 **Retence** — historie PDF se nemaže automaticky. Cron `cron-cleanup.sh`
+> odeslané (`was_sent=1`) verze nemaže. Případnou individuální retenční politiku
+> řeš až po ověřené záloze a nikdy neodstraňuj doklad o tom, co klient skutečně
+> obdržel.
 
 ## 16.7 Admin akce nad vystavenou fakturou
 

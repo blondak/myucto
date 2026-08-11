@@ -40,8 +40,8 @@ Používá `docker-compose.production.yml` (image-only, žádný `build:` block)
 takže další compose příkazy vyžadují flag `-f docker-compose.production.yml`
 (viz [§ 3.6 Daily ops](#36-daily-ops)).
 
-> 💡 V produkci pinuj konkrétní verzi — uprav `docker-compose.production.yml`
-> a změň `:latest` na konkrétní tag (např. `:1.7.0`). Update pak přes
+> 💡 V produkci pinuj konkrétní neměnný release tag — uprav `docker-compose.production.yml`
+> a změň `:latest` na konkrétní tag (např. `:X.Y.Z`). Aktualizaci pak proveď přes
 > `cmd/docker-update.{sh,ps1}` (auto-detekuje registry mode = `pull` + `up -d`
 > + migrace).
 
@@ -162,9 +162,9 @@ docker compose up -d
 docker compose exec app php api/bin/migrate.php
 ```
 
-> 🛈 Od image **v3.1.0** se v Dockeru migrace spouští automaticky při startu
-> kontejneru (`docker-entrypoint.sh`). Ruční `php api/bin/migrate.php` zůstává
-> bezpečný idempotentní fallback.
+> 🛈 V Dockeru se migrace spouštějí automaticky při startu kontejneru
+> (`docker-entrypoint.sh`). Ruční `php api/bin/migrate.php` zůstává bezpečný
+> idempotentní fallback.
 
 > ⚠️ Varianta C2 NEgeneruje hesla a secrets automaticky — musíš je do
 > `cfg.docker.php` doplnit ručně. Pro one-click bez klonu repa použij **C1**.
@@ -248,11 +248,12 @@ se výchozí chování.
 `docker-compose.production.yml` (single-volume layout `app-data:/data`). Drží
 log/, storage/, private/dkim/ **i `cfg.local.php`** — per-instance konfigurace
 z setup wizardu tak přežije image update. Viz **[§ 3.5.3 Single-volume úložiště](#353-single-volume-uloziste)** níže.
-Pokud upgraduješ z 3.5.x nebo staršího 3-volume layoutu, `cmd/docker-update.{sh,ps1}`
-detekuje starý layout a před `up -d` automaticky spustí
-`cmd/docker-migrate-volumes.{sh,ps1}` — viz [§ 77.5](77_Aktualizace.md#775-migrace-na-single-volume-layout-35x-360).
+Pokud používáš původní třísvazkové úložiště, `cmd/docker-update.{sh,ps1}` ho
+detekuje a před `up -d` automaticky spustí `cmd/docker-migrate-volumes.{sh,ps1}`.
+Podrobný popis aktuálního ukládání dat je v
+[§ 77.5](77_Aktualizace.md#775-persistentni-data-v-dockeru).
 
-**`cfg.docker.php` mount je nově volitelný** — image obsahuje stub `cfg.php`
+**Mount `cfg.docker.php` je volitelný** — image obsahuje stub `cfg.php`
 (`<?php return [];`) a vše lze předat přes ENV (12-factor). Pro full-ENV deploy
 (Railway, Heroku, Fly.io) bind-mount `./cfg.docker.php:/var/www/html/cfg.php:ro`
 v `docker-compose.yml` zakomentuj nebo odstraň.
@@ -266,12 +267,12 @@ Pokud chybí `secret_encryption_key`, aplikace fallbackuje na HKDF z `app.pepper
 
 ### 3.5.3 Single-volume úložiště
 
-> 🛈 **TL;DR:** od **3.6.0** je single-volume default. Všechen stateful obsah
+> 🛈 **TL;DR:** Výchozí je single-volume layout. Všechen stavový obsah
 > (log/, storage/, private/dkim/ **+ `cfg.local.php`**) leží v jediném
 > persistent volumu `app-data:/data`. Image updaty jsou tak bezpečné —
 > per-instance konfigurace přežije.
 
-**Layout (3.6.0+):**
+**Výchozí layout:**
 
 | Vlastnost     | Single-volume                                |
 |---------------|----------------------------------------------|
@@ -304,11 +305,12 @@ docker compose exec app ls /data                            # → log  storage  
 docker volume ls | grep myucto                           # vidíš pouze app-data + db-data
 ```
 
-#### Pro existující 3-volume instalaci (upgrade z ≤ 3.5.x)
+#### Pro instalaci s původním třísvazkovým úložištěm
 
 **Nikdy nepřepínej layout bez migrace** — aplikace by nahlížela do prázdného
 `/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` to dělá
-automaticky před `up -d`. Detaily v [§ 77.5 Migrace na single-volume layout](77_Aktualizace.md#775-migrace-na-single-volume-layout-35x-360).
+automaticky před `up -d`. Aktuální rozložení dat popisuje
+[§ 77.5 Persistentní data v Dockeru](77_Aktualizace.md#775-persistentni-data-v-dockeru).
 
 Shrnutí: `cmd/docker-migrate-volumes.{sh,ps1}` snapshotne `cfg.local.php`
 z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data`
@@ -508,10 +510,10 @@ schtasks /run /tn "MyUcto Update Watcher"
 
 Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
 
-#### Daily check pro detekci nové verze
+#### Denní kontrola dostupné aktualizace
 
 Watcher jen reaguje na *kliknutí*. Aby admin **viděl**, že je dostupná
-nová verze (badge v patičce + status na `/admin/update`), musí běžet
+aktualizace (badge v patičce + stav na `/admin/update`), musí běžet
 denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](77_Aktualizace.md).
 
 #### Plné detaily
@@ -532,7 +534,7 @@ jen výrazně štíhlejší:
 | RAM aplikace (idle)             | desítky MB (Apache prefork) | **~26 MB** (php-fpm ondemand) |
 | Web server                      | Apache + `.htaccess` | nginx |
 
-GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) je nově **alpine**. Lokální build
+GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) používá **Alpine Linux**. Lokální build
 (`docker compose build`) staví taky alpine z `Dockerfile.alpine`.
 
 ### Migrace existující instalace = nic navíc
@@ -545,16 +547,13 @@ příštím updatu**:
 cmd/docker-update.sh        # registry: pull :latest (= alpine) + recreate; data zůstanou
 ```
 
-### Debian fallback (rollback)
+### Lokální Debian varianta
 
-Kdybys narazil na problém s alpine, vrať se na Debian/Apache (`Dockerfile`
-zůstává v repu, CI ho jen nepublikuje):
+Pokud pro své prostředí potřebuješ Debian/Apache, sestav image lokálně ze
+souboru `Dockerfile`; CI tuto variantu do GHCR nepublikuje:
 
 ```bash
-# registry (GHCR): pinni starší version tag — ≤ v4.31.0 jsou ještě Debian
-#   v docker-compose.production.yml změň :latest na :4.31.0, pak pull + up -d
-
-# source: postav Debian image lokálně z původního Dockerfile
+# source: postav Debian image lokálně z Dockerfile
 docker build -f Dockerfile -t myucto:latest .
 docker compose up -d
 ```
@@ -677,14 +676,16 @@ posílat `X-Forwarded-Proto: https`, jinak vznikne redirect loop.
 
 ### 3.11.5 Aktualizace v GUI
 
-Nová verze = pull novějšího image + recreate, migrace doběhnou při startu:
+Aktualizace stáhne aktuální image a znovu vytvoří kontejner; migrace doběhnou
+při startu:
 
 - **Portainer:** Stacks → MyÚčto → **Update the stack** se zapnutým
   *Re-pull image and redeploy* (u App Template / git stacku *Pull and redeploy*).
 - **Dockge:** tlačítko **Update** u stacku.
 
-> 💡 V produkci radši **pinni konkrétní verzi** (v compose změň
-> `:latest` na `:4.34.3`) a aktualizuj vědomě — u účetní aplikace nedoporučuju
+> 💡 V produkci radši **pinni konkrétní neměnný release tag** (v compose změň
+> `:latest` například na `:X.Y.Z`) a aktualizuj vědomě — u účetní aplikace
+> nedoporučujeme
 > slepý auto-update přes Watchtower na `:latest`. In-app upgrade z UI (Systém →
 > Aktualizace) i host watcher z [§ 3.9](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
 > jsou pro Portainer/Dockge zbytečné — update je tu otázkou jednoho tlačítka.

@@ -110,9 +110,10 @@ konkrétně, o co jde:
      - sessions.auth_method — 21 vyplněných hodnot by se ztratilo
 ```
 
-Nejčastější příčina je **starší verze MyÚčta, než je zdrojová instalace
-MyInvoice**. Aktualizuj MyÚčto a spusť převod znovu. Prázdné tabulky a sloupce
-plné `NULL` převod nezastaví — vypíšou se jen informativně.
+Nejčastější příčina je nekompatibilní nebo neaktuální cílová instalace MyÚčta
+vůči zdrojové instalaci MyInvoice. Aktualizuj MyÚčto a spusť převod znovu.
+Prázdné tabulky a sloupce plné `NULL` převod nezastaví — vypíšou se jen
+informativně.
 
 Vědomé pokračování se ztrátou uvedených dat: `--allow-missing`.
 

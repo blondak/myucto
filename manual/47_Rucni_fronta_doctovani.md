@@ -123,3 +123,8 @@ Prázdná fronta znamená jen to, že systém neeviduje žádný známý přípa
 výše uvedených predikátů. Neodhalí fakturu, smlouvu, závazek, majetek, dohad
 ani časové rozlišení, které v aplikaci vůbec nemá zdrojová data. Nenahrazuje
 inventarizaci, saldokonto ani odborné posouzení účetní.
+
+Prázdný stav nabízí přímé pokračování do bankovní záložky **K zaúčtování** a do
+**Automatu**. Použij je zejména tehdy, když víš o bankovním pohybu, který ve frontě
+není: pravděpodobně už k němu existuje návrh kontace a patří do jedné z těchto
+agend.

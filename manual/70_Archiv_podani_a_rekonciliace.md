@@ -40,7 +40,7 @@ nepřepíše předchozí soubor.
 Přímé rozhraní automaticky uloží podepsaný odchozí balíček, XML odpovědi a
 vrácené potvrzení P7S. Dokumentované odesílací API neposkytuje ZFO ani
 renderovaný PDF opis. PDF nebo P7S/P7M získané později z portálu lze přidat
-přetažením; ZFO zatím není podporovaný typ ručního uploadu.
+přetažením; ZFO není podporovaný typ ručního uploadu.
 
 V nastavení archívu lze vybrat dva kořeny: jeden pro DPH, kontrolní a souhrnné
 hlášení a OSS, druhý pro DPFO a DPPO. Pod kořenem vzniká automaticky strom
@@ -294,9 +294,12 @@ zastoupení, funkci nebo plné moci.
    nebo dodatečné tvrzení.
 
 Odkaz vrácený EPO si ponechá jen aktuální prohlížeč — server ho neukládá do
-databáze ani do logu. Tlačítkem **Pokračovat do EPO** se k němu dá vrátit, když
-se okno zavřelo nebo ho zablokoval blokovač vyskakovacích oken. Nabízí se ale
-jen tehdy, když platí **obojí**:
+databáze ani do logu. Odkaz je **jednorázový**: portál jej spotřebuje prvním
+otevřením. MyÚčto jej proto hned po otevření označí jako použitý a tlačítko
+**Pokračovat do EPO** znovu nenabídne. Pokud podání v otevřeném okně
+nedokončíš nebo okno zavřeš, vytvoř nový odkaz.
+
+Dosud neotevřený odkaz je použitelný jen tehdy, když platí **obojí**:
 
 - od vytvoření neuplynulo víc než **20 minut** — portál mluví o session zhruba
   30 minut od poslední aktivity a tohle je rezerva pod tím;
@@ -305,10 +308,11 @@ jen tehdy, když platí **obojí**:
   otisku, který archiv u snapshotu vede.
 
 Skutečnou životnost odkazu portál neprozrazuje, takže dvacetiminutové okno je
-náš odhad, ne slib. Jakmile kterákoli z podmínek přestane platit, nabídne detail
-podání místo odkazu **Vytvořit nový odkaz EPO**. Použij ho vždycky, když jsi
-podání nedokončil: vytvoření nového odkazu nic nestojí, dosavadní aktivní pokus
-se v historii označí jako zrušený a vznikne nový.
+bezpečnostní rezerva, ne zaručená platnost. Po otevření odkazu, uplynutí tohoto
+okna nebo změně XML nabídne detail podání místo pokračování akci **Vytvořit
+nový odkaz EPO**. Použij ji vždy, když jsi podání nedokončil: vytvoření nového
+odkazu nic neodesílá, dosavadní aktivní pokus se v historii označí jako zrušený
+a vznikne nový.
 
 > [!IMPORTANT]
 > **OSS přiznání (OSSEI1) se přes EPO podat nedá — žádnou z obou cest.** Portál
@@ -384,7 +388,7 @@ a evidence popisuje kapitola [40. Režim OSS](40_OSS.md#408-priznani-a-podani).
 
 MyÚčto provádí interní křížové kontroly DPHDP3 proti KH, souhrnnému hlášení, knize
 DPH a účtu 343. To však není import a porovnání se skutečně podaným XML. U DPFO,
-DPHDP3, KH, sociálního ani zdravotního přehledu zatím obecná rekonciliace proti
+DPHDP3, KH, sociálního ani zdravotního přehledu obecná rekonciliace proti
 podanému souboru v uživatelském rozhraní není.
 
 Pro tato podání uchovej finální XML i potvrzení a při opravě porovnej podané hodnoty

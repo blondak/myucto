@@ -290,7 +290,7 @@ rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
   faktury. Ta vyžaduje saldokontní vypořádání 311/321 v cizí měně a systém ji
   záměrně odmítne místo vytvoření neúplného zápisu.
 - Převod mezi valutovou pokladnou a bankou nebo jinou pokladnou přes účet 261
-  zatím není podporovaný. Různé měny vyžadují doložený kurz a kurzový rozdíl;
+  není podporovaný. Různé měny vyžadují doložený kurz a kurzový rozdíl;
   zaúčtuj je ručně v deníku.
 - Úhradu přijaté faktury z pokladny lze provést jen v plné výši; částečné úhrady přijatých
   faktur hotově systém nepodporuje.

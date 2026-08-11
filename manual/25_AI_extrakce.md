@@ -51,7 +51,7 @@ multi-column servisní faktury) a součet řádků se liší od totalu o víc ne
 Uživatel pak postupně doplní qty/cenu k jednotlivým řádkům a nakonec smaže
 korekční řádek.
 
-### Backfill existujících faktur
+### Dodatečná kontrola uložených faktur
 
 CLI skript `php api/bin/recheck-ai-extracted-invoices.php` projde přijaté
 faktury s PDF přílohou, re-spustí AI extrakci a porovná AI total s aktuálním
@@ -87,6 +87,18 @@ z dokladu, takže zůstane poznat, o co šlo (PHM, poplatky).
 Koncept nese **varování**, že položky nebyly vytěženy — pokud potřebuješ doklad
 rozepsaný, doplň řádky ručně. Doklady, které jednotkové ceny uvádějí, se
 extrahují **beze změny** i nadále včetně rozpadu na položky.
+
+### Kontrola dat a identifikátorů při extrakci
+
+- **Datum objednávky není datum vystavení.** Extraktor přijme jako datum
+  vystavení jen údaj, který je tak na dokladu označený; datum objednávky,
+  expedice, tisku nebo přijetí objednávky za něj nezamění.
+- **Chybějící splatnost se neodhaduje.** Pokud na dokladu datum splatnosti není,
+  výsledek ho nechá neurčené a doplníš ho při kontrole v editoru. Stejně tak se
+  nesnaží „opravovat" DUZP jen proto, že předchází datu vystavení.
+- **IČO s vedoucí nulou zůstává osmimístné.** Vyhledání i párování dodavatele
+  používá normalizovaný osmimístný tvar, takže například `01234567` není
+  zaměněno za jiný identifikátor ani uloženo bez úvodní nuly.
 
 ### Dodavatel se skupinovou registrací k DPH (dvě DIČ na dokladu)
 
@@ -128,8 +140,8 @@ AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI 
 co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci dat:
 
 - **Anthropic Claude** — BYOK (vlastní klíč z `console.anthropic.com`), modely
-  `claude-haiku-4-5` / `claude-sonnet-4-6` / `claude-opus-4-7`. Původní a
-  výchozí volba, na kterou je AI extrakce v celém manuálu (viz výše) primárně
+  `claude-haiku-4-5` / `claude-sonnet-4-6` / `claude-opus-4-7`. Výchozí volba,
+  na kterou je AI extrakce v celém manuálu (viz výše) primárně
   odladěná — umí nativně číst PDF jako dokument (ne jen text/obrázek), takže má
   nejlepší přesnost na vícesloupcových a naskenovaných fakturách.
 - **Azure OpenAI** — vlastní Azure resource (`endpoint` + `deployment` +
@@ -176,7 +188,7 @@ Pod tím je formulář **Přihlašovací údaje — {poskytovatel}**:
 - Tlačítko **Test připojení** ověří klíč/endpoint reálným voláním a nahlásí,
   jaký model odpověděl (nebo chybu). Před uložením se kontroluje i základní
   formát klíče (Anthropic musí začínat `sk-ant-`, OpenAI `sk-`; Gemini přijímá
-  starší standardní i nové autorizační klíče z AI Studio) — ušetří to zbytečný
+  podporované standardní i autorizační klíče z AI Studio) — ušetří to zbytečný
   test s očividně špatně vloženým klíčem.
 - Tlačítko **koš** u nastaveného poskytovatele smaže jeho uložené přihlašovací
   údaje (po potvrzení) — pokud byl zrovna aktivní, extrakce přestane fungovat,
@@ -204,8 +216,8 @@ Ne každý poskytovatel to ale umí stejně:
 |---|---|---|
 | **Azure OpenAI** | Ano | Podle hostname Azure endpointu — pokud obsahuje token EU regionu (`westeurope`, `swedencentral`, `germanywestcentral`, `northeurope`, `francecentral`, `norwayeast`, `switzerlandnorth`, `polandcentral`, `italynorth`, `spaincentral`, `uksouth`, `ukwest`…), region = EU. Jinak platí deklarovaný region dodavatele, ale jen pro **ověřený Azure host** — neplatný/cizí host padá fail-closed na US. |
 | **OpenAI** | Ano | Jen když je **Base URL** nastaveno přesně na `https://eu.api.openai.com` (OpenAI project data residency). Cokoli jiného (včetně prázdného pole = výchozí `api.openai.com`) = US. |
-| **Anthropic Claude** | Ne (v1) | Přímé API v1 nabízí jen US region. |
-| **Google Gemini** | Ne (v1) | Přímé API (AI Studio) je jen US; EU by šlo jen přes Vertex AI regionální endpoint, což zatím nepodporujeme. |
+| **Anthropic Claude** | Ne | Přímé API nabízí jen US region. |
+| **Google Gemini** | Ne | Přímá integrace přes AI Studio používá US; regionální endpoint Vertex AI není součástí této integrace. |
 
 Pokud zaškrtneš **Vynutit EU rezidenci dat** u poskytovatele, který EU neumí
 (Anthropic, Gemini, nebo Azure/OpenAI se špatně nastaveným endpointem), tlačítko

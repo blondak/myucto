@@ -84,23 +84,21 @@ Pokud Android stránku ukončil, neuložená data nelze ze zámku obnovit.
 
 ### Ztratil jsem passkey nebo TOTP zařízení
 
-Použij jinou passkey nebo TOTP. MyÚčto nemá záložní recovery kódy. Pokud
-není dostupný žádný silný faktor, správce spustí CLI rescue:
+Použij jinou passkey, TOTP nebo jeden z dříve uložených **záložních kódů**.
+Každý záložní kód funguje jen jednou; po přihlášení zkontroluj zbývající počet
+a s funkčním silným faktorem si v profilu případně vygeneruj novou sadu.
+
+Pokud není dostupný žádný silný faktor ani záložní kód, správce spustí CLI
+obnovu:
 
 ```bash
 php api/bin/reset-mfa.php tvuj@email.cz
 ```
 
-Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení a čekající
-ověřovací flow a invaliduje všechny session. Kompatibilní alias
-`reset-2fa.php` lze dál použít. Detail viz [§ 76.2.3](76_Bezpecnost.md).
-
-Pokud nemáš shell přístup ke kontejneru/serveru, použij legacy SQL fallback —
-ten ale vypne jen TOTP, passkeys je nutné odvolat zvlášť:
-
-```sql
-UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE email = 'tvuj@email.cz';
-```
+Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení, čekající
+ověřovací procesy i záložní kódy a invaliduje všechny session. Detail včetně
+Docker příkazů je v [§ 76.2.4](76_Bezpecnost.md#7624-obnova-pristupu). Neupravuj
+jen sloupce TOTP ručně v databázi: ponechal bys aktivní další faktory a session.
 
 ### Varování `secret_encryption_key` (špatná délka klíče)
 
@@ -189,7 +187,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ### DKIM podpis se nedaří aktivovat
 
-1. Vygeneruj klíče: viz [76. Bezpečnost § 55.8](76_Bezpecnost.md).
+1. Vygeneruj klíče: viz [§ 76.8](76_Bezpecnost.md#768-dkim-podpis-e-mailu).
 2. Publikuj DNS TXT — počkej 5–60 minut na propagaci.
 3. Ověř DKIM přes [mxtoolbox.com](https://mxtoolbox.com/dkim.aspx).
 4. Až DNS funguje, zapni v `cfg.php → smtp.dkim.enabled => true`.
@@ -215,8 +213,8 @@ nebo nové neznámé rozvržení se neodhaduje pomocí AI a import se odmítne.
   zůstatek.
 - Pokud součet transakcí nesedí na zůstatky na haléř, systém výpis neuloží.
   Nestvrzuj chybějící pohyby ručně; stáhni úplný výpis za stejné období.
-- U nové varianty layoutu přilož k hlášení anonymizovaný vzor bez citlivých
-  údajů nebo popis banky/verze. Originál s čísly účtů neposílej do veřejného issue.
+- U neznámé varianty rozložení přilož k hlášení anonymizovaný vzor bez citlivých
+  údajů nebo přesný popis banky a rozložení. Originál s čísly účtů neposílej do veřejného issue.
 
 ### Auto-matching nefunguje
 
@@ -322,7 +320,7 @@ nenulovým zůstatkem, nikoli všechny faktury ve stavu „nezaplaceno“.
 
 Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
 Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
-311/321 a valutový převod přes 261 zatím nejsou podporované a systém je
+311/321 a valutový převod přes 261 nejsou podporované a systém je
 záměrně blokuje. Proveď doložený ruční zápis v deníku. V daňové evidenci je
 pokladna pouze korunová.
 
@@ -333,6 +331,24 @@ potvrzenou DPA, rezidenční politiku a denní limit. Nepoužitelná odpověď l
 modelu může být jednou zopakována silnějším modelem; pokud ani ta neprojde,
 položka zůstane ruční. AI nikdy nezaúčtuje položku sama. Pokus a jeho výsledek
 jsou uložené v auditní stopě návrhu.
+
+### Úplné mzdy zastavily výpočet v ruční kontrole
+
+Úplné mzdy jsou testovací alfa. Stav **Ruční kontrola** je bezpečnostní výsledek,
+ne technická porucha: pro rozhodné datum může chybět účinný a odborně schválený
+ruleset, úplný personální podklad nebo podporovaný scénář. V **Mzdy →
+Legislativní pravidla** ověř období účinnosti a stav všech dotčených oblastí;
+v detailu revize potom projdi konkrétní blokery. Chybějící rok se nesmí nahradit
+nejbližší sadou pravidel. Výsledek neopravuj ručním přepsáním vypočtených částek
+a nepoužívej jej jako jediný podklad pro výplatu nebo podání.
+
+### Odkaz do EPO po otevření zmizel
+
+To je očekávané. Handoff URL je jednorázová a portál ji spotřebuje prvním
+otevřením; MyÚčto ji proto podruhé nenabídne. Pokud jsi podání v otevřeném okně
+nedokončil, v detailu snapshotu vytvoř **nový odkaz EPO**. Nový odkaz sám nic
+neodesílá. Úspěšné otevření formuláře také není důkaz podání — rozhoduje až
+potvrzení podatelny nahrané nebo převzaté do archivu.
 
 ## 99.7 Výkon
 
@@ -372,7 +388,7 @@ Pokud problém nevyřeší tato kapitola, kontaktuj:
 
 Užitečné pro hlášení:
 
-- Verze (`/api/health` v prohlížeči ukáže)
+- Označení běžícího sestavení (zobrazí `/api/health`)
 - Browser / OS
 - Krok-po-kroku, jak chybu reprodukovat
 - Screenshot

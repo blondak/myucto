@@ -17,18 +17,22 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
 | **[/api/openapi.yaml](/api/openapi.yaml)** | Raw OpenAPI 3.1 | Import do Postmana, Insomnie, Zapier Custom App, Make HTTP modulu |
 
 > [!NOTE]
-> `openapi.yaml` dnes pokrývá i novější agendy nad rámec fakturace a klientů —
+> `openapi.yaml` pokrývá fakturaci a klienty i další dostupné agendy —
 > účetnictví (tagy okolo podvojného účetnictví, účtové osnovy, období a deníku),
 > sklad (skladové karty, pohyby, doklady, inventury), e-shop (katalog zboží,
 > kategorie, číselníky) a klientský portál (agregovaný přehled hospodaření).
 > Detailní chování jednotlivých endpointů popisují kapitoly k dané agendě —
 > tady jde jen o to, že přes REST API se dá automatizovat i tahle část systému.
+> Samotná přítomnost operace ve specifikaci však neznamená, že ji lze zavolat
+> PAT tokenem: popis konkrétní operace může uvádět session-only přístup,
+> superadmina nebo zákaz zápisu přes bearer token.
 
 ---
 
 ## 78.1 Vytvoření tokenu
 
-1. **Systém → API tokeny** (admin) nebo **profil uživatele**.
+1. Otevři položku **API tokeny** v hlavním menu. Každý uživatel spravuje své
+   vlastní tokeny; dostupné firmy a oprávnění se odvozují z jeho účtu.
 2. Klikni **Nový token**, vyplň:
    - **Název** — pojmenuj integraci (např. „Make zapier reporting“).
    - **Dodavatel** — když má účet víc firem, vyber, do které firmy token patří.
@@ -310,8 +314,8 @@ faktury. Pozdější úprava profilu tedy již vystavený doklad nezmění.
   Money S3 XML nebo CSV; `date_by=tax` zařazuje dle DUZP (shodně s výkazy DPH).
   Jde o stejnou logiku jako na obrazovce **Export / Import → Export vystavených**.
 - **`GET /api/v1/invoices/{id}/isdoc`** — ISDOC XML jedné vystavené faktury
-  (koncept nelze, 400). PDF varianta existovala už dřív
-  (`GET /api/v1/invoices/{id}/pdf`).
+  (koncept nelze, 400). PDF je dostupné přes
+  `GET /api/v1/invoices/{id}/pdf`.
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" -OJ \
@@ -331,13 +335,13 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 
 ## 78.14 Co API nepokrývá
 
-- **Admin a settings endpointy** (`/api/admin/*` a `/api/settings/*` mimo
-  veřejný subset — supplier, číselníky) nejsou v `openapi.yaml` - jsou určené
-  pro interní administraci, integrace na nich stavět nemá smysl. Platí to
-  i pro interní podpisové endpointy, například per-dokladový výběr podpisu
-  (`/api/documents/.../signature-selection`).
-- **Webhooks** zatím nejsou — pokud potřebuješ notifikaci o platbě, použij polling
+- **Session-only a administrační endpointy** mohou být v `openapi.yaml`
+  zdokumentované kvůli úplnému kontraktu SPA, ale bearer token je volat nesmí.
+  Poznáš je podle popisu operace a případné chyby `token_endpoint_forbidden`.
+  Externí integraci stav jen na operacích výslovně dostupných pro PAT; interní
+  správu uživatelů, rolí, tokenů a podpisových profilů neautomatizuj.
+- **Webhooks** nejsou podporované — pokud potřebuješ notifikaci o platbě, použij polling
   `/api/v1/invoices?status=paid&from=<last_check>`.
 - **OAuth2** nepodporujeme — PAT je vědomé zjednodušení pro tenhle typ produktu.
-- **Idempotency-Key** zatím není implementován; pokud Make po retry vytváří
+- **Idempotency-Key** není podporován; pokud Make po retry vytváří
   duplicitní záznam, otevři issue.

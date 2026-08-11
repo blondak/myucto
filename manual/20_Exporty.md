@@ -134,7 +134,7 @@ Některé účetní softwary tyto reference zachovávají při importu (Money S3
 Helios). MyÚčto je při [zpětném importu](21_Importy.md) také čte —
 zakázka se podle `project_number` najde nebo automaticky vytvoří.
 
-### 20.3.5 ISDOC v PDF příloze (3.6.2+)
+### 20.3.5 ISDOC v PDF příloze
 
 Samotné PDF je konformní **PDF/A-3b** (ISO 19005-3, viz
 [§ 16.2.2](16_Faktura_PDF.md#1622-pdfa-3b-archivni-format)). Při generování se
@@ -248,7 +248,7 @@ zvolené období. Je určený pro import do **Kastner Stereo** přes volbu
 **Import faktury (XML)**. Výstup používá:
 
 - `SoftwareVendor` a `SoftwareProduct` = `myucto.cz`,
-- `Payment/CurrencyCode` a `Rows/Row/CurrencyCode` s legacy Stereo mapováním
+- `Payment/CurrencyCode` a `Rows/Row/CurrencyCode` s mapováním vyžadovaným Stereo
   `CZK → Kč`; ostatní měny zůstávají jako ISO kód (`EUR`, ...),
 - `Payment/ConstantSymbol` jako prázdný element, pokud faktura konstantní symbol
   neobsahuje.
@@ -258,7 +258,7 @@ bez DPH (`total_without_vat`), `LineVAT` je DPH řádku a `LineNet + LineVAT`
 odpovídá částce řádku s DPH. Souhrny `TaxableTotal`, `VatTotal` a `NetTotal`
 jsou součty těchto hodnot přes všechny položky.
 
-Export v první iteraci zapisuje pevné mapování DPH klasifikací MyÚčto do
+Export zapisuje pevné mapování DPH klasifikací MyÚčto do
 Stereo `TypeOfVAT`. Stereo vyžaduje jeden typ DPH pro celý doklad, proto se
 stejná hodnota zapisuje do `VatInfo/TypeOfVAT` i do všech řádků dokladu. Pokud
 má faktura vyplněný hlavičkový `vat_classification_code`, použije se jako
@@ -276,7 +276,7 @@ s validační chybou.
 | `26` | `UV` |
 
 Volitelné účetní klasifikace Stereo jako `TypeOfOperation`, `Stredisko`, `Vykon`
-nebo `Zakazka` se zatím nezapisují. `TypeOfOperation` není podle XSD povinné a
+nebo `Zakazka` se do exportu nezapisují. `TypeOfOperation` není podle XSD povinné a
 u tuzemského režimu přenesení daňové povinnosti může import Sterea odmítnout,
 pokud hodnota neodpovídá lokálnímu číselníku.
 
@@ -315,8 +315,8 @@ ISDOC export pro EUR fakturu obsahuje:
 ```
 
 Všechny `<…Amount currencyID="EUR">…</…Amount>` zůstávají v EUR. Účetní soft
-si CZK ekvivalent dopočítá z `CurrRate`. Pokud faktura nemá zafixovaný kurz
-(starší data před verzí 1.4 nebo selhal fetch z ČNB), `CurrRate=1` — uživatel
+si CZK ekvivalent dopočítá z `CurrRate`. Pokud faktura nemá zafixovaný kurz,
+například kvůli nedostupnosti ČNB při jeho načítání, export použije `CurrRate=1` — uživatel
 musí v účetním softu kurz ručně doplnit.
 
 ### 20.7.2 Pohoda XML — `inv:foreignCurrency` + `inv:homeCurrency`
@@ -348,7 +348,7 @@ z globálního kurzu.
 - **Konzultuj kurz s účetní** — některé účetní software (zejm. Pohoda) má
   vlastní kurzovní lístek a může při importu kurz přepsat. Pokud chceš mít
   v Pohodě přesný kurz z faktury, nech přepis vypnutý.
-- **Backfill při exportu** — když exportuješ starší fakturu bez kurzu, MyÚčto
+- **Doplnění chybějícího kurzu** — když exportuješ fakturu bez kurzu, MyÚčto
   ho automaticky doplní (cache → ČNB → poslední známý). Když ČNB nedostupné
   a žádný kurz není, v ISDOC dostaneš `CurrRate=1` s varováním.
 

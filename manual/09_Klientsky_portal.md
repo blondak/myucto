@@ -107,7 +107,7 @@ U plátců DPH karta **DPH** ukáže aktuální období, daň na výstupu, daň 
 výslednou daňovou povinnost (nebo nadměrný odpočet) a termín podání. U neplátců
 se místo toho zobrazí informace „Firma není plátce DPH." Vedle karta **Daňové
 termíny** vypisuje blížící se termíny v okně 35 dní dopředu (barevně podle
-závažnosti) — souvisí s [§ 35 Výkazy DPH](36_Vykazy_DPH.md).
+závažnosti) — souvisí s [§ 36 Výkazy DPH](36_Vykazy_DPH.md).
 
 ### 9.3.5 Pruh „Účetní čeká na doklady"
 
@@ -201,10 +201,9 @@ zámek ani jiná omezení navíc.
 
 ## 9.8 Vyžádané doklady od klienta
 
-Nejčastější zdržení měsíční uzávěrky je čekání na doklady od klienta — dřív se
-urgovalo e-mailem mimo systém a nikdo neviděl, co už dorazilo. **Vyžádané
-doklady** řeší tenhle koloběh přímo v aplikaci: účetní založí požadavek, klient
-ho vidí v portálu a doklad rovnou nahraje.
+Nejčastější zdržení měsíční uzávěrky je čekání na doklady od klienta.
+**Vyžádané doklady** drží požadavky i jejich stav přímo v aplikaci: účetní
+založí požadavek, klient ho vidí v portálu a doklad rovnou nahraje.
 
 ### 9.8.1 Účetní strana — Dokumenty → Chybějící doklady
 

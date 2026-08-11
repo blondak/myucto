@@ -51,7 +51,7 @@ Tady nastavíš metadata, která se zkopírují na každou vygenerovanou fakturu
 - **Splatnost** — počet dnů od vystavení
 - **Sleva z celé faktury** — procentuální sleva (0–100 %), kterou zdědí každá
   vygenerovaná faktura. Na faktuře se projeví jako záporná položka „Sleva X %"
-  (po sazbách DPH) — viz § 10.4.1.
+(po sazbách DPH) — viz § 15.4.1.
 - **Kategorie tržby** — pevná kategorie tržby pro všechny
   faktury z této šablony (typicky domény, hosting, licence, paušály). Bez
   výběru (*dle zakázky / zákazníka*) se při generování použije výchozí
@@ -64,8 +64,7 @@ Tady nastavíš metadata, která se zkopírují na každou vygenerovanou fakturu
   se na každou vygenerovanou fakturu — viz [§ 15.2.6](15_Faktura_editor.md#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim).
 - **DUZP** *(plátci DPH)* — režim, kterým se počítá datum uskutečnění
   zdanitelného plnění z `issue_date`:
-    - **Stejné jako datum vystavení** *(default)* — DUZP = vystavení.
-      Zachovává původní chování pro existující šablony.
+    - **Stejné jako datum vystavení** *(výchozí)* — DUZP = vystavení.
     - **Poslední den předchozího měsíce** — typický CZ scénář „fakturuji
       1.6. za květnové služby". Faktura má vystavení 1.6.2026, ale DUZP
       31.5.2026. Měsíc v popiscích položek se synchronizuje k DUZP, takže
@@ -91,7 +90,7 @@ cena/j, sazba DPH). Sazba se bere podle vybraného `vat_rate_id` ze šablony.
 položky zvolíš také zdroj popisu a cenovou politiku:
 
 Napojení na jednoduchý ceník je dostupné jen bez aktivního skladu/e-shopu.
-Po zapnutí skladu se také dříve napojené řádky přestanou přeceňovat z ceníku a
+Po zapnutí skladu se napojené řádky přestanou přeceňovat z ceníku a
 generování pokračuje z posledního uloženého snapshotu. Při následném uložení
 šablony se takový řádek převede na běžnou ruční položku.
 
@@ -119,8 +118,8 @@ snapshotu uložit bez jeho výslovného obnovení.
 
 > 💡 **Neplátce DPH** — pokud je dodavatel neplátce, pravidelná fakturace se chová
 > stejně jako jednorázové vystavení: výběr sazby DPH se v šabloně skryje a každá
-> vygenerovaná faktura je **bez DPH** (0 % „Osvobozeno"). Platí to i pro šablony
-> založené dřív s nominální sazbou — generátor sazbu při vystavení sám sjednotí
+> vygenerovaná faktura je **bez DPH** (0 % „Osvobozeno"). Pokud šablona obsahuje
+> nominální sazbu, generátor ji při vystavení sám sjednotí
 > na 0 %.
 
 #### Režim OSS na položce šablony
@@ -201,9 +200,9 @@ Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY
   spadá do 5/2026, a „Hosting 06/2026" pokud do 6/2026 — bez kumulativního
   driftu. Pattern detektor zvládá `M/YYYY`, `YYYY-MM`, `M.YYYY`, `M-YYYY`
   a varianty; plná data typu `2026-05-15` chrání lookaround a nemění je.
-  Pro nové šablony zvaž **placeholdery období** (viz § 17.2.3) — jsou
+  Přednostně používej **placeholdery období** (viz § 17.2.3) — jsou
   explicitnější (`{MM}/{YYYY}`) a umí víc (roky, čtvrtletí, celá data);
-  tahle volba zůstává pro stávající šablony s prostým `M/YYYY` v textu.
+  volba synchronizace se hodí pro šablony s prostým `M/YYYY` v textu.
 - **Po vygenerování rovnou vystavit** — cron rovnou přidělí číslo faktury
   z šablony číslování dodavatele a zafixuje snapshoty klienta/dodavatele/
   bankovního spojení (status = `issued`). Pokud vypneš, vygeneruje se jen
@@ -211,12 +210,12 @@ Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY
 - **Po vystavení rovnou odeslat klientovi e-mailem** — automatický send PDF
   + e-mailu na klienta a fakturační e-maily zakázky. Vyžaduje předchozí
   volbu (nelze odeslat draft).
-- **Kdy vytvořit koncept** — viz [15.2.5](#1725-otevreny-koncept-prubezny-vykaz-vicepraci).
+- **Kdy vytvořit koncept** — viz [§ 17.2.5](#1725-otevreny-koncept-prubezny-vykaz-vicepraci).
 - **Připomenout dní před vystavením** — jen u režimu „Na začátku období";
   počet dní předem, kdy ti přijde e-mailová připomínka doplnit vícepráce
   (0 = neposílat).
 
-**Default pro nové šablony** je obojí (vystavit + odeslat) zapnuté a režim
+**Výchozí nastavení šablony** má obojí (vystavit + odeslat) zapnuté a režim
 konceptu „Až při vystavení" → plně automatická pravidelná fakturace.
 
 ### 17.2.5 Otevřený koncept (průběžný výkaz víceprací)
@@ -226,7 +225,7 @@ stálý paušál, ke kterému během měsíce přibývá proměnný seznam více
 
 Přepínač **„Kdy vytvořit koncept"** má dvě hodnoty:
 
-- **Až při vystavení** *(default)* — původní chování. Faktura vznikne až
+- **Až při vystavení** *(výchozí)* — faktura vznikne až
   v den vystavení (`next_run_date`) a podle automatizace se rovnou vystaví.
 - **Na začátku období** — cron vytvoří **koncept** faktury (s fixními
   položkami ze šablony) **1. den fakturovaného měsíce**. Koncept pak celý
@@ -313,7 +312,7 @@ Cron v jednom běhu zvládá tři fáze:
    fakturované období, vytvoří koncept (idempotentně — jednou za období).
 2. **Vystavení** — u šablon po `next_run_date` vystaví (režim *Na začátku
    období* uzavře otevřený koncept **den po** konci období; ostatní režimy
-   vygenerují a vystaví přímo v `next_run_date` jako dřív). U režimu *Na začátku
+   vygenerují a vystaví přímo v `next_run_date`). U režimu *Na začátku
    období* cron hned po uzávěrce **rovnou otevře koncept dalšího období**, pokud
    už začalo — takže 1. den měsíce proběhne „uzavři minulé → otevři nové"
    v jednom běhu.
@@ -370,5 +369,6 @@ Pravidelné fakturace mají vlastní REST endpointy pod `/api/recurring/*`:
 | `POST   /api/recurring/{id}/resume` | obnovit |
 | `POST   /api/recurring/{id}/run-now` | manuální spuštění (volitelně `issue_date`) |
 
-Detailní schémata viz [`/api/reference`](../api/reference) (Redoc) nebo
-[`/api/docs`](../api/docs) (Swagger UI, Try it out).
+Detailní schémata najdeš v aplikačních rozhraních
+[`/api/reference`](/api/reference) (Redoc) nebo
+[`/api/docs`](/api/docs) (Swagger UI, Try it out).

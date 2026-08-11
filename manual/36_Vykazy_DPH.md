@@ -240,7 +240,7 @@ vysvětluje [§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
 
 Účtování OSS daně na vlastní účet **345.100** je důvod, proč **zůstatek 343 jde
 s přiznáním k DPH srovnat** — podrobně
-[§ 40.7](40_OSS.md#407-uctovani-oss-dane).
+[§ 40.7](40_OSS.md#407-ctovani-oss-dane).
 
 ## DPH přiznání (DPHDP3)
 
@@ -251,7 +251,7 @@ s přiznáním k DPH srovnat** — podrobně
 - **Toggle Měsíčně / Kvartálně** — override podle `supplier.vat_period`
 - **Month / Year picker** — pro měsíční; **Q1/Q2/Q3/Q4 picker** pro kvartální
 - **Typ podání** — Řádné / Opravné / Dodatečné (viz [níže](#typ-podani-radne-opravne-dodatecne))
-- **Stáhnout XML** — generuje DPHDP3 verze 03.01 pro EPO portál
+- **Stáhnout XML** — vytvoří XML formuláře DPHDP3 pro EPO portál
 
 #### Typ podání — řádné, opravné, dodatečné
 
@@ -414,7 +414,7 @@ ovlivňuje daň z příjmů v daňové evidenci, nikoli období DPH.
 
 | Filtr | Pravidlo |
 |---|---|
-| **Období** | **Vystavené** se řadí podle **DUZP** (`COALESCE(tax_date, issue_date)`) — daň na výstupu vzniká k datu plnění. **Přijaté tuzemské** se řadí podle **nejpozdějšího ze tří dat**: DUZP, datum vystavení, a **datum přijetí** (`received_at`) tehdy, když ho **zadal(a) uživatel** — nárok na odpočet nelze uplatnit dříve, než plátce doklad fyzicky drží (§ 73 odst. 1 písm. a ZDPH). Typicky se to projeví u dokladu se zpětným DUZP, který dorazil až později — faktura pak spadá do měsíce, kdy jsi ji fyzicky/e-mailem dostal(a), ne do měsíce DUZP/vystavení. U **importovaných** dokladů (AI extrakce, ISDOC, iDoklad/Fakturoid, bankovní avízo, scan inboxu) se datum přijetí do řazení nepočítá — import ho plní datem zpracování, ne skutečným přijetím, takže by zařazení jen zkreslilo; u nich platí jen pozdější z DUZP/vystavení jako dřív. Rozhoduje **skutečná změna pole**, ne to, že doklad někdo otevřel a uložil: přeuložení vytěženého dokladu beze změny data přijetí ho ponechá importním, takže upravený i neupravený doklad se stejnými daty skončí ve stejném období. **Přijaté zahraniční reverse charge** (příznak RC + dodavatel mimo CZ — pořízení zboží z JČS, služby z EU/3. země, dovoz) se řadí **podle DUZP** — povinnost přiznat daň (ř. 3–13) vzniká k DUZP bez ohledu na to, kdy doklad dorazil (§ 25 odst. 1, § 24), a pozdní doklad neblokuje ani zrcadlový odpočet ř. 43 (§ 73 odst. 1 písm. b — nárok lze prokázat jiným způsobem). Tuzemský RC (kód 5) zůstává konzervativně na pozdějším z dat. (Zobrazené *Datum plnění* dál nese skutečné DUZP, mění se jen příslušnost k období.) Doklad bez vyplněného DUZP nevypadne. |
+| **Období** | **Vystavené** se řadí podle **DUZP** (`COALESCE(tax_date, issue_date)`) — daň na výstupu vzniká k datu plnění. **Přijaté tuzemské** se řadí podle **nejpozdějšího ze tří dat**: DUZP, datum vystavení, a **datum přijetí** (`received_at`) tehdy, když ho **zadal(a) uživatel** — nárok na odpočet nelze uplatnit dříve, než plátce doklad fyzicky drží (§ 73 odst. 1 písm. a ZDPH). Typicky se to projeví u dokladu se zpětným DUZP, který dorazil až později — faktura pak spadá do měsíce, kdy jsi ji fyzicky/e-mailem dostal(a), ne do měsíce DUZP/vystavení. U **importovaných** dokladů (AI extrakce, ISDOC, iDoklad/Fakturoid, bankovní avízo, scan inboxu) se datum přijetí do řazení nepočítá — import ho plní datem zpracování, ne skutečným přijetím, takže by zařazení jen zkreslilo; použije se pozdější z DUZP a data vystavení. Rozhoduje **skutečná změna pole**, ne to, že doklad někdo otevřel a uložil: přeuložení vytěženého dokladu beze změny data přijetí ho ponechá importním, takže upravený i neupravený doklad se stejnými daty skončí ve stejném období. **Přijaté zahraniční reverse charge** (příznak RC + dodavatel mimo CZ — pořízení zboží z JČS, služby z EU/3. země, dovoz) se řadí **podle DUZP** — povinnost přiznat daň (ř. 3–13) vzniká k DUZP bez ohledu na to, kdy doklad dorazil (§ 25 odst. 1, § 24), a pozdní doklad neblokuje ani zrcadlový odpočet ř. 43 (§ 73 odst. 1 písm. b — nárok lze prokázat jiným způsobem). Tuzemský RC (kód 5) zůstává konzervativně na pozdějším z dat. (Zobrazené *Datum plnění* dál nese skutečné DUZP, mění se jen příslušnost k období.) Doklad bez vyplněného DUZP nevypadne. |
 | **Stav** | Vylučují se `draft` a `cancelled`. U vystavených navíc `proforma` (zálohová faktura není daňový doklad). |
 | **Klasifikace** | Řádek se zařadí podle `vat_classification_code` (item-level override → header → auto-default podle sazby + RC + směru). Řádek bez výsledného kódu se do přiznání nedostane. |
 
@@ -488,9 +488,9 @@ jednotlivém dokladu — kráti se **jedním koeficientem za celou firmu a rok**
 **Nastavení koeficientu.** Bez nastaveného zálohového koeficientu pro daný rok
 nejde doklad s kráceným nárokem §76 **ani zaúčtovat, ani zahrnout do přiznání** —
 systém vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení
-zálohového koeficientu i roční vypořádání je **v tuto chvíli dostupné jen přes
+zálohového koeficientu i roční vypořádání je **dostupné jen přes
 administrátorské API** — obdobně jako [zámek účtování k datu](45_Ucetni_denik.md#459-zamek-uctovani-k-datu),
-samostatná obrazovka v administraci pro tuto akci zatím není:
+samostatná obrazovka v administraci pro tuto akci není:
 
 | Endpoint | Kdo smí | Co dělá |
 |---|---|---|
@@ -553,7 +553,9 @@ Pokud na fakturu/řádek manuálně nevybereš kód, systém **automaticky při�
 - Direction (sale → vystavené kódy, purchase → přijaté kódy)
 - Tax date faktury (pro budoucí změny sazby)
 
-Mapování čte z databáze `vat_classifications` table. Pokud admin v Codebooks tabu **Klasifikace DPH** upraví sazbu (např. 21% → 20% k 1.1.2027), defaulter automaticky chytne novou hodnotu.
+Mapování se čte z číselníku `vat_classifications`. Když administrátor v záložce
+**Klasifikace DPH** nastaví účinnost nové sazby, automatické přiřazení použije
+hodnotu platnou k DUZP dokladu.
 
 U vystavených řádků se sazbou **0 %** se klasifikace záměrně nedoplňuje automaticky.
 Nulová sazba sama nerozlišuje osvobození bez nároku, vývoz, plnění mimo předmět
@@ -649,7 +651,7 @@ Aby v reálně podaném KH seděly sekce, řídí se zařazení dokladů těmito
 | **Období** | `COALESCE(tax_date, issue_date)` v daném měsíci — DUZP, fallback datum vystavení. Doklad **bez DUZP** se zařadí podle data vystavení (nevypadne). |
 | **Stav** | Bez `draft` a `cancelled` (storno je součást auditní stopy, do KH nepatří). |
 | **Práh 10 000 Kč** | Porovnává se **`abs()` celkové částky vč. DPH** — záporný dobropis nad limit (např. −25 000 Kč) jde tedy správně do A.4/B.2 jednotlivě, ne do sumace. |
-| **DIČ protistrany** | Do A.4/B.2 patří jen plnění **nad limit a s DIČ** plátce. Plnění **bez DIČ** (B2C, doklad od neplátce) jde do sumace **A.5/B.3 bez ohledu na částku** — dříve se nad limit bez DIČ tiše zahazovalo. |
+| **DIČ protistrany** | Do A.4/B.2 patří jen plnění **nad limit a s DIČ** plátce. Plnění **bez DIČ** (B2C, doklad od neplátce) jde do sumace **A.5/B.3 bez ohledu na částku**. |
 | **Jen zdanitelná plnění** | Do A.4/A.5/B.2/B.3 patří jen plnění se **zdanitelným základem 21/12 %**. Osvobozená, EU dodání, vývoz a reverse charge (kde je uložená sazba 0) se sem **nezařazují** (netvoří nulové řádky). |
 
 #### Kam který doklad patří
@@ -780,17 +782,19 @@ aplikaci a při další opravě ji porovnej ručně. Archivní snapshot je věrn
 souboru vytvořeného aplikací, nikoli automatickým potvrzením, že právě tento soubor
 byl přijat finanční správou.
 
-## Změna VAT sazby v budoucnu (např. 21% → 20% v 2027)
+## Změna sazby DPH s budoucí platností
 
 Pokud se sazba změní, postupuj:
 
-1. **Codebooks → Sazby DPH:**
-   - U existující CZ-21 nastav `valid_to = 2026-12-31`
-   - Vytvoř novou CZ-20 s `rate_percent = 20.00`, `valid_from = 2027-01-01`
-2. **Codebooks → Klasifikace DPH:**
-   - U kódu "1" (vystavená 21%) — buď uprav `vat_rate` na 20, nebo nech a budou se používat **oba** kódy (jen historicky).
-3. **Pro historické faktury 2026** — sazba 21% zůstane na řádku (snapshot, immutable po vystavení).
-4. **Pro nové faktury 2027+** — systém auto-default najde novou sazbu/kód.
+1. **Číselníky → Sazby DPH:**
+   - u dosavadní sazby nastav **Platí do** na den před účinností změny,
+   - založ novou sazbu s novým procentem a datem **Platí od**.
+2. **Číselníky → Klasifikace DPH:**
+   - u odpovídající klasifikace uprav sazbu, nebo ponech samostatné klasifikace
+     pro dosavadní a novou sazbu.
+3. **Vystavené doklady** si ponechají sazbu uloženou na svých řádcích.
+4. **Doklady s DUZP v nové účinnosti** použijí platnou sazbu a odpovídající výchozí
+   klasifikaci.
 
 ## Časté chyby
 

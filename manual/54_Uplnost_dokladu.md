@@ -109,3 +109,28 @@ nezaúčtované vydané a přijaté doklady a banku bez návrhu bez ohledu na st
 Prázdný výsledek neprokazuje, že v účetnictví nechybí doklad, který do systému
 vůbec nevstoupil. Je to technická kontrola úplnosti vazeb nad dostupnými daty,
 nikoli úplná inventura účetních případů.
+
+## 54.5 Úplnost číselných řad vydaných dokladů
+
+Samostatná stránka **Daně → Úplnost číselných řad** hledá mezery v číslování
+vydaných **faktur a dobropisů**. Zvol rok a u každé nalezené řady uvidíš období,
+rozsah od prvního do nejvyššího použitého pořadového čísla, počet použitých čísel
+a konkrétní chybějící čísla.
+
+Kontrola respektuje nastavení číslování firmy i vlastní šablony jednotlivých
+odběratelů:
+
+- měsíční řady vyhodnotí samostatně po měsících, roční po roce,
+- řadu bez resetu kontroluje přes celou historii bez ohledu na rok vybraný na
+  stránce,
+- pokud faktury a dobropisy skutečně používají shodnou číselnou kostru, posuzuje
+  je jako jednu sdílenou řadu, aby číslo použité dobropisem nevypadalo jako mezera
+  faktur,
+- šablonu bez pořadového zástupného symbolu nelze tímto způsobem zkontrolovat a
+  sestava ji neuvádí.
+
+Sestava je pouze čtecí a čísla sama nedoplňuje ani nepřečísluje. Mezera je signál
+k prověření: dohledávej například smazaný koncept, ručně změněné číslo nebo chybnou
+šablonu. Stornovaný doklad, který v systému zůstal s přiděleným číslem, mezeru
+nevytváří. Výsledek kontroly řad je nezávislý na bankovním párování a na dvou
+kontrolách popsaných výše.

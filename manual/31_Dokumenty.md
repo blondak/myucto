@@ -125,6 +125,34 @@ uživateli nezobrazí v žádném z těchto míst, ani v hromadném ZIP exportu.
 > obě běží současně. Nejdřív tě systém omezí na dokumenty tvé aktuální firmy,
 > teprve uvnitř ní pak na firemní vs. tvoje osobní.
 
+## Vyžádání chybějících podkladů
+
+Stránka **Firma → Žádosti o dokumenty** slouží účetnímu k evidenci podkladů,
+které má dodat klient. Není to další složka DMS: každý řádek je pracovní požadavek
+s povinným popisem a volitelnou částkou, datem účetního případu a termínem dodání.
+Požadavek lze také založit přímo z nespárovaného bankovního pohybu; vazba na pohyb
+pak zůstane zachovaná pro kontrolu úplnosti.
+
+Stav požadavku má tento význam:
+
+- **Vyžádáno** — podklad ještě nebyl doručen; prošlý termín se v seznamu zvýrazní.
+- **Nahráno** — klient v portálu odevzdal PDF. Aplikace ho zpracuje stejnou AI
+  extrakcí jako běžný import, vytvoří koncept přijaté faktury a zobrazí na něj
+  účetnímu odkaz. Nahrání samo nepotvrzuje správnost vytěžených údajů ani kontace.
+- **Vyřešeno** — účetní podklad zkontroloval a požadavek ručně uzavřel. Vyřešený
+  požadavek lze znovu otevřít, například když klient dodal nesprávný soubor.
+
+Seznam lze filtrovat podle stavu a ukazuje počet otevřených požadavků. Účetní nebo
+administrátor může požadavky zakládat, řešit, znovu otevírat a mazat; uživatel jen
+pro čtení je může prohlížet. Klient pracuje pouze se svými požadavky v klientském
+portálu a nemá přístup k účetní správě požadavků.
+
+Otevřený požadavek ve stavu **Vyžádáno** se promítá také do
+[fronty K doúčtování](47_Rucni_fronta_doctovani.md). U bankovního pohybu se jeho
+existence ukáže v [Úplnosti dokladů](54_Uplnost_dokladu.md), ale pohyb z kontroly
+zmizí až po doložení a správném účetním zpracování — samotné založení požadavku ho
+neřeší.
+
 ## Přílohy účetních zápisů (§33a)
 
 Kromě obecného úložiště popsaného v této kapitole má MyÚčto ještě **samostatnou,

@@ -56,7 +56,9 @@ U záloh se neporovnává jen stav dokladu. Systém sleduje skutečnou
 zaúčtovanou platbu a její následné čerpání:
 
 - na **314** je otevřená poskytnutá záloha snížena o zúčtování ve finální
-  přijaté faktuře i o kredit 314 z přijatého daňového dokladu k platbě,
+  přijaté faktuře i o kredit 314 z přijatého daňového dokladu k platbě. Platí to
+  také pro samostatný daňový doklad k platbě použitý jako záloha při nákupu bez
+  samostatné zálohové faktury,
 - na **324** je přijatá platba vydané proformy snížena o daňový doklad k
   přijaté platbě a o vyúčtovací fakturu.
 

@@ -70,9 +70,9 @@ oba štítky.
 Jak oba stavy vznikají a co s každým z nich dělat, popisuje
 [§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
 
-Filtr jde do URL i do uložených filtrů. Starší odkazy a filtry uložené dřív, než měl
-filtr tři hodnoty, se otevřou jako **Nejisté místo plnění (OSS)**, tedy s obojím — nic
-se tím neschová.
+Filtr se zapisuje do URL i do uložených filtrů. Souhrnná volba **Nejisté místo
+plnění (OSS)** zobrazí oba dílčí stavy najednou, takže se žádný nejistý doklad
+neschová.
 
 ## 14.2 Stavy faktur
 

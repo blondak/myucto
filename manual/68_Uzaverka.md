@@ -114,7 +114,7 @@ výsledek hospodaření.
 Uzávěrkový průvodce (backend `ClosingService`) má **deset kroků v pevném, závazném
 pořadí** — každý krok musí být před uzavřením knih buď dokončený (`done`), nebo vědomě
 přeskočený (`skipped`). Devět z nich má ovládání ve webovém průvodci, desátý
-(**Zásoby**) je zatím jen backendový. V levém panelu se dokončený krok značí zelenou
+(**Zásoby**) je pouze backendový. V levém panelu se dokončený krok značí zelenou
 fajfkou, přeskočený pomlčkou a popiskem „přeskočeno":
 
 | # | Krok | Klíč | UI | Podmíněnost |
@@ -130,10 +130,10 @@ fajfkou, přeskočený pomlčkou a popiskem „přeskočeno":
 | 9 | Uzavření knih | `close_books` | ✅ | až po dokončení/přeskočení kroků 1–8 |
 | 10 | Otevření nového roku | `open_next` | ✅ | až po Uzavření knih |
 
-Ve webovém průvodci se zobrazuje **9 z 10** kroků — skladový krok (`stock`) je zatím
+Ve webovém průvodci se zobrazuje **9 z 10** kroků — skladový krok (`stock`) je
 jen backendový, UI jej **nezobrazuje ani neumí spustit**. Firma se zapnutým skladem
-(způsob B) proto standardní cestou v UI uzávěrku nedokončí, dokud toto omezení trvá —
-je nutný správcovský zásah přes podporované API, nebo uzávěrku zatím neuzavírat. Firma
+(způsob B) proto standardní cestou v UI uzávěrku nedokončí — je nutný správcovský
+zásah přes podporované API, jinak uzávěrku neuzavírej. Firma
 bez skladu je tímto omezením nedotčena (krok se sám označí `skipped`).
 
 ### 68.2.1 Krok 1 — Předběžné kontroly
@@ -169,11 +169,10 @@ u dokončeného kroku se zobrazí datum potvrzení.
 > [!NOTE]
 > **Odpisy během uzávěrky.** Tlačítko „Zaúčtovat odpisy" na stránce Majetek funguje jen
 > do stavu období Otevřené — jakmile období přejde do Uzavírá se, stejné tlačítko
-> odpisy dál nezaúčtuje (hlásí neotevřené období). Nad rámec toho teď existuje i
-> zaúčtování odpisů přímo pro tento krok uzávěrky, které umí zaúčtovat i do období ve
-> stavu Uzavírá se — vlastní tlačítko přímo v tomto panelu zatím v UI není, takže
-> v běžném provozu odpisy zaúčtuj na Majetku ještě **před** zahájením uzávěrky, jak je
-> popsáno v [Majetek § 49.6](59_Majetek.md).
+> odpisy dál nezaúčtuje (hlásí neotevřené období). Backend umí zaúčtovat odpisy
+> přímo pro tento krok i do období ve stavu Uzavírá se, ale vlastní tlačítko v panelu
+> není. V běžném provozu proto odpisy zaúčtuj na Majetku ještě **před** zahájením
+> uzávěrky, jak je popsáno v [Majetek § 59.6](59_Majetek.md).
 
 ### 68.2.3 Krok 3 — Kurzové rozdíly
 
@@ -337,7 +336,7 @@ skladových dokladů a inventur, ale účetní musí před spuštěním doložit
 inventuru, ocenění, neidentifikované doklady a posouzení mank a přebytků.
 
 > [!WARNING]
-> Tento krok zatím nemá ovládání ve webovém průvodci. Je-li sklad zapnutý, backend jej
+> Tento krok nemá ovládání ve webovém průvodci. Je-li sklad zapnutý, backend jej
 > vyžaduje před uzavřením knih, takže standardní UI cestou nelze uzávěrku dokončit.
 > Firma bez skladu je tímto omezením nedotčena — krok se označí jako nepoužitelný.
 
@@ -494,7 +493,7 @@ vyžaduje `reports.export:write`.
 > inventurní zápisy, bankovní potvrzení ani jiné podklady. Přiznání k dani je jen
 > **vygenerovaná** sestava (XML nese vlastní varování) — **skutečné podání dokládá až
 > importovaný podaný soubor**, ne balíček (viz křížová kontrola **K9 — rekonciliace
-> přiznání** v [§ 68.7.1](#6871-kontrolni-mapa-k1k10-a-jeji-interpretace)). Případné
+> přiznání** v [§ 68.7.1](#6871-kontrolni-mapa-k1-k10-a-jeji-interpretace)). Případné
 > chybějící/přeskočené sestavy jsou vypsané jako **upozornění** v README balíčku a
 > v logu úlohy. Na rozdíl od Archivu účetnictví nejde o úplnou technickou zálohu ani
 > prostředek obnovy firmy.
@@ -594,7 +593,7 @@ a zdůvodnění podle vnitřní směrnice.
   Při technickém výpadku proto ověř stav kroku a deník i tehdy, když auditní stopa chybí;
   změnu neopakuj naslepo.
 - Do kurzového přecenění nevkládej stejný bankovní analytický účet vícekrát. Backend
-  duplicitu zatím neodmítne a mohl by stejný zůstatek přecenit opakovaně.
+  duplicitu neodmítne a mohl by stejný zůstatek přecenit opakovaně.
 - Znovuotevření uzavřeného období je zablokované, dokud existují zaúčtované
   uzávěrkové/otevírací zápisy — nejprve je nutné vzít zpět kroky *Otevření nového
   roku* a *Uzavření knih* v průvodci.

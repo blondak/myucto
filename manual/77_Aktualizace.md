@@ -1,9 +1,9 @@
-# 77. Aktualizace na novou verzi
+# 77. Aktualizace aplikace
 
-MyÚčto.cz denně kontroluje GitHub Releases API a v Systém → **Aktualizace**
-(jen admin) zobrazí aktuální i poslední dostupnou verzi spolu s release
-notes. Aplikaci se updatuje buď z UI (jedním tlačítkem), nebo ručně přes
-shell — záleží na typu instalace.
+MyÚčto.cz kontroluje GitHub Releases API a v **Systém → Aktualizace**
+(jen superadmin) zobrazí běžící sestavení, dostupnou aktualizaci a její poznámky.
+Aplikaci lze aktualizovat z uživatelského rozhraní nebo provozním skriptem;
+konkrétní postup závisí na typu instalace.
 
 ## 77.1 Co všechno se aktualizuje
 
@@ -15,15 +15,16 @@ Aktualizace zahrnuje všechny tři vrstvy aplikace:
 - **Frontend (Vue)** — `web/dist/` (Vite produkční build).
 - **Manuál** — `manual/generated/*.html` + `manual/manual.pdf`.
 
-Zachovají se: `cfg.php`, `cfg.local.php`, `private/`, `storage/`, `log/` —
-tj. všechno, co obsahuje konfiguraci a uživatelská data. Migrace nikdy
-nepřepisují existující data, jen přidávají sloupce/tabulky/indexy.
+Zachovají se `cfg.php`, `cfg.local.php`, `private/`, `storage/` a `log/`, tedy
+konfigurace a uživatelská data mimo distribuční balíček. Databázové migrace
+mohou schéma i uložená data řízeně převádět, proto před aktualizací vždy
+zálohuj databázi i datový adresář.
 
-> 🛈 Aktualizace verze se nedotýká licence — ta je vázaná na instalaci a
+> 🛈 Aktualizace aplikace se nedotýká licence — ta je vázaná na instalaci a
 > zůstává aktivní přes upgrady. Správu licence a předplatného popisuje
 > [79. Licence a aktivace](79_Licence_a_aktivace.md).
 
-## 77.2 Daily check — jak to funguje
+## 77.2 Pravidelná kontrola — jak funguje
 
 Cron skript `api/bin/cron-version-check.php` se spouští 1× denně, volá
 GitHub API a cachuje výsledek do tabulky `app_meta` (klíče
@@ -42,21 +43,21 @@ blocking síťový call při každém načtení stránky.
 Pokud cron nenastavíš, kontrola se nikdy nespustí — admin musí kliknout
 **„Zkontrolovat teď"** v UI.
 
-## 77.3 Footer aplikace + badge nové verze
+## 77.3 Patička aplikace a upozornění na aktualizaci
 
-V patičce každé stránky vidíš `vX.Y.Z` — to je verze, která teď běží.
-Pokud je k dispozici nová verze a jsi přihlášený jako admin, badge
-**`v2.5.0`** vedle ní je klikatelný odkaz na **Systém → Aktualizace**.
+V patičce každé stránky vidíš označení právě běžícího sestavení. Pokud je
+k dispozici aktualizace a jsi přihlášený jako superadmin, zobrazí se vedle něj
+klikací upozornění vedoucí do **Systém → Aktualizace**.
 
-Neadminové vidí jen verzi bez badge (badge je čistě admin signál — běžný
-uživatel s upgradem stejně nic neudělá).
+Ostatní uživatelé vidí jen označení běžícího sestavení; upozornění ani ovládání
+aktualizace nemají k dispozici.
 
 ## 77.4 Aktualizace v UI — Docker
 
-V **Systém → Aktualizace** klikni na **„Aktualizovat na vX.Y.Z"**.
+V **Systém → Aktualizace** klikni na tlačítko **Aktualizovat**.
 Aplikace zapíše flag soubor `upgrade-requested.json` **uvnitř kontejneru**
-do `${MYINVOICE_DATA_DIR}/storage/` (default `/data/storage/` od 3.6.0;
-ve starších 3-volume instalacích `/var/www/html/storage/`) a UI začne pollovat.
+do `${MYINVOICE_DATA_DIR}/storage/` (ve standardní Docker instalaci
+`/data/storage/`) a UI začne sledovat stav.
 **Vlastní
 upgrade ale provádí host-side watcher** — proces běžící mimo container,
 který má přístup k `docker compose` na hostu a přes `docker compose exec`
@@ -177,83 +178,32 @@ docker compose -f docker-compose.production.yml exec app rm -f storage/upgrade-r
 
 (Pokud nepoužíváš production compose, vynechej `-f docker-compose.production.yml`.)
 
-## 77.5 Migrace na single-volume layout (3.5.x → 3.6.0)
+## 77.5 Persistentní data v Dockeru
 
-> ⚠️ **Tohle je breaking změna pro existující Docker instalace 3.5.x a starší.**
-> Default Compose layout se mění ze 3-volume (`app-log` + `app-storage` + `app-private`)
-> na **single-volume** (`app-data:/data` + `MYINVOICE_DATA_DIR=/data`). Migrace
-> proběhne **automaticky** při běžném `docker-update.{sh,ps1}` — nemusíš dělat
-> nic navíc.
+Standardní Compose konfigurace ukládá stav aplikace do jediného volume
+`app-data:/data` a nastavuje `MYINVOICE_DATA_DIR=/data`. V něm musí zůstat
+`cfg.local.php`, `log/`, `storage/` a `private/`; databáze používá samostatný
+volume. Aktualizace image ani znovuvytvoření aplikačního kontejneru proto
+nesmí tyto soubory odstranit.
 
-**Proč ta změna:** v 3-volume layoutu byl soubor `cfg.local.php` (per-instance
-overrides z setup wizardu — `app.url`, MFA politika) v ephemeral container
-filesystému a `docker-update.sh` ho při recreate kontejneru smazal. Důsledek
-(reportovaný v [issue #23](https://github.com/radekhulan/myinvoice/issues/23)):
-po updatu `Origin` mismatch a všechny mutace v UI dostaly 403. Single-volume
-layout drží `cfg.local.php` v perzistentním `/data` volumu, takže image
-updaty jsou bezpečné.
+Před aktualizací ověř:
 
-### Co dělá `docker-update.{sh,ps1}` na 3.6.0
+1. `docker compose config` ukazuje volume `app-data` připojený do `/data`;
+2. datový volume i databáze jsou zahrnuté v záloze;
+3. `cfg.local.php` neleží pouze v zapisovatelné vrstvě běžícího kontejneru;
+4. na hostu je dost místa pro nový image i zálohu.
 
-1. `git pull` (source mode) nebo `docker compose pull` (registry mode).
-2. **Detekuje** existující 3-volume volumes (`<project>_app-log`, `_app-storage`,
-   `_app-private`) a absenci nového `<project>_app-data` → vypíše prominentní
-   banner a automaticky spustí `cmd/docker-migrate-volumes.{sh,ps1}`.
-3. Migrace:
-   - `docker cp` snapshotne `cfg.local.php` z běžícího 3.5.x kontejneru,
-   - `docker compose down` (DB volume `db-data` zůstává),
-   - alpine sidecar `cp -a` přepíše `log/`, `storage/`, `private/` ze 3 starých
-     volumes do nového `app-data:/data`,
-   - obnoví `cfg.local.php` v `/data/cfg.local.php` (přežijí `app.url` a
-   nastavení MFA),
-   - `docker compose up -d` na novém layoutu.
-4. **Staré volumes nemaže** — vypíše `docker volume rm` příkazy. Smaž je
-   až po ověření, že nová instalace vidí faktury / uploady / sessions.
-
-### Ruční migrace (pokud nepoužíváš docker-update)
-
-```bash
-# Linux / macOS
-cd /opt/myucto
-git pull --ff-only                # přinese nový docker-compose.yml (single-volume)
-bash cmd/docker-migrate-volumes.sh  # snapshotne cfg.local.php, zkopíruje data, up -d
-```
-
-```powershell
-# Windows
-cd C:\inetpub\myucto
-git pull --ff-only
-.\cmd\docker-migrate-volumes.ps1
-```
-
-Pro registry mode (jen `docker-compose.production.yml`, bez `.git`) si stáhni
-nové compose soubory:
-
-```bash
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-migrate-volumes.sh
-chmod +x docker-migrate-volumes.sh
-./docker-migrate-volumes.sh
-```
-
-### Idempotence + recovery
-
-Skript je idempotentní — opětovné spuštění detekuje, že staré volumes
-už neexistují (nebo že nový volume už obsahuje data) a jen vypíše stav.
-
-Pokud něco selže před `docker volume rm`, **stará data jsou pořád celá**
-v `<project>_app-log/storage/private` — ručně je restoreneš přes:
-
-```bash
-docker run --rm -v myinvoice_app-storage:/old:ro -v myinvoice_app-data:/new alpine \
-  sh -c "cp -a /old/. /new/storage/"
-```
+Aktualizační skript umí rozpoznat instalaci se samostatnými volumes pro log,
+storage a private data a před pokračováním spustí převod přes
+`cmd/docker-migrate-volumes.ps1` nebo `cmd/docker-migrate-volumes.sh`. Zdrojové
+volumes po převodu nemaže. Odstraň je až po ověření přihlášení, konfigurace,
+faktur, nahraných souborů a běhu naplánovaných úloh v aktuálním kontejneru.
 
 ## 77.6 Aktualizace v UI — nativní instalace
 
 Nativní deployment (sdílený hosting / VPS bez Dockeru) se aktualizuje
 z UI stejně jako Docker — jedním tlačítkem. V **Systém → Aktualizace**
-klikni na **„Aktualizovat na vX.Y.Z"**.
+klikni na **Aktualizovat**.
 
 Aplikace stáhne **production bundle** z GitHub release
 (`myucto-X.Y.Z.tar.gz`), ověří jeho SHA-256, nasadí ho přes instalaci
@@ -389,7 +339,6 @@ nová verze, můžeš pollovat veřejný endpoint:
 curl -s https://myucto.tvuj-server.cz/api/version | jq
 ```
 
-Vrátí `{ "current": "3.0.0", "latest": "3.1.0", "has_update": true,
-"release_url": "https://github.com/.../v3.1.0" }`. Tohle je veřejný
-endpoint bez auth, ale stejná data vidí kdokoliv s přístupem k aplikaci
-ve footru.
+Vrátí aktuální označení, poslední dostupné označení, příznak `has_update`
+a odkaz `release_url`. Jde o veřejný endpoint bez autentizace; stejné základní
+údaje může vidět kdokoli s přístupem k aplikaci v patičce.

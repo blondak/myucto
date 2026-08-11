@@ -87,7 +87,7 @@ automaticky ke každému release tagu a obsahuje hotové `api/vendor/`,
 potřeba** (přeskočíš sekce 4.3 frontend/manuál i 4.4).
 
 ```bash
-TAG=4.30.1
+TAG=X.Y.Z
 curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
 sha256sum -c myucto-$TAG.tar.gz.sha256   # ověř integritu
 tar -xzf myucto-$TAG.tar.gz --strip-components=1 \
@@ -130,7 +130,7 @@ php api/bin/migrate.php
 (viz [4.6](#46-alternativa-hotovy-balicek-bez-buildu)) a spusť migraci:
 
 ```bash
-TAG=4.30.1
+TAG=X.Y.Z
 curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
 sha256sum -c myucto-$TAG.tar.gz.sha256
 tar -xzf myucto-$TAG.tar.gz --strip-components=1 \

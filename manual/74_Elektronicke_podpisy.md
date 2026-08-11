@@ -406,5 +406,5 @@ Nejsou součástí veřejného `/api/v1` subsetu a nejsou popsané v
 `api/openapi.yaml`.
 
 Veřejné endpointy pro stažení nebo odeslání PDF vrací dokument podle aktuální
-konfigurace podpisů, ale samotná správa podpisových profilů zatím není veřejné
+konfigurace podpisů, ale samotná správa podpisových profilů není veřejné
 API pro externí integrace.

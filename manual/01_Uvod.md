@@ -396,8 +396,8 @@ v Pohodě), ISDOC, bankovní výpisy a číselníky. Export do ISDOC nebo Pohoda
 je **volitelný**: hodí se, pokud část agendy řešíš jinde, ale není to nutná
 součást postupu — účtování i výkazy si MyÚčto zvládne samo.
 
-Nad tím vším je **REST API — 531 cest ve 28 skupinách, OpenAPI 3.1**,
-s tokenovou autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
+Nad tím vším je **REST API v1 popsané specifikací OpenAPI 3.1** s tokenovou
+autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
 něj e-shop, CRM, BI nástroj i automatizační platforma typu Make nebo Zapier.
 Viz [78. REST API](78_API.md), [20. Exporty](20_Exporty.md),
 [21. Importy](21_Importy.md) a [42. Hromadný export](42_Hromadny_export.md).
@@ -419,10 +419,10 @@ Viz [72. Více dodavatelů](72_Multi_supplier.md).
 
 ## 1.19 Tým, oprávnění a úlohy na pozadí
 
-- **Role a oprávnění** — **88 granulárních práv v 19 skupinách**, upravitelných
-  pro každou firmu zvlášť
+- **Role a oprávnění** — granulární práva uspořádaná do funkčních skupin,
+  upravitelná pro každou firmu zvlášť
 - **Log činnosti** se zamaskováním citlivých hodnot
-- **Plánované úlohy** — rutinu na pozadí obstarává **16 cron úloh** (zálohy,
+- **Plánované úlohy** — rutinu na pozadí obstarávají cron úlohy (zálohy,
   import banky, čtení e-mailové schránky, upomínky, generování pravidelných
   faktur, kontrola integrity deníku, AI worker a další). Poslední běh, doba
   trvání i chyba jsou na jedné obrazovce.
@@ -471,7 +471,7 @@ stát s účetnictvím** (detail v [76. Bezpečnost](76_Bezpecnost.md)):
 - **Žádný externí cloud** — data v tvojí MariaDB, PDF na tvém disku
 - **Žádná telemetrie** — aplikace nikam neposílá data o tvém používání
 - **Docker image** na GHCR (`ghcr.io/radekhulan/myucto`) — multi-arch
-  (amd64 + arm64), publikovaný automaticky při tagování verze
+  (amd64 + arm64), připravený pro běžné nasazení přes Docker Compose
 - **Nativní nasazení** na IIS i Apache, s volitelným Redisem
 - **Migrace** přes `php api/bin/migrate.php` — verzované, idempotentní
 - **Backup** = `mysqldump` + `tar` adresáře s PDF; obnovení obrácený postup

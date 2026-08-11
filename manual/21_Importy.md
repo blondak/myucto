@@ -148,8 +148,8 @@ Všechny tři první body má [hromadná úprava OSS](40_OSS.md#405-hromadna-edi
 jako samostatný výběr položek — nemusíš je hledat po jednom.
 
 > [!TIP]
-> Doklady, které do systému natekly dřív, než byl OSS správně nastavený, mají
-> příznak OSS prázdný a jejich zahraniční daň může být vykázaná v českém přiznání.
+> Doklady s prázdným příznakem OSS vyžadují kontrolu, protože jejich zahraniční
+> daň může být vykázaná v českém přiznání.
 > Než podáš přiznání za období, do kterého import spadl, projdi si zahraniční
 > doklady v tom období a ověř, že v přiznání k DPH nefigurují.
 
@@ -204,7 +204,7 @@ balíček **rozbalí**, vytáhne z něj ISDOC a naimportuje ho stejně jako samo
 archivuje pro náhled v detailu faktury. Funguje to jak při nahrání samotného
 `.isdocx`, tak když je `.isdocx` přílohou uvnitř PDF/A-3. Hlavní ISDOC se v
 balíčku určí podle `manifest.xml` (`<maindocument>`), s fallbackem na `.isdoc`
-v kořeni archivu (starší balíčky bez manifestu).
+v kořeni archivu (balíčky bez manifestu).
 
 **Jak to poznáš, jestli PDF má embedded ISDOC?**
 
@@ -246,7 +246,7 @@ ISDOC přílohu". V tom případě:
   zadej heslo, ulož znovu bez šifrování, a pak nahraj.
 - ❌ **Non-FlateDecode stream filtr** (LZW, RunLengthDecode, ASCII85
   bez následného Flate). Extractor zvládá jen FlateDecode (drtivá
-  většina dnešních PDF). U starších/legacy producentů můžeš narazit.
+  většina běžných PDF). U producentů používajících jiné filtry můžeš narazit.
 - ❌ **Vícestupňový filter chain** (`/Filter [/ASCII85Decode /FlateDecode]`).
   Vzácné, ale existuje. Workaround: stáhni si ISDOC samostatně v původním
   systému.
@@ -365,7 +365,7 @@ Pro neplátce DPH je tohle bez dopadu — účtenka je jen daňový náklad.
 (`DiscountType=OnDocument`) se u vydaných faktur uloží jako procentuální sleva
 (viz § 10.4.1), u přijatých jako záporná položka „Sleva X %" po sazbách DPH;
 položková sleva se zapečetí do jednotkové ceny. Importovaná částka tak odpovídá
-iDokladu (dřív se sleva ignorovala a faktura se importovala za plnou cenu).
+iDokladu.
 
 **Idempotence:** každý záznam má v DB sloupec `idoklad_id`, který se uloží při
 prvním importu. Druhý import téhož období záznamy **přeskočí** (žádné duplicity,
@@ -378,7 +378,7 @@ metody** — email + API token i OAuth2 Client Credentials.
 
 ### 21.9.1 Získání API credentials
 
-**Nově založené účty (po 2024) — OAuth2:**
+**OAuth2 Client Credentials (doporučeno):**
 
 1. Přihlas se do [Fakturoidu](https://app.fakturoid.cz/).
 2. **Nastavení → API v3 přístupové údaje**.
@@ -386,7 +386,7 @@ metody** — email + API token i OAuth2 Client Credentials.
 4. Zjisti **slug účtu** — část URL: `https://app.fakturoid.cz/{slug}/...`,
    např. `jannovak`.
 
-**Starší účty (před 2024) — legacy:**
+**E-mail a osobní API token (kompatibilní alternativa):**
 
 1. **Nastavení → API přístup → Osobní API token**.
 2. Zkopíruj **email** + **API token**.
@@ -400,8 +400,8 @@ Přepínač **Typ autentizace**:
 
 | Typ | Pole |
 |---|---|
-| **OAuth2 (Client Credentials)** — pro nové účty | Slug + Client ID + Client Secret |
-| **Email + API token (legacy)** — pro starší účty | Slug + Email + API token |
+| **OAuth2 (Client Credentials)** — doporučená metoda | Slug + Client ID + Client Secret |
+| **E-mail + API token** — kompatibilní alternativa | Slug + E-mail + API token |
 
 Oba způsoby koexistují per-supplier. Pokud má supplier vyplněné oba bloky,
 **OAuth2 má prioritu** (Bearer token).

@@ -149,7 +149,7 @@ Widget **Daňový kalendář** (pod dlaždicemi, vedle nadcházejících záloh)
 blížící se daňové termíny aktuálního dodavatele do jednoho seznamu:
 
 - **DPH přiznání** a **Kontrolní hlášení** — dle periodicity dodavatele
-  (měsíčně / čtvrtletně, viz [§ 35](36_Vykazy_DPH.md)).
+  (měsíčně / čtvrtletně, viz [§ 36](36_Vykazy_DPH.md)).
 - **Souhrnné hlášení** — jen pokud má firma za předchozí měsíc EU B2B plnění.
 - **Zálohy na daň a pojistné** — z [Daně z příjmů § Zálohy na daň a pojistné](38_Dan_z_prijmu.md#zalohy-na-dan-a-pojistne),
   s částkou a stavem *naplánováno* / *zaplaceno*.
@@ -231,4 +231,4 @@ aby dotaz na dashboard zůstal levný. Pokud job našel nesrovnalost mezi doklad
 a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů v
 popisku. Klik — na hlavním řádku i na kterémkoli štítku rozpadu — vede vždy na
 [Účetní deník](45_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
-jednotlivých nálezů, ty najdeš jen přes CLI (viz § 41.11).
+jednotlivých nálezů; ty najdeš jen přes CLI (viz § 45.10).

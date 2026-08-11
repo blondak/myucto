@@ -15,6 +15,9 @@ vyberete, co se zabalí:
   každý měsíc kvartálu)
 
 U každé části se hned ukáže počet dostupných dokladů; prázdné části nejdou zaškrtnout.
+Při otevření stránky je předvyplněný předchozí kalendářní měsíc, protože balíček se
+obvykle připravuje za dokončené období. Výběr **Vše** a **Nic** mění pouze části,
+které se mají vložit do následujícího ZIP.
 
 **Zařazení do období je daňově korektní a shodné s výkazy DPH** (přiznání, kontrolní
 hlášení, kniha DPH): vystavené dle DUZP, přijaté tuzemské dle pozdějšího z dat
@@ -28,6 +31,12 @@ Protože u většího počtu faktur může příprava PDF chvíli trvat, export 
 tlačítko **Stáhnout ZIP**. Hotové exporty zůstávají v seznamu **Poslední exporty** a
 jdou stáhnout opakovaně; soubor se stažením nemaže. Úklid proběhne automaticky po
 7 dnech (nebo ručně tlačítkem koš). Souběžně běží vždy jen jeden export.
+
+Běžící nebo čekající úlohu lze tlačítkem **Zrušit** požádat o ukončení. Po dobu
+aktivní úlohy nelze měnit období ani spustit další export. Neúspěšná úloha zůstane
+v historii se stavem a textem chyby; po odstranění příčiny spusť nový export.
+Zrušené, dokončené a neúspěšné řádky lze z historie smazat. Stažení i vytvoření
+balíčku vyžaduje oprávnění k exportu výkazů.
 
 > [!TIP]
 > Pro jednoúčelové formáty (jen ISDOC vydaných, jen Pohoda XML) použij

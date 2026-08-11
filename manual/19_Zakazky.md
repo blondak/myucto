@@ -130,8 +130,8 @@ schválení se faktura **automaticky vystaví a odešle**.
 
 | Konfigurace | Příjemce schvalovacího e-mailu |
 |---|---|
-| Klient má **kontakty s účelem Schvalování** (§ 13.2.2) | Tyto kontakty (+ e-maily zakázky dle režimu kombinace) |
-| Zakázka má **fakturační e-maily** (sekce 8.2.1) | Jen na ně, hlavní e-mail klienta NEDOSTANE |
+| Klient má **kontakty s účelem Schvalování** ([§ 18.2.2](18_Klienti.md#1822-e-mailove-kontakty-podle-ucelu)) | Tyto kontakty (+ e-maily zakázky dle režimu kombinace) |
+| Zakázka má **fakturační e-maily** (§ 19.2.1) | Jen na ně, hlavní e-mail klienta NEDOSTANE |
 | Zakázka **nemá** fakturační e-maily | Hlavní e-mail klienta |
 
 > Záměr: na schvalovacím e-mailu může být účetní (fakturační e-mail), zákazník
@@ -208,7 +208,7 @@ cyklus je popsán v [§ 15.7](15_Faktura_editor.md#157-schvalovani-vykazu-zakazn
 ## 19.9 Tipy
 
 - **Bez zakázky lze fakturovat** — v editoru nech pole „Zakázka" prázdné.
-  Užitečné pro jednorázové faktury (poradenství, license).
+  Užitečné pro jednorázové faktury (poradenství, licence).
 - **Hodinová sazba je default** — vždy ji můžeš v editoru přepsat per
   položka.
 - **Číslo projektu / smlouvy** se na PDF zobrazí jen pokud je vyplněné.

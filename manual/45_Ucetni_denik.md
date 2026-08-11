@@ -92,7 +92,7 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 - **Zdroj** — typ a číslo zdrojového dokladu; odznak **Automaticky** se u
   automatického zápisu zobrazuje přímo v tomto sloupci, stejně jako ikona
   řetězu u zápisů, které mají protějšek (doklad ↔ jeho úhrada — viz
-  [Souvisí: doklad a jeho úhrada](#souvisí-doklad-a-jeho-úhrada)),
+  [Souvisí: doklad a jeho úhrada](#souvisi-doklad-a-jeho-uhrada)),
 - **Částka** — bez filtru **Účet od / Účet do** celková částka zápisu (Σ MD, u
   vyváženého zápisu shodná se Σ Dal); s aktivním filtrem na účet naopak částka
   PŘIPADAJÍCÍ na filtrovaný rozsah účtů v daném zápisu, se značkou **MD**/**Dal**
@@ -464,7 +464,7 @@ s výchozí hodnotou 663/563, pokud si ji ve firemní osnově nepřenastavíš).
 > touto hranicí už nejde o zaokrouhlení, ale o skutečný nesoulad dokladu (špatná DPH
 > klasifikace položky, ručně přepsaný základ/DPH v rekapitulaci DPH apod.) — je potřeba
 > doklad opravit, ne rozdíl zamaskovat jako výnos/náklad. Jde o jinou toleranci než
-> 1 Kč dorovnání u spárovaných bankovních plateb (viz [Banka § 27.7.1](28_Banka.md)) —
+> 1 Kč dorovnání u spárovaných bankovních plateb (viz [Banka § 28.7.1](28_Banka.md#2871-sparovane-platby-faktur-primy-zapis)) —
 > to řeší jen zaokrouhlení mezi součtem alokací a částkou platby, ne shodu hlavičky
 > dokladu s DPH evidencí.
 
@@ -661,7 +661,7 @@ doklady k přijaté platbě). Selhání storna jediného potomka zastaví celé 
 > výjimečně upravit i fakturu nebo přijatou fakturu, která je zaúčtovaná a spadá do už
 > uzavřeného období (parametr `?force=1` v detailu dokladu — viz
 > [Faktury](14_Faktury.md) / [Přijaté faktury](23_Prijate_faktury.md)). Taková úprava
-> teď vždy vyžaduje **explicitní volbu**, co se má stát se zápisem v deníku — bez
+> vždy vyžaduje **explicitní volbu**, co se má stát se zápisem v deníku — bez
 > zvolení jedné z nich se úprava vůbec neuloží:
 >
 > - **Přeúčtovat** — původní zápis se stornuje (protizápis k dnešnímu, otevřenému datu)
@@ -691,7 +691,7 @@ měsících funguje beze změny, chráněná je jen minulost před zamčeným da
 (viz [Výkazy DPH](36_Vykazy_DPH.md)) samo zámek neposouvá. Backend jej posune až při
 explicitním označení validního snapshotu za skončené období jako **odeslaného**, a to
 jen **dopředu** (nikdy ho automaticky nezmenší). Běžná obrazovka Archivu podání tuto
-akci zatím nenabízí, proto v současném UI použij po doloženém podání ruční nastavení
+akci nenabízí, proto v UI použij po doloženém podání ruční nastavení
 zámku administrátorem.
 
 **Co uvidíš.** Pokus o zaúčtování, přeúčtování nebo storno dokladu s datem v zamčeném
@@ -783,7 +783,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 - Kromě otevřenosti období hlídá zaúčtování/přeúčtování/storno i **zámek k datu**
   (§ 45.9). Po doloženém podání jej nastav administrátor; backend jej umí posunout také
   při explicitním označení DPH/KH snapshotu jako odeslaného, ale běžné UI tuto akci
-  zatím nenabízí.
+  nenabízí.
 
 > [!TIP]
 > Hledáš zápis ke konkrétní faktuře? Otevři fakturu, klikni na **„Zobrazit v deníku"**

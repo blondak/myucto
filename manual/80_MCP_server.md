@@ -17,8 +17,10 @@ přes REST API a asistentovi nabízí sadu pojmenovaných **nástrojů**
 
 Podstatné vlastnosti:
 
-- **Data neopouštějí tvůj okruh víc, než musí.** Server běží lokálně a volá
-  přímo tvoji instanci; nikam se nic nesynchronizuje.
+- **MCP server nevytváří vlastní kopii dat.** Běží lokálně a volá přímo tvoji
+  instanci. Výsledek nástroje ale dostane připojený AI asistent a může jej podle
+  svého provozního modelu odeslat poskytovateli AI. Citlivost dotazu proto
+  posuzuj stejně jako při ručním vložení údajů do daného asistenta.
 - **Asistent má jen to, co má token.** Rozsah, vazba na firmu, omezení podle IP
   i oprávnění role uživatele platí beze změny.
 - **Všechno je vidět v logu.** Každé volání se zapíše včetně názvu nástroje.
@@ -42,7 +44,7 @@ Podstatné vlastnosti:
 > zaevidovat opravu podle § 46 / § 74b ani odeslat podání na EPO nemůže. Je to
 > agenda s daňovou odpovědností, kde chyba znamená opravné podání — dělá ji člověk
 > v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
-> na takovou operaci `403 token_write_forbidden` (viz [kapitola 76.6](78_API.md)).
+> na takovou operaci `403 token_write_forbidden` (viz [kapitola 78.6](78_API.md#786-scopes)).
 
 ## 80.3 Zprovoznění
 
@@ -67,10 +69,10 @@ pwsh -File cmd/build-mcp.ps1      # Windows
 ./cmd/build-mcp.sh                # Linux / macOS
 ```
 
-Vznikne `MCP/dist/myucto-mcp.mjs` — jediný soubor bez závislostí, který můžeš
+Vznikne `MCP/dist/myucto-mcp.mjs` — jediný soubor bez externích balíčků, který můžeš
 zkopírovat kamkoliv, třeba na jiný počítač. **Ve vydaných balíčcích je hotový
-už přiložený**, takže tenhle krok obvykle přeskočíš; u každého vydání je navíc
-ke stažení samostatně jako `myucto-mcp-<verze>.mjs`.
+už přiložený**, takže tenhle krok obvykle přeskočíš; v artefaktech vydání může
+být ke stažení také samostatný soubor MCP serveru.
 
 **B) Přímo ze zdrojáků.** Hodí se, když si chceš nástroje upravovat:
 
@@ -170,7 +172,7 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Přidej do výkazu 5 metrů kabeláže po 120 Kč.“
 - „Smaž poslední řádek z výkazu, zadal jsem ho omylem.“
 
-Podrobnosti v [78.7](#807-výkazy-práce-a-materiálu).
+Podrobnosti v [§ 80.7](#807-vykazy-prace-a-materialu).
 
 **Daně**
 
@@ -272,7 +274,7 @@ tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název n�
 takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
-v [kapitole 76.8](78_API.md).
+jsou v [§ 78.8](78_API.md#788-log-volani-api).
 
 ## 80.9 Bezpečnost
 
@@ -291,11 +293,11 @@ v [kapitole 76.8](78_API.md).
 | Projev | Příčina a náprava |
 |---|---|
 | Server nenaběhne, hlásí chybnou konfiguraci | `MYUCTO_API_URL` musí končit `/api/v1` a token začínat `mi_pat_`. |
-| Asistent hlásí, že **server neodpovídá** | Nejčastěji nedůvěryhodný HTTPS certifikát, ne výpadek — viz 78.11. |
+| Asistent hlásí, že **server neodpovídá** | Častou příčinou je nedůvěryhodný HTTPS certifikát — viz [§ 80.11](#8011-vlastni-https-certifikat); současně ověř dostupnost API. |
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
-| `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz 78.2. |
+| `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz [§ 78.6](78_API.md#786-scopes). |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý. |
 | `429` | Překročen limit — sniž `MYUCTO_MAX_RPS`. |
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |
@@ -315,7 +317,7 @@ certifikát tak stačí a nic dalšího nastavovat nemusíš. Co načetl, vypí�
 chybový výstup:
 
 ```
-MyÚčto MCP v1.0.0 připojen — 62 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
+MyÚčto MCP připojen — nástroje načteny, API https://…/api/v1; TLS: systémové certifikáty načteny
 ```
 
 Když spojení i tak selže na certifikát, dostaneš konkrétní hlášku s postupem.
