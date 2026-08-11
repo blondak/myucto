@@ -6,11 +6,14 @@ const props = withDefaults(defineProps<{
   uploading?: boolean
   maxSizeBytes?: number
   hint?: string
+  /** Editor nového dokladu navíc přijímá ISDOC/ISDOCX k deterministickému importu. */
+  acceptStructured?: boolean
   /** Když true, dropzone zmizí jakmile user začne psát do formuláře (anti-confusion) */
   hideWhenInteracted?: boolean
 }>(), {
   uploading: false,
   maxSizeBytes: 20 * 1024 * 1024,
+  acceptStructured: false,
   hideWhenInteracted: false,
 })
 
@@ -64,13 +67,18 @@ function handleFile(file: File) {
       t('purchase_invoice.pdf.upload_error', { error: `> ${Math.round(props.maxSizeBytes / 1024 / 1024)} MiB` }))
     return
   }
-  // Akceptujeme PDF, obrázky (fotka z telefonu → server konvertuje na PDF),
-  // ISDOC / ISDOCX balíček (server rozbalí + naparsuje), NEBO empty type
-  // (některé browsery type=""). Server validuje magic bytes znovu.
-  const accepted = !file.type || file.type === 'application/pdf' || file.type.startsWith('image/') ||
-    /\.(pdf|jpe?g|png|webp|heic|heif|gif|bmp|isdoc|isdocx)$/i.test(file.name)
+  // PDF/obrázky jsou přílohy. ISDOC/ISDOCX patří jen do editoru NOVÉ faktury,
+  // kde se zpracují přes import-structured; na detailu/editaci by je /pdf odmítl.
+  // Empty MIME některé browsery posílají i pro běžné soubory, proto rozhoduje i přípona.
+  const isStructured = /\.isdocx?$/i.test(file.name)
+  const accepted = file.type === 'application/pdf'
+    || file.type.startsWith('image/')
+    || /\.(pdf|jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name)
+    || (props.acceptStructured && isStructured)
   if (!accepted) {
-    emit('error', 'invalid_pdf', t('purchase_invoice.pdf.invalid_pdf'))
+    emit('error', 'invalid_pdf', t(props.acceptStructured
+      ? 'purchase_invoice.pdf.invalid_document'
+      : 'purchase_invoice.pdf.invalid_pdf'))
     return
   }
   emit('file-dropped', file)
@@ -100,7 +108,7 @@ const cls = computed(() => {
     <input
       ref="fileInput"
       type="file"
-      accept="application/pdf,.pdf,image/*,.isdoc,.isdocx"
+      :accept="acceptStructured ? 'application/pdf,.pdf,image/*,.isdoc,.isdocx' : 'application/pdf,.pdf,image/*'"
       class="hidden"
       @change="onFileInput"
       :disabled="uploading"
@@ -118,9 +126,13 @@ const cls = computed(() => {
         <path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-7-2a4 4 0 0 1 0-8 5 5 0 0 1 9.584-1.06A4 4 0 0 1 19 14" />
       </svg>
       <p class="text-sm text-neutral-700">
-        {{ isDragging ? t('purchase_invoice.pdf.dropzone_active') : (hint || t('purchase_invoice.pdf.dropzone_hint')) }}
+        {{ isDragging ? t('purchase_invoice.pdf.dropzone_active') : (hint || t(acceptStructured
+          ? 'purchase_invoice.pdf.dropzone_hint_structured'
+          : 'purchase_invoice.pdf.dropzone_hint')) }}
       </p>
-      <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.pdf.max_size_hint') }}</p>
+      <p class="text-xs text-neutral-500 mt-1">{{ t(acceptStructured
+        ? 'purchase_invoice.pdf.max_size_hint_structured'
+        : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>
   </div>
 </template>
