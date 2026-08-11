@@ -959,6 +959,12 @@ function vatCollisionLabel(c: VatStatusCollision): string {
 
       <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.payroll_enabled.title') }}</h2>
+        <!-- Alfa upozornění stojí NAD přepínačem záměrně: mzdy počítají odvody
+             a podání, kde chyba stojí penále, takže se o stavu modulu musí
+             uživatel dozvědět dřív, než ho zapne, ne až v nápovědě pod ním. -->
+        <p class="mb-4 rounded-md border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-800">
+          {{ t('settings.payroll_enabled.alpha_warning') }}
+        </p>
         <label class="flex items-start gap-2 cursor-pointer">
           <input v-model="supplier.payroll_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
           <span>
