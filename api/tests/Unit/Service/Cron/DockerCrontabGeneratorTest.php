@@ -178,4 +178,57 @@ final class DockerCrontabGeneratorTest extends TestCase
             self::assertFileExists($root . '/' . $path);
         }
     }
+
+    /**
+     * Issue #6: crontab volal `/usr/local/bin/myinvoice-cron-run`, ale oba
+     * Dockerfily instalují wrapper jako `myucto-cron-run` (pozůstatek
+     * přejmenování projektu). Cron úlohu spustil, ta okamžitě skončila na
+     * neexistujícím souboru — a protože je v crontabu MAILTO="" a wrapper, který
+     * jediný loguje do log/cron, se vůbec nespustil, selhání NEZANECHALO ŽÁDNOU
+     * STOPU. Instalace běžela bez záloh, bez kontroly integrity deníku a bez
+     * upomínek a nic na to neupozornilo.
+     *
+     * Testy výš tohle chytit NEMOHLY: obě strany porovnání braly WRAPPER, takže
+     * si konstanta odpovídala sama se sebou. Kontrakt je až vůči Dockerfilům.
+     */
+    public function testWrapperNameMatchesWhatDockerfilesInstall(): void
+    {
+        $root = dirname(__DIR__, 5);
+        $wrapper = DockerCrontabGenerator::WRAPPER;
+
+        foreach (['Dockerfile', 'Dockerfile.alpine'] as $dockerfile) {
+            $contents = (string) file_get_contents($root . '/' . $dockerfile);
+            self::assertStringContainsString(
+                'cp docker/cron-run.sh ' . $wrapper,
+                $contents,
+                "{$dockerfile} musí instalovat wrapper pod jménem {$wrapper} — jinak cron tiše neběží vůbec",
+            );
+        }
+
+        // Entrypointy počítají naplánované úlohy grepem přes jméno wrapperu.
+        // Rozejde-li se, hlásí „0 úloh" u plného crontabu a svádí na špatnou
+        // diagnózu (že všechno odfiltrovala brána CronJobGate).
+        foreach (['docker-entrypoint.sh', 'docker/entrypoint-alpine.sh'] as $entrypoint) {
+            $contents = (string) file_get_contents($root . '/' . $entrypoint);
+            self::assertStringContainsString(
+                'grep -c ' . basename($wrapper) . ' /etc/cron.d/myucto',
+                $contents,
+                "{$entrypoint} musí počítat úlohy podle jména wrapperu {$wrapper}",
+            );
+        }
+    }
+
+    /** Detekce běhu v Dockeru nesmí mít jméno wrapperu opsané druhou rukou. */
+    public function testDockerDetectionUsesTheSharedConstant(): void
+    {
+        $root = dirname(__DIR__, 5);
+        foreach ([
+            'api/src/Action/Admin/CronJobsAction.php',
+            'api/src/Action/Admin/SetCronScheduleModeAction.php',
+        ] as $path) {
+            $contents = (string) file_get_contents($root . '/' . $path);
+            self::assertStringContainsString('DockerCrontabGenerator::WRAPPER', $contents, $path);
+            self::assertStringNotContainsString('/usr/local/bin/myinvoice-cron-run', $contents, $path);
+        }
+    }
 }

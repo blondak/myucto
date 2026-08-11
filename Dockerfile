@@ -122,6 +122,7 @@ RUN php tools/generateManualHtml.php \
 # takže obsahuje všechny úlohy + frekvence z UI „Plánované úlohy". Daemon pouští entrypoint.
 RUN cp docker/cron-run.sh /usr/local/bin/myucto-cron-run \
  && chmod 0755 /usr/local/bin/myucto-cron-run \
+ && ln -s /usr/local/bin/myucto-cron-run /usr/local/bin/myinvoice-cron-run \
  && php tools/generateDockerCrontab.php > /etc/cron.d/myucto \
  && chmod 0644 /etc/cron.d/myucto
 

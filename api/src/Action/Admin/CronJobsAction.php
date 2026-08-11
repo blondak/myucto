@@ -14,6 +14,7 @@ use MyInvoice\Service\Cron\CronDispatcher;
 use MyInvoice\Service\Cron\CronHealth;
 use MyInvoice\Service\Cron\CronJobGate;
 use MyInvoice\Service\Cron\CronScheduleMode;
+use MyInvoice\Service\Cron\DockerCrontabGenerator;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -211,7 +212,7 @@ final class CronJobsAction
         $dataDir = is_string($dataDir) && trim($dataDir) !== '' ? trim($dataDir) : null;
         // V Docker image plánuje úlohy vestavěný cron generovaný z CronCatalog
         // (DockerCrontabGenerator) — admin tam nemá co nastavovat, jen ověřit.
-        $isDocker = is_file('/.dockerenv') || is_file('/usr/local/bin/myinvoice-cron-run');
+        $isDocker = is_file('/.dockerenv') || is_file(DockerCrontabGenerator::WRAPPER);
 
         $windows = PHP_OS_FAMILY === 'Windows';
         $sep = $windows ? '\\' : '/';

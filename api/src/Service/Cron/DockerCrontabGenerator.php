@@ -12,7 +12,7 @@ namespace MyInvoice\Service\Cron;
  * z katalogu (tools/generateDockerCrontab.php), místo aby se ručně opisoval a časem
  * se rozešel (např. by chyběl cron-backup-documents).
  *
- * Každý řádek volá wrapper `/usr/local/bin/myinvoice-cron-run`, který načte runtime
+ * Každý řádek volá wrapper `/usr/local/bin/myucto-cron-run`, který načte runtime
  * ENV (cron je v Debianu nedědí) a spustí PHP skript jako www-data s logem do
  * `${MYINVOICE_DATA_DIR}/log/cron`.
  *
@@ -23,7 +23,17 @@ namespace MyInvoice\Service\Cron;
  */
 final class DockerCrontabGenerator
 {
-    public const WRAPPER = '/usr/local/bin/myinvoice-cron-run';
+    /**
+     * MUSÍ se shodovat se jménem, pod kterým wrapper instalují Dockerfile
+     * i Dockerfile.alpine — jinak cron úlohy spustí, ony okamžitě skončí na
+     * neexistujícím souboru a protože je v crontabu MAILTO="" a wrapper (který
+     * jediný loguje do log/cron) se vůbec nespustí, selhání NEZANECHÁ ŽÁDNOU
+     * STOPU. Instalace pak běží bez záloh a kontrol a nic na to neupozorní.
+     * Přesně tohle způsobil pozůstatek přejmenování projektu (issue #6):
+     * image instaloval `myucto-cron-run`, konstanta držela staré `myinvoice-`.
+     * Shodu hlídá DockerCrontabWrapperNameTest proti obou Dockerfilům.
+     */
+    public const WRAPPER = '/usr/local/bin/myucto-cron-run';
 
     /**
      * @param CronJobGate|null $gate Bez brány se vygenerují všechny úlohy z katalogu

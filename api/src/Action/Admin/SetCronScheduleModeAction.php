@@ -11,6 +11,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronCatalog;
 use MyInvoice\Service\Cron\CronScheduleMode;
+use MyInvoice\Service\Cron\DockerCrontabGenerator;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -78,7 +79,7 @@ final class SetCronScheduleModeAction
 
     private function nextStep(string $mode): string
     {
-        $isDocker = is_file('/.dockerenv') || is_file('/usr/local/bin/myinvoice-cron-run');
+        $isDocker = is_file('/.dockerenv') || is_file(DockerCrontabGenerator::WRAPPER);
 
         if ($isDocker) {
             return 'Restartuj kontejner — plán úloh se při startu vygeneruje podle nového režimu. '
