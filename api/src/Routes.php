@@ -9,6 +9,7 @@ use MyInvoice\Action\AresVies\CrpDphLookupAction;
 use MyInvoice\Action\AresVies\ViesLookupAction;
 use MyInvoice\Action\Auth\ChangePasswordAction;
 use MyInvoice\Action\Client\ArchiveClientAction;
+use MyInvoice\Action\Client\ClientDuplicatesAction;
 use MyInvoice\Action\Client\CreateClientAction;
 use MyInvoice\Action\Client\DeleteClientAction;
 use MyInvoice\Action\Client\GetClientAction;
@@ -427,6 +428,7 @@ final class Routes
 
         // Clients
         $app->get   ('/api/clients',                 ListClientsAction::class);
+        $app->get   ('/api/clients/duplicates',      ClientDuplicatesAction::class);  // FR 2 — report duplicitních karet (IČO/DIČ)
         $app->post  ('/api/clients',                 CreateClientAction::class);
         $app->get   ('/api/clients/{id:[0-9]+}',     GetClientAction::class);
         $app->get   ('/api/clients/{id:[0-9]+}/vat-status', ClientVatStatusAction::class);  // online ARES/VIES plátcovství
@@ -1389,6 +1391,9 @@ final class Routes
         $app->get    ('/api/reports/oss',              [OssReportAction::class, 'download']);
         // Audit kurzů vs. ČNB (§C / K4) — cizoměnové doklady s odchylkou účetního kurzu od ČNB
         $app->get    ('/api/reports/cnb-rate-audit',   \MyInvoice\Action\Report\CnbRateAuditAction::class);
+        // Úplnost číselné řady vydaných dokladů (FR3, vendor audit 2026-08) — mezera
+        // v řadě je auditní signál pro FÚ. Read-only, dostupné bez ohledu na účetní režim.
+        $app->get    ('/api/reports/invoice-series-completeness', \MyInvoice\Action\Report\InvoiceSeriesCompletenessAction::class);
         // Měsíční export — background job: jeden ZIP s vybranými exporty za měsíc
         // (VF/PF PDF+ISDOC, výpisy PDF+GPC, Kniha DPH). Běží na pozadí (import_jobs).
         $app->get    ('/api/reports/monthly-export/preview',                  [MonthlyExportAction::class, 'preview']);

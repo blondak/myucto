@@ -666,11 +666,11 @@ final class DocumentLockTest extends TestCase
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
-            'INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, issue_date, due_date,
-                                            received_at, currency_id, vendor_snapshot, status, paid_at, created_by)
-             VALUES (?, ?, ?, ?, DATE_ADD(?, INTERVAL 14 DAY), ?, ?, "{}", ?, ?, ?)'
+            'INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, issue_date, tax_date,
+                                            due_date, received_at, currency_id, vendor_snapshot, status, paid_at, created_by)
+             VALUES (?, ?, ?, ?, ?, DATE_ADD(?, INTERVAL 14 DAY), ?, ?, "{}", ?, ?, ?)'
         )->execute([
-            $sid, $this->clientIds[$sid], 'VF-' . bin2hex(random_bytes(5)), $issueDate, $issueDate, $issueDate,
+            $sid, $this->clientIds[$sid], 'VF-' . bin2hex(random_bytes(5)), $issueDate, $issueDate, $issueDate, $issueDate,
             $this->currencyIds[$sid], $status,
             $status === 'paid' ? $issueDate : null, $this->ownerIds[$sid],
         ]);

@@ -86,9 +86,82 @@ final class PurchaseInvoiceCalculator
             $purchaseInvoiceId,
         ]);
 
+        $this->assertIntegrity($purchaseInvoiceId);
+
         return [
             'totals'        => $computed['totals'],
             'vat_breakdown' => $computed['vat_breakdown'],
         ];
+    }
+
+    /**
+     * FR4 (vendor audit 2026-08) — preventivní pojistka: znovu načte PRÁVĚ
+     * uložený stav (hlavička + položky) a ověří `základ + DPH = celkem` a
+     * `SUM(položky) = hlavička`, obojí s malou tolerancí. Za normálního běhu tahle
+     * kontrola vždy projde — {@see recompute()} odvozuje hlavičku ze stejného průchodu
+     * položkami, který persistuje, takže drift je matematicky vyloučený. Jde o
+     * bezpečnostní síť proti BUDOUCÍ regresi (nová cesta zápisu mimo `recompute()`,
+     * částečně selhavší UPDATE, DECIMAL(12,2) truncation na hraně float zaokrouhlení),
+     * ne proti dnešnímu chování — nejrizikovější je doklad s `vat_overrides` (§73
+     * ZDPH), kde InvoiceMath::applyRateOverrides rozděluje zaokrouhlovací reziduum na
+     * nejsilnější řádek dané sazby a rozjezd mezi hlavičkou a položkami by jinak nikdo
+     * nezachytil až do podkladů DPH.
+     *
+     * Veřejná (ne jen interní krok recompute()) — volitelně callable i mimo write
+     * path, např. z auditní brány nebo testu, který ji ověřuje na záměrně
+     * poškozeném stavu (regresní test proti tomu, že guard nikdy nic nechytí).
+     */
+    public function assertIntegrity(int $purchaseInvoiceId): void
+    {
+        $pdo = $this->db->pdo();
+
+        $stmt = $pdo->prepare(
+            'SELECT total_without_vat, total_vat, total_with_vat
+               FROM purchase_invoices WHERE id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId]);
+        $header = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($header === false) {
+            return; // doklad mezitím smazán — nic k ověření
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT COALESCE(SUM(total_without_vat), 0) AS base, COALESCE(SUM(total_vat), 0) AS vat
+               FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId]);
+        $itemSums = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['base' => 0, 'vat' => 0];
+
+        // Tolerance: dvojnásobek jednoho zaokrouhlovacího haléře — bezpečná rezerva
+        // proti akumulaci zaokrouhlení na dokladu s víc řádky/sazbami, ale dost malá,
+        // aby chytila skutečný rozjezd (FR4: "s malou tolerancí").
+        $tol = 0.02;
+
+        $hdrBase = (float) $header['total_without_vat'];
+        $hdrVat  = (float) $header['total_vat'];
+        $hdrWith = (float) $header['total_with_vat'];
+        $itemsBase = (float) $itemSums['base'];
+        $itemsVat  = (float) $itemSums['vat'];
+
+        if (abs($hdrBase - $itemsBase) > $tol || abs($hdrVat - $itemsVat) > $tol) {
+            throw new PurchaseInvoiceArithmeticException(sprintf(
+                'Přijatá faktura #%d: součet položek (základ %s, DPH %s) neodpovídá hlavičce '
+                    . '(základ %s, DPH %s) — uložení bylo zamítnuto.',
+                $purchaseInvoiceId,
+                number_format($itemsBase, 2, ',', ' '),
+                number_format($itemsVat, 2, ',', ' '),
+                number_format($hdrBase, 2, ',', ' '),
+                number_format($hdrVat, 2, ',', ' '),
+            ));
+        }
+
+        if (abs(round($hdrBase + $hdrVat, 2) - $hdrWith) > $tol) {
+            throw new PurchaseInvoiceArithmeticException(sprintf(
+                'Přijatá faktura #%d: základ + DPH (%s) neodpovídá uloženému celku (%s) — uložení bylo zamítnuto.',
+                $purchaseInvoiceId,
+                number_format(round($hdrBase + $hdrVat, 2), 2, ',', ' '),
+                number_format($hdrWith, 2, ',', ' '),
+            ));
+        }
     }
 }

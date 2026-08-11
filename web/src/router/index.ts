@@ -335,6 +335,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/shv',            name: 'reports-shv',        component: () => import('@/pages/reports/SouhrnneHlaseniReport.vue') },
       { path: 'reports/income-tax',     name: 'reports-income-tax', component: () => import('@/pages/reports/IncomeTaxReport.vue') },
       { path: 'reports/cnb-rate-audit', name: 'reports-cnb-rate-audit', component: () => import('@/pages/reports/CnbRateAudit.vue') },
+      // FR3 (vendor audit 2026-08) — úplnost číselné řady vydaných dokladů (mezera = auditní signál pro FÚ).
+      { path: 'reports/invoice-series-completeness', name: 'reports-invoice-series-completeness', component: () => import('@/pages/reports/InvoiceSeriesCompleteness.vue') },
       { path: 'reports/submissions',    name: 'reports-submissions', component: () => import('@/pages/reports/TaxSubmissions.vue') },
       { path: 'reports/monthly-export', name: 'reports-monthly-export', component: () => import('@/pages/reports/MonthlyExportReport.vue') },
       { path: 'reports/oss',            name: 'reports-oss', component: () => import('@/pages/reports/OssReport.vue'), meta: { requiresOss: true } },
@@ -451,7 +453,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
-  'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
+  'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
   'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
 }
 

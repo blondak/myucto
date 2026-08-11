@@ -117,6 +117,14 @@ export interface DphBookRow {
   original_doc_number: string | null
   tax_date: string | null
   accounting_date: string | null
+  /**
+   * Období odpočtu dle § 73 ZDPH (issue #9) — datum, podle kterého doklad spadl do TÉHLE
+   * sestavy. U vystavených plnění a u korekcí § 74b null (řídí se jiným pravidlem).
+   */
+  claim_date: string | null
+  /** Které datum období odpočtu určilo — vysvětlení pro uživatele, ne vstup výpočtu. */
+  claim_basis: 'tax_date' | 'issue_date' | 'received_at' | null
+  received_at: string | null
   description: string
   counterparty_name: string
   counterparty_dic: string
@@ -396,6 +404,31 @@ export interface CnbRateAuditResult {
   items: CnbRateAuditItem[]
   missing_cnb_count: number
   fixed_mode_skipped: boolean
+}
+
+/** FR3 — úplnost číselné řady vydaných dokladů (mezera v řadě = auditní signál pro FÚ). */
+export interface InvoiceSeriesBucket {
+  period_key: string
+  used_count: number
+  range_from: number
+  range_to: number
+  missing: number[]
+  missing_preview: string[]
+}
+
+export interface InvoiceSeriesGroup {
+  types: ('invoice' | 'credit_note')[]
+  client_id: number
+  client_name: string | null
+  period: 'year' | 'month' | 'none'
+  template_by_type: Record<string, string>
+  buckets: InvoiceSeriesBucket[]
+}
+
+export interface InvoiceSeriesCompletenessResult {
+  year: number
+  series: InvoiceSeriesGroup[]
+  total_missing: number
 }
 
 /** Řádek náhledu §74b — korekce odpočtu DPH u neuhrazených závazků (pohled dlužníka). */
@@ -696,6 +729,12 @@ export const reportsApi = {
   cnbRateAudit: (from: string, to: string, threshold?: number) =>
     api.get<CnbRateAuditResult>('/reports/cnb-rate-audit', {
       params: { from, to, ...(threshold != null ? { threshold } : {}) },
+    }).then(r => r.data),
+
+  // FR3 — úplnost číselné řady vydaných dokladů (mezera = auditní signál pro FÚ)
+  invoiceSeriesCompleteness: (year: number) =>
+    api.get<InvoiceSeriesCompletenessResult>('/reports/invoice-series-completeness', {
+      params: { year },
     }).then(r => r.data),
 
   // §74b — korekce odpočtu DPH u neuhrazených závazků (dlužník). Preview = dry-run,

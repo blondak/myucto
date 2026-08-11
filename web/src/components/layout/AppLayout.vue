@@ -385,6 +385,7 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
         ] : []),
         { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin },
+        { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         ...(isOsvc ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
       ],

@@ -30,8 +30,10 @@ faktura, závazek, majetek nebo časové rozlišení, které systém neměl z č
    účet 343 s DPH za stejné období.
 5. U cizoměnových dokladů spusť **Daně → Audit kurzů (ČNB)** a vysvětli významné
    odchylky.
-6. Oprav zdrojové doklady a kontroly spusť znovu.
-7. Po potvrzeném podání DPH období vědomě zamkni k datu a ulož důvod.
+6. Před podáním DPH přiznání spusť **Daně → Úplnost číselné řady** a vysvětli
+   nalezené mezery v číslování vydaných dokladů.
+7. Oprav zdrojové doklady a kontroly spusť znovu.
+8. Po potvrzeném podání DPH období vědomě zamkni k datu a ulož důvod.
 
 Kontroly jsou read-only, pokud u nich není výslovně uvedeno tlačítko pro vytvoření
 návrhu či zápisu. Nález se nemá „zazelenat“ ručním dorovnáním bez podkladu.
@@ -128,6 +130,7 @@ aplikace jeho stav zpětně odvodí z ověřených účetních zůstatků.
 | **K8** | kolize variabilních symbolů | Nejednoznačné shody potvrď podle partnera, částky, měny a data. |
 | **K9** | podané přiznání | Porovnávej s XML, které bylo skutečně odesláno, nikoli jen vygenerováno. |
 | **K10** | závěrková úplnost | Odpisy, rozlišení, opravné položky a opakované náklady jsou návrhy k odbornému posouzení. |
+| **K11** | úplnost číselné řady | Mezera v číslování vydaných dokladů je auditní signál pro FÚ — dohledej a vysvětli, nedoplňuj číslo zpětně. |
 
 Podrobný rozpad průběžných kontrol a možnost exportovat všechna zjištění jsou
 v kapitole [Měsíční kontrola](55_Mesicni_kontrola.md).
@@ -143,7 +146,24 @@ Kurz na faktuře, kurz bankovní úhrady a závěrkový kurz plní různé úče
 rozdíl se nemá odstranit přepsáním historie; tvoří realizovaný nebo nerealizovaný
 kurzový rozdíl podle povahy položky.
 
-## 60.8 Vazba na uzávěrku a balíček
+## 60.8 Úplnost číselné řady vydaných dokladů
+
+**Cesta: `Daně → Úplnost číselné řady`**
+
+Sestava projde číslování vydaných faktur a dobropisů za zvolený rok a nahlásí
+chybějící čísla v jinak souvislé řadě. Mezera v číselné řadě je typický kontrolní
+bod finančního úřadu — nedokazuje sama o sobě chybu, ale musí mít vysvětlení
+(stornovaný a přesto číslovaný doklad, ruční přečíslování, oprávněné vynechání).
+Sestava jen hlásí, nic neopravuje.
+
+Faktury a dobropisy, které mají nastavenou **stejnou číselnou šablonu**, sestava
+posuzuje jako jednu společnou řadu — číslo použité dobropisem se u faktur nehlásí
+jako chybějící a naopak. Má-li klient v nastavení vlastní šablonu číslování
+(`Systém → Dodavatelé → Číslování faktur`), počítá se jako samostatná, nezávislá
+řada. Kolize dvou různých šablon (dvě řady vyprodukující stejný VS) hlásí
+samostatná kontrola v nastavení dodavatele — viz **K8** výše.
+
+## 60.9 Vazba na uzávěrku a balíček
 
 Uzávěrkový balíček umí shromáždit účetní výkazy, deník, knihu DPH, daňový výstup,
 inventuru dlouhodobého a drobného majetku, staré saldo a časová rozlišení. Balíček

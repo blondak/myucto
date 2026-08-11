@@ -121,6 +121,26 @@ final class TransitionPurchaseInvoiceStatusAction
             );
         }
 
+        // FR1 (vendor audit 2026-08): DUZP je legislativně nosný údaj daňového
+        // dokladu (§21 vznik povinnosti přiznat daň, §73/1/a nárok na odpočet) —
+        // PurchaseInvoiceValidation dosud kontrolovala jen FORMÁT, když byl vyplněný, takže
+        // `tax_date IS NULL` klidně protekl až do podkladů DPH (VatLedgerService spadá na
+        // COALESCE(tax_date, issue_date), což u dokladu s jiným skutečným DUZP než datem
+        // vystavení dá špatné zdaňovací období). TVRDÝ blok právě tady, na přechodu do
+        // `booked` — to je okamžik, kdy se doklad stává účetním případem ("zaúčtování").
+        // Záměrně NE na `received` (pořizovací/pracovní stav, migrace historie tam musí
+        // projít volně) a záměrně NE retroaktivně — kontrola platí jen na NOVÝ přechod, už
+        // dřív zaúčtované doklady (typicky z migrace historie) zůstávají beze změny, takže
+        // upgrade nikomu nezablokuje uzávěrku existujícího období.
+        if ($target === 'booked' && empty($existing['tax_date'])) {
+            return Json::error(
+                $response,
+                'missing_tax_date',
+                'Doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj nelze fakturu zaúčtovat.',
+                422,
+            );
+        }
+
         $paidDate = null;
         if ($target === 'paid') {
             $paidDate = !empty($body['paid_date']) ? (string) $body['paid_date'] : date('Y-m-d');
