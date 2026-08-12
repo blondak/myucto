@@ -174,6 +174,9 @@ final class ClosingService
         // § 36a ZDPH / § 23/7 ZDP — transakce se spojenými osobami a měřitelné odchylky
         // od cen účtovaných nespojeným. Read-only, nic neúčtuje.
         private readonly \MyInvoice\Service\Tax\RelatedPartyService $relatedParties,
+        // Migrace 1332 — aktuálnost interního dokladu zúčtování DPH. Read-only: kontrola
+        // nikdy sama nepřeúčtovává (do zavřeného ani zamčeného období se nesahá), jen hlásí.
+        private readonly \MyInvoice\Service\Accounting\Vat\VatClearingService $vatClearing,
     ) {}
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
@@ -3946,6 +3949,8 @@ final class ClosingService
             $checks[] = $s79Check;
         }
 
+        $checks[] = $this->checkVatClearingFresh($supplierId, $rangeFrom, $rangeTo);
+
         $checks[] = [
             'key' => 'income_tax_hint',
             'severity' => 'info',
@@ -4171,6 +4176,40 @@ final class ClosingService
      * kvartálu (DPH přiznání se nepodává za libovolné „od-do"). Mimo to vracíme
      * jen informativní poznámku, ne chybu.
      */
+    /**
+     * Interní doklad zúčtování DPH odpovídá SKUTEČNÉMU obratu období? (migrace 1332)
+     *
+     * Odlišná otázka než {@see checkAccount343VsReturn()}: ta se ptá, zda zůstatek 343
+     * sedí na PŘIZNÁNÍ. Tahle se ptá, zda převod daně období z 343.100/343.200 na
+     * zúčtovací 343.900 odpovídá tomu, co v období DNES leží. Rozejde se to přesně
+     * tehdy, když do už zúčtovaného období přibude nebo se opraví doklad — opožděná
+     * přijatá faktura, dobropis, doklad vytěžený AI o pár dní později. Zůstatek 343.900
+     * pak neodpovídá odváděné dani a saldo vůči FÚ přestane být porovnatelné.
+     *
+     * Kontrola je ČISTĚ ČTECÍ. Zavřené (`approved`/`closed`) ani zamčené období
+     * nepřeúčtovává — takové období se v nálezu označí `writable=false`, aby bylo
+     * poznat, že se samo neopraví a je potřeba vědomý zásah účetní (posun zámku,
+     * případně dodatečné přiznání).
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}
+     */
+    private function checkVatClearingFresh(int $supplierId, string $rangeFrom, string $rangeTo): array
+    {
+        try {
+            $stale = $this->vatClearing->staleForRange($supplierId, $rangeFrom, $rangeTo);
+        } catch (\Throwable) {
+            // Firma bez DPH osnovy / neplátce / jednoduché účetnictví — kontrola nedává smysl.
+            return ['key' => 'vat_clearing_stale', 'severity' => 'info', 'ok' => true, 'value' => null];
+        }
+
+        return [
+            'key' => 'vat_clearing_stale',
+            'severity' => 'warning',
+            'ok' => $stale === [],
+            'value' => ['count' => count($stale), 'items' => $stale],
+        ];
+    }
+
     private function checkAccount343VsReturn(int $supplierId, string $rangeFrom, string $rangeTo): array
     {
         $monthBounds = self::calendarMonthBounds($rangeFrom, $rangeTo);

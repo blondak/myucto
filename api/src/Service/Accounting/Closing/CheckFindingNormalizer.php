@@ -67,6 +67,7 @@ final class CheckFindingNormalizer
         'paid_proformas_no_advance' => 'invoice',
         'paid_advances_no_payment'  => 'purchase_invoice',
         'drafts_in_period'          => 'journal_entry',
+        'vat_clearing_stale'        => 'journal_entry',
     ];
 
     /** Klíče, pod kterými bývá v položce částka. Pořadí = priorita. */

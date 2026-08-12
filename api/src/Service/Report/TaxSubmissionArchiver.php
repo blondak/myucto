@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Accounting\Vat\VatClearingTrigger;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 
 /**
@@ -40,6 +41,7 @@ final class TaxSubmissionArchiver
         private readonly TaxSubmissionRepository $repo,
         private readonly XmlSchemaValidator $validator,
         private readonly AccountingSupplierSettingsRepository $settings,
+        private readonly VatClearingTrigger $vatClearing,
     ) {}
 
     /**
@@ -82,6 +84,28 @@ final class TaxSubmissionArchiver
             'downloaded',
         );
 
+        // Zúčtování DPH (migrace 1332): koncept přiznání UŽ EXISTUJÍCÍ zúčtovací doklad
+        // období obnoví, aby neukazoval jinou daň než ta, kterou účetní právě vidí.
+        // NOVÝ doklad nezakládá — archivace snímku není podání (§2.4 výše) a účetní
+        // zápis z pouhého stažení náhledu vzniknout nesmí. Rozhodovací logika a její
+        // odůvodnění jsou ve {@see VatClearingTrigger}. `$allowLock` je tady použit
+        // v původním významu „akce smí mutovat účetní stav" — readonly GET nemutuje.
+        if ($allowLock) {
+            $this->vatClearing->onSubmissionDrafted(
+                [
+                    'id'             => $id,
+                    'supplier_id'    => $supplierId,
+                    'form_code'      => $formCode,
+                    'period_year'    => $year,
+                    'period_month'   => $month,
+                    'period_quarter' => $quarter,
+                    'form_variant'   => $variant,
+                    'submitted_at'   => null,
+                ],
+                ['user_id' => $generatedBy],
+            );
+        }
+
         return [
             'submission_id'     => $id,
             'validation_status' => $validation['status'],
@@ -110,6 +134,25 @@ final class TaxSubmissionArchiver
         $row = $this->repo->markSubmitted($submissionId, $supplierId, $submittedAt, $submissionRef, $submittedBy);
         if ($row === null) {
             return null;
+        }
+
+        // ── Zúčtování DPH PŘED posunem zámku (migrace 1332) ────────────────────────────
+        // Podání je autoritativní okamžik, kdy je daň za období známá: až teď se
+        // zúčtovací doklad (343.100/343.200 → 343.900) zaúčtuje nebo přepočítá, takže
+        // hlavní kniha ukazuje přesně tu daň, která odešla na FÚ. Opravné i dodatečné
+        // přiznání sem přijdou znovu a doklad přepočítají.
+        //
+        // POŘADÍ JE KRITICKÉ, NE KOSMETICKÉ: `advanceLockedUntil()` níž zamkne datum
+        // konce vykázaného období — a přesně to je datum účetního případu zúčtovacího
+        // dokladu. Po zámku by ho PostingService odmítl s `date_locked`, takže tenhle
+        // krok MUSÍ zůstat nad ním. Selhání nikdy neshodí označení „podáno" (nález si
+        // vyzvedne kontrola uzávěrky `vat_clearing_stale`) — ošetřeno ve VatClearingTrigger.
+        // Výsledek jde zpátky volajícímu (a tím do odpovědi endpointu „označit jako podané"),
+        // protože právě tohle je okamžik, kdy má účetní vědět, že se zúčtování NEZAÚČTOVALO —
+        // typicky u dodatečného přiznání do období, kterému zámek nikdo nevrátil zpět.
+        $clearing = $this->vatClearing->onSubmissionFiled($row, ['user_id' => $submittedBy]);
+        if ($clearing !== null) {
+            $row['vat_clearing'] = $clearing;
         }
 
         // VAT-lock (B8/H7 + §2.4): posun zámku váže na PODÁNÍ, ne na stažení. allowLock=true,

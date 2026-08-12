@@ -1085,6 +1085,11 @@ final class Routes
                 [\MyInvoice\Action\Accounting\Reports\StatementNotesAction::class, 'get']);
             $g->put('/periods/{id:[0-9]+}/statement-notes/{section:[a-z0-9_]+}',
                 [\MyInvoice\Action\Accounting\Reports\StatementNotesAction::class, 'save']);
+            // Interní doklad zúčtování DPH (migrace 1332). Primární spouštěč je PODÁNÍ
+            // přiznání (VatClearingTrigger); tohle je ruční cesta z agendy DPH s náhledem
+            // před zápisem. GET = náhled (accounting READ), POST = zaúčtování (journal.post).
+            $g->get ('/vat-clearing',                             [\MyInvoice\Action\Accounting\VatClearingAction::class, 'preview']);
+            $g->post('/vat-clearing',                             [\MyInvoice\Action\Accounting\VatClearingAction::class, 'run']);
             // Měkký zámek účtování k datu (B8). GET = readonly+; PUT = admin-only
             // (není v route permission rules → PermissionMiddleware fallback admin; Action self-check requireAdmin).
             $g->get('/period-lock',                               [PeriodLockAction::class, 'get']);

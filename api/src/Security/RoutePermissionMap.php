@@ -248,6 +248,10 @@ final class RoutePermissionMap
         // Zaúčtování sdílí právo s ostatním účtováním deníku.
         ['*', '#^/api/accounting/payroll/preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/payroll/post$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Zúčtování DPH (migrace 1332): náhled je čtení, spuštění zakládá účetní zápis
+        // v deníku → stejné právo jako ostatní účtování (ne pouhé `accounting` WRITE).
+        ['GET', '#^/api/accounting/vat-clearing(/|$)#', 'accounting', AccessLevel::READ],
+        ['*',   '#^/api/accounting/vat-clearing(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/offsets(/|$)#', 'accounting.offsets', AccessLevel::READ],
         ['*', '#^/api/accounting/offsets(/|$)#', 'accounting.offsets', AccessLevel::WRITE],
         // Zápočet faktury proti účtu — stejné právo jako vzájemné zápočty.

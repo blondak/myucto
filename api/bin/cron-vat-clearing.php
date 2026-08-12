@@ -5,6 +5,14 @@ declare(strict_types=1);
 /**
  * Cron — interní doklad „zúčtování DPH" na konci zdaňovacího období (migrace 1323/1324).
  *
+ * ⚠️ ZÁCHRANNÁ SÍŤ, NE PRIMÁRNÍ SPOUŠTĚČ (migrace 1332).
+ * Autoritativní okamžik, kdy je daň za období známá, je PODÁNÍ PŘIZNÁNÍ — tehdy se
+ * zúčtování zaúčtuje/přepočítá samo ({@see MyInvoice\Service\Accounting\Vat\VatClearingTrigger},
+ * volané z TaxSubmissionArchiver::markSubmitted()). Kalendářní běh nemůže vědět, že do
+ * období ještě přibude opožděná faktura nebo oprava; tenhle cron proto jen dojíždí
+ * období, za která se přiznání v aplikaci nepodalo. Rozjetá období hlásí kontrola
+ * uzávěrky `vat_clearing_stale` a agenda DPH.
+ *
  * Použití:
  *   php api/bin/cron-vat-clearing.php
  *   php api/bin/cron-vat-clearing.php --dry-run           (jen vypíše, co by zaúčtoval)
@@ -94,7 +102,13 @@ printf(
     count($supplierIds),
 );
 
-$meta = ['user_agent' => 'cron-vat-clearing/1.0'];
+echo "  (záchranná síť — primární spouštěč je PODÁNÍ přiznání k DPH; cron jen dojíždí\n"
+    . "   období, za která se přiznání v aplikaci nepodalo)\n";
+
+$meta = [
+    'user_agent' => 'cron-vat-clearing/1.0',
+    'trigger'    => VatClearingService::TRIGGER_CRON,
+];
 
 foreach ($supplierIds as $sid) {
     $periodType = $service->vatPeriodFor($sid);
@@ -139,6 +153,10 @@ foreach ($supplierIds as $sid) {
             break;
         case VatClearingService::STATUS_DRY_RUN:
             printf("  [DRY] supplier #%d %s → zaúčtovalo by se\n", $sid, $label);
+            break;
+        case VatClearingService::STATUS_DELETED_ZERO:
+            $report['posted']++;
+            printf("  ✓ supplier #%d %s — období vynulováno, zúčtovací doklad smazán\n", $sid, $label);
             break;
         default:
             $report['skipped']++;

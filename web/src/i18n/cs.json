@@ -5501,6 +5501,7 @@
         "accounts_unusual_side": "Účty se zůstatkem na neobvyklé straně (dle typu účtu)",
         "assets_without_accumulated_depreciation": "Majetek na účtu bez zaúčtovaných oprávek",
         "vat_343_vs_return": "Saldo účtu 343 vs. DPH přiznání za období",
+        "vat_clearing_stale": "Zúčtování DPH neodpovídá obratu období",
         "deposits_314_324_open": "Nevypořádané zálohové účty 314/324 k rozvahovému dni",
         "paid_invoices_open_saldo": "Zaplacené vydané faktury s otevřeným saldem na 311 (úhrada chybí v deníku)",
         "paid_purchases_open_saldo": "Zaplacené přijaté faktury s otevřeným saldem na 321 (úhrada chybí v deníku)",
@@ -11545,6 +11546,39 @@
         "amendment_title": "Dodatečné přiznání — vykazuje pouze rozdíly proti poslední známé dani",
         "last_known_tax": "Poslední známá daň",
         "tax_difference": "Rozdíl (ř. 66)"
+      },
+      "clearing": {
+        "title": "Interní doklad zúčtování DPH",
+        "trigger_hint": "Převod daně období z 343.100/343.200 na zúčtovací účet 343.900. Zakládá se automaticky při PODÁNÍ přiznání — tady ho jde spustit ručně za období, za která se přiznání v aplikaci nepodává.",
+        "output_vat": "Daň na výstupu",
+        "input_vat": "Daň na vstupu",
+        "settlement": "Zůstatek k odvodu",
+        "freshness": {
+          "ok": "Sedí",
+          "stale": "Neaktuální",
+          "missing": "Chybí doklad",
+          "not_applicable": "Netýká se"
+        },
+        "trigger": {
+          "return_filed": "podání přiznání",
+          "return_draft": "koncept přiznání",
+          "manual": "ruční spuštění",
+          "cron": "automatická úloha"
+        },
+        "stale_hint": "Doklad byl zaúčtovaný na {posted}, ale z dnešních dat vychází {fresh} — do období po zúčtování přibyl nebo se změnil doklad. Přepočítej, ať hlavní kniha ukazuje skutečnou daň.",
+        "missing_hint": "Za období zůstává na účtech daně nepřevedený zůstatek — zúčtovací doklad chybí.",
+        "last_run": "Naposledy přepočteno: {trigger}, {at}",
+        "linked_submission": "odpovídá podání #{id} (druh {variant})",
+        "blocked": {
+          "period_not_open": "Účetní období není otevřené — doklad se nepřepočítá. Rozdíl patří do dodatečného přiznání, ne do zavřených knih.",
+          "date_locked": "Datum konce období je uzamčené (podané přiznání / ruční zámek). Přepočet je možný až po posunutí zámku v nastavení účetnictví (jen admin).",
+          "no_accounting_period": "Pro konec období neexistuje účetní období."
+        },
+        "action_post": "Zaúčtovat zúčtování",
+        "action_recompute": "Přepočítat zúčtování",
+        "open_entry": "Zobrazit v deníku",
+        "done_posted": "Zúčtování za {period} zaúčtováno.",
+        "done_deleted": "Období vyšlo nulové — zúčtovací doklad byl smazán."
       },
       "post_filing": {
         "title": "Doklady změněné po podání",

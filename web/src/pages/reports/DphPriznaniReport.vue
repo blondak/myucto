@@ -2,10 +2,11 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction, type DphVariant, type DphCrossCheckDocument, type DphCrossCheckFinding, type DphCrossCheck343Reason } from '@/api/reports'
+import { vatClearingApi, type VatClearingStatus } from '@/api/vatClearing'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -67,6 +68,45 @@ async function loadAll() {
     error.value = apiErrorMessage(e)
   } finally {
     loading.value = false
+  }
+}
+
+// ── Interní doklad zúčtování DPH (migrace 1332) ────────────────────────────────
+// Primárně ho zakládá PODÁNÍ přiznání; tenhle panel je ruční cesta pro období, za
+// která se přiznání v aplikaci nepodává, a pro nápravu po opravě zpětného dokladu.
+// Náhled (co se zaúčtuje) je vždy samostatný krok PŘED zápisem do deníku.
+const clearing = ref<VatClearingStatus | null>(null)
+const clearingBusy = ref(false)
+const clearingError = ref('')
+const clearingDone = ref('')
+
+async function loadClearing() {
+  clearing.value = null
+  clearingError.value = ''
+  if (!auth.canRead('accounting')) return
+  try {
+    clearing.value = await vatClearingApi.status(year.value, month.value)
+  } catch {
+    // Neplátce / jednoduché účetnictví / chybějící osnova — panel se prostě neukáže.
+    clearing.value = null
+  }
+}
+
+async function runClearing() {
+  clearingBusy.value = true
+  clearingError.value = ''
+  clearingDone.value = ''
+  try {
+    const r = await vatClearingApi.run(year.value, month.value)
+    clearing.value = r
+    clearingDone.value = r.status === 'deleted_zero'
+      ? t('reports.dph.clearing.done_deleted')
+      : t('reports.dph.clearing.done_posted', { period: r.period_label })
+    await loadClearing()
+  } catch (e) {
+    clearingError.value = apiErrorMessage(e)
+  } finally {
+    clearingBusy.value = false
   }
 }
 
@@ -215,10 +255,15 @@ const daysToDeadline = computed(() => {
 
 watch([year, month, periodOverride, variant, dZjist], () => {
   postFilingPage.value = 1
+  clearingDone.value = ''
   for (const key of Object.keys(crossCheckPages)) delete crossCheckPages[key]
   void loadAll()
+  void loadClearing()
 })
-onMounted(loadAll)
+onMounted(() => {
+  void loadAll()
+  void loadClearing()
+})
 </script>
 
 <template>
@@ -326,6 +371,69 @@ onMounted(loadAll)
       <div v-if="preview.post_filing_changes?.has_filing && !preview.post_filing_changes.snapshot_available"
         class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700">
         {{ t('reports.dph.post_filing.legacy_snapshot_warning') }}
+      </div>
+
+      <!-- Interní doklad zúčtování DPH (migrace 1332) — 343.100/343.200 → 343.900.
+           Primární spouštěč je PODÁNÍ přiznání; tady je náhled a ruční přepočet. -->
+      <div v-if="clearing && clearing.freshness !== 'not_applicable'"
+        class="rounded-md border p-3 text-sm space-y-2"
+        :class="clearing.freshness === 'ok'
+          ? 'bg-neutral-50 border-neutral-200 text-neutral-700'
+          : 'bg-warning-50 border-warning-500/40 text-warning-700'">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <strong>{{ t('reports.dph.clearing.title') }}</strong>
+            <p class="text-xs mt-0.5">{{ t('reports.dph.clearing.trigger_hint') }}</p>
+          </div>
+          <span class="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+            :class="clearing.freshness === 'ok' ? 'bg-success-100 text-success-700' : 'bg-warning-200 text-warning-800'">
+            {{ t('reports.dph.clearing.freshness.' + clearing.freshness) }}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs">
+          <div>{{ t('reports.dph.clearing.output_vat') }} ({{ clearing.accounts.output }}): {{ formatMoney(clearing.output_vat, 'CZK') }}</div>
+          <div>{{ t('reports.dph.clearing.input_vat') }} ({{ clearing.accounts.input }}): {{ formatMoney(clearing.input_vat, 'CZK') }}</div>
+          <div class="font-semibold">{{ t('reports.dph.clearing.settlement') }} ({{ clearing.accounts.settlement }}): {{ formatMoney(clearing.settlement, 'CZK') }}</div>
+        </div>
+
+        <p v-if="clearing.freshness === 'stale' && clearing.posted" class="text-xs">
+          {{ t('reports.dph.clearing.stale_hint', {
+            posted: formatMoney(clearing.posted.settlement, 'CZK'),
+            fresh: formatMoney(clearing.settlement, 'CZK'),
+          }) }}
+        </p>
+        <p v-else-if="clearing.freshness === 'missing'" class="text-xs">{{ t('reports.dph.clearing.missing_hint') }}</p>
+
+        <p v-if="clearing.run" class="text-xs text-neutral-500">
+          {{ t('reports.dph.clearing.last_run', {
+            trigger: t('reports.dph.clearing.trigger.' + clearing.run.trigger_source),
+            at: formatDate(clearing.run.computed_at),
+          }) }}
+          <template v-if="clearing.run.submission_id">
+            — {{ t('reports.dph.clearing.linked_submission', { id: clearing.run.submission_id, variant: clearing.run.submission_variant ?? '?' }) }}
+          </template>
+        </p>
+
+        <p v-if="!clearing.writable" class="text-xs font-medium">
+          {{ t('reports.dph.clearing.blocked.' + (clearing.writable_reason ?? 'period_not_open')) }}
+        </p>
+
+        <div v-if="clearingError" class="text-xs text-danger-600">{{ clearingError }}</div>
+        <div v-if="clearingDone" class="text-xs text-success-700">{{ clearingDone }}</div>
+
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button v-if="auth.canWrite('accounting.journal.post')" type="button"
+            :class="clearing.freshness === 'ok' ? btnOutline('neutral') : btnFilled('primary')"
+            :disabled="clearingBusy || !clearing.writable"
+            @click="runClearing">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path :d="ICONS.cycle" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            {{ clearing.entry_id ? t('reports.dph.clearing.action_recompute') : t('reports.dph.clearing.action_post') }}
+          </button>
+          <RouterLink v-if="clearing.entry_id" :to="`/accounting/journal?entry_id=${clearing.entry_id}`" :class="btnOutline('neutral')">
+            {{ t('reports.dph.clearing.open_entry') }}
+          </RouterLink>
+        </div>
       </div>
 
       <!-- Dodatečné přiznání — poslední známá daň vs rozdíl (ř.66) -->

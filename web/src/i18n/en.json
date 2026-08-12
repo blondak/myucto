@@ -5501,6 +5501,7 @@
         "accounts_unusual_side": "Accounts with a balance on the unusual side (per account type)",
         "assets_without_accumulated_depreciation": "Assets on an account without booked accumulated depreciation",
         "vat_343_vs_return": "Account 343 balance vs. VAT return for the period",
+        "vat_clearing_stale": "VAT clearing does not match the period turnover",
         "deposits_314_324_open": "Unsettled advance accounts 314/324 at the balance-sheet date",
         "paid_invoices_open_saldo": "Paid issued invoices with an open balance on 311 (payment missing in the journal)",
         "paid_purchases_open_saldo": "Paid purchase invoices with an open balance on 321 (payment missing in the journal)",
@@ -11545,6 +11546,39 @@
         "amendment_title": "Supplementary return — reports only differences against the last known tax",
         "last_known_tax": "Last known tax",
         "tax_difference": "Difference (line 66)"
+      },
+      "clearing": {
+        "title": "Internal VAT clearing document",
+        "trigger_hint": "Transfers the period's VAT from 343.100/343.200 to the settlement account 343.900. Created automatically when the VAT return is FILED — run it here manually for periods whose return is not filed from the app.",
+        "output_vat": "Output VAT",
+        "input_vat": "Input VAT",
+        "settlement": "Balance payable",
+        "freshness": {
+          "ok": "Up to date",
+          "stale": "Out of date",
+          "missing": "Document missing",
+          "not_applicable": "Not applicable"
+        },
+        "trigger": {
+          "return_filed": "return filed",
+          "return_draft": "draft return",
+          "manual": "manual run",
+          "cron": "scheduled task"
+        },
+        "stale_hint": "The document was posted at {posted}, but today's data gives {fresh} — a document was added or changed in the period after it was cleared. Recompute so the general ledger shows the real liability.",
+        "missing_hint": "The period still has an untransferred balance on the VAT accounts — the clearing document is missing.",
+        "last_run": "Last recomputed: {trigger}, {at}",
+        "linked_submission": "matches submission #{id} (type {variant})",
+        "blocked": {
+          "period_not_open": "The accounting period is not open — the document will not be recomputed. The difference belongs in a supplementary return, not in closed books.",
+          "date_locked": "The period end date is locked (filed return / manual lock). Recomputing is possible only after moving the lock in accounting settings (admin only).",
+          "no_accounting_period": "There is no accounting period covering the period end."
+        },
+        "action_post": "Post clearing",
+        "action_recompute": "Recompute clearing",
+        "open_entry": "Show in journal",
+        "done_posted": "VAT clearing for {period} posted.",
+        "done_deleted": "The period came out zero — the clearing document was deleted."
       },
       "post_filing": {
         "title": "Documents changed after filing",
