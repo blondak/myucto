@@ -13,6 +13,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
+use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
@@ -61,6 +62,7 @@ final class IssueInvoiceAction
         private readonly AdvanceCycleLock $cycleLock,
         private readonly InvoiceAssetSaleService $assetSale,
         private readonly VatStatusService $vatStatus,
+        private readonly CashSettlementService $cashSettlement,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -476,7 +478,30 @@ final class IssueInvoiceAction
             'user_agent' => $request->getHeaderLine('User-Agent'),
         ]);
 
+        // Hotovostní vyrovnání (migrace 1327): draft se inkasovat nedá, takže volbu
+        // „přijmout hotově do pokladny" uplatní až vystavení — vznikne příjmový pokladní
+        // doklad a faktura je rovnou uhrazená. Až ZA auto-postem a prodejem majetku, ať
+        // v deníku sedí chronologie doklad → úhrada. Měkká brána: chyba pokladny
+        // NESMÍ shodit vystavení (zákazník už doklad má), jen se ohlásí.
+        $settlement = $this->cashSettlement->maybeSettle(
+            $supplierId,
+            'invoice',
+            $id,
+            isset($user['id']) ? (int) $user['id'] : null,
+            $ip,
+            $request->getHeaderLine('User-Agent'),
+        );
+
         $issued = $this->repo->find($id);
+        if ($settlement['status'] !== CashSettlementService::NOOP) {
+            $issued['_cash_settlement'] = $settlement;
+        }
+        if ($settlement['status'] === CashSettlementService::FAILED) {
+            $issued['warnings'] = array_merge(
+                is_array($issued['warnings'] ?? null) ? $issued['warnings'] : [],
+                [CashSettlementService::WARNING],
+            );
+        }
 
         // Karta majetku, kterou se nepodařilo uzavřít (zavřené období, nedoúčtovaný odpis
         // minulého roku, daňová evidence). Faktura je platná a zaúčtovaná, ale uživatel to

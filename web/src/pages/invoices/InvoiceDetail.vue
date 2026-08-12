@@ -674,6 +674,17 @@ async function issue() {
     for (const w of invoice.value.asset_sale_warnings ?? []) {
       toast.warning(`${t('invoice.asset_sale.not_closed', { name: w.name })} ${w.message}`)
     }
+    // Hotovostní vyrovnání (migrace 1327): vystavení faktury s formou úhrady „Hotově"
+    // a zvolenou pokladnou z ní udělá zaúčtovaný PPD. Neúspěch jen hlásíme — faktura
+    // je vystavená a zákazník ji má, jen zůstala neuhrazená.
+    const settlement = invoice.value._cash_settlement
+    if (settlement?.status === 'created') {
+      toast.success(t('cash_settlement.created', { number: settlement.doc_number ?? '' }))
+    } else if (settlement?.status === 'failed') {
+      toast.warning(t('cash_settlement.failed') + (settlement.message ? ` (${settlement.message})` : ''))
+    } else if (settlement?.status === 'skipped' && settlement.reason) {
+      toast.info(t(`cash_settlement.reason.${settlement.reason}`))
+    }
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
     invoicesApi.listPdfs(invoice.value.id).then(items => { pdfHistory.value = items }).catch(() => {})
     // Sklad (Epic SKLAD, B5): auto-výdejka vznikla v téže transakci co issue —

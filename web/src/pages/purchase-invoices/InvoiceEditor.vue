@@ -19,6 +19,8 @@ import {
 } from '@/api/purchaseInvoices'
 import { PAYMENT_METHODS, type PaymentMethod } from '@/api/invoices'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { cashApi, type CashRegister } from '@/api/cash'
+import type { CashSettlementResult } from '@/api/invoices'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
@@ -54,6 +56,39 @@ const supplierStore = useSupplierStore()
 
 /** Volby formy úhrady — pořadí a doména ze sdíleného API typu (migrace 1128). */
 const paymentMethodOptions = PAYMENT_METHODS
+
+// Hotovostní vyrovnání (migrace 1327): u formy úhrady „Hotově" nabídneme pokladnu a
+// backend z ní při přijetí dokladu vyrobí zaúčtovaný výdajový pokladní doklad.
+// Jen KORUNOVÉ pokladny — úhradu faktury z valutové pokladny CashDocumentService
+// odmítá, takže nabízet ji by znamenalo nabízet chybu. Klientská role do pokladny
+// nevidí, tak se u ní volba vůbec nezobrazí.
+const cashRegisters = ref<CashRegister[]>([])
+const showCashSettlement = computed(() => form.value.payment_method === 'cash' && !auth.isClientRole)
+
+async function loadCashRegisters() {
+  if (auth.isClientRole) return
+  try {
+    cashRegisters.value = (await cashApi.listRegisters()).filter(r => r.currency_code === 'CZK')
+  } catch {
+    // Pokladna nemusí být u tenanta vůbec zapnutá — select prostě zůstane prázdný.
+    cashRegisters.value = []
+  }
+}
+
+/**
+ * Co backend s pokladním dokladem udělal. `skipped` je legitimní mezistav (koncept,
+ * nic k úhradě) — hlásí se jen s důvodem, ať uživatel nečeká doklad, který nevznikl.
+ */
+function notifyCashSettlement(s?: CashSettlementResult): void {
+  if (!s) return
+  if (s.status === 'created') {
+    toast.success(t('cash_settlement.created', { number: s.doc_number ?? '' }))
+  } else if (s.status === 'removed') {
+    toast.info(t('cash_settlement.removed'))
+  } else if (s.status === 'skipped' && s.reason) {
+    toast.info(t(`cash_settlement.reason.${s.reason}`))
+  }
+}
 
 // Sklad (Epic SKLAD) — na řádku přijaté faktury jen volitelná vazba na skladovou kartu.
 // Na rozdíl od vydané faktury BEZ skladu (warehouse) a bez náhledu dostupnosti.
@@ -172,6 +207,7 @@ const form = ref<{
   payment_bic: string
   payment_variable_symbol: string
   payment_method: PaymentMethod
+  cash_register_id: number | null
   advance_paid_amount: number
   rounding: number
   payment_currency_id: number | null
@@ -212,6 +248,7 @@ const form = ref<{
   payment_bic: '',
   payment_variable_symbol: '',
   payment_method: 'bank_transfer',
+  cash_register_id: null,
   advance_paid_amount: 0,
   rounding: 0,
   payment_currency_id: null,
@@ -465,6 +502,7 @@ async function addCurrency() {
 
 onMounted(async () => {
   await loadCodebooks()
+  void loadCashRegisters()
   if (isEdit.value && invoiceId.value) {
     await loadInvoice(invoiceId.value)
   } else {
@@ -672,6 +710,7 @@ function populate(inv: PurchaseInvoice) {
   form.value.payment_bic = inv.payment_bic || ''
   form.value.payment_variable_symbol = inv.payment_variable_symbol || ''
   form.value.payment_method = inv.payment_method || 'bank_transfer'
+  form.value.cash_register_id = inv.cash_register_id ?? null
   form.value.advance_paid_amount = inv.advance_paid_amount
   form.value.rounding = Number(inv.rounding) || 0
   form.value.payment_currency_id = inv.payment_currency_id
@@ -1157,6 +1196,9 @@ async function submit() {
       // Forma úhrady — volba v editoru je vědomý úkon účetní, backend jí proto vždy
       // přiřadí source 'manual' a už ji nepřepíše AI ani předvolba dodavatele.
       payment_method: form.value.payment_method,
+      // Hotovostní vyrovnání (migrace 1327): pokladna se posílá JEN u formy úhrady
+      // „Hotově" — jinak natvrdo null, ať přepnutí na převod zruší i dřív založený VPD.
+      cash_register_id: form.value.payment_method === 'cash' ? form.value.cash_register_id : null,
       advance_paid_amount: form.value.advance_paid_amount,
       rounding: form.value.rounding,
       payment_currency_id: form.value.payment_currency_id,
@@ -1223,10 +1265,16 @@ async function submit() {
           date: m?.rate_date ?? '—',
           reason: t(`purchase_invoice.warning.exchange_rate_not_reloaded_${m?.reason ?? 'source_locked'}`),
         }))
+      } else if (code === 'cash_settlement_failed') {
+        // Vlastní hláška — kód pokladny nese `_cash_settlement.reason`, ne
+        // `purchase_invoice.warning.*` (tam by chyběl překlad).
+        const s = inv._cash_settlement
+        toast.warning(t('cash_settlement.failed') + (s?.message ? ` (${s.message})` : ''))
       } else {
         toast.warning(t(`purchase_invoice.warning.${code}`))
       }
     }
+    notifyCashSettlement(inv._cash_settlement)
     router.push(`/purchase-invoices/${inv.id}`)
   } catch (e: any) {
     const data = e?.response?.data?.error
@@ -2160,6 +2208,24 @@ function fieldErr(key: string): string | null {
             </select>
             <p v-if="form.payment_method !== 'bank_transfer'" class="text-xs text-warning-600 mt-1">
               {{ t('payment_method.purchase_hint') }}
+            </p>
+          </div>
+          <!-- Hotovostní vyrovnání (migrace 1327): pokladna k formě úhrady „Hotově".
+               Nepovinné — bez pokladny se nic nezaúčtuje a faktura zůstane závazkem. -->
+          <div v-if="showCashSettlement">
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('cash_settlement.register_label') }}</label>
+            <select v-model="form.cash_register_id"
+              class="w-full px-3 h-9 border border-neutral-300 rounded-md text-sm bg-surface">
+              <option :value="null">{{ t('cash_settlement.none') }}</option>
+              <option v-for="r in cashRegisters" :key="r.id" :value="r.id">
+                {{ r.name }} ({{ r.account_code }})
+              </option>
+            </select>
+            <p v-if="cashRegisters.length === 0" class="text-xs text-neutral-500 mt-1">
+              {{ t('cash_settlement.no_registers') }}
+            </p>
+            <p v-else-if="form.cash_register_id" class="text-xs text-neutral-500 mt-1">
+              {{ t('cash_settlement.purchase_hint') }}
             </p>
           </div>
         </div>

@@ -1,7 +1,7 @@
 import { api } from './client'
 import type { DocumentLock } from './locks'
 import type { DocItem } from './documents'
-import type { CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
+import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
 export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
@@ -335,6 +335,12 @@ export interface PurchaseInvoice {
   /** Forma úhrady (migrace 1128). `direct_debit` = inkaso → netvoří se platební příkaz. */
   payment_method: PaymentMethod
   payment_method_source: PaymentMethodSource
+  /**
+   * Hotovostní vyrovnání (migrace 1327): pokladna, ze které se faktura hradí.
+   * Platí jen s `payment_method = 'cash'`; při přijetí dokladu z ní vznikne
+   * zaúčtovaný VPD a faktura přejde na `paid`. NULL = bez vyrovnání.
+   */
+  cash_register_id: number | null
   status: PurchaseInvoiceStatus
   booked_at: string | null
   paid_at: string | null
@@ -431,6 +437,8 @@ export interface PurchaseInvoice {
   _meta?: {
     exchange_rate?: ResolvedExchangeRateMeta
   }
+  /** Výsledek hotovostního vyrovnání z posledního uložení (migrace 1327). */
+  _cash_settlement?: CashSettlementResult
   // Joined fields
   vendor_company_name?: string
   vendor_ic?: string | null
@@ -558,6 +566,11 @@ export interface PurchaseInvoicePayload {
    * `payment_method_source = 'manual'` — volba v editoru je vědomý úkon účetní.
    */
   payment_method?: PaymentMethod
+  /**
+   * Hotovostní vyrovnání (migrace 1327) — pokladna pro úhradu hotově.
+   * Zapisuje se jen když je klíč přítomen; null volbu i dřív založený VPD zruší.
+   */
+  cash_register_id?: number | null
   items: Array<{
     description: string
     quantity: number

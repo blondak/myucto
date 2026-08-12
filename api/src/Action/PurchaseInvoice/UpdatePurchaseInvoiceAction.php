@@ -14,6 +14,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -59,6 +60,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly PurchaseInvoiceRateReloader $rateReloader,
+        private readonly CashSettlementService $cashSettlement,
     ) {}
 
     /**
@@ -72,6 +74,9 @@ final class UpdatePurchaseInvoiceAction
         'reverse_charge', 'prices_include_vat', 'advance_paid_amount',
         'vat_classification_code', 'vat_deduction', 'vat_deduction_percent',
         'tax_deductible', 'is_fixed_asset', 'expense_category_id', 'varsymbol',
+        // Volba hotovostního vyrovnání (migrace 1327) zakládá/ruší ZAÚČTOVANÝ pokladní
+        // doklad, takže je to účetní pole jako každé jiné — notes_only ji nesmí pustit.
+        'cash_register_id',
     ];
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -171,7 +176,7 @@ final class UpdatePurchaseInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             $supplierId,
             $body,
-            ['expense_category_id', 'currency_id', 'payment_currency_id'],
+            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
@@ -276,6 +281,15 @@ final class UpdatePurchaseInvoiceAction
             // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
             if (DocumentItemsPayload::replaces($body)) {
                 $this->repo->replaceItems($id, (array) $body['items']);
+            }
+            // Volba „uhradit hotově z pokladny" (migrace 1327) — jen když klíč v těle JE,
+            // ať částečný PUT (samotné DUZP, poznámka) volbu tiše nesmaže.
+            if (array_key_exists('cash_register_id', $body)) {
+                $this->repo->setCashRegisterId(
+                    $id,
+                    $supplierId,
+                    ($body['cash_register_id'] ?? null) !== null ? (int) $body['cash_register_id'] : null,
+                );
             }
             // Ruční rekapitulace DPH dle dokladu (§ 73) — uložit PŘED recompute, aby ji
             // kalkulátor zapekl do řádkových totálů.
@@ -408,7 +422,23 @@ final class UpdatePurchaseInvoiceAction
             }
         }
 
+        // Hotovostní vyrovnání (migrace 1327): je-li forma úhrady „Hotově" a je zvolená
+        // pokladna, vznikne (nebo se zaktualizuje) výdajový pokladní doklad; odebraná
+        // volba ten dřívější zruší. Měkká brána — chyba pokladny NESMÍ shodit uložení
+        // faktury, jen se ohlásí warningem (stejně jako auto-post).
+        $settlement = $this->cashSettlement->maybeSettle(
+            $supplierId,
+            'purchase_invoice',
+            $id,
+            isset($user['id']) ? (int) $user['id'] : null,
+            $ip,
+            $request->getHeaderLine('User-Agent'),
+        );
+
         $invoice = $this->repo->find($id, $supplierId);
+        if ($invoice !== null && $settlement['status'] !== CashSettlementService::NOOP) {
+            $invoice['_cash_settlement'] = $settlement;
+        }
         if ($reconcile !== null && $invoice !== null) {
             $invoice['_reconcile'] = $reconcile;
         }
@@ -420,6 +450,9 @@ final class UpdatePurchaseInvoiceAction
         }
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
+        if ($settlement['status'] === CashSettlementService::FAILED) {
+            $warnings[] = CashSettlementService::WARNING;
+        }
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
         // VÝJIMKA reverse charge (zahraniční služba/zboží): dodavatel je z pohledu české
         // DPH neplátce ZE SVÉ PODSTATY (nefakturuje českou DPH), ale příjemce si daň

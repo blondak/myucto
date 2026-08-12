@@ -35,6 +35,7 @@
     "bank_accounts",
     "bank_template_admin",
     "cash",
+    "cash_settlement",
     "checks",
     "codebookTransfer",
     "costs",
@@ -154,6 +155,7 @@
       "integrations"
     ],
     "invoice-new": [
+      "cash_settlement",
       "errors",
       "lock",
       "payment_method",
@@ -165,6 +167,7 @@
     "invoice-detail": [
       "accounting",
       "cash",
+      "cash_settlement",
       "documents",
       "lock",
       "payment_method",
@@ -174,6 +177,7 @@
       "stock"
     ],
     "invoice-edit": [
+      "cash_settlement",
       "errors",
       "lock",
       "payment_method",
@@ -220,6 +224,7 @@
     "purchase-invoice-new": [
       "accounting",
       "automation",
+      "cash_settlement",
       "errors",
       "lock",
       "payment_method",
@@ -230,6 +235,7 @@
       "accounting",
       "automation",
       "cash",
+      "cash_settlement",
       "documents",
       "lock",
       "payment_method",
@@ -239,6 +245,7 @@
     "purchase-invoice-edit": [
       "accounting",
       "automation",
+      "cash_settlement",
       "errors",
       "lock",
       "payment_method",
@@ -705,6 +712,7 @@
       "bank_accounts",
       "bank_template_admin",
       "cash",
+      "cash_settlement",
       "checks",
       "codebookTransfer",
       "costs",

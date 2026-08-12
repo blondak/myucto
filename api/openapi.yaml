@@ -16949,6 +16949,14 @@ components:
           enum: [bank_transfer, card, cash, other]
           default: bank_transfer
           description: "Způsob úhrady. U card/cash se v PDF/emailu nezobrazuje QR ani bankovní spojení a místo výzvy k platbě se uvede odpovídající poznámka."
+        cash_register_id:
+          type: [integer, "null"]
+          description: |
+            Hotovostní vyrovnání (migrace 1327): pokladna, do které se doklad inkasuje,
+            je-li `payment_method = cash`. Při vystavení (a při každém uložení) z ní
+            vznikne zaúčtovaný příjmový pokladní doklad navázaný na tuto fakturu;
+            NULL doklad zase zruší. Neplatí pro zálohové faktury (proforma),
+            storna a platební kalendáře.
         language: { type: string, enum: [cs, en], description: "Jazyk PDF/emailů" }
         reverse_charge: { type: boolean }
         prices_include_vat: { type: boolean, description: "Ceny položek zadané včetně DPH (DPH se počítá shora koeficientem). Per-doklad, migrace 0083." }
@@ -17131,6 +17139,12 @@ components:
           enum: [bank_transfer, card, cash, other]
           default: bank_transfer
           description: "Způsob úhrady. Pro card/cash se v PDF/emailu nevygeneruje QR ani bankovní spojení."
+        cash_register_id:
+          type: [integer, "null"]
+          description: |
+            Hotovostní vyrovnání (migrace 1327) — pokladna pro inkaso, platí jen s
+            `payment_method = cash`. Pokladní doklad vznikne až při vystavení faktury;
+            NULL volbu (a dřív založený pokladní doklad) zruší.
         exchange_rate: { type: [number, "null"], format: float, description: "Volitelný manuální override ČNB kurzu (CZK / 1 jednotka cizí měny)" }
         note: { type: [string, "null"], description: "Generická poznámka (mapuje se na note_below_items pokud není uvedeno jinak)" }
         note_above_items: { type: [string, "null"] }
@@ -18680,6 +18694,13 @@ components:
             historický zápis" a chová se jako `import`; `idoklad`/`fakturoid` jsou
             DEPRECATED a nikdy se nezapsaly.
         reverse_charge: { type: boolean }
+        cash_register_id:
+          type: [integer, "null"]
+          description: |
+            Hotovostní vyrovnání (migrace 1327): pokladna, ze které se faktura hradí,
+            je-li forma úhrady „Hotově". Při přijetí dokladu (a při každém uložení)
+            z ní vznikne zaúčtovaný výdajový pokladní doklad navázaný na tuto fakturu
+            a faktura přejde na `paid`; NULL doklad zase zruší. Koncept se nevyrovnává.
         vat_deduction:
           type: string
           enum: [full, none, proportional]
@@ -18868,6 +18889,13 @@ components:
         reverse_charge: { type: boolean, default: false }
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
         expense_category_id: { type: [integer, "null"], description: "Kategorie nákladu. Když chybí, na create se odvodí z default kategorie dodavatele." }
+        cash_register_id:
+          type: [integer, "null"]
+          description: |
+            Hotovostní vyrovnání (migrace 1327) — pokladna, ze které se faktura hradí;
+            dává smysl jen s `payment_method = cash`. Zapisuje se jen když je klíč
+            v těle přítomen. Výdajový pokladní doklad vznikne až u nekonceptu; NULL
+            volbu (a dřív založený pokladní doklad) zruší.
         vat_overrides:
           type: [array, "null"]
           description: "Per-sazba override rekapitulace DPH (§73). Zapisuje se jen když je klíč přítomen; zapéká se do řádkových totálů."

@@ -241,6 +241,12 @@ export interface Invoice {
   advance_paid_amount: number
   discount_percent: number
   payment_method: PaymentMethod
+  /**
+   * Hotovostní vyrovnání (migrace 1327): pokladna, do které se doklad inkasuje.
+   * Platí jen s `payment_method = 'cash'`; při vystavení z ní vznikne zaúčtovaný
+   * PPD a faktura je uhrazená. NULL = bez vyrovnání.
+   */
+  cash_register_id: number | null
   auto_send_reminders: boolean
   amount_to_pay: number
   /** Suma evidovaných plateb (#89); zbývá k úhradě = amount_to_pay - paid_total. */
@@ -322,6 +328,21 @@ export interface Invoice {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
     oss_document_contradiction?: OssDocumentContradictionMeta
   }
+  /** Výsledek hotovostního vyrovnání z posledního uložení/vystavení (migrace 1327). */
+  _cash_settlement?: CashSettlementResult
+}
+
+/**
+ * Hotovostní vyrovnání faktury (migrace 1327) — co backend s pokladním dokladem
+ * udělal při posledním uložení. `reason` je strojový kód pro
+ * `t('cash_settlement.reason.<reason>')`, u `failed` může být i chybový kód pokladny.
+ */
+export interface CashSettlementResult {
+  status: 'noop' | 'created' | 'removed' | 'unchanged' | 'skipped' | 'failed'
+  cash_document_id: number | null
+  doc_number: string | null
+  reason: string | null
+  message?: string
 }
 
 /**
@@ -458,6 +479,11 @@ export interface InvoicePayload {
   advance_paid_amount?: number
   discount_percent?: number
   payment_method?: PaymentMethod
+  /**
+   * Hotovostní vyrovnání (migrace 1327) — pokladna pro inkaso hotově.
+   * Zapisuje se jen když je klíč přítomen; null volbu i dřív založený PPD zruší.
+   */
+  cash_register_id?: number | null
   auto_send_reminders?: boolean
   exchange_rate?: number | null
   // Volitelný ruční override čísla faktury (varsymbol). Prázdný řetězec / null =

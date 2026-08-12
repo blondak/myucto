@@ -270,6 +270,16 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
     invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate)
     markPaidOpen.value = false
     toast.success(t(`purchase_invoice.transition.success_${target}`))
+    // Hotovostní vyrovnání (migrace 1327): přijetí dokladu s formou úhrady „Hotově"
+    // a zvolenou pokladnou z ní udělá zaúčtovaný VPD a fakturu rovnou uhradí.
+    const settlement = invoice.value._cash_settlement
+    if (settlement?.status === 'created') {
+      toast.success(t('cash_settlement.created', { number: settlement.doc_number ?? '' }))
+    } else if (settlement?.status === 'failed') {
+      toast.warning(t('cash_settlement.failed') + (settlement.message ? ` (${settlement.message})` : ''))
+    } else if (settlement?.status === 'skipped' && settlement.reason) {
+      toast.info(t(`cash_settlement.reason.${settlement.reason}`))
+    }
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
   } catch (e) {
     toast.error(apiErrorMessage(e))

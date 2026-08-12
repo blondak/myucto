@@ -1183,6 +1183,20 @@ final class PurchaseInvoiceRepository
         return $stmt->rowCount() > 0;
     }
 
+    /**
+     * Volba „uhradit hotově z této pokladny" (migrace 1327). Samostatný setter, ne
+     * další sloupec v pozičním INSERT/UPDATE výš — zápis je nezávislý na zbytku
+     * dokladu a vlastnictví pokladny váže volající (TenantReferenceGuard).
+     * NULL = volba zrušena; {@see \MyInvoice\Service\Accounting\Cash\CashSettlementService}
+     * na to reaguje smazáním dřív založeného pokladního dokladu.
+     */
+    public function setCashRegisterId(int $id, int $supplierId, ?int $registerId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET cash_register_id = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$registerId !== null && $registerId > 0 ? $registerId : null, $id, $supplierId]);
+    }
+
     /** Předvolená forma úhrady dodavatele; null = neurčeno (nebo sloupec ještě není). */
     private function vendorDefaultPaymentMethod(int $vendorId): ?string
     {
@@ -2914,7 +2928,7 @@ final class PurchaseInvoiceRepository
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id',
-                  'parent_purchase_invoice_id'] as $f) {
+                  'parent_purchase_invoice_id', 'cash_register_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;

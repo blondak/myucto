@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow } from '@/api/invoices'
+import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
@@ -33,6 +33,7 @@ import { stockApi, type StockItemSearchResult, type Warehouse } from '@/api/stoc
 import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
 import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
+import { cashApi, type CashRegister } from '@/api/cash'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -194,6 +195,43 @@ function stockSelectedFor(item: InvoiceItem): { value: number; label: string; se
 async function loadStockWarehouses() {
   if (!stockEnabled.value) return
   try { stockWarehouses.value = await stockApi.listWarehouses(true) } catch { stockWarehouses.value = [] }
+}
+
+// Hotovostní vyrovnání (migrace 1327): u formy úhrady „Hotově" nabídneme pokladnu a
+// backend z ní při vystavení faktury vyrobí zaúčtovaný příjmový pokladní doklad.
+// Jen KORUNOVÉ pokladny — inkaso faktury z valutové pokladny CashDocumentService
+// odmítá. Zálohová faktura se takhle vyrovnat nedá (úhrada zálohy vystavuje finální
+// doklad, což by odebrání volby neumělo vzít zpět) → volbu u ní vůbec nenabízíme.
+const cashRegisters = ref<CashRegister[]>([])
+const showCashSettlement = computed(() =>
+  form.value.payment_method === 'cash'
+  && !auth.isClientRole
+  && !['proforma', 'payment_calendar'].includes(form.value.invoice_type),
+)
+
+async function loadCashRegisters() {
+  if (auth.isClientRole) return
+  try {
+    cashRegisters.value = (await cashApi.listRegisters()).filter(r => r.currency_code === 'CZK')
+  } catch {
+    // Pokladna nemusí být u tenanta vůbec zapnutá — select prostě zůstane prázdný.
+    cashRegisters.value = []
+  }
+}
+
+/**
+ * Co backend s pokladním dokladem udělal. `skipped` je legitimní mezistav (koncept,
+ * nic k inkasu) — hlásí se jen s důvodem, ať uživatel nečeká doklad, který nevznikl.
+ */
+function notifyCashSettlement(s?: CashSettlementResult): void {
+  if (!s) return
+  if (s.status === 'created') {
+    toast.success(t('cash_settlement.created', { number: s.doc_number ?? '' }))
+  } else if (s.status === 'removed') {
+    toast.info(t('cash_settlement.removed'))
+  } else if (s.status === 'skipped' && s.reason) {
+    toast.info(t(`cash_settlement.reason.${s.reason}`))
+  }
 }
 
 async function refreshAvailability() {
@@ -420,6 +458,7 @@ const form = ref<{
   advance_paid_amount: number
   discount_percent: number
   payment_method: PaymentMethod
+  cash_register_id: number | null
   auto_send_reminders: boolean
   exchange_rate: number | null
   varsymbol: string  // Ruční override čísla faktury (prázdný = generuje se při issue)
@@ -450,6 +489,7 @@ const form = ref<{
   advance_paid_amount: 0,
   discount_percent: 0,
   payment_method: 'bank_transfer',
+  cash_register_id: null,
   auto_send_reminders: true,
   exchange_rate: null,
   varsymbol: '',
@@ -695,6 +735,7 @@ onMounted(async () => {
   vatClassifications.value = vc
   revenueCategories.value = rcat
   void loadStockWarehouses()
+  void loadCashRegisters()
   if (form.value.currency_id === 0) {
     const def = cur.find(c => c.is_default && c.code === 'CZK') || cur[0]
     if (def) {
@@ -741,6 +782,7 @@ onMounted(async () => {
       advance_paid_amount: inv.advance_paid_amount,
       discount_percent: inv.discount_percent ?? 0,
       payment_method: inv.payment_method ?? 'bank_transfer',
+      cash_register_id: inv.cash_register_id ?? null,
       auto_send_reminders: (inv as { auto_send_reminders?: boolean }).auto_send_reminders ?? true,
       // Slevové položky (item_kind='discount') jsou generované z discount_percent —
       // do editovatelného seznamu nepatří (jinak by se editovaly / zdvojily při uložení).
@@ -1675,6 +1717,9 @@ async function submit() {
       advance_paid_amount: form.value.advance_paid_amount,
       discount_percent: form.value.discount_percent || 0,
       payment_method: form.value.payment_method,
+      // Hotovostní vyrovnání (migrace 1327): pokladna se posílá JEN u formy úhrady
+      // „Hotově" — jinak natvrdo null, ať přepnutí na převod zruší i dřív založený PPD.
+      cash_register_id: form.value.payment_method === 'cash' ? form.value.cash_register_id : null,
       auto_send_reminders: form.value.auto_send_reminders,
       // Kurz posíláme JEN když ho uživatel opravdu změnil proti načtené hodnotě. Backend
       // bere jakoukoli poslanou hodnotu jako manuální override a přeskočí přepočet z ČNB —
@@ -1760,11 +1805,16 @@ async function submit() {
           cnb: m ? m.cnb_rate.toFixed(3) : '',
           diff: m ? m.diff_percent.toFixed(2) : '',
         }))
+      } else if (code === 'cash_settlement_failed') {
+        // Vlastní hláška — důvod nese `_cash_settlement`, ne `invoice.warning.*`.
+        toast.warning(t('cash_settlement.failed')
+          + (saved._cash_settlement?.message ? ` (${saved._cash_settlement.message})` : ''))
       } else {
         // Ostatní kódy nemají parametry — stačí přeložit (issue #35: credit_note_positive_total).
         toast.warning(t(`invoice.warning.${code}`))
       }
     }
+    notifyCashSettlement(saved._cash_settlement)
     // Po uložení faktury — pokud uživatel otevřel work report, ulož ho
     // (jen řádky s vyplněným popisem; prázdné řádky tiše ignorujeme — viz wrItemsValid)
     if (wrOpen.value && wrItemsValid.value.length > 0) {
@@ -1999,6 +2049,23 @@ async function deleteDraft() {
               </select>
               <p v-if="form.payment_method !== 'bank_transfer'" class="text-xs text-warning-600 mt-1">
                 {{ t('payment_method.hint') }}
+              </p>
+            </div>
+            <!-- Hotovostní vyrovnání (migrace 1327): pokladna k formě úhrady „Hotově".
+                 Nepovinné — bez pokladny se nic nezaúčtuje a faktura zůstane pohledávkou. -->
+            <div v-if="showCashSettlement">
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash_settlement.register_label') }}</label>
+              <select v-model="form.cash_register_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+                <option :value="null">{{ t('cash_settlement.none') }}</option>
+                <option v-for="r in cashRegisters" :key="r.id" :value="r.id">
+                  {{ r.name }} ({{ r.account_code }})
+                </option>
+              </select>
+              <p v-if="cashRegisters.length === 0" class="text-xs text-neutral-500 mt-1">
+                {{ t('cash_settlement.no_registers') }}
+              </p>
+              <p v-else-if="form.cash_register_id" class="text-xs text-neutral-500 mt-1">
+                {{ t('cash_settlement.invoice_hint') }}
               </p>
             </div>
             <div v-if="showReverseChargeUI">

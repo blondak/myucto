@@ -108,6 +108,7 @@ final class TenantReferenceGuard
         'purchase_invoice_id'        => ['purchase_invoices',  self::VIA_SUPPLIER],
         'source_purchase_invoice_id' => ['purchase_invoices',  self::VIA_SUPPLIER],
         'asset_id'                   => ['assets',             self::VIA_SUPPLIER],
+        'cash_register_id'           => ['cash_registers',     self::VIA_SUPPLIER],
         'project_id'                 => ['projects',           self::VIA_CLIENT],
     ];
 

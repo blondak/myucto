@@ -62,7 +62,7 @@ final class CreateInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             SupplierGuard::currentId($request),
             $body,
-            ['client_id', 'project_id', 'currency_id', 'revenue_category_id'],
+            ['client_id', 'project_id', 'currency_id', 'revenue_category_id', 'cash_register_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
@@ -145,6 +145,15 @@ final class CreateInvoiceAction
             // jinak by po každém odmítnutém pokusu zůstala prázdná faktura se spáleným číslem.
             $this->repo->delete($id);
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+        }
+        // Volba „inkasovat hotově do pokladny" (migrace 1327). Na draftu se jen ULOŽÍ —
+        // pokladní doklad z ní vznikne až při vystavení ({@see IssueInvoiceAction}).
+        if (array_key_exists('cash_register_id', $body)) {
+            $this->repo->setCashRegisterId(
+                $id,
+                SupplierGuard::currentId($request),
+                ($body['cash_register_id'] ?? null) !== null ? (int) $body['cash_register_id'] : null,
+            );
         }
         $this->paymentSchedule->saveFromPayload(SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);

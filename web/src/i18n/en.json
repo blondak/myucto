@@ -7058,6 +7058,27 @@
     "empty_filtered": "No work report matches this filter",
     "empty_show_all": "Show all"
   },
+  "cash_settlement": {
+    "register_label": "Cash register",
+    "none": "Do not use a cash register",
+    "no_registers": "You have no CZK cash register — the document will stay unpaid.",
+    "purchase_hint": "On save a cash payment voucher is issued and posted from this register and the invoice becomes paid.",
+    "invoice_hint": "On issue a cash receipt voucher is issued and posted into this register and the invoice becomes paid.",
+    "created": "Cash voucher {number} was issued and posted.",
+    "removed": "The cash settlement voucher was removed.",
+    "failed": "The cash voucher could not be issued — the document is saved but stays unpaid.",
+    "reason": {
+      "document_not_payable": "The document is still a draft — the cash voucher will be created once you receive/issue it.",
+      "document_type_not_settleable": "This document type cannot be settled through a cash register.",
+      "already_paid": "The document is already marked as paid by other means.",
+      "nothing_to_settle": "Nothing is left to pay on this document.",
+      "foreign_currency": "A foreign-currency document cannot be paid from a cash register.",
+      "register_not_czk": "The selected cash register is not in CZK.",
+      "register_inactive": "The selected cash register is inactive.",
+      "register_not_found": "The selected cash register does not exist.",
+      "ddkp_not_payable": "A tax document for a payment is not paid on its own."
+    }
+  },
   "checks": {
     "doc_date": "Date",
     "issue": {

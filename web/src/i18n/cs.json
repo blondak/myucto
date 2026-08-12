@@ -7058,6 +7058,27 @@
     "empty_filtered": "Tomuto filtru neodpovídá žádný výkaz",
     "empty_show_all": "Zobrazit vše"
   },
+  "cash_settlement": {
+    "register_label": "Pokladna",
+    "none": "Nepoužít pokladnu",
+    "no_registers": "Nemáte založenou žádnou korunovou pokladnu — doklad zůstane neuhrazený.",
+    "purchase_hint": "Po uložení se z pokladny vystaví a zaúčtuje výdajový pokladní doklad a faktura bude uhrazená.",
+    "invoice_hint": "Po vystavení se do pokladny vystaví a zaúčtuje příjmový pokladní doklad a faktura bude uhrazená.",
+    "created": "Pokladní doklad {number} byl vystaven a zaúčtován.",
+    "removed": "Pokladní doklad hotovostní úhrady byl zrušen.",
+    "failed": "Pokladní doklad se nepodařilo vystavit — doklad je uložený, ale zůstává neuhrazený.",
+    "reason": {
+      "document_not_payable": "Doklad je zatím koncept — pokladní doklad vznikne, až ho přijmete/vystavíte.",
+      "document_type_not_settleable": "Tento typ dokladu se přes pokladnu vyrovnat nedá.",
+      "already_paid": "Doklad je už označený jako uhrazený jinou cestou.",
+      "nothing_to_settle": "Na dokladu nezbývá nic k úhradě.",
+      "foreign_currency": "Cizoměnový doklad z pokladny hradit nelze.",
+      "register_not_czk": "Vybraná pokladna není korunová.",
+      "register_inactive": "Vybraná pokladna je neaktivní.",
+      "register_not_found": "Vybraná pokladna neexistuje.",
+      "ddkp_not_payable": "Daňový doklad k platbě se samostatně nehradí."
+    }
+  },
   "checks": {
     "doc_date": "Datum",
     "issue": {

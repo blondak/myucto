@@ -92,6 +92,13 @@ final class DocumentBranchParityGuardsTest extends TestCase
         'Service/Accounting/Cash/CashDocumentService.php' => [
             'searchUnpaid' => 'vydaný DDKP kryje PAYABLE_TYPES + amount_to_pay = 0',
         ],
+        // Hotovostní vyrovnání z editoru faktury (migrace 1327) — táž asymetrie:
+        // přijatý DDKP navázaný na zálohu se vylučuje explicitně, vydaný je vždy
+        // uhrazený (paid_total == amount_to_pay), takže na něm nezbývá co inkasovat
+        // a vyrovnání ho odmítne obecným 'nothing_to_settle'.
+        'Service/Accounting/Cash/CashSettlementService.php' => [
+            'purchaseBlockReason' => 'vydaný DDKP je vždy uhrazený → nezbývá co inkasovat',
+        ],
 
         // Povinnost přiznat daň z přijaté úplaty (§ 20a/21) má DODAVATEL — chybějící
         // vydaný DDKP je riziko doměrku a kontroluje se. U poskytnuté zálohy nám chybějící

@@ -298,6 +298,20 @@ final class InvoiceRepository
         )->execute([$rate, $rateDate, $invoiceId]);
     }
 
+    /**
+     * Volba „inkasovat hotově do této pokladny" (migrace 1327). Samostatný setter, ne
+     * další sloupec v pozičním UPDATE updateDraft() — zápis je nezávislý na zbytku
+     * dokladu a vlastnictví pokladny váže volající (TenantReferenceGuard).
+     * NULL = volba zrušena; {@see \MyInvoice\Service\Accounting\Cash\CashSettlementService}
+     * na to reaguje smazáním dřív založeného pokladního dokladu.
+     */
+    public function setCashRegisterId(int $invoiceId, int $supplierId, ?int $registerId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET cash_register_id = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$registerId !== null && $registerId > 0 ? $registerId : null, $invoiceId, $supplierId]);
+    }
+
     // ── Propojení zálohové faktury (proforma) s vyúčtovacím daňovým dokladem ──
     // Symetrické s PurchaseInvoiceRepository::linkAdvance — u vydaných je „záloha"
     // = invoice_type='proforma', vazba se ukládá NA finální fakturu (parent_invoice_id),
@@ -1843,6 +1857,9 @@ final class InvoiceRepository
         }
         if (array_key_exists('revenue_category_id', $row)) {
             $row['revenue_category_id'] = $row['revenue_category_id'] !== null ? (int) $row['revenue_category_id'] : null;
+        }
+        if (array_key_exists('cash_register_id', $row)) {
+            $row['cash_register_id'] = $row['cash_register_id'] !== null ? (int) $row['cash_register_id'] : null;
         }
         if (array_key_exists('branding_profile_id', $row)) {
             $row['branding_profile_id'] = $row['branding_profile_id'] !== null ? (int) $row['branding_profile_id'] : null;

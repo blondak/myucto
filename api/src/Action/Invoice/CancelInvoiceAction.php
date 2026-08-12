@@ -12,6 +12,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
+use MyInvoice\Service\Accounting\Cash\CashException;
+use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -53,6 +55,7 @@ final class CancelInvoiceAction
         private readonly DocumentJournalSync $journalSync,
         private readonly AdvanceCycleLock $cycleLock,
         private readonly InvoiceAssetSaleService $assetSale,
+        private readonly CashSettlementService $cashSettlement,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -175,6 +178,12 @@ final class CancelInvoiceAction
                 'user_agent' => $request->getHeaderLine('User-Agent'),
             ]);
 
+            // Hotovostní vyrovnání (migrace 1327): stornovaná faktura nesmí zůstat
+            // inkasovaná zaúčtovaným PPD — pokladní doklad i jeho zápis padnou s ní,
+            // ve stejné transakci. Ručně pořízených pokladních dokladů (auto_settlement = 0)
+            // se to nedotýká; ty ať uživatel vyřídí v modulu Pokladna vědomě.
+            $this->cashSettlement->detach($supplierId, 'invoice', (int) $invoice['id']);
+
             // 1. Vytvoř cancellation záznam (interní, bez varsymbolu)
             $stmt = $pdo->prepare(
                 'INSERT INTO invoices
@@ -228,6 +237,17 @@ final class CancelInvoiceAction
             if ($ownTx) {
                 $pdo->commit();
             }
+        } catch (CashException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error(
+                $response,
+                'cash_' . $e->errorCode,
+                'Fakturu nelze stornovat — nejdřív vyřešte pokladní doklad, kterým byla hotově '
+                    . 'inkasována (' . $e->getMessage() . ').',
+                409,
+            );
         } catch (PostingException $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();

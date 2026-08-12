@@ -12,6 +12,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -62,6 +63,7 @@ final class UpdateInvoiceAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly OssItemDeriver $ossDeriver,
         private readonly OssItemPlanner $ossPlanner,
+        private readonly CashSettlementService $cashSettlement,
     ) {}
 
     /**
@@ -78,6 +80,9 @@ final class UpdateInvoiceAction
         'invoice_type', 'payment_method', 'discount_percent', 'advance_paid_amount',
         'reverse_charge', 'prices_include_vat', 'vat_classification_code', 'income_tax_exempt',
         'is_simplified',
+        // Volba hotovostního vyrovnání (migrace 1327) zakládá/ruší ZAÚČTOVANÝ pokladní
+        // doklad, takže je to účetní pole jako každé jiné — notes_only ji nesmí pustit.
+        'cash_register_id',
     ];
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -258,7 +263,7 @@ final class UpdateInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             SupplierGuard::currentId($request),
             $body,
-            ['client_id', 'project_id', 'currency_id', 'revenue_category_id'],
+            ['client_id', 'project_id', 'currency_id', 'revenue_category_id', 'cash_register_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
@@ -342,6 +347,15 @@ final class UpdateInvoiceAction
             // zůstaly nedotčené (validace běží před DELETE), takže doklad je konzistentní.
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         }
+        // Volba „inkasovat hotově do pokladny" (migrace 1327) — jen když klíč v těle JE,
+        // ať částečný PUT volbu tiše nesmaže.
+        if (array_key_exists('cash_register_id', $body)) {
+            $this->repo->setCashRegisterId(
+                $id,
+                SupplierGuard::currentId($request),
+                ($body['cash_register_id'] ?? null) !== null ? (int) $body['cash_register_id'] : null,
+            );
+        }
         $this->paymentSchedule->saveFromPayload(\MyInvoice\Http\SupplierGuard::currentId($request), $id, $body);
         $this->calc->recompute($id);
 
@@ -411,7 +425,23 @@ final class UpdateInvoiceAction
         // takže bez explicit invalidate by se starý PDF dál servíroval.
         $this->pdf->invalidate($id, 'invalidate_update');
 
+        // Hotovostní vyrovnání (migrace 1327): forma úhrady „Hotově" + zvolená pokladna →
+        // příjmový pokladní doklad; odebraná volba ten dřívější zruší. Na draftu se volba
+        // jen uloží (inkasovat se dá až vystavený doklad). Měkká brána — chyba pokladny
+        // NESMÍ shodit uložení faktury, jen se ohlásí warningem.
+        $settlement = $this->cashSettlement->maybeSettle(
+            SupplierGuard::currentId($request),
+            'invoice',
+            $id,
+            isset($user['id']) ? (int) $user['id'] : null,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+        );
+
         $invoice = $this->repo->find($id);
+        if (is_array($invoice) && $settlement['status'] !== CashSettlementService::NOOP) {
+            $invoice['_cash_settlement'] = $settlement;
+        }
 
         // Audit detail: která pole se opravila (zobrazí se v historii u faktury).
         $changed = self::diffFields($existing, $invoice);
@@ -493,6 +523,9 @@ final class UpdateInvoiceAction
         if (is_array($invoice)) {
             // Akumulovat, ne přiřazovat — jinak by poslední zapisovatel přebil ostatní.
             $warnings = InvoiceValidation::warnings($invoice);
+            if ($settlement['status'] === CashSettlementService::FAILED) {
+                $warnings[] = CashSettlementService::WARNING;
+            }
             $dev = $this->rateChecker->deviationWarning(
                 SupplierGuard::currentId($request),
                 (string) ($invoice['currency'] ?? ''),

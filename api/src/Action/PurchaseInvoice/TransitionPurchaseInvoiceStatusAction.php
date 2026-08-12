@@ -12,6 +12,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Cash\CashException;
+use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -66,6 +68,7 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly DocumentJournalSync $journalSync,
         private readonly DocumentAutoPoster $autoPoster,
         private readonly SmallAssetService $smallAssets,
+        private readonly CashSettlementService $cashSettlement,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -183,6 +186,11 @@ final class TransitionPurchaseInvoiceStatusAction
                 $pdo->beginTransaction();
             }
             try {
+                // Hotovostní vyrovnání (migrace 1327): stornovaná faktura nesmí zůstat
+                // „uhrazená" zaúčtovaným VPD — pokladní doklad i jeho zápis padnou s ní,
+                // ve stejné transakci. Ruční pokladní doklady (auto_settlement = 0) se
+                // nedotýká; ty ať uživatel vyřídí v modulu Pokladna vědomě.
+                $this->cashSettlement->detach($supplierId, 'purchase_invoice', $id);
                 $this->journalSync->onCancel($supplierId, 'purchase_invoice', $id, [
                     'user_id'    => $user['id'] ?? null,
                     'posted_by'  => $user['id'] ?? null,
@@ -203,6 +211,17 @@ final class TransitionPurchaseInvoiceStatusAction
                 if ($ownTx) {
                     $pdo->commit();
                 }
+            } catch (CashException $e) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::error(
+                    $response,
+                    'cash_' . $e->errorCode,
+                    'Přijatou fakturu nelze stornovat — nejdřív vyřešte pokladní doklad, kterým byla '
+                        . 'hotově uhrazena (' . $e->getMessage() . ').',
+                    409,
+                );
             } catch (PostingException $e) {
                 if ($ownTx && $pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -288,6 +307,27 @@ final class TransitionPurchaseInvoiceStatusAction
             }
         }
 
-        return Json::ok($response, $this->repo->find($id, $supplierId));
+        // Hotovostní vyrovnání (migrace 1327): koncept ještě není závazek, takže volbu
+        // „uhradit hotově z pokladny" uplatní až přijetí/zaúčtování dokladu. Měkká brána —
+        // chyba pokladny nesmí zablokovat přechod stavu (stejně jako auto-post výš);
+        // doklad pak jen zůstane neuhrazený a warning je v auditní stopě.
+        $settlement = null;
+        if (in_array($target, ['received', 'booked'], true)) {
+            $settlement = $this->cashSettlement->maybeSettle(
+                $supplierId,
+                'purchase_invoice',
+                $id,
+                isset($user['id']) ? (int) $user['id'] : null,
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
+
+        $invoice = $this->repo->find($id, $supplierId);
+        if ($invoice !== null && $settlement !== null && $settlement['status'] !== CashSettlementService::NOOP) {
+            $invoice['_cash_settlement'] = $settlement;
+        }
+
+        return Json::ok($response, $invoice);
     }
 }

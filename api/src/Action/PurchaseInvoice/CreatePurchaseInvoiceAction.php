@@ -73,7 +73,7 @@ final class CreatePurchaseInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             $supplierId,
             $body,
-            ['expense_category_id', 'currency_id', 'payment_currency_id'],
+            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
@@ -167,6 +167,16 @@ final class CreatePurchaseInvoiceAction
             // stav — týž výklad, jaký import používá pro přijaté faktury. Ostatně u přijaté
             // faktury se hlavička často pořizuje z PDF dřív než řádky.
             $this->repo->replaceItems($id, (array) ($body['items'] ?? []));
+            // Volba „uhradit hotově z pokladny" (migrace 1327). Na draftu se jen ULOŽÍ —
+            // koncept ještě není závazek, pokladní doklad z něj vyrobí až přechod na
+            // 'received' ({@see TransitionPurchaseInvoiceStatusAction}).
+            if (array_key_exists('cash_register_id', $body)) {
+                $this->repo->setCashRegisterId(
+                    $id,
+                    $supplierId,
+                    ($body['cash_register_id'] ?? null) !== null ? (int) $body['cash_register_id'] : null,
+                );
+            }
             if (array_key_exists('vat_overrides', $body)) {
                 $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
             }
