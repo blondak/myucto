@@ -107,7 +107,7 @@ systémové autority načte sám (`tls.setDefaultCACertificates`, Node 22.15+)
 a výsledek vypíše na stderr:
 
 ```
-MyÚčto MCP v1.0.0 připojen — 138 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
+MyÚčto MCP v1.0.0 připojen — 157 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
 ```
 
 Zbylé příčiny selhání: neúplný řetěz (chybí mezilehlý certifikát — oprava patří

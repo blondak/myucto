@@ -322,7 +322,9 @@ zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 > [!NOTE]
 > **Každý bankovní účet má svou analytiku.** Účet 221 se nikdy nepoužívá plochý:
 > bankovní strana zápisu padá na analytiku toho účtu, ze kterého je výpis —
-> **221100**, **221200**, **221300** … Číslo se přiděluje automaticky (první volné,
+> **221.100**, **221.200**, **221.300** … (o tečkovaném zápisu viz
+> [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik)).
+> Číslo se přiděluje automaticky (první volné,
 > které v účtovém rozvrhu nekoliduje) a najdeš i změníš ho v
 > **Nastavení → Bankovní účty → Kontace účtů**. Díky tomu sedí zůstatek každé
 > analytiky přesně na výpis daného účtu, inventarizace k rozvahovému dni se dá
@@ -510,7 +512,11 @@ a předčíslí účtu finančního úřadu. Platby mimo banku 0710 tento detekt
 nepřebírá.
 
 Rozpoznaný odvod se zobrazí ve frontě s kontací **336/341/342/343/345 proti
-221**, údajem **Jistota** a lidským vysvětlením. Nejasný odvod zůstane pouze
+221**, údajem **Jistota** a lidským vysvětlením. Platba i vratka **DPH** míří na
+zúčtovací analytiku **343.900** — tedy přesně na účet, na kterém po měsíčním
+zúčtování DPH ([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)) leží
+skutečný závazek vůči finančnímu úřadu; firma bez analytik účtuje jako dřív na
+holou 343. Nejasný odvod zůstane pouze
 návrhem. Pokud na zúčtovacím účtu chybí zaúčtovaný předpis nebo jeho kreditní
 zůstatek nestačí na platbu, automatika zápis sama neprovede, aby nevytvořila
 debetní zůstatek závazku.

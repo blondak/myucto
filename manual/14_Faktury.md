@@ -194,7 +194,9 @@ Funguje fulltext česky i anglicky.
   drobné chyby (špatná částka, chybějící popis), pošlou se klientovi všechny
   najednou.
 - **„Označit zaplacené" je manuální fallback** — primárně se faktury označují
-  zaplacenými automaticky při importu bankovního výpisu (viz [28. Banka](28_Banka.md)).
+  zaplacenými automaticky při importu bankovního výpisu (viz [28. Banka](28_Banka.md)),
+  u hotovosti pak volbou způsobu úhrady **Hotově** s pokladnou přímo v editoru
+  ([§ 15.2.7](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove)).
   Částečné platby a evidenci úhrad popisuje [§ 16.1.2](16_Faktura_PDF.md).
 - **Filtr „Po splatnosti"** je nejrychlejší způsob, jak zjistit, kdo dluží —
   klik na řádek a hned máš tlačítko **Upomínka**.

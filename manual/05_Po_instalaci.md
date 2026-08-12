@@ -74,6 +74,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-ai-worker` | každých 10 min; zpracuje frontu po zapnutí AI asistence |
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
 | `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
+| `cron-vat-clearing` | 1× měsíčně 1. dne 04:30; interní doklad zúčtování DPH za skončené období ([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)) |
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
 | `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |
 | `cron-license-renew` | 1× denně 05:00 |

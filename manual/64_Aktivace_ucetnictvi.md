@@ -62,7 +62,7 @@ Akce **Předvyplnit** sestaví návrh k dni předcházejícímu zahájení:
 | 324 Dal | Přijaté zálohy |
 | 132 MD | Zásoby z přechodového můstku |
 | 211 MD/Dal | Stav zaúčtovaných pokladních dokladů |
-| 221xxx MD/Dal | Stav bankovních transakcí, samostatný řádek za každý vlastní účet |
+| `221.xxx` MD/Dal | Stav bankovních transakcí, samostatný řádek za každý vlastní účet |
 
 Do návrhu se vloží jen účty existující v osnově. Bankovní zůstatek respektuje
 tenantové vlastnictví výpisu a počítá jen CZK pohyby do rozhodného dne. Návrh
@@ -70,7 +70,7 @@ nenahrazuje inventuru. Administrátor musí doplnit ostatní aktiva, pasiva,
 oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
 
 Banka se nepředvyplňuje jedním souhrnem: každý výpis nese číslo vlastního účtu,
-takže počáteční stav jde rovnou na analytiku toho účtu (**221100**, **221200** …,
+takže počáteční stav jde rovnou na analytiku toho účtu (**221.100**, **221.200** …,
 viz kapitola *Banka*) — tutéž, na kterou pak padají jeho pohyby. Díky tomu sedí
 zůstatek analytiky na výpis od prvního dne účetnictví.
 

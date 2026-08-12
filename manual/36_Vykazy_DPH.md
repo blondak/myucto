@@ -505,9 +505,13 @@ na běžném řádku 1/2 nebo 50 a současně se vykáže na řádku 51 ve sprá
 vypořádací koeficient ho odečte z čitatele nebo jmenovatele.
 
 **Omezení, o kterých je dobré vědět:**
-- Samotné **účetní zaúčtování ročního vypořádání** (na účty 548/343) systém **nedělá
-  automaticky** — jen spočte a zobrazí částku na ř. 53 v přiznání; do
-  [Účetního deníku](45_Ucetni_denik.md) ji zapiš ručním zápisem.
+- Samotné **účetní zaúčtování ročního vypořádání** (na účty 548/343, u firem
+  s analytikami DPH proti **343.100**) systém **nedělá automaticky** — jen spočte
+  a zobrazí částku na ř. 53 v přiznání; do
+  [Účetního deníku](45_Ucetni_denik.md) ji zapiš ručním zápisem. Nezaměňuj to
+  s [měsíčním zúčtováním DPH](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph),
+  které automatické je — to jen převádí obrat období na 343.900, roční
+  vypořádání koeficientu neřeší.
 - Kombinace **reverse charge** (samovyměření) a **Krácený (§76)** na jednom dokladu
   **není podporovaná** (řádek 43, kam se zrcadlí odpočet u samovyměření, nemá krácený
   protějšek) — takový doklad systém odmítne zaúčtovat i zahrnout do přiznání

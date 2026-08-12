@@ -47,7 +47,8 @@ nezapočte, protože jej nelze bezpečně přiřadit.
 ### 29.1.2 Kontace účtů — analytika 221 (jen podvojné účetnictví)
 
 Záložka **Kontace účtů** drží účetní pohled na tytéž účty. **Každý bankovní
-účet má vlastní analytiku syntetického účtu 221** — 221100, 221200, 221300 …
+účet má vlastní analytiku syntetického účtu 221** — 221.100, 221.200, 221.300 …
+(tečkovaný zápis, viz [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik))
 Číslo se přiděluje **automaticky** (první volné, které v
 [účtovém rozvrhu](62_Ucetni_osnova.md) nekoliduje s už existujícím účtem) a
 analytika se zároveň založí v rozvrhu pod 221.
@@ -68,12 +69,12 @@ V tabulce u každého účtu nastavíš:
 |---|---|
 | Název | Vlastní pojmenování účtu (použije se i jako název analytiky v rozvrhu) |
 | Druh | Běžný účet / spořicí účet / termínovaný vklad |
-| Analytika | Číslo za 221 — vedle se hned ukáže výsledný účet (např. `221200`) |
+| Analytika | Číslo za tečkou — vedle se hned ukáže výsledný účet (např. `221.200`) |
 | Aktivní | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
 
 Číslo můžeš **přepsat** — typicky když už některý účet v rozvrhu vedeš pod
 konkrétní analytikou a chceš na ni bankovní účet **namapovat** (např.
-termínovaný vklad na 221100). Analytiku, kterou už používá jiný účet,
+termínovaný vklad na 221.100). Analytiku, kterou už používá jiný účet,
 systém odmítne, a jednou přidělenou analytiku **nelze zrušit** — jde ji jen
 změnit na jiné číslo. Analytika, na které už leží účetní zápisy, se sama
 nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
@@ -81,7 +82,7 @@ nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
 > [!NOTE]
 > Zápisy zaúčtované dřív, než účet analytiku dostal, zůstávají na syntetice 221.
 > Jejich přesun je **účetní reklasifikace k datu** — účtuje se ručně jako interní
-> doklad (221xxx / 221) v **otevřeném** období; do uzavřených a schválených let se
+> doklad (`221.xxx` / 221) v **otevřeném** období; do uzavřených a schválených let se
 > nezasahuje a rozvahový řádek „Peněžní prostředky na účtech" se rozpadem uvnitř
 > 221 stejně nemění.
 

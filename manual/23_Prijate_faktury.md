@@ -362,6 +362,40 @@ kurzový rozdíl, ne chyba.
 U zaúčtovaného dokladu, který admin opravuje vynuceně (`?force=1`), se s novým kurzem
 **přepočte i zápis v účetním deníku**, aby korunové částky odpovídaly dokladu.
 
+### 23.2.9 Způsob úhrady a platba hotově z pokladny
+
+Pole **Způsob úhrady** s volbou **Hotově** otevře výběr **Pokladna** — přijatou
+fakturu tak zaplatíš z pokladny přímo z editoru, aniž bys přecházel/a do modulu
+Pokladna a doklad tam vypisoval/a ručně.
+
+- Výchozí volba je **„Nepoužít pokladnu"**; nabízejí se **jen korunové**
+  pokladny ([§ 30.1](30_Pokladna.md#301-iselnik-pokladen)). Bez korunové
+  pokladny se zobrazí hláška „Nemáte založenou žádnou korunovou pokladnu —
+  doklad zůstane neuhrazený."
+- Vyrovnání se spustí **při uložení faktury** a při přechodu do stavu
+  **Přijatá** nebo **Zaúčtovaná** ([§ 23.1](#231-stavy-prijate-faktury)). U konceptu
+  se volba jen uloží a čeká.
+
+Vznikne **výdajový pokladní doklad (VPD)** s účelem „Úhrada přijaté faktury",
+datem = datum vystavení faktury, popisem „Úhrada přijaté faktury {číslo} hotově"
+a **celou částkou včetně DPH** — částečná hotovostní úhrada přijaté faktury
+podporovaná není. Doklad se rovnou zaúčtuje (**MD 321 / D analytika pokladny**;
+u zálohové přijaté faktury **MD 314 / D pokladna**) a faktura se překlopí na
+**Uhrazená**. Doklad **nemá vlastní rozpad DPH** — daň už nese sama faktura,
+úhrada ji neduplikuje.
+
+Zrušení volby smaže pokladní doklad i jeho zápis a vrátí fakturu do předchozího
+stavu; změna pokladny doklad přesune. Ručně vystaveného pokladního dokladu se
+vyrovnání nikdy nedotkne. Podrobnosti, včetně chování při selhání a při stornu,
+jsou u vydané faktury v
+[§ 15.2.7](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove) — u přijaté
+faktury platí zrcadlově.
+
+> [!NOTE]
+> Nepodporuje se **cizoměnová faktura**, **valutová pokladna** a **daňový doklad
+> k poskytnuté záloze (DDKP)** — ten se samostatně nehradí. V těchto případech
+> se vyrovnání jen přeskočí (s informativní hláškou) a faktura se normálně uloží.
+
 ## 23.3 Detail přijaté faktury
 
 Po uložení / přechodu na detail:

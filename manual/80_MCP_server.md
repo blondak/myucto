@@ -37,7 +37,13 @@ Podstatné vlastnosti:
 | Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník — **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 80.8](#808-e-shop-a-sklad)) |
+| Objednávky u dodavatele | **čtení i zápis** — založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 80.8](#808-e-shop-a-sklad)) |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
+
+Nástrojů je aktuálně **157**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
+[§ 80.4](#804-nastaveni)) se jich asistentovi nabídne **93** — zbylých 64 mění
+data a server je vůbec nezveřejní. Přesný počet vypíše server při startu do
+`stderr` ([§ 80.3](#803-zprovozneni), krok 4).
 
 > [!IMPORTANT]
 > **Do účetnictví a daní asistent nezapisuje.** Zaúčtovat doklad, uzavřít období,
@@ -292,11 +298,15 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 | **Zboží — obsah pro e-shop** | karta i s kategoriemi, štítky a parametry; jazykové verze | výrobce, záruka, dodací lhůta, hmotnost, publikace, překlady, kategorie, štítky, parametry, poplatky |
 | **Ceny** | ceny po měnách, marže | uložit cenotvorbu (přirážka / pevná cena / zaokrouhlení), vynutit přepočet |
 | **Dodavatelé zboží** | seznam s nákupní cenou a dodací lhůtou | nahradit seznam dodavatelů zboží |
+| **Nabídky dodavatelů („u dodavatele")** | přehled dvojic zboží × dodavatel napříč katalogem — nákupní cena a měna, kód u dodavatele, dodací lhůta, minimální odběr, balení a množství hlášené dodavatelem | založit a upravit nabídku (upsert podle dvojice zboží × dodavatel), odebrat nabídku |
 | **Média** | seznam obrázků a příloh | popisky, pořadí, hlavní obrázek, smazání |
 | **Kategorie** | strom, detail, překlady | založit, upravit, přesunout v stromu, uložit překlady, smazat |
 | **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty | u všech čtyř založit / upravit / smazat |
 | **Sklady** | seznam, detail, hodnota zásob | založit, upravit, smazat |
 | **Zásoby** | stav, dostupnost s rezervacemi, sestava stavu, ocenění k datu | — |
+| **Množstevní pohledy** | všechny čtyři veličiny najednou (skladem, rezervováno, prodejné, na cestě), rozpad „na cestě" na konkrétní objednávky a rozpad rezervací na konkrétní faktury | — |
+| **Doplnění zásob** | návrh, co a kolik doobjednat (zboží pod minimem) | hromadně z návrhu založit objednávky seskupené po dodavatelích |
+| **Objednávky u dodavatele** | seznam se stavem a plněním (objednáno / přijato / zbývá), detail s řádky | založit koncept, upravit, odeslat, potvrdit, uzavřít zbytek, stornovat, znovu otevřít, smazat koncept, vytvořit příjemku |
 | **Příjemky, výdejky, převodky** | seznam, detail s řádky | založit koncept, upravit, zaúčtovat, stornovat, smazat koncept |
 | **Inventury** | seznam, detail s rozdíly | založit, spustit, zapsat napočítané množství, uzavřít |
 
@@ -349,6 +359,37 @@ opačný protidoklad v původních cenách a oba zůstanou ve skladové knize.
 Server sám odmítne (`409`) výdej do minusu, jakýkoli pohyb na skladu
 s rozběhnutou inventurou a doklad do uzavřeného účetního období.
 
+### Objednávky u dodavatele
+
+Asistent umí celý životní cyklus objednávky
+([§ 33.11](33_Sklad.md#3311-objednavky-u-dodavatele)) — a drží se v něm stejných
+pravidel jako aplikace:
+
+- **Nová objednávka vzniká jako koncept.** Nedostane číslo a do „na cestě" se
+  nezapočítá. Teprve *odeslat* jí přidělí číslo řady OBJ a zboží se začne počítat
+  jako objednané.
+- **Úprava objednávky nahrazuje i řádky celé** — platí tu totéž pravidlo jako
+  u ostatních kolekcí (viz výše). Upravovat jde jen koncept.
+- **Zavřít zbytek, stornovat a smazat vyžadují potvrzení** (jsou nevratné).
+  Storno projde jen do doby, než se z objednávky cokoli přijme; potom server
+  odmítne s doporučením použít *zavřít zbytek*.
+- **Příjem z objednávky založí příjemku jako koncept** — skladem pohne teprve
+  její zaúčtování, stejně jako u ručně pořízeného dokladu.
+- **Doplnění zásob umí objednat hromadně**: z plochého seznamu zboží a množství
+  vznikne **jedna objednávka na dodavatele**, vždy jako koncept. Položky, které
+  nešly zařadit (chybí dodavatel, neplatné množství, neznámé zboží), asistent
+  dostane zpátky vypsané i s důvodem — nikdy se nezahodí tiše.
+
+Množstevní pohledy jsou jen ke čtení a odpovídají § 33.9: `stock_quantities`
+vrací u každé karty **skladem, rezervováno, prodejné a na cestě**,
+`stock_in_transit` rozpad na konkrétní objednávky a `stock_reservations` rozpad
+na konkrétní faktury.
+
+> „Kolik máme kabelů volných k prodeji a co z toho je jen rezervované?"
+> „Co je potřeba doobjednat a od koho?"
+> → asistent přečte množstevní pohledy a návrh doplnění, objednávky ale založí
+> jako koncepty, které si odsouhlasíš.
+
 ### Inventura
 
 Postup kopíruje aplikaci: založit → spustit (udělá se snímek očekávaných stavů
@@ -362,8 +403,9 @@ kolik řádků zůstalo nespočítaných (ty se přeskočí).
 - **Nahrát fotku ke zboží.** Přenos souborů běží mimo formát, se kterým tenhle
   server pracuje. Fotky nahraješ v aplikaci, asistent s nimi pak umí pracovat
   (popisky, pořadí, hlavní obrázek, smazání).
-- **Hromadný import zboží z XLSX/CSV.** Ze stejného důvodu; import má v aplikaci
-  vlastní průvodce s náhledem.
+- **Hromadný import zboží z XLSX/CSV** ani **import ceníku dodavatele**. Ze
+  stejného důvodu; oba importy mají v aplikaci vlastní průvodce s náhledem.
+  Jednotlivé nabídky dodavatelů ale asistent zakládat i upravovat umí.
 - **Stáhnout PDF nebo XLSX** skladového dokladu, inventurního soupisu či sestavy.
   Data sestav asistent přečte, hotový soubor si stáhneš v aplikaci.
 

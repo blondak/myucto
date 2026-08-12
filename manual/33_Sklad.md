@@ -5,10 +5,13 @@ zboží nebo vyrábí výrobky. Vede skladové karty, příjemky/výdejky/převo
 sklady, umožňuje víc skladů, inventury a základní skladové sestavy. Napojuje se na
 [Vydané faktury](14_Faktury.md) a [Přijaté faktury](23_Prijate_faktury.md) — umí
 automaticky vydat zboží ze skladu při vystavení faktury a naskladnit zboží z přijaté
-faktury.
+faktury. Vedle fyzického stavu vede i **rezervace, zboží na cestě a skladovost
+u dodavatele** (§ 33.9), **objednávky vydané dodavatelům** (§ 33.11) a návrh
+**doplnění zásob** (§ 33.12).
 
 V menu ho najdeš pod sekcí **Sklad** (zobrazí se jen po zapnutí modulu):
-**Skladové karty**, **Skladové doklady**, **Inventury**, **Sestavy**. Číselník
+**Skladové karty**, **Příjemky a výdejky**, **Objednávky dodavatelům**
+(§ 33.11), **U dodavatele** (§ 33.10), **Inventury**, **Sestavy**. Číselník
 **Sklady** (jednotlivé sklady firmy) je záložka na stránce **E-shop** — modul Sklad
 totiž sdílí skladové karty s [e-shopovým modulem](34_Eshop.md) (ceny, kategorie,
 parametry, dodavatelé, přílohy k produktu).
@@ -438,7 +441,498 @@ Obě sestavy mají **součtový řádek** (počet položek a celková hodnota) a
 exportovat do **PDF** i **XLSX**; každý export se zaznamenává do žurnálu aktivit
 firmy (typ, formát, čas, uživatel).
 
-## 33.9 Omezení a tipy
+## 33.9 Kolik toho vlastně máš — skladem, rezervováno, na cestě, u dodavatele
+
+Samotné číslo „skladem" na otázku *„můžu to prodat?"* neodpovídá. Část zásoby už
+je vyfakturovaná zákazníkovi a jen fyzicky nevydaná, další kusy jsou objednané
+u dodavatele a ještě nedorazily, a dodavatel má ve svém skladu ještě další.
+Modul proto vede **čtyři množstevní veličiny** a dvě dopočtené hodnoty.
+
+| Veličina | Co znamená | Odkud se bere |
+|---|---|---|
+| **Skladem** (`on_hand`) | fyzický stav na skladě | zaúčtované skladové doklady (§ 33.4) |
+| **Rezervováno** (`reserved`) | vyfakturováno zákazníkovi, ale ještě nevydáno ze skladu | řádky vystavených faktur bez zaúčtované výdejky (§ 33.9.2) |
+| **Na cestě** (`in_transit`) | objednáno u dodavatele a ještě nedodáno | objednávky u dodavatele (§ 33.11) |
+| **U dodavatele** (`at_vendor`) | kolik toho podle svého ceníku drží dodavatel | nabídky dodavatelů (§ 33.10) |
+
+Z nich se počítají dvě odvozené hodnoty:
+
+```text
+    prodejné (sellable)      = skladem − rezervováno
+    volně k dispozici (ATP)  = skladem − rezervováno + na cestě
+```
+
+> [!IMPORTANT]
+> **Zboží na cestě záměrně nezvyšuje to, co se smí nabízet k prodeji.**
+> Do veličiny *prodejné* — tedy do čísla, které je určené e-shopu — se **na cestě
+> nepočítá**. Prodávat něco, co ještě nedorazilo, je obchodní riziko (dodavatel
+> nedodá, dodá později, dodá míň) a tohle rozhodnutí má udělat firma vědomě, ne
+> aplikace za ni. *Volně k dispozici (ATP)* je naproti tomu **plánovací** číslo pro
+> nákup a rozhodování uvnitř firmy — tam „na cestě" smysl dává, protože jde o to,
+> kdy zboží bude, ne co se dá slíbit dnes.
+
+**Žádná z těch čtyř veličin se nikam neukládá** — počítají se v okamžiku dotazu
+z objednávek a dokladů. Objednané ani rezervované zboží nemá pořizovací cenu,
+nevstupuje do rozvahy, a proto nepatří mezi skladové stavy, ze kterých se dělá
+ocenění (§ 33.3) ani inventura (§ 33.7) — objednávka ani rezervace se skladovou
+knihou nehýbe.
+
+Veličiny se počítají v tisícinách jednotky, stejně jako zbytek skladu, takže na
+nich nevzniká zaokrouhlovací chyba.
+
+### 33.9.1 Kde je uvidíš
+
+Na **detailu skladové karty** (§ 33.2.1) jsou nahoře čtyři dlaždice:
+**Skladem** (pod ní menším písmem *Volně k dispozici*), **Rezervováno**,
+**Na cestě** (dlaždice je proklik na objednávky dané karty; pod číslem je
+*Očekáváno {datum}* — nejbližší termín dodání ze všech otevřených objednávek)
+a **U dodavatele**.
+
+Karta, která nemá jediný pohyb ani objednávku, ukazuje ve všech čtyřech
+dlaždicích **nuly** — ne prázdno. Je to záměr: „nula" je odpověď, „—" by byla
+chyba (viz § 33.9.4).
+
+Hodnota **prodejné** vlastní dlaždici nemá; je to číslo pro strojové odběratele
+(REST API `GET /api/stock/quantities` a [MCP server](80_MCP_server.md)),
+odkud si ho bere e-shop. Může vyjít i **záporně** — to znamená, že je
+vyfakturováno víc, než je fyzicky skladem, a záměrně se to neschovává nulou.
+
+> [!NOTE]
+> Náhled dostupnosti u řádku faktury a skladového dokladu (§ 33.4.3, § 33.5.1)
+> pracuje pořád s **prostým fyzickým stavem**, ne s prodejným množstvím —
+> rezervace se od něj neodečítají. Je to jen informativní nápověda; závaznou
+> kontrolu na zápornou zásobu dělá až zaúčtování.
+
+### 33.9.2 Rezervace
+
+**Rezervaci vytvoří řádek vystavené faktury napojený na skladovou kartu, ke
+kterému ještě neexistuje zaúčtovaná výdejka.** Rezervováno je tedy množství, které
+sice fyzicky leží ve skladu, ale už je slíbené konkrétnímu odběrateli.
+
+Rezervaci **netvoří**: koncept faktury, proforma (zálohová faktura) ani
+stornovaná faktura. Storno faktury rezervaci uvolní. Naopak **storno výdejky
+rezervaci vrátí** — protidoklad se do součtu započítá se záporným znaménkem,
+takže se řádek faktury zase tváří jako nevydaný.
+
+> [!IMPORTANT]
+> **Firmy se zapnutou automatickou výdejkou (§ 33.1) uvidí v rezervacích trvale
+> nulu — a je to správně.** Když se výdejka zakládá a účtuje v tomtéž okamžiku
+> jako vystavení faktury, žádné okno mezi „slíbeno" a „vydáno" prostě neexistuje
+> a rezervovat není co. Rezervace mají smysl pro firmy, které automatickou
+> výdejku **vypnuly** a zboží vydávají ze skladu ručně (typicky později, při
+> expedici) — teprve tam vzniká mezera, ve které by se stejný kus dal prodat
+> podruhé.
+
+Rezervace se sčítají **za celou kartu**; filtr na sklad je jen omezením, ne
+rozpadem. U každé karty je k dispozici i rozpad na konkrétní faktury (číslo,
+odběratel, datum vystavení, splatnost, množství).
+
+### 33.9.3 Na cestě
+
+„Na cestě" je součet toho, co je na **otevřených objednávkách** u dodavatelů
+a ještě nedorazilo. Za každý řádek objednávky:
+
+```text
+    na cestě = max(0, potvrzeno (jinak objednáno) − uzavřený zbytek − přijato)
+```
+
+- **Potvrzené množství přebíjí objednané.** Objednáš 10 ks, dodavatel potvrdí 7 →
+  na cestě je 7, ne 10.
+- **Přijaté množství se odečítá.** Z 10 objednaných přijmeš 4 → na cestě zůstane 6
+  a objednávka přejde do stavu *Částečně přijato*.
+- **Storno příjemky vrátí zboží zpátky „na cestu"** — protidoklad nese stejnou
+  vazbu na řádek objednávky, takže se odečet zruší.
+- **Nadměrná dodávka nikdy nedá zápor** — výsledek je useknutý na nule.
+- Řádek objednávky **bez skladové karty** (doprava, služba) do „na cestě" nevstupuje.
+
+Do „na cestě" se počítají objednávky ve stavech **Odesláno, Potvrzeno
+a Částečně přijato**. Koncept se nepočítá (ještě to není závazek), stejně jako
+Přijato, Uzavřeno a Stornováno.
+
+Firma si může přepnout, že se má počítat **až od potvrzení** dodavatelem (pak se
+započítávají jen stavy Potvrzeno a Částečně přijato) — přepínač
+`stock_in_transit_from` na firmě.
+
+> [!WARNING]
+> Tenhle přepínač **zatím nemá obrazovku ani API** — mění se přímo v databázi.
+> V praxi tedy platí výchozí nastavení „počítat od odeslání". Pokud je pro tebe
+> odeslaná, ale nepotvrzená objednávka příliš měkký příslib, řeš to zatím tím,
+> že objednávky odesíláš až s potvrzením, nebo je rovnou potvrzuješ.
+
+Rozpad „na cestě" ukáže, ze kterých konkrétních objednávek se číslo skládá
+(číslo objednávky, stav, dodavatel, sklad, očekávaný termín, množství), seřazený
+podle očekávaného termínu.
+
+### 33.9.4 U dodavatele
+
+Poslední veličina je součet **skladovosti hlášené dodavateli** — sečtou se
+hodnoty *Skladem u dodavatele* ze všech **aktivních** nabídek dané karty
+(§ 33.10). Nabídka bez vyplněného množství přispěje nulou.
+
+Je to **cizí, orientační údaj** — nikdo ho neověřuje a aplikace podle něj nic
+neblokuje. Slouží k rozhodnutí „má to vůbec smysl objednávat?" ještě předtím,
+než dodavateli zavoláš.
+
+## 33.10 Nabídky dodavatelů („u dodavatele")
+
+**Sklad → U dodavatele** je katalog dvojic **zboží × dodavatel** — kdo dané zboží
+nabízí, za kolik, v jaké lhůtě a kolik ho má. Je to podklad pro objednávání
+(§ 33.11), pro návrh doplnění zásob (§ 33.12) i pro cenotvorbu e-shopu, která si
+z preferovaného dodavatele bere nákupní cenu (viz
+[§ 34.8.2](34_Eshop.md#3482-nakupni-cena-cenova-baze)).
+
+Tatáž data se dají editovat i z karty zboží, záložka **Dodavatelé**
+([§ 34.9](34_Eshop.md#349-dodavatele-zbozi)) — je to jeden a týž záznam, jen
+jednou po kartách a jednou přes celý katalog.
+
+> [!TIP]
+> **Karta funguje dřív, než cokoli objednáš.** Skladovou kartu si můžeš založit
+> bez jediné příjemky, bez zásoby a bez objednávky, navěsit na ni nabídky
+> dodavatelů s cenou a skladovostí a teprve pak řešit, jestli a od koho nakoupíš.
+> Karta bez pohybu se v seznamech i v množstevních veličinách chová korektně —
+> ukáže nuly, ne prázdno.
+
+### 33.10.1 Pole nabídky
+
+| Pole | Význam |
+|---|---|
+| **Zboží** *(povinné)* | skladová karta (SKU + název) |
+| **Dodavatel** *(povinný)* | klient s **rolí dodavatele** v adresáři ([§ 18](18_Klienti.md)) |
+| **Kód u dodavatele** | katalogové číslo, pod kterým položku vede dodavatel (max 80 znaků) — tiskne se na objednávku a páruje se podle něj ceník |
+| **Nákupní cena** | cena bez DPH, za kterou od něj nakupuješ |
+| **Měna** | ISO kód, výchozí `CZK` |
+| **Lhůta (dní)** | dodací lhůta |
+| **Skladem u dodavatele** | množství, které dodavatel hlásí — sčítá se do veličiny *U dodavatele* (§ 33.9.4) |
+| **Dostupnost** | Skladem / Na objednávku / Nedostupné / **Neznámá** *(výchozí)* |
+| **Min. objednávka** | minimální odběr; doplnění zásob pod něj nikdy nenavrhne méně |
+| **Balení** | velikost balení; objednávané množství se zaokrouhluje **nahoru** na celá balení |
+| **Cena platí do** | do kdy ceníková cena platí; prázdné = bez omezení |
+| **Hlavní dodavatel** | nejvýš **jeden na kartu** — nastavením se příznak ostatním sám shodí |
+| **Aktivní** | vyřazená nabídka zůstane v evidenci kvůli historii, ale nikam se nenabízí |
+| **Poznámka** | volný text (max 255 znaků) |
+
+Ke každé nabídce se navíc eviduje **kdy naposled se změnilo hlášené množství**
+a **odkud data pocházejí** (ručně / import ceníku / automatický kanál). Údaj
+o stáří je čistě informativní — nabídka nikdy „nevyprší" sama od sebe a nic se
+podle stáří neblokuje.
+
+**Jedna dvojice zboží × dodavatel smí existovat jen jednou.** Pokus přidat
+druhou nabídku téhož dodavatele k téže kartě skončí chybou „Tento dodavatel už
+u karty nabídku má — upravte ji." (HTTP 409).
+
+Každý zápis nabídky (založení, úprava i smazání) **spustí přepočet prodejních
+cen** té karty — u karet s cenovou bází „Ruční" se totiž prodejní cena odvíjí od
+nákupní ceny hlavního dodavatele.
+
+Seznam ukazuje u každé nabídky i **Naši zásobu** (kolik toho máš ty), takže se
+dá porovnat vlastní stav proti tomu, co drží dodavatel. Filtrovat jde fulltextem
+(SKU, název, kód u dodavatele, dodavatel), podle dostupnosti, jen aktivní a jen
+hlavní dodavatele.
+
+### 33.10.2 Import ceníku dodavatele
+
+Tlačítko **Import ceníku** nahraje ceník v **XLSX nebo CSV do 2 MB**. U CSV se
+oddělovač (`;` nebo `,`) rozpozná z prvního řádku sám a soubor se čeká v UTF-8;
+u XLSX se čte **jen první list**, hodnoty se berou tak, jak jsou zapsané (buňka
+začínající `=` zůstane textem, vzorec se nevyhodnocuje).
+
+**Sloupce se poznají podle záhlaví**, žádné ruční mapování se nedělá. Názvy se
+porovnávají bez ohledu na velikost písmen, diakritiku a oddělovače, takže
+`Nákupní cena` i `nakupni_cena` sedí stejně:
+
+| Sloupec | Povinný | Alternativní názvy | Poznámka |
+|---|---|---|---|
+| `sku` | **ano** | kod, code, katalog | SKU **existující** karty |
+| `dodavatel` | ano *(nebo `ico`)* | vendor, supplier, firma | název dodavatele |
+| `ico` | ne | ič, ičo, company_id | má **přednost** před názvem |
+| `kod_dodavatele` | ne | vendor_sku | |
+| `nakupni_cena` | ne | purchase_price, cena, price | `1 234,50` i `1234.50` |
+| `mena` | ne | currency | výchozí `CZK` |
+| `dodaci_lhuta_dny` | ne | delivery_days, delivery | |
+| `skladem_u_dodavatele` | ne | stock_qty, skladem, mnozstvi | |
+| `dostupnost` | ne | availability | skladem / na objednávku / nedostupné / neznámé |
+| `min_objednavka` | ne | min_order_qty, moq | |
+| `baleni` | ne | package_qty, package | |
+| `cena_plati_do` | ne | price_valid_to, valid_to | `31.12.2026` i `2026-12-31` |
+| `hlavni_dodavatel` | ne | is_preferred | 1/0, ano/ne |
+| `aktivni` | ne | is_active | výchozí 1 |
+| `poznamka` | ne | note | |
+
+Chybí-li ve souboru sloupec `sku`, nebo současně `dodavatel` i `ico`, import se
+odmítne celý. **Sloupec, který v souboru není, se nemění**; sloupec, který tam je
+a je prázdný, hodnotu **vymaže** (výjimkou jsou měna, hlavní dodavatel a aktivní —
+prázdná hodnota se u nich ignoruje).
+
+Chování importu:
+
+- **Identita řádku je dvojice SKU karty × dodavatel** — přesně tak, jak je
+  omezená i v datech. Páruje se **jen podle SKU**, nikdy podle EAN.
+- **Import nikdy nic nemaže a nikdy nezakládá karty ani dodavatele.** Neznámé
+  SKU je chyba řádku („Karta zboží se SKU „X" neexistuje (založte ji nejdřív)."),
+  stejně tak neznámý dodavatel. Když má víc dodavatelů stejný název, řádek skončí
+  chybou s výzvou doplnit sloupec `ico`.
+- Stejná dvojice zboží + dodavatel dvakrát v jednom souboru = chyba řádku.
+- Existující nabídka se aktualizuje jen v těch polích, která se skutečně liší;
+  beze změny se řádek započítá jako **Beze změny**.
+- Po ostrém importu se přepočtou prodejní ceny všech dotčených karet.
+
+**Import je dvoufázový a je vše, nebo nic.** Nejdřív běží **náhled** (výchozí
+zaškrtnuté „Jen náhled (nic nezapisovat)"), který vypíše po řádcích stav
+**Nová / Změna / Beze změny / Chyba** a u změn i konkrétní `z → na` u každého
+pole; souhrn nahoře ukazuje počty. Ostré tlačítko **Provést import** se objeví,
+teprve když je náhled bez jediné chyby. Ostrý běh s chybou nezapíše **nic**
+a vrátí hlášku „Import obsahuje chyby — nic nebylo zapsáno."
+
+> [!WARNING]
+> **V tomto vydání je import ceníku funkční jen v náhledu na úrovni služby —
+> HTTP endpoint `POST /api/stock/vendor-offers/import` selže dřív, než se ke
+> zpracování souboru dostane.** Tlačítko **Import ceníku** proto v aplikaci
+> zatím nedoběhne. Než bude opravené, zadávej změny ceníku ručně na nabídkách
+> (§ 33.10.1) nebo přes [MCP server](80_MCP_server.md), který nabídky umí
+> zakládat i upravovat po jedné.
+
+## 33.11 Objednávky u dodavatele
+
+**Sklad → Objednávky dodavatelům** je evidence toho, co jsi u dodavatele objednal
+a co z toho ještě nedorazilo. Objednávka je jediným zdrojem veličiny **na cestě**
+(§ 33.9) a zároveň podkladem pro příjemku — zboží z ní naskladníš i dřív, než
+přijde faktura.
+
+> [!IMPORTANT]
+> **Objednávka není účetní případ.** Dokud nepřejde vlastnictví zboží, nevzniká
+> závazek ani zásoba — objednávka proto **nezakládá žádný zápis v účetním deníku**
+> a nemá vůbec žádnou kontaci. Do účetnictví (a do ocenění zásob) vstoupí až
+> zaúčtovaná příjemka. Sazba DPH na řádku je čistě orientační, aby seděl součet
+> objednávky; objednávka není daňový doklad a nárok na odpočet z ní nevzniká.
+
+### 33.11.1 Životní cyklus objednávky
+
+Objednávka prochází sedmi stavy. Ručně se přepínají jen čtyři přechody
+(**Odeslat**, **Potvrdit**, **Zavřít zbytek**, **Storno**, plus **Znovu otevřít**);
+stavy *Částečně přijato* a *Přijato* si systém nastavuje sám podle toho, kolik
+zboží se z objednávky skutečně naskladnilo.
+
+```text
+   ┌─────────┐   Odeslat    ┌──────────┐   Potvrdit   ┌───────────┐
+   │ Koncept │─────────────►│ Odesláno │─────────────►│ Potvrzeno │
+   │  draft  │ přidělí číslo│   sent   │              │ confirmed │
+   └────┬────┘ → „na cestě" └────┬─────┘              └─────┬─────┘
+        │ Smazat                 │                          │
+        ▼                        └───────────┬──────────────┘
+     (zmizí)                                 │ zaúčtování příjemky
+                                             ▼
+                              ┌──────────────────────────┐
+                              │    Částečně přijato      │
+                              │   partially_received     │
+                              └─────────────┬────────────┘
+                                            │ dorazilo všechno
+                                            ▼
+                                      ┌───────────┐
+                                      │  Přijato  │
+                                      │ received  │
+                                      └───────────┘
+
+   Storno — z draft / sent / confirmed      Zavřít zbytek — z sent / confirmed /
+   a jen dokud nic nedorazilo:              partially_received / received:
+        ──► Stornováno (cancelled)               ──► Uzavřeno (closed)
+            konečný stav, zpět už ne                 ──► Znovu otevřít
+```
+
+| Přechod | Z jakého stavu | Co se stane |
+|---|---|---|
+| **Odeslat** | Koncept | Přidělí **číslo řady OBJ** (§ 33.11.3), zapíše okamžik odeslání a od té chvíle se zboží počítá jako **na cestě**. Objednávka bez jediného řádku se odeslat nedá. Opakované kliknutí nic nezkazí — vrátí objednávku beze změny a **další číslo nepropálí**. |
+| **Potvrdit** | Odesláno (i opakovaně u Potvrzeno) | Zapíše, co dodavatel potvrdil: volitelně jiný **termín** na hlavičce a **potvrzené množství** i termín u jednotlivých řádků. Od té chvíle se „na cestě" počítá z potvrzeného množství, ne z objednaného. Prázdný termín stávající nepřepíše. |
+| *(automaticky)* | Odesláno / Potvrzeno | **Zaúčtování příjemky** navázané na objednávku ji samo přepne na *Částečně přijato* nebo *Přijato*. **Storno příjemky posun vrátí zpět** (Přijato → Částečně přijato → Odesláno/Potvrzeno) a množství se vrátí „na cestu". |
+| **Zavřít zbytek** | Odesláno, Potvrzeno, Částečně přijato, Přijato | „Zbytek už nedorazí." Nedodané množství se na každém řádku odepíše jako stornované, takže zmizí z „na cestě" a doplnění zásob (§ 33.12) ho zase začne navrhovat k objednání. Koncept se zavírat nedá — ten se maže nebo stornuje. |
+| **Storno** | Koncept, Odesláno, Potvrzeno | Zruší celou objednávku. **Odmítne se, jakmile z objednávky existuje jakýkoli příjem** — chybou „K objednávce už existuje příjem — místo storna uzavři nedodaný zbytek („Zavřít zbytek")" (HTTP 409). Storno je **konečné**, zpět už se z něj nedá. |
+| **Znovu otevřít** | Uzavřeno | Vrátí uzavřenou objednávku mezi živé: zruší odepsaný zbytek a stav dopočítá podle toho, kolik se reálně přijalo. **Stornovanou objednávku znovu otevřít nelze.** |
+| **Smazat** | Koncept | Smaže objednávku i s řádky. Odeslanou objednávku smazat nejde — ta se stornuje nebo uzavře. |
+
+Upravovat se dá **jen koncept**. Pokus o úpravu odeslané objednávky vrátí chybu
+„Upravovat lze jen rozpracovanou (draft) objednávku. Odeslanou objednávku uprav
+přes potvrzení nebo uzavření zbytku." (HTTP 409) a v editoru je celý formulář
+uzamčený.
+
+> [!NOTE]
+> Do plnění objednávky se počítají **jen řádky napojené na skladovou kartu**.
+> Řádek za dopravu nebo službu (bez karty) vstupuje do ceny objednávky, ale ne do
+> „objednáno / přijato / zbývá" a ani do veličiny na cestě.
+
+### 33.11.2 Hlavička a řádky
+
+**Hlavička**: **dodavatel** *(povinný, z adresáře klientů — typicky s rolí
+dodavatele)*, **datum objednávky** *(povinné)*, **sklad**, na který se má dodat
+*(povinný, musí být aktivní)*, **měna** *(povinná)*, volitelně **očekávané
+dodání**, **kurz** (zobrazí se jen u cizí měny a je čistě orientační — ocenění
+určí až příjemka nebo faktura), **reference dodavatele** (číslo, pod kterým
+objednávku vede dodavatel), **poznámka** (tiskne se do PDF) a **interní poznámka**
+(do PDF se netiskne).
+
+**Řádek**: skladová karta *(nepovinná — bez ní jde o dopravu či službu)*, vlastní
+**sklad** (přebije sklad z hlavičky), **kód u dodavatele**, **popis** *(povinný;
+prázdný se doplní z názvu karty)*, **měrná jednotka** (výchozí „ks"),
+**objednané množství** *(povinné, musí být větší než 0)*, **cena za jednotku**
+*(nesmí být záporná)*, **sazba DPH** (orientační), **očekávané dodání řádku**
+a poznámka.
+
+Součty **Celkem bez DPH** a **Celkem včetně DPH** v hlavičce se počítají
+z **objednaného** množství. Po potvrzení jiného množství dodavatelem se
+nepřepočítávají — řádky v tabulce i v PDF už ale ukazují potvrzené množství,
+takže se hlavičkový součet a součet řádků mohou rozejít. Ber ho jako orientační
+hodnotu objednávky, ne jako fakturační podklad.
+
+### 33.11.3 Číslování a PDF
+
+Číslo objednávky má formát **`OBJ-RRRR-NNNN`** — prefix, rok z **data objednávky**
+a čtyřmístné pořadové číslo. Prefix `OBJ` je výchozí a dá se firmě přenastavit
+stejně jako u ostatních řad dokladů.
+
+**Číslo se přiděluje až při odeslání**, ne při založení. Koncepty žádné číslo
+nemají (v seznamu i v detailu je u nich text **„Koncept"**), takže si můžeš
+připravit libovolné množství rozpracovaných objednávek, aniž bys spálil čísla
+v řadě. Přidělení je chráněné zamykacím dotazem — souběžné odeslání dvou
+objednávek nemůže vygenerovat duplicitu a při chybě se číslo nespotřebuje.
+
+Tlačítko **PDF** vytiskne objednávku pro dodavatele (funguje i u konceptu, kde
+místo čísla stojí „koncept #…"). PDF obsahuje objednatele a dodavatele s IČ/DIČ,
+sklad dodání, datum objednávky, požadovaný termín, referenci dodavatele, měnu,
+tabulku řádků (kód u dodavatele, položka, množství, MJ, cena/MJ, celkem, termín),
+oba součty, veřejnou poznámku a podpisové řádky **Vystavil / Schválil**. Interní
+poznámka se do PDF nedostane.
+
+### 33.11.4 Příjem zboží z objednávky
+
+Tlačítko **Příjem na sklad** (na detailu objednávky ve stavu Potvrzeno nebo
+Částečně přijato) otevře dialog, který nabídne řádky se zbývajícím množstvím.
+Po potvrzení vznikne **draft příjemka** s původem „Objednávka", navázaná na
+objednávku i na jednotlivé její řádky. Skladem to zatím **nehne** — příjemku
+zaúčtuješ standardně ve Skladových dokladech (§ 33.4.1) a teprve tím se zásoba
+zvýší a stav objednávky přepočítá.
+
+**Částečné dodávky** jsou normální stav: příjemek z jedné objednávky můžeš udělat
+kolik chceš, každá odečte svůj díl ze zbývajícího množství.
+
+**Nadměrná dodávka se ve výchozím stavu odmítne** — pokus přijmout víc, než
+zbývá, skončí chybou „Množství přesahuje zbývající k příjmu z objednávky. Potvrď
+nadměrnou dodávku, nebo množství uprav." (HTTP 409) s výpisem dotčených řádků
+(požadováno / zbývá). Teprve když v dialogu zaškrtneš **Povolit nadměrné dodání**
+(zaškrtávátko se objeví, až když nějaký řádek limit překročí), příjem projde
+a dotčené řádky objednávky dostanou natrvalo badge **„Nadměrné dodání"**.
+Objednané množství se přitom nikdy samo nezvyšuje — v objednávce zůstává to, co
+jsi objednal.
+
+#### Cena je zatím jen odhad
+
+Pořizovací cenu na příjemce systém určuje v tomto pořadí:
+
+1. **Z řádku přijaté faktury** navázaného na řádek objednávky (jednotková cena =
+   částka řádku bez DPH ÷ množství). Cena je pak skutečná.
+2. **Odhad z objednávky** — cena za jednotku z objednávky přepočtená kurzem
+   z hlavičky. Řádek dostane v dialogu i na dokladu příznak **„Odhad"** a nahoře
+   svítí varování **„Cena je odhad z objednávky — po doručení faktury přeceňte."**
+3. **Ručně přepsaná cena** v dialogu má přednost před obojím.
+
+> [!WARNING]
+> Odhadnutá cena **vstupuje rovnou do váženého klouzavého průměru** karty
+> (§ 33.3) a tím i do ocenění všech následujících výdejů. Není to jen kosmetický
+> údaj — dokud ji neopravíš, má karta špatnou průměrnou cenu.
+>
+> **Automatické přecenění příjemky po doručení faktury v aplikaci není.** Máš dvě
+> cesty: buď nechat příjemku **v konceptu**, dokud faktura nedorazí, a cenu před
+> zaúčtováním jen přepsat (nejlevnější varianta), nebo — je-li už zaúčtovaná —
+> ji **stornovat** a přijmout znovu se správnou cenou. Storno je hodnotově
+> neutrální a množství se navíc vrátí „na cestu", takže se objednávka rozpadne
+> zpátky do částečně přijatého stavu a příjem jde zopakovat.
+
+### 33.11.5 Seznam objednávek
+
+Sloupce: **Číslo**, **Datum**, **Dodavatel**, **Sklad**, **Očekáváno**,
+**Objednáno**, **Přijato**, **Zbývá**, **Celkem bez DPH** a **Stav**. Filtry:
+fulltext, **stav** (volba *Otevřené* zahrne koncepty, odeslané, potvrzené
+i částečně přijaté), sklad, rozsah data objednávky a „očekáváno do". Sloupce
+i hustotu řádků si nastavíš stejně jako u ostatních přehledů.
+
+Na detailu objednávky je pod řádky sekce **Vzniklé příjemky** s prokliky na
+jednotlivé skladové doklady.
+
+### 33.11.6 Oprávnění
+
+Čtení seznamu, detailu i PDF stačí běžné skladové oprávnění. Všechny zápisové
+akce (založit, upravit, odeslat, potvrdit, zavřít, stornovat, znovu otevřít,
+smazat, vytvořit příjemku i hromadné objednání) vyžadují samostatné oprávnění
+**`stock.orders.write`** — role „skladník" s právem na skladové doklady tedy
+objednávat nemůže, dokud jí právo nepřidáš. **Uživatelé klientského portálu se
+k objednávkám nedostanou vůbec**, ani ke čtení, ani když mají skladové právo.
+
+## 33.12 Doplnění zásob — co objednat
+
+Doplnění zásob odpovídá na otázku *„co a kolik mám doobjednat?"*. Nejde jen
+o seznam karet pod minimem — z návrhu se odečítá i to, co už je **na cestě**,
+a přičítá to, co je **rezervované**.
+
+### 33.12.1 Jak se navržené množství počítá
+
+Postupně, pro každou **aktivní** kartu, která má vyplněnou **minimální zásobu**:
+
+```text
+  1) cílová hladina  = minimální zásoba × koeficient      (výchozí koeficient 1,0)
+  2) schodek         = cílová hladina − skladem + rezervováno − na cestě
+  3) je-li schodek ≤ 0 → kartu nenavrhovat vůbec
+  4) zaokrouhlit schodek NAHORU na celá balení hlavního dodavatele
+  5) výsledek zvednout aspoň na minimální odběr hlavního dodavatele
+```
+
+- **Rezervované se přičítá** — ty kusy sice fyzicky máš, ale už jsou slíbené
+  někomu jinému, takže na doplnění minima nestačí.
+- **Na cestě se odečítá** — a přesně v tomhle je celý smysl. Bez toho odečtu bys
+  objednal podruhé to, co už je objednané.
+- **Balení a minimální odběr** se berou z nabídky **hlavního dodavatele**
+  (§ 33.10). Nemá-li karta nabídku, návrh zůstane v holém schodku, bez
+  zaokrouhlení.
+- Hlavního dodavatele vybírá pořadí **označený jako hlavní → nejnižší nákupní
+  cena → nejstarší nabídka**; ručně označený hlavní dodavatel tedy porazí
+  i levnějšího.
+
+Vedle navrženého množství se u karty ukáže i **schodek** (surové číslo před
+zaokrouhlením), aby bylo vidět, kolik z návrhu přidalo balení a minimální odběr.
+
+**Karta bez vyplněné minimální zásoby se nikdy nenavrhne** — stejně tak
+neaktivní karta. Zboží, které nakupuješ až na zakázku, tedy tímhle modulem
+neobjednáváš; nastav mu minimum, nebo objednávej ručně (§ 33.11).
+
+### 33.12.2 Příklad
+
+Karta *KAB-230* má minimální zásobu **50 ks**, skladem je **12 ks**, z toho
+**5 ks** drží nevydaná faktura, a **20 ks** je na cestě z otevřené objednávky.
+Hlavní dodavatel prodává po **balení 24 ks** a jeho minimální odběr je **10 ks**:
+
+| Krok | Výpočet | Výsledek |
+|---|---|--:|
+| Cílová hladina | 50 × 1,0 | 50 ks |
+| Schodek | 50 − 12 + 5 − 20 | **23 ks** |
+| Zaokrouhlení na balení | strop(23 ÷ 24) × 24 | 24 ks |
+| Minimální odběr | max(24; 10) | **24 ks** |
+
+Návrh tedy zní **objednat 24 ks**, přestože „chybí do minima" je na první pohled
+38 ks (50 − 12). Kdyby se „na cestě" neodečítalo, návrh by zněl 48 ks a po
+dodání obou objednávek by na skladě leželo o 24 ks víc, než je potřeba.
+
+### 33.12.3 Jak se k němu dostaneš
+
+Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5).
+
+> [!WARNING]
+> **Vlastní obrazovka doplnění zásob v tomto vydání ještě není.** Tlačítko
+> **Doplnění zásob** vede zatím jen na **seznam skladových karet s filtrem
+> „jen pod minimem"** (§ 33.2) — a ten pracuje s **prostým** porovnáním
+> „skladem < minimum". Nezná rezervace, neodečítá zboží na cestě a nenavrhuje
+> množství. Kompletní výpočet podle § 33.12.1 i **hromadné založení objednávek
+> z návrhu** (jedna objednávka na dodavatele, vždy jako koncept, karty bez
+> dodavatele se vypíšou jako přeskočené) jsou zatím dostupné **jen přes
+> [REST API](78_API.md) a [MCP server](80_MCP_server.md)** — asistenta se tedy
+> zeptat můžeš, na obrazovce to zatím neuvidíš.
+
+## 33.13 Omezení a tipy
 
 - Modul podporuje jen **způsob B** účtování zásob (průběžná evidence bez účtování,
   promítnutí do účetnictví až uzávěrkou) — způsob A není v tomto vydání funkční,
@@ -458,7 +952,29 @@ firmy (typ, formát, čas, uživatel).
 - Zobrazení karty v e-shopu je nezávislé na jejím skladovém typu — řídí ho
   samostatný příznak **Exportovat do e-shopu** (§ 33.2.2).
 
+### 33.13.1 Co objednávky ještě neumí
+
+Nákupní část modulu je první vydání a záměrně řeší jen evidenci objednaného
+zboží. Tohle v ní **není**:
+
+| Chybí | Náhradní řešení |
+|---|---|
+| **Účetní zápis z objednávky** | Není chyba, ale záměr — objednávka není účetní případ. Do deníku vstoupí až zaúčtovaná příjemka. |
+| **Párování objednávka ↔ přijatá faktura** | Obrazovka ani akce pro spárování neexistuje. Objednávku a fakturu k sobě dohledáš ručně přes číslo objednávky (pole „Reference dodavatele" a popis příjemky). |
+| **Kontrola cenové odchylky** faktura vs. objednávka | Neprovádí se; cenu z faktury si porovnej ručně. |
+| **Odeslání objednávky e-mailem** | Tlačítko **Odeslat** znamená „označ za odeslanou", ne „odešli". PDF (§ 33.11.3) stáhni a pošli dodavateli sám. |
+| **Automatické přecenění příjemky po doručení faktury** | Nechat příjemku v konceptu, nebo ji po zaúčtování stornovat a přijmout znovu (§ 33.11.4). |
+| **Dropshipping** — objednávání zboží až na zakázku | Doplnění zásob pracuje jen s kartami, které mají **minimální zásobu**. Zboží na objednávku objednávej ručně (§ 33.11). Cenotvorbu pro dropshipping popisuje [§ 34.9.2](34_Eshop.md#3492-dropshipping-zbozi-bez-skladu). |
+| **Schvalovací workflow objednávky** | PDF má podpisové pole „Schválil", ale žádný schvalovací krok v aplikaci není. |
+| **Hromadné akce nad existujícími objednávkami** | Hromadně jde jen *zakládat* (z návrhu doplnění zásob); odeslat, uzavřít nebo stornovat se musí po jedné. |
+| **Obrazovka doplnění zásob a hromadné objednání** | Zatím jen přes API a MCP (§ 33.12.3). |
+| **Import ceníku dodavatele přes UI** | V tomto vydání nedoběhne (§ 33.10.2) — zadávej nabídky ručně nebo přes MCP. |
+| **Přepnutí „na cestě až od potvrzení" v nastavení** | Pole existuje jen v databázi (§ 33.9.3). |
+
 > [!TIP]
 > Skladovou kartu nemusíš mít vždy založenou dopředu — v průvodci **naskladněním
 > z přijaté faktury** (§ 33.5.2) ji jde založit rovnou z popisu řádku faktury, bez
-> nutnosti přecházet napřed na Skladové karty.
+> nutnosti přecházet napřed na Skladové karty. A naopak: kartu si můžeš založit
+> **dlouho předtím**, než cokoli koupíš — bez zásoby, bez pohybu, jen s nabídkami
+> dodavatelů (§ 33.10), a teprve podle nich se rozhodnout, jestli a od koho
+> objednáš.

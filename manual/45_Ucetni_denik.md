@@ -30,8 +30,8 @@ a můžeš se z něj prokliknout zpět na zdrojový doklad. Podle sloupce **Zdro
 
 | Zdroj v deníku | Kdy vzniká |
 |---|---|
-| **Vydaná faktura** | zaúčtování vydané faktury (311/6xx + 343 DPH podle [Knihy DPH](37_Kniha_DPH.md)) |
-| **Přijatá faktura** | zaúčtování přijaté faktury (321/5xx nebo 04x/02x u majetku + 343) |
+| **Vydaná faktura** | zaúčtování vydané faktury (311/6xx + DPH na výstupu **343.200** podle [Knihy DPH](37_Kniha_DPH.md)) |
+| **Přijatá faktura** | zaúčtování přijaté faktury (321/5xx nebo 04x/02x u majetku + DPH na vstupu **343.100**) |
 | **Banka** | spárování položky bankovního výpisu s dokladem — viz [Banka](28_Banka.md) |
 | **Pokladna** | zaúčtování pokladního dokladu — viz [Pokladna](30_Pokladna.md) |
 | **Zápočet / vypořádání** | vzájemný zápočet nebo jiné vypořádání otevřených položek |
@@ -39,6 +39,7 @@ a můžeš se z něj prokliknout zpět na zdrojový doklad. Podle sloupce **Zdro
 | **Odpis majetku** | měsíční/roční odpisový běh karty majetku |
 | **Zařazení majetku** / **Vyřazení majetku** | uvedení majetku do užívání / jeho vyřazení |
 | **Uzavření knih** / **Otevření knih** | roční uzávěrka a otevření nového účetního období |
+| **Zúčtování DPH** | měsíční (u čtvrtletního plátce čtvrtletní) interní doklad, který převede vstupní a výstupní daň na **343.900** — viz [§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph) |
 | **Kurzové přecenění** | přecenění cizoměnových zůstatků k rozvahovému dni (viz [§ 45.5](#455-multi-menove-radky-zapisu)) |
 | **Ruční** | zápis, který jsi založil(a) přímo v deníku (viz [§ 45.4](#454-rucni-zapis)) |
 

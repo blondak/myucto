@@ -32,7 +32,9 @@ Přepínač **Zobrazit neaktivní** načte i vyřazené účty. Neaktivní úče
 ## 62.2 Automatické založení osnovy
 
 Při zahájení aktivace podvojného účetnictví server idempotentně naseeduje
-standardní syntetické účty a systémové předkontace. Stejný seed lze bezpečně
+standardní syntetické účty, vybrané analytiky (mimo jiné **343.100 / 343.200 /
+343.900** — viz [§ 62.3.2](#6232-analytiky-dph-343100-343200-a-343900)) a systémové
+předkontace. Stejný seed lze bezpečně
 spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole
 [Aktivace účetnictví](64_Aktivace_ucetnictvi.md).
@@ -45,8 +47,8 @@ jiné firmy nestačí k jeho načtení nebo změně.
 
 - **Syntetický účet** je zpravidla třímístný účet standardní osnovy, například
   `311` nebo `501`.
-- **Analytický účet** je firemní podúčet syntetiky, například `311100` nebo
-  `501200`.
+- **Analytický účet** je firemní podúčet syntetiky, například `311.100` nebo
+  `501.200`.
 
 Tlačítko **Nová analytika** otevře formulář:
 
@@ -58,6 +60,116 @@ Analytika dědí **typ účtu a obvyklou stranu** po rodiči. Web proto tato pol
 nenabízí. Kód musí být v rámci firmy unikátní. Nový účet vzniká jako aktivní.
 Novou syntetiku nelze založit tímto formulářem; pro řízený hromadný přenos
 slouží import.
+
+### 62.3.1 Tečkovaný zápis analytik
+
+Kanonický tvar analytiky je **syntetika, tečka, pořadové číslo** — `221.100`,
+`211.500`, `343.900`, `501.200`. Tak analytiky vedou účetní i ostatní účetní
+programy a tak je aplikace zakládá i zobrazuje. Dřívější beztečkový zápis
+(`221100`) se při aktualizaci **přejmenoval automaticky** všude, kde je kód
+uložený jako text — v účtovém rozvrhu, v předkontacích, v bankovních pravidlech
+účtování, u pokladen, na kartách majetku i v mzdovém nastavení. Kde by
+přejmenování narazilo na už existující tečkovaný kód, zůstane starý kód
+nedotčený a funguje dál.
+
+Formulář sám tečku nevynucuje — kód smí mít 3–10 znaků z číslic, písmen a tečky,
+takže i účty jako `311D` nebo `461K` ze standardní šablony zůstávají platné.
+Tečkovaný tvar má ale dva praktické důsledky:
+
+- **Přesměrování z holé syntetiky.** Když má předkontace zadaný jen syntetický
+  účet a firma pod ním má **právě jednu aktivní tečkovanou analytiku**, zápis se
+  provede na tu analytiku. Řeší to naráz všechna místa, kde byl účet v enginu
+  zadaný natvrdo (kurzové rozdíly, opravy a udržování, zaokrouhlení) a odpadá
+  díky tomu ruční kontace pro každou drobnost.
+- **Víceznačné účty se nepřesměrovávají nikdy.** U **`211`, `221`, `343`, `336`,
+  `315`, `345` a `501`** rozhoduje o analytice kontext dokladu — bankovní účet
+  výpisu, pokladní registr nebo mzdové nastavení — ne osnova. Kdyby se
+  přesměrovávalo i tady, skončily by všechny účty na první nalezené analytice.
+- Netečkovaná analytika se pro přesměrování nepoužije. Je to záměrná pojistka:
+  šablona má pod `311` jedinou analytiku `311D` (dlouhodobé pohledávky), na
+  kterou by jinak spadly úplně všechny pohledávky.
+
+Celý mechanismus jde firmě vypnout, pokud si účtování nad holými syntetikami
+vyloženě přeješ.
+
+### 62.3.2 Analytiky DPH 343.100, 343.200 a 343.900
+
+Šablona rozvrhu zakládá pod syntetikou 343 tři analytiky:
+
+| Účet | Název | Co na něj chodí |
+|---|---|---|
+| **343.100** | Daň z přidané hodnoty **vstup** | nárok na odpočet — přijaté faktury (i s kráceným odpočtem), odpočtová strana samovyměření (reverse charge), daňový doklad k poskytnuté záloze, nákup přes výdajový pokladní doklad |
+| **343.200** | Daň z přidané hodnoty **výstup** | povinnost přiznat daň — vydané faktury, přiznávací strana samovyměření, daňový doklad k přijaté záloze, prodej přes příjmový pokladní doklad |
+| **343.900** | Daň z přidané hodnoty **zúčtování** | jen dvě věci: měsíční doklad zúčtování (§ 62.3.3) a **platba nebo vratka finančnímu úřadu** z banky |
+
+Všechny tři jsou závazkové a **saldní** — smějí stát na obou stranách, protože
+nadměrný odpočet je pohledávka za státem.
+
+Přednost má vždy **předkontace** (`invoice.vat.input`, `invoice.vat.output`);
+analytika je jen výchozí hodnota. Kdo chce zůstat na plochém 343, přepíše si
+kontaci a nic se pro něj nemění.
+
+> [!NOTE]
+> **Firma, která analytiky nemá, o nic nepřijde.** Chybí-li 343.100 nebo 343.200
+> v rozvrhu (nebo je někdo deaktivoval), engine se sám vrátí na holou **343**
+> a účtuje jako dřív. Cena za to je, že se vstup a výstup na jednom účtu
+> vzájemně vynetují a firmu **přeskočí měsíční zúčtování DPH** (§ 62.3.3).
+
+> [!IMPORTANT]
+> Od zavedení analytik je **343 syntetika se třemi dětmi** — přímo na ni se už
+> neúčtuje. Kde se v manuálu mluví o „obratu účtu 343" (kontroly proti přiznání
+> k DPH, uzávěrka, měsíční kontrola), jde vždy o **součet syntetiky včetně
+> analytik** — tak ho i všechny sestavy počítají, takže srovnání s přiznáním
+> platí dál.
+
+### 62.3.3 Měsíční zúčtování DPH
+
+Za každé skončené zdaňovací období vznikne automaticky **interní doklad
+„Zúčtování DPH"**, který převede obrat vstupní a výstupní daně na zúčtovací účet
+— přesně tak, jak to účetní dělá ručně:
+
+```text
+    MD 343.200 / D 343.900     daň na výstupu za období
+    MD 343.900 / D 343.100     daň na vstupu za období
+```
+
+Po dokladu jsou 343.100 i 343.200 za období nulové a na **343.900 leží přesně
+to, co se odvede** (nebo co má finanční úřad vrátit). Ten zůstatek pak uzavře
+platba z banky, takže je průběžně srovnatelný se saldem u správce daně — na
+plochém 343 to z principu nešlo.
+
+| Vlastnost | Chování |
+|---|---|
+| Číslo dokladu | `DPH-01/2026` (měsíční plátce) nebo `DPH-Q1/2026` (čtvrtletní) — nečerpá z číselné řady interních dokladů |
+| Popis | „Zúčtování DPH za 01/2026"; v deníku je zdroj označený jako **Zúčtování DPH** |
+| Datum zápisu | **poslední den období** — zápis padne do správného období i při opožděném běhu |
+| Kdy běží | plánovaná úloha **1. den v měsíci ve 04:30** (viz [§ 5.5](05_Po_instalaci.md)), za období obsahující předchozí měsíc |
+| Opakované spuštění | doklad se **přepočítá, nikdy nezdvojí** — vlastní zúčtovací doklady se přitom z obratu vylučují, aby si samy sebe nepřičítaly |
+| Zpětné dohnání | jde spustit ručně pro konkrétní období |
+
+Do obratu se **nepočítají** uzávěrkové a otevírací zápisy, dřívější zúčtovací
+doklady ani nezaúčtované koncepty.
+
+**Kdo doklad nedostane** (a proč) — vždy se to zapíše do reportu úlohy, nikdy se
+to nestane tiše:
+
+| Situace | Důvod |
+|---|---|
+| Daňová evidence | zúčtování dává smysl jen v podvojném účetnictví |
+| Neplátce, který není ani identifikovaná osoba | nemá co zúčtovat |
+| Vstup i výstup na témž účtu (ploché 343) | doklad by byl 343/343 |
+| Některá z analytik chybí v rozvrhu nebo je neaktivní | není kam účtovat |
+| Nulový vstup i výstup | doklad se nezakládá vůbec |
+| Čtvrtletní plátce před koncem čtvrtletí | období ještě neskončilo — doklad počká, aby se tři měsíce po sobě nepřepisoval neúplnými čísly |
+
+**Identifikovaná osoba** se vyhodnocuje měsíčně bez ohledu na nastavenou periodu
+DPH. Převažují-li dobropisy a obrat vyjde záporný, obrátí se strany zápisu —
+záporná částka se nikdy neúčtuje. Chyba u jedné firmy (uzavřené období, zámek
+data, chybějící analytika) běh nezastaví, jen skončí v reportu.
+
+> [!TIP]
+> Zúčtovací doklad **nenahrazuje roční vypořádání koeficientu** podle § 76 odst.
+> 7 ZDPH — to je pořád ruční zápis (viz [§ 36](36_Vykazy_DPH.md)).
 
 ## 62.4 Aktivace a deaktivace
 
@@ -145,7 +257,7 @@ Karta obsahuje:
 - u analytiky odkaz na **nadřízenou syntetiku**.
 
 Rozsah se nastavuje poli **Od / Do** nebo zkratkou na účetní období. Tlačítka
-v hlavičce vedou na [Opis účtu](48_Hlavni_kniha.md#485-opis-účtu), do
+v hlavičce vedou na [Opis účtu](48_Hlavni_kniha.md#485-opis-uctu), do
 [Hlavní knihy](48_Hlavni_kniha.md) (kniha účet sama rozbalí) a do
 [Účetního deníku](45_Ucetni_denik.md) filtrovaného na tento účet a rozsah;
 u syntetiky pokrývá filtr i její analytiky.

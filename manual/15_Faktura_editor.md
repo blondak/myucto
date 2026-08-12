@@ -105,6 +105,73 @@ DPH výkazy (přiznání, kontrolní hlášení, kniha DPH) ukazují stejné č�
 > 💡 Režim „s DPH" funguje stejně i u **přijatých faktur** (viz [§ 23.2.3](23_Prijate_faktury.md#2323-polozky))
 > a u **šablon pravidelné fakturace** (viz [§ 17.2.2](17_Pravidelne_fakturace.md#1722-sekce-faktura)).
 
+### 15.2.7 Způsob úhrady a platba hotově
+
+Pole **Způsob úhrady** (Bankovní převod / Platební karta / **Hotově** / Jiný) se
+tiskne na fakturu. Volba **Hotově** navíc otevře **hotovostní vyrovnání** — třetí
+způsob, jak se faktura stane uhrazenou, vedle bankovního výpisu a ručního
+označení.
+
+Po zvolení „Hotově" se pod polem objeví výběr **Pokladna**:
+
+- Výchozí volba je **„Nepoužít pokladnu"** — faktura se jen vytiskne s poznámkou
+  „hotově" a o úhradu se postaráš jinde. Vyrovnání se nespustí.
+- Nabízejí se **jen korunové pokladny** ([§ 30.1](30_Pokladna.md#301-iselnik-pokladen)).
+  Valutová pokladna v seznamu není vůbec.
+- Nemá-li firma žádnou korunovou pokladnu, pod polem se zobrazí hláška
+  **„Nemáte založenou žádnou korunovou pokladnu — doklad zůstane neuhrazený."**
+- Uživatelé **klientského portálu** výběr nevidí.
+
+**Co se stane při vystavení.** V okamžiku vystavení faktury (u konceptu se volba
+jen uloží a čeká) systém automaticky:
+
+1. vystaví ve zvolené pokladně **příjmový pokladní doklad (PPD)** s účelem
+   „Úhrada faktury", datem = **datum vystavení faktury**, částkou = **zbývá
+   k úhradě** a popisem „Úhrada vydané faktury {VS} hotově",
+2. doklad **rovnou zaúčtuje** (MD analytika pokladny / D 311) — nevzniká žádný
+   koncept ke schválení,
+3. zaeviduje **úhradu** k faktuře, takže se faktura překlopí do stavu
+   **Uhrazeno**.
+
+Toast potvrdí **„Pokladní doklad {číslo} byl vystaven a zaúčtován."** Doklad
+najdeš normálně v [Pokladně](30_Pokladna.md) i v pokladní knize.
+
+**Je to plně vratné.** Když volbu zrušíš — přepneš způsob úhrady jinam, nebo
+vybereš „Nepoužít pokladnu" — systém při uložení **smaže pokladní doklad
+i jeho zápis v deníku**, zruší evidovanou úhradu a faktura se vrátí do
+původního stavu. Změníš-li pokladnu, doklad se **přesune** (starý se zruší,
+v nové pokladně vznikne nový s novým číslem) — nezdvojí se. Opakované uložení
+beze změny neudělá nic. **Ručně pořízeného pokladního dokladu se vyrovnání
+nikdy nedotkne**, ani když je navázaný na tutéž fakturu.
+
+> [!NOTE]
+> Analytika účtu 211 se bere z **karty zvolené pokladny**, ne natvrdo z 211.
+> Máš-li dvě pokladny na `211.100` a `211.200`, zápis padne na tu správnou.
+
+> [!WARNING]
+> **Selhání vyrovnání nikdy neshodí vystavení faktury.** Když pokladní doklad
+> z jakéhokoli důvodu vzniknout nemůže (zavřené období, mezitím smazaná
+> pokladna…), faktura se normálně vystaví a jen se zobrazí varování
+> **„Pokladní doklad se nepodařilo vystavit — doklad je uložený, ale zůstává
+> neuhrazený."** Úhradu pak dořeš ručně v Pokladně.
+>
+> Naopak **storno faktury, která byla hotově inkasovaná, se neprovede**, dokud
+> jde pokladní doklad zrušit — když to nejde (třeba kvůli uzavřenému období),
+> vrátí systém chybu „Fakturu nelze stornovat — nejdřív vyřešte pokladní
+> doklad, kterým byla hotově inkasována (…)".
+
+#### Kde hotovostní vyrovnání nefunguje
+
+| Případ | Chování |
+|---|---|
+| **Zálohová (proforma) faktura**, storno faktura, platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasuj hotově přímo v [Pokladně](30_Pokladna.md#3032-cel-dokladu). |
+| **Pravidelné (opakované) fakturace** | Šablona pole „Pokladna" nemá — vygenerovaná faktura sice zdědí způsob úhrady „Hotově", ale pokladnu ne, takže **žádný doklad nevznikne a faktura zůstane neuhrazená**. Totéž platí pro finální fakturu vystavenou ze zálohy. |
+| **Cizoměnová faktura** | Vyrovnání se přeskočí („Cizoměnový doklad z pokladny hradit nelze."). |
+| **Valutová pokladna** | Nenabízí se. |
+| **Faktura už uhrazená jinou cestou** | Vyrovnání se přeskočí, aby úhradu nezdvojilo. |
+
+Přeskočení není chyba — systém ho oznámí informativní hláškou a fakturu uloží.
+
 ## 15.3 Položky
 
 Tabulka řádků faktury. Tlačítko **+ Přidat položku** přidá nový řádek.

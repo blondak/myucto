@@ -70,10 +70,10 @@ počátečního stavu, ne lednového obratu.
 
 Kliknutí na měsíc s pohybem rozbalí **jednotlivé řádky deníku** za ten měsíc:
 datum, doklad, analytiku, popis a částku na správné straně. Doklad vede na
-prvotní doklad (viz [48.5](#485-opis-účtu)). Zobrazí se prvních 200 řádků;
+prvotní doklad (viz [48.5](#485-opis-uctu)). Zobrazí se prvních 200 řádků;
 u delších měsíců odkaz v patičce pokračuje v opisu účtu za stejný měsíc.
 
-Kliknutí na **kód účtu** otevře [kartu účtu](62_Ucetni_osnova.md#627-karta-účtu)
+Kliknutí na **kód účtu** otevře [kartu účtu](62_Ucetni_osnova.md#627-karta-uctu)
 se zachovaným rozsahem `Od / Do`. Z karty vede odkaz zpět do hlavní knihy;
 kniha pak dotčený účet sama rozbalí a odroluje k němu.
 

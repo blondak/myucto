@@ -27,7 +27,8 @@ V modálním okně správy pokladen vyplníte:
 - **Název** pokladny (např. „Hlavní pokladna").
 - **Měna** — CZK, EUR, USD nebo GBP. Měnu zvol při založení; po vzniku pohybů ji
   nelze zaměnit za jinou.
-- **Účet** — analytika účtu 211 z účtové osnovy firmy (např. 211100). Nabízí se jen aktivní účty
+- **Účet** — analytika účtu 211 z účtové osnovy firmy (např. `211.100` — o tečkovaném
+  zápisu viz [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik)). Nabízí se jen aktivní účty
   začínající prefixem 211; pokud vhodná analytika v osnově chybí, je u pole odkaz na založení
   účtu přímo v osnově. V daňové evidenci se pole s účtem nezobrazuje vůbec (evidence nemá účtovou
   osnovu ani deník). U valutové pokladny je analytika volitelná; ponecháš-li ji
@@ -97,6 +98,9 @@ Stránka podporuje serverové stránkování (50 dokladů na stránku).
 Formulář nového dokladu se otevírá tlačítkem **Příjem** nebo **Výdej** z hlavní stránky pokladny,
 případně z rychlé akce v menu (ikona plus u položky Pokladna). Předvyplní se typ dokladu podle
 zvoleného tlačítka a aktuální/výchozí pokladna.
+
+Pokladní doklad ale může vzniknout i **bez toho, aniž bys sem vůbec šel/šla** — přímo
+z editoru faktury volbou způsobu úhrady „Hotově" (§ 30.3.6).
 
 ### 30.3.1 Hlavička dokladu
 
@@ -182,8 +186,10 @@ mezikrok rozpracovaného dokladu, který by bylo nutné dodatečně zaúčtovat)
 
 ### 30.3.5 Storno dokladu
 
-Zaúčtovaný doklad nelze opravit ani smazat — jedinou cestou k opravě je **storno** (tlačítko s
-ikonou zpětné šipky u řádku v seznamu). Storno vyžaduje:
+Ručně vystavený zaúčtovaný doklad nelze opravit ani smazat — jedinou cestou k opravě je **storno**
+(tlačítko s ikonou zpětné šipky u řádku v seznamu). Jediná výjimka je doklad, který vznikl
+automaticky z faktury (§ 30.3.6) — ten se při zrušení volby v editoru faktury skutečně **smaže**.
+Storno vyžaduje:
 
 - **Důvod storna** — povinné textové pole (minimálně 3 znaky), vloží se do popisu protizápisu.
 - **Datum storna** — volitelné, výchozí je aktuální datum.
@@ -197,6 +203,46 @@ předchozího stavu.
 > Storno dokladu, který už byl zahrnut do podaného přiznání k DPH nebo kontrolního hlášení, se
 > v podaném přiznání zpětně neopraví — případný rozdíl je nutné řešit dodatečným přiznáním nebo
 > následným kontrolním hlášením mimo tento systém.
+
+### 30.3.6 Doklad vzniklý z faktury (hotovostní vyrovnání)
+
+Pokladní doklad nemusí vzniknout jen tady. Zvolíš-li v editoru
+[vydané](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove) nebo
+[přijaté faktury](23_Prijate_faktury.md#2329-zpusob-uhrady-a-platba-hotove-z-pokladny)
+způsob úhrady **Hotově** a k tomu **pokladnu**, systém při vystavení (resp.
+uložení či přijetí) sám vystaví a zaúčtuje PPD nebo VPD s účelem *Úhrada faktury*
+— přesně takový, jaký bys tady vyplnil/a ručně. Faktura se tím stane uhrazenou.
+
+Takový doklad se od ručního liší v jediné věci: **řídí ho faktura**.
+
+- Zrušíš-li volbu v editoru faktury, doklad se **smaže i se svým zápisem
+  v deníku** a evidovaná úhrada zmizí. Není to storno protizápisem — doklad
+  prostě přestane existovat. **Číslo v řadě se ale nedorovnává**, takže po něm
+  zůstane díra; to je stejné jako u storna.
+- Změníš-li na faktuře pokladnu, doklad se přesune do nové pokladny a dostane
+  **nové číslo** z její řady. Původní číslo je spotřebované.
+- Změna částky nebo data vystavení faktury se propíše stejně — starý doklad se
+  zruší a vznikne nový.
+- **Ručně pořízeného dokladu se tenhle mechanismus nikdy nedotkne**, ani když je
+  navázaný na tutéž fakturu. Rozlišují se v datech.
+
+> [!WARNING]
+> Rušit vyrovnání jde jen v **otevřeném účetním období** a mimo zámek účtování
+> k datu. Jinak se pokus zastaví chybou „Účetní zápis dokladu je v období „…" —
+> smazat lze jen doklad v otevřeném období." resp. „Daňové období je uzamčené;
+> pokladní doklad v něm nelze zaúčtovat ani stornovat." Kvůli tomu pak nejde
+> stornovat ani samotná faktura — nejdřív je potřeba vyřešit pokladní doklad.
+
+Doklad vzniklý z faktury **nemá vlastní rozpad DPH** — daň nese sama faktura
+a úhrada ji neduplikuje. Zaúčtuje se tedy jen dvouřádkově, saldokonto proti
+pokladně (§ 30.6). Analytika 211 se i tady bere z karty zvolené pokladny.
+
+Hotovostní vyrovnání **nefunguje** u zálohových (proforma) faktur, u pravidelně
+a hromadně vystavovaných faktur, u cizoměnových dokladů a u valutových pokladen
+— seznam s vysvětlením je v
+[§ 15.2.7](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove). Zálohu
+inkasovanou v hotovosti tedy pořiď rovnou tady, účelem *Úhrada faktury*
+(§ 30.3.2) — pokladna umí i navazující daňový doklad k platbě.
 
 ## 30.4 Tisk pokladního dokladu
 
@@ -257,13 +303,19 @@ dokladu:
 
 | Účel | Zaúčtování (zjednodušeně) |
 |---|---|
-| Prodej (PPD) | MD Pokladna (211) / D Tržby (602) + DPH na 343 |
-| Nákup (VPD) | MD Náklad (501) + DPH na 343 / D Pokladna (211) |
+| Prodej (PPD) | MD Pokladna (211) / D Tržby (602) + DPH na **343.200** (výstup) |
+| Nákup (VPD) | MD Náklad (501) + DPH na **343.100** (vstup) / D Pokladna (211) |
 | Úhrada vydané faktury | MD Pokladna (211) / D Pohledávky (311) |
 | Úhrada přijaté faktury | MD Závazky (321) / D Pokladna (211) |
 | Převod — příjem z banky | MD Pokladna (211) / D Převody mezi účty (261) |
 | Převod — odvod do banky | MD Převody mezi účty (261) / D Pokladna (211) |
 | Ostatní | volný protiúčet podle zvoleného účtu |
+
+Firmy s analytikami DPH ([§ 62.3.2](62_Ucetni_osnova.md#6232-analytiky-dph-343100-343200-a-343900))
+účtují daň z pokladních dokladů na **343.100** (vstup) a **343.200** (výstup), takže hotovostní
+doklady vstupují i do měsíčního zúčtování DPH
+([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)). Firma, která analytiky nemá,
+účtuje jako dřív na holou **343**.
 
 Strana účtu 211 v zápisu vždy odpovídá konkrétní analytice zvolené pokladny. Z detailu dokladu
 i z řádku pokladní knihy lze prokliknout přímo na odpovídající zápis v deníku. V daňové evidenci
@@ -300,7 +352,10 @@ rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
   DPH. U valutového VPD kontroluj
   limit ručně podle korunové protihodnoty.
 - Doklad, jednou zaúčtovaný, se needituje ani nemaže — jedinou opravou je storno s uvedením
-  důvodu a případné vystavení nového dokladu.
+  důvodu a případné vystavení nového dokladu. Výjimkou je doklad vzniklý z faktury
+  (§ 30.3.6), který faktura umí zase zrušit.
+- Hotovostní vyrovnání z editoru faktury (§ 30.3.6) neumí zálohové faktury, pravidelné
+  a hromadně vystavované faktury ani valutové pokladny — ty se hradí ručním dokladem tady.
 - Smazat lze jen pokladnu bez jediného dokladu; jinak nabídne systém deaktivaci.
 
 > [!TIP]

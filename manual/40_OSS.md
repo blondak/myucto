@@ -555,8 +555,11 @@ což není číselný variabilní symbol. Odvádí se v měně podání, tedy v 
 > nohy.
 
 Účet lze v předkontacích u pravidla `oss.output.vat` změnit — například na vlastní
-analytiku k 343. Pak se ale zůstatek 343 s přiznáním k DPH přestane shodovat, což
-je přesně ten problém, kvůli kterému má OSS daň vlastní účet.
+analytiku **pod 343**. To ale nedělej: součet syntetiky 343 (tedy 343 včetně
+[analytik vstupu, výstupu a zúčtování](62_Ucetni_osnova.md#6232-analytiky-dph-343100-343200-a-343900))
+se pak přestane shodovat s tuzemským přiznáním k DPH a OSS daň jiného státu by
+navíc vstoupila do [měsíčního zúčtování DPH](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph).
+Přesně kvůli tomu má OSS daň vlastní účet **345.100**.
 
 ## 40.8 Přiznání a podání
 

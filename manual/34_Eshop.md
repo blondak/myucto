@@ -24,6 +24,15 @@ na kartě zboží. Pokud tě zajímá jen nacenění katalogu, začni
 > množství se nesleduje. To je hlavní důvod, proč e-shopová prezentace žije
 > jako nadstavba nad skladem, ne jako podmínka „napřed naskladni".
 
+> [!IMPORTANT]
+> **Kolik smí e-shop nabídnout: skladem mínus rezervováno.** U skladové položky
+> se pro e-shop nepočítá holý fyzický stav, ale **prodejné množství** =
+> *skladem − rezervováno*, kde rezervované je zboží už vyfakturované zákazníkovi
+> a dosud nevydané ze skladu. Díky tomu se stejný kus neprodá dvakrát.
+> **Zboží na cestě** (objednané u dodavatele, ještě nedodané) se do nabídky
+> **záměrně nepromítá.** Podrobně
+> [§ 33.9 Kolik toho vlastně máš](33_Sklad.md#339-kolik-toho-vlastne-mas-skladem-rezervovano-na-ceste-u-dodavatele).
+
 ## 34.1 Přehled záložek
 
 Stránka `/eshop` má nahoře vodorovné taby, mezi kterými se přepínáš (stav
@@ -439,7 +448,7 @@ okamžicích:
 > takže se to dělá kartu po kartě.
 
 > [!NOTE]
-> **Akčních cen** ([§ 34.8.9](#3489-akční-ceny)) se přepočet netýká — je to
+> **Akčních cen** ([§ 34.8.9](#3489-akcni-ceny)) se přepočet netýká — je to
 > zadaná částka, ne odvozená hodnota. Jejich platnost naopak řídí čas a počet
 > kusů automaticky, bez jakéhokoli přepočtu.
 
@@ -451,7 +460,7 @@ okamžicích:
   **nejsou součástí prodejní ceny**. Vedou se jako samostatné částky s vlastní
   sazbou DPH, protože zákon vyžaduje jejich oddělené uvedení. Do přirážky ani
   do zaokrouhlení nevstupují.
-- **Sleva** na kartě zboží se dělá **akční cenou** ([§ 34.8.9](#3489-akční-ceny)).
+- **Sleva** na kartě zboží se dělá **akční cenou** ([§ 34.8.9](#3489-akcni-ceny)).
   Kromě toho existuje ještě procentní **sleva na úrovni dokladu** (na faktuře),
   která se počítá až z ceny, kterou akce vrátí.
 
@@ -578,13 +587,22 @@ vlastními podmínkami. Slouží ke dvěma věcem: jako **podklad pro nákup** a
 | Pole | Význam |
 |---|---|
 | **Dodavatel** | Výběr z klientů, kteří mají v adresáři zapnutou **roli dodavatele** ([§ 18](18_Klienti.md)) |
-| **Kód u dodavatele** | Katalogové číslo, pod kterým položku vede dodavatel (max 64 znaků) — pro objednávky a párování ceníků |
+| **Kód u dodavatele** | Katalogové číslo, pod kterým položku vede dodavatel (max 80 znaků) — tiskne se na objednávku a páruje se podle něj ceník |
 | **Nákupní cena** | Cena, za kterou od něj nakupuješ |
 | **Měna** | Měna nákupní ceny (default `CZK`) |
 | **Dodání (dny)** | Dodací lhůta — u zboží bez skladu tvoří dostupnost na e-shopu |
-| **Skladem (ks)** | Množství, které dodavatel drží — orientační, needituje tvůj sklad |
+| **Skladem (ks)** | Množství, které dodavatel drží — orientační, needituje tvůj sklad; sčítá se do veličiny **U dodavatele** ([§ 33.9.4](33_Sklad.md#3394-u-dodavatele)) |
 | **Preferovaný** | Přepínač; **nejvýš jeden dodavatel na kartu** |
-| **Poznámka** | Volný text (minimální odběr, sezónnost, kontakt…) |
+| **Poznámka** | Volný text (sezónnost, kontakt…) |
+
+> [!NOTE]
+> Tahle záložka je **pohled po kartách** na tatáž data, která stránka
+> **Sklad → U dodavatele** ukazuje přes celý katalog — jde o jeden a týž záznam.
+> Kompletní sada polí (**minimální odběr**, **balení**, **dostupnost**,
+> **cena platí do**, **aktivní**) i **import ceníku** jsou popsané
+> v [§ 33.10 Nabídky dodavatelů](33_Sklad.md#3310-nabidky-dodavatelu-u-dodavatele).
+> Právě minimální odběr a balení používá návrh
+> [doplnění zásob](33_Sklad.md#3312-doplneni-zasob-co-objednat).
 
 ### 34.9.1 Preferovaný dodavatel
 
@@ -605,6 +623,13 @@ dodavatelů**: skladové množství se nesleduje, dostupnost a dodací lhůta se
 od dodavatele a nákupní cena pro cenotvorbu přijde z preferovaného dodavatele.
 Kombinace **„Skladová položka" vypnutá + cenová báze „Ruční" + preferovaný
 dodavatel s cenou** je doporučené nastavení pro dropshipping.
+
+> [!NOTE]
+> Dropshippingové zboží **nákupní modul neobjednává**. Návrh
+> [doplnění zásob](33_Sklad.md#3312-doplneni-zasob-co-objednat) pracuje jen
+> s kartami, které mají vyplněnou **minimální zásobu** — u zboží bez skladu žádná
+> není a nemá být. Potřebuješ-li takovou položku přesto objednat, založ
+> [objednávku](33_Sklad.md#3311-objednavky-u-dodavatele) ručně.
 
 ## 34.10 Praktické postupy cenotvorby
 
@@ -627,20 +652,27 @@ dodavatel s cenou** je doporučené nastavení pro dropshipping.
 
 ### 34.10.3 Změna dodavatele nebo jeho ceníku
 
-Nákupní ceny dodavatelů se zadávají **ručně** — automatický import ceníku
-dodavatele v aplikaci není. Po přecenění od dodavatele tedy:
+Po přecenění od dodavatele:
 
 1. Uprav nákupní cenu na záložce **Dodavatelé** (u karet s bází „Ruční" se cena
-   přepočte hned po uložení).
+   přepočte hned po uložení). Přepočet prodejních cen spustí **každý** zápis
+   nabídky — tedy i její založení a smazání.
 2. Přesouváš-li nákup k jinému dodavateli, přepni u něj přepínač
    **Preferovaný** — starého nech v seznamu jako záložní zdroj.
+
+U rozsáhlejšího ceníku se vyplatí **hromadný import z XLSX nebo CSV**
+(**Sklad → U dodavatele → Import ceníku**) — páruje se podle SKU karty
+a dodavatele, běží v náhledu s výpisem změn `z → na` a nikdy nic nemaže ani
+nezakládá. Formát souboru a chování popisuje
+[§ 33.10.2](33_Sklad.md#33102-import-ceniku-dodavatele); tamtéž je i upozornění,
+že v tomto vydání tlačítko importu ještě nedoběhne.
 
 ### 34.10.4 Kontrola marže
 
 Systém marži nepočítá, ale máš k dispozici obě čísla:
 
-- **nákupní cenu** — ve skladových sestavách (ocenění zásob, [§ 32](33_Sklad.md))
-  nebo na záložce Dodavatelé,
+- **nákupní cenu** — ve skladových sestavách (ocenění zásob,
+  [§ 33.8](33_Sklad.md#338-skladove-sestavy)) nebo na záložce Dodavatelé,
 - **prodejní cenu** — ve sloupci „Výsledná cena".
 
 Marži pak spočítáš jako `(prodej − nákup) ÷ prodej × 100`. Pro pravidelnou
@@ -650,7 +682,7 @@ procesoru.
 ### 34.10.5 Akce a výprodej
 
 Na akční ceny má karta vlastní sekci na záložce „Ceny" —
-[§ 34.8.9](#3489-akční-ceny). Postup:
+[§ 34.8.9](#3489-akcni-ceny). Postup:
 
 1. V sekci **„Akční ceny"** klikni na **„Přidat akci"**, zadej akční částku a
    měnu.
@@ -706,10 +738,10 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 |---|---|
 | **Cenové hladiny / skupiny zákazníků** | Ceny per zákazník existují jen v jednoduchém **Ceníku** pro fakturaci ([§ 73.1.5](73_Nastaveni.md)), který se se skladem nekombinuje |
 | **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu — akční cena umí jen *strop* počtu kusů, ne cenové pásmo |
-| **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 34.8.9](#3489-akční-ceny)) |
+| **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 34.8.9](#3489-akcni-ceny)) |
 | **Historie cen** | Není — uchovává se jen aktuální hodnota a datum posledního přepočtu |
 | **Hromadné přecenění** | Kartu po kartě přes „Přepočítat" |
-| **Import ceníku dodavatele** | Nákupní ceny se zadávají ručně na záložce Dodavatelé |
+| **Automatický feed nákupních cen od dodavatele** | Ceník se importuje ručně z XLSX/CSV ([§ 33.10.2](33_Sklad.md#33102-import-ceniku-dodavatele)), online napojení na dodavatele není |
 | **Automatický přepočet po příjemce / po importu kurzů** | Ruční „Přepočítat" ([§ 34.8.7](#3487-kdy-se-cena-prepocita)) |
 | **Výpočet a reporting marže** | Ručně z nákupní a prodejní ceny |
 | **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je jen označení pro externí systém |
