@@ -553,11 +553,11 @@ Firma si může přepnout, že se má počítat **až od potvrzení** dodavatele
 započítávají jen stavy Potvrzeno a Částečně přijato) — přepínač
 `stock_in_transit_from` na firmě.
 
-> [!WARNING]
-> Tenhle přepínač **zatím nemá obrazovku ani API** — mění se přímo v databázi.
-> V praxi tedy platí výchozí nastavení „počítat od odeslání". Pokud je pro tebe
-> odeslaná, ale nepotvrzená objednávka příliš měkký příslib, řeš to zatím tím,
-> že objednávky odesíláš až s potvrzením, nebo je rovnou potvrzuješ.
+Přepínač najdeš v **Nastavení → Daně a účetnictví**, v sekci skladu, jako
+„Zboží se počítá „na cestě" od stavu". Výchozí je *Odesláno*. Pokud je pro tebe
+odeslaná, ale nepotvrzená objednávka příliš měkký příslib, přepni na
+*Potvrzeno* — pak se do „na cestě" započítají až objednávky, které dodavatel
+potvrdil.
 
 Rozpad „na cestě" ukáže, ze kterých konkrétních objednávek se číslo skládá
 (číslo objednávky, stav, dodavatel, sklad, očekávaný termín, množství), seřazený
