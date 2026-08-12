@@ -69,7 +69,10 @@ final class TrialBalanceService
             $totals['ks_d']        += $ksD;
         }
 
-        $journal = $this->ledger->journalTotals($supplierId, $from, $to);
+        // Stejná množina řádků jako v $raw výše (viz journalTotals()) — kontrola
+        // „obrat předvahy = obrat deníku" jinak nemůže projít u období s počátečním
+        // stavem ani u uzavřeného roku v pohledu před uzavřením knih.
+        $journal = $this->ledger->journalTotals($supplierId, $from, $to, !$afterClosing);
 
         return [
             'period' => [

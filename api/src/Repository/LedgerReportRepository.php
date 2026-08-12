@@ -337,18 +337,29 @@ final class LedgerReportRepository
     /**
      * Kontrolní obrat deníku v rozsahu (bez JOIN na osnovu).
      *
+     * Musí počítat PŘESNĚ tu množinu řádků, kterou {@see trialBalanceRows()} sčítá
+     * do sloupců OBRAT — jinak je kontrola „obrat předvahy = obrat deníku" nesplnitelná:
+     *   • otevírací zápis (`opening`, datovaný na první den období) patří do PS, ne do obratů,
+     *   • uzávěrkový zápis (`closing` mimo slotované skladové zápisy §3.4) se v pohledu
+     *     PŘED uzavřením knih z obratů vynechává taky.
+     * Bez téhle symetrie hlásila předvaha ✗ u každého roku, který má počáteční stav
+     * nebo zaúčtovanou uzávěrku — tedy u všech kromě prvního roku po uzávěrce.
+     *
      * @return array{md: float, d: float}
      */
-    public function journalTotals(int $supplierId, string $from, string $to): array
+    public function journalTotals(int $supplierId, string $from, string $to, bool $excludeClosing = false): array
     {
+        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?"
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
+                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$closingSql}"
         );
-        $stmt->execute([$supplierId, $from, $to]);
+        $stmt->execute([$supplierId, $from, $to, $from, ...$closingParams]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
             'md' => round((float) ($row['md'] ?? 0), 2),
