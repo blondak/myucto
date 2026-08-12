@@ -199,7 +199,10 @@ onMounted(async () => {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('stock.orders.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <RouterLink to="/stock/items?only_below_min=1" :class="btnOutline('neutral')">
+        <!-- Dřív mířilo na /stock/items?only_below_min=1 — prostý filtr `skladem < minimum`,
+             který ignoruje rezervace, zboží na cestě, balení i minimum odběru, takže ukazoval
+             jiná čísla než `GET /api/stock/replenishment`. -->
+        <RouterLink to="/stock/replenishment" :class="btnOutline('neutral')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.stock_items" /></svg>
           {{ t('stock.orders.replenishment_cta') }}
         </RouterLink>

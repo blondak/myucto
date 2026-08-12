@@ -41,13 +41,28 @@ abstract class AbstractCodebookImportAction
     /** kind pro ActivityLogger payload (accounts|posting-rules|assets). */
     abstract protected function kind(): string;
 
+    /**
+     * Vyžaduje tenhle import podvojné účetnictví?
+     *
+     * Default `true` je schválně fail-safe: nový import číselníku, který se
+     * na tuhle bázi pověsí, je gate ohlídaný, i když na něj autor zapomene.
+     * Opt-out patří jen importům, které s účetním režimem nemají nic
+     * společného — sklad a e-shop běží stejně u daňové evidence jako
+     * u podvojného účetnictví a `requireDoubleEntry()` by je jen bezdůvodně
+     * zavřel. Ty místo toho hlídá `GuardsStockEnabled` (opt-in modul).
+     */
+    protected function requiresDoubleEntry(): bool
+    {
+        return true;
+    }
+
     public function import(Request $request, Response $response): Response
     {
         if (!$this->requireWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if ($this->requiresDoubleEntry() && !$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
         $file = $this->firstFile($request->getUploadedFiles());
         if ($file === null || $file->getError() !== UPLOAD_ERR_OK) {

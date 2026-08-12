@@ -405,11 +405,11 @@ final class SettingsAction
             }
         }
 
-        // Sklad (Epic SKLAD): stock_enabled/stock_auto_issue smí přepínat i účetní,
-        // ne jen admin — cílený bypass guard() JEN pro tato dvě pole (least-invasive:
-        // guard() zůstává admin-only pro všechno ostatní; sem se accountant dostane
-        // pouze pokud body neobsahuje NIC jiného než tato dvě pole).
-        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue'];
+        // Sklad (Epic SKLAD): stock_enabled/stock_auto_issue/stock_in_transit_from smí
+        // přepínat i účetní, ne jen admin — cílený bypass guard() JEN pro tato pole
+        // (least-invasive: guard() zůstává admin-only pro všechno ostatní; sem se
+        // accountant dostane pouze pokud body neobsahuje NIC jiného než tato pole).
+        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from'];
         $isStockOnlyUpdate = $body !== [] && array_diff(array_keys($body), $stockOnlyFields) === [];
         if ($isStockOnlyUpdate) {
             if (!RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
@@ -462,7 +462,9 @@ final class SettingsAction
             'payroll_enabled',
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul evidence zásob + auto-výdejka
             // při vystavení FV; smí přepínat i účetní (viz bypass guard() výše).
-            'stock_enabled', 'stock_auto_issue',
+            // `stock_in_transit_from` (migrace 1331) rozhoduje, od kterého stavu objednávky
+            // se zboží počítá „na cestě" — čte ho InTransitRepository::inTransitStates().
+            'stock_enabled', 'stock_auto_issue', 'stock_in_transit_from',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
             // přijetí; admin-only (jako ostatní účetní nastavení firmy), účinek jen v double_entry.
             'auto_post_invoices', 'auto_post_purchases',
@@ -488,6 +490,15 @@ final class SettingsAction
             && !in_array($body['accounting_mode'], ['tax_evidence', 'double_entry'], true)
         ) {
             return Json::error($response, 'validation_failed', "accounting_mode musí být 'tax_evidence' nebo 'double_entry'.", 400);
+        }
+
+        // Sklad — od kterého stavu objednávky se zboží počítá „na cestě" (rozhodnutí #2).
+        // ENUM v DB je ('sent','confirmed'); cizí hodnota by v strict mode shodila UPDATE
+        // na PDOException → 500, tady se z ní stane čitelná 400.
+        if (array_key_exists('stock_in_transit_from', $body)
+            && !in_array($body['stock_in_transit_from'], ['sent', 'confirmed'], true)
+        ) {
+            return Json::error($response, 'validation_failed', "stock_in_transit_from musí být 'sent' nebo 'confirmed'.", 400);
         }
         $modeEffectiveFrom = null;
         if (array_key_exists('accounting_mode', $body)) {
@@ -1012,6 +1023,11 @@ final class SettingsAction
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);
+        // Od kterého stavu objednávky se zboží počítá „na cestě" (migrace 1331,
+        // rozhodnutí #2). Výchozí 'sent' musí odpovídat fallbacku
+        // v InTransitRepository::inTransitStates(), jinak by obrazovka ukazovala
+        // jiný stav, než podle kterého se doopravdy počítá.
+        $row['stock_in_transit_from']    = (string) ($row['stock_in_transit_from'] ?? 'sent');
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);

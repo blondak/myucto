@@ -398,6 +398,7 @@ async function saveSupplier() {
       // Sklad (Epic SKLAD) — nezávislé na accounting_mode.
       stock_enabled: supplier.value.stock_enabled ?? false,
       stock_auto_issue: supplier.value.stock_auto_issue ?? true,
+      stock_in_transit_from: supplier.value.stock_in_transit_from ?? 'sent',
       // Tax settings (EPO výkazy DPH/KH)
       accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
       // „Vést účetnictví" (1179) — opt-out účetní nadstavby v menu; na licenci bez vlivu.
@@ -995,6 +996,14 @@ function vatCollisionLabel(c: VatStatusCollision): string {
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.auto_issue_hint') }}</p>
             </span>
           </label>
+          <div v-if="supplier.stock_enabled" class="ml-6">
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('stock.settings.in_transit_from_label') }}</label>
+            <select v-model="supplier.stock_in_transit_from" class="w-full max-w-sm h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+              <option value="sent">{{ t('stock.settings.in_transit_from_sent') }}</option>
+              <option value="confirmed">{{ t('stock.settings.in_transit_from_confirmed') }}</option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('stock.settings.in_transit_from_hint') }}</p>
+          </div>
         </div>
       </section>
 

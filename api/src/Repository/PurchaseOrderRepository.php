@@ -502,6 +502,26 @@ final class PurchaseOrderRepository
     }
 
     // ── vazba na přijaté faktury ─────────────────────────────────────────────
+    //
+    // ⚠ NEPOUŽITO — tabulka `purchase_order_invoice_links` (migrace 1330) je
+    // zatím jen podloží pro párování objednávka ↔ přijatá faktura (§ 5.2 plánu).
+    // `invoiceLinks()` se sice volá z `PurchaseOrderService::withFulfilment()`,
+    // ale `linkInvoice()`/`unlinkInvoice()` NEMÁ ŽÁDNÉHO VOLAJÍCÍHO, takže
+    // tabulka je v praxi vždycky prázdná a `invoice_links` v detailu objednávky
+    // je vždy `[]`. Chybí k tomu celá horní polovina funkce: čtyři endpointy
+    // (`GET /purchase-orders/{id}/invoice-match`,
+    // `POST|DELETE /purchase-orders/{id}/invoice-links` a protisměrné dvojče
+    // pod `/purchase-invoices/{id}`), služba `PurchaseOrderInvoiceMatcher`
+    // a obrazovka `OrderInvoiceMatchModal.vue`.
+    //
+    // Se stejným osudem čeká `supplier.stock_order_price_tolerance_pct`
+    // (migrace 1331): práh cenové odchylky faktura vs. objednávka podle
+    // rozhodnutí #8 („jen varuje, nikdy neblokuje"). Nikdo ho nečte — varování
+    // nemá kde vzniknout, dokud se faktura nedá k objednávce připnout, a nemá
+    // kde se zobrazit, dokud neexistuje ta obrazovka. Zapojit půlku (tiché
+    // varování v API, které nikdo neukáže) by bylo horší než nezapojit nic.
+    //
+    // Až se § 5.2 dělat bude, tohle jsou hotové stavební kameny — NEMAZAT.
 
     /** @return list<array<string,mixed>> */
     public function invoiceLinks(int $supplierId, int $orderId): array

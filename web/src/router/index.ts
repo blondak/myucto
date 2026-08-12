@@ -206,6 +206,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'stock/purchase-orders',            name: 'stock-purchase-orders',        component: () => import('@/pages/stock/PurchaseOrderList.vue'),   meta: { requiresStock: true } },
       { path: 'stock/purchase-orders/new',        name: 'stock-purchase-order-new',     component: () => import('@/pages/stock/PurchaseOrderDetail.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/purchase-orders/:id(\\d+)',  name: 'stock-purchase-order-detail',  component: () => import('@/pages/stock/PurchaseOrderDetail.vue'), meta: { requiresStock: true } },
+      // „Co objednat" — návrh doplnění zásob se zohledněním rezervací a zboží na cestě.
+      { path: 'stock/replenishment',              name: 'stock-replenishment',          component: () => import('@/pages/stock/Replenishment.vue'),       meta: { requiresStock: true } },
       { path: 'stock/warehouses',       name: 'stock-warehouses',      component: () => import('@/pages/stock/Warehouses.vue'),   meta: { requiresStock: true } },
       // „U dodavatele" — nabídky dodavatelů (zboží × dodavatel), fáze 3 epicu.
       { path: 'stock/vendor-offers',    name: 'stock-vendor-offers',   component: () => import('@/pages/stock/VendorOffers.vue'), meta: { requiresStock: true } },
@@ -455,6 +457,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
   'stock-purchase-orders': ['stock'], 'stock-purchase-order-new': ['stock.orders.write', 'write'], 'stock-purchase-order-detail': ['stock'],
+  'stock-replenishment': ['stock'],
   'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
   'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'],

@@ -3540,11 +3540,42 @@
       "empty": "No stock documents.",
       "issued_hint": "The goods issue was created automatically on posting."
     },
+    "replenishment": {
+      "title": "Replenishment",
+      "subtitle": "What to order — goods in transit are subtracted from the need, reservations added",
+      "create_orders": "Create orders",
+      "select_first": "Select the goods you want to order first.",
+      "filter_warehouse": "Warehouse",
+      "filter_below_min": "Below minimum only",
+      "filter_coefficient": "Coefficient",
+      "filter_coefficient_hint": "Multiple of the minimum stock level to replenish to. 1 = exactly to the minimum, 1.5 = with half a buffer on top.",
+      "col_sku": "Code",
+      "col_name": "Name",
+      "col_on_hand": "On hand",
+      "col_reserved": "Reserved",
+      "col_in_transit": "In transit",
+      "col_min_qty": "Minimum",
+      "col_suggested": "Suggested",
+      "col_vendor": "Vendor",
+      "col_cost": "Estimated cost",
+      "no_vendor": "No vendor",
+      "empty_title": "Nothing to order",
+      "empty_hint": "No item is below its minimum stock level — or the missing quantity is already in transit.",
+      "summary_title": "{orders} orders will be created from {lines} lines",
+      "summary_lines": "{count} lines",
+      "summary_hint": "Orders are created as drafts — you can send them (and put the goods \"in transit\") from the order detail.",
+      "toast_created": "{count} orders created.",
+      "toast_skipped": "{count} lines were not ordered (missing vendor or quantity): {items}"
+    },
     "settings": {
       "enable_label": "Track stock",
       "enable_hint": "Enables stock items, documents, stock takes and automatic goods issue on invoice posting.",
       "auto_issue_label": "Automatic goods issue on invoice posting",
-      "auto_issue_hint": "When an invoice with lines linked to stock items is posted, a goods issue is created and posted automatically."
+      "auto_issue_hint": "When an invoice with lines linked to stock items is posted, a goods issue is created and posted automatically.",
+      "in_transit_from_label": "Count goods as \"in transit\" from",
+      "in_transit_from_hint": "A sent order is already a commitment for purchase planning. A company that only trusts the vendor's confirmation switches to \"confirmed\" — until then the ordered units are not counted as in transit and replenishment will suggest them again.",
+      "in_transit_from_sent": "Sent order",
+      "in_transit_from_confirmed": "Only once confirmed by the vendor"
     },
     "error": {
       "not_found": "Stock document not found.",

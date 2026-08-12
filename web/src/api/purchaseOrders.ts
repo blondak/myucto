@@ -79,6 +79,11 @@ export interface PurchaseOrderReceiptLink {
 
 export interface PurchaseOrderDetail extends PurchaseOrder {
   lines: PurchaseOrderLine[]
+  /**
+   * ⚠ NEPOUŽITO — vždy `[]`. Párování objednávka ↔ přijatá faktura (§ 5.2 plánu)
+   * není hotové: tabulku `purchase_order_invoice_links` nikdo neplní (viz
+   * `PurchaseOrderRepository::invoiceLinks()`). Až vznikne, dostane tvar.
+   */
   invoice_links: unknown[]
   receipts: PurchaseOrderReceiptLink[]
 }
@@ -284,11 +289,14 @@ export interface StockReplenishmentRow {
   sku: string
   name: string
   unit: string
-  warehouse_id: number
+  warehouse_id: number | null
   on_hand: string
   reserved: string
   in_transit: string
+  sellable: string
   min_qty: string | null
+  /** Čistá potřeba před zaokrouhlením na balení / minimum odběru. */
+  shortfall: string
   suggested_qty: string
   preferred_vendor: StockReplenishmentPreferredVendor | null
 }
@@ -298,6 +306,35 @@ export interface StockReplenishmentResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface PurchaseOrderBulkLine {
+  stock_item_id: number
+  qty: number | string
+  vendor_id?: number
+  warehouse_id?: number
+  unit_price?: number | string
+}
+
+export interface PurchaseOrderBulkPayload {
+  items: PurchaseOrderBulkLine[]
+  warehouse_id?: number
+  order_date?: string
+  expected_date?: string | null
+  currency_id?: number
+  note?: string | null
+}
+
+export interface PurchaseOrderBulkSkipped {
+  stock_item_id: number
+  sku?: string
+  reason: 'item_not_found' | 'invalid_qty' | 'no_vendor'
+}
+
+export interface PurchaseOrderBulkResponse {
+  orders: PurchaseOrderDetail[]
+  created: number
+  skipped: PurchaseOrderBulkSkipped[]
 }
 
 function toParams<T extends object>(f: T = {} as T): Record<string, string | number> {
@@ -358,6 +395,11 @@ export const purchaseOrdersApi = {
     api.get<StockReservationsResponse>('/stock/reservations', {
       params: toParams({ item_ids: itemIds.length ? itemIds.join(',') : undefined, warehouse_id: warehouseId }),
     }).then(r => r.data),
-  replenishment: (filters: { warehouse_id?: number; below_min?: boolean; limit?: number; offset?: number } = {}) =>
+  replenishment: (
+    filters: { warehouse_id?: number; below_min?: boolean; coefficient?: number; limit?: number; offset?: number } = {},
+  ) =>
     api.get<StockReplenishmentResponse>('/stock/replenishment', { params: toParams(filters) }).then(r => r.data),
+  /** Zaškrtnuté karty → JEDNA objednávka NA DODAVATELE (seskupení dělá backend). */
+  bulkCreate: (payload: PurchaseOrderBulkPayload) =>
+    api.post<PurchaseOrderBulkResponse>('/stock/purchase-orders/bulk', payload).then(r => r.data),
 }

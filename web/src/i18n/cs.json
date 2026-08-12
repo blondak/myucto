@@ -3540,11 +3540,42 @@
       "empty": "Žádné skladové doklady.",
       "issued_hint": "Výdejka byla vytvořena automaticky při vystavení."
     },
+    "replenishment": {
+      "title": "Doplnění zásob",
+      "subtitle": "Co objednat — od potřeby se odečítá zboží na cestě a přičítají rezervace",
+      "create_orders": "Vytvořit objednávky",
+      "select_first": "Nejdřív zaškrtněte zboží, které chcete objednat.",
+      "filter_warehouse": "Sklad",
+      "filter_below_min": "Jen pod minimem",
+      "filter_coefficient": "Koeficient",
+      "filter_coefficient_hint": "Násobek minimální zásoby, na který se doobjednává. 1 = přesně na minimum, 1,5 = s poloviční rezervou navíc.",
+      "col_sku": "Kód",
+      "col_name": "Název",
+      "col_on_hand": "Skladem",
+      "col_reserved": "Rezervováno",
+      "col_in_transit": "Na cestě",
+      "col_min_qty": "Minimum",
+      "col_suggested": "Návrh",
+      "col_vendor": "Dodavatel",
+      "col_cost": "Odhad ceny",
+      "no_vendor": "Bez dodavatele",
+      "empty_title": "Není co objednat",
+      "empty_hint": "Žádná karta není pod minimální zásobou — nebo je chybějící množství už na cestě.",
+      "summary_title": "Vznikne {orders} objednávek z {lines} položek",
+      "summary_lines": "{count} položek",
+      "summary_hint": "Objednávky vzniknou jako koncepty — odeslat je (a tím zboží pustit „na cestu\") můžete až na detailu objednávky.",
+      "toast_created": "Založeno {count} objednávek.",
+      "toast_skipped": "{count} položek se neobjednalo (chybí dodavatel nebo množství): {items}"
+    },
     "settings": {
       "enable_label": "Vést skladovou evidenci",
       "enable_hint": "Zpřístupní skladové karty, doklady, inventury a automatickou výdejku při vystavení faktury.",
       "auto_issue_label": "Automatická výdejka při vystavení faktury",
-      "auto_issue_hint": "Při vystavení faktury s položkami napojenými na skladové karty se automaticky vytvoří a zaúčtuje výdejka."
+      "auto_issue_hint": "Při vystavení faktury s položkami napojenými na skladové karty se automaticky vytvoří a zaúčtuje výdejka.",
+      "in_transit_from_label": "Zboží se počítá „na cestě\" od stavu",
+      "in_transit_from_hint": "Odeslaná objednávka už je pro plánování nákupu závazek. Firma, která věří až potvrzení dodavatelem, přepne na „potvrzené\" — do té doby se objednané kusy do „na cestě\" nezapočítají a doplnění zásob je navrhne znovu.",
+      "in_transit_from_sent": "Odeslaná objednávka",
+      "in_transit_from_confirmed": "Až potvrzená dodavatelem"
     },
     "error": {
       "not_found": "Skladový doklad nenalezen.",

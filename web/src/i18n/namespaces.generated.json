@@ -475,6 +475,9 @@
       "stock",
       "vendor"
     ],
+    "stock-replenishment": [
+      "stock"
+    ],
     "stock-warehouses": [
       "stock"
     ],

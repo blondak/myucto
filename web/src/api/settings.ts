@@ -204,6 +204,8 @@ export interface Supplier {
   // Smí přepínat i účetní (ne jen admin) — viz SettingsAction::$stockOnlyFields.
   stock_enabled?: boolean
   stock_auto_issue?: boolean
+  /** Od kterého stavu objednávky se zboží počítá „na cestě" (migrace 1331, rozhodnutí #2). */
+  stock_in_transit_from?: 'sent' | 'confirmed'
   // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po přijetí;
   // účinek jen v režimu double_entry.
   auto_post_invoices?: boolean

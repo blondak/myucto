@@ -18867,6 +18867,11 @@ components:
           default: B
           description: "Způsob účtování zásob (ČÚS 015). V1 vynuceně 'B' (service); 'A' schema-ready pro v2."
         stock_auto_issue: { type: boolean, default: true, description: "Automatická výdejka ze skladu při vystavení faktury (item se stock_item_id)." }
+        stock_in_transit_from:
+          type: string
+          enum: [sent, confirmed]
+          default: sent
+          description: "Od kterého stavu objednávky se zboží počítá „na cestě\" (rozhodnutí #2). 'sent' = odeslaná objednávka je závazek; 'confirmed' = počítat až od potvrzení dodavatelem."
         invoice_number_format:
           type: [string, "null"]
           example: "{YY}{MM}{CCC}"
