@@ -420,6 +420,9 @@ export interface InvoiceSeriesGroup {
   types: ('invoice' | 'credit_note')[]
   client_id: number
   client_name: string | null
+  /** Řada kategorie tržby; 0 = řada není vázaná na kategorii. */
+  revenue_category_id: number
+  revenue_category_name: string | null
   period: 'year' | 'month' | 'none'
   template_by_type: Record<string, string>
   buckets: InvoiceSeriesBucket[]

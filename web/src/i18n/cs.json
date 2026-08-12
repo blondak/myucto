@@ -11177,6 +11177,7 @@
             "type_credit_note": "dobropisy",
             "series_supplier": "Řada dodavatele",
             "series_client": "Řada klienta {name}",
+            "series_revenue_category": "Řada kategorie tržby {name}",
             "shared_note": "Faktury a dobropisy sdílejí jednu řadu — čísla se posuzují dohromady.",
             "period_none": "celá historie",
             "col_period": "Období",

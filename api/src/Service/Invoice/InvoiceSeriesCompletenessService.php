@@ -31,13 +31,14 @@ use PDO;
  * (jediný globální counter bez ročního resetu), kde se vždy skenuje CELÁ historie —
  * jinak by report ročním řezem sám vyrobil falešnou mezeru na hranici roku.
  *
- * ZNÁMÉ OMEZENÍ: řady kategorií tržeb (`revenue_categories.*_number_format`, migrace
- * 1333) tenhle sken zatím NEPOKRÝVÁ — scope se sbírá jen za dodavatele a klienty.
- * Falešné mezery to nedělá (doklad s číslem z řady kategorie má jiný literál, takže
- * regexu supplier-wide řady neodpovídá, a counter supplier-wide řady neinkrementoval);
- * jen pro tyhle řady zatím report nevzniká. Pokud by šablona kategorie měla TÝŽ digit
- * skeleton jako supplier-wide řada, jde o kolizi, kterou hlásí
- * {@see VarsymbolSeriesCollisionChecker} — řeší se tam, ne tady.
+ * Scope se sbírá za všechny tři osy číslování, které zná
+ * {@see VarsymbolGenerator::resolveTemplateAndPeriod()} — dodavatel, klient s vlastní
+ * šablonou a kategorie tržby s vlastní šablonou. Vzájemné vyloučení musí kopírovat
+ * PRIORITU resolveru (klient > kategorie > dodavatel), jinak by týž doklad spadl do dvou
+ * skenů a vyrobil falešnou mezeru v tom, kam nepatří:
+ *   - supplier-wide sken vynechá doklady klientů i kategorií s vlastní šablonou,
+ *   - sken kategorie vynechá doklady klientů s vlastní šablonou (tam vyhrává klient),
+ *   - sken klienta nevynechává nic (klient přebíjí kategorii bez ohledu na ni).
  */
 final class InvoiceSeriesCompletenessService
 {
@@ -52,6 +53,7 @@ final class InvoiceSeriesCompletenessService
     /**
      * @return list<array{
      *   types: list<string>, client_id: int, client_name: ?string,
+     *   revenue_category_id: int, revenue_category_name: ?string,
      *   period: string, template_by_type: array<string,string>,
      *   buckets: list<array{
      *     period_key: string, used_count: int, range_from: int, range_to: int,
@@ -75,11 +77,12 @@ final class InvoiceSeriesCompletenessService
     }
 
     /**
-     * Per-scope šablony (supplier-wide + každý klient s VLASTNÍ šablonou) — stejný
-     * princip jako {@see VarsymbolSeriesCollisionChecker::collectSeries()}, jen navíc
-     * s obdobím (`invoice_number_period`), které report potřebuje pro bucketing.
+     * Per-scope šablony (supplier-wide + každý klient a každá kategorie tržby s VLASTNÍ
+     * šablonou) — stejný princip jako {@see VarsymbolSeriesCollisionChecker::collectSeries()},
+     * jen navíc s obdobím (`invoice_number_period`), které report potřebuje pro bucketing.
      *
-     * @return list<array{client_id:int, client_name:?string, period:string, templates: array<string,string>}>
+     * @return list<array{client_id:int, client_name:?string, revenue_category_id:int,
+     *                    revenue_category_name:?string, period:string, templates: array<string,string>}>
      */
     private function collectScopes(int $supplierId): array
     {
@@ -107,10 +110,12 @@ final class InvoiceSeriesCompletenessService
         $scopes = [];
         if ($supplierTemplates !== []) {
             $scopes[] = [
-                'client_id'   => 0,
-                'client_name' => null,
-                'period'      => $supplierPeriod,
-                'templates'   => $supplierTemplates,
+                'client_id'             => 0,
+                'client_name'           => null,
+                'revenue_category_id'   => 0,
+                'revenue_category_name' => null,
+                'period'                => $supplierPeriod,
+                'templates'             => $supplierTemplates,
             ];
         }
 
@@ -122,24 +127,39 @@ final class InvoiceSeriesCompletenessService
         );
         $stmt->execute([$supplierId]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $cli) {
-            $templates = [];
-            foreach (self::SCANNED_TYPES as $type) {
-                $tpl = trim((string) ($cli["{$type}_number_format"] ?? ''));
-                if ($tpl !== '') {
-                    $templates[$type] = $tpl;
-                }
-            }
+            $templates = self::templatesFromRow($cli);
             if ($templates === []) {
                 continue;
             }
-            $period = $cli['invoice_number_period'] !== null && $cli['invoice_number_period'] !== ''
-                ? self::normalizePeriod((string) $cli['invoice_number_period'])
-                : $supplierPeriod;
             $scopes[] = [
-                'client_id'   => (int) $cli['id'],
-                'client_name' => (string) $cli['company_name'],
-                'period'      => $period,
-                'templates'   => $templates,
+                'client_id'             => (int) $cli['id'],
+                'client_name'           => (string) $cli['company_name'],
+                'revenue_category_id'   => 0,
+                'revenue_category_name' => null,
+                'period'                => self::periodFromRow($cli, $supplierPeriod),
+                'templates'             => $templates,
+            ];
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT id, label, invoice_number_format, credit_note_number_format, invoice_number_period
+                 FROM revenue_categories
+                WHERE supplier_id = ?
+                  AND (COALESCE(invoice_number_format, '') <> '' OR COALESCE(credit_note_number_format, '') <> '')"
+        );
+        $stmt->execute([$supplierId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $cat) {
+            $templates = self::templatesFromRow($cat);
+            if ($templates === []) {
+                continue;
+            }
+            $scopes[] = [
+                'client_id'             => 0,
+                'client_name'           => null,
+                'revenue_category_id'   => (int) $cat['id'],
+                'revenue_category_name' => (string) $cat['label'],
+                'period'                => self::periodFromRow($cat, $supplierPeriod),
+                'templates'             => $templates,
             ];
         }
 
@@ -147,26 +167,57 @@ final class InvoiceSeriesCompletenessService
     }
 
     /**
+     * @param array<string,mixed> $row
+     * @return array<string,string>
+     */
+    private static function templatesFromRow(array $row): array
+    {
+        $templates = [];
+        foreach (self::SCANNED_TYPES as $type) {
+            $tpl = trim((string) ($row["{$type}_number_format"] ?? ''));
+            if ($tpl !== '') {
+                $templates[$type] = $tpl;
+            }
+        }
+        return $templates;
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function periodFromRow(array $row, string $supplierPeriod): string
+    {
+        return $row['invoice_number_period'] !== null && $row['invoice_number_period'] !== ''
+            ? self::normalizePeriod((string) $row['invoice_number_period'])
+            : $supplierPeriod;
+    }
+
+    /**
      * V rámci KAŽDÉHO scope zvlášť: má-li scope šablonu pro invoice i credit_note a obě
      * vyprodukují stejný digit skeleton, slouč je do jedné logické řady (types=[oba]).
      * Jinak zůstanou jako samostatné řady (jedna skupina na typ).
      *
-     * @param list<array{client_id:int, client_name:?string, period:string, templates: array<string,string>}> $scopes
-     * @return list<array{client_id:int, client_name:?string, period:string, types: list<string>, template_by_type: array<string,string>}>
+     * @param list<array{client_id:int, client_name:?string, revenue_category_id:int,
+     *                   revenue_category_name:?string, period:string, templates: array<string,string>}> $scopes
+     * @return list<array{client_id:int, client_name:?string, revenue_category_id:int,
+     *                    revenue_category_name:?string, period:string, types: list<string>,
+     *                    template_by_type: array<string,string>}>
      */
     private function groupByDigitSkeleton(array $scopes): array
     {
         $groups = [];
         foreach ($scopes as $scope) {
+            $identity = [
+                'client_id'             => $scope['client_id'],
+                'client_name'           => $scope['client_name'],
+                'revenue_category_id'   => $scope['revenue_category_id'],
+                'revenue_category_name' => $scope['revenue_category_name'],
+                'period'                => $scope['period'],
+            ];
             $types = array_keys($scope['templates']);
             if (count($types) === 2) {
                 $skeletonA = VarsymbolSeriesCollisionChecker::digitSkeleton($scope['templates'][$types[0]]);
                 $skeletonB = VarsymbolSeriesCollisionChecker::digitSkeleton($scope['templates'][$types[1]]);
                 if ($skeletonA !== '' && $skeletonA === $skeletonB) {
-                    $groups[] = [
-                        'client_id'        => $scope['client_id'],
-                        'client_name'      => $scope['client_name'],
-                        'period'           => $scope['period'],
+                    $groups[] = $identity + [
                         'types'            => $types,
                         'template_by_type' => $scope['templates'],
                     ];
@@ -174,10 +225,7 @@ final class InvoiceSeriesCompletenessService
                 }
             }
             foreach ($scope['templates'] as $type => $tpl) {
-                $groups[] = [
-                    'client_id'        => $scope['client_id'],
-                    'client_name'      => $scope['client_name'],
-                    'period'           => $scope['period'],
+                $groups[] = $identity + [
                     'types'            => [$type],
                     'template_by_type' => [$type => $tpl],
                 ];
@@ -187,17 +235,25 @@ final class InvoiceSeriesCompletenessService
     }
 
     /**
-     * @param array{client_id:int, client_name:?string, period:string, types: list<string>, template_by_type: array<string,string>} $group
+     * @param array{client_id:int, client_name:?string, revenue_category_id:int,
+     *               revenue_category_name:?string, period:string, types: list<string>,
+     *               template_by_type: array<string,string>} $group
      * @return array{types: list<string>, client_id: int, client_name: ?string,
+     *               revenue_category_id: int, revenue_category_name: ?string,
      *               period: string, template_by_type: array<string,string>, buckets: list<array<string,mixed>>}|null
      */
     private function buildGroupReport(int $supplierId, array $group, int $year): ?array
     {
         $bucketKeys = self::bucketKeysFor($group['period'], $year);
 
-        // Klienti s VLASTNÍ šablonou pro daný typ nepatří do supplier-wide skenu — jejich
-        // doklady jedou pod vlastním counterem (viz VarsymbolGenerator::resolveTemplateAndPeriod).
+        // Klienti s VLASTNÍ šablonou pro daný typ nepatří ani do supplier-wide skenu, ani do
+        // skenu kategorie — klient přebíjí obojí (VarsymbolGenerator::resolveTemplateAndPeriod).
         $ownClientIdsByType = $group['client_id'] === 0 ? $this->clientsWithOwnTemplate($supplierId) : [];
+        // Kategorie s vlastní šablonou vypadávají navíc ze supplier-wide skenu; ve skenu
+        // konkrétní kategorie se naopak nevylučuje nic (scope je právě ta kategorie).
+        $ownCategoryIdsByType = $group['client_id'] === 0 && $group['revenue_category_id'] === 0
+            ? $this->categoriesWithOwnTemplate($supplierId)
+            : [];
 
         $buckets = [];
         foreach ($bucketKeys as $bucketKey) {
@@ -211,6 +267,8 @@ final class InvoiceSeriesCompletenessService
                 $rows = $this->fetchVarsymbols(
                     $supplierId, $type, $group['client_id'],
                     $group['client_id'] === 0 ? ($ownClientIdsByType[$type] ?? []) : [],
+                    $group['revenue_category_id'],
+                    $ownCategoryIdsByType[$type] ?? [],
                     $bucketKey, $group['period'],
                 );
                 foreach ($rows as $vs) {
@@ -250,12 +308,14 @@ final class InvoiceSeriesCompletenessService
         // Popisek se ZÁMĚRNĚ neskládá tady (žádný natvrdo český label v API payloadu) —
         // frontend si ho poskládá z `types` + `client_name` přes t() (AGENTS.md i18n).
         return [
-            'types'            => $group['types'],
-            'client_id'        => $group['client_id'],
-            'client_name'      => $group['client_name'],
-            'period'           => $group['period'],
-            'template_by_type' => $group['template_by_type'],
-            'buckets'          => $buckets,
+            'types'                 => $group['types'],
+            'client_id'             => $group['client_id'],
+            'client_name'           => $group['client_name'],
+            'revenue_category_id'   => $group['revenue_category_id'],
+            'revenue_category_name' => $group['revenue_category_name'],
+            'period'                => $group['period'],
+            'template_by_type'      => $group['template_by_type'],
+            'buckets'               => $buckets,
         ];
     }
 
@@ -284,7 +344,32 @@ final class InvoiceSeriesCompletenessService
     }
 
     /**
+     * Kategorie tržeb s vlastní šablonou per typ — použije se k VYLOUČENÍ jejich dokladů
+     * ze supplier-wide skenu (mají svůj vlastní, nezávislý counter).
+     *
+     * @return array<string, list<int>> type => list revenue_category_id
+     */
+    private function categoriesWithOwnTemplate(int $supplierId): array
+    {
+        $out = ['invoice' => [], 'credit_note' => []];
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, invoice_number_format, credit_note_number_format
+                 FROM revenue_categories WHERE supplier_id = ?"
+        );
+        $stmt->execute([$supplierId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            foreach (self::SCANNED_TYPES as $type) {
+                if (trim((string) ($row["{$type}_number_format"] ?? '')) !== '') {
+                    $out[$type][] = (int) $row['id'];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
      * @param list<int> $excludeClientIds
+     * @param list<int> $excludeCategoryIds
      * @return list<string>
      */
     private function fetchVarsymbols(
@@ -292,6 +377,8 @@ final class InvoiceSeriesCompletenessService
         string $invoiceType,
         int $clientId,
         array $excludeClientIds,
+        int $revenueCategoryId,
+        array $excludeCategoryIds,
         string $bucketKey,
         string $period,
     ): array {
@@ -310,6 +397,17 @@ final class InvoiceSeriesCompletenessService
             $placeholders = implode(',', array_fill(0, count($excludeClientIds), '?'));
             $sql .= " AND client_id NOT IN ({$placeholders})";
             array_push($params, ...$excludeClientIds);
+        }
+
+        if ($revenueCategoryId > 0) {
+            $sql .= ' AND revenue_category_id = ?';
+            $params[] = $revenueCategoryId;
+        } elseif ($excludeCategoryIds !== []) {
+            // Doklad BEZ kategorie do supplier-wide řady patří, takže NULL musí projít —
+            // samotné NOT IN by ho vyhodilo (NULL NOT IN (…) je UNKNOWN).
+            $placeholders = implode(',', array_fill(0, count($excludeCategoryIds), '?'));
+            $sql .= " AND (revenue_category_id IS NULL OR revenue_category_id NOT IN ({$placeholders}))";
+            array_push($params, ...$excludeCategoryIds);
         }
 
         $stmt = $this->db->pdo()->prepare($sql);

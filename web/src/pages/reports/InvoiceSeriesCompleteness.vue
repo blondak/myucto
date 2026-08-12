@@ -35,9 +35,16 @@ function typeLabel(type: string): string {
 
 function groupLabel(g: InvoiceSeriesGroup): string {
   const types = g.types.map(typeLabel).join(' + ')
-  const scope = g.client_id === 0
-    ? t('reports.series_completeness.series_supplier')
-    : t('reports.series_completeness.series_client', { name: g.client_name || `#${g.client_id}` })
+  let scope: string
+  if (g.client_id !== 0) {
+    scope = t('reports.series_completeness.series_client', { name: g.client_name || `#${g.client_id}` })
+  } else if (g.revenue_category_id !== 0) {
+    scope = t('reports.series_completeness.series_revenue_category', {
+      name: g.revenue_category_name || `#${g.revenue_category_id}`,
+    })
+  } else {
+    scope = t('reports.series_completeness.series_supplier')
+  }
   return `${scope} — ${types}`
 }
 

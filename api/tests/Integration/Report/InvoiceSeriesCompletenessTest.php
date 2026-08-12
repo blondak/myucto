@@ -34,6 +34,10 @@ final class InvoiceSeriesCompletenessTest extends TestCase
     private int $userId = 0;
     private int $czId = 0;
     private int $clientId = 0;
+    private int $clientWithOwnSeriesId = 0;
+
+    /** @var list<int> */
+    private array $categoryIds = [];
 
     /** @var array<string,mixed> */
     private array $originalSupplierRow = [];
@@ -93,12 +97,46 @@ final class InvoiceSeriesCompletenessTest extends TestCase
             $this->supplierId,
         ]);
 
-        if ($this->clientId !== 0) {
+        foreach ([$this->clientId, $this->clientWithOwnSeriesId] as $clientId) {
+            if ($clientId === 0) {
+                continue;
+            }
             $pdo->prepare('DELETE FROM invoices WHERE supplier_id = ? AND client_id = ?')
-                ->execute([$this->supplierId, $this->clientId]);
-            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$this->clientId]);
+                ->execute([$this->supplierId, $clientId]);
+            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$clientId]);
+        }
+        foreach ($this->categoryIds as $categoryId) {
+            $pdo->prepare('DELETE FROM revenue_categories WHERE id = ?')->execute([$categoryId]);
         }
         $this->db->close();
+    }
+
+    /** Kategorie tržby s VLASTNÍ číselnou řadou (migrace 1333). */
+    private function createCategory(string $code, string $invoiceTpl, string $period = 'year'): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO revenue_categories (supplier_id, code, label, invoice_number_format, invoice_number_period)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $code, "FR3 {$code}", $invoiceTpl, $period]);
+        $id = (int) $pdo->lastInsertId();
+        $this->categoryIds[] = $id;
+        return $id;
+    }
+
+    /** Klient s VLASTNÍ číselnou řadou — přebíjí řadu kategorie i dodavatele. */
+    private function createClientWithOwnSeries(string $invoiceTpl, string $period = 'year'): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, ic,
+                                  main_email, language, currency_default_id, is_customer, is_vendor,
+                                  invoice_number_format, invoice_number_period)
+             VALUES (?, "FR3 Own Series Client", "Test 2", "Praha", "11000", ?, "10000004",
+                     "fr3own@example.com", "cs", ?, 1, 0, ?, ?)'
+        )->execute([$this->supplierId, $this->czId, $this->currencyId, $invoiceTpl, $period]);
+        $this->clientWithOwnSeriesId = (int) $pdo->lastInsertId();
+        return $this->clientWithOwnSeriesId;
     }
 
     private function setTemplates(string $invoiceTpl, string $creditNoteTpl, string $period = 'year'): void
@@ -109,19 +147,36 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         )->execute([$invoiceTpl, $creditNoteTpl, $period, $this->supplierId]);
     }
 
-    private function insertInvoice(string $varsymbol, string $type = 'invoice'): void
-    {
+    private function insertInvoice(
+        string $varsymbol,
+        string $type = 'invoice',
+        ?int $revenueCategoryId = null,
+        ?int $clientId = null,
+    ): void {
         $issue = self::YEAR . '-06-15';
         $this->db->pdo()->prepare(
             'INSERT INTO invoices
-                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                (supplier_id, varsymbol, invoice_type, client_id, revenue_category_id,
+                 issue_date, tax_date, due_date,
                  currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
                  status, vat_classification_code, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1000.00, 210.00, 1210.00, "issued", "1", ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1000.00, 210.00, 1210.00, "issued", "1", ?)'
         )->execute([
-            $this->supplierId, $varsymbol, $type, $this->clientId, $issue, $issue, $issue,
+            $this->supplierId, $varsymbol, $type, $clientId ?? $this->clientId, $revenueCategoryId,
+            $issue, $issue, $issue,
             $this->currencyId, $this->userId,
         ]);
+    }
+
+    /** @param list<array<string,mixed>> $series */
+    private static function groupFor(array $series, int $clientId, int $categoryId): array
+    {
+        foreach ($series as $group) {
+            if ($group['client_id'] === $clientId && $group['revenue_category_id'] === $categoryId) {
+                return $group;
+            }
+        }
+        self::fail("Řada pro client_id={$clientId}, revenue_category_id={$categoryId} v reportu chybí.");
     }
 
     public function testSharedSeriesCombinesInvoiceAndCreditNoteNumbers(): void
@@ -185,6 +240,67 @@ final class InvoiceSeriesCompletenessTest extends TestCase
 
         self::assertCount(1, $series);
         self::assertSame([], $series[0]['buckets'][0]['missing']);
+    }
+
+    /**
+     * Řada kategorie tržby (migrace 1333) je vlastní scope. Šablona je schválně zvolená
+     * tak, aby se vyrenderovaná čísla CHYTLA i do regexu supplier-wide řady ("2098" + 9 +
+     * counter) — reálný vzor „kategorii vyhradím číselné pásmo 9xx". Bez vyloučení
+     * kategorie ze supplier-wide skenu by tenhle sken viděl counter 903 jako svoje
+     * nejvyšší číslo a nahlásil stovky neexistujících mezer.
+     */
+    public function testRevenueCategorySeriesIsOwnScopeAndLeavesSupplierWideIntact(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');
+        $categoryId = $this->createCategory('FR3PREDPL', '{YYYY}9{CC}');
+
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}000001", 'invoice');
+        $this->insertInvoice("{$y}000002", 'invoice');
+        // Řada kategorie: counter 1 a 3, číslo 2 v ní opravdu chybí.
+        $this->insertInvoice("{$y}901", 'invoice', $categoryId);
+        $this->insertInvoice("{$y}903", 'invoice', $categoryId);
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        $supplierGroup = self::groupFor($series, 0, 0);
+        self::assertSame([], $supplierGroup['buckets'][0]['missing'], 'Doklady kategorie nesmí do supplier-wide řady vůbec vstoupit.');
+        self::assertSame(2, $supplierGroup['buckets'][0]['range_to']);
+        self::assertSame(2, $supplierGroup['buckets'][0]['used_count']);
+
+        $categoryGroup = self::groupFor($series, 0, $categoryId);
+        self::assertSame('FR3 FR3PREDPL', $categoryGroup['revenue_category_name']);
+        self::assertSame(['invoice'], $categoryGroup['types']);
+        self::assertSame([2], $categoryGroup['buckets'][0]['missing'], 'Mezera uvnitř řady kategorie se hlásit MUSÍ.');
+        self::assertSame(3, $categoryGroup['buckets'][0]['range_to']);
+    }
+
+    /**
+     * Priorita resolveru je klient > kategorie > dodavatel, takže doklad klienta s vlastní
+     * řadou nepatří do skenu kategorie, i když kategorii nese. Obě šablony jsou schválně
+     * identické — bez vyloučení klienta by sken kategorie spolkl jeho číslo 900007 a
+     * vyrobil mezery 2..6 v řadě, kde žádné nejsou.
+     */
+    public function testClientOwnSeriesBeatsRevenueCategoryScope(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');
+        $categoryId = $this->createCategory('FR3SDILENA', '{YYYY}9{CCCCC}');
+        $ownClientId = $this->createClientWithOwnSeries('{YYYY}9{CCCCC}');
+
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}900001", 'invoice', $categoryId);
+        // Klient s vlastní řadou, doklad NESE tutéž kategorii — vyhrává klient.
+        $this->insertInvoice("{$y}900007", 'invoice', $categoryId, $ownClientId);
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        $categoryGroup = self::groupFor($series, 0, $categoryId);
+        self::assertSame([], $categoryGroup['buckets'][0]['missing'], 'Doklad klienta s vlastní řadou nesmí do řady kategorie.');
+        self::assertSame(1, $categoryGroup['buckets'][0]['range_to']);
+
+        $clientGroup = self::groupFor($series, $ownClientId, 0);
+        self::assertSame(7, $clientGroup['buckets'][0]['range_to']);
+        self::assertSame([1, 2, 3, 4, 5, 6], $clientGroup['buckets'][0]['missing']);
     }
 
     public function testDifferentYearIsNotPolluted(): void

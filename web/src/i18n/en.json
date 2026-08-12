@@ -11177,6 +11177,7 @@
             "type_credit_note": "credit notes",
             "series_supplier": "Supplier series",
             "series_client": "Client series {name}",
+            "series_revenue_category": "Revenue category series {name}",
             "shared_note": "Invoices and credit notes share one series — numbers are assessed together.",
             "period_none": "entire history",
             "col_period": "Period",

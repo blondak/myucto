@@ -9,7 +9,7 @@ REM   2. backup api/vendor (rename na vendor.dev.bak) + z?skat produkcni vendor:
 REM        - cache hit (api/vendor.prod existuje, hash composer.lock sedi) = rename (instant)
 REM        - cache miss = composer install --no-dev (30-60s) + ulozit hash
 REM   3. php tools/generateManualHtml.php (HTML manu?l do manual/generated/)
-REM      pwsh tools/export-pdf.ps1         (PDF manu?l do manual/manual.pdf, MD2PDF combine)
+REM      pwsh tools/export-pdf.ps1         (PDF manu?l ? JEN kdyz manual/manual.pdf chybi)
 REM   4. push na cilovy remote vc. web/dist + manual/generated + manual/manual.pdf + api/vendor
 REM   5. cachovat: rename api/vendor -^> api/vendor.prod (pro pristi deploy)
 REM      stash web/dist + manual/generated + manual/manual.pdf do *.bak (preserve pres `git checkout master`)
@@ -129,6 +129,15 @@ if errorlevel 1 (
 
 REM Manual PDF: sdileny MD2PDF engine (combine rezim) pres tools\export-pdf.ps1.
 REM Engine se hleda v %MD2PDF_HOME%, jinak C:\work\MD2PDF. Vyzaduje PowerShell 7 (pwsh).
+REM
+REM Generuje se JEN kdyz manual\manual.pdf chybi ? export je pomaly a PDF se mezi
+REM deployi temer nemeni. Vynucene pregenerovani = smazat manual\manual.pdf a spustit
+REM deploy znovu (nebo rovnou "pwsh tools\export-pdf.ps1").
+if exist manual\manual.pdf (
+    echo === Manual PDF jiz existuje ? preskakuji regeneraci ===
+    goto :pdf_ready
+)
+
 echo === Generate manual PDF ^(MD2PDF combine^) ===
 where pwsh >nul 2>nul
 if errorlevel 1 (
@@ -141,6 +150,8 @@ if errorlevel 1 (
     echo [ABORT] manual PDF export selhal.
     exit /b 1
 )
+
+:pdf_ready
 
 REM ====== 4. Push na cilovy deploy remote (s built artefakty) ======
 REM `-c core.autocrlf=false` = vypne CRLF konverzi pro tyto prikazy:
