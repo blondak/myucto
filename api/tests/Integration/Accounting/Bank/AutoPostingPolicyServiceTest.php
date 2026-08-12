@@ -71,6 +71,49 @@ final class AutoPostingPolicyServiceTest extends BankPostingTestCase
         self::assertSame('auto', $this->policy->decide($this->supplierId, $input)->decision);
     }
 
+    /**
+     * Předpis v deníku je v haléřích, odváděná částka celokorunová — přiznání k DPH uvádí
+     * každý řádek zaokrouhlený, takže se součet přiznaných řádků od zůstatku 343.900 běžně
+     * liší o jednotky korun. S pevnou tolerancí 1 Kč se reálná platba 205 993 Kč proti
+     * předpisu 205 988,74 Kč (rozdíl 0,002 %) hlásila jako „předpis chybí" a čtvrtletní
+     * odvod se musel odklikávat ručně. Tolerance je proto relativní — a rozdíl, který
+     * relativně malý NENÍ, se pojmenuje jinak než chybějící předpis.
+     */
+    public function testLiabilityToleranceIsRelativeAndNamesShortPrescription(): void
+    {
+        $this->policy->upsertRow($this->supplierId, OperationType::REMITTANCE_VAT, 'auto', $this->userId);
+        $this->policy->upsertRow($this->supplierId, OperationType::DETECTOR_TAX_REMITTANCE, 'auto', $this->userId);
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplierId} AND account_code='343'"
+        )->fetchColumn();
+        foreach (['343998' => 'Testovací zúčtování DPH', '343997' => 'Testovací zúčtování DPH 2'] as $code => $name) {
+            $this->db->pdo()->prepare(
+                'INSERT INTO chart_of_accounts
+                    (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+                 VALUES (?, ?, ?, "liability", "credit", 0, ?)'
+            )->execute([$this->supplierId, $code, $name, $parentId]);
+        }
+        $this->postPredpis('manual', 992026, '548', '343998', 205988.74);
+
+        $rounding = $this->input(
+            operation: OperationType::REMITTANCE_VAT, debit: '343998', source: 'detector', amount: 205993.00);
+        self::assertSame('auto', $this->policy->decide($this->supplierId, $rounding)->decision,
+            'Zaokrouhlovací rozdíl 4,26 Kč z celokorunového přiznání nesmí blokovat odvod.');
+
+        $real = $this->input(
+            operation: OperationType::REMITTANCE_VAT, debit: '343998', source: 'detector', amount: 208000.00);
+        $decision = $this->policy->decide($this->supplierId, $real);
+        self::assertSame('suggest', $decision->decision);
+        self::assertSame('liability_prescription_short', $decision->note,
+            'Předpis existuje, jen nestačí — to je jiná diagnóza než „předpis chybí".');
+
+        // Spodní hranice zůstává na koruně: u drobného odvodu je i pár korun rozdíl k prošetření.
+        $small = $this->input(
+            operation: OperationType::REMITTANCE_VAT, debit: '343997', source: 'detector', amount: 2808.00);
+        $this->postPredpis('manual', 992027, '548', '343997', 2801.00);
+        self::assertSame('liability_prescription_short', $this->policy->decide($this->supplierId, $small)->note);
+    }
+
     public function testAiAndLowConfidenceNeverAuto(): void
     {
         $this->policy->upsertRow($this->supplierId, OperationType::BANK_FEE, 'auto', $this->userId);

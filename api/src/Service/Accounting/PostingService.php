@@ -1733,6 +1733,20 @@ final class PostingService
     }
 
     /**
+     * Kód účtu po přesměrování syntetiky na její jedinou analytiku — pro NÁHLED kontace.
+     *
+     * Přesměr dělá {@see resolveLines()} až v okamžiku zápisu, takže návrh ve frontě
+     * ukazoval syrové kódy z pravidla („261/221") a v deníku pak vznikl zápis jiný
+     * („261.100/221.400"). Náhled, který ukazuje něco jiného, než co se zapíše, je
+     * v účetnictví nepřijatelný, a druhá kopie pravidla přesměru by se s originálem
+     * rozešla — proto se sem pouští TÁŽ mapa, jakou používá zaúčtování.
+     */
+    public function redirectedAccountCode(int $supplierId, string $code): string
+    {
+        return $this->singleAnalyticMap($supplierId)[$code] ?? $code;
+    }
+
+    /**
      * Mapa „trojmístná syntetika → její JEDINÁ aktivní analytika" pro firmu.
      *
      * PROČ. Jakmile syntetika dostane potomka, nesmí se na ni dál účtovat — součet

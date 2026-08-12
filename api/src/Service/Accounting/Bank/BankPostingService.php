@@ -76,6 +76,7 @@ final class BankPostingService
         private readonly ?EmbeddingWriter $embeddingWriter = null,
         private readonly ?LegacyBankPaymentReconciler $legacyPayments = null,
         private readonly ?BankAnalyticResolver $bankAnalytics = null,
+        private readonly ?BankPostingPreview $previews = null,
     ) {}
 
     /**
@@ -1780,11 +1781,23 @@ final class BankPostingService
         PostingService::assertBalanced($lines);
         $baseCurrency = $currency !== 'CZK' && array_filter($lines, static fn (array $line): bool => isset($line['currency_code']))
             ? 'CZK' : $currency;
+        // Náhled dopadu musí ukazovat kontaci PO analytických přepisech — jinak uživatel
+        // hromadně schvaluje `261/221`, kdežto do deníku spadne `261.100/221.400`.
+        $resolved = true;
+        foreach ($lines as $i => $line) {
+            $preview = $this->previews?->code($supplierId, $tx, (string) $line['account_code']);
+            if ($preview === null) {
+                continue;
+            }
+            $lines[$i]['account_code'] = $preview['code'];
+            $resolved = $resolved && $preview['resolved'];
+        }
         return [
             'suggestion_id' => $suggestionId,
             'bank_transaction_id' => $txId,
             'currency' => $baseCurrency,
             'lines' => $lines,
+            'accounts_resolved' => $resolved,
         ];
     }
 

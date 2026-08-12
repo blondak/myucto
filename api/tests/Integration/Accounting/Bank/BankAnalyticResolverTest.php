@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting\Bank;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
+use MyInvoice\Service\Accounting\Bank\BankPostingPreview;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -195,6 +196,51 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
         $lines = [['account_code' => '221', 'side' => 'debit', 'amount' => 10.0]];
         $out = $this->resolver->apply($this->supplierId, $this->tx('9999999999', '9999'), $lines);
         self::assertSame('221', $out[0]['account_code'], 'Bez shody vlastního účtu = no-op.');
+    }
+
+    /**
+     * Náhled návrhu musí ukazovat TOTÉŽ, co zapíše zaúčtování.
+     *
+     * Fronta „K zaúčtování" zobrazovala syrové kódy z pravidla — u okamžité platby z účtu
+     * CREDITAS tvrdila `261/221`, kdežto do deníku spadlo `261.100/221.400`. Náhled proto
+     * prochází touž cestou: analytika vlastního účtu + přesměr syntetiky s jedinou
+     * analytikou. Na rozdíl od zaúčtování ale NIC nezakládá — analytiku, která ještě
+     * neexistuje, nevymyslí, jen ohlásí `resolved = false`.
+     */
+    public function testPreviewShowsPostedAccountsAndFlagsUnresolvedBankLeg(): void
+    {
+        $preview = $this->container->get(BankPostingPreview::class);
+        $this->ownAccount('2000000057', '0300', '400', 'CZK');
+        $this->assigner->ensureChartAccount($this->supplierId, '400', 'CREDITAS běžný');
+        $this->seedSingleAnalytic('261', '261.100', 'Peníze na cestě');
+
+        $resolved = $preview->codes($this->supplierId, $this->tx('2000000057', '0300'), '261', '221');
+        self::assertSame('261.100', $resolved['debit'], 'Syntetika s jedinou analytikou se přesměruje.');
+        self::assertSame('221.400', $resolved['credit'], 'Bankovní noha jde na analytiku účtu výpisu.');
+        self::assertTrue($resolved['resolved']);
+
+        $unknown = $preview->codes($this->supplierId, $this->tx('9999999999', '9999'), '261', '221');
+        self::assertSame('221', $unknown['credit'], 'Bez shody vlastního účtu zůstane syntetika.');
+        self::assertFalse($unknown['resolved'], 'A náhled to musí přiznat, ať nevypadá jako výsledek.');
+    }
+
+    /** Založí syntetice právě jednu tečkovanou analytiku (spouštěč přesměru z migrace 1326). */
+    private function seedSingleAnalytic(string $synthetic, string $analytic, string $name): void
+    {
+        if ($this->accounts->findByCode($this->supplierId, $analytic) !== null) {
+            return;
+        }
+        $parent = $this->accounts->findByCode($this->supplierId, $synthetic);
+        self::assertNotNull($parent, 'Syntetika ' . $synthetic . ' musí být v osnově.');
+        $this->accounts->insert($this->supplierId, [
+            'account_code' => $analytic,
+            'name'         => $name,
+            'account_type' => (string) $parent['account_type'],
+            'normal_side'  => (string) ($parent['normal_side'] ?? 'debit'),
+            'is_synthetic' => false,
+            'parent_id'    => (int) $parent['id'],
+            'is_active'    => true,
+        ]);
     }
 
     /** Pořadí kandidátů je smluvní — SQL backfill v migraci 1318 generuje totéž. */

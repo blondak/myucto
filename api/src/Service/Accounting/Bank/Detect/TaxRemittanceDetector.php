@@ -17,6 +17,16 @@ use PDO;
 
 final class TaxRemittanceDetector implements BankTransactionDetector
 {
+    /**
+     * Kolik dřívějších, člověkem potvrzených odvodů na TÝŽ účet a TÝŽ VS nahradí chybějící
+     * ověření variabilního symbolu. Tři je stejná laťka, jakou {@see \MyInvoice\Service\Accounting\AutoPostingPolicyService}
+     * vyžaduje po uživatelském pravidle (`hit_count >= 3`), než ho pustí do plné automatiky.
+     */
+    private const CONFIRMED_REPETITIONS = 3;
+
+    /** Jak daleko zpět od data platby se opakování hledá (shodně s učením kontací). */
+    private const CONFIRMED_HISTORY_DAYS = 400;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PostingRuleRepository $postingRules,
@@ -159,14 +169,31 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             && $map['account_prefix'] === null && $map['account_number'] === null;
         $institutionAccountMatch = $employerIdentifier['account_match'] ?? false;
         $legacyFallback = $employerIdentifier['legacy_fallback'] ?? false;
+        $identified = $institutionAccountMatch
+            || (($specificVs || $specificAccount) && ($specificPrefix || $specificAccount));
+        // Opakování jako náhrada za neověřený VS.
+        //
+        // Předčíslí účtu u ČNB říká DRUH odvodu (21012 = pojistné na sociální zabezpečení),
+        // VS říká, ČÍ odvod to je. Zdravotní pojišťovny mají místo předčíslí celé číslo účtu,
+        // takže jim samotný účet stačí (viz `$specificAccount`) — u ČSSZ se ale matriková část
+        // liší podle OSSZ, mapa proto drží jen předčíslí a bez ověřeného VS spadne jistota na
+        // 0,70. Firma, která VS zaměstnavatele nikde nemá zadaný (právnická osoba s vypnutými
+        // Mzdami nemá kam), tak zůstane navěky na ručním schvalování téhož odvodu každý měsíc.
+        //
+        // Chybějící ověření nahradí DŮKAZ, ne sleva z laťky: tentýž účet a tentýž VS už člověk
+        // opakovaně potvrdil jako tento druh odvodu. Práh 0,90 zůstává nedotčený, jen se uzná
+        // druhý zdroj identifikace. Vlastní ochrany dál platí — kontace se pořád odvozuje
+        // z mapy, nikoli z historie, a vybočení částky degraduje na návrh přes anomálie.
+        if (!$identified && !$fallback && !$legacyFallback && $specificPrefix
+            && $this->hasConfirmedRepetitions($supplierId, $tx, (string) $map['operation_type'])
+        ) {
+            $identified = true;
+        }
         $confidence = $legacyFallback
             ? 0.70
             : ($fallback
             ? 0.40
-            : ($institutionAccountMatch
-                || (($specificVs || $specificAccount) && ($specificPrefix || $specificAccount))
-                ? 0.90
-                : 0.70));
+            : ($identified ? 0.90 : 0.70));
         return $this->fromRule(
             $supplierId,
             (string) $map['operation_type'],
@@ -180,6 +207,67 @@ final class TaxRemittanceDetector implements BankTransactionDetector
                 : ($fallback ? 'remittance_unclassified' : null),
             !$legacyFallback && (bool) $map['auto_allowed'],
         );
+    }
+
+    /**
+     * Potvrdil už člověk nejméně {@see self::CONFIRMED_REPETITIONS}× TÝŽ odvod?
+     *
+     * Shoda je úmyslně úzká — stejný účet protistrany, stejný kód banky, stejný VS a stejný
+     * druh odvodu. Počítají se jen návrhy, které člověk SCHVÁLIL (`reviewed_by`), nikdy
+     * automaticky zaúčtované: jinak by jedno chybné zaúčtování zplodilo důkaz samo pro sebe
+     * a jistota by se vyšplhala bez jediného lidského rozhodnutí. Transakce, u které si
+     * uživatel kontaci přepsal (`approve_override`) nebo ji zaúčtoval ručně mimo návrh,
+     * se nepočítá — potvrzením detekce zjevně nebyla.
+     *
+     * @param array<string,mixed> $tx
+     */
+    private function hasConfirmedRepetitions(int $supplierId, array $tx, string $operationType): bool
+    {
+        $account = isset($tx['counterparty_account']) ? (string) $tx['counterparty_account'] : '';
+        $normalizedAccount = AccountNumberNormalizer::normalize($account);
+        $vs = VariableSymbolNormalizer::digits((string) ($tx['variable_symbol'] ?? ''));
+        if ($normalizedAccount === '' || $vs === '') {
+            return false;
+        }
+        $date = (new DateTimeImmutable((string) $tx['posted_at']))->format('Y-m-d');
+        $bank = isset($tx['counterparty_bank']) ? (string) $tx['counterparty_bank'] : null;
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(DISTINCT s.bank_transaction_id)
+               FROM bank_posting_suggestions s
+               JOIN bank_transactions bt ON bt.id = s.bank_transaction_id
+              WHERE s.supplier_id = ?
+                AND s.status = 'approved'
+                AND s.reviewed_by IS NOT NULL
+                AND s.operation_type = ?
+                AND s.bank_transaction_id <> ?
+                AND bt.amount < 0
+                AND bt.posted_at < ?
+                AND bt.posted_at >= DATE_SUB(?, INTERVAL " . self::CONFIRMED_HISTORY_DAYS . " DAY)
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bt.counterparty_account, ''), '[^0-9]', '')) = ?
+                AND REGEXP_REPLACE(IFNULL(bt.variable_symbol, ''), '[^0-9]', '') = ?
+                AND (? IS NULL OR bt.counterparty_bank IS NULL OR bt.counterparty_bank = ?)
+                AND NOT EXISTS (
+                    SELECT 1 FROM accounting_corrections c
+                     WHERE c.supplier_id = s.supplier_id
+                       AND c.entity_type = 'bank_transaction'
+                       AND c.entity_id = s.bank_transaction_id
+                       AND c.event_type IN ('approve_override', 'manual_post')
+                )"
+        );
+        $stmt->execute([
+            $supplierId,
+            $operationType,
+            (int) ($tx['id'] ?? 0),
+            $date,
+            $date,
+            $normalizedAccount,
+            $vs,
+            $bank,
+            $bank,
+        ]);
+
+        return (int) $stmt->fetchColumn() >= self::CONFIRMED_REPETITIONS;
     }
 
     /** @return array<string,mixed>|null */

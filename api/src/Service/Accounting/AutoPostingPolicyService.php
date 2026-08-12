@@ -29,6 +29,22 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
     private const SALDO_PREFIXES = ['311', '321', '314', '324', '325'];
 
     /**
+     * Odchylka úhrady od zůstatku zúčtovacího účtu, kterou guard ještě bere jako TÝŽ závazek.
+     *
+     * Předpis v deníku je v haléřích, ale odváděná částka je celokorunová a vzniká jinou
+     * cestou: přiznání k DPH uvádí každý řádek zaokrouhlený na celé koruny (§ 37 a příloha
+     * tiskopisu), takže součet přiznaných řádků se od haléřového zůstatku 343.900 běžně liší
+     * o jednotky korun. Pevná tolerance 1 Kč tenhle rozdíl neustála: platba 205 993 Kč proti
+     * předpisu 205 988,74 Kč (rozdíl 4,26 Kč, tj. 0,002 %) se hlásila jako „předpis chybí".
+     *
+     * Tolerance je proto relativní se spodní hranicí 1 Kč. Bezpečnostní vlastnost guardu
+     * zůstává: `has_credit` pořád vyžaduje EXISTUJÍCÍ předpis a 0,1 % nepustí úhradu, která
+     * závazek reálně přesahuje (u malých odvodů zůstává v praxi na koruně).
+     */
+    private const LIABILITY_TOLERANCE_PCT = 0.001;
+    private const LIABILITY_TOLERANCE_MIN_CENTS = 100;
+
+    /**
      * Vlastní peněžní účty pro interní převod: 221* (běžný účet i analytika termínovaného
      * vkladu 221100) a 261 (peníze na cestě). Pravidlo, jehož OBĚ nohy míří sem, je jen
      * přesun peněz mezi vlastními účty firmy — částka = přesný pohyb na výpisu, žádný
@@ -88,10 +104,12 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
             return new PolicyDecision('needs_input', 'duplicate_suspect');
         }
         if ($this->hasPrefix($in->debitAccountCode, self::LIABILITY_PREFIXES)
-            && str_starts_with($in->creditAccountCode, '221')
-            && !$this->liabilityCovered($supplierId, $in->debitAccountCode, $in->entryDate, $in->amountCzk)) {
-            $decision = 'suggest';
-            $note = 'liability_prescription_missing';
+            && str_starts_with($in->creditAccountCode, '221')) {
+            $coverage = $this->liabilityCoverage($supplierId, $in->debitAccountCode, $in->entryDate, $in->amountCzk);
+            if ($coverage !== null) {
+                $decision = 'suggest';
+                $note = $coverage;
+            }
         }
         // Anomálie (z-score částky / duplicitní VS) degraduje na návrh — ALE ne u úhrady
         // navázané na konkrétní doklad s jistotou 1.00. Tam už není co posuzovat: víme,
@@ -318,7 +336,18 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
         return $locked === false || $locked === null || substr($date, 0, 10) > (string) $locked;
     }
 
-    private function liabilityCovered(int $supplierId, string $code, string $date, float $amount): bool
+    /**
+     * Kryje předpis na zúčtovacím účtu tuhle úhradu?
+     *
+     * @return string|null null = kryje; jinak kód důvodu pro frontu návrhů:
+     *                     `liability_prescription_missing` (na účtu není žádný předpis),
+     *                     `liability_prescription_short` (předpis je, ale úhrada ho přesahuje
+     *                     o víc než {@see self::LIABILITY_TOLERANCE_PCT}). Rozlišení není
+     *                     kosmetika: „chybí" znamená doúčtovat doklad, „nestačí" znamená
+     *                     porovnat s podáním — u zdravotního pojistného tenhle rozdíl
+     *                     odhalil sedmikorunovou nesrovnalost v převzatém počátečním stavu.
+     */
+    private function liabilityCoverage(int $supplierId, string $code, string $date, float $amount): ?string
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT
@@ -332,9 +361,18 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
         );
         $stmt->execute([$supplierId, substr($date, 0, 10), $code]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['balance' => 0, 'has_credit' => 0];
+        if ((int) $row['has_credit'] !== 1) {
+            return 'liability_prescription_missing';
+        }
         $balanceCents = (int) round((float) $row['balance'] * 100);
         $amountCents = (int) round(abs($amount) * 100);
-        return (int) $row['has_credit'] === 1 && $balanceCents >= $amountCents - 100;
+        $toleranceCents = max(
+            self::LIABILITY_TOLERANCE_MIN_CENTS,
+            (int) ceil($amountCents * self::LIABILITY_TOLERANCE_PCT),
+        );
+        return $balanceCents >= $amountCents - $toleranceCents
+            ? null
+            : 'liability_prescription_short';
     }
 
     private function dailyLimitExceeded(int $supplierId, float $amount): bool

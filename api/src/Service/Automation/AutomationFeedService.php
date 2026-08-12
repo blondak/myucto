@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Automation;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankPostingRuleRepository;
 use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingPreview;
 use MyInvoice\Service\Accounting\Bank\BankRuleMatcher;
 use MyInvoice\Service\Accounting\Learning\LearningStatsProvider;
 use PDO;
@@ -22,6 +23,7 @@ final class AutomationFeedService
         private readonly BankRuleMatcher $ruleMatcher,
         private readonly BankPostingRuleRepository $rules,
         private readonly LearningStatsProvider $learningStats,
+        private readonly BankPostingPreview $previews,
     ) {}
 
     /** @return list<int> */
@@ -366,6 +368,7 @@ final class AutomationFeedService
             "SELECT bps.*, bt.posted_at tx_date, DATE(bps.created_at) decision_date,
                     bt.currency tx_currency, bt.description tx_description,
                     bt.statement_id, bt.amount signed_amount, bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol,
+                    bs.account_number recipient_account, bs.bank_code recipient_bank,
                     COALESCE(NULLIF(s.display_name,''),s.company_name) supplier_name,
                     r.name rule_name, r.hit_count rule_hit_count, r.approved_streak rule_approved_streak, je.document_no,
                     $confidence confidence_value, $detector detector_value, $operation operation_value,
@@ -375,6 +378,7 @@ final class AutomationFeedService
                                AND aset.locked_until IS NOT NULL AND bt.posted_at <= aset.locked_until)) period_closed
                FROM bank_posting_suggestions bps
                JOIN bank_transactions bt ON bt.id=bps.bank_transaction_id
+               JOIN bank_statements bs ON bs.id=bt.statement_id
                JOIN supplier s ON s.id=bps.supplier_id
           LEFT JOIN bank_posting_rules r ON r.id=bps.rule_id
           LEFT JOIN journal_entries je ON je.id=bps.journal_entry_id
@@ -401,14 +405,24 @@ final class AutomationFeedService
                     }
                 }
             }
+            // Kontace se ukazuje tak, jak ji uvidí deník (analytika banky + přesměr jediné
+            // analytiky) — návrh držící syrové `261/221` by sliboval jiný zápis, než jaký
+            // schválením vznikne.
+            $codes = $this->previews->codes(
+                $sid,
+                $r,
+                (string) $r['debit_account_code'],
+                (string) $r['credit_account_code'],
+            );
             $out[] = [
                 'id' => 'bps:' . $r['id'], 'kind' => 'bank_suggestion', 'tab' => $query->tab,
                 'supplier_id' => $sid, 'supplier_name' => (string) $r['supplier_name'],
                 'date' => (string) ($query->tab === 'auto' ? $r['decision_date'] : $r['tx_date']),
                 'amount' => (float) $r['amount'], 'currency' => (string) ($r['tx_currency'] ?: 'CZK'),
                 'description' => (string) ($r['description'] ?: $r['tx_description'] ?: ''),
-                'counterparty' => $r['counterparty_name'], 'debit_account_code' => (string) $r['debit_account_code'],
-                'credit_account_code' => (string) $r['credit_account_code'], 'source' => (string) $r['source'],
+                'counterparty' => $r['counterparty_name'], 'debit_account_code' => $codes['debit'],
+                'credit_account_code' => $codes['credit'],
+                'accounts_resolved' => $codes['resolved'], 'source' => (string) $r['source'],
                 'confidence' => $r['confidence_value'] === null ? null : (float) $r['confidence_value'],
                 'detector' => $r['detector_value'], 'operation_type' => $r['operation_value'],
                 'rule_id' => $r['rule_id'] === null ? null : (int) $r['rule_id'], 'rule_name' => $r['rule_name'],

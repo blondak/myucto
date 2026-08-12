@@ -31,6 +31,7 @@ export const AUTOMATION_NOTE_CODES = [
   'anomaly',
   'fee_gap',
   'liability_prescription_missing',
+  'liability_prescription_short',
   'schedule_amount_differs',
   'remittance_unclassified',
   'amount_over_cap',
@@ -71,6 +72,11 @@ export interface AutomationFeedItem {
   counterparty: string | null
   debit_account_code: string | null
   credit_account_code: string | null
+  /**
+   * Kontace je konečná (prošla analytickými přepisy zaúčtování). `false` = analytiku
+   * vlastního účtu se nepodařilo určit, zobrazená syntetika se při zaúčtování ještě změní.
+   */
+  accounts_resolved?: boolean
   source: string
   confidence: number | null
   detector: string | null

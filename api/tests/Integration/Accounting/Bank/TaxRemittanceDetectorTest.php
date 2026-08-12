@@ -157,6 +157,66 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         }
     }
 
+    /**
+     * Odvod na ČSSZ, jehož VS firma nikde evidovaný nemá (právnická osoba s vypnutými
+     * Mzdami nemá kam VS zaměstnavatele uložit), zůstával navěky na jistotě 0,70 — a to
+     * i po dvaadvaceti měsících, kdy tentýž odvod na tentýž účet se stejným VS pokaždé
+     * ručně schválil týž člověk. Předčíslí 21012 říká DRUH odvodu, VS by řekl ČÍ je;
+     * chybějící ověření VS proto nahradí opakované lidské potvrzení téže platby.
+     *
+     * Práh 0,90 se nesnižuje — přibývá druhý zdroj identifikace, a jen ten, který stojí
+     * na lidských rozhodnutích (automaticky zaúčtované návrhy se nepočítají, jinak by si
+     * automatika vyráběla důkaz sama pro sebe).
+     */
+    public function testRepeatedHumanConfirmationsReplaceUnverifiedVariableSymbol(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET taxpayer_type = 'po', payroll_enabled = 0,
+                    cssz_vsdp = NULL, health_insurance_number = NULL WHERE id = ?"
+        )->execute([$this->supplierId]);
+        $account = '0210120007928311';
+        $vs = '4442070407';
+
+        $unknown = $this->detector->detect($this->supplierId, $this->tx(account: $account, vs: $vs));
+        self::assertNotNull($unknown);
+        self::assertSame(OperationType::REMITTANCE_SOCIAL_EMPLOYER, $unknown->operationType);
+        self::assertSame(0.70, $unknown->confidence, 'Bez ověřeného VS je předčíslí samo jen střední jistota.');
+
+        $statementId = $this->statement();
+        foreach (['-05-06', '-04-06', '-03-06'] as $i => $day) {
+            $txId = $this->transaction($statementId, -1436.00, [
+                'posted_at' => self::YEAR . $day,
+                'variable_symbol' => $vs,
+                'counterparty_account' => $account,
+                'counterparty_bank' => '0710',
+            ]);
+            $this->approvedRemittance($txId, OperationType::REMITTANCE_SOCIAL_EMPLOYER, 1436.00);
+            $confirmed = $this->detector->detect($this->supplierId, $this->tx(account: $account, vs: $vs));
+            self::assertNotNull($confirmed);
+            self::assertSame(
+                $i === 2 ? 0.90 : 0.70,
+                $confirmed->confidence,
+                'Jistota smí vyskočit až po třetím potvrzení, ne dřív.',
+            );
+        }
+
+        // Jiný VS na témž účtu důkaz nedědí — potvrzení se váže na konkrétní platbu.
+        $other = $this->detector->detect($this->supplierId, $this->tx(account: $account, vs: '9999999999'));
+        self::assertNotNull($other);
+        self::assertSame(0.70, $other->confidence);
+    }
+
+    /** Odvod, který kdysi ručně potvrdil člověk — důkaz pro opakování téže platby. */
+    private function approvedRemittance(int $txId, string $operationType, float $amount): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO bank_posting_suggestions
+                (supplier_id, bank_transaction_id, source, debit_account_code, credit_account_code,
+                 amount, status, confidence, detector, operation_type, reviewed_by, reviewed_at)
+             VALUES (?, ?, 'detector', '336', '221', ?, 'approved', 0.70, 'tax_remittance', ?, ?, NOW())"
+        )->execute([$this->supplierId, $txId, $amount, $operationType, $this->userId]);
+    }
+
     public function testPhysicalPersonEmployerUsesPayrollOfficeSocialVariableSymbol(): void
     {
         $this->configurePayrollOffice('1234509876');

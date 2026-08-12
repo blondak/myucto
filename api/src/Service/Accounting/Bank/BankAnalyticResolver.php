@@ -103,6 +103,42 @@ final class BankAnalyticResolver
     }
 
     /**
+     * Analytika banky pro NÁHLED — čte jen to, co už existuje, a nic nezakládá.
+     *
+     * {@see analyticCodeFor()} má vedlejší efekty (přidělí suffix, dohraje účet do osnovy),
+     * protože bez nich by zaúčtování spadlo. Náhled návrhu se ale vykresluje při každém
+     * načtení fronty, klidně pro stovky řádků, a zakládat účetní osnovu při GET požadavku
+     * je nepřijatelné. Když analytika ještě neexistuje, vrátí null a volající zobrazí
+     * syntetiku — s příznakem, že kontace ještě není konečná.
+     *
+     * @param array<string,mixed> $tx
+     */
+    public function existingAnalyticCodeFor(int $supplierId, array $tx): ?string
+    {
+        $account = trim((string) ($tx['recipient_account'] ?? ''));
+        if ($account === '') {
+            return null;
+        }
+        $bankRaw = $tx['recipient_bank'] ?? null;
+        $bank = ($bankRaw === null || (string) $bankRaw === '') ? null : (string) $bankRaw;
+        $own = $this->ownAccount(
+            $supplierId . '|' . $account . '|' . ($bank ?? ''),
+            $supplierId,
+            $account,
+            $bank,
+        );
+        if (!is_array($own)) {
+            return null;
+        }
+        $suffix = $own['analytic_suffix'] ?? null;
+        if (!BankAnalyticAssigner::isValidSuffix($suffix)) {
+            return null;
+        }
+
+        return BankAnalyticAssigner::codeFor((string) $suffix);
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     private function ownAccount(string $key, int $supplierId, string $account, ?string $bank): ?array

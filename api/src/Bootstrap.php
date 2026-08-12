@@ -399,6 +399,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Ai\EmbeddingWriter::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\LegacyBankPaymentReconciler::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankPostingPreview::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),

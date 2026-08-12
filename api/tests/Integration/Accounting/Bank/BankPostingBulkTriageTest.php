@@ -45,7 +45,14 @@ final class BankPostingBulkTriageTest extends BankPostingTestCase
         self::assertSame('pending', $this->suggestionRow($first)['status']);
         $accounts = array_column($preview['body']['accounts'], null, 'account_code');
         self::assertSame(200.0, (float) $accounts['568']['debit']);
-        self::assertSame(200.0, (float) $accounts['221']['credit']);
+        // Bankovní noha se v náhledu ukazuje už na analytice vlastního účtu výpisu (221.xxx),
+        // stejně jako ji zapíše zaúčtování — náhled slibující holé 221 by lhal.
+        $bankLeg = array_values(array_filter(
+            $accounts,
+            static fn (array $row): bool => str_starts_with((string) $row['account_code'], '221'),
+        ));
+        self::assertCount(1, $bankLeg, 'Obě platby jdou z téhož účtu, tedy na jednu bankovní analytiku.');
+        self::assertSame(200.0, (float) $bankLeg[0]['credit']);
 
         $approved = $this->callAction(
             $this->action,
