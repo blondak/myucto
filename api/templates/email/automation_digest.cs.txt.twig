@@ -6,7 +6,8 @@ RANNÍ PŘEHLED AUTOMATIKY
 Dnes máte {{ totals.pending }} návrhů k potvrzení a {{ totals.needs }} položek, které potřebují váš zásah.
 
 {% for company in companies %}{{ company.name }}: {{ company.auto }} samo · {{ company.pending }} potvrdit · {{ company.needs }} potřebuje vás
-Potvrdit: {{ company.pending_link }}
+{% if company.resweep_posted|default(0) > 0 or company.resweep_refreshed|default(0) > 0 %}Přepočet návrhů bez předpisu: {{ company.resweep_posted|default(0) }} zaúčtováno, {{ company.resweep_refreshed|default(0) }} s upřesněným důvodem.
+{% endif %}Potvrdit: {{ company.pending_link }}
 Potřebuje mě: {{ company.needs_link }}
 
 {% endfor %}Otevřít Automat: {{ automation_link }}

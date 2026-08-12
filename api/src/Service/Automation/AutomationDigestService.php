@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Automation;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Bank\StaleSuggestionSweep;
 use MyInvoice\Service\Mail\Mailer;
 use PDO;
 
@@ -16,13 +17,28 @@ final class AutomationDigestService
         private readonly AutomationFeedService $feed,
         private readonly Mailer $mailer,
         private readonly Config $config,
+        private readonly StaleSuggestionSweep $sweep,
     ) {}
 
-    /** @return array{sent:int,skipped:int,recipients:list<array<string,mixed>>} */
+    /** @return array{sent:int,skipped:int,resweep:array<string,mixed>,recipients:list<array<string,mixed>>} */
     public function run(\DateTimeImmutable $now, bool $dryRun = false, ?int $hourOverride = null): array
     {
         $hour = $hourOverride ?? (int) $now->format('G');
         if ($hour < 0 || $hour > 23) throw new \InvalidArgumentException('Hour must be 0..23.');
+
+        // Přepočet zastaralých důvodů PŘED sečtením fronty. Souhrn je jediné místo, kde
+        // se fronta pravidelně prochází celá, a zastaralé „předpis chybí" škodí právě
+        // tady nejvíc: uživatel dostane mail o deseti čekajících položkách, přestože
+        // osm z nich by se po přepočtu zaúčtovalo samo. Sweep nesmí shodit souhrn —
+        // když selže, pošle se mail bez něj a chyba je vidět v reportu cronu.
+        // Běží nad VŠEMI firmami s podvojným účetnictvím, ne jen nad adresáty téhle
+        // hodiny: firma s vypnutým souhrnem má frontu úplně stejně.
+        try {
+            $resweep = $this->sweep->run($dryRun);
+        } catch (\Throwable $e) {
+            $resweep = ['error' => $e->getMessage()];
+        }
+        $perSupplier = is_array($resweep['per_supplier'] ?? null) ? $resweep['per_supplier'] : [];
         $stmt = $this->db->pdo()->prepare(
             "SELECT u.id user_id,u.email,u.locale,s.id supplier_id,
                     COALESCE(NULLIF(s.display_name,''),s.company_name) supplier_name
@@ -52,11 +68,16 @@ final class AutomationDigestService
             $companies = []; $totals = ['auto' => 0, 'pending' => 0, 'needs' => 0];
             foreach ($user['suppliers'] as $supplier) {
                 $counts = $this->feed->counts($uid, false, $now->format('Y-m-d'), $now->format('Y-m-d'), [$supplier['id']]);
+                $swept = $perSupplier[$supplier['id']] ?? ['posted' => 0, 'refreshed' => 0, 'queued' => 0];
                 $row = [
                     'id' => $supplier['id'], 'name' => $supplier['name'],
                     'auto' => $counts['auto_today'], 'pending' => $counts['pending'], 'needs' => $counts['needs_input'],
                     'pending_link' => $baseUrl . '/automation?tab=pending&suppliers=' . $supplier['id'],
                     'needs_link' => $baseUrl . '/automation?tab=needs_input&suppliers=' . $supplier['id'],
+                    // Jen vlastní čísla firmy — souhrn chodí uživateli, který může vidět
+                    // jen část firem, takže globální součty sweepu do mailu nepatří.
+                    'resweep_posted' => (int) ($swept['posted'] ?? 0),
+                    'resweep_refreshed' => (int) ($swept['refreshed'] ?? 0) + (int) ($swept['queued'] ?? 0),
                 ];
                 $companies[] = $row;
                 foreach ($totals as $key => $_) $totals[$key] += $row[$key];
@@ -75,6 +96,6 @@ final class AutomationDigestService
                 $sent++;
             }
         }
-        return ['sent' => $sent, 'skipped' => $skipped, 'recipients' => $recipients];
+        return ['sent' => $sent, 'skipped' => $skipped, 'resweep' => $resweep, 'recipients' => $recipients];
     }
 }

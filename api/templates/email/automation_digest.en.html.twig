@@ -6,6 +6,9 @@
 <div style="padding:14px 16px;margin:10px 0;border:1px solid #D9D3EC;border-radius:8px;background:#F8F7FB;">
   <strong>{{ company.name }}</strong><br>
   <span style="color:#5A5470;">{{ company.auto }} automatic · <a href="{{ company.pending_link }}">{{ company.pending }} to approve</a> · <a href="{{ company.needs_link }}">{{ company.needs }} need you</a></span>
+  {% if company.resweep_posted|default(0) > 0 or company.resweep_refreshed|default(0) > 0 %}<br>
+  <span style="color:#5A5470;font-size:13px;">Suggestions waiting for a missing prescription were re-evaluated before this digest: {{ company.resweep_posted|default(0) }} posted, {{ company.resweep_refreshed|default(0) }} with an updated reason.</span>
+  {% endif %}
 </div>
 {% endfor %}
 <p style="margin:22px 0 0;"><a href="{{ automation_link }}" style="display:inline-block;padding:11px 20px;background:#3B2D83;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Open automation</a></p>

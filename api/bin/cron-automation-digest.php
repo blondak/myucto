@@ -25,7 +25,23 @@ $run = CronRun::start($pdo, 'cron-automation-digest');
 try {
     $report = $container->get(AutomationDigestService::class)->run(new DateTimeImmutable(), $dryRun, $hour);
     echo json_encode($report, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;
-    $run->finish('ok', ['sent' => $report['sent'], 'skipped' => $report['skipped'], 'dry_run' => $dryRun]);
+    // Přepočet zastaralých návrhů (běží před sečtením fronty) patří do protokolu cronu:
+    // tiché doúčtování je v účetnictví to poslední, co má zůstat jen v e-mailu.
+    $resweep = is_array($report['resweep'] ?? null) ? $report['resweep'] : [];
+    $run->finish('ok', [
+        'sent' => $report['sent'],
+        'skipped' => $report['skipped'],
+        'dry_run' => $dryRun,
+        'resweep' => [
+            'candidates' => $resweep['candidates'] ?? 0,
+            'reevaluated' => $resweep['reevaluated'] ?? 0,
+            'posted' => $resweep['posted'] ?? 0,
+            'refreshed' => $resweep['refreshed'] ?? 0,
+            'queued' => $resweep['queued'] ?? 0,
+            'skipped' => $resweep['skipped'] ?? 0,
+            'error' => $resweep['error'] ?? null,
+        ],
+    ]);
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL);
     $run->finish('error', ['error' => $e->getMessage(), 'dry_run' => $dryRun]);

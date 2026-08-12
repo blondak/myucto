@@ -6,7 +6,8 @@ MORNING AUTOMATION OVERVIEW
 You have {{ totals.pending }} suggestions to approve and {{ totals.needs }} items that need your input.
 
 {% for company in companies %}{{ company.name }}: {{ company.auto }} automatic · {{ company.pending }} to approve · {{ company.needs }} need you
-Approve: {{ company.pending_link }}
+{% if company.resweep_posted|default(0) > 0 or company.resweep_refreshed|default(0) > 0 %}Re-evaluated before the digest: {{ company.resweep_posted|default(0) }} posted, {{ company.resweep_refreshed|default(0) }} with an updated reason.
+{% endif %}Approve: {{ company.pending_link }}
 Needs input: {{ company.needs_link }}
 
 {% endfor %}Open automation: {{ automation_link }}

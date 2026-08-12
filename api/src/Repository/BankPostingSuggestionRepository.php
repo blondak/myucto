@@ -366,6 +366,153 @@ final class BankPostingSuggestionRepository
         return $stmt->rowCount() > 0;
     }
 
+    /**
+     * Přepíše důvod u nevyřízeného návrhu, aniž by se sáhlo na cokoli dalšího.
+     *
+     * Slouží periodickému přepočtu ({@see \MyInvoice\Service\Accounting\Bank\StaleSuggestionSweep}):
+     * `createIfNoPending()` u existujícího pending návrhu vrátí jen jeho id a poznámku NEMĚNÍ,
+     * takže by ve frontě zůstal důvod, který už neplatí („předpis chybí" u závazku, který
+     * mezitím vznikl).
+     */
+    public function refreshNote(int $supplierId, int $id, ?string $note): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE bank_posting_suggestions SET note = ?
+              WHERE id = ? AND supplier_id = ? AND status IN ("pending","needs_input","blocked")
+                AND NOT (note <=> ?)'
+        );
+        $stmt->execute([$note, $id, $supplierId, $note]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Nevyřízené návrhy, jejichž uložený důvod mohlo pozdější zaúčtování změnit
+     * (předpis závazku chybí / nestačí). Vrací je napříč firmami s podvojným
+     * účetnictvím, chronologicky.
+     *
+     * Vynechává vše, co by přepočet neměl oživit:
+     *   - odložený (snooze) návrh — uživatel řekl „teď ne",
+     *   - transakci s živým zápisem — přepočet by přepisoval hotové účetnictví,
+     *   - transakci s odmítnutým návrhem nebo lidským zásahem v `accounting_corrections`
+     *     (`reject`, `approve_override`, `manual_post`, `unpost`) — člověk už rozhodl.
+     *
+     * @param list<string> $notes
+     * @return list<array{suggestion_id:int, supplier_id:int, tx_id:int, posted_at:string, note:?string}>
+     */
+    public function transientPendingCandidates(array $notes, ?int $supplierId = null): array
+    {
+        if ($notes === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($notes), '?'));
+        $sql = "SELECT s.id, s.supplier_id, s.bank_transaction_id, s.note, bt.posted_at
+                  FROM bank_posting_suggestions s
+                  JOIN supplier sup ON sup.id = s.supplier_id AND sup.accounting_mode = 'double_entry'
+                  JOIN bank_transactions bt ON bt.id = s.bank_transaction_id
+                 WHERE s.status IN ('pending','needs_input','blocked')
+                   AND s.note IN ({$in})
+                   AND (s.snoozed_until IS NULL OR s.snoozed_until <= NOW())
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries je
+                                    WHERE je.supplier_id = s.supplier_id AND je.source_type = 'bank'
+                                      AND je.source_id = s.bank_transaction_id AND je.reversed_by IS NULL)
+                   AND NOT EXISTS (SELECT 1 FROM bank_posting_suggestions rej
+                                    WHERE rej.supplier_id = s.supplier_id
+                                      AND rej.bank_transaction_id = s.bank_transaction_id
+                                      AND rej.status = 'rejected')
+                   AND NOT EXISTS (SELECT 1 FROM accounting_corrections c
+                                    WHERE c.supplier_id = s.supplier_id
+                                      AND c.entity_type = 'bank_transaction'
+                                      AND c.entity_id = s.bank_transaction_id
+                                      AND c.event_type IN ('reject','approve_override','manual_post','unpost'))";
+        $params = $notes;
+        if ($supplierId !== null) {
+            $sql .= ' AND s.supplier_id = ?';
+            $params[] = $supplierId;
+        }
+        $sql .= ' ORDER BY s.supplier_id, bt.posted_at, s.id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(static fn (array $r): array => [
+            'suggestion_id' => (int) $r['id'],
+            'supplier_id'   => (int) $r['supplier_id'],
+            'tx_id'         => (int) $r['bank_transaction_id'],
+            'posted_at'     => (string) $r['posted_at'],
+            'note'          => $r['note'] === null ? null : (string) $r['note'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Spárované pohyby, které nemají ANI zápis, ANI jakýkoli návrh.
+     *
+     * Tady končí úhrada dokladu, jehož předpis ještě nebyl v deníku:
+     * {@see \MyInvoice\Service\Accounting\Bank\BankPostingService::matchedOutcome} vrátí
+     * skip `document_not_posted` a NEZALOŽÍ návrh — důvod tedy nikde není uložený a podle
+     * poznámky se takový pohyb dohledat nedá. Po doúčtování dokladu se ale sám od sebe
+     * nikdo nezeptá znovu, proto je pro periodický přepočet potřeba tenhle druhý vstup.
+     *
+     * Scope je stejný jako u {@see unpostedWithoutSuggestion()} (vlastnictví výpisu přes
+     * resolver NEBO explicitní vazba na doklad), navíc omezený na SPÁROVANÉ pohyby: jen
+     * ty jdou v enginu větví `matchedOutcome`. Nespárované by spadly do `applyRules()`,
+     * kde by se z fronty nic nespravilo a jen by se znovu volala AI.
+     *
+     * @return list<array{suggestion_id:null, supplier_id:int, tx_id:int, posted_at:string, note:null}>
+     */
+    public function matchedUnpostedWithoutSuggestion(int $supplierId): array
+    {
+        $scopeSql = "bt.source = 'statement'
+            AND bt.match_status <> 'ignored'
+            AND (
+                bt.match_status IN ('auto_exact','auto_partial','manual')
+                OR EXISTS (SELECT 1 FROM invoice_payments alloc_ip
+                            WHERE alloc_ip.supplier_id = ? AND alloc_ip.bank_transaction_id = bt.id)
+                OR EXISTS (SELECT 1 FROM payment_matches alloc_pm
+                            WHERE alloc_pm.supplier_id = ? AND alloc_pm.bank_transaction_id = bt.id)
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM journal_entries je
+                 WHERE je.supplier_id = ? AND je.source_type = 'bank'
+                   AND je.source_id = bt.id AND je.reversed_by IS NULL
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM bank_posting_suggestions s2
+                 WHERE s2.bank_transaction_id = bt.id
+                   AND s2.status IN ('pending','needs_input','blocked','approved','auto_posted','rejected')
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM accounting_corrections c
+                 WHERE c.supplier_id = ? AND c.entity_type = 'bank_transaction' AND c.entity_id = bt.id
+                   AND c.event_type IN ('reject','approve_override','manual_post','unpost')
+            )
+            AND (
+                " . BankStatementOwnershipResolver::sql() . "
+                OR EXISTS (SELECT 1 FROM invoice_payments ip
+                            WHERE ip.supplier_id = ? AND ip.bank_transaction_id = bt.id)
+                OR EXISTS (SELECT 1 FROM payment_matches pm
+                            WHERE pm.supplier_id = ? AND pm.bank_transaction_id = bt.id)
+                OR EXISTS (SELECT 1 FROM invoices i
+                            WHERE i.supplier_id = ? AND i.id = bt.matched_invoice_id)
+            )";
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT bt.id, bt.posted_at
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE {$scopeSql}
+              ORDER BY bt.posted_at, bt.id"
+        );
+        $stmt->execute(array_merge(
+            [$supplierId, $supplierId, $supplierId, $supplierId],
+            BankStatementOwnershipResolver::params($supplierId),
+            [$supplierId, $supplierId, $supplierId],
+        ));
+        return array_map(static fn (array $r): array => [
+            'suggestion_id' => null,
+            'supplier_id'   => $supplierId,
+            'tx_id'         => (int) $r['id'],
+            'posted_at'     => (string) $r['posted_at'],
+            'note'          => null,
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     public function countPending(int $supplierId): int
     {
         $stmt = $this->db->pdo()->prepare(

@@ -45,6 +45,32 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
     private const LIABILITY_TOLERANCE_MIN_CENTS = 100;
 
     /**
+     * Důvody návrhu, které může ZMĚNIT pozdější zaúčtování — a jen ty smí periodický
+     * přepočet ({@see \MyInvoice\Service\Accounting\Bank\StaleSuggestionSweep}) sáhnout znovu.
+     *
+     * Obě poznámky vyrábí {@see liabilityCoverage()} a obě mluví o stavu deníku
+     * v okamžiku vyhodnocení: úhrada vyhodnocená DŘÍV, než vznikl předpis závazku
+     * (počáteční stav, zúčtování DPH, mzdová rekapitulace, závěrka), dostane „předpis
+     * chybí" — a ta věta přestane platit o pár vteřin později, aniž by ji kdokoli
+     * přepsal. Po přepočtu se buď zaúčtuje, nebo aspoň dostane pravdivý důvod.
+     *
+     * Zbytek poznámek sem ZÁMĚRNĚ nepatří: `low_confidence`, `no_rule`, `anomaly`,
+     * `rule_conflict` ani `duplicate_suspect` přepočet nezmění (chce to jiná vstupní
+     * data, ne další zápis v deníku), `period_closed` řeší otevření období a odmítnutý
+     * návrh se oživovat nesmí vůbec. `daily_limit_reached` je transientní časem, ne
+     * zaúčtováním — denní strop je vědomá brzda uživatele, ne zastaralá informace.
+     *
+     * `document_not_posted` (úhrada dokladu bez zaúčtovaného předpisu) je stejná třída
+     * problému, jenže se NEUKLÁDÁ: engine takový pohyb přeskočí úplně bez návrhu.
+     * Dohledává se proto zvlášť, viz
+     * {@see \MyInvoice\Repository\BankPostingSuggestionRepository::matchedUnpostedWithoutSuggestion()}.
+     */
+    public const TRANSIENT_NOTES = [
+        'liability_prescription_missing',
+        'liability_prescription_short',
+    ];
+
+    /**
      * Vlastní peněžní účty pro interní převod: 221* (běžný účet i analytika termínovaného
      * vkladu 221100) a 261 (peníze na cestě). Pravidlo, jehož OBĚ nohy míří sem, je jen
      * přesun peněz mezi vlastními účty firmy — částka = přesný pohyb na výpisu, žádný
@@ -322,7 +348,13 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
         return (bool) $stmt->fetchColumn() ? 'auto' : 'suggest';
     }
 
-    private function isOpenDate(int $supplierId, string $date): bool
+    /**
+     * Smí se k tomuhle datu vůbec účtovat? Období musí být `open` a datum za měkkým
+     * zámkem `locked_until`. Veřejné, protože stejnou otázku si musí položit i
+     * periodický přepočet fronty, PŘEDTÍM než engine cokoli zapíše — a dvě různé
+     * odpovědi na „je období otevřené" by v účetnictví byly to poslední, co chceme.
+     */
+    public function isOpenDate(int $supplierId, string $date): bool
     {
         $period = $this->periods->findForDate($supplierId, substr($date, 0, 10));
         if ($period === null || (string) $period['status'] !== 'open') {
