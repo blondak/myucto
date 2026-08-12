@@ -7151,6 +7151,8 @@ paths:
         Read-only, nic neopravuje. Faktury a dobropisy sdílející jednu šablonu (stejný digit skeleton) se posuzují jako jedna řada, aby se nehlásily falešné mezery způsobené tím druhým typem dokladu.
 
         Skenují se všechny tři osy číslování — dodavatel, klient s vlastní šablonou a kategorie tržby s vlastní šablonou. Doklad patří právě do jedné řady podle priority `klient → kategorie tržby → dodavatel`; skupinu v odpovědi rozlišuje dvojice `client_id` a `revenue_category_id` (0 = osa se neuplatnila).
+
+        Výčet `missing` (a `missing_preview`) je v každém období stropovaný na 500 položek, protože jediné chybně zadané číslo posune horní hranici řady o několik řádů. Skutečný počet mezer je vždy v `missing_total` a useknutí hlásí `missing_truncated`; souhrnné `total_missing` sčítá `missing_total`, ne délku výčtu.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, schema: { type: integer, minimum: 2000, maximum: 2100 }, description: "Default aktuální rok. Řady s period='none' (bez ročního resetu counteru) se skenují vždy celé bez ohledu na year." }

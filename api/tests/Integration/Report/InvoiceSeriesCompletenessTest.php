@@ -303,6 +303,46 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         self::assertSame([1, 2, 3, 4, 5, 6], $clientGroup['buckets'][0]['missing']);
     }
 
+    /**
+     * Jediné ručně zadané (nebo importem rozbité) číslo posune horní hranici řady o
+     * několik řádů. Výčet mezer se proto usekne, ale `missing_total` musí zůstat
+     * přesný — jinak by sestava tvrdila, že mezer je 500, a účetní by podle toho
+     * hledal 500 dokladů místo jednoho špatného čísla.
+     */
+    public function testHugeGapIsTruncatedButCountedExactly(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');
+
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}000001", 'invoice');
+        $this->insertInvoice("{$y}000002", 'invoice');
+        $this->insertInvoice("{$y}090000", 'invoice'); // překlep — řada vystřelí na 90 000
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+        $bucket = self::groupFor($series, 0, 0)['buckets'][0];
+
+        self::assertSame(90000, $bucket['range_to']);
+        self::assertSame(89997, $bucket['missing_total'], 'Počet mezer je 90000 - 3 obsazená čísla.');
+        self::assertTrue($bucket['missing_truncated']);
+        self::assertCount(500, $bucket['missing'], 'Výčet se musí useknout na strop.');
+        self::assertCount(500, $bucket['missing_preview']);
+        self::assertSame(3, $bucket['missing'][0], 'Useknutý výčet začíná od první skutečné mezery.');
+    }
+
+    public function testSmallGapIsNotMarkedTruncated(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}000001", 'invoice');
+        $this->insertInvoice("{$y}000003", 'invoice');
+
+        $bucket = self::groupFor($this->service->build($this->supplierId, self::YEAR), 0, 0)['buckets'][0];
+
+        self::assertSame([2], $bucket['missing']);
+        self::assertSame(1, $bucket['missing_total']);
+        self::assertFalse($bucket['missing_truncated']);
+    }
+
     public function testDifferentYearIsNotPolluted(): void
     {
         $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');

@@ -11173,6 +11173,7 @@
             "year_label": "Rok",
             "no_series": "Pro zvolený rok nejsou nastavené žádné číselné řady vydaných dokladů, nebo v nich nejsou žádné doklady.",
             "no_gaps": "Bez mezer — číselná řada je kompletní.",
+            "missing_truncated": "Zobrazeno prvních {shown} z {total} chybějících čísel. Takhle velký rozsah obvykle znamená ručně zadané nebo importem rozbité číslo, které řadu vystřelilo nahoru — zkontroluj nejvyšší doklad v období.",
             "type_invoice": "faktury",
             "type_credit_note": "dobropisy",
             "series_supplier": "Řada dodavatele",

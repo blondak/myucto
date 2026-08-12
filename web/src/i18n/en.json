@@ -11173,6 +11173,7 @@
             "year_label": "Year",
             "no_series": "No issued-document numbering series are configured for the selected year, or none of them have any documents.",
             "no_gaps": "No gaps — the numbering series is complete.",
+            "missing_truncated": "Showing the first {shown} of {total} missing numbers. A range this large usually means a manually entered or import-mangled number pushed the series up — check the highest document in the period.",
             "type_invoice": "invoices",
             "type_credit_note": "credit notes",
             "series_supplier": "Supplier series",

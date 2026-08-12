@@ -45,6 +45,9 @@ final class InvoiceSeriesCompletenessService
     /** Vydané doklady dle FR3 — proforma není daňový doklad, do auditu číselné řady nepatří. */
     private const SCANNED_TYPES = ['invoice', 'credit_note'];
 
+    /** Strop výčtu chybějících čísel v jednom období; `missing_total` zůstává přesné. */
+    private const MAX_LISTED_MISSING = 500;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
@@ -57,7 +60,8 @@ final class InvoiceSeriesCompletenessService
      *   period: string, template_by_type: array<string,string>,
      *   buckets: list<array{
      *     period_key: string, used_count: int, range_from: int, range_to: int,
-     *     missing: list<int>, missing_preview: list<string>,
+     *     missing: list<int>, missing_total: int, missing_truncated: bool,
+     *     missing_preview: list<string>,
      *   }>,
      * }>
      */
@@ -281,20 +285,33 @@ final class InvoiceSeriesCompletenessService
                 continue;
             }
             $max = max(array_keys($used));
+
+            // Počet mezer je aritmetika, ne výčet: všechna obsazená čísla leží v [1..$max],
+            // takže chybí právě $max - count($used). Díky tomu je celkové číslo správné
+            // i tehdy, když se výčet níže usekne.
+            $missingTotal = $max - count($used);
+
+            // Výčet je stropovaný. Jediný doklad s ručně zadaným (nebo importem
+            // rozbitým) číslem posune $max o několik řádů a report by pak stavěl
+            // statisícipoložkové pole i s vyrenderovanými náhledy — sestava se tím
+            // uvaří dřív, než ji stihne někdo přečíst. Useknutí se hlásí ven, aby si
+            // uživatel nespletl "prvních 500" s "všechno".
             $missing = [];
-            for ($n = 1; $n <= $max; $n++) {
+            for ($n = 1; $n <= $max && count($missing) < self::MAX_LISTED_MISSING; $n++) {
                 if (!isset($used[$n])) {
                     $missing[] = $n;
                 }
             }
             $previewTemplate = $group['template_by_type'][$group['types'][0]];
             $buckets[] = [
-                'period_key'      => $bucketKey,
-                'used_count'      => count($used),
-                'range_from'      => 1,
-                'range_to'        => $max,
-                'missing'         => $missing,
-                'missing_preview' => array_map(
+                'period_key'        => $bucketKey,
+                'used_count'        => count($used),
+                'range_from'        => 1,
+                'range_to'          => $max,
+                'missing'           => $missing,
+                'missing_total'     => $missingTotal,
+                'missing_truncated' => $missingTotal > count($missing),
+                'missing_preview'   => array_map(
                     static fn (int $n): string => self::previewRender($previewTemplate, $bucketKey, $group['period'], $n),
                     $missing,
                 ),

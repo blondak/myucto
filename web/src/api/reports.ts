@@ -412,7 +412,11 @@ export interface InvoiceSeriesBucket {
   used_count: number
   range_from: number
   range_to: number
+  /** Stropovaný výčet chybějících čísel — viz missing_truncated. */
   missing: number[]
+  /** Skutečný počet mezer; může být vyšší než délka `missing`. */
+  missing_total: number
+  missing_truncated: boolean
   missing_preview: string[]
 }
 

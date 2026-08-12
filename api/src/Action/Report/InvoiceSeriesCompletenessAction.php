@@ -43,7 +43,9 @@ final class InvoiceSeriesCompletenessAction
         $totalMissing = 0;
         foreach ($series as $s) {
             foreach ($s['buckets'] as $b) {
-                $totalMissing += count($b['missing']);
+                // `missing` je stropovaný výčet, `missing_total` skutečný počet — souhrn
+                // musí sčítat ten druhý, jinak by u useknutého období hlásil méně mezer.
+                $totalMissing += $b['missing_total'];
             }
         }
 

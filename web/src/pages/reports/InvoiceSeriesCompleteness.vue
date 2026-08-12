@@ -126,6 +126,14 @@ onMounted(load)
                   <span v-if="bucket.missing.length === 0" class="text-emerald-600 text-xs">
                     {{ t('reports.series_completeness.no_gaps') }}
                   </span>
+                  <span v-else-if="bucket.missing_truncated" class="text-danger-500 font-mono text-xs">
+                    {{ bucket.missing_preview.join(', ') }}
+                    <span class="block mt-1 font-sans text-neutral-500 not-italic">
+                      {{ t('reports.series_completeness.missing_truncated', {
+                        shown: bucket.missing.length, total: bucket.missing_total,
+                      }) }}
+                    </span>
+                  </span>
                   <span v-else class="text-danger-500 font-mono text-xs">
                     {{ bucket.missing_preview.join(', ') }}
                   </span>
