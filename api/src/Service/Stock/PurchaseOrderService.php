@@ -167,7 +167,42 @@ final class PurchaseOrderService
         $order['invoice_links']       = $this->orders->invoiceLinks($supplierId, (int) $order['id']);
         $order['receipts']            = $this->orders->receiptDocuments($supplierId, (int) $order['id']);
 
-        return $order;
+        // Popisky stran a skladu — detail musí nést stejná pole jako řádek seznamu,
+        // jinak by karta objednávky ukazovala u dodavatele pomlčku i tam, kde ho
+        // seznam vypisuje jménem.
+        return array_merge($order, $this->labels($supplierId, $order));
+    }
+
+    /**
+     * Názvy navázaných číselníků jedním dotazem (dodavatel, sklad, měna).
+     *
+     * @param array<string,mixed> $order
+     * @return array<string,mixed>
+     */
+    private function labels(int $supplierId, array $order): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT c.company_name AS vendor_name,
+                    w.code AS warehouse_code, w.name AS warehouse_name,
+                    cur.code AS currency_code
+               FROM purchase_orders o
+          LEFT JOIN clients c ON c.id = o.vendor_id AND c.supplier_id = o.supplier_id
+          LEFT JOIN warehouses w ON w.id = o.warehouse_id AND w.supplier_id = o.supplier_id
+          LEFT JOIN currencies cur ON cur.id = o.currency_id AND cur.supplier_id = o.supplier_id
+              WHERE o.supplier_id = ? AND o.id = ?'
+        );
+        $stmt->execute([$supplierId, (int) $order['id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return [];
+        }
+
+        return [
+            'vendor_name'    => $row['vendor_name'] !== null ? (string) $row['vendor_name'] : null,
+            'warehouse_code' => $row['warehouse_code'] !== null ? (string) $row['warehouse_code'] : null,
+            'warehouse_name' => $row['warehouse_name'] !== null ? (string) $row['warehouse_name'] : null,
+            'currency_code'  => $row['currency_code'] !== null ? (string) $row['currency_code'] : null,
+        ];
     }
 
     // ── stavový automat ──────────────────────────────────────────────────────

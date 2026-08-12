@@ -47,6 +47,29 @@ final class PurchaseOrderLifecycleTest extends StockTestCase
         self::assertSame('10.000', $order['lines'][0]['qty_remaining']);
     }
 
+    /**
+     * Detail musí nést tytéž popisky jako řádek seznamu. Bez toho ukazovala karta
+     * objednávky u dodavatele pomlčku, přestože ho seznam vypisoval jménem
+     * (nalezeno při ověřování na dev).
+     */
+    public function testDetailCarriesTheSameLabelsAsTheListRow(): void
+    {
+        $sid   = $this->createSupplier();
+        $whId  = $this->warehouse($sid, 'DETAIL');
+        $item  = $this->item($sid, 'PO-1b');
+        $order = $this->createOrder($sid, $whId, [
+            ['stock_item_id' => $item, 'qty_ordered' => '1', 'unit_price' => '1'],
+        ]);
+
+        self::assertSame('Dodavatel objednávek', $order['vendor_name']);
+        self::assertSame('DETAIL', $order['warehouse_code']);
+        self::assertSame('CZK', $order['currency_code']);
+
+        $detail = $this->orders->detail($sid, (int) $order['id']);
+        self::assertSame('Dodavatel objednávek', $detail['vendor_name']);
+        self::assertSame('DETAIL', $detail['warehouse_code']);
+    }
+
     public function testSendAssignsNumberFromObjSeriesAndIsIdempotent(): void
     {
         $sid  = $this->createSupplier();
