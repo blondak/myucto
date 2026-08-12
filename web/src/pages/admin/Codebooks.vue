@@ -14,6 +14,7 @@ import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbol'
 import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -275,34 +276,71 @@ async function removeExpense(c: ExpenseCategory) {
 }
 
 // ─── Revenue categories (kategorie tržeb pro CRM/Stats rozpad) ─────────
+type RevenueNumberingField = 'invoice_number_format' | 'proforma_number_format' | 'credit_note_number_format'
+
 const revenueCategories = ref<RevenueCategory[]>([])
-const revenueDraft = reactive({
+const emptyRevenueDraft = () => ({
   id: 0,
   code: '',
   label: '',
   display_order: 0,
   archived: false,
+  // Vlastní číselná řada (migrace 1333) — prázdné = dědí se z dodavatele.
+  invoice_number_format: '' as string,
+  proforma_number_format: '' as string,
+  credit_note_number_format: '' as string,
+  invoice_number_period: null as 'year' | 'month' | 'none' | null,
 })
+const revenueDraft = reactive(emptyRevenueDraft())
 const revenueOpen = ref(false)
 const revenueSlug = useAutoSlug((s) => { revenueDraft.code = s }, { maxLen: 20 })
+
+const revenueHasNumbering = computed(() =>
+  !!(revenueDraft.invoice_number_format || revenueDraft.proforma_number_format || revenueDraft.credit_note_number_format))
+
+/**
+ * Živý náhled řady kategorie. Counter úmyslně 1 — skutečnou hodnotu zná až DB
+ * (a při vystavení ji dodá /api/invoices/preview-varsymbol); tady jde o kontrolu
+ * tvaru šablony, ne o predikci konkrétního čísla.
+ */
+function revenueNumberingPreview(field: RevenueNumberingField): string {
+  return renderVarsymbolTemplate(revenueDraft[field], new Date(), 1)
+}
+
+function revenueNumberingWarning(field: RevenueNumberingField): string {
+  const tpl = revenueDraft[field]
+  if (!tpl || hasCounterPlaceholder(tpl)) return ''
+  return t('revenue_categories.numbering_must_have_counter')
+}
 
 async function loadRevenueCategories() {
   revenueCategories.value = await revenueCategoriesApi.list(true)
 }
 
 function newRevenue() {
-  Object.assign(revenueDraft, { id: 0, code: '', label: '', display_order: 0, archived: false })
+  Object.assign(revenueDraft, emptyRevenueDraft())
   revenueSlug.init('', false)
   revenueOpen.value = true
 }
 
 function editRevenue(c: RevenueCategory) {
-  Object.assign(revenueDraft, c)
+  Object.assign(revenueDraft, emptyRevenueDraft(), c, {
+    invoice_number_format: c.invoice_number_format ?? '',
+    proforma_number_format: c.proforma_number_format ?? '',
+    credit_note_number_format: c.credit_note_number_format ?? '',
+    invoice_number_period: c.invoice_number_period ?? null,
+  })
   revenueSlug.init(revenueDraft.code, true)
   revenueOpen.value = true
 }
 
 async function saveRevenue() {
+  const numbering = {
+    invoice_number_format: revenueDraft.invoice_number_format || null,
+    proforma_number_format: revenueDraft.proforma_number_format || null,
+    credit_note_number_format: revenueDraft.credit_note_number_format || null,
+    invoice_number_period: revenueDraft.invoice_number_period,
+  }
   try {
     if (revenueDraft.id) {
       await revenueCategoriesApi.update(revenueDraft.id, {
@@ -310,12 +348,14 @@ async function saveRevenue() {
         label: revenueDraft.label,
         display_order: revenueDraft.display_order,
         archived: revenueDraft.archived,
+        ...numbering,
       })
     } else {
       await revenueCategoriesApi.create({
         code: revenueDraft.code,
         label: revenueDraft.label,
         display_order: revenueDraft.display_order,
+        ...numbering,
       })
     }
     revenueOpen.value = false
@@ -1688,7 +1728,7 @@ watch(tab, (newTab) => {
 
     <!-- Revenue category modal -->
     <div v-if="revenueOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
+      <div class="bg-surface rounded-xl shadow-lg max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-semibold mb-3">
           {{ revenueDraft.id ? t('revenue_categories.edit_title') : t('revenue_categories.new_title') }}
         </h3>
@@ -1716,6 +1756,39 @@ watch(tab, (newTab) => {
             <input v-model="revenueDraft.archived" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('revenue_categories.archive') }}
           </label>
+
+          <!-- Vlastní číselná řada kategorie (volitelná) — vzor viz ClientForm.vue -->
+          <details class="pt-3 border-t border-neutral-100" :open="revenueHasNumbering">
+            <summary class="cursor-pointer text-sm font-medium text-neutral-700">
+              {{ t('revenue_categories.numbering_section') }}
+            </summary>
+            <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('revenue_categories.numbering_hint') }}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div v-for="field in (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format'] as const)" :key="field">
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t(`revenue_categories.${field}`) }}</label>
+                <input v-model="revenueDraft[field]" type="text" maxlength="60"
+                  :placeholder="field === 'proforma_number_format' ? '9{YY}{CCCC}' : '{YY}{CCCC}'"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                <p v-if="revenueNumberingWarning(field)" class="text-xs text-warning-600 mt-1">
+                  {{ revenueNumberingWarning(field) }}
+                </p>
+                <p v-else-if="revenueDraft[field]" class="text-xs text-neutral-500 mt-1 font-mono">
+                  {{ t('revenue_categories.numbering_preview') }}: {{ revenueNumberingPreview(field) }}
+                </p>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('revenue_categories.invoice_number_period') }}</label>
+                <select v-model="revenueDraft.invoice_number_period"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                  <option :value="null">{{ t('revenue_categories.numbering_period_inherit') }}</option>
+                  <option value="year">{{ t('revenue_categories.numbering_period_year') }}</option>
+                  <option value="month">{{ t('revenue_categories.numbering_period_month') }}</option>
+                  <option value="none">{{ t('revenue_categories.numbering_period_none') }}</option>
+                </select>
+              </div>
+            </div>
+            <p class="text-xs text-neutral-500 mt-2">{{ t('revenue_categories.numbering_placeholders_hint') }}</p>
+          </details>
         </div>
         <div class="flex justify-end gap-2 pt-4 mt-3 border-t border-neutral-200">
           <button @click="revenueOpen = false" :class="btnOutline('neutral')">

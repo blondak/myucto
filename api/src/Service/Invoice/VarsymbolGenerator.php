@@ -12,16 +12,20 @@ use Psr\Log\LoggerInterface;
 /**
  * Generuje var. symbol (číslo faktury).
  *
- * Resolver template per (client, supplier, type) — clients.{type}_number_format má
- * nejvyšší prioritu, dál supplier.{type}_number_format, fallback na
- * cfg.varsymbol.templates.{type}. Period scope (year/month/none) řídí, kdy se
- * counter resetuje; per-client clients.invoice_number_period má prioritu, dál
- * supplier.invoice_number_period (legacy default 'month').
+ * Resolver template per (client, kategorie tržby, supplier, type) — nejvyšší prioritu
+ * má clients.{type}_number_format, pak revenue_categories.{type}_number_format, dál
+ * supplier.{type}_number_format a fallback na cfg.varsymbol.templates.{type}. Klient
+ * je nad kategorií záměrně: per-client řada se sjednávala s konkrétním odběratelem
+ * a nesmí ji přebít plošné nastavení kategorie. Period scope (year/month/none) řídí,
+ * kdy se counter resetuje; období si nese ta úroveň, která template vyhrála
+ * (clients/revenue_categories.invoice_number_period), jinak supplier.invoice_number_period
+ * (legacy default 'month').
  *
  * Counter se atomicky inkrementuje v `invoice_counters` per
- * (supplier_id, client_id, invoice_type, period). `client_id = 0` značí
- * supplier-wide counter (žádný per-client template) — tak existující řady
- * pokračují beze změny.
+ * (supplier_id, client_id, revenue_category_id, invoice_type, period). Scope drží
+ * právě jednu vyhrávající osu: vyhraje-li klient, je `revenue_category_id = 0`;
+ * vyhraje-li kategorie, je `client_id = 0`; bez obojího jsou obě 0 = supplier-wide
+ * counter, takže existující řady pokračují beze změny.
  *
  * Placeholdery v template:
  *   {YYYY} = 4-digit year      ("2026")
@@ -76,12 +80,19 @@ final class VarsymbolGenerator
      * a tuto metodu nezavolá — viz IssueInvoiceAction.
      *
      * `$clientId` = 0 znamená "supplier-wide counter" (per-client template není
-     * nastavený, použije se supplier-level template + jeho counter).
+     * nastavený, použije se supplier-level template + jeho counter). Totéž platí pro
+     * `$revenueCategoryId` = 0.
      *
-     * @throws \InvalidArgumentException pokud typ nemá template ani v clients, ani v supplier, ani v cfg
+     * @throws \InvalidArgumentException pokud typ nemá template ani v clients, ani
+     *                                   v revenue_categories, ani v supplier, ani v cfg
      */
-    public function next(int $supplierId, string $invoiceType, ?\DateTimeInterface $for = null, int $clientId = 0): string
-    {
+    public function next(
+        int $supplierId,
+        string $invoiceType,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): string {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException("Neplatný supplier_id: {$supplierId}");
         }
@@ -90,7 +101,8 @@ final class VarsymbolGenerator
             throw new \InvalidArgumentException("Nepodporovaný typ pro varsymbol: {$invoiceType}");
         }
 
-        [$template, $period, $counterClientId] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId);
+        [$template, $period, $counterClientId, $counterCategoryId] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
         if ($template === '') {
             throw new \InvalidArgumentException(
                 "Chybí template pro {$invoiceType}: nastav v Systém → Dodavatelé → Číslování faktur,"
@@ -100,7 +112,7 @@ final class VarsymbolGenerator
 
         $for       = $for ?? new \DateTimeImmutable('today');
         $periodKey = $this->makePeriodKey($period, $for);
-        $next      = $this->incrementCounter($supplierId, $counterClientId, $invoiceType, $periodKey);
+        $next      = $this->incrementCounter($supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey);
         $rendered  = $this->render($template, $for, $next);
 
         // Template bez counteru ({C+}) → číslo je fixní, nelze nic přeskakovat.
@@ -119,7 +131,7 @@ final class VarsymbolGenerator
         $startedAt = $next;
         $highest = $this->highestUsedCounter($supplierId, $template, $for);
         if ($highest >= $next) {
-            $next     = $this->liftCounterTo($supplierId, $counterClientId, $invoiceType, $periodKey, $highest + 1);
+            $next     = $this->liftCounterTo($supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey, $highest + 1);
             $rendered = $this->render($template, $for, $next);
         }
 
@@ -131,18 +143,19 @@ final class VarsymbolGenerator
                     . " pokusech (typ {$invoiceType}, období {$periodKey}). Zkontroluj číselnou řadu nebo zadej číslo ručně."
                 );
             }
-            $next     = $this->incrementCounter($supplierId, $counterClientId, $invoiceType, $periodKey);
+            $next     = $this->incrementCounter($supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey);
             $rendered = $this->render($template, $for, $next);
         }
 
         $this->logger?->warning('varsymbol: counter byl pozadu, automaticky posunut na volné číslo', [
-            'supplier_id'   => $supplierId,
-            'client_id'     => $counterClientId,
-            'invoice_type'  => $invoiceType,
-            'period'        => $periodKey,
-            'from_counter'  => $startedAt,
-            'to_counter'    => $next,
-            'varsymbol'     => $rendered,
+            'supplier_id'         => $supplierId,
+            'client_id'           => $counterClientId,
+            'revenue_category_id' => $counterCategoryId,
+            'invoice_type'        => $invoiceType,
+            'period'              => $periodKey,
+            'from_counter'        => $startedAt,
+            'to_counter'          => $next,
+            'varsymbol'           => $rendered,
         ]);
 
         return $rendered;
@@ -156,14 +169,20 @@ final class VarsymbolGenerator
      *
      * @return int Nová (případně beze změny) hodnota counteru pro danou scope.
      */
-    public function syncCounter(int $supplierId, string $invoiceType, ?\DateTimeInterface $for = null, int $clientId = 0): int
-    {
+    public function syncCounter(
+        int $supplierId,
+        string $invoiceType,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): int {
         $invoiceType = self::normalizeType($invoiceType);
         if ($supplierId <= 0 || !in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             return 0;
         }
 
-        [$template, $period, $counterClientId] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId);
+        [$template, $period, $counterClientId, $counterCategoryId] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
         if ($template === '' || !$this->hasCounterPlaceholder($template)) {
             return 0;
         }
@@ -175,7 +194,7 @@ final class VarsymbolGenerator
             return 0;
         }
 
-        return $this->liftCounterTo($supplierId, $counterClientId, $invoiceType, $periodKey, $highest);
+        return $this->liftCounterTo($supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey, $highest);
     }
 
     /**
@@ -184,8 +203,9 @@ final class VarsymbolGenerator
      * syncCounter()/liftCounterTo() umí counter i snížit — kolize s už vystavenými
      * čísly řeší samoopravná logika v next() (přeskočí na první volné číslo).
      *
-     * Scope je vždy supplier-wide (client_id = 0); per-client řady se nastavují
-     * přes template na klientovi a jejich counter se dorovnává automaticky.
+     * Scope je vždy supplier-wide (client_id = 0, revenue_category_id = 0); řady
+     * klienta i kategorie tržby se nastavují přes vlastní template a jejich counter
+     * se dorovnává automaticky.
      *
      * @return array{counter:int, period:string, preview:string}
      * @throws \InvalidArgumentException neplatný vstup, chybějící template
@@ -204,7 +224,7 @@ final class VarsymbolGenerator
             throw new \InvalidArgumentException('next_number musí být >= 1.');
         }
 
-        [$template, $period] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, 0);
+        [$template, $period] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, 0, 0);
         if ($template === '') {
             throw new \InvalidArgumentException(
                 "Chybí template pro {$invoiceType}: nastav v Systém → Dodavatelé → Číslování faktur,"
@@ -221,8 +241,8 @@ final class VarsymbolGenerator
         $periodKey = $this->makePeriodKey($period, $for);
 
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO invoice_counters (supplier_id, client_id, invoice_type, period, last_number)
-             VALUES (?, 0, ?, ?, ?)
+            'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+             VALUES (?, 0, 0, ?, ?, ?)
              ON DUPLICATE KEY UPDATE last_number = VALUES(last_number)'
         );
         $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1]);
@@ -319,34 +339,46 @@ final class VarsymbolGenerator
      * Zvedne counter dané scope na minimálně $value (GREATEST) a vrátí výslednou hodnotu.
      * Nikdy nesnižuje.
      */
-    private function liftCounterTo(int $supplierId, int $clientId, string $invoiceType, string $periodKey, int $value): int
-    {
+    private function liftCounterTo(
+        int $supplierId,
+        int $clientId,
+        int $revenueCategoryId,
+        string $invoiceType,
+        string $periodKey,
+        int $value,
+    ): int {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'INSERT INTO invoice_counters (supplier_id, client_id, invoice_type, period, last_number)
-             VALUES (?, ?, ?, ?, ?)
+            'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE last_number = GREATEST(last_number, VALUES(last_number))'
         );
-        $stmt->execute([$supplierId, $clientId, $invoiceType, $periodKey, $value]);
+        $stmt->execute([$supplierId, $clientId, $revenueCategoryId, $invoiceType, $periodKey, $value]);
 
         $sel = $pdo->prepare(
             'SELECT last_number FROM invoice_counters
-              WHERE supplier_id = ? AND client_id = ? AND invoice_type = ? AND period = ?'
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?'
         );
-        $sel->execute([$supplierId, $clientId, $invoiceType, $periodKey]);
+        $sel->execute([$supplierId, $clientId, $revenueCategoryId, $invoiceType, $periodKey]);
         return (int) $sel->fetchColumn();
     }
 
     /**
      * Vrátí, jaký bude další varsymbol BEZ inkrementu (pro náhled v UI).
      */
-    public function preview(int $supplierId, string $invoiceType, ?\DateTimeInterface $for = null, int $clientId = 0): string
-    {
+    public function preview(
+        int $supplierId,
+        string $invoiceType,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): string {
         if ($supplierId <= 0) return '';
         $invoiceType = self::normalizeType($invoiceType);
         if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) return '';
 
-        [$template, $period, $counterClientId] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId);
+        [$template, $period, $counterClientId, $counterCategoryId] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
         if ($template === '') return '';
 
         $for       = $for ?? new \DateTimeImmutable('today');
@@ -354,9 +386,9 @@ final class VarsymbolGenerator
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT last_number FROM invoice_counters
-              WHERE supplier_id = ? AND client_id = ? AND invoice_type = ? AND period = ?'
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?'
         );
-        $stmt->execute([$supplierId, $counterClientId, $invoiceType, $periodKey]);
+        $stmt->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey]);
         $current = (int) ($stmt->fetchColumn() ?: 0);
 
         return $this->render($template, $for, $current + 1);
@@ -373,14 +405,21 @@ final class VarsymbolGenerator
      *
      * @return bool true pokud byl counter dekrementován
      */
-    public function releaseIfLatest(int $supplierId, string $invoiceType, string $varsymbol, ?\DateTimeInterface $for = null, int $clientId = 0): bool
-    {
+    public function releaseIfLatest(
+        int $supplierId,
+        string $invoiceType,
+        string $varsymbol,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): bool {
         $invoiceType = self::normalizeType($invoiceType);
         if ($supplierId <= 0 || $varsymbol === '' || !in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             return false;
         }
 
-        [$template, $period, $counterClientId] = $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId);
+        [$template, $period, $counterClientId, $counterCategoryId] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
         if ($template === '') return false;
 
         $for       = $for ?? new \DateTimeImmutable('today');
@@ -389,9 +428,9 @@ final class VarsymbolGenerator
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'SELECT last_number FROM invoice_counters
-              WHERE supplier_id = ? AND client_id = ? AND invoice_type = ? AND period = ?'
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?'
         );
-        $stmt->execute([$supplierId, $counterClientId, $invoiceType, $periodKey]);
+        $stmt->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey]);
         $current = (int) ($stmt->fetchColumn() ?: 0);
         if ($current <= 0) return false;
 
@@ -401,9 +440,10 @@ final class VarsymbolGenerator
 
         $upd = $pdo->prepare(
             'UPDATE invoice_counters SET last_number = last_number - 1
-              WHERE supplier_id = ? AND client_id = ? AND invoice_type = ? AND period = ? AND last_number = ?'
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?
+                AND last_number = ?'
         );
-        $upd->execute([$supplierId, $counterClientId, $invoiceType, $periodKey, $current]);
+        $upd->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey, $current]);
 
         return $upd->rowCount() > 0;
     }
@@ -427,18 +467,20 @@ final class VarsymbolGenerator
     }
 
     /**
-     * Vrátí [template, period, counterClientId].
+     * Vrátí [template, period, counterClientId, counterRevenueCategoryId].
      *
-     * counterClientId určuje scope counteru:
-     *   - když má klient vlastní template, vrátí se $clientId (per-client counter)
-     *   - když dědí ze supplieru, vrátí se 0 (supplier-wide counter)
+     * Poslední dvě hodnoty určují scope counteru — nastavená je vždy nejvýš JEDNA
+     * z nich, podle toho, která úroveň dodala template:
+     *   - vlastní template klienta   → [$clientId, 0]   (per-client counter)
+     *   - vlastní template kategorie → [0, $categoryId] (per-kategorii counter)
+     *   - dědí se ze supplieru/cfg   → [0, 0]           (supplier-wide counter)
      *
-     * Tím se zajistí, že supplier-wide řada zůstane konzistentní napříč klienty, kteří
-     * žádný vlastní formát nemají, a per-client klienti mají svůj nezávislý counter.
+     * Tím supplier-wide řada zůstane konzistentní napříč klienty i kategoriemi, které
+     * vlastní formát nemají, a obě specifičtější osy mají nezávislý counter.
      *
-     * @return array{0: string, 1: string, 2: int}
+     * @return array{0: string, 1: string, 2: int, 3: int}
      */
-    private function resolveTemplateAndPeriod(int $supplierId, string $invoiceType, int $clientId): array
+    private function resolveTemplateAndPeriod(int $supplierId, string $invoiceType, int $clientId, int $revenueCategoryId): array
     {
         $supStmt = $this->db->pdo()->prepare(
             'SELECT invoice_number_format, proforma_number_format, credit_note_number_format,
@@ -454,6 +496,8 @@ final class VarsymbolGenerator
             'credit_note' => 'credit_note_number_format',
         };
 
+        $supplierPeriod = (string) ($supRow['invoice_number_period'] ?? self::DEFAULT_PERIOD);
+
         $clientTemplate = '';
         $clientPeriod = null;
         if ($clientId > 0) {
@@ -468,9 +512,22 @@ final class VarsymbolGenerator
         }
 
         if ($clientTemplate !== '') {
-            $period = $clientPeriod !== null ? (string) $clientPeriod : (string) ($supRow['invoice_number_period'] ?? self::DEFAULT_PERIOD);
-            if (!in_array($period, self::VALID_PERIODS, true)) $period = self::DEFAULT_PERIOD;
-            return [$clientTemplate, $period, $clientId];
+            return [$clientTemplate, $this->normalizePeriod($clientPeriod, $supplierPeriod), $clientId, 0];
+        }
+
+        // Kategorie tržby — druhá nejspecifičtější osa. Čte se VÝHRADNĚ v rámci
+        // supplier_id (tenant izolace): cizí kategorie nesmí ovlivnit číslování.
+        if ($revenueCategoryId > 0) {
+            $catStmt = $this->db->pdo()->prepare(
+                "SELECT {$col} AS tpl, invoice_number_period AS period
+                   FROM revenue_categories WHERE id = ? AND supplier_id = ? LIMIT 1"
+            );
+            $catStmt->execute([$revenueCategoryId, $supplierId]);
+            $catRow = $catStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $catTemplate = trim((string) ($catRow['tpl'] ?? ''));
+            if ($catTemplate !== '') {
+                return [$catTemplate, $this->normalizePeriod($catRow['period'] ?? null, $supplierPeriod), 0, $revenueCategoryId];
+            }
         }
 
         $supplierTemplate = trim((string) ($supRow[$col] ?? ''));
@@ -478,10 +535,14 @@ final class VarsymbolGenerator
             ? $supplierTemplate
             : (string) $this->config->get("varsymbol.templates.{$invoiceType}", '');
 
-        $period = (string) ($supRow['invoice_number_period'] ?? self::DEFAULT_PERIOD);
-        if (!in_array($period, self::VALID_PERIODS, true)) $period = self::DEFAULT_PERIOD;
+        return [$template, $this->normalizePeriod(null, $supplierPeriod), 0, 0];
+    }
 
-        return [$template, $period, 0];
+    /** Override období, jinak supplier-level; nesmysl padá na legacy default 'month'. */
+    private function normalizePeriod(mixed $override, string $supplierPeriod): string
+    {
+        $period = $override !== null ? (string) $override : $supplierPeriod;
+        return in_array($period, self::VALID_PERIODS, true) ? $period : self::DEFAULT_PERIOD;
     }
 
     /**
@@ -499,22 +560,27 @@ final class VarsymbolGenerator
         };
     }
 
-    private function incrementCounter(int $supplierId, int $clientId, string $invoiceType, string $periodKey): int
-    {
+    private function incrementCounter(
+        int $supplierId,
+        int $clientId,
+        int $revenueCategoryId,
+        string $invoiceType,
+        string $periodKey,
+    ): int {
         $pdo = $this->db->pdo();
 
         $stmt = $pdo->prepare(
-            'INSERT INTO invoice_counters (supplier_id, client_id, invoice_type, period, last_number)
-             VALUES (?, ?, ?, ?, 1)
+            'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+             VALUES (?, ?, ?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE last_number = last_number + 1'
         );
-        $stmt->execute([$supplierId, $clientId, $invoiceType, $periodKey]);
+        $stmt->execute([$supplierId, $clientId, $revenueCategoryId, $invoiceType, $periodKey]);
 
         $stmt = $pdo->prepare(
             'SELECT last_number FROM invoice_counters
-              WHERE supplier_id = ? AND client_id = ? AND invoice_type = ? AND period = ?'
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?'
         );
-        $stmt->execute([$supplierId, $clientId, $invoiceType, $periodKey]);
+        $stmt->execute([$supplierId, $clientId, $revenueCategoryId, $invoiceType, $periodKey]);
         return (int) $stmt->fetchColumn();
     }
 }

@@ -11,6 +11,7 @@ use MyInvoice\Repository\RevenueCategoryRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\InvoiceNumberFormat;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -130,6 +131,18 @@ final class RevenueCategoriesAction
         if ($label === '' || strlen($label) > 100) {
             return 'Label povinný, max 100 znaků.';
         }
+
+        // Vlastní číselná řada kategorie (migrace 1333) — TÁŽ pravidla jako per-client
+        // řada na klientovi, proto sdílený {@see InvoiceNumberFormat}, ne vlastní regex.
+        try {
+            foreach (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format'] as $col) {
+                InvoiceNumberFormat::templateOrNull($body[$col] ?? null, $col);
+            }
+            InvoiceNumberFormat::periodOrNull($body['invoice_number_period'] ?? null, 'invoice_number_period');
+        } catch (\InvalidArgumentException $e) {
+            return $e->getMessage();
+        }
+
         return null;
     }
 }

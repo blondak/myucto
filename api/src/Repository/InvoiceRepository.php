@@ -647,6 +647,65 @@ final class InvoiceRepository
             : VatLedgerService::MANUAL_REVIEW_SCOPE_ANY;
     }
 
+    /**
+     * Sentinel pro doklad BEZ kategorie tržby v `filter[revenue_category_id]`
+     * i `filter[revenue_category_exclude]`. Číselné ID by to vyjádřit nešlo —
+     * `revenue_category_id` je NULL a NULL se do IN/NOT IN nechytá.
+     */
+    public const REVENUE_CATEGORY_NONE = 'none';
+
+    /**
+     * Rozparsuje čárkou oddělený seznam kategorií tržby na vlastněná ID + sentinel `none`.
+     *
+     * Vrací `null`, když filtr nebyl zadaný (nebo v něm nebyl JEDINÝ použitelný token) —
+     * to je no-op, ne prázdný výsledek. Naopak zadané, ale CIZÍ ID zmizí až tady, takže
+     * volajícímu zbude prázdný seznam a on ho umí odlišit od nezadaného filtru; cizí
+     * tenant tak nezjistí ani to, jestli ID existuje.
+     *
+     * @return array{ids: list<int>, none: bool}|null
+     */
+    private function revenueCategorySelection(mixed $raw, int $supplierId): ?array
+    {
+        if (is_array($raw)) {
+            $tokens = $raw;
+        } elseif (is_scalar($raw)) {
+            $tokens = explode(',', (string) $raw);
+        } else {
+            return null;
+        }
+
+        $none = false;
+        $ids = [];
+        foreach ($tokens as $token) {
+            if (!is_scalar($token)) continue;
+            $token = trim((string) $token);
+            if ($token === '') continue;
+            if (strcasecmp($token, self::REVENUE_CATEGORY_NONE) === 0) {
+                $none = true;
+                continue;
+            }
+            if (ctype_digit($token) && (int) $token > 0) {
+                $ids[] = (int) $token;
+            }
+        }
+        if (!$none && $ids === []) return null;
+
+        $ids = array_values(array_unique($ids));
+        if ($ids !== []) {
+            // Bez tenanta nelze vlastnictví ověřit → nic není vlastní (raději prázdno než únik).
+            if ($supplierId <= 0) return ['ids' => [], 'none' => $none];
+            $place = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id FROM revenue_categories WHERE supplier_id = ? AND id IN ($place)"
+            );
+            $stmt->execute(array_merge([$supplierId], $ids));
+            $owned = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+            $ids = array_values(array_intersect($ids, $owned));
+        }
+
+        return ['ids' => $ids, 'none' => $none];
+    }
+
     public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
     {
         $where = ['1=1'];
@@ -676,6 +735,41 @@ final class InvoiceRepository
         if (!empty($filters['project_id'])) {
             $where[] = 'i.project_id = ?';
             $params[] = (int) $filters['project_id'];
+        }
+        // Kategorie tržby — dvě nezávislé množiny: `revenue_category_id` ponechá JEN vybrané,
+        // `revenue_category_exclude` vybrané skryje. Typický důvod pro exclude: drobné faktury
+        // za předplatné mají vlastní kategorii a v seznamu jen překáží. Zadané obojí = include
+        // vybere množinu a exclude ji zúží (obojí je AND ve WHERE).
+        $supplierId = (int) ($filters['supplier_id'] ?? 0);
+        $catInclude = $this->revenueCategorySelection($filters['revenue_category_id'] ?? null, $supplierId);
+        if ($catInclude !== null) {
+            $parts = [];
+            if ($catInclude['ids'] !== []) {
+                $place = implode(',', array_fill(0, count($catInclude['ids']), '?'));
+                $parts[] = "i.revenue_category_id IN ($place)";
+                foreach ($catInclude['ids'] as $id) $params[] = $id;
+            }
+            if ($catInclude['none']) $parts[] = 'i.revenue_category_id IS NULL';
+            // Zbyla-li po ověření vlastnictví prázdná množina (cizí / smazané ID), je správná
+            // odpověď PRÁZDNO. Tiché „nefiltrovat" by ukázalo všechno a uživatel by věřil, že
+            // vidí výběr.
+            $where[] = $parts === [] ? '1=0' : '(' . implode(' OR ', $parts) . ')';
+        }
+        $catExclude = $this->revenueCategorySelection($filters['revenue_category_exclude'] ?? null, $supplierId);
+        if ($catExclude !== null) {
+            // NULL sémantika: `revenue_category_id NOT IN (…)` je u dokladu BEZ kategorie
+            // UNKNOWN, takže by ho exclude vyhodil taky — a to nikdo nečeká. Doklady bez
+            // kategorie proto zůstávají, dokud uživatel nevyloučí i sentinel `none`.
+            if ($catExclude['ids'] !== []) {
+                $place = implode(',', array_fill(0, count($catExclude['ids']), '?'));
+                $where[] = $catExclude['none']
+                    ? "(i.revenue_category_id IS NOT NULL AND i.revenue_category_id NOT IN ($place))"
+                    : "(i.revenue_category_id IS NULL OR i.revenue_category_id NOT IN ($place))";
+                foreach ($catExclude['ids'] as $id) $params[] = $id;
+            } elseif ($catExclude['none']) {
+                $where[] = 'i.revenue_category_id IS NOT NULL';
+            }
+            // Prázdné ids bez `none` = vyloučené kategorie tenantovi nepatří → nevylučuje se nic.
         }
         if (!empty($filters['year'])) {
             // Sargovatelný půlotevřený rozsah místo YEAR(...) — využije idx_inv_supplier_efftax.

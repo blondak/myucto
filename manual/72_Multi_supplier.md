@@ -213,6 +213,26 @@ s chybou „Chybí counter".
 > 409 chybu při Vystavení, ale doporučujeme spolu s změnou cyklu **upravit
 > i šablonu** (pro `year` vyhoď `{MM}`, pro `none` vyhoď `{YY}` i `{MM}`).
 
+**Vlastní řada mimo dodavatele:**
+
+Šablonu lze přebít i na nižší úrovni. Uplatní se první vyplněná v tomto pořadí:
+
+| Priorita | Kde se nastavuje | Kdy to použít |
+|---|---|---|
+| 1. Zákazník | Detail zákazníka → **Vlastní číselná řada** | Odběratel, se kterým je sjednaná samostatná řada (typicky převod z jiného systému) |
+| 2. Kategorie tržby | Číselníky → **Kategorie tržeb** → *Vlastní číselná řada* | Oddělené řady podle druhu tržby (např. hosting × konzultace) napříč zákazníky |
+| 3. Dodavatel | Sekce výše | Standardní řada firmy |
+| 4. `cfg.varsymbol.templates` | Konfigurace instalace | Fallback, když není vyplněné nic |
+
+Každá vyhrávající úroveň má **vlastní počítadlo** — dvě kategorie tržeb s vlastní
+šablonou se navzájem nepřečíslovávají a supplier-wide řada jimi neproběhne.
+Nevyplněná pole se dědí, takže kategorie může mít vlastní řadu jen pro faktury
+a proformy nechat na dodavateli.
+
+> ⚠️ Šablony různých řad se musí lišit **číslicí**, ne jen písmenem nebo pomlčkou —
+> bankovní párování variabilní symbol normalizuje na číslice. Kolizi hlásí kontrola
+> v nastavení dodavatele (pokrývá řady dodavatele, zákazníků i kategorií tržeb).
+
 **Kde se to projeví:**
 
 - V editoru konceptu vidíš **placeholder** s předpokládaným číslem (preview).

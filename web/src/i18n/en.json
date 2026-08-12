@@ -7792,6 +7792,15 @@
         "unpaid_as_of_label": "Unpaid as of",
         "unpaid_as_of_hint": "Shows documents issued by the selected date that were not fully paid as of that day — regardless of today's status. Same definition as in the Balance report (Saldokonto).",
         "unpaid_as_of_clear": "Clear date filter",
+        "revenue_category_filter": "Revenue category",
+        "revenue_category_filter_excluded": "Revenue category excluded",
+        "revenue_category_filter_all": "All revenue categories",
+        "revenue_category_filter_none": "No category",
+        "revenue_category_filter_archived": "archived",
+        "revenue_category_filter_mode_include": "Show selected only",
+        "revenue_category_filter_mode_exclude": "Hide selected",
+        "revenue_category_filter_more": "+{n}",
+        "revenue_category_filter_hint": "Pick revenue categories and switch whether you want to see only them, or hide them instead — e.g. small subscription invoices. The \"No category\" option targets documents with no category set.",
         "oss_review_only_hint": "Documents with a line whose place of supply the system is unsure about. Some ended up in the OSS return (check the country and rate type), some stayed in the Czech VAT return on lines 1 and 2 (check whether they belong there).",
         "oss_review_scope": {
             "off": "Place of supply (OSS): all",
@@ -10154,7 +10163,8 @@
         "cz_nace_placeholder": "Search code or activity name…",
         "cz_nace_no_results": "No matching activity",
         "cz_nace_expired": "Code {code} expired on {date} (the codebook moved to NACE rev. 2.1). Filing still goes through, but the portal will flag it — please pick a successor.",
-        "cz_nace_unknown": "Code {code} is not in the current codebook. Filing still goes through, but the portal will flag it."
+        "cz_nace_unknown": "Code {code} is not in the current codebook. Filing still goes through, but the portal will flag it.",
+        "numbering_scope_revenue_category": "revenue category"
     },
     "oss_rates": {
         "hint": "VAT rates of EU member states used to verify OSS documents. This is a control codebook, not the rates used on documents — those live under VAT rates.",
@@ -10260,7 +10270,20 @@
         "archive": "Archive (hide from pickers)",
         "archived": "Archived",
         "archived_due_to_usage": "Category is in use — archived (hidden from pickers, history preserved).",
-        "delete_confirm": "Delete category \"{label}\"? If already used, will be archived instead."
+        "delete_confirm": "Delete category \"{label}\"? If already used, will be archived instead.",
+        "numbering_section": "Custom invoice numbering (optional)",
+        "numbering_hint": "Filling these gives invoices in this revenue category a separate series with its own counter. Leave empty to inherit the supplier-wide format. A client-specific series takes precedence over the category one.",
+        "invoice_number_format": "Invoices",
+        "proforma_number_format": "Proformas",
+        "credit_note_number_format": "Credit notes",
+        "invoice_number_period": "Counter reset",
+        "numbering_period_inherit": "Inherit from supplier",
+        "numbering_period_year": "Yearly (January 1)",
+        "numbering_period_month": "Monthly",
+        "numbering_period_none": "Never (single global counter)",
+        "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars).",
+        "numbering_preview": "Preview",
+        "numbering_must_have_counter": "Missing counter — add e.g. CCC in curly braces."
     },
     "codebooks": {
         "title": "Codebooks",

@@ -673,6 +673,7 @@ async function loadVarsymbolPreview() {
       form.value.invoice_type,
       form.value.issue_date,
       form.value.client_id ?? undefined,
+      form.value.revenue_category_id ?? undefined,
     )
     varsymbolAutoPreview.value = r.varsymbol
     varsymbolAutoHasTemplate.value = r.has_template
@@ -681,7 +682,7 @@ async function loadVarsymbolPreview() {
     varsymbolAutoHasTemplate.value = false
   }
 }
-watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id], () => {
+watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id], () => {
   if (loaded.value && editedStatus.value === 'draft') loadVarsymbolPreview()
 })
 

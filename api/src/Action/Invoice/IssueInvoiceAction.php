@@ -307,7 +307,13 @@ final class IssueInvoiceAction
             $varsymbol = $manualVarsymbol;
         } else {
             try {
-                $varsymbol = $this->varsymbol->next($supplierId, $invoice['invoice_type'], $issueDate, (int) $invoice['client_id']);
+                $varsymbol = $this->varsymbol->next(
+                    $supplierId,
+                    $invoice['invoice_type'],
+                    $issueDate,
+                    (int) $invoice['client_id'],
+                    (int) ($invoice['revenue_category_id'] ?? 0),
+                );
             } catch (\InvalidArgumentException | \RuntimeException $e) {
                 return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
             }

@@ -51,6 +51,12 @@ final class ListInvoicesAction
             'overdue'       => !empty($filter['overdue']),
             'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
             'booked'        => $filter['booked']      ?? null,
+            // Kategorie tržby, čárkou oddělené seznamy: `revenue_category_id` = ponechat jen
+            // tyhle, `revenue_category_exclude` = tyhle skrýt. Sentinel `none` = doklad bez
+            // kategorie. Ověření vlastnictví i sémantiku NULL řeší repository, ať filtr
+            // a jeho SQL nemají dvě různá pravidla.
+            'revenue_category_id'      => $filter['revenue_category_id']      ?? null,
+            'revenue_category_exclude' => $filter['revenue_category_exclude'] ?? null,
             // Doklady s řádkem k ručnímu posouzení místa plnění (OSS). Rozsah říká, kde
             // řádek leží: 'domestic' = mimo OSS (tiše v přiznání na ř. 1/2), 'oss' = v OSS
             // podání s otazníkem nad zemí či typem sazby, 'any' = obojí. Legacy `1`/`true`

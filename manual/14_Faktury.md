@@ -36,6 +36,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Měna | CZK / EUR / … |
 | Období | Tento měsíc / minulý měsíc / tento rok / minulý rok / vlastní rozsah |
 | Neuhrazené k datu | Datum — vypíše doklady vystavené do zvoleného dne, u kterých k tomu dni nebyla uhrazena celá částka |
+| Kategorie tržby | Výběr několika kategorií najednou + přepínač **Zobrazit jen vybrané / Skrýt vybrané** — viz níže |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
 | Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
@@ -51,6 +52,24 @@ historickému dni** (např. „kdo mi k 30. 6. dlužil"). Doklad zaplacený až 
 tomto dni se proto ve výpisu objeví (k danému dni ještě nebyl uhrazen), i
 když má dnes stav „Zaplaceno". Používá stejnou definici úhrady jako
 [Saldokonto](53_Saldokonto.md), takže si obě sestavy neodporují.
+
+#### Kategorie tržby
+
+Filtr bere **několik kategorií najednou** a přepínačem vedle něj rozhodneš, co s nimi:
+
+| Režim | Co vypíše |
+|---|---|
+| **Zobrazit jen vybrané** | Pouze doklady s některou z vybraných kategorií |
+| **Skrýt vybrané** | Všechno ostatní — typicky „ukaž mi velké faktury bez drobných za předplatné" |
+
+V nabídce je i volba **Bez kategorie** pro doklady, které kategorii vyplněnou nemají.
+Ta je důležitá u režimu **Skrýt vybrané**: doklady bez kategorie zůstávají ve výpisu,
+dokud mezi skrytými nezaškrtneš právě **Bez kategorie**. V seznamu jsou i archivované
+kategorie — visí na starých fakturách, takže bez nich by je nešlo dohledat ani skrýt.
+
+Filtr se zapisuje do URL i do [uložených
+filtrů](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni) včetně režimu, takže
+si pohled „prodej bez předplatného" uložíš a příště vyvoláš jedním klikem.
 
 #### Nejisté místo plnění (OSS)
 

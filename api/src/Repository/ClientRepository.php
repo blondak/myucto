@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Client\VendorDuplicateFinder;
+use MyInvoice\Service\Invoice\InvoiceNumberFormat;
 use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -793,22 +794,12 @@ final class ClientRepository
     }
 
     /**
-     * Per-client invoice template. Whitelistne placeholdery a délku, jinak null —
-     * uživatel by neměl protlačit neplatný template, který by VarsymbolGenerator
-     * vyhodil za invalid až při issue.
+     * Per-client invoice template. Pravidlo drží {@see InvoiceNumberFormat} — sdílí ho
+     * i číselník kategorií tržeb, který má vlastní řady na téže ose.
      */
     private function nullableTemplate(array $data, string $key): ?string
     {
-        $v = $this->nullable($data, $key);
-        if ($v === null) return null;
-        if (strlen($v) > 60) {
-            throw new \InvalidArgumentException("{$key} smí mít max 60 znaků.");
-        }
-        $stripped = preg_replace('/\{(YYYY|YY|MM|C+)\}/', '', $v) ?? '';
-        if (preg_match('/[{}]/', $stripped)) {
-            throw new \InvalidArgumentException("{$key} obsahuje neznámý placeholder. Dovolené: {YYYY} {YY} {MM} {C+}.");
-        }
-        return $v;
+        return InvoiceNumberFormat::templateOrNull($data[$key] ?? null, $key);
     }
 
     /**
@@ -816,12 +807,7 @@ final class ClientRepository
      */
     private function nullablePeriod(array $data, string $key): ?string
     {
-        $v = $this->nullable($data, $key);
-        if ($v === null) return null;
-        if (!in_array($v, ['year', 'month', 'none'], true)) {
-            throw new \InvalidArgumentException("{$key} musí být year, month nebo none.");
-        }
-        return $v;
+        return InvoiceNumberFormat::periodOrNull($data[$key] ?? null, $key);
     }
 
     /**

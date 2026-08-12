@@ -7792,6 +7792,15 @@
         "unpaid_as_of_label": "Neuhrazené k datu",
         "unpaid_as_of_hint": "Zobrazí doklady vystavené do zvoleného data, u kterých k tomu dni nebyla uhrazena celá částka — bez ohledu na dnešní stav. Stejná definice jako v Saldokontu.",
         "unpaid_as_of_clear": "Zrušit filtr na datum",
+        "revenue_category_filter": "Kategorie tržby",
+        "revenue_category_filter_excluded": "Kategorie tržby mimo",
+        "revenue_category_filter_all": "Všechny kategorie tržeb",
+        "revenue_category_filter_none": "Bez kategorie",
+        "revenue_category_filter_archived": "archivovaná",
+        "revenue_category_filter_mode_include": "Zobrazit jen vybrané",
+        "revenue_category_filter_mode_exclude": "Skrýt vybrané",
+        "revenue_category_filter_more": "+{n}",
+        "revenue_category_filter_hint": "Vyber kategorie tržeb a přepni, jestli chceš vidět jen je, nebo je naopak schovat — třeba drobné faktury za předplatné. Volba „Bez kategorie\" míří na doklady, které kategorii nemají vyplněnou.",
         "oss_review_only_hint": "Doklady s řádkem, u kterého si systém není jistý místem plnění. Část z nich se do OSS zařadila (ověřte zemi a typ sazby), část zůstala v tuzemském přiznání na ř. 1 a 2 (ověřte, jestli tam patří).",
         "oss_review_scope": {
             "off": "Místo plnění (OSS): vše",
@@ -10154,7 +10163,8 @@
         "cz_nace_placeholder": "Hledej kód nebo název činnosti…",
         "cz_nace_no_results": "Žádná činnost neodpovídá",
         "cz_nace_expired": "Kód {code} k {date} skončil platnost (číselník přešel na NACE rev. 2.1). Podání projde, ale portál na to upozorní — vyber prosím nástupce.",
-        "cz_nace_unknown": "Kód {code} v aktuálním číselníku není. Podání projde, ale portál na to upozorní."
+        "cz_nace_unknown": "Kód {code} v aktuálním číselníku není. Podání projde, ale portál na to upozorní.",
+        "numbering_scope_revenue_category": "kategorie tržby"
     },
     "oss_rates": {
         "hint": "Sazby DPH členských států, proti kterým se ověřují OSS doklady. Je to kontrolní číselník, ne sazby pro doklad — ty se zakládají v Sazbách DPH.",
@@ -10260,7 +10270,20 @@
         "archive": "Archivovat (skrýt z pickerů)",
         "archived": "Archivováno",
         "archived_due_to_usage": "Kategorie už je použitá — archivována (skryta z pickerů, ale zachová historii).",
-        "delete_confirm": "Smazat kategorii „{label}\"? Pokud je už použitá, jen ji archivuji."
+        "delete_confirm": "Smazat kategorii „{label}\"? Pokud je už použitá, jen ji archivuji.",
+        "numbering_section": "Vlastní číselná řada (volitelné)",
+        "numbering_hint": "Pokud zde vyplníš formát, dostanou faktury s touto kategorií tržby vlastní řadu s nezávislým počítadlem. Bez vyplnění se použije řada z nastavení dodavatele. Vlastní řada klienta má přednost před kategorií.",
+        "invoice_number_format": "Faktury",
+        "proforma_number_format": "Proformy",
+        "credit_note_number_format": "Dobropisy",
+        "invoice_number_period": "Reset počítadla",
+        "numbering_period_inherit": "Dědit z dodavatele",
+        "numbering_period_year": "Každý rok (1. ledna)",
+        "numbering_period_month": "Každý měsíc",
+        "numbering_period_none": "Nikdy (jedno globální počítadlo)",
+        "numbering_placeholders_hint": "Placeholdery (vždy ve složených závorkách): YYYY rok 4-místně · YY rok 2-místně · MM měsíc · C+ pořadové číslo, počet C určuje šířku (CCCC = 4 znaky).",
+        "numbering_preview": "Náhled",
+        "numbering_must_have_counter": "Chybí counter — vlož např. CCC ve složených závorkách."
     },
     "codebooks": {
         "title": "Číselníky",

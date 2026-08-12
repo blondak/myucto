@@ -366,10 +366,11 @@ final class InvoiceImportService
                         if ($route === 'issued') {
                             $type = (string) ($inv['invoice_type'] ?? 'invoice');
                             $cli  = (int) ($r['client_id'] ?? 0);
+                            $cat  = (int) ($r['revenue_category_id'] ?? 0);
                             // Kanonický tvar i tady: klíč scope se jinak u téhož dne
                             // rozdvojí podle toho, jestli soubor psal vodicí nuly.
                             $date = OssItemDeriver::canonicalDate($inv['issue_date'] ?? null) ?? '';
-                            $counterScopes[$type . '|' . $cli . '|' . $date] = [$type, $cli, $date];
+                            $counterScopes[$type . '|' . $cli . '|' . $cat . '|' . $date] = [$type, $cli, $cat, $date];
                         }
                     }
                     elseif ($r['status'] === 'skipped') $skipped++;
@@ -385,13 +386,13 @@ final class InvoiceImportService
         // nejvyšší importované číslo odpovídající aktuálnímu template (jinak no-op).
         // Selhání syncu nesmí shodit import — jen se přeskočí (generátor je i tak
         // duplicate-aware při dalším vystavení).
-        foreach ($counterScopes as [$type, $cli, $date]) {
+        foreach ($counterScopes as [$type, $cli, $cat, $date]) {
             if (!in_array($type, ['invoice', 'proforma', 'credit_note'], true)) {
                 continue;
             }
             try {
                 $for = $date !== '' ? new \DateTimeImmutable($date) : null;
-                $this->varsymbol->syncCounter($supplierId, $type, $for, $cli);
+                $this->varsymbol->syncCounter($supplierId, $type, $for, $cli, $cat);
             } catch (\Throwable) {
                 // ignore — best-effort dorovnání
             }
@@ -1115,6 +1116,9 @@ final class InvoiceImportService
             'status' => 'created',
             'invoice_id' => $invoiceId,
             'client_id' => $clientId,
+            // Kategorie tržby je od migrace 1333 další osa scope číselné řady — bez ní
+            // by se po importu dorovnal counter jiné řady, než ze které číslo pochází.
+            'revenue_category_id' => $revenueCategoryId,
             'client_created' => $clientResult['created'],
             'project_id' => $projectId,
             'varsymbol' => $varsymbol,

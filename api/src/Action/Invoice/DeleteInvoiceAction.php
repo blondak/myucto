@@ -109,7 +109,7 @@ final class DeleteInvoiceAction
         // do posouzení, zda force-delete maže výhradně nezaúčtované doklady.
         $children = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, invoice_type, varsymbol, status, issue_date, tax_date,
-                    effective_tax_date, booked_at
+                    effective_tax_date, booked_at, revenue_category_id
                FROM invoices
               WHERE parent_invoice_id = ?'
         );
@@ -224,7 +224,8 @@ final class DeleteInvoiceAction
                 $parentVs   = (string) ($existing['varsymbol'] ?? '');
                 if ($parentVs !== '' && in_array($parentType, ['invoice', 'proforma', 'credit_note'], true)) {
                     $issueDate = !empty($existing['issue_date']) ? new \DateTimeImmutable($existing['issue_date']) : null;
-                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentType, $parentVs, $issueDate, $clientId ?? 0)) {
+                    $parentCat = (int) ($existing['revenue_category_id'] ?? 0);
+                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentType, $parentVs, $issueDate, $clientId ?? 0, $parentCat)) {
                         $counterReleased[] = ['id' => $id, 'varsymbol' => $parentVs, 'type' => $parentType];
                     }
                 }
@@ -234,7 +235,8 @@ final class DeleteInvoiceAction
                 $cvs   = (string) ($child['varsymbol'] ?? '');
                 if ($cvs === '' || !in_array($ctype, ['invoice', 'proforma', 'credit_note'], true)) continue;
                 $cdate = !empty($child['issue_date']) ? new \DateTimeImmutable($child['issue_date']) : null;
-                if ($this->varsymbol->releaseIfLatest($supplierId, $ctype, $cvs, $cdate, $clientId ?? 0)) {
+                $ccat  = (int) ($child['revenue_category_id'] ?? 0);
+                if ($this->varsymbol->releaseIfLatest($supplierId, $ctype, $cvs, $cdate, $clientId ?? 0, $ccat)) {
                     $counterReleased[] = ['id' => (int) $child['id'], 'varsymbol' => $cvs, 'type' => $ctype];
                 }
             }

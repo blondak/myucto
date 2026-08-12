@@ -225,17 +225,24 @@ final class UpdateInvoiceAction
             }
 
             // 1) Uvolni staré číslo z původní řady (jen je-li poslední v counteru).
-            $oldDate   = !empty($existing['issue_date']) ? new \DateTimeImmutable((string) $existing['issue_date']) : null;
-            $oldClient = (int) ($existing['client_id'] ?? 0);
+            //    Kategorie tržby je další osa scope counteru (migrace 1333) — uvolňovat
+            //    se musí ze STEJNÉ scope, ve které se číslo přidělilo, tedy z té staré.
+            $oldDate     = !empty($existing['issue_date']) ? new \DateTimeImmutable((string) $existing['issue_date']) : null;
+            $oldClient   = (int) ($existing['client_id'] ?? 0);
+            $oldCategory = (int) ($existing['revenue_category_id'] ?? 0);
             if ($supplierId > 0 && $oldVs !== '') {
-                $this->varsymbol->releaseIfLatest($supplierId, $existingType, $oldVs, $oldDate, $oldClient);
+                $this->varsymbol->releaseIfLatest($supplierId, $existingType, $oldVs, $oldDate, $oldClient, $oldCategory);
             }
 
-            // 2) Přiděl nové číslo v řadě cílového typu (datum/klient z payloadu, fallback na staré).
-            $newDate   = !empty($body['issue_date']) ? new \DateTimeImmutable((string) $body['issue_date']) : ($oldDate ?? new \DateTimeImmutable('today'));
-            $newClient = isset($body['client_id']) ? (int) $body['client_id'] : $oldClient;
+            // 2) Přiděl nové číslo v řadě cílového typu (datum/klient/kategorie z payloadu,
+            //    fallback na staré). Změna kategorie sama o sobě NENÍ důvod k přečíslování —
+            //    tady jen bereme aktuální hodnotu, protože přečíslování už nastalo kvůli
+            //    změně typu dokladu.
+            $newDate     = !empty($body['issue_date']) ? new \DateTimeImmutable((string) $body['issue_date']) : ($oldDate ?? new \DateTimeImmutable('today'));
+            $newClient   = isset($body['client_id']) ? (int) $body['client_id'] : $oldClient;
+            $newCategory = array_key_exists('revenue_category_id', $body) ? (int) $body['revenue_category_id'] : $oldCategory;
             try {
-                $newVs = $this->varsymbol->next($supplierId, $requestedType, $newDate, $newClient);
+                $newVs = $this->varsymbol->next($supplierId, $requestedType, $newDate, $newClient, $newCategory);
             } catch (\InvalidArgumentException | \RuntimeException $e) {
                 return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
             }

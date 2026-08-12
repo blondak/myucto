@@ -1,6 +1,14 @@
 import { api } from './client'
 
-export interface RevenueCategory {
+/** Vlastní číselná řada kategorie (migrace 1333); null = dědí se z dodavatele. */
+export interface RevenueCategoryNumbering {
+  invoice_number_format: string | null
+  proforma_number_format: string | null
+  credit_note_number_format: string | null
+  invoice_number_period: 'year' | 'month' | 'none' | null
+}
+
+export interface RevenueCategory extends RevenueCategoryNumbering {
   id: number
   code: string
   label: string
@@ -10,7 +18,7 @@ export interface RevenueCategory {
   created_at: string
 }
 
-export interface RevenueCategoryCreatePayload {
+export interface RevenueCategoryCreatePayload extends Partial<RevenueCategoryNumbering> {
   code: string
   label: string
   display_order?: number

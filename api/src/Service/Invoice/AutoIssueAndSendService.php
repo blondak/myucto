@@ -215,7 +215,13 @@ final class AutoIssueAndSendService
 
         $issueDate  = new \DateTimeImmutable($invoice['issue_date']);
         $supplierId = (int) $invoice['supplier_id'];
-        $varsymbol  = $this->varsymbol->next($supplierId, $invoice['invoice_type'], $issueDate, (int) $invoice['client_id']);
+        $varsymbol  = $this->varsymbol->next(
+            $supplierId,
+            $invoice['invoice_type'],
+            $issueDate,
+            (int) $invoice['client_id'],
+            (int) ($invoice['revenue_category_id'] ?? 0),
+        );
         $snapshots  = $this->snapshots->build(
             (int) $invoice['client_id'],
             (int) $invoice['currency_id'],

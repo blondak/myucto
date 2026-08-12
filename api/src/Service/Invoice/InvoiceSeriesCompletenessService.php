@@ -30,6 +30,14 @@ use PDO;
  * Rozsah: report je vždy vázaný na jeden rok (`issue_date`), s výjimkou period='none'
  * (jediný globální counter bez ročního resetu), kde se vždy skenuje CELÁ historie —
  * jinak by report ročním řezem sám vyrobil falešnou mezeru na hranici roku.
+ *
+ * ZNÁMÉ OMEZENÍ: řady kategorií tržeb (`revenue_categories.*_number_format`, migrace
+ * 1333) tenhle sken zatím NEPOKRÝVÁ — scope se sbírá jen za dodavatele a klienty.
+ * Falešné mezery to nedělá (doklad s číslem z řady kategorie má jiný literál, takže
+ * regexu supplier-wide řady neodpovídá, a counter supplier-wide řady neinkrementoval);
+ * jen pro tyhle řady zatím report nevzniká. Pokud by šablona kategorie měla TÝŽ digit
+ * skeleton jako supplier-wide řada, jde o kolizi, kterou hlásí
+ * {@see VarsymbolSeriesCollisionChecker} — řeší se tam, ne tady.
  */
 final class InvoiceSeriesCompletenessService
 {

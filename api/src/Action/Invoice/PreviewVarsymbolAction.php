@@ -11,14 +11,16 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * GET /api/invoices/preview-varsymbol?type=invoice&issue_date=2026-05-06&client_id=7
+ * GET /api/invoices/preview-varsymbol?type=invoice&issue_date=2026-05-06&client_id=7&revenue_category_id=3
  *
  * Vrátí, jaký bude příští varsymbol pro aktuálního dodavatele + (volitelně) klienta +
- * daný typ + datum, BEZ inkrementu counteru. Slouží pro náhled v editoru faktury —
- * uživatel hned vidí, jaké číslo dostane při vystavení (pokud nepřepíše ručně).
+ * (volitelně) kategorie tržby + daný typ + datum, BEZ inkrementu counteru. Slouží pro
+ * náhled v editoru faktury — uživatel hned vidí, jaké číslo dostane při vystavení
+ * (pokud nepřepíše ručně).
  *
- * Když `client_id` chybí nebo klient nemá vlastní template, použije se supplier-wide
- * řada. Když má vlastní formát, vrátí se jeho per-client counter.
+ * Když `client_id` ani `revenue_category_id` nemá vlastní template, použije se
+ * supplier-wide řada; jinak counter té úrovně, která template dodala (priorita
+ * klient → kategorie → dodavatel, viz VarsymbolGenerator).
  *
  * Response: { "varsymbol": "JD2026-01", "has_template": true }
  *           { "varsymbol": "", "has_template": false }   pokud chybí template
@@ -40,6 +42,7 @@ final class PreviewVarsymbolAction
         $type     = (string) ($params['type'] ?? 'invoice');
         $date     = (string) ($params['issue_date'] ?? date('Y-m-d'));
         $clientId = (int) ($params['client_id'] ?? 0);
+        $category = (int) ($params['revenue_category_id'] ?? 0);
 
         // Kalendář (§ 31) se čísluje v řadě faktur — VarsymbolGenerator si typ normalizuje
         // sám, takže náhled ukáže číslo, které doklad při vystavení opravdu dostane.
@@ -53,7 +56,7 @@ final class PreviewVarsymbolAction
             $for = new \DateTimeImmutable('today');
         }
 
-        $varsymbol = $this->varsymbol->preview($supplierId, $type, $for, $clientId);
+        $varsymbol = $this->varsymbol->preview($supplierId, $type, $for, $clientId, $category);
 
         return Json::ok($response, [
             'varsymbol'    => $varsymbol,

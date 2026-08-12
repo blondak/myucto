@@ -168,7 +168,11 @@ function numberSeriesTypeLabel(type: 'invoice' | 'proforma' | 'credit_note'): st
 
 function numberSeriesSideLabel(side: NumberSeriesSide): string {
   const typeLabel = numberSeriesTypeLabel(side.type)
-  return side.client_name ? `${typeLabel} (${side.client_name})` : typeLabel
+  if (side.client_name) return `${typeLabel} (${side.client_name})`
+  if (side.revenue_category_name) {
+    return `${typeLabel} (${t('settings.numbering_scope_revenue_category')}: ${side.revenue_category_name})`
+  }
+  return typeLabel
 }
 
 const numberSeriesWarnings = computed<SeriesWarning[]>(() => {

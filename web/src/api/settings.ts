@@ -263,6 +263,8 @@ export interface NumberSeriesSide {
   type: 'invoice' | 'proforma' | 'credit_note'
   client_id: number | null
   client_name: string | null
+  revenue_category_id: number | null
+  revenue_category_name: string | null
   template: string
 }
 

@@ -11,11 +11,13 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { clientsApi, type Client } from '@/api/clients'
+import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { codebooksApi, type Currency, type Country } from '@/api/codebooks'
 import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import MultiSelectFilter, { type MultiSelectOption } from '@/components/ui/MultiSelectFilter.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
@@ -93,8 +95,37 @@ const bookedFilter = ref<'' | '1' | '0'>('')
  */
 const ossReviewFilter = ref<'' | OssReviewScope>('')
 const currencyFilter = ref<string>('')
+/**
+ * Kategorie tržby — jeden výběr, dva režimy. `include` ponechá jen vybrané, `exclude`
+ * je naopak schová; přesně kvůli druhému případu filtr vznikl (drobné faktury za
+ * předplatné mají vlastní kategorii a v seznamu jen překáží).
+ *
+ * Hodnoty jsou stringy, protože seznam míchá ID číselníku se sentinelem `none`
+ * (doklad bez kategorie) — ten se přes číslo vyjádřit nedá a bez něj by „bez kategorie"
+ * nešlo ani vybrat, ani vyloučit.
+ */
+const REVENUE_CATEGORY_NONE = 'none'
+const revenueCategoryMode = ref<'include' | 'exclude'>('include')
+const revenueCategoryIds = ref<string[]>([])
+const revenueCategories = ref<RevenueCategory[]>([])
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
+
+// Archivované kategorie v nabídce ZŮSTÁVAJÍ — visí na starých fakturách, takže bez nich
+// by je nešlo ani najít, ani vyloučit.
+const revenueCategoryOptions = computed<MultiSelectOption[]>(() => [
+  { value: REVENUE_CATEGORY_NONE, label: t('invoice.revenue_category_filter_none') },
+  ...revenueCategories.value.map(c => ({
+    value: String(c.id),
+    label: c.label,
+    secondary: c.archived ? t('invoice.revenue_category_filter_archived') : undefined,
+  })),
+])
+
+function revenueCategoryLabel(value: string): string {
+  if (value === REVENUE_CATEGORY_NONE) return t('invoice.revenue_category_filter_none')
+  return revenueCategories.value.find(c => String(c.id) === value)?.label ?? value
+}
 
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají — rok má výchozí hodnotu, hledání je vždy vidět)
 const activeFilterCount = computed(() => {
@@ -110,6 +141,7 @@ const activeFilterCount = computed(() => {
   if (unpaidAsOf.value) n++
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
+  if (revenueCategoryIds.value.length) n++
   return n
 })
 
@@ -151,6 +183,21 @@ const filterChips = computed<FilterChip[]>(() => {
   if (ossReviewFilter.value) {
     chips.push({ key: 'oss_review', value: t(`invoice.oss_review_scope.${ossReviewFilter.value}`) })
   }
+  // Chip musí nést i REŽIM — „Kategorie: Předplatné" a „Kategorie mimo: Předplatné"
+  // jsou opačné výsledky a bez rozlišení by chip lhal.
+  if (revenueCategoryIds.value.length) {
+    const names = revenueCategoryIds.value.map(revenueCategoryLabel)
+    const shown = names.slice(0, 2).join(', ')
+    chips.push({
+      key: 'revenue_category',
+      label: revenueCategoryMode.value === 'exclude'
+        ? t('invoice.revenue_category_filter_excluded')
+        : t('invoice.revenue_category_filter'),
+      value: names.length > 2
+        ? `${shown} ${t('invoice.revenue_category_filter_more', { n: names.length - 2 })}`
+        : shown,
+    })
+  }
   return chips
 })
 
@@ -167,6 +214,7 @@ function clearFilter(key: string) {
     case 'unpaid_as_of': unpaidAsOf.value = ''; break
     case 'booked': bookedFilter.value = ''; break
     case 'oss_review': ossReviewFilter.value = ''; break
+    case 'revenue_category': revenueCategoryIds.value = []; break
   }
 }
 
@@ -804,6 +852,10 @@ async function load(reset = true) {
       unpaid_as_of: unpaidAsOf.value || undefined,
       booked: bookedFilter.value || undefined,
       oss_review: ossReviewFilter.value || undefined,
+      revenue_category_id: revenueCategoryMode.value === 'include' && revenueCategoryIds.value.length
+        ? revenueCategoryIds.value : undefined,
+      revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
+        ? revenueCategoryIds.value : undefined,
       page: page.value,
     })
     if (reset) {
@@ -882,6 +934,8 @@ onMounted(async () => {
     const seen = new Set<string>()
     currencies.value = r.filter(c => c.is_active && !seen.has(c.code) && seen.add(c.code))
   }).catch(() => {})
+  // Včetně archivovaných — visí na starých fakturách (viz revenueCategoryOptions).
+  revenueCategoriesApi.list(true).then(r => { revenueCategories.value = r }).catch(() => {})
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   loadFiltersFromQuery(route.query)
   await load(true)
@@ -910,6 +964,15 @@ function loadFiltersFromQuery(q: typeof route.query) {
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
   currencyFilter.value = typeof q.currency === 'string' ? q.currency : ''
+  // Režim se pozná podle toho, KTERÝ klíč v query je — uložený pohled je jen JSON
+  // s query stringem, takže se tím obnoví i on. Přijdou-li (ručně sestavenou URL) oba,
+  // vyhrává exclude: UI umí ukázat jen jeden režim a schovat něco navíc je menší zlo
+  // než tvrdit, že se nefiltruje.
+  const rcExclude = typeof q.revenue_category_exclude === 'string' ? q.revenue_category_exclude : ''
+  const rcInclude = typeof q.revenue_category === 'string' ? q.revenue_category : ''
+  revenueCategoryMode.value = rcExclude !== '' ? 'exclude' : 'include'
+  const rcRaw = rcExclude !== '' ? rcExclude : rcInclude
+  revenueCategoryIds.value = rcRaw ? rcRaw.split(',').map(v => v.trim()).filter(v => v !== '') : []
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
@@ -929,6 +992,10 @@ function buildQuery(): Record<string, string> {
   if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
   if (bookedFilter.value) q.booked = bookedFilter.value
   if (ossReviewFilter.value) q.oss_review = ossReviewFilter.value
+  if (revenueCategoryIds.value.length) {
+    const key = revenueCategoryMode.value === 'exclude' ? 'revenue_category_exclude' : 'revenue_category'
+    q[key] = revenueCategoryIds.value.join(',')
+  }
   if (search.value) q.q = search.value
   return q
 }
@@ -948,7 +1015,8 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter], () => {
+       overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
+       revenueCategoryIds, revenueCategoryMode], () => {
   syncFiltersToUrl()
   load(true)
 })
@@ -977,6 +1045,8 @@ watch(() => route.query, (newQ) => {
     bookedFilter.value = ''
     ossReviewFilter.value = ''
     currencyFilter.value = ''
+    revenueCategoryIds.value = []
+    revenueCategoryMode.value = 'include'
     search.value = ''
     setTimeout(() => { suppressUrlSync = false }, 0)
   }
@@ -1174,6 +1244,25 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
         <select v-model="currencyFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('invoice.all_currencies') }}</option>
           <option v-for="c in currencies" :key="c.id" :value="c.code">{{ c.code }}</option>
+        </select>
+        <!-- Kategorie tržby: výběr 1:N + přepínač, jestli se vybrané mají ukázat, nebo
+             naopak schovat. Přepínač se objeví až s výběrem — bez něj nemá co přepínat
+             a lišta by měla o jeden trvale zbytečný select víc. -->
+        <MultiSelectFilter
+          v-model="revenueCategoryIds"
+          :options="revenueCategoryOptions"
+          :label="t('invoice.revenue_category_filter_all')"
+          :active-label="revenueCategoryMode === 'exclude'
+            ? t('invoice.revenue_category_filter_excluded')
+            : t('invoice.revenue_category_filter')"
+          :title="t('invoice.revenue_category_filter_hint')"
+          :tone="revenueCategoryMode === 'exclude' ? 'warning' : 'primary'"
+        />
+        <select v-if="revenueCategoryIds.length" v-model="revenueCategoryMode"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('invoice.revenue_category_filter_hint')">
+          <option value="include">{{ t('invoice.revenue_category_filter_mode_include') }}</option>
+          <option value="exclude">{{ t('invoice.revenue_category_filter_mode_exclude') }}</option>
         </select>
         <select v-model="yearFilter" :disabled="!!dateFrom || !!dateTo"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50">

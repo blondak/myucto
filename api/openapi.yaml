@@ -648,6 +648,25 @@ paths:
             `any` = obojí. Legacy `1` / `true` se mapuje na `any`.
           schema: { type: string, enum: [any, oss, domestic, '1'] }
         - in: query
+          name: filter[revenue_category_id]
+          description: >
+            Kategorie tržby — ponechat JEN vybrané. Čárkou oddělený seznam ID z číselníku
+            `revenue_categories`; sentinel `none` znamená doklad BEZ kategorie
+            (`revenue_category_id IS NULL`, do IN/NOT IN by se nechytil).
+            ID cizího tenanta se zahodí — nezbude-li po tom nic, odpověď je prázdná
+            (ne „bez filtru"). Nečíselné tokeny se ignorují; nezbude-li ani jeden
+            použitelný token, filtr se neuplatní.
+          schema: { type: string, example: "3,7,none" }
+        - in: query
+          name: filter[revenue_category_exclude]
+          description: >
+            Kategorie tržby — vybrané SKRÝT (typicky drobné faktury za předplatné).
+            Stejný formát jako `filter[revenue_category_id]`. Doklady BEZ kategorie
+            zůstávají, dokud se nevyloučí i sentinel `none` — `NOT IN` je u NULL
+            UNKNOWN a naivní vyloučení by je vyhodilo taky. Zadané obojí: `revenue_category_id`
+            vybere množinu a `revenue_category_exclude` ji zúží.
+          schema: { type: string, example: "12,none" }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1, default: 1 }
         - in: query
@@ -695,8 +714,12 @@ paths:
       summary: Náhled budoucího čísla faktury
       description: |
         Vrátí, jaké číslo (varsymbol) by faktura dostala při vystavení, podle
-        aktuální `invoice_number_template` supplier-a a stávajícího counteru —
-        **bez inkrementace**. Slouží pro náhled v editoru.
+        platné číselné řady a stávajícího counteru — **bez inkrementace**.
+        Slouží pro náhled v editoru.
+
+        Řada se vybírá podle priority `klient → kategorie tržby → dodavatel →
+        výchozí konfigurace`, takže náhled odpovídá skutečnosti jen tehdy, když
+        se předá i `client_id` a `revenue_category_id` rozpracované faktury.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
@@ -709,6 +732,16 @@ paths:
           name: issue_date
           description: Datum vystavení (YYYY-MM-DD). Default = dnes.
           schema: { type: string, format: date }
+        - in: query
+          name: client_id
+          description: Odběratel — rozhoduje o případné per-client číselné řadě.
+          schema: { type: integer }
+        - in: query
+          name: revenue_category_id
+          description: |
+            Kategorie tržby — rozhoduje o případné číselné řadě kategorie.
+            Uplatní se jen tehdy, když klient vlastní řadu nastavenou nemá.
+          schema: { type: integer }
       responses:
         '200':
           description: OK
@@ -17075,6 +17108,27 @@ components:
         invoices_count:
           type: integer
           description: Počet vydaných faktur v této kategorii (jen v listu)
+        invoice_number_format:
+          type: [string, 'null']
+          maxLength: 60
+          description: |
+            Vlastní číselná řada pro faktury v této kategorii; `null` = dědí se
+            z dodavatele. Uplatní se jen u faktur, jejichž odběratel vlastní
+            řadu nastavenou nemá (priorita klient → kategorie → dodavatel).
+        proforma_number_format:
+          type: [string, 'null']
+          maxLength: 60
+          description: Totéž pro proformy.
+        credit_note_number_format:
+          type: [string, 'null']
+          maxLength: 60
+          description: Totéž pro dobropisy.
+        invoice_number_period:
+          type: [string, 'null']
+          enum: [year, month, none, null]
+          description: |
+            Kdy se čítač řady kategorie resetuje; `null` = převezme se perioda
+            dodavatele.
     ExpenseCategory:
       type: object
       properties:

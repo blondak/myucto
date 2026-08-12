@@ -767,7 +767,7 @@ aktuální firmu:
 | Záložka | Použití |
 |---|---|
 | **Kategorie nákladů** | Člení přijaté faktury a další náklady. U kategorie se zadává kód, název, pořadí a druh **fixní / variabilní** pro nákladové přehledy. |
-| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. |
+| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. Volitelně i **vlastní číselná řada** — faktury s touto kategorií pak dostanou číslo z ní (vlastní řada zákazníka má přednost), viz [§ 72.5.3](72_Multi_supplier.md#7253-islovani-faktur). |
 
 U každé kategorie stránka ukazuje počet použití. Nepoužitou kategorii lze
 smazat; použitá se kvůli zachování historie pouze archivuje a přestane se

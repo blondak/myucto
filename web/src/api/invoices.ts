@@ -555,6 +555,17 @@ export interface ListFilters {
    *  - `any` = obojí.
    */
   oss_review?: OssReviewScope
+  /**
+   * Kategorie tržby — ponechat JEN vybrané. Hodnoty jsou ID číselníku, sentinel
+   * `none` znamená doklad bez kategorie (NULL se do IN/NOT IN nechytá). Cizí ID
+   * backend zahodí; zbude-li po tom prázdno, vrátí prázdný seznam, ne „bez filtru".
+   */
+  revenue_category_id?: string[]
+  /**
+   * Kategorie tržby — vybrané SKRÝT (typicky drobné faktury za předplatné). Doklady
+   * bez kategorie zůstávají, dokud se nevyloučí i sentinel `none`.
+   */
+  revenue_category_exclude?: string[]
   q?: string
   page?: number
   per_page?: number
@@ -660,6 +671,12 @@ export const invoicesApi = {
     if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
     if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
+    if (filters.revenue_category_id?.length) {
+      params['filter[revenue_category_id]'] = filters.revenue_category_id.join(',')
+    }
+    if (filters.revenue_category_exclude?.length) {
+      params['filter[revenue_category_exclude]'] = filters.revenue_category_exclude.join(',')
+    }
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     return api.get<{ data: MonthGroup[]; meta: InvoiceListMeta }>('/invoices', { params }).then(r => r.data)
@@ -706,10 +723,22 @@ export const invoicesApi = {
    * Vrátí náhled, jaké číslo faktura dostane při Vystavení (BEZ inkrementu counteru).
    * Používá se v editoru jako placeholder „automaticky: JD2026-01".
    */
-  previewVarsymbol: (type: 'invoice' | 'proforma' | 'credit_note' | 'payment_calendar', issueDate: string, clientId?: number) =>
+  previewVarsymbol: (
+    type: 'invoice' | 'proforma' | 'credit_note' | 'payment_calendar',
+    issueDate: string,
+    clientId?: number,
+    revenueCategoryId?: number,
+  ) =>
     api.get<{ varsymbol: string; has_template: boolean }>(
       `/invoices/preview-varsymbol`,
-      { params: { type, issue_date: issueDate, ...(clientId ? { client_id: clientId } : {}) } },
+      {
+        params: {
+          type,
+          issue_date: issueDate,
+          ...(clientId ? { client_id: clientId } : {}),
+          ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
+        },
+      },
     ).then(r => r.data),
   create: (payload: InvoicePayload) => api.post<Invoice>('/invoices', payload).then(r => r.data),
   update: (id: number, payload: InvoicePayload, force = false) =>
