@@ -304,6 +304,40 @@ final class InvoiceSeriesCompletenessTest extends TestCase
     }
 
     /**
+     * Konfigurace číslování se mění v čase: kategorii tržby přibude vlastní řada až
+     * uprostřed období, doklady vystavené předtím ale nesou čísla ze staré (dodavatelské)
+     * řady. Kdyby se příslušnost k řadě určovala podle DNEŠNÍHO `revenue_category_id`,
+     * tyhle starší doklady by ze supplier-wide skenu vypadly a zůstaly by po nich falešné
+     * mezery — a v nové řadě by se nezapočítaly, protože jejímu vzoru neodpovídají.
+     * Rozhoduje proto tvar VS, ne aktuální nastavení.
+     */
+    public function testDocumentsKeepOldSeriesAfterCategoryGetsItsOwn(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', '{YYYY}{CCCCCC}');
+        $categoryId = $this->createCategory('FR3POZDE', '5{YYYY}{CCC}');
+
+        $y = self::YEAR;
+        // Vystaveno JEŠTĚ ve staré řadě dodavatele, kategorie tehdy vlastní řadu neměla.
+        $this->insertInvoice("{$y}000001", 'invoice', $categoryId);
+        $this->insertInvoice("{$y}000002", 'invoice', $categoryId);
+        $this->insertInvoice("{$y}000003", 'invoice');
+        // Až tenhle doklad vznikl po zavedení vlastní řady kategorie.
+        $this->insertInvoice("5{$y}001", 'invoice', $categoryId);
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        $supplierGroup = self::groupFor($series, 0, 0);
+        self::assertSame([], $supplierGroup['buckets'][0]['missing'], 'Starší doklady kategorie zůstávají v dodavatelské řadě.');
+        self::assertSame(3, $supplierGroup['buckets'][0]['range_to']);
+        self::assertSame(3, $supplierGroup['buckets'][0]['used_count']);
+
+        $categoryGroup = self::groupFor($series, 0, $categoryId);
+        self::assertSame([], $categoryGroup['buckets'][0]['missing'], 'Nová řada kategorie začíná od 1 a je úplná.');
+        self::assertSame(1, $categoryGroup['buckets'][0]['range_to']);
+        self::assertSame(1, $categoryGroup['buckets'][0]['used_count']);
+    }
+
+    /**
      * Jediné ručně zadané (nebo importem rozbité) číslo posune horní hranici řady o
      * několik řádů. Výčet mezer se proto usekne, ale `missing_total` musí zůstat
      * přesný — jinak by sestava tvrdila, že mezer je 500, a účetní by podle toho
