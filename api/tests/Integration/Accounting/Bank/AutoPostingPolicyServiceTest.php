@@ -114,6 +114,55 @@ final class AutoPostingPolicyServiceTest extends BankPostingTestCase
         self::assertSame('liability_prescription_short', $this->policy->decide($this->supplierId, $small)->note);
     }
 
+    /**
+     * Závazek přenesený počátečním zápisem je pořád závazek.
+     *
+     * Lednová úhrada prosincového pojistného či DPH nemá předpis v běžícím roce — nese ho
+     * počáteční účet rozvažný (`source_type='opening'`). Kdyby zůstatek zúčtovacího účtu
+     * technické zápisy vynechával (instinkt „obraty počítáme bez uzávěrkových dokladů"),
+     * hlásila by automatika „předpis chybí" u KAŽDÉ platby na začátku roku, která hradí
+     * závazek z minulého období — plošná díra napříč odvody. Dotaz proto žádný filtr
+     * `source_type` nemá a sčítá od počátku evidence, takže se konečný a počáteční
+     * zůstatek navzájem vyruší. Tenhle test to drží.
+     */
+    public function testOpeningBalanceCountsAsLiabilityPrescription(): void
+    {
+        $this->policy->upsertRow($this->supplierId, OperationType::REMITTANCE_HEALTH, 'auto', $this->userId);
+        $this->policy->upsertRow($this->supplierId, OperationType::DETECTOR_TAX_REMITTANCE, 'auto', $this->userId);
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplierId} AND account_code='336'"
+        )->fetchColumn();
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+             VALUES (?, "336998", "Testovací zdravotní pojištění", "liability", "credit", 0, ?)'
+        )->execute([$this->supplierId, $parentId]);
+        $payment = $this->input(
+            operation: OperationType::REMITTANCE_HEALTH, debit: '336998', source: 'detector', amount: 2808.00);
+        self::assertSame('liability_prescription_missing',
+            $this->policy->decide($this->supplierId, $payment)->note);
+
+        // Loňský závazek přenesený k 1. 1. — jediný předpis, který tahle platba má.
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id'   => $this->periodId,
+            'entry_date'  => self::YEAR . '-01-01',
+            'document_no' => 'PZ-' . self::YEAR,
+            'description' => 'Počáteční účet rozvažný 701',
+            'source_type' => 'opening',
+            'source_id'   => null,
+            'posted_at'   => date('Y-m-d H:i:s'),
+            'posted_by'   => $this->userId,
+        ], [
+            ['account_id' => $map['701']['id'], 'side' => 'debit', 'amount' => 2808.00],
+            ['account_id' => $map['336998']['id'], 'side' => 'credit', 'amount' => 2808.00],
+        ]);
+
+        self::assertSame('auto', $this->policy->decide($this->supplierId, $payment)->decision,
+            'Počáteční stav kryje lednovou úhradu loňského závazku.');
+    }
+
     public function testAiAndLowConfidenceNeverAuto(): void
     {
         $this->policy->upsertRow($this->supplierId, OperationType::BANK_FEE, 'auto', $this->userId);
