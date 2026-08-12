@@ -34,6 +34,37 @@ const total = computed(() =>
  */
 const showsTotal = computed(() => props.lines.length > 2)
 
+/**
+ * Účty, které v zápisu stojí na obou stranách (typicky 343.900 u převodu DPH nebo
+ * 261 u převodu mezi vlastními účty). Hrubý součet u nich sčítá i to, co se proti
+ * sobě ruší — 484 255,45 + 155 630,72 = 639 886,17, přestože skutečný dopad je
+ * rozdíl 328 624,73. Právě ten rozdíl je u převodu DPH ta jediná zajímavá veličina
+ * (závazek k úhradě), takže se dopočítá vedle.
+ */
+const netByAccount = computed(() => {
+  const net = new Map<string, number>()
+  for (const l of props.lines) {
+    const code = String(l.account_code ?? '')
+    const amount = Number(l.amount || 0) * (l.side === 'debit' ? 1 : -1)
+    net.set(code, (net.get(code) ?? 0) + amount)
+  }
+  return net
+})
+
+/** Účty na obou stranách zápisu — jen ty, u kterých se něco reálně ruší. */
+const twoSidedAccounts = computed(() => {
+  const sides = new Map<string, Set<string>>()
+  for (const l of props.lines) {
+    const code = String(l.account_code ?? '')
+    if (!sides.has(code)) { sides.set(code, new Set()) }
+    sides.get(code)!.add(l.side)
+  }
+  return [...sides.entries()]
+    .filter(([, s]) => s.size > 1)
+    .map(([code]) => ({ code, net: netByAccount.value.get(code) ?? 0 }))
+    .filter(a => Math.abs(a.net) > 0.005)
+})
+
 const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
 </script>
 
@@ -77,6 +108,10 @@ const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
         <tr class="font-semibold">
           <td :class="cell" colspan="2">{{ t('accounting.journal.total') }}</td>
           <td class="text-right font-mono text-neutral-900" :class="cell" colspan="2">{{ formatMoney(total) }}</td>
+        </tr>
+        <tr v-for="a in twoSidedAccounts" :key="a.code" class="text-xs font-normal text-neutral-500">
+          <td :class="cell" colspan="2">{{ t('accounting.journal.net_on_account', { account: a.code }) }}</td>
+          <td class="text-right font-mono" :class="cell" colspan="2">{{ formatMoney(Math.abs(a.net)) }}</td>
         </tr>
       </tfoot>
     </table>
