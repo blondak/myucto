@@ -1836,6 +1836,10 @@ final class Routes
             $g->get   ('/products/{id:[0-9]+}/prices',            [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'get']);
             $g->put   ('/products/{id:[0-9]+}/prices',            [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'put']);
             $g->post  ('/products/{id:[0-9]+}/prices/recompute',  [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'recompute']);
+            // Akční (promoční) ceny — dočasný override nad cenotvorbou (migrace 1328)
+            $g->get   ('/products/{id:[0-9]+}/promo-prices',       [\MyInvoice\Action\Eshop\ProductPromoPriceAction::class, 'get']);
+            $g->put   ('/products/{id:[0-9]+}/promo-prices',       [\MyInvoice\Action\Eshop\ProductPromoPriceAction::class, 'put']);
+            $g->get   ('/products/{id:[0-9]+}/effective-price',    [\MyInvoice\Action\Eshop\ProductPromoPriceAction::class, 'effective']);
             $g->get   ('/products/{id:[0-9]+}/vendors',           [\MyInvoice\Action\Eshop\ProductVendorAction::class, 'get']);
             $g->put   ('/products/{id:[0-9]+}/vendors',           [\MyInvoice\Action\Eshop\ProductVendorAction::class, 'put']);
             $g->get   ('/products/{id:[0-9]+}',                [\MyInvoice\Action\Eshop\ProductCardAction::class, 'get']);

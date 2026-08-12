@@ -13,7 +13,19 @@ export type StockDocStatus = 'draft' | 'posted' | 'reversed'
 export type StockTakeStatus = 'draft' | 'counting' | 'closed'
 export type LandedCostAllocation = 'by_value' | 'by_qty'
 
-export interface StockItem {
+/**
+ * Platná cena karty doplněná backendem (EffectivePriceResolver, migrace 1328).
+ * `effective_price` je JEDINÁ cena, kterou smí UI nabízet do dokladu —
+ * `sale_price_without_vat` je jen standardní hladina bez akcí.
+ */
+export interface StockItemEffectivePrice {
+  effective_price?: string | null
+  promo_price?: string | null
+  promo_label?: string | null
+  promo_qty_available?: string | null
+}
+
+export interface StockItem extends StockItemEffectivePrice {
   id: number
   supplier_id: number
   sku: string
@@ -43,7 +55,7 @@ export interface StockItemPayload {
   note?: string | null
 }
 
-export interface StockItemSearchResult {
+export interface StockItemSearchResult extends StockItemEffectivePrice {
   id: number
   sku: string
   name: string

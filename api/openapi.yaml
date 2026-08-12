@@ -11283,6 +11283,92 @@ paths:
       responses:
         '200': { description: Výsledek přepočtu cen }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/eshop/products/{id}/promo-prices:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Akční (promoční) ceny karty zboží
+      description: |
+        Vrátí všechny akční ceny karty (i naplánované, vypnuté a prošlé),
+        doplněné o dopočtený `qty_remaining` a `state`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPromoPrice' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Nahradí akční ceny karty zboží (bulk)
+      description: |
+        Kompletní náhrada seznamu (`promo_prices`) — řádek s `id` se aktualizuje,
+        bez `id` se zakládá, chybějící se mažou. Tři nezávislé, každý volitelný
+        limit: časové okno (`valid_from`/`valid_to`, NULL = bez omezení),
+        množstevní strop (`qty_mode`) a sama cena (`promo_price`, bez DPH).
+        `qty_mode=limited` vyžaduje kladný `qty_limit`; u `stock` a `unlimited`
+        se `qty_limit` ignoruje.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                promo_prices:
+                  type: array
+                  maxItems: 50
+                  items: { $ref: '#/components/schemas/EshopPromoPriceInput' }
+      responses:
+        '200':
+          description: Uložené akční ceny
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPromoPrice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/eshop/products/{id}/effective-price:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+      - in: query
+        name: currency
+        schema: { type: string, minLength: 3, maxLength: 3, default: CZK }
+      - in: query
+        name: qty
+        description: Množství, pro které se cena posuzuje (rozhoduje o množstevním stropu akce).
+        schema: { type: number, default: 1 }
+      - in: query
+        name: on_date
+        description: Datum, ke kterému se posuzuje platnost akce (default dnes).
+        schema: { type: string, format: date }
+    get:
+      tags: [Eshop]
+      summary: Platná (efektivní) cena karty zboží
+      description: |
+        Jediný zdroj pravdy o tom, jakou cenu bez DPH zboží právě má — standardní
+        cenu z cenotvorby, nebo akční cenu, pokud je nějaká platná a její
+        množstevní strop pokryje celé `qty`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EshopEffectivePrice' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/eshop/products/{id}/vendors:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14974,6 +15060,87 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    EshopPromoPriceInput:
+      type: object
+      required: [promo_price]
+      properties:
+        id:
+          type: [integer, "null"]
+          description: Existující akce k úpravě; prázdné = nová.
+        currency_code: { type: string, minLength: 3, maxLength: 3, default: CZK }
+        promo_price: { type: number, description: Akční cena bez DPH. }
+        label: { type: [string, "null"], maxLength: 60 }
+        valid_from:
+          type: [string, "null"]
+          format: date
+          description: Začátek platnosti včetně; null = bez omezení zdola.
+        valid_to:
+          type: [string, "null"]
+          format: date
+          description: Konec platnosti včetně; null = bez omezení shora.
+        qty_mode:
+          type: string
+          enum: [stock, limited, unlimited]
+          default: stock
+          description: >
+            `stock` = do vyprodání zásob (strop = živý stav skladu, doskladnění akci
+            obnoví); `limited` = pevný rozpočet `qty_limit` kusů odečítaný prodejem;
+            `unlimited` = bez množstevního stropu.
+        qty_limit:
+          type: [number, "null"]
+          description: Povinné a kladné pro `qty_mode=limited`, jinak se ignoruje.
+        is_active: { type: boolean, default: true }
+        note: { type: [string, "null"], maxLength: 255 }
+    EshopPromoPrice:
+      allOf:
+        - $ref: '#/components/schemas/EshopPromoPriceInput'
+        - type: object
+          properties:
+            id: { type: integer, format: int64 }
+            stock_item_id: { type: integer, format: int64 }
+            qty_remaining:
+              type: [number, "null"]
+              description: Kolik kusů akce ještě pokryje; null = bez stropu.
+            state:
+              type: string
+              enum: [active, scheduled, expired, disabled, exhausted]
+            created_at: { type: string }
+            updated_at: { type: string }
+    EshopEffectivePrice:
+      type: object
+      required: [stock_item_id, currency_code, unit_price, promo_applied, promo_reason]
+      properties:
+        stock_item_id: { type: integer, format: int64 }
+        currency_code: { type: string, minLength: 3, maxLength: 3 }
+        base_price:
+          type: [string, "null"]
+          description: Standardní cena bez DPH z cenotvorby.
+        unit_price:
+          type: [string, "null"]
+          description: Platná cena bez DPH — akční, pokud se akce uplatnila, jinak standardní.
+        promo_applied: { type: boolean }
+        promo_reason:
+          type: string
+          enum: [applied, none, qty_exceeds_remaining, exhausted, not_cheaper]
+          description: >
+            `qty_exceeds_remaining` = akce existuje, ale její strop nepokryje celé
+            požadované množství (uplatnění je vše-nebo-nic per řádek);
+            `exhausted` = strop vyčerpaný / zboží není skladem;
+            `not_cheaper` = akce není levnější než standardní cena.
+        promo_qty_available:
+          type: [string, "null"]
+          description: Kolik kusů by akce pokryla; null = bez stropu.
+        promo:
+          type: [object, "null"]
+          properties:
+            id: { type: integer, format: int64 }
+            label: { type: [string, "null"] }
+            promo_price: { type: string }
+            valid_from: { type: [string, "null"], format: date }
+            valid_to: { type: [string, "null"], format: date }
+            qty_mode: { type: string, enum: [stock, limited, unlimited] }
+            qty_limit: { type: [string, "null"] }
+            qty_remaining: { type: [string, "null"] }
     OssPreview:
       type: object
       required: [period, settings, summary, countries, corrections, warnings]

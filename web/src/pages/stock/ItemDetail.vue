@@ -135,7 +135,14 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('stock.items.col_sale_price') }}</div>
-          <div class="text-lg font-semibold font-mono">{{ item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—' }}</div>
+          <!-- Platná cena = effective_price; při akci je původní hladina přeškrtnutá. -->
+          <div class="text-lg font-semibold font-mono" :class="item.promo_price != null ? 'text-success-600' : ''">
+            {{ item.effective_price != null ? formatMoney(Number(item.effective_price)) : (item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—') }}
+          </div>
+          <div v-if="item.promo_price != null" class="text-xs text-neutral-500 mt-0.5">
+            <span class="line-through">{{ item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—' }}</span>
+            <span class="ml-1">{{ item.promo_label ?? t('eshop.promo.title') }}</span>
+          </div>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('stock.items.col_min_qty') }}</div>

@@ -386,7 +386,14 @@ onMounted(async () => {
               </td>
               <td v-if="tbl.isVisible('value')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(value(i)) }}</td>
               <td v-if="tbl.isVisible('avg_cost')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(avgCost(i)) }}</td>
-              <td v-if="tbl.isVisible('sale_price')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—' }}</td>
+              <!-- Platná cena = effective_price (akční cena nad cenotvorbou); původní hladina se ukáže přeškrtnutá. -->
+              <td v-if="tbl.isVisible('sale_price')" class="px-3 py-2 text-right font-mono whitespace-nowrap">
+                <template v-if="i.promo_price != null">
+                  <span class="line-through text-neutral-400 mr-1">{{ i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—' }}</span>
+                  <span class="text-success-600 font-semibold" :title="i.promo_label ?? t('eshop.promo.title')">{{ formatMoney(Number(i.promo_price)) }}</span>
+                </template>
+                <template v-else>{{ i.effective_price != null ? formatMoney(Number(i.effective_price)) : (i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—') }}</template>
+              </td>
               <td v-if="tbl.isVisible('min_qty')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ i.min_qty ?? '—' }}</td>
               <td v-if="tbl.isVisible('active')" class="px-3 py-2 text-center">
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="i.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">

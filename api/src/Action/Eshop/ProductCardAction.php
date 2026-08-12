@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemI18nRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\EshopException;
+use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\ProductCardService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -37,6 +38,7 @@ final class ProductCardAction
         private readonly StockItemI18nRepository $i18n,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly EffectivePriceResolver $effectivePrice,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -45,10 +47,13 @@ final class ProductCardAction
         if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
             return $err;
         }
-        $card = $this->cards->get($supplierId, (int) $args['id']);
+        $id = (int) $args['id'];
+        $card = $this->cards->get($supplierId, $id);
         if ($card === null) {
             return Json::error($response, 'not_found', 'Karta zboží nenalezena.', 404);
         }
+        // Platná cena karty (akční cena nad cenotvorbou) — jediný zdroj je resolver.
+        $card['effective_price'] = $this->effectivePrice->resolve($supplierId, $id);
         return Json::ok($response, $card);
     }
 

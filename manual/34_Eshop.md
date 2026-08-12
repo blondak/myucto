@@ -438,6 +438,11 @@ okamžicích:
 > karty a kliknout na „Přepočítat"**. Hromadné přecenění v aplikaci není,
 > takže se to dělá kartu po kartě.
 
+> [!NOTE]
+> **Akčních cen** ([§ 34.8.9](#3489-akční-ceny)) se přepočet netýká — je to
+> zadaná částka, ne odvozená hodnota. Jejich platnost naopak řídí čas a počet
+> kusů automaticky, bez jakéhokoli přepočtu.
+
 ### 34.8.8 Co cena obsahuje — DPH a poplatky
 
 - Všechny ceny v cenotvorbě jsou **bez DPH**. Sazbu DPH má karta zvlášť
@@ -446,8 +451,121 @@ okamžicích:
   **nejsou součástí prodejní ceny**. Vedou se jako samostatné částky s vlastní
   sazbou DPH, protože zákon vyžaduje jejich oddělené uvedení. Do přirážky ani
   do zaokrouhlení nevstupují.
-- **Sleva** existuje jen **na úrovni dokladu** (procentní sleva na faktuře),
-  ne na kartě zboží.
+- **Sleva** na kartě zboží se dělá **akční cenou** ([§ 34.8.9](#3489-akční-ceny)).
+  Kromě toho existuje ještě procentní **sleva na úrovni dokladu** (na faktuře),
+  která se počítá až z ceny, kterou akce vrátí.
+
+### 34.8.9 Akční ceny
+
+**Cesta: `Zboží → Skladové karty → (karta) → záložka „Ceny" → sekce „Akční ceny"`**
+
+Akční cena je **dočasná sleva položená nad standardní cenou**. Standardní
+cenotvorba (přirážka, přepočet měn, zaokrouhlení) běží dál beze změny — akce
+jen po dobu své platnosti přebije výsledek. Jakmile akce skončí, cena se sama
+vrátí na standardní hladinu; **není potřeba nic ručně vracet**.
+
+Akce má tři omezení a **každé z nich je nepovinné**:
+
+| Omezení | Pole | Prázdné znamená |
+|---|---|---|
+| **Časové okno** | „Platí od" / „Platí do" | bez omezení (i jen jedna strana) |
+| **Počet kusů** | „Počet kusů" (+ číslo u volby *Omezený počet*) | výchozí je *Do vyprodání zásob* |
+| **Akční cena** | „Akční cena" | povinná — to je jádro akce |
+
+#### Tři režimy množstevního stropu
+
+**1. Do vyprodání zásob** *(výchozí)* — akce platí, dokud je zboží skladem, a
+nejvýš na tolik kusů, kolik je právě na skladě. Strop se **neodečítá**: čte se
+živě ze skladu, takže **doskladněním akci znovu „nabiješ"**.
+
+> *Příklad:* prodáváš termosku za 890 Kč a chceš ji vyprodat za 690 Kč. Na
+> skladě je 12 ks. Založíš akci `690` v režimu **Do vyprodání zásob** bez data.
+> Prvních 12 ks se prodá za 690 Kč; jakmile stav klesne na nulu, faktury se zase
+> nacení na 890 Kč. Když ti dorazí dalších 5 ks, akce se sama znovu rozjede —
+> pro trvalé ukončení akci **vypni** (odškrtni „Aktivní") nebo smaž.
+
+**2. Omezený počet kusů** — pevný rozpočet („prvních N kusů"). Prodej ho
+odečítá a **doskladnění ho neobnoví**. Aplikace vyčerpané množství **dopočítává
+z vystavených faktur** dané karty a měny v období akce; storno, smazání faktury
+i dobropis rozpočet zase uvolní.
+
+> *Příklad:* uvádíš novinku a chceš dát **prvních 100 ks za 1 490 Kč** místo
+> 1 990 Kč. Založíš akci `1490`, režim **Omezený počet kusů**, počet `100`.
+> Sloupec „Zbývá" ti průběžně ukazuje, kolik kusů z rozpočtu zbývá; po stotisícím
+> kusu se akce označí jako **Vyčerpaná** a nové faktury se nacení na 1 990 Kč,
+> i kdyby na skladě leželo dalších 300 ks.
+
+**3. Bez omezení počtu** — žádný množstevní strop. Hodí se pro akci, kterou
+řídíš výhradně kalendářem, nebo pro zboží bez skladové evidence (dropshipping,
+`is_stocked = 0`), kde by režim „do vyprodání zásob" znamenal nulu.
+
+> *Příklad:* letní sleva na službu montáže od 1. 7. do 31. 8. Založíš akci
+> s cenou `990`, „Platí od" `1. 7.`, „Platí do" `31. 8.` a režim **Bez omezení
+> počtu**. Celé dva měsíce se fakturuje 990 Kč bez ohledu na počet zakázek,
+> 1. 9. se cena sama vrátí na standardní hladinu.
+
+#### Časové okno
+
+Datum „Platí od" i „Platí do" jsou **včetně** daného dne a obě jsou nepovinná:
+
+- **obě prázdná** — akce platí, dokud ji nevypneš (nebo dokud jí nedojde strop),
+- **jen „od"** — akce se sama spustí v zadaný den (do té doby má stav
+  **Naplánovaná**),
+- **jen „do"** — akce platí hned a v zadaný den večer sama skončí (stav
+  **Skončila**).
+
+> [!TIP]
+> Kombinace „jen do" + režim **Do vyprodání zásob** je nejběžnější výprodej:
+> *„sleva do konce měsíce, nebo do vyprodání zásob — co nastane dřív"*.
+
+#### Několik akcí najednou
+
+Na téže kartě a měně smí platit **víc akcí současně** — sezónní i produktové
+kampaně se běžně vrství. Vyhrává **nejnižší platná cena** (při shodě novější
+záznam), takže zákazník vždy dostane tu nejlepší. Akce, která by byla **dražší
+než standardní cena**, se ignoruje — po snížení běžné ceny tedy stará „akce"
+zboží nezdraží.
+
+#### Když strop nestačí na celý řádek
+
+Uplatnění je **vše nebo nic per řádek dokladu**. Když z akce zbývá 3 ks a ty
+fakturuješ 5 ks, míchaná jednotková cena by rozbila vztah *cena × množství =
+základ* a na faktuře by se nedala vysvětlit. Aplikace proto:
+
+1. zkusí **další akci v pořadí** (dražší akce s volnějším stropem je pořád lepší
+   než plná cena),
+2. a když ani ta nestačí, nacení celý řádek **standardní cenou**.
+
+Chceš-li v takové situaci prodat část akčně, **rozděl řádek** na dva — 3 ks
+s akční cenou a 2 ks se standardní.
+
+#### Stavy akce
+
+Sloupec „Stav" ti u každého řádku řekne, co se s ním právě děje:
+
+| Stav | Význam |
+|---|---|
+| **Probíhá** | akce se právě uplatňuje |
+| **Naplánovaná** | „Platí od" je v budoucnosti |
+| **Skončila** | „Platí do" už je v minulosti |
+| **Vypnutá** | odškrtnuté „Aktivní" (akce se schovává, ale nemaže) |
+| **Vyčerpaná** | došel množstevní strop, nebo zboží není skladem |
+
+> [!NOTE]
+> Akční cena je **bez DPH**, stejně jako celá cenotvorba, a platí vždy jen pro
+> **jednu měnu** — pro akci v eurech založ druhý řádek s `EUR`. Na rozdíl od
+> standardní ceny se akční cena **nepřepočítává** ani kurzem, ani přirážkou;
+> je to prostě zadaná částka.
+
+#### Kde všude se akční cena projeví
+
+Akční cena není jen ozdoba karty — aplikace ji dosazuje všude, kde zboží
+naceňuje:
+
+- v **seznamu skladových karet** (původní cena přeškrtnutá, akční zeleně),
+- na **detailu karty**,
+- při **vložení zboží do faktury** — do řádku se předvyplní akční cena a
+  aplikace tě na to upozorní hláškou.
 
 ## 34.9 Dodavatelé zboží
 
@@ -531,18 +649,22 @@ procesoru.
 
 ### 34.10.5 Akce a výprodej
 
-Časově omezené akční ceny aplikace neumí. Prakticky se řeší takto:
+Na akční ceny má karta vlastní sekci na záložce „Ceny" —
+[§ 34.8.9](#3489-akční-ceny). Postup:
 
-1. Na akčním řádku přepni režim na **Fixní cena**, zaškrtni **„Ruční"** a zadej
-   akční částku.
-2. Po skončení akce **odškrtni „Ruční"**, vrať režim na **Přirážka %** a klikni
-   na **„Přepočítat"** — cena se vrátí na standardní hladinu.
-3. Zboží v akci si označ **tagem** (např. „Výprodej", [§ 34.5](#345-tagy)),
-   ať víš, které karty po skončení akce vrátit zpět.
+1. V sekci **„Akční ceny"** klikni na **„Přidat akci"**, zadej akční částku a
+   měnu.
+2. Vyplň, čím má být akce omezená: **datum** („Platí od" / „Platí do"),
+   **počet kusů**, nebo obojí. Nevyplněné omezení prostě neplatí.
+3. Ulož kartu. Standardní cenu **nech být** — akce ji přebije jen dokud platí a
+   po skončení se cena sama vrátí zpět.
+4. Zboží v akci si můžeš navíc označit **tagem** (např. „Výprodej",
+   [§ 34.5](#345-tagy)) kvůli filtrování a exportu.
 
-> [!WARNING]
-> Krok 2 je **čistě na tobě** — nic ho nepřipomene a akční cena by jinak platila
-> donekonečna. Než akci spustíš, poznač si datum jejího konce.
+> [!TIP]
+> Starší návod („Fixní cena" + zaškrtnutá **„Ruční"**) už používej jen na
+> **trvalou** změnu ceny. Pro časově nebo množstevně omezenou slevu je akční
+> cena vždycky lepší — nemusíš si hlídat její konec.
 
 ## 34.11 Mazání vs. archivace
 
@@ -583,9 +705,8 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 | Chybějící funkce | Náhradní řešení |
 |---|---|
 | **Cenové hladiny / skupiny zákazníků** | Ceny per zákazník existují jen v jednoduchém **Ceníku** pro fakturaci ([§ 73.1.5](73_Nastaveni.md)), který se se skladem nekombinuje |
-| **Časově omezené akční ceny** | Ruční přepis + tag, ručně vrátit ([§ 34.10.5](#34105-akce-a-vyprodej)) |
-| **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu |
-| **Sleva na produkt** | Jen procentní sleva na úrovni faktury |
+| **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu — akční cena umí jen *strop* počtu kusů, ne cenové pásmo |
+| **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 34.8.9](#3489-akční-ceny)) |
 | **Historie cen** | Není — uchovává se jen aktuální hodnota a datum posledního přepočtu |
 | **Hromadné přecenění** | Kartu po kartě přes „Přepočítat" |
 | **Import ceníku dodavatele** | Nákupní ceny se zadávají ručně na záložce Dodavatelé |

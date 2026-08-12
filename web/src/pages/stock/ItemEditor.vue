@@ -19,6 +19,10 @@ import {
   type ProductVendor,
   type PriceMode,
   type PriceRounding,
+  type ProductPromoPrice,
+  type ProductPromoPricePayload,
+  type PromoQtyMode,
+  type PromoState,
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
 import { codebooksApi, type VatRate } from '@/api/codebooks'
@@ -216,6 +220,89 @@ function pricePayloadFrom(r: PriceRow) {
   }
 }
 
+// ── Akční (promoční) ceny ───────────────────────────────────────────────
+// Tři nezávislé, každý volitelný limit: časové okno, množstevní strop a sama
+// akční cena. Strop v režimu „stock" se čte živě ze skladu, v režimu „limited"
+// je to pevný rozpočet odečítaný prodejem. Dopočtené qty_remaining/state
+// posílá backend (jediný zdroj pravdy je EffectivePriceResolver).
+interface PromoRow {
+  id: number | null
+  currency_code: string
+  promo_price: string
+  label: string | null
+  valid_from: string | null
+  valid_to: string | null
+  qty_mode: PromoQtyMode
+  qty_limit: string | null
+  is_active: boolean
+  note: string | null
+  qty_remaining: string | null
+  state: PromoState | null
+}
+const QTY_MODES: PromoQtyMode[] = ['stock', 'limited', 'unlimited']
+const promos = ref<PromoRow[]>([])
+
+function promoRowFrom(p: ProductPromoPrice): PromoRow {
+  return {
+    id: p.id,
+    currency_code: p.currency_code,
+    promo_price: p.promo_price,
+    label: p.label,
+    valid_from: p.valid_from,
+    valid_to: p.valid_to,
+    qty_mode: p.qty_mode,
+    qty_limit: p.qty_limit,
+    is_active: p.is_active,
+    note: p.note,
+    qty_remaining: p.qty_remaining,
+    state: p.state,
+  }
+}
+function addPromoRow() {
+  promos.value.push({
+    id: null,
+    currency_code: prices.value[0]?.currency_code?.trim().toUpperCase() || 'CZK',
+    promo_price: '',
+    label: null,
+    valid_from: null,
+    valid_to: null,
+    qty_mode: 'stock',
+    qty_limit: null,
+    is_active: true,
+    note: null,
+    qty_remaining: null,
+    state: null,
+  })
+}
+function removePromoRow(idx: number) {
+  promos.value.splice(idx, 1)
+}
+function promoPayloadFrom(r: PromoRow): ProductPromoPricePayload {
+  return {
+    id: r.id,
+    currency_code: r.currency_code.trim().toUpperCase() || 'CZK',
+    promo_price: String(r.promo_price ?? '').trim(),
+    label: r.label === '' ? null : r.label,
+    valid_from: r.valid_from === '' ? null : r.valid_from,
+    valid_to: r.valid_to === '' ? null : r.valid_to,
+    qty_mode: r.qty_mode,
+    qty_limit: r.qty_mode === 'limited' ? (r.qty_limit === '' ? null : r.qty_limit) : null,
+    is_active: r.is_active,
+    note: r.note === '' ? null : r.note,
+  }
+}
+/** Barva odznaku stavu akce — sémantika shodná se zbytkem UI. */
+function promoStateClass(state: PromoState | null): string {
+  switch (state) {
+    case 'active': return 'bg-success-50 text-success-600 border-success-500/40'
+    case 'scheduled': return 'bg-primary-50 text-primary-600 border-primary-500/40'
+    case 'exhausted': return 'bg-warning-50 text-warning-600 border-warning-500/40'
+    case 'expired':
+    case 'disabled': return 'bg-neutral-100 text-neutral-500 border-neutral-300'
+    default: return 'bg-neutral-100 text-neutral-500 border-neutral-300'
+  }
+}
+
 // ── Dodavatelé ──────────────────────────────────────────────────────────
 interface VendorRow {
   id: number | null
@@ -392,12 +479,14 @@ async function loadProduct(id: number) {
   }
   // média
   media.value = [...(p.media ?? [])].sort((a, b) => a.display_order - b.display_order)
-  // ceny + dodavatelé (samostatné endpointy)
-  const [pr, vn] = await Promise.all([
+  // ceny + akční ceny + dodavatelé (samostatné endpointy)
+  const [pr, pp, vn] = await Promise.all([
     eshopApi.getPrices(id).catch(() => []),
+    eshopApi.getPromoPrices(id).catch(() => []),
     eshopApi.getVendors(id).catch(() => []),
   ])
   prices.value = pr.map(priceRowFrom)
+  promos.value = pp.map(promoRowFrom)
   vendors.value = vn.map(vendorRowFrom)
 }
 
@@ -459,6 +548,7 @@ async function submit() {
       await stockApi.updateItem(itemId.value, form.value)
       await eshopApi.updateProduct(itemId.value, buildProductPayload())
       await eshopApi.updatePrices(itemId.value, prices.value.map(pricePayloadFrom))
+      await eshopApi.updatePromoPrices(itemId.value, promos.value.map(promoPayloadFrom))
       await eshopApi.updateVendors(itemId.value, vendors.value.map(vendorPayloadFrom))
       toast.success(t('common.saved'))
       await loadProduct(itemId.value)
@@ -890,6 +980,91 @@ function onImgError(e: Event) {
             </table>
           </div>
           <p class="text-xs text-neutral-500">{{ t('eshop.prices.hint') }}</p>
+
+          <!-- ─────────── Akční (promoční) ceny ─────────── -->
+          <div class="pt-5 mt-1 border-t border-neutral-200 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-semibold text-neutral-800">{{ t('eshop.promo.title') }}</h3>
+                <p class="text-xs text-neutral-500 mt-0.5">{{ t('eshop.promo.subtitle') }}</p>
+              </div>
+              <button type="button" @click="addPromoRow" :class="btnOutline('primary')" class="whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                {{ t('eshop.promo.add') }}
+              </button>
+            </div>
+
+            <EmptyState v-if="promos.length === 0" dense accent="neutral" icon="tag"
+              :title="t('eshop.promo.empty')" :message="t('eshop.promo.empty_hint')" />
+
+            <div v-else class="overflow-x-auto scrollbar-slim">
+              <table class="w-full text-sm border-collapse">
+                <thead>
+                  <tr class="text-left text-xs text-neutral-500 border-b border-neutral-200">
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_label') }}</th>
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_currency') }}</th>
+                    <th class="py-2 pr-3 font-medium text-right">{{ t('eshop.promo.col_price') }}</th>
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_from') }}</th>
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_to') }}</th>
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_qty_mode') }}</th>
+                    <th class="py-2 pr-3 font-medium text-right">{{ t('eshop.promo.col_remaining') }}</th>
+                    <th class="py-2 pr-3 font-medium text-center">{{ t('eshop.promo.col_active') }}</th>
+                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_state') }}</th>
+                    <th class="py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(p, idx) in promos" :key="p.id ?? `new-promo-${idx}`" class="border-b border-neutral-100 align-top">
+                    <td class="py-2 pr-3">
+                      <input v-model="p.label" type="text" maxlength="60" :placeholder="t('eshop.promo.label_ph')"
+                        class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <input v-model="p.currency_code" maxlength="3" placeholder="CZK"
+                        class="w-20 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <input v-model="p.promo_price" type="text" inputmode="decimal" :placeholder="t('eshop.prices.fixed_ph')"
+                        class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <input v-model="p.valid_from" type="date"
+                        class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <input v-model="p.valid_to" type="date"
+                        class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <select v-model="p.qty_mode" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                        <option v-for="m in QTY_MODES" :key="m" :value="m">{{ t('eshop.promo.qty_mode_' + m) }}</option>
+                      </select>
+                      <input v-if="p.qty_mode === 'limited'" v-model="p.qty_limit" type="number" step="1" min="1"
+                        :placeholder="t('eshop.promo.qty_limit_ph')"
+                        class="mt-1 w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right block" />
+                    </td>
+                    <td class="py-2 pr-3 text-right font-mono text-neutral-700 whitespace-nowrap">
+                      {{ p.qty_mode === 'unlimited' ? '∞' : (p.qty_remaining ?? '—') }}
+                    </td>
+                    <td class="py-2 pr-3 text-center">
+                      <input v-model="p.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600 mt-2" />
+                    </td>
+                    <td class="py-2 pr-3">
+                      <span v-if="p.state" class="inline-block px-2 py-0.5 rounded-full border text-xs whitespace-nowrap"
+                        :class="promoStateClass(p.state)">{{ t('eshop.promo.state_' + p.state) }}</span>
+                      <span v-else class="text-xs text-neutral-400">{{ t('eshop.promo.state_unsaved') }}</span>
+                    </td>
+                    <td class="py-2 text-right">
+                      <button type="button" @click="removePromoRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
+                        <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-xs text-neutral-500">{{ t('eshop.promo.hint') }}</p>
+          </div>
         </div>
       </div>
 

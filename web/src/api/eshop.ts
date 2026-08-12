@@ -239,6 +239,69 @@ export interface ProductPricePayload {
   is_manual_override: boolean
 }
 
+// ── Akční (promoční) ceny karty (Promo prices, migrace 1328) ─────────────
+/**
+ * Množstevní strop akce:
+ *  - `stock`     … do vyprodání zásob (strop = živý stav skladu; doskladnění akci obnoví),
+ *  - `limited`   … pevný rozpočet kusů odečítaný prodejem (doskladnění ho NEobnoví),
+ *  - `unlimited` … bez množstevního stropu.
+ */
+export type PromoQtyMode = 'stock' | 'limited' | 'unlimited'
+export type PromoState = 'active' | 'scheduled' | 'expired' | 'disabled' | 'exhausted'
+
+/** Řádek akční ceny. Money/qty pole jsou string (money-safe). */
+export interface ProductPromoPrice {
+  id: number
+  stock_item_id: number
+  currency_code: string
+  promo_price: string
+  label: string | null
+  valid_from: string | null
+  valid_to: string | null
+  qty_mode: PromoQtyMode
+  qty_limit: string | null
+  is_active: boolean
+  note: string | null
+  /** Dopočet backendem — kolik kusů akce ještě pokryje; null = bez stropu. */
+  qty_remaining: string | null
+  state: PromoState
+}
+
+/** PUT /eshop/products/{id}/promo-prices — vstupní řádek (id = úprava, bez id = nová). */
+export interface ProductPromoPricePayload {
+  id: number | null
+  currency_code: string
+  promo_price: string
+  label: string | null
+  valid_from: string | null
+  valid_to: string | null
+  qty_mode: PromoQtyMode
+  qty_limit: string | null
+  is_active: boolean
+  note: string | null
+}
+
+/** GET /eshop/products/{id}/effective-price — platná cena pro dané množství. */
+export interface EffectivePrice {
+  stock_item_id: number
+  currency_code: string
+  base_price: string | null
+  unit_price: string | null
+  promo_applied: boolean
+  promo_reason: 'applied' | 'none' | 'qty_exceeds_remaining' | 'exhausted' | 'not_cheaper'
+  promo_qty_available: string | null
+  promo: {
+    id: number
+    label: string | null
+    promo_price: string
+    valid_from: string | null
+    valid_to: string | null
+    qty_mode: PromoQtyMode
+    qty_limit: string | null
+    qty_remaining: string | null
+  } | null
+}
+
 // ── Dodavatelé karty (Vendors) ───────────────────────────────────────────
 /** Řádek dodavatele karty. Money/decimal pole jsou string. */
 export interface ProductVendor {
@@ -389,6 +452,14 @@ export const eshopApi = {
     api.put<ProductPrice[]>(`/eshop/products/${productId}/prices`, { prices }).then(r => r.data),
   recomputePrices: (productId: number) =>
     api.post<ProductPrice[]>(`/eshop/products/${productId}/prices/recompute`).then(r => r.data),
+
+  // ── Akční ceny karty (Promo prices) ──────────────────────────────────────
+  getPromoPrices: (productId: number) =>
+    api.get<ProductPromoPrice[]>(`/eshop/products/${productId}/promo-prices`).then(r => r.data),
+  updatePromoPrices: (productId: number, promoPrices: ProductPromoPricePayload[]) =>
+    api.put<ProductPromoPrice[]>(`/eshop/products/${productId}/promo-prices`, { promo_prices: promoPrices }).then(r => r.data),
+  getEffectivePrice: (productId: number, params?: { currency?: string; qty?: string | number; on_date?: string }) =>
+    api.get<EffectivePrice>(`/eshop/products/${productId}/effective-price`, { params: toParams(params ?? {}) }).then(r => r.data),
 
   // ── Dodavatelé karty (Vendors) ───────────────────────────────────────────
   getVendors: (productId: number) =>

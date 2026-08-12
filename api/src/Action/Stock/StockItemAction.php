@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLevelRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
@@ -43,7 +44,35 @@ final class StockItemAction
         private readonly IpMatcher $ipMatcher,
         private readonly StockItemMovementsPdfRenderer $movementsPdf,
         private readonly StockReportXlsxExporter $xlsx,
+        private readonly EffectivePriceResolver $effectivePrice,
     ) {}
+
+    /**
+     * Doplní řádkům platnou cenu (akční cena nad standardní cenotvorbou, migrace
+     * 1328). Cena se NIKDY nečte přímo ze `sale_price_without_vat` — jediná cesta
+     * je {@see EffectivePriceResolver}, aby doklad, seznam i našeptávač quotovaly
+     * totéž. Dávkově = konstantní počet dotazů bez ohledu na počet řádků.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withEffectivePrice(int $supplierId, array $rows): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+        $ids = array_map(static fn (array $r): int => (int) $r['id'], $rows);
+        $resolved = $this->effectivePrice->resolveMany($supplierId, $ids);
+        foreach ($rows as &$row) {
+            $r = $resolved[(int) $row['id']] ?? null;
+            $row['effective_price']     = $r['unit_price'] ?? ($row['sale_price_without_vat'] ?? null);
+            $row['promo_price']         = ($r !== null && $r['promo_applied']) ? $r['promo']['promo_price'] : null;
+            $row['promo_label']         = ($r !== null && $r['promo_applied']) ? $r['promo']['label'] : null;
+            $row['promo_qty_available'] = $r['promo_qty_available'] ?? null;
+        }
+        unset($row);
+        return $rows;
+    }
 
     public function list(Request $request, Response $response): Response
     {
@@ -68,6 +97,7 @@ final class StockItemAction
 
         $p = Pagination::fromQuery($q, 50);
         [$rows, $total] = $this->items->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
+        $rows = $this->withEffectivePrice($supplierId, $rows);
         return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
     }
 
@@ -79,7 +109,8 @@ final class StockItemAction
         }
         $q = $request->getQueryParams();
         $limit = max(1, min(200, (int) ($q['limit'] ?? 50)));
-        return Json::ok($response, $this->items->search($supplierId, (string) ($q['q'] ?? ''), $limit));
+        $rows = $this->items->search($supplierId, (string) ($q['q'] ?? ''), $limit);
+        return Json::ok($response, $this->withEffectivePrice($supplierId, $rows));
     }
 
     public function get(Request $request, Response $response, array $args): Response
@@ -92,7 +123,7 @@ final class StockItemAction
         if ($item === null) {
             return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
         }
-        return Json::ok($response, $item);
+        return Json::ok($response, $this->withEffectivePrice($supplierId, [$item])[0]);
     }
 
     public function create(Request $request, Response $response): Response

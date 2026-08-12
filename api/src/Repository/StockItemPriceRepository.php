@@ -45,6 +45,37 @@ final class StockItemPriceRepository
     }
 
     /**
+     * Dávkové čtení materializované prodejní ceny pro víc karet a jednu měnu
+     * (EffectivePriceResolver — jinak by list karet dělal N+1 dotazů). Karta bez
+     * cenového řádku nebo bez přepočtu v mapě chybí; fallback řeší volající.
+     *
+     * @param list<int> $stockItemIds
+     * @return array<int,string> stock_item_id => computed_price
+     */
+    public function computedPricesFor(int $supplierId, array $stockItemIds, string $currency): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $stockItemIds),
+            static fn (int $i): bool => $i > 0,
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT stock_item_id, computed_price FROM stock_item_prices
+              WHERE supplier_id = ? AND currency_code = ? AND computed_price IS NOT NULL
+                AND stock_item_id IN (' . $in . ')'
+        );
+        $stmt->execute(array_merge([$supplierId, strtoupper($currency)], $ids));
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['stock_item_id']] = (string) $r['computed_price'];
+        }
+        return $out;
+    }
+
+    /**
      * Upsert definice ceny (mode/markup/fixed/rounding/override) — NEpřepisuje
      * computed_* (ty nastavuje updateComputed po přepočtu).
      * @param array{price_mode:string, markup_pct:?string, fixed_price:?string,

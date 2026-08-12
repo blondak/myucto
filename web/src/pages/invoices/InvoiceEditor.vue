@@ -230,7 +230,17 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
     item.description = si.name
     item.unit = si.unit
-    if (si.sale_price_without_vat != null) item.unit_price_without_vat = Number(si.sale_price_without_vat)
+    // Cena do řádku VŽDY přes effective_price (EffectivePriceResolver na backendu) —
+    // zahrnuje platnou akční cenu. sale_price_without_vat je jen fallback pro starší
+    // odpovědi bez toho pole; nikdy nesmí akci obejít.
+    const price = si.effective_price ?? si.sale_price_without_vat
+    if (price != null) item.unit_price_without_vat = Number(price)
+    if (si.promo_price != null) {
+      toast.info(t('invoice.promo_price_applied', {
+        price: formatMoney(Number(si.promo_price)),
+        label: si.promo_label ?? t('invoice.promo_price_generic'),
+      }))
+    }
     if (si.vat_rate_id != null && vatRates.value.some(v => v.id === si.vat_rate_id)) item.vat_rate_id = si.vat_rate_id
   }
   if (item.warehouse_id == null) item.warehouse_id = defaultWarehouseId.value
@@ -257,7 +267,12 @@ async function hydrateStockSelections() {
   await Promise.all(rows.map(async ({ it }) => {
     try {
       const si = await stockApi.getItem(it.stock_item_id!)
-      stockItemsCache.set(si.id, { id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id, sale_price_without_vat: si.sale_price_without_vat })
+      stockItemsCache.set(si.id, {
+        id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id,
+        sale_price_without_vat: si.sale_price_without_vat,
+        effective_price: si.effective_price, promo_price: si.promo_price,
+        promo_label: si.promo_label, promo_qty_available: si.promo_qty_available,
+      })
       stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
     } catch { /* karta smazána/nedostupná — necháme jen id, picker zůstane prázdný */ }
   }))

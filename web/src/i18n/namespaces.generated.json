@@ -431,6 +431,7 @@
       "tax_evidence"
     ],
     "stock-items": [
+      "eshop",
       "stock"
     ],
     "stock-item-new": [
@@ -438,6 +439,7 @@
       "stock"
     ],
     "stock-item-detail": [
+      "eshop",
       "stock"
     ],
     "stock-item-edit": [
