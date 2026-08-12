@@ -154,6 +154,16 @@ export class MyUctoClient {
     return this.request('PUT', path, { body, tool });
   }
 
+  /**
+   * `delete` je v JS rezervované slovo, takže metoda je `del`.
+   *
+   * Tělo se záměrně neposílá: mazací endpointy API ho nečtou a prázdný
+   * `Content-Type: application/json` bez těla některé proxy odmítají.
+   */
+  del(path, tool) {
+    return this.request('DELETE', path, { tool });
+  }
+
   async request(method, path, { query, body, tool } = {}) {
     const url = new URL(this.baseUrl + path);
     appendQuery(url.searchParams, query);

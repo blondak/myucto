@@ -17,8 +17,16 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
-| E-shop a sklad | zboží, kategorie, výrobci, ceny, zásoby, dostupnost, ocenění |
+| E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
+
+E-shopová a skladová vrstva je naopak **obousměrná** — pohyb je dohledatelný ve
+skladové knize a zaúčtovaný doklad jde stornovat protidokladem, takže je chyba
+napravitelná v aplikaci. Mazání, storno dokladu a uzavření inventury přesto
+vyžadují `confirm: true`: první volání nic neprovede a jen vrátí, čeho by se
+změna týkala (`destructive: true` u nástroje, `destructiveHint` v anotaci).
+Nahrání médií a import zboží z XLSX/CSV v katalogu nejsou — jedou přes
+multipart, který tenhle klient neposílá.
 
 Účetní a daňová vrstva je **jednosměrná**. Zaúčtování, storno zápisu, uzavření
 období, zaevidování opravy podle § 46 / § 74b a odeslání podání na EPO v katalogu
@@ -99,7 +107,7 @@ systémové autority načte sám (`tls.setDefaultCACertificates`, Node 22.15+)
 a výsledek vypíše na stderr:
 
 ```
-MyÚčto MCP v1.0.0 připojen — 62 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
+MyÚčto MCP v1.0.0 připojen — 138 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
 ```
 
 Zbylé příčiny selhání: neúplný řetěz (chybí mezilehlý certifikát — oprava patří
@@ -133,6 +141,13 @@ src/tools.mjs   katalog nástrojů (jediné místo, kam se přidává nový nás
 
 Přidání nástroje = jeden záznam v `TOOLS`. `write: true` u čehokoli, co mění data —
 podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v popisu.
+`destructive: true` navíc u mazání a nevratných kroků; k tomu patří `confirm: CONFIRM`
+ve schématu a `confirmed()` / `requireConfirm()` v `run()`, které bez potvrzení
+místo zápisu vrátí náhled dotčeného záznamu.
+
+Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
+pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník
+stejného tvaru je tedy jeden objekt, ne pět nástrojů psaných ručně.
 
 ## Logování
 

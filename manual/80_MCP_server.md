@@ -36,7 +36,7 @@ Podstatné vlastnosti:
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
 | Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník — **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
-| E-shop a sklad | zboží, kategorie, výrobci, ceny, zásoby, dostupnost, ocenění |
+| E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 80.8](#808-e-shop-a-sklad)) |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
 > [!IMPORTANT]
@@ -198,6 +198,11 @@ Podrobnosti v [§ 80.7](#807-vykazy-prace-a-materialu).
 
 - „Které zboží je pod minimální zásobou a mělo by se doobjednat?“
 - „Kolik máme uloženo ve skladu k dnešnímu dni?“
+- „Založ zboží Kabel HDMI 2 m, sazba 21 %, minimální zásoba 10.“ *(token čtení a zápis)*
+- „Zdraž všechno zboží značky Acme o pět procent.“ *(token čtení a zápis)*
+- „Nasklaď 20 kusů kabelu na hlavní sklad za 89 Kč a příjemku zaúčtuj.“ *(token čtení a zápis)*
+
+Celá kapitola: [§ 80.8](#808-e-shop-a-sklad).
 
 ## 80.6 Odběratelé a ARES
 
@@ -267,7 +272,102 @@ rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
 existujícího výkazu, jinak si o ni řekne — špatná sazba by se propsala do
 přiznání k DPH.
 
-## 80.8 Log volání
+## 80.8 E-shop a sklad
+
+Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** — asistent
+umí katalog nejen číst, ale i zakládat, upravovat a mazat. Důvod je prostý:
+skladový pohyb je dohledatelný ve skladové knize a zaúčtovaný doklad jde
+stornovat protidokladem, takže se chyba dá v aplikaci napravit. Účetní dopad
+vzniká až v účetní vrstvě, která zůstává jen ke čtení.
+
+> [!NOTE]
+> Celá tahle agenda je **volitelný modul**. Když ho firma nemá zapnutý,
+> nástroje vracejí `403 stock_disabled` — zapíná se v nastavení firmy.
+
+### Co asistent umí
+
+| Oblast | Čtení | Zápis |
+|---|---|---|
+| **Zboží — skladová karta** | seznam, našeptávač, detail, skladová kniha (pohyby) | založit, upravit (SKU, název, MJ, sazba DPH, minimální zásoba, aktivita), smazat |
+| **Zboží — obsah pro e-shop** | karta i s kategoriemi, štítky a parametry; jazykové verze | výrobce, záruka, dodací lhůta, hmotnost, publikace, překlady, kategorie, štítky, parametry, poplatky |
+| **Ceny** | ceny po měnách, marže | uložit cenotvorbu (přirážka / pevná cena / zaokrouhlení), vynutit přepočet |
+| **Dodavatelé zboží** | seznam s nákupní cenou a dodací lhůtou | nahradit seznam dodavatelů zboží |
+| **Média** | seznam obrázků a příloh | popisky, pořadí, hlavní obrázek, smazání |
+| **Kategorie** | strom, detail, překlady | založit, upravit, přesunout v stromu, uložit překlady, smazat |
+| **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty | u všech čtyř založit / upravit / smazat |
+| **Sklady** | seznam, detail, hodnota zásob | založit, upravit, smazat |
+| **Zásoby** | stav, dostupnost s rezervacemi, sestava stavu, ocenění k datu | — |
+| **Příjemky, výdejky, převodky** | seznam, detail s řádky | založit koncept, upravit, zaúčtovat, stornovat, smazat koncept |
+| **Inventury** | seznam, detail s rozdíly | založit, spustit, zapsat napočítané množství, uzavřít |
+
+### Potvrzování nevratných kroků
+
+Mazání, storno dokladu a uzavření inventury vyžadují **výslovné potvrzení**.
+První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
+změna týkala:
+
+> **NEPROVEDENO — chybí potvrzení.** Smazat se má výrobce: `ACME — Acme s.r.o.`
+> Operace je nevratná. Ukaž to uživateli a teprve po jeho souhlasu zavolej
+> nástroj znovu s `confirm: true`.
+
+Funguje to tedy jako **suchý běh**: uvidíš konkrétní záznam včetně kódu a názvu,
+ne jen to, co si asistent myslí, že maže. Teprve druhé volání s potvrzením
+operaci provede. U médií a hodnot parametrů se navíc kontroluje, že záznam
+opravdu patří ke zboží (resp. parametru), které jsi uvedl — překlep v čísle tak
+nesmaže fotku cizímu zboží.
+
+Praktický dopad: **asistent se tě před smazáním vždycky zeptá.** Řetězec „ukliď
+nepoužívané štítky“ neproběhne jedním vrzem, ale jako výpis a dotaz.
+
+### Kolekce se nahrazují celé
+
+Ceny, dodavatelé, jazykové verze, kategorie, štítky, parametry a řádky
+skladového dokladu se ukládají **jako celek** — co v uloženém seznamu není, to se
+smaže. Není to nedostatek nástroje, ale způsob, jakým to ukládá i aplikace.
+
+Nástroje na to asistenta upozorňují a jeho správný postup je: nejdřív si stav
+načíst, do něj vložit změnu a poslat zpátky **kompletní** seznam. Když si nejsi
+jistý, řekni si o vypsání současného stavu předem:
+
+> „Ukaž ceny toho zboží, pak k nim přidej eurovou cenu s marží 25 %.“
+
+### Skladové doklady mají dvě fáze
+
+Příjemka, výdejka i převodka vznikají jako **koncept**, který se stavem skladu
+nedělá nic — teprve zaúčtování pohyb provede, přidělí dokladu číslo a doklad
+uzamkne. Nástroje ty dvě fáze schválně nespojují: asistent má doklad připravit
+a nechat si ho zkontrolovat, než se zásoby pohnou.
+
+> „Nasklaď 20 kusů kabelu na hlavní sklad za 89 Kč za kus.“
+> → asistent založí koncept příjemky a ukáže ti ho.
+> „Souhlasím, zaúčtuj.“
+> → teprve teď se zásoba zvýší.
+
+Zaúčtovaný doklad už upravit ani smazat nejde, jen **stornovat** — vznikne k němu
+opačný protidoklad v původních cenách a oba zůstanou ve skladové knize.
+
+Server sám odmítne (`409`) výdej do minusu, jakýkoli pohyb na skladu
+s rozběhnutou inventurou a doklad do uzavřeného účetního období.
+
+### Inventura
+
+Postup kopíruje aplikaci: založit → spustit (udělá se snímek očekávaných stavů
+a **sklad se zablokuje** pro zaúčtování dokladů) → zapsat napočítané množství →
+uzavřít. Uzavření vygeneruje rozdílovou příjemku na přebytky a výdejku na manka,
+rovnou zaúčtované — proto vyžaduje potvrzení a proto asistent před ním hlásí,
+kolik řádků zůstalo nespočítaných (ty se přeskočí).
+
+### Co přes MCP nejde
+
+- **Nahrát fotku ke zboží.** Přenos souborů běží mimo formát, se kterým tenhle
+  server pracuje. Fotky nahraješ v aplikaci, asistent s nimi pak umí pracovat
+  (popisky, pořadí, hlavní obrázek, smazání).
+- **Hromadný import zboží z XLSX/CSV.** Ze stejného důvodu; import má v aplikaci
+  vlastní průvodce s náhledem.
+- **Stáhnout PDF nebo XLSX** skladového dokladu, inventurního soupisu či sestavy.
+  Data sestav asistent přečte, hotový soubor si stáhneš v aplikaci.
+
+## 80.9 Log volání
 
 Stránka **Firma → MCP server** má dole **Log volání** — každé volání tvých API
 tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název nástroje**,
@@ -276,7 +376,7 @@ takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
 jsou v [§ 78.8](78_API.md#788-log-volani-api).
 
-## 80.9 Bezpečnost
+## 80.10 Bezpečnost
 
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omez token na IP** — uniklý token je pak mimo tvou síť k ničemu.
@@ -287,23 +387,30 @@ jsou v [§ 78.8](78_API.md#788-log-volani-api).
 - Token **nedávej do souborů, které commituješ** do gitu (týká se hlavně
   `.vscode/mcp.json` a `.cursor/mcp.json` v projektu).
 - Nepoužívaný token **zruš**. Historie volání v logu zůstane.
+- **Mazání a storna se neprovedou napoprvé.** Nástroje, které nejdou vzít zpět,
+  vyžadují potvrzení a při prvním zavolání jen vypíšou, čeho by se změna týkala
+  (viz [§ 80.8](#808-e-shop-a-sklad)). Je to pojistka proti tomu, aby asistent
+  smazal něco, co si domyslel — ne náhrada za `MYUCTO_READ_ONLY=1`, který je
+  u nedozorovaného provozu pořád ta správná volba.
 
-## 80.10 Řešení problémů
+## 80.11 Řešení problémů
 
 | Projev | Příčina a náprava |
 |---|---|
 | Server nenaběhne, hlásí chybnou konfiguraci | `MYUCTO_API_URL` musí končit `/api/v1` a token začínat `mi_pat_`. |
-| Asistent hlásí, že **server neodpovídá** | Častou příčinou je nedůvěryhodný HTTPS certifikát — viz [§ 80.11](#8011-vlastni-https-certifikat); současně ověř dostupnost API. |
+| Asistent hlásí, že **server neodpovídá** | Častou příčinou je nedůvěryhodný HTTPS certifikát — viz [§ 80.12](#8012-vlastni-https-certifikat); současně ověř dostupnost API. |
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
 | `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz [§ 78.6](78_API.md#786-scopes). |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý. |
+| `409` u mazání zboží, výrobce, kategorie, skladu… | Záznam je někde použitý — server ho nepustí. Archivuj ho (`archived`), případně zboží či sklad jen deaktivuj. |
+| „NEPROVEDENO — chybí potvrzení“ | Není chyba: takhle vypadá náhled nevratné operace. Zkontroluj výpis a řekni asistentovi, ať to potvrdí. |
 | `429` | Překročen limit — sniž `MYUCTO_MAX_RPS`. |
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |
 | V logu nejsou žádná volání | Server se nespustil — zkontroluj cestu k `index.mjs` a že proběhlo `npm install`. |
 
-## 80.11 Vlastní HTTPS certifikát
+## 80.12 Vlastní HTTPS certifikát
 
 Instance s certifikátem od firemní nebo vlastní autority (typicky testovací
 prostředí) je zvláštní případ: **Node má vlastní seznam kořenových autorit

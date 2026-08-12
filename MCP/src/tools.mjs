@@ -13,8 +13,18 @@
  * Vynucuje to i server ({@see \MyInvoice\Middleware\ApiScopeMiddleware}), takže
  * i kdyby sem někdo zápisový nástroj přidal, dostane 403.
  *
- * Každý nástroj: { name, title, description, inputSchema, write, run(client, args) }
- * `write: true` = mění data; klient je odmítne v režimu MYUCTO_READ_ONLY.
+ * E-SHOP A SKLAD JSOU NAOPAK OBOUSMĚRNÉ — katalog zboží, číselníky, ceny,
+ * dodavatelé, média, sklady, skladové doklady i inventury se dají přes API
+ * i zapisovat. Zápis do skladu není daňový úkon: pohyb jde vždy dohledat ve
+ * skladové knize a zaúčtovaný doklad lze stornovat protidokladem, takže se
+ * chyba dá napravit v aplikaci. Účetní dopad vzniká až v účetní vrstvě, která
+ * pro token zůstává jen ke čtení.
+ *
+ * Každý nástroj: { name, title, description, inputSchema, write, destructive,
+ *                  run(client, args, toolName) }
+ * `write: true`      = mění data; klient je odmítne v režimu MYUCTO_READ_ONLY.
+ * `destructive: true`= maže nebo nevratně přepisuje; vyžaduje `confirm: true`
+ *                      (viz {@see confirmed}) a hlásí se jako destructiveHint.
  */
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -34,6 +44,79 @@ const PAGING = {
   page: int('Stránka, od 1.', { minimum: 1 }),
   per_page: int('Počet záznamů na stránku (5–200, výchozí 50).', { minimum: 5, maximum: 200 }),
 };
+
+/** Stránkování endpointů, které jedou na limit/offset místo page/per_page. */
+const WINDOW = {
+  limit: int('Počet záznamů (1–500, výchozí 100).', { minimum: 1, maximum: 500 }),
+  offset: int('Kolik záznamů přeskočit (výchozí 0).', { minimum: 0 }),
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// Pojistka nevratných operací
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Potvrzovací parametr pro mazání a další nevratné kroky.
+ *
+ * Zavedeno kvůli tomu, že katalog e-shopu je poprvé zapisovatelný z jazykového
+ * modelu. Model si dokáže domyslet, že „ukliď staré štítky" znamená mazání,
+ * ale nemá jak vědět, co na štítku visí. Vzor je stejný jako u `allow_duplicate`
+ * v `create_client`: bez výslovného souhlasu se operace neprovede.
+ */
+const CONFIRM = bool(
+  'Potvrzení nevratné operace. Bez `true` se NIC nesmaže — nástroj jen vrátí, '
+  + 'čeho by se změna týkala. Ten výpis ukaž uživateli a zavolej nástroj znovu '
+  + 's `confirm: true` teprve po jeho souhlasu.',
+);
+
+/**
+ * Bez potvrzení operaci zastaví a místo provedení vrátí, čeho se týká.
+ *
+ * @param {string} action co by se stalo, např. „Smazat se má kategorie"
+ * @param {string} label  konkrétní záznam, ať uživatel nevidí jen číslo
+ */
+function requireConfirm(a, action, label) {
+  if (a.confirm === true) return;
+  throw new Error(
+    `NEPROVEDENO — chybí potvrzení. ${action}: ${label}.\n`
+    + 'Operace je nevratná. Ukaž to uživateli a teprve po jeho souhlasu zavolej '
+    + 'nástroj znovu s `confirm: true`.',
+  );
+}
+
+/**
+ * Načte dotčený záznam a bez potvrzení ho vrátí jako náhled místo provedení.
+ *
+ * První volání tak funguje jako suchý běh: uživatel vidí konkrétní záznam
+ * z databáze, ne jen agentův odhad, co se asi smaže. Zároveň se tím ověří,
+ * že záznam vůbec existuje a patří téhle firmě.
+ *
+ * @param {(row: any) => string} label krátký popis záznamu do hlášky
+ */
+async function confirmed(c, a, tool, { path, action, label }) {
+  const current = await c.get(path, null, tool);
+  requireConfirm(a, action, label(current));
+  return current;
+}
+
+/** Popisek záznamu do potvrzovací hlášky — kód a název tak, jak je vidí uživatel. */
+const nameOf = (row, fallbackId) => {
+  const code = row?.code ?? row?.sku ?? row?.doc_number ?? '';
+  const name = row?.name ?? row?.description ?? row?.title ?? '';
+  const text = [code, name].filter(Boolean).join(' — ');
+  return text || `#${row?.id ?? fallbackId ?? '?'}`;
+};
+
+/**
+ * Tělo požadavku jen z předaných parametrů.
+ *
+ * Zdroje e-shopu a skladu dělají partial update (chybějící klíč = beze změny),
+ * takže posílat `undefined` klíče by znamenalo rozdíl mezi „neměň" a „vynuluj"
+ * setřít — a model, který chce upravit jen název, by tiše smazal EAN.
+ */
+const changed = (a, keys) => Object.fromEntries(
+  keys.filter((k) => a[k] !== undefined).map((k) => [k, a[k]]),
+);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pomocné funkce pro výkazy práce
@@ -153,6 +236,159 @@ async function resolveDraftInvoice(client, args, tool) {
 function defaultReportTitle(invoice) {
   const period = String(invoice?.tax_date || invoice?.issue_date || '').slice(0, 7);
   return period ? `Výkaz práce ${period}` : 'Výkaz práce';
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Opakované tvary polí (e-shop a sklad)
+//
+// Několik zdrojů přijímá kolekci, kterou při zápisu NAHRAZUJÍ celou — ceny,
+// dodavatele, překlady i řádky dokladu. Tvar je proto na jednom místě i s
+// varováním, že vynechaný prvek znamená smazání; kdyby se popis lišil nástroj
+// od nástroje, model by si u jednoho z nich domyslel, že jde o přírůstek.
+// ────────────────────────────────────────────────────────────────────────────
+
+const arrayOf = (description, properties, required = [], extra = {}) => ({
+  type: 'array',
+  description,
+  items: {
+    type: 'object',
+    properties,
+    required,
+    additionalProperties: false,
+  },
+  ...extra,
+});
+
+const PRICE_ROWS = arrayOf(
+  'Kompletní sada cen po měnách. Měna, která tu není, se ze zboží SMAŽE.',
+  {
+    currency_code: str('Kód měny podle ISO 4217, např. CZK.', { minLength: 3, maxLength: 3 }),
+    price_mode: str('Režim: `markup` = přirážka k pořizovací ceně, `fixed` = pevná cena.', { enum: ['markup', 'fixed'] }),
+    markup_pct: num('Přirážka v procentech. Používá se u režimu `markup`.'),
+    fixed_price: num('Pevná prodejní cena. Povinná u režimu `fixed`.'),
+    rounding: str('Zaokrouhlení výsledné ceny.', { enum: ['none', '0.01', '0.10', '0.50', '1', '9_ending'] }),
+    is_manual_override: bool('Cenu needituje automatický přepočet.'),
+  },
+  ['currency_code'],
+);
+
+const VENDOR_ROWS = arrayOf(
+  'Kompletní seznam dodavatelů zboží. Dodavatel, který tu není, se ze zboží SMAŽE.',
+  {
+    client_id: int('ID dodavatele — karta odběratele s příznakem „je dodavatel" (`search_clients` s `role: "vendors"`).'),
+    vendor_sku: str('Kód zboží u dodavatele.'),
+    purchase_price: num('Nákupní cena bez DPH.'),
+    currency_code: str('Měna nákupní ceny (ISO 4217). Výchozí CZK.', { minLength: 3, maxLength: 3 }),
+    delivery_days: int('Dodací lhůta ve dnech.', { minimum: 0 }),
+    stock_qty: num('Množství, které dodavatel hlásí skladem.'),
+    is_preferred: bool('Hlavní dodavatel. Nejvýš jeden v seznamu.'),
+    note: str('Poznámka.'),
+  },
+  ['client_id'],
+);
+
+const PRODUCT_I18N_ROWS = arrayOf(
+  'Kompletní sada jazykových verzí. Jazyk, který tu není, se ze zboží SMAŽE.',
+  {
+    locale: str('Kód jazyka, max 5 znaků — např. cs, en, de.', { maxLength: 5 }),
+    name: str('Název zboží v tomto jazyce. Povinný — řádek bez názvu se přeskočí.'),
+    short_desc: str('Krátký popis.'),
+    description: str('Podrobný popis.'),
+    seo_title: str('Titulek pro vyhledávače.'),
+    seo_description: str('Popis pro vyhledávače.'),
+    seo_slug: str('Část URL.'),
+  },
+  ['locale', 'name'],
+);
+
+const STOCK_DOC_LINES = arrayOf(
+  'Řádky dokladu. Při úpravě dokladu se stávající řádky NAHRAZUJÍ tímto seznamem.',
+  {
+    stock_item_id: int('ID skladové karty — dohledej přes `search_products`.'),
+    qty: num('Množství v měrné jednotce karty. Vždy kladné, směr pohybu určuje `doc_type`.', { exclusiveMinimum: 0 }),
+    unit_cost: num('Pořizovací cena za MJ bez DPH. Jen u příjemky (`receipt`) — u výdeje a převodky si ji doplní zaúčtování.'),
+    extra_cost: num('Vedlejší pořizovací náklady rozpočítané na řádek (doprava, clo). Jen u příjemky.'),
+    note: str('Poznámka k řádku.'),
+  },
+  ['stock_item_id', 'qty'],
+  { minItems: 1 },
+);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Číselníky e-shopu
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Vygeneruje pětici nástrojů (seznam / detail / založit / upravit / smazat) nad
+ * plochým číselníkem e-shopu.
+ *
+ * Výrobci, štítky, poplatky i parametry mají na serveru stejný tvar: `active`
+ * jako filtr seznamu, partial update, kolize kódu jako 409 a odmítnuté mazání
+ * u referencovaného záznamu. Psát to pětkrát ručně znamená pět příležitostí,
+ * jak se v jednom z nich rozejít se zbytkem — a hlavně je díky tomu levné
+ * přidat další číselník, až přibude (třeba katalog dodavatelů).
+ *
+ * Texty se předávají celé, ne skládají z podstatného jména: popis nástroje je
+ * to jediné, podle čeho se model rozhoduje, a šroubovaná čeština z generátoru
+ * ho mate víc, než kolik ušetří.
+ */
+function codebookTools({ names, titles, descriptions, path, fields, required, listFields = {} }) {
+  const idField = int(`ID záznamu v číselníku (${names.list}).`);
+
+  return [
+    {
+      name: names.list,
+      title: titles.list,
+      description: descriptions.list,
+      inputSchema: schema({
+        active_only: bool('Jen aktivní (nearchivované) záznamy.'),
+        ...listFields,
+      }),
+      write: false,
+      run: (c, a, tool) => c.get(path, { active: a.active_only, ...changed(a, Object.keys(listFields)) }, tool),
+    },
+    {
+      name: names.get,
+      title: titles.get,
+      description: descriptions.get,
+      inputSchema: schema({ id: idField }, ['id']),
+      write: false,
+      run: (c, a, tool) => c.get(`${path}/${a.id}`, null, tool),
+    },
+    {
+      name: names.create,
+      title: titles.create,
+      description: descriptions.create,
+      inputSchema: schema(fields, required),
+      write: true,
+      run: (c, a, tool) => c.post(path, changed(a, Object.keys(fields)), tool),
+    },
+    {
+      name: names.update,
+      title: titles.update,
+      description: descriptions.update,
+      inputSchema: schema({ id: idField, ...fields }, ['id']),
+      write: true,
+      run: (c, a, tool) => c.put(`${path}/${a.id}`, changed(a, Object.keys(fields)), tool),
+    },
+    {
+      name: names.delete,
+      title: titles.delete,
+      description: descriptions.delete,
+      inputSchema: schema({ id: idField, confirm: CONFIRM }, ['id']),
+      write: true,
+      destructive: true,
+      run: async (c, a, tool) => {
+        const target = `${path}/${a.id}`;
+        const was = await confirmed(c, a, tool, {
+          path: target,
+          action: descriptions.deleteAction,
+          label: (row) => nameOf(row, a.id),
+        });
+        return { deleted: was, result: await c.del(target, tool) };
+      },
+    },
+  ];
 }
 
 export const TOOLS = [
@@ -1395,16 +1631,21 @@ export const TOOLS = [
   },
 
   // ──────────────────────────────────────────────────────────────────────────
-  // E-shop a sklad
+  // E-shop — zboží (skladová karta)
+  //
+  // Zboží je jedna entita ve dvou pohledech. `/stock/items` drží skladovou
+  // identitu (SKU, název, MJ, sazba DPH, minimální zásoba) a je jediné místo,
+  // kde karta vzniká a zaniká; `/eshop/products/{id}` je nadstavba s obsahem
+  // pro e-shop. Nástroje to kopírují, aby bylo z názvu poznat, co se mění.
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search_products',
     title: 'Rychlé hledání zboží',
     description:
-      'Našeptávač nad skladovými kartami — hledá podle názvu a kódu/SKU. '
+      'Našeptávač nad skladovými kartami — hledá podle názvu, kódu/SKU a EAN. '
       + 'Pro filtrování a stránkování použij `list_products`.',
     inputSchema: schema({
-      query: str('Hledaný text — název nebo kód zboží.'),
+      query: str('Hledaný text — název, kód nebo EAN zboží.'),
       limit: int('Maximální počet výsledků (1–200, výchozí 50).', { minimum: 1, maximum: 200 }),
     }, ['query']),
     write: false,
@@ -1417,8 +1658,8 @@ export const TOOLS = [
       'Skladové karty s filtry. `type: "goods"` vrátí jen e-shopové zboží, '
       + '`only_below_min: true` položky pod minimální zásobou (kandidáti na doobjednání).',
     inputSchema: schema({
-      query: str('Fulltext přes název a kód.'),
-      type: str('Typ karty.', { enum: ['goods', 'material', 'product', 'service'] }),
+      query: str('Fulltext přes název, kód a EAN.'),
+      type: str('Typ karty.', { enum: ['goods', 'material', 'product'] }),
       active: bool('Jen aktivní (true) nebo jen neaktivní (false) karty.'),
       only_below_min: bool('Jen položky pod minimální zásobou.'),
       ...PAGING,
@@ -1437,15 +1678,204 @@ export const TOOLS = [
     name: 'get_product',
     title: 'Karta zboží',
     description:
-      'Kompletní e-shopová karta zboží — popis, kategorie, výrobce, parametry, štítky a média.',
+      'Kompletní e-shopová karta zboží — popis, kategorie, výrobce, parametry, štítky a média. '
+      + 'Skladovou identitu (SKU, MJ, sazbu DPH) vrací tenhle agregát taky, ale mění se přes '
+      + '`update_product`; e-shopový obsah přes `update_product_card`.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/eshop/products/${a.id}`, null, tool),
   },
   {
+    name: 'create_product',
+    title: 'Založit zboží',
+    description:
+      'Založí novou skladovou kartu. Pro e-shopové zboží nech `item_type` na `goods`.\n\n'
+      + 'Bez `sku` se kód odvodí z názvu; duplicitní SKU server odmítne (409). '
+      + 'Karta vzniká prázdná — popisy, kategorie a parametry doplní `update_product_card`, '
+      + 'ceny `set_product_prices`. Naskladnění je samostatný krok: '
+      + '`create_stock_document` s `doc_type: "receipt"` a `post_stock_document`.',
+    inputSchema: schema({
+      name: str('Název zboží.', { maxLength: 255 }),
+      sku: str('Kód/SKU. Bez zadání se odvodí z názvu.', { maxLength: 50 }),
+      item_type: str('Typ karty. Výchozí `goods` (zboží e-shopu).', { enum: ['goods', 'material', 'product'] }),
+      unit: str('Měrná jednotka. Výchozí `ks`.'),
+      ean: str('Čárový kód EAN.'),
+      vat_rate_id: int('ID sazby DPH — číselník vrací `list_vat_rates`.'),
+      sale_price_without_vat: num('Základní prodejní cena bez DPH.', { minimum: 0 }),
+      min_qty: num('Minimální zásoba pro hlídání podlimitních položek.', { minimum: 0 }),
+      is_active: bool('Aktivní karta (výchozí ano).'),
+      note: str('Interní poznámka.'),
+    }, ['name']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/items', changed(a, [
+      'name', 'sku', 'item_type', 'unit', 'ean', 'vat_rate_id',
+      'sale_price_without_vat', 'min_qty', 'is_active', 'note',
+    ]), tool),
+  },
+  {
+    name: 'update_product',
+    title: 'Upravit skladovou identitu zboží',
+    description:
+      'Změní SKU, název, měrnou jednotku, EAN, sazbu DPH, minimální zásobu nebo aktivitu karty. '
+      + 'Uveď jen to, co se má změnit — nevyplněné údaje zůstanou beze změny.\n\n'
+      + 'POZOR na `unit` a `vat_rate_id`: obojí se propisuje do nových dokladů, takže změna '
+      + 'u zavedené karty mění chování fakturace. Popisky, kategorie a parametry pro e-shop '
+      + 'sem NEPATŘÍ — na ty je `update_product_card`.',
+    inputSchema: schema({
+      id: int('ID zboží (skladové karty).'),
+      name: str('Název zboží.', { maxLength: 255 }),
+      sku: str('Kód/SKU.', { maxLength: 50 }),
+      item_type: str('Typ karty.', { enum: ['goods', 'material', 'product'] }),
+      unit: str('Měrná jednotka.'),
+      ean: str('Čárový kód EAN.'),
+      vat_rate_id: int('ID sazby DPH.'),
+      sale_price_without_vat: num('Základní prodejní cena bez DPH.', { minimum: 0 }),
+      min_qty: num('Minimální zásoba.', { minimum: 0 }),
+      is_active: bool('Aktivní karta. `false` kartu skryje, aniž by přišla o historii pohybů — '
+        + 'tohle je náhrada za mazání u zboží, se kterým se už obchodovalo.'),
+      note: str('Interní poznámka.'),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/stock/items/${a.id}`, changed(a, [
+      'name', 'sku', 'item_type', 'unit', 'ean', 'vat_rate_id',
+      'sale_price_without_vat', 'min_qty', 'is_active', 'note',
+    ]), tool),
+  },
+  {
+    name: 'delete_product',
+    title: 'Smazat zboží',
+    description:
+      'Smaže skladovou kartu i s jejím e-shopovým obsahem, cenami a médii.\n\n'
+      + 'Kartu, která má jakýkoli skladový pohyb, server smazat NEDOVOLÍ (409) — a je to '
+      + 'správně, historie skladu musí zůstat průkazná. V takovém případě kartu jen '
+      + 'deaktivuj: `update_product` s `is_active: false`.',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/items/${a.id}`,
+        action: 'Smazat se má skladová karta',
+        label: (row) => nameOf(row, a.id),
+      });
+      return { deleted: was, result: await c.del(`/stock/items/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'product_movements',
+    title: 'Skladová kniha zboží',
+    description:
+      'Pohyby jedné karty (příjmy, výdeje, převody, inventurní rozdíly) s běžnou bilancí '
+      + 'po každém řádku. Odpověď na „proč máme skladem tolik kusů".',
+    inputSchema: schema({
+      id: int('ID zboží (skladové karty).'),
+      warehouse_id: int('Jen pohyby na tomto skladu.'),
+      from: date('Od data (RRRR-MM-DD).'),
+      to: date('Do data (RRRR-MM-DD).'),
+      ...WINDOW,
+    }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/items/${a.id}/movements`, {
+      warehouse_id: a.warehouse_id, from: a.from, to: a.to, limit: a.limit, offset: a.offset,
+    }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — obsah karty zboží
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'update_product_card',
+    title: 'Upravit e-shopový obsah zboží',
+    description:
+      'Uloží e-shopovou část karty: výrobce, záruku, dodací lhůtu, hmotnost, publikaci do '
+      + 'e-shopu, jazykové verze, kategorie, štítky, parametry a poplatky.\n\n'
+      + 'Zapisují se JEN sekce, které pošleš — vynechaná sekce zůstane beze změny. Uvnitř '
+      + 'poslané sekce jde ale o úplnou náhradu: `tag_ids: [3]` znamená, že zboží bude mít '
+      + 'jediný štítek, ostatní se odeberou. Před úpravou si proto načti `get_product` '
+      + 'a pošli současný obsah i s doplněnou změnou.\n\n'
+      + 'Číselníky pro vazby: `list_manufacturers`, `list_categories`, `list_product_tags`, '
+      + '`list_product_attributes`, `list_fee_types`.',
+    inputSchema: schema({
+      id: int('ID zboží (skladové karty).'),
+      manufacturer_id: int('ID výrobce. `null` výrobce odebere.', { type: ['integer', 'null'] }),
+      warranty_months: int('Záruka v měsících.', { minimum: 0 }),
+      delivery_days: int('Obvyklá dodací lhůta ve dnech.', { minimum: 0 }),
+      weight_g: int('Hmotnost v gramech (pro dopravu).', { minimum: 0 }),
+      export_eshop: bool('Publikovat zboží do e-shopového exportu.'),
+      is_stocked: bool('Zboží se drží skladem (jinak se objednává na zakázku).'),
+      pricing_base: str(
+        'Základ pro výpočet prodejní ceny: `weighted_avg` = vážený průměr skladu, '
+        + '`last_purchase` = poslední nákupní cena, `manual` = ruční. Změna spustí přepočet cen.',
+        { enum: ['weighted_avg', 'last_purchase', 'manual'] },
+      ),
+      i18n: PRODUCT_I18N_ROWS,
+      categories: arrayOf(
+        'Kompletní zařazení do kategorií. Kategorie, která tu není, se odebere. '
+        + 'Nejvýš jedna smí mít `is_primary: true`.',
+        {
+          category_id: int('ID kategorie.'),
+          is_primary: bool('Hlavní kategorie zboží.'),
+          display_order: int('Pořadí.'),
+        },
+        ['category_id'],
+      ),
+      tag_ids: {
+        type: 'array',
+        items: { type: 'integer' },
+        description: 'Kompletní seznam ID štítků. Štítek, který tu není, se odebere.',
+      },
+      attributes: arrayOf(
+        'Kompletní sada hodnot parametrů. Parametr, který tu není, se odebere. '
+        + 'Hodnotu vyplň podle typu parametru: `value_text` (text), `value_num` (číslo), '
+        + '`value_bool` (ano/ne), `option_id` (výběr z hodnot — viz `list_attribute_options`).',
+        {
+          attribute_id: int('ID parametru.'),
+          value_text: str('Hodnota u parametru typu `text`.'),
+          value_num: num('Hodnota u parametru typu `number`.'),
+          value_bool: bool('Hodnota u parametru typu `bool`.'),
+          option_id: int('ID zvolené hodnoty u parametru typu `enum`.'),
+          display_order: int('Pořadí.'),
+        },
+        ['attribute_id'],
+      ),
+      fees: arrayOf(
+        'Kompletní sada poplatků zboží (autorský, recyklační, WEEE). Poplatek, který tu není, se odebere.',
+        {
+          fee_type_id: int('ID typu poplatku.'),
+          amount: num('Částka poplatku.'),
+          currency_code: str('Měna (ISO 4217).', { minLength: 3, maxLength: 3 }),
+          vat_included: bool('Částka je včetně DPH.'),
+        },
+        ['fee_type_id', 'amount'],
+      ),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/products/${a.id}`, changed(a, [
+      'manufacturer_id', 'warranty_months', 'delivery_days', 'weight_g',
+      'export_eshop', 'is_stocked', 'pricing_base',
+      'i18n', 'categories', 'tag_ids', 'attributes', 'fees',
+    ]), tool),
+  },
+  {
+    name: 'get_product_i18n',
+    title: 'Jazykové verze zboží',
+    description:
+      'Překlady karty zboží po jazycích — název, popisy a SEO. Načti je před úpravou '
+      + 'textů, protože `update_product_card` sekci `i18n` nahrazuje celou.',
+    inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/i18n`, null, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — ceny a dodavatelé
+  // ──────────────────────────────────────────────────────────────────────────
+  {
     name: 'get_product_prices',
     title: 'Cenotvorba zboží',
-    description: 'Prodejní ceny, marže a cenové hladiny konkrétního zboží.',
+    description:
+      'Prodejní ceny zboží po měnách — režim (přirážka / pevná cena), procento přirážky, '
+      + 'zaokrouhlení a spočítaná cena.',
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/eshop/products/${a.id}/prices`, null, tool),
@@ -1454,54 +1884,578 @@ export const TOOLS = [
     name: 'set_product_prices',
     title: 'Změnit ceny zboží',
     description:
-      'Uloží cenotvorbu zboží. MĚNÍ PRODEJNÍ CENY V OSTRÉM E-SHOPU — nejdřív si přečti '
-      + 'aktuální stav přes `get_product_prices`, pošli kompletní strukturu (ne jen změněné '
-      + 'pole) a změnu si nech potvrdit uživatelem.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: int('ID zboží.'),
-        prices: {
-          type: 'object',
-          description:
-            'Kompletní objekt cenotvorby ve tvaru, který vrací `get_product_prices`. '
-            + 'Struktura se liší podle nastavení firmy, proto se neověřuje tady, ale na serveru.',
-          additionalProperties: true,
-        },
-      },
-      required: ['id', 'prices'],
-      additionalProperties: false,
-    },
+      'Uloží cenotvorbu zboží a hned ji přepočítá. MĚNÍ PRODEJNÍ CENY V OSTRÉM E-SHOPU.\n\n'
+      + 'Seznam je ÚPLNÝ: měna, která v něm chybí, se ze zboží smaže. Vždycky si tedy '
+      + 'nejdřív načti `get_product_prices`, uprav jen dotčený řádek a pošli zpátky '
+      + 'všechny měny. Změnu si nech potvrdit uživatelem.',
+    inputSchema: schema({
+      id: int('ID zboží.'),
+      prices: PRICE_ROWS,
+    }, ['id', 'prices']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/prices`, a.prices, tool),
+    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/prices`, { prices: a.prices }, tool),
   },
+  {
+    name: 'recompute_product_prices',
+    title: 'Přepočítat ceny zboží',
+    description:
+      'Vynutí přepočet prodejních cen z aktuální pořizovací ceny a nastavené přirážky. '
+      + 'Nemění pravidla cenotvorby, jen dopočítá výsledek — hodí se po naskladnění za '
+      + 'jinou nákupní cenu. Ceny s ručním přepisem (`is_manual_override`) zůstanou.',
+    inputSchema: schema({ id: int('ID zboží.') }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/eshop/products/${a.id}/prices/recompute`, {}, tool),
+  },
+  {
+    name: 'get_product_vendors',
+    title: 'Dodavatelé zboží',
+    description:
+      'Dodavatelé jednoho zboží s nákupní cenou, kódem u dodavatele, dodací lhůtou '
+      + 'a jejich hlášeným stavem skladem.',
+    inputSchema: schema({ id: int('ID zboží.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/vendors`, null, tool),
+  },
+  {
+    name: 'set_product_vendors',
+    title: 'Změnit dodavatele zboží',
+    description:
+      'Uloží seznam dodavatelů zboží. Seznam je ÚPLNÝ — dodavatel, který v něm chybí, '
+      + 'se ze zboží odebere; načti proto nejdřív `get_product_vendors`.\n\n'
+      + 'Každý `client_id` musí být karta s příznakem „je dodavatel" (`search_clients` '
+      + 's `role: "vendors"`), jinak server vrátí 422. Hlavní dodavatel smí být nejvýš '
+      + 'jeden. Při cenotvorbě z nákupní ceny se po zápisu přepočtou prodejní ceny.',
+    inputSchema: schema({
+      id: int('ID zboží.'),
+      vendors: VENDOR_ROWS,
+    }, ['id', 'vendors']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/vendors`, { vendors: a.vendors }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — média zboží
+  //
+  // Nahrání souboru tady není: API ho bere jako multipart upload a tenhle
+  // server umí posílat jen JSON. Fotky se nahrávají v aplikaci, agent s nimi
+  // pak může pracovat (popisky, pořadí, hlavní obrázek, smazání).
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_product_media',
+    title: 'Média zboží',
+    description:
+      'Obrázky a přílohy karty zboží s jejich id, pořadím a příznakem hlavního obrázku.',
+    inputSchema: schema({ id: int('ID zboží.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/media`, null, tool),
+  },
+  {
+    name: 'update_product_media',
+    title: 'Upravit médium zboží',
+    description:
+      'Změní popisky média (`title`, `alt_text`), pořadí, publikaci do e-shopu, nebo ho '
+      + 'nastaví jako hlavní obrázek. Hlavní obrázek je vždy jen jeden — nastavením '
+      + '`is_primary: true` se ten předchozí odznačí. Id média zjistíš z `list_product_media`.',
+    inputSchema: schema({
+      media_id: int('ID média (z `list_product_media`).'),
+      title: str('Titulek.'),
+      alt_text: str('Alternativní text pro čtečky a vyhledávače.'),
+      display_order: int('Pořadí v galerii.'),
+      export_eshop: bool('Publikovat do e-shopu.'),
+      is_primary: bool('Nastavit jako hlavní obrázek karty.'),
+    }, ['media_id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/media/${a.media_id}`, changed(a, [
+      'title', 'alt_text', 'display_order', 'export_eshop', 'is_primary',
+    ]), tool),
+  },
+  {
+    name: 'reorder_product_media',
+    title: 'Přeuspořádat média zboží',
+    description:
+      'Nastaví pořadí médií karty. Pošli id médií v pořadí, v jakém se mají zobrazovat; '
+      + 'id, která ke kartě nepatří, server ignoruje.',
+    inputSchema: schema({
+      id: int('ID zboží.'),
+      order: {
+        type: 'array',
+        items: { type: 'integer' },
+        description: 'ID médií v cílovém pořadí.',
+        minItems: 1,
+      },
+    }, ['id', 'order']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/media/reorder`, { order: a.order }, tool),
+  },
+  {
+    name: 'delete_product_media',
+    title: 'Smazat médium zboží',
+    description:
+      'Odebere obrázek nebo přílohu z karty zboží. Nevratné — soubor se z aplikace '
+      + 'nedá nahrát zpět přes API, jen ručně.',
+    inputSchema: schema({
+      id: int('ID zboží — kontroluje se, že médium opravdu patří téhle kartě.'),
+      media_id: int('ID média (z `list_product_media`).'),
+      confirm: CONFIRM,
+    }, ['id', 'media_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      // Médium se maže globální cestou /eshop/media/{mid}, takže příslušnost ke
+      // kartě ověřujeme sami — jinak by překlep v id smazal fotku cizímu zboží.
+      const media = rows(await c.get(`/eshop/products/${a.id}/media`, null, tool));
+      const hit = media.find((m) => Number(m?.id) === Number(a.media_id));
+      if (!hit) {
+        throw new Error(
+          `Zboží #${a.id} nemá médium #${a.media_id}. Dostupná média: `
+          + (media.map((m) => `#${m.id} ${m.title ?? m.file_name ?? ''}`).join(', ') || 'žádná') + '.',
+        );
+      }
+      requireConfirm(a, 'Smazat se má médium zboží', `#${hit.id} ${hit.title ?? hit.file_name ?? ''}`);
+      return { deleted: hit, result: await c.del(`/eshop/media/${a.media_id}`, tool) };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — kategorie
+  // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_categories',
     title: 'Kategorie e-shopu',
-    description: 'Strom kategorií zboží.',
+    description:
+      'Celý strom kategorií zboží. Zanoření je v `path` a `depth`, takže se z plochého '
+      + 'seznamu dá strom složit bez dalších dotazů.',
     inputSchema: schema(),
     write: false,
     run: (c, _a, tool) => c.get('/eshop/categories', null, tool),
   },
   {
-    name: 'list_manufacturers',
-    title: 'Výrobci / značky',
-    description: 'Číselník výrobců a značek e-shopu.',
-    inputSchema: schema(),
+    name: 'get_category',
+    title: 'Detail kategorie',
+    description: 'Jedna kategorie včetně jazykových verzí.',
+    inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
     write: false,
-    run: (c, _a, tool) => c.get('/eshop/manufacturers', null, tool),
+    run: (c, a, tool) => c.get(`/eshop/categories/${a.id}`, null, tool),
   },
+  {
+    name: 'create_category',
+    title: 'Založit kategorii',
+    description:
+      'Vytvoří kategorii pod zadaným rodičem, nebo v kořeni (bez `parent_id`). '
+      + 'Zanoření se dopočítá samo. Kód musí být v rámci firmy unikátní (jinak 409).',
+    inputSchema: schema({
+      code: str('Unikátní kód kategorie.', { maxLength: 50 }),
+      name: str('Název kategorie.', { maxLength: 150 }),
+      parent_id: int('ID nadřazené kategorie. Bez zadání vznikne v kořeni.'),
+      display_order: int('Pořadí mezi sourozenci.'),
+      export_eshop: bool('Publikovat do e-shopu (výchozí ano).'),
+      archived: bool('Založit rovnou jako archivovanou.'),
+    }, ['code', 'name']),
+    write: true,
+    run: (c, a, tool) => c.post('/eshop/categories', changed(a, [
+      'code', 'name', 'parent_id', 'display_order', 'export_eshop', 'archived',
+    ]), tool),
+  },
+  {
+    name: 'update_category',
+    title: 'Upravit kategorii',
+    description:
+      'Změní kód, název, pořadí, publikaci nebo archivaci kategorie. Uveď jen to, co se '
+      + 'má změnit. Přeřazení pod jiného rodiče tímhle nástrojem NEJDE — na to je '
+      + '`move_category`.',
+    inputSchema: schema({
+      id: int('ID kategorie.'),
+      code: str('Kód kategorie.', { maxLength: 50 }),
+      name: str('Název kategorie.', { maxLength: 150 }),
+      display_order: int('Pořadí mezi sourozenci.'),
+      export_eshop: bool('Publikovat do e-shopu.'),
+      archived: bool('Archivovaná kategorie — zůstane v datech, ale nenabízí se.'),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/categories/${a.id}`, changed(a, [
+      'code', 'name', 'display_order', 'export_eshop', 'archived',
+    ]), tool),
+  },
+  {
+    name: 'move_category',
+    title: 'Přesunout kategorii',
+    description:
+      'Přeřadí kategorii pod jiného rodiče i s celým jejím podstromem. Bez `parent_id` '
+      + '(nebo s `null`) se kategorie přesune do kořene. Přesun do vlastního podstromu '
+      + 'server odmítne (422) — vznikl by cyklus.',
+    inputSchema: schema({
+      id: int('ID přesouvané kategorie.'),
+      parent_id: int('ID nového rodiče. Vynech (nebo `null`) pro přesun do kořene.', { type: ['integer', 'null'] }),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/eshop/categories/${a.id}/move`, {
+      parent_id: a.parent_id ?? null,
+    }, tool),
+  },
+  {
+    name: 'delete_category',
+    title: 'Smazat kategorii',
+    description:
+      'Smaže kategorii. Zvaž místo toho archivaci (`update_category` s `archived: true`) — '
+      + 'archivovaná kategorie zmizí z nabídky, ale zůstane u historických dat.',
+    inputSchema: schema({ id: int('ID kategorie.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/eshop/categories/${a.id}`,
+        action: 'Smazat se má kategorie',
+        label: (row) => nameOf(row, a.id),
+      });
+      return { deleted: was, result: await c.del(`/eshop/categories/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'get_category_i18n',
+    title: 'Jazykové verze kategorie',
+    description: 'Překlady názvu, popisu a URL kategorie po jazycích.',
+    inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/categories/${a.id}/i18n`, null, tool),
+  },
+  {
+    name: 'set_category_i18n',
+    title: 'Uložit jazykové verze kategorie',
+    description:
+      'Uloží překlady kategorie. Seznam je ÚPLNÝ — jazyk, který v něm chybí, se smaže; '
+      + 'načti proto nejdřív `get_category_i18n`. Řádky bez `locale` nebo `name` server přeskočí.',
+    inputSchema: schema({
+      id: int('ID kategorie.'),
+      translations: arrayOf(
+        'Kompletní sada jazykových verzí kategorie.',
+        {
+          locale: str('Kód jazyka, max 5 znaků — např. cs, en, de.', { maxLength: 5 }),
+          name: str('Název kategorie v tomto jazyce.'),
+          description: str('Popis kategorie.'),
+          seo_slug: str('Část URL.'),
+        },
+        ['locale', 'name'],
+      ),
+    }, ['id', 'translations']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/categories/${a.id}/i18n`, {
+      translations: a.translations,
+    }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E-shop — číselníky (výrobci, štítky, poplatky, parametry)
+  // ──────────────────────────────────────────────────────────────────────────
+  ...codebookTools({
+    path: '/eshop/manufacturers',
+    names: {
+      list: 'list_manufacturers',
+      get: 'get_manufacturer',
+      create: 'create_manufacturer',
+      update: 'update_manufacturer',
+      delete: 'delete_manufacturer',
+    },
+    titles: {
+      list: 'Výrobci / značky',
+      get: 'Detail výrobce',
+      create: 'Založit výrobce',
+      update: 'Upravit výrobce',
+      delete: 'Smazat výrobce',
+    },
+    descriptions: {
+      list: 'Číselník výrobců a značek e-shopu. `id` se dosazuje do `manufacturer_id` v `update_product_card`.',
+      get: 'Jeden výrobce i s webem a příznakem publikace.',
+      create: 'Založí výrobce/značku. Kód musí být v rámci firmy unikátní (jinak 409).',
+      update: 'Změní údaje výrobce. Uveď jen to, co se má změnit.',
+      delete: 'Smaže výrobce. Server to odmítne (409), pokud je výrobce použitý u zboží — '
+        + 'v tom případě ho archivuj (`update_manufacturer` s `archived: true`).',
+      deleteAction: 'Smazat se má výrobce',
+    },
+    fields: {
+      code: str('Unikátní kód.', { maxLength: 50 }),
+      name: str('Název výrobce nebo značky.', { maxLength: 150 }),
+      website: str('Web výrobce.'),
+      display_order: int('Pořadí v nabídce.'),
+      export_eshop: bool('Publikovat do e-shopu.'),
+      archived: bool('Archivovaný — zůstane u historických dat, ale nenabízí se.'),
+    },
+    required: ['code', 'name'],
+  }),
+  ...codebookTools({
+    path: '/eshop/tags',
+    names: {
+      list: 'list_product_tags',
+      get: 'get_product_tag',
+      create: 'create_product_tag',
+      update: 'update_product_tag',
+      delete: 'delete_product_tag',
+    },
+    titles: {
+      list: 'Štítky zboží',
+      get: 'Detail štítku',
+      create: 'Založit štítek',
+      update: 'Upravit štítek',
+      delete: 'Smazat štítek',
+    },
+    descriptions: {
+      list: 'Číselník štítků zboží (novinka, výprodej, doporučujeme). `id` patří do `tag_ids` v `update_product_card`.',
+      get: 'Jeden štítek i s barvou.',
+      create: 'Založí štítek zboží. Kód musí být v rámci firmy unikátní (jinak 409).',
+      update: 'Změní název, kód, barvu nebo archivaci štítku. Uveď jen to, co se má změnit.',
+      delete: 'Smaže štítek a odebere ho ze všech zboží, kde je nasazený. '
+        + 'Zvaž místo toho archivaci (`update_product_tag` s `archived: true`).',
+      deleteAction: 'Smazat se má štítek zboží',
+    },
+    fields: {
+      code: str('Unikátní kód.', { maxLength: 50 }),
+      name: str('Název štítku.', { maxLength: 100 }),
+      color: str('Barva ve tvaru #RRGGBB.', { pattern: '^#[0-9a-fA-F]{6}$' }),
+      archived: bool('Archivovaný štítek.'),
+    },
+    required: ['code', 'name'],
+  }),
+  ...codebookTools({
+    path: '/eshop/fee-types',
+    names: {
+      list: 'list_fee_types',
+      get: 'get_fee_type',
+      create: 'create_fee_type',
+      update: 'update_fee_type',
+      delete: 'delete_fee_type',
+    },
+    titles: {
+      list: 'Typy poplatků',
+      get: 'Detail poplatku',
+      create: 'Založit typ poplatku',
+      update: 'Upravit typ poplatku',
+      delete: 'Smazat typ poplatku',
+    },
+    descriptions: {
+      list: 'Číselník poplatků ke zboží — autorský, recyklační, WEEE. Konkrétní částky se '
+        + 'nastavují u zboží v sekci `fees` nástroje `update_product_card`.',
+      get: 'Jeden typ poplatku i s navázanou sazbou DPH.',
+      create: 'Založí typ poplatku. Kód musí být v rámci firmy unikátní (jinak 409).',
+      update: 'Změní název, kód, sazbu DPH nebo archivaci poplatku. Uveď jen to, co se má změnit.',
+      delete: 'Smaže typ poplatku. Server to odmítne (409), pokud je poplatek použitý u zboží — '
+        + 'v tom případě ho archivuj (`update_fee_type` s `archived: true`).',
+      deleteAction: 'Smazat se má typ poplatku',
+    },
+    fields: {
+      code: str('Unikátní kód.', { maxLength: 30 }),
+      name: str('Název poplatku.', { maxLength: 120 }),
+      vat_rate_id: int('ID sazby DPH poplatku — číselník vrací `list_vat_rates`.'),
+      archived: bool('Archivovaný poplatek.'),
+    },
+    required: ['code', 'name'],
+  }),
+  ...codebookTools({
+    path: '/eshop/attributes',
+    names: {
+      list: 'list_product_attributes',
+      get: 'get_product_attribute',
+      create: 'create_product_attribute',
+      update: 'update_product_attribute',
+      delete: 'delete_product_attribute',
+    },
+    titles: {
+      list: 'Parametry zboží',
+      get: 'Detail parametru',
+      create: 'Založit parametr',
+      update: 'Upravit parametr',
+      delete: 'Smazat parametr',
+    },
+    descriptions: {
+      list: 'Číselník parametrů zboží (barva, velikost, výkon). U parametrů typu `enum` '
+        + 'je v odpovědi i výčet hodnot. Hodnoty konkrétního zboží se nastavují v sekci '
+        + '`attributes` nástroje `update_product_card`.',
+      get: 'Jeden parametr včetně výčtu hodnot, jde-li o typ `enum`.',
+      create: 'Založí parametr zboží. `data_type` určuje, čím se pak vyplňuje hodnota u zboží. '
+        + 'Kód musí být v rámci firmy unikátní (jinak 409).',
+      update: 'Změní parametr. Uveď jen to, co se má změnit. Změnu `data_type` u parametru, '
+        + 'který už je u zboží vyplněný, si rozmysli — dosavadní hodnoty typu neodpovídají.',
+      delete: 'Smaže parametr. Server to odmítne (409), pokud je parametr použitý u zboží — '
+        + 'v tom případě ho archivuj (`update_product_attribute` s `archived: true`).',
+      deleteAction: 'Smazat se má parametr zboží',
+    },
+    fields: {
+      code: str('Unikátní kód.', { maxLength: 50 }),
+      name: str('Název parametru.', { maxLength: 120 }),
+      data_type: str(
+        'Typ hodnoty: `text`, `number`, `bool`, nebo `enum` (výběr z připravených hodnot). Výchozí `text`.',
+        { enum: ['text', 'number', 'bool', 'enum'] },
+      ),
+      unit: str('Jednotka hodnoty (mm, W, kg).'),
+      is_filterable: bool('Podle parametru se dá v e-shopu filtrovat.'),
+      is_multivalue: bool('Zboží může mít víc hodnot tohoto parametru zároveň.'),
+      display_order: int('Pořadí v kartě zboží.'),
+      archived: bool('Archivovaný parametr.'),
+    },
+    required: ['code', 'name'],
+  }),
+  {
+    name: 'list_attribute_options',
+    title: 'Hodnoty parametru',
+    description:
+      'Výčet hodnot parametru typu `enum` (např. u parametru „Barva" hodnoty červená, modrá). '
+      + '`id` hodnoty se dosazuje do `option_id` v sekci `attributes` nástroje `update_product_card`.',
+    inputSchema: schema({ attribute_id: int('ID parametru (musí být typu `enum`).') }, ['attribute_id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/attributes/${a.attribute_id}/options`, null, tool),
+  },
+  {
+    name: 'create_attribute_option',
+    title: 'Přidat hodnotu parametru',
+    description: 'Přidá další volitelnou hodnotu k parametru typu `enum`.',
+    inputSchema: schema({
+      attribute_id: int('ID parametru (musí být typu `enum`).'),
+      code: str('Unikátní kód hodnoty.', { maxLength: 50 }),
+      label: str('Zobrazovaný text hodnoty.', { maxLength: 120 }),
+      display_order: int('Pořadí v nabídce.'),
+    }, ['attribute_id', 'code', 'label']),
+    write: true,
+    run: (c, a, tool) => c.post(`/eshop/attributes/${a.attribute_id}/options`, changed(a, [
+      'code', 'label', 'display_order',
+    ]), tool),
+  },
+  {
+    name: 'update_attribute_option',
+    title: 'Upravit hodnotu parametru',
+    description:
+      'Přejmenuje hodnotu parametru. Na rozdíl od ostatních úprav vyžaduje server '
+      + 'kód i text zároveň — pošli obojí, i když měníš jen jedno (současné hodnoty '
+      + 'najdeš v `list_attribute_options`).',
+    inputSchema: schema({
+      option_id: int('ID hodnoty (z `list_attribute_options`).'),
+      code: str('Kód hodnoty.', { maxLength: 50 }),
+      label: str('Zobrazovaný text hodnoty.', { maxLength: 120 }),
+      display_order: int('Pořadí v nabídce.'),
+    }, ['option_id', 'code', 'label']),
+    write: true,
+    run: (c, a, tool) => c.put(`/eshop/attribute-options/${a.option_id}`, changed(a, [
+      'code', 'label', 'display_order',
+    ]), tool),
+  },
+  {
+    name: 'delete_attribute_option',
+    title: 'Smazat hodnotu parametru',
+    description:
+      'Odebere jednu volitelnou hodnotu parametru typu `enum`. Zboží, které tuhle hodnotu '
+      + 'mělo nastavenou, o ni přijde.',
+    inputSchema: schema({
+      attribute_id: int('ID parametru — kontroluje se, že hodnota patří opravdu k němu.'),
+      option_id: int('ID hodnoty (z `list_attribute_options`).'),
+      confirm: CONFIRM,
+    }, ['attribute_id', 'option_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      // Mazací cesta je globální (/eshop/attribute-options/{oid}), takže si
+      // příslušnost k parametru ověříme sami — jinak by překlep v id smazal
+      // hodnotu úplně jinému parametru.
+      const options = rows(await c.get(`/eshop/attributes/${a.attribute_id}/options`, null, tool));
+      const hit = options.find((o) => Number(o?.id) === Number(a.option_id));
+      if (!hit) {
+        throw new Error(
+          `Parametr #${a.attribute_id} nemá hodnotu #${a.option_id}. Dostupné hodnoty: `
+          + (options.map((o) => `#${o.id} ${o.label ?? o.code ?? ''}`).join(', ') || 'žádné') + '.',
+        );
+      }
+      requireConfirm(a, 'Smazat se má hodnota parametru', `#${hit.id} ${hit.label ?? hit.code ?? ''}`);
+      return { deleted: hit, result: await c.del(`/eshop/attribute-options/${a.option_id}`, tool) };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — sklady
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_warehouses',
+    title: 'Seznam skladů',
+    description:
+      'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
+      + 'ostatních skladových nástrojů a na skladových dokladech.',
+    inputSchema: schema({ active_only: bool('Jen aktivní sklady.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/warehouses', { active: a.active_only }, tool),
+  },
+  {
+    name: 'get_warehouse',
+    title: 'Detail skladu',
+    description: 'Jeden sklad včetně aktuální hodnoty zásob.',
+    inputSchema: schema({ id: int('ID skladu.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/warehouses/${a.id}`, null, tool),
+  },
+  {
+    name: 'create_warehouse',
+    title: 'Založit sklad',
+    description:
+      'Vytvoří nový sklad. Kód musí být v rámci firmy unikátní (jinak 409). '
+      + '`is_default: true` z něj udělá výchozí sklad pro nové doklady.',
+    inputSchema: schema({
+      code: str('Unikátní kód skladu.', { maxLength: 20 }),
+      name: str('Název skladu.', { maxLength: 100 }),
+      is_default: bool('Výchozí sklad firmy.'),
+      is_active: bool('Aktivní sklad (výchozí ano).'),
+      note: str('Poznámka.'),
+    }, ['code', 'name']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/warehouses', changed(a, [
+      'code', 'name', 'is_default', 'is_active', 'note',
+    ]), tool),
+  },
+  {
+    name: 'update_warehouse',
+    title: 'Upravit sklad',
+    description: 'Změní kód, název, výchozí příznak, aktivitu nebo poznámku skladu. Uveď jen to, co se má změnit.',
+    inputSchema: schema({
+      id: int('ID skladu.'),
+      code: str('Kód skladu.', { maxLength: 20 }),
+      name: str('Název skladu.', { maxLength: 100 }),
+      is_default: bool('Výchozí sklad firmy.'),
+      is_active: bool('Aktivní sklad. `false` sklad skryje, ale historie zůstane — '
+        + 'tohle je náhrada za mazání u skladu, kde se už hospodařilo.'),
+      note: str('Poznámka.'),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/stock/warehouses/${a.id}`, changed(a, [
+      'code', 'name', 'is_default', 'is_active', 'note',
+    ]), tool),
+  },
+  {
+    name: 'delete_warehouse',
+    title: 'Smazat sklad',
+    description:
+      'Smaže sklad. Server to dovolí jen u skladu s nulovým stavem a bez jediného pohybu '
+      + '(jinak 409) — jindy sklad jen deaktivuj přes `update_warehouse` s `is_active: false`.',
+    inputSchema: schema({ id: int('ID skladu.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/warehouses/${a.id}`,
+        action: 'Smazat se má sklad',
+        label: (row) => nameOf(row, a.id),
+      });
+      return { deleted: was, result: await c.del(`/stock/warehouses/${a.id}`, tool) };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — zásoby a sestavy
+  // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'stock_levels',
     title: 'Stav zásob',
     description:
-      'Aktuální množství na skladech s filtrem na sklad, typ karty a podlimitní zásobu.',
+      'Aktuální množství po dvojicích karta × sklad, s filtrem na sklad, typ karty '
+      + 'a podlimitní zásobu.',
     inputSchema: schema({
       query: str('Fulltext přes název a kód.'),
       warehouse_id: int('Jen tento sklad.'),
-      item_type: str('Typ karty.', { enum: ['goods', 'material', 'product', 'service'] }),
+      item_type: str('Typ karty.', { enum: ['goods', 'material', 'product'] }),
       below_min: bool('Jen položky pod minimální zásobou.'),
-      ...PAGING,
+      active: bool('Jen aktivní (true) nebo jen neaktivní (false) karty.'),
     }),
     write: false,
     run: (c, a, tool) => c.get('/stock/levels', {
@@ -1509,8 +2463,7 @@ export const TOOLS = [
       warehouse_id: a.warehouse_id,
       item_type: a.item_type,
       below_min: a.below_min,
-      page: a.page,
-      per_page: a.per_page,
+      active: a.active === undefined ? undefined : (a.active ? 1 : 0),
     }, tool),
   },
   {
@@ -1534,25 +2487,319 @@ export const TOOLS = [
     }, tool),
   },
   {
-    name: 'stock_valuation',
-    title: 'Ocenění skladu',
-    description: 'Hodnota zásob k datu — pro otázky „kolik máme uloženo ve skladu".',
+    name: 'stock_status_report',
+    title: 'Sestava stavu zásob',
+    description:
+      'Sestava „stav zásob" — množství a hodnota po kartách, se stejnými filtry jako '
+      + '`stock_levels`, ale v podobě sestavy včetně souhrnů.',
     inputSchema: schema({
+      query: str('Fulltext přes název a kód.'),
       warehouse_id: int('Jen tento sklad.'),
-      to: date('Ocenění k datu (RRRR-MM-DD). Výchozí dnes.'),
+      item_type: str('Typ karty.', { enum: ['goods', 'material', 'product'] }),
+      below_min: bool('Jen položky pod minimální zásobou.'),
+      active: bool('Jen aktivní (true) nebo jen neaktivní (false) karty.'),
     }),
     write: false,
-    run: (c, a, tool) => c.get('/stock/reports/valuation', {
-      warehouse_id: a.warehouse_id, to: a.to,
+    run: (c, a, tool) => c.get('/stock/reports/status', {
+      q: a.query,
+      warehouse_id: a.warehouse_id,
+      item_type: a.item_type,
+      below_min: a.below_min,
+      active: a.active === undefined ? undefined : (a.active ? 1 : 0),
     }, tool),
   },
   {
-    name: 'list_warehouses',
-    title: 'Seznam skladů',
-    description: 'Sklady firmy s jejich ID — pro filtrování v ostatních skladových nástrojích.',
-    inputSchema: schema(),
+    name: 'stock_valuation',
+    title: 'Ocenění skladu',
+    description:
+      'Hodnota zásob k datu — pro otázky „kolik máme uloženo ve skladu". Ocenění '
+      + 'ke zpětnému datu se rekonstruuje z pohybů.',
+    inputSchema: schema({
+      warehouse_id: int('Jen tento sklad.'),
+      date: date('Ocenění k datu (RRRR-MM-DD). Výchozí dnes.'),
+    }),
     write: false,
-    run: (c, _a, tool) => c.get('/stock/warehouses', null, tool),
+    run: (c, a, tool) => c.get('/stock/reports/valuation', {
+      warehouse_id: a.warehouse_id, date: a.date,
+    }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — příjemky, výdejky, převodky
+  //
+  // Doklad má dvě fáze: draft se dá libovolně upravovat i smazat a se stavem
+  // skladu nic nedělá, teprve `post_stock_document` pohyb provede. Nástroje ty
+  // dvě fáze nespojují schválně — agent má mít možnost doklad připravit
+  // a nechat si ho zkontrolovat, než se zásoby pohnou.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_stock_documents',
+    title: 'Skladové doklady',
+    description:
+      'Příjemky, výdejky a převodky s filtry na typ, stav, původ, sklad a období.',
+    inputSchema: schema({
+      doc_type: str('Typ dokladu: `receipt` příjemka, `issue` výdejka, `transfer` převodka.', {
+        enum: ['receipt', 'issue', 'transfer'],
+      }),
+      status: str('Stav: `draft` rozpracovaný, `posted` zaúčtovaný, `reversed` stornovaný.', {
+        enum: ['draft', 'posted', 'reversed'],
+      }),
+      origin: str('Původ dokladu.', {
+        enum: ['manual', 'invoice', 'credit_note', 'purchase_invoice', 'inventory'],
+      }),
+      warehouse_id: int('Jen tento sklad.'),
+      query: str('Fulltext přes číslo dokladu a popis.'),
+      from: date('Od data (RRRR-MM-DD).'),
+      to: date('Do data (RRRR-MM-DD).'),
+      ...WINDOW,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/documents', {
+      doc_type: a.doc_type,
+      status: a.status,
+      origin: a.origin,
+      warehouse_id: a.warehouse_id,
+      q: a.query,
+      from: a.from,
+      to: a.to,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'get_stock_document',
+    title: 'Detail skladového dokladu',
+    description: 'Hlavička a řádky jednoho skladového dokladu včetně ocenění.',
+    inputSchema: schema({ id: int('ID skladového dokladu.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/documents/${a.id}`, null, tool),
+  },
+  {
+    name: 'create_stock_document',
+    title: 'Založit skladový doklad',
+    description:
+      'Založí ROZPRACOVANÝ skladový doklad (draft). Stav zásob se tím ještě NEMĚNÍ — '
+      + 'pohyb provede až `post_stock_document`.\n\n'
+      + '`receipt` = naskladnění (u řádků zadej `unit_cost`, jinak se zboží naskladní za nulu), '
+      + '`issue` = vyskladnění, `transfer` = převod mezi sklady (povinný `warehouse_to_id`).\n\n'
+      + 'Tímhle nástrojem dělej jen ruční pohyby. Naskladnění z přijaté faktury má vlastní '
+      + 'cestu v aplikaci, která doklad naváže na fakturu a převezme z ní ceny.',
+    inputSchema: schema({
+      doc_type: str('Typ dokladu: `receipt` příjemka, `issue` výdejka, `transfer` převodka.', {
+        enum: ['receipt', 'issue', 'transfer'],
+      }),
+      doc_date: date('Datum dokladu (RRRR-MM-DD).'),
+      description: str('Popis dokladu — proč pohyb vzniká.', { maxLength: 255 }),
+      warehouse_id: int('ID skladu. U převodky sklad, ze kterého se vydává.'),
+      warehouse_to_id: int('ID cílového skladu. Povinné a jen u převodky (`transfer`).'),
+      partner_name: str('Protistrana (dodavatel, odběratel) pro tisk dokladu.'),
+      lines: STOCK_DOC_LINES,
+    }, ['doc_type', 'doc_date', 'description', 'warehouse_id', 'lines']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/documents', {
+      ...changed(a, ['doc_type', 'doc_date', 'description', 'warehouse_id', 'warehouse_to_id', 'partner_name', 'lines']),
+      origin: 'manual',
+    }, tool),
+  },
+  {
+    name: 'update_stock_document',
+    title: 'Upravit skladový doklad',
+    description:
+      'Přepíše rozpracovaný doklad. Zaúčtovaný ani stornovaný doklad upravit NEJDE (422) — '
+      + 'tam se chyba řeší stornem přes `reverse_stock_document`.\n\n'
+      + 'Pošleš-li `lines`, nahradí se řádky dokladu KOMPLETNĚ tímto seznamem; '
+      + 'načti si proto nejdřív `get_stock_document`.',
+    inputSchema: schema({
+      id: int('ID skladového dokladu (musí být ve stavu `draft`).'),
+      doc_date: date('Datum dokladu (RRRR-MM-DD).'),
+      description: str('Popis dokladu.', { maxLength: 255 }),
+      warehouse_id: int('ID skladu.'),
+      warehouse_to_id: int('ID cílového skladu u převodky.'),
+      partner_name: str('Protistrana.'),
+      lines: STOCK_DOC_LINES,
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.put(`/stock/documents/${a.id}`, changed(a, [
+      'doc_date', 'description', 'warehouse_id', 'warehouse_to_id', 'partner_name', 'lines',
+    ]), tool),
+  },
+  {
+    name: 'post_stock_document',
+    title: 'Zaúčtovat skladový doklad',
+    description:
+      'Provede pohyb: naskladní, vyskladní, nebo převede zboží, přidělí dokladu číslo '
+      + 'a uzamkne ho. TEPRVE TÍMHLE KROKEM SE MĚNÍ STAV SKLADU.\n\n'
+      + 'Zaúčtovaný doklad už nejde upravit ani smazat, jen stornovat protidokladem. '
+      + 'Pouštěj to až po odsouhlasení uživatelem.\n\n'
+      + 'Server odmítne (409) pohyb do minusu, sklad s rozběhnutou inventurou a uzavřené '
+      + 'účetní období. Opakované zavolání na už zaúčtovaném dokladu nic nezmění.',
+    inputSchema: schema({ id: int('ID rozpracovaného skladového dokladu.') }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/stock/documents/${a.id}/post`, {}, tool),
+  },
+  {
+    name: 'reverse_stock_document',
+    title: 'Stornovat skladový doklad',
+    description:
+      'Vystaví ke zaúčtovanému dokladu opačný protidoklad v původních cenách a rovnou ho '
+      + 'zaúčtuje; původní doklad se označí jako stornovaný. Hodnotově je to neutrální, '
+      + 'ale ve skladové knize zůstanou oba doklady — storno se nedá vzít zpět.\n\n'
+      + 'Storno příjemky, po které se už vydávalo a sklad by šel do minusu, server odmítne (409).',
+    inputSchema: schema({
+      id: int('ID zaúčtovaného skladového dokladu.'),
+      reason: str('Důvod storna — propíše se do popisu protidokladu.'),
+      confirm: CONFIRM,
+    }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/documents/${a.id}`,
+        action: 'Stornovat se má skladový doklad',
+        label: (row) => `${nameOf(row, a.id)} ze dne ${row?.doc_date ?? '?'} (stav ${row?.status ?? '?'})`,
+      });
+      const result = await c.post(`/stock/documents/${a.id}/reverse`, { reason: a.reason }, tool);
+      return { reversed: was, result };
+    },
+  },
+  {
+    name: 'delete_stock_document',
+    title: 'Smazat skladový doklad',
+    description:
+      'Smaže ROZPRACOVANÝ doklad. Zaúčtovaný doklad smazat nejde (422) — na ten je '
+      + '`reverse_stock_document`.',
+    inputSchema: schema({ id: int('ID skladového dokladu ve stavu `draft`.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/documents/${a.id}`,
+        action: 'Smazat se má rozpracovaný skladový doklad',
+        label: (row) => `${nameOf(row, a.id)} ze dne ${row?.doc_date ?? '?'} (stav ${row?.status ?? '?'})`,
+      });
+      return { deleted: was, result: await c.del(`/stock/documents/${a.id}`, tool) };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — inventury
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_stock_takes',
+    title: 'Seznam inventur',
+    description: 'Inventury s filtrem na sklad a fázi (rozpracovaná / počítá se / uzavřená).',
+    inputSchema: schema({
+      warehouse_id: int('Jen tento sklad.'),
+      status: str('Fáze: `draft` rozpracovaná, `counting` probíhá počítání, `closed` uzavřená.', {
+        enum: ['draft', 'counting', 'closed'],
+      }),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/takes', {
+      warehouse_id: a.warehouse_id, status: a.status,
+    }, tool),
+  },
+  {
+    name: 'get_stock_take',
+    title: 'Detail inventury',
+    description:
+      'Inventura i s řádky: očekávané množství, napočítané množství a rozdíl. '
+      + 'Řádky s `counted_qty: null` ještě nikdo nespočítal a při uzavření se přeskočí.',
+    inputSchema: schema({ id: int('ID inventury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/takes/${a.id}`, null, tool),
+  },
+  {
+    name: 'create_stock_take',
+    title: 'Založit inventuru',
+    description:
+      'Založí rozpracovanou inventuru skladu. Odpovědné osoby jsou povinné, protože '
+      + 'se tisknou na inventurní soupis — vyplň skutečná jména, ne zástupný text.\n\n'
+      + 'Na jednom skladu smí být rozpracovaná jen jedna inventura (jinak 409). '
+      + 'Se stavem zásob to zatím nic nedělá.',
+    inputSchema: schema({
+      warehouse_id: int('ID inventarizovaného skladu.'),
+      take_date: date('Datum inventury (RRRR-MM-DD).'),
+      counting_method: str('Způsob zjištění: `physical_count` přepočtení, `measurement` přeměření, '
+        + '`weighing` převážení, `other` jiný.', {
+        enum: ['physical_count', 'measurement', 'weighing', 'other'],
+      }),
+      responsible_count_name: str('Jméno osoby odpovědné za zjištění skutečného stavu.', { maxLength: 255 }),
+      responsible_inventory_name: str('Jméno osoby odpovědné za inventarizaci.', { maxLength: 255 }),
+      note: str('Poznámka.'),
+    }, ['warehouse_id', 'take_date', 'counting_method', 'responsible_count_name', 'responsible_inventory_name']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/takes', changed(a, [
+      'warehouse_id', 'take_date', 'counting_method',
+      'responsible_count_name', 'responsible_inventory_name', 'note',
+    ]), tool),
+  },
+  {
+    name: 'start_stock_take',
+    title: 'Spustit inventuru',
+    description:
+      'Přepne inventuru do fáze počítání a udělá snímek očekávaných stavů všech aktivních '
+      + 'karet skladu. Od té chvíle je sklad ZABLOKOVANÝ pro zaúčtování skladových dokladů, '
+      + 'dokud se inventura neuzavře — spouštěj to až ve chvíli, kdy se opravdu počítá.',
+    inputSchema: schema({ id: int('ID inventury ve stavu `draft`.') }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/stock/takes/${a.id}/start`, {}, tool),
+  },
+  {
+    name: 'set_stock_take_counts',
+    title: 'Zapsat napočítané množství',
+    description:
+      'Zapíše skutečně napočítané množství na řádky inventury. Jde to jen ve fázi počítání.\n\n'
+      + 'Řádky se adresují svým `id` z `get_stock_take` (NE id zboží). Posílej jen řádky, '
+      + 'které se mají změnit — ostatní zůstanou, jak byly. `counted_qty: null` znamená '
+      + '„nepočítáno" a při uzavření se takový řádek přeskočí.',
+    inputSchema: schema({
+      id: int('ID inventury ve fázi `counting`.'),
+      lines: arrayOf(
+        'Řádky inventury, které se mají zapsat.',
+        {
+          line_id: int('ID řádku inventury z `get_stock_take`.'),
+          counted_qty: num('Napočítané množství. Vynech pro „nepočítáno".', { minimum: 0 }),
+          surplus_unit_cost: num('Cena za MJ pro ocenění přebytku (reprodukční pořizovací cena).', { minimum: 0 }),
+        },
+        ['line_id'],
+        { minItems: 1 },
+      ),
+    }, ['id', 'lines']),
+    write: true,
+    run: (c, a, tool) => c.put(`/stock/takes/${a.id}`, {
+      lines: a.lines.map((l) => ({
+        id: l.line_id,
+        counted_qty: l.counted_qty ?? null,
+        ...(l.surplus_unit_cost === undefined ? {} : { surplus_unit_cost: l.surplus_unit_cost }),
+      })),
+    }, tool),
+  },
+  {
+    name: 'close_stock_take',
+    title: 'Uzavřít inventuru',
+    description:
+      'Uzavře inventuru: spočítá rozdíly proti očekávání a vygeneruje rozdílové skladové '
+      + 'doklady — souhrnnou příjemku na přebytky a výdejku na manka. Doklady se rovnou '
+      + 'zaúčtují, takže SE TÍM MĚNÍ STAV SKLADU a vzniká účetní dopad.\n\n'
+      + 'Nevratné a s daňovou dohrou (manko a přebytek se vypořádávají v účetnictví), '
+      + 'takže před uzavřením ověř přes `get_stock_take`, že jsou opravdu všechny řádky '
+      + 'spočítané — nespočítané se tiše přeskočí — a nech si krok potvrdit uživatelem.',
+    inputSchema: schema({ id: int('ID inventury ve fázi `counting`.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const take = await c.get(`/stock/takes/${a.id}`, null, tool);
+      const lines = rows(take?.lines ?? take);
+      const uncounted = lines.filter((l) => l?.counted_qty === null || l?.counted_qty === undefined).length;
+      requireConfirm(
+        a,
+        'Uzavřít se má inventura',
+        `#${a.id} na skladu ${take?.warehouse_name ?? take?.warehouse_id ?? '?'} `
+        + `ze dne ${take?.take_date ?? '?'} — ${lines.length} řádků, z toho ${uncounted} nespočítaných`,
+      );
+      return c.post(`/stock/takes/${a.id}/close`, {}, tool);
+    },
   },
 ];
 
