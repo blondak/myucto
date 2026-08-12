@@ -937,6 +937,9 @@ final class Routes
             // Účtová osnova
             $g->get   ('/accounts',             [ChartOfAccountsAction::class, 'list']);
             $g->post  ('/accounts',             [ChartOfAccountsAction::class, 'create']);
+            // Karta účtu (drill-through osnova → účet → analytiky) — až ZA /accounts,
+            // ale před ním nic kolizního není (segment je čistě numerický).
+            $g->get   ('/accounts/{id:[0-9]+}', [ChartOfAccountsAction::class, 'detail']);
             $g->patch ('/accounts/{id:[0-9]+}', [ChartOfAccountsAction::class, 'update']);
             // Účetní období
             $g->get   ('/periods',                    [AccountingPeriodAction::class, 'list']);

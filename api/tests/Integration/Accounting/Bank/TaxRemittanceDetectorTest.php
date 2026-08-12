@@ -38,7 +38,7 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
         $exact = $this->detector->detect($this->supplierId, $this->tx(vs: '12345678'));
         self::assertNotNull($exact);
         self::assertSame(OperationType::REMITTANCE_VAT, $exact->operationType);
-        self::assertSame('343', $exact->debitAccountCode);
+        self::assertSame('343.900', $exact->debitAccountCode, 'Úhrada DPH jde proti zúčtovací analytice 343.900.');
         self::assertSame(0.90, $exact->confidence);
 
         $prefixOnly = $this->detector->detect($this->supplierId, $this->tx(vs: '999999'));

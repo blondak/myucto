@@ -19,6 +19,9 @@ use MyInvoice\Repository\LedgerReportRepository;
  */
 final class CashRegisterService
 {
+    /** Syntetický účet pokladny, pod který analytiky patří. */
+    public const CASH_SYNTHETIC = '211';
+
     public function __construct(
         private readonly Connection $db,
         private readonly CashRegisterRepository $registers,
@@ -285,8 +288,13 @@ final class CashRegisterService
     }
 
     /**
-     * První volná analytika pokladny 211<NNN> (211001…211999), kterou zatím nedrží
+     * První volná analytika pokladny 211.<NNN> (211.001…211.999), kterou zatím nedrží
      * žádná pokladna firmy — deterministické auto-přidělení pro valutovou pokladnu.
+     *
+     * Tvar kódu je TEČKOVANÝ, shodně se zbytkem osnovy (501.100, 221.100 —
+     * viz {@see \MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner}). Bezteččkové
+     * kódy z doby před migrací 1322 zůstávají platné (existující pokladny se nepřečíslují),
+     * jen se nové už nezakládají — proto se obsazenost kontroluje na OBOU tvarech.
      */
     private function nextFreeCashAnalytic(int $supplierId): string
     {
@@ -296,19 +304,25 @@ final class CashRegisterService
         // že nemá zápisy.
         $firstRegisterFree = null;
         for ($n = 1; $n <= 999; $n++) {
-            $code = '211' . str_pad((string) $n, 3, '0', STR_PAD_LEFT);
-            if ($this->registers->findByAccountCode($supplierId, $code) !== null) {
+            $suffix = str_pad((string) $n, 3, '0', STR_PAD_LEFT);
+            $code = self::CASH_SYNTHETIC . '.' . $suffix;
+            $legacy = self::CASH_SYNTHETIC . $suffix;
+            if ($this->registers->findByAccountCode($supplierId, $code) !== null
+                || $this->registers->findByAccountCode($supplierId, $legacy) !== null
+            ) {
                 continue;
             }
             $firstRegisterFree ??= $code;
-            if ($this->accounts->findByCode($supplierId, $code) === null) {
+            if ($this->accounts->findByCode($supplierId, $code) === null
+                && $this->accounts->findByCode($supplierId, $legacy) === null
+            ) {
                 return $code;
             }
         }
         if ($firstRegisterFree !== null) {
             return $firstRegisterFree;
         }
-        throw new CashException('account_taken', 'Vyčerpány volné analytiky pokladny 211xxx.');
+        throw new CashException('account_taken', 'Vyčerpány volné analytiky pokladny 211.xxx.');
     }
 
     /**
@@ -374,8 +388,8 @@ final class CashRegisterService
     /** Ověří, že account_code je platná aktivní analytika 211 a není obsazená jinou pokladnou. */
     private function assertAccountUsable(int $supplierId, string $accountCode, ?int $excludeRegisterId = null): void
     {
-        if ($accountCode === '' || !str_starts_with($accountCode, '211')) {
-            throw new CashException('account_invalid', 'Účet pokladny musí být analytika 211 (211, 211100…).');
+        if ($accountCode === '' || !str_starts_with($accountCode, self::CASH_SYNTHETIC)) {
+            throw new CashException('account_invalid', 'Účet pokladny musí být analytika 211 (211, 211.100…).');
         }
         $account = $this->accounts->findByCode($supplierId, $accountCode);
         if ($account === null || empty($account['is_active'])) {

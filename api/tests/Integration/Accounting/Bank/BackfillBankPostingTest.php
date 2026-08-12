@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
+use MyInvoice\Service\Accounting\OperationType;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Backfill CLI runner (§7): dry-run nic nezapíše + agregace skipů; --apply účtuje;
- * bez --rules se pravidla nevyhodnocují; s --rules auto → jen suggest; zavřené období
- * skip bez suggestion; druhý běh po doúčtování předpisů doúčtuje (self-healing H1). §8.
+ * bez --rules se pravidla nevyhodnocují; s --rules auto → jen suggest; s --auto
+ * rozhoduje auto_posting_policy (auto účtuje, suggest navrhuje, firma bez politiky
+ * dostane jen návrh); zavřené období skip bez suggestion; druhý běh po doúčtování
+ * předpisů doúčtuje (self-healing H1). §8.
  */
 #[Group('integration')]
 final class BackfillBankPostingTest extends BankPostingTestCase
@@ -447,6 +450,128 @@ final class BackfillBankPostingTest extends BankPostingTestCase
         self::assertSame(0, $this->entryCountForTx($tx), 'Auto pravidlo se při backfillu neúčtuje.');
         $pending = $this->suggestionRepo->pendingForTx($this->supplierId, $tx);
         self::assertNotNull($pending, 'Vznikl jen návrh.');
+    }
+
+    /** Úroveň automatiky pro typ operace; `null` = řádek smazat (typ bez konfigurace). */
+    private function policyLevel(string $operationType, ?string $level): void
+    {
+        $pdo = $this->db->pdo();
+        if ($level === null) {
+            $pdo->prepare('DELETE FROM auto_posting_policy WHERE supplier_id = ? AND operation_type = ?')
+                ->execute([$this->supplierId, $operationType]);
+            return;
+        }
+        $pdo->prepare(
+            'INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE level = VALUES(level)'
+        )->execute([$this->supplierId, $operationType, $level, $this->userId]);
+    }
+
+    /**
+     * Smaže `accounting_supplier_settings` — firma bez presetu i bez denního limitu.
+     * Bez toho by preset `full` z demo dat dělal default `auto` i typům bez řádku
+     * a test „firma bez politiky" by netestoval nic.
+     */
+    private function dropAutomationSettings(): void
+    {
+        $this->db->pdo()->prepare('DELETE FROM accounting_supplier_settings WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+    }
+
+    /** Nespárovaná platba s auto pravidlem, které má odslouženo (hit_count + pásmo částky). */
+    private function provenAutoRule(string $account): int
+    {
+        $ruleId = $this->rule([
+            'name' => 'Odvod', 'direction' => 'outgoing', 'counterparty_account' => $account,
+            'amount_min' => 100.00, 'amount_max' => 90000.00,
+            'debit_account_code' => '518', 'credit_account_code' => '221', 'mode' => 'auto',
+            'operation_type' => OperationType::BANK_RULE_CUSTOM,
+        ]);
+        $this->db->pdo()->prepare('UPDATE bank_posting_rules SET hit_count = 5 WHERE id = ?')->execute([$ruleId]);
+        return $ruleId;
+    }
+
+    public function testAutoModePostsWherePolicySaysAuto(): void
+    {
+        $this->dropAutomationSettings();
+        $this->policyLevel(OperationType::BANK_RULE_CUSTOM, 'auto');
+        $this->provenAutoRule('778910');
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1000.00, ['counterparty_account' => '778910']);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, false, null, false, true);
+
+        self::assertTrue($report['honour_policy']);
+        self::assertTrue($report['with_rules'], '--auto implikuje vyhodnocení nespárovaných.');
+        self::assertSame(1, $report['posted']);
+        self::assertSame(1, $this->entryCountForTx($tx), 'Politika auto → dávka zaúčtovala.');
+    }
+
+    public function testAutoModeStillSuggestsWherePolicySaysSuggest(): void
+    {
+        $this->dropAutomationSettings();
+        $this->policyLevel(OperationType::BANK_RULE_CUSTOM, 'suggest');
+        $this->provenAutoRule('778911');
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1000.00, ['counterparty_account' => '778911']);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, false, null, false, true);
+
+        self::assertSame(0, $report['posted']);
+        self::assertSame(1, $report['suggested']);
+        self::assertSame(0, $this->entryCountForTx($tx), 'Politika suggest → jen návrh.');
+        self::assertNotNull($this->suggestionRepo->pendingForTx($this->supplierId, $tx));
+    }
+
+    public function testAutoModeKeepsSuggestingForTenantWithoutPolicy(): void
+    {
+        $this->dropAutomationSettings();
+        $this->policyLevel(OperationType::BANK_RULE_CUSTOM, null);
+        $this->provenAutoRule('778912');
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1000.00, ['counterparty_account' => '778912']);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, false, null, false, true);
+
+        self::assertSame(0, $report['posted']);
+        self::assertSame(1, $report['suggested']);
+        self::assertSame(0, $this->entryCountForTx($tx), 'Firma bez politiky dostane i s --auto jen návrh.');
+    }
+
+    /** Bez `--auto` se chování nemění ani u firmy, která má politiku na `auto`. */
+    public function testWithoutAutoFlagPolicyAutoStillOnlySuggests(): void
+    {
+        $this->dropAutomationSettings();
+        $this->policyLevel(OperationType::BANK_RULE_CUSTOM, 'auto');
+        $this->provenAutoRule('778913');
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1000.00, ['counterparty_account' => '778913']);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, true);
+
+        self::assertFalse($report['honour_policy']);
+        self::assertSame(0, $report['posted']);
+        self::assertSame(1, $report['suggested']);
+        self::assertSame(0, $this->entryCountForTx($tx));
+    }
+
+    /**
+     * Aktivace účetnictví stojí na `suggestOnly = true` (jinak jí spadne guard
+     * `not_double_entry`, protože firma podvojné účetnictví teprve zapíná), takže
+     * `honourPolicy` se v aktivačním režimu ignoruje.
+     */
+    public function testActivationModeIgnoresHonourPolicy(): void
+    {
+        $this->dropAutomationSettings();
+        $this->policyLevel(OperationType::BANK_RULE_CUSTOM, 'auto');
+        $this->provenAutoRule('778914');
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -1000.00, ['counterparty_account' => '778914']);
+
+        $report = $this->backfill->run($this->supplierId, $this->from(), true, true, null, true, true);
+
+        self::assertFalse($report['honour_policy']);
+        self::assertSame(0, $this->entryCountForTx($tx));
     }
 
     public function testClosedPeriodSkippedWithoutSuggestion(): void

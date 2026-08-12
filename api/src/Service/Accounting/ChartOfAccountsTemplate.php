@@ -100,6 +100,7 @@ final class ChartOfAccountsTemplate
         ['code' => '251', 'name' => 'Majetkové cenné papíry k obchodování', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '253', 'name' => 'Dluhové cenné papíry k obchodování', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '256', 'name' => 'Dluhové cenné papíry se splatností do jednoho roku držené do splatnosti', 'type' => 'asset', 'normal_side' => 'debit'],
+        ['code' => '257', 'name' => 'Ostatní cenné papíry', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '259', 'name' => 'Pořizovaný krátkodobý finanční majetek', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '261', 'name' => 'Peníze na cestě', 'type' => 'asset', 'normal_side' => null],
 
@@ -121,6 +122,19 @@ final class ChartOfAccountsTemplate
         ['code' => '341', 'name' => 'Daň z příjmů', 'type' => 'liability', 'normal_side' => null],
         ['code' => '342', 'name' => 'Ostatní přímé daně', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '343', 'name' => 'Daň z přidané hodnoty', 'type' => 'liability', 'normal_side' => null],
+        // Rozpad DPH na vstup / výstup / zúčtování (migrace 1323). Účetní vede daň takhle
+        // a bez toho nejde na konci období udělat interní doklad, který obrat období převede
+        // na zúčtovací účet — na plochém 343 by se vstup s výstupem hned vzájemně vynetoval
+        // a zůstatek by nešlo odsouhlasit proti přiznání ani proti úhradě na FÚ.
+        //   343.100  daň na VSTUPU  (nárok na odpočet, obvykle MD)
+        //   343.200  daň na VÝSTUPU (povinnost přiznat, obvykle D)
+        //   343.900  ZÚČTOVÁNÍ s FÚ (po interním dokladu nese celý závazek/nadměrný odpočet
+        //            období; vynuluje ho až platba/vratka z banky)
+        // normal_side zůstává NULL (saldní účet) — každá z analytik může být z principu na
+        // obou stranách (dobropis, opravný DDKP, nadměrný odpočet).
+        ['code' => '343.100', 'name' => 'Daň z přidané hodnoty vstup', 'type' => 'liability', 'normal_side' => null, 'parent_code' => '343'],
+        ['code' => '343.200', 'name' => 'Daň z přidané hodnoty výstup', 'type' => 'liability', 'normal_side' => null, 'parent_code' => '343'],
+        ['code' => '343.900', 'name' => 'Daň z přidané hodnoty zúčtování', 'type' => 'liability', 'normal_side' => null, 'parent_code' => '343'],
         ['code' => '345', 'name' => 'Ostatní daně a poplatky', 'type' => 'liability', 'normal_side' => 'credit'],
         // OSS (§ 110 a násl. ZDPH): daň patří státu spotřeby, ne českému rozpočtu — do
         // přiznání k DPH ani do KH nevstupuje, platí se zvlášť a v jiné měně. Kdyby seděla

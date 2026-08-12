@@ -67,7 +67,7 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
 
         self::assertEqualsWithDelta(1500.00, $byAcc['518']['debit'], 0.001, 'Neklasifikovaný doklad zůstává celý na 518.');
         self::assertArrayNotHasKey($this->materialAccount, $byAcc, 'Bez klasifikace se 501 nesmí objevit.');
-        self::assertEqualsWithDelta(315.00, $byAcc['343']['debit'], 0.001);
+        self::assertEqualsWithDelta(315.00, $byAcc['343.100']['debit'], 0.001);
         self::assertEqualsWithDelta(1815.00, $byAcc['321']['credit'], 0.001);
     }
 
@@ -89,7 +89,7 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(3150.00, $byAcc['518']['debit'], 0.001, '518 = doprava 150 + záruka 3 000.');
 
         // A tohle je ten invariant, kvůli kterému se rozděluje a nesčítá:
-        self::assertEqualsWithDelta(10363.50, $byAcc['343']['debit'], 0.001, 'DPH se rozpadem NESMÍ hnout.');
+        self::assertEqualsWithDelta(10363.50, $byAcc['343.100']['debit'], 0.001, 'DPH se rozpadem NESMÍ hnout.');
         self::assertEqualsWithDelta(59713.50, $byAcc['321']['credit'], 0.001, 'Závazek se rozpadem NESMÍ hnout.');
         self::assertArrayNotHasKey('548', $byAcc, 'Rozpad nesmí vyrobit dorovnání na 548.');
         self::assertArrayNotHasKey('648', $byAcc, 'Rozpad nesmí vyrobit dorovnání na 648.');

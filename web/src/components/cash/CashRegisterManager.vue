@@ -222,7 +222,7 @@ async function remove(r: CashRegister) {
                 <option value="" disabled>—</option>
                 <option v-for="a in cashAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
               </select>
-              <input v-else v-model="form.account_code" type="text" placeholder="211500"
+              <input v-else v-model="form.account_code" type="text" placeholder="211.500"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
               <p v-if="isForeignForm" class="text-xs text-neutral-500 mt-1">{{ t('cash.register_foreign_hint') }}</p>
               <RouterLink v-else to="/accounting/accounts" class="text-xs text-primary-600 hover:text-primary-700 mt-1 inline-block">

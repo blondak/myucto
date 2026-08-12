@@ -20,6 +20,10 @@ use PDO;
  *     nestornovaného journal_entries zdroje, CHRONOLOGICKY,
  *   - bez `withRules` přeskočí nespárované (jen spárované platby),
  *   - s `withRules` běží pravidla VŽDY jen jako suggest (auto degradace),
+ *   - s `honourPolicy` (CLI `--auto`) se degradace vypne a rozhoduje výhradně
+ *     tenantova {@see \MyInvoice\Service\Accounting\AutoPostingPolicyService}: kde
+ *     dá `auto`, dávka zaúčtuje; kde dá `suggest`, navrhne jako dosud. Firma bez
+ *     nastavené politiky má default `suggest`, takže se pro ni nic nemění,
  *   - zavřená / neexistující období → skip 'period_closed', ŽÁDNÁ suggestion
  *     ze zavřených let (frontu nezaplavit historií; --from to řídí),
  *   - report agreguje důvody skipů.
@@ -40,11 +44,18 @@ final class BankPostingBackfill
     ) {}
 
     /**
+     * @param bool $honourPolicy dávka respektuje `auto_posting_policy` místo tvrdé
+     *        degradace auto → suggest; implikuje `withRules` (jinak by se nespárované
+     *        transakce k politice vůbec nedostaly). S `activationMode` se ZÁMĚRNĚ
+     *        ignoruje: aktivace potřebuje `suggestOnly=true`, jinak jí spadne guard
+     *        `not_double_entry` (firma podvojné účetnictví teprve zapíná).
+     *
      * @return array{
-     *   supplier_id:int, dry_run:bool, with_rules:bool, from:?string,
+     *   supplier_id:int, dry_run:bool, with_rules:bool, honour_policy:bool, from:?string,
      *   candidates:int, posted:int, suggested:int, skipped:int,
      *   reconciled_legacy:int, normalized_full:int,
-     *   skip_reasons:array<string,int>, suggest_reasons:array<string,int>
+     *   skip_reasons:array<string,int>, suggest_reasons:array<string,int>,
+     *   errors:list<array{tx_id:int, reason:string, message:string}>
      * }
      */
     public function run(
@@ -54,9 +65,13 @@ final class BankPostingBackfill
         bool $withRules,
         ?int $userId = null,
         bool $activationMode = false,
+        bool $honourPolicy = false,
     ): array
     {
         $dryRun = !$apply;
+        $honourPolicy = $honourPolicy && !$activationMode;
+        $withRules = $withRules || $honourPolicy;
+        $suggestOnly = !$honourPolicy;
         $pdo = $this->db->pdo();
 
         // Ostrý běh: idempotentní seed osnovy (postDocument potřebuje účty).
@@ -70,6 +85,7 @@ final class BankPostingBackfill
             'supplier_id'      => $supplierId,
             'dry_run'          => $dryRun,
             'with_rules'       => $withRules,
+            'honour_policy'    => $honourPolicy,
             'from'             => $from,
             'candidates'       => count($rows),
             'posted'           => 0,
@@ -79,6 +95,7 @@ final class BankPostingBackfill
             'normalized_full'  => 0,
             'skip_reasons'     => [],
             'suggest_reasons'  => [],
+            'errors'           => [],
         ];
 
         // Dry-run: engine zapisuje, na konci vše zahodíme. Nested-safe: pokud žádná
@@ -135,23 +152,25 @@ final class BankPostingBackfill
                         continue;
                     }
 
-                    // Týž engine; backfill VŽDY degraduje auto pravidla na suggest.
+                    // Týž engine; bez honourPolicy degraduje dávka auto pravidla na suggest.
                     $res = $this->service->handleTransaction(
                         $txId,
                         $userId,
-                        true,
+                        $suggestOnly,
                         $activationMode ? $supplierId : null,
                     );
                     if (($reconciled || $normalized) && $res['action'] !== 'posted') {
                         $reason = (string) ($res['reason'] ?? 'unknown');
                         $this->finishCandidateTransaction($candidateTx, false);
                         $this->tallySkip($report, 'reconcile_not_posted:' . $reason);
+                        $this->tallyError($report, $txId, $reason, (string) ($res['message'] ?? ''));
                         continue;
                     }
                     $this->finishCandidateTransaction($candidateTx, true);
                 } catch (\Throwable $e) {
                     $this->finishCandidateTransaction($candidateTx, false);
                     $this->tallySkip($report, 'reconcile_error');
+                    $this->tallyError($report, $txId, 'reconcile_error', $e->getMessage());
                     continue;
                 }
 
@@ -163,7 +182,7 @@ final class BankPostingBackfill
                         $report['normalized_full']++;
                     }
                 }
-                $this->tally($report, $res);
+                $this->tally($report, $res, $txId);
             }
         } finally {
             if ($ownTx) {
@@ -396,10 +415,10 @@ final class BankPostingBackfill
     }
 
     /**
-     * @param array{action:string, reason?:string} $res
+     * @param array{action:string, reason?:string, message?:string} $res
      * @param array<string,mixed> $report
      */
-    private function tally(array &$report, array $res): void
+    private function tally(array &$report, array $res, int $txId): void
     {
         switch ($res['action']) {
             case 'posted':
@@ -411,7 +430,9 @@ final class BankPostingBackfill
                 $report['suggest_reasons'][$reason] = ($report['suggest_reasons'][$reason] ?? 0) + 1;
                 break;
             default:
-                $this->tallySkip($report, $res['reason'] ?? 'unknown');
+                $reason = (string) ($res['reason'] ?? 'unknown');
+                $this->tallySkip($report, $reason);
+                $this->tallyError($report, $txId, $reason, (string) ($res['message'] ?? ''));
         }
     }
 
@@ -420,5 +441,24 @@ final class BankPostingBackfill
     {
         $report['skipped']++;
         $report['skip_reasons'][$reason] = ($report['skip_reasons'][$reason] ?? 0) + 1;
+    }
+
+    /**
+     * Tvrdá chyba (výjimka enginu) se vedle počítadla uloží i s textem. `error` bez
+     * textu je pro dávku k ničemu — příčinou bývá triviálně opravitelná věc typu
+     * neaplikovaná migrace, kterou ale z agregovaného reportu nikdo nepozná.
+     *
+     * @param array<string,mixed> $report
+     */
+    private function tallyError(array &$report, int $txId, string $reason, string $message): void
+    {
+        if ($message === '' || count($report['errors']) >= 50) {
+            return;
+        }
+        $report['errors'][] = [
+            'tx_id'   => $txId,
+            'reason'  => $reason,
+            'message' => mb_substr($message, 0, 300),
+        ];
     }
 }

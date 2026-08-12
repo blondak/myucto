@@ -8,6 +8,8 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Service\Accounting\Reports\AccountDetailService;
+use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -17,6 +19,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Účtová osnova (chart of accounts) — REST API (Epic F1).
  *
  *   GET   /api/accounting/accounts        — seznam (?tree=1 = strom, ?include_inactive=1)
+ *   GET   /api/accounting/accounts/{id}   — karta účtu (kmen + analytiky + PS/obraty/KS)
  *   POST  /api/accounting/accounts        — nová analytika (dítě syntetiky) — účetní|admin
  *   PATCH /api/accounting/accounts/{id}   — přejmenování / deaktivace — účetní|admin
  *
@@ -29,6 +32,7 @@ final class ChartOfAccountsAction
 
     public function __construct(
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly AccountDetailService $detail,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
@@ -45,6 +49,57 @@ final class ChartOfAccountsAction
             return Json::ok($response, $this->accounts->tree($supplierId, $includeInactive));
         }
         return Json::ok($response, $this->accounts->listForTenant($supplierId, $includeInactive));
+    }
+
+    /**
+     * Karta účtu. `from`/`to` jsou volitelné — bez nich se vezme účetní období,
+     * do kterého spadá dnešek, jinak kalendářní rok (aby šel odkaz na kartu
+     * poslat bez znalosti období).
+     */
+    public function detail(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0) {
+            return Json::error($response, 'validation_failed', 'Neplatné ID účtu.', 422);
+        }
+
+        $q = $request->getQueryParams();
+        $range = $this->dateRange($q);
+        if ($range === null) {
+            return Json::error($response, 'validation_failed', 'from/to musí být datum (YYYY-MM-DD) a from nesmí být větší než to.', 422);
+        }
+
+        try {
+            $data = $this->detail->build($supplierId, $id, $range[0], $range[1], (string) ($q['after_closing'] ?? '') === '1');
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, $data);
+    }
+
+    /**
+     * @param array<string,mixed> $q
+     * @return array{0:string, 1:string}|null
+     */
+    private function dateRange(array $q): ?array
+    {
+        $year = (new \DateTimeImmutable('today'))->format('Y');
+        $from = trim((string) ($q['from'] ?? '')) ?: $year . '-01-01';
+        $to   = trim((string) ($q['to'] ?? '')) ?: $year . '-12-31';
+        if (!$this->isDate($from) || !$this->isDate($to) || $from > $to) {
+            return null;
+        }
+        return [$from, $to];
+    }
+
+    private function isDate(string $v): bool
+    {
+        $d = \DateTimeImmutable::createFromFormat('Y-m-d', $v);
+        return $d !== false && $d->format('Y-m-d') === $v;
     }
 
     public function create(Request $request, Response $response): Response

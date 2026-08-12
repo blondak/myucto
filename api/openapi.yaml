@@ -7611,6 +7611,27 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/accounts/{id}:
+    get:
+      tags: [Accounting]
+      summary: Karta účtu (kmenová data, analytiky se zůstatky, PS/obraty/KS za rozsah)
+      description: >
+        Rozcestník drill-through nad osnovou. `from`/`to` jsou volitelné — bez nich se
+        vezme kalendářní rok. Součty syntetiky zahrnují i pohyby jejích analytik
+        (stejný roll-up jako hlavní kniha a opis účtu).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: after_closing, description: "1 = stav PO uzavření knih", schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
     patch:
       tags: [Accounting]
       summary: Přejmenování / deaktivace účtu
@@ -15848,6 +15869,61 @@ components:
           type: array
           description: Přítomno jen v režimu ?tree=1
           items: { $ref: '#/components/schemas/ChartAccount' }
+
+    AccountBalances:
+      type: object
+      properties:
+        opening_balance: { type: number, format: float, description: "Počáteční stav (kladné = MD)" }
+        turnover_md: { type: number, format: float }
+        turnover_d: { type: number, format: float }
+        closing_balance: { type: number, format: float, description: "Konečný stav (kladné = MD)" }
+        line_count: { type: integer, description: "Počet řádků deníku v rozsahu" }
+
+    AccountDetail:
+      type: object
+      properties:
+        account:
+          type: object
+          properties:
+            id: { type: integer }
+            code: { type: string, example: "221.100" }
+            name: { type: string }
+            account_type: { type: string, enum: [asset, liability, equity, revenue, expense, offbalance, closing] }
+            normal_side: { type: [string, "null"], enum: [debit, credit, null] }
+            is_synthetic: { type: boolean }
+            is_active: { type: boolean }
+            parent_id: { type: [integer, "null"] }
+            created_at: { type: [string, "null"] }
+        parent:
+          type: [object, "null"]
+          properties:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
+        period:
+          type: [object, "null"]
+          properties:
+            id: { type: integer }
+            fiscal_year: { type: integer }
+            starts_on: { type: string, format: date }
+            ends_on: { type: string, format: date }
+            status: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        after_closing: { type: boolean }
+        totals: { $ref: '#/components/schemas/AccountBalances' }
+        children:
+          type: array
+          description: Analytiky pod syntetikou, každá s vlastními zůstatky
+          items:
+            allOf:
+              - type: object
+                properties:
+                  id: { type: integer }
+                  code: { type: string }
+                  name: { type: string }
+                  is_active: { type: boolean }
+              - $ref: '#/components/schemas/AccountBalances'
 
     AccountingPeriod:
       type: object

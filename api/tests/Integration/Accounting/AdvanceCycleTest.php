@@ -65,7 +65,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $byAcc   = $this->linesByAccountCode($entryId);
 
         self::assertEqualsWithDelta(105.00, $byAcc['324']['debit'], 0.001, '324 MD = čerpání přijaté zálohy o DPH.');
-        self::assertEqualsWithDelta(105.00, $byAcc['343']['credit'], 0.001, '343 D = DPH na výstupu ze zálohy.');
+        self::assertEqualsWithDelta(105.00, $byAcc['343.200']['credit'], 0.001, '343 D = DPH na výstupu ze zálohy.');
         self::assertArrayNotHasKey('311', $byAcc, 'DDKP nezakládá pohledávku 311.');
         self::assertArrayNotHasKey('602', $byAcc, 'DDKP nenese výnos 602.');
         $this->assertBalancedEntry($entryId);
@@ -85,7 +85,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $ddkp, $lines, ['entry_date' => self::YEAR . '-06-16']);
         $byAcc   = $this->linesByAccountCode($entryId);
 
-        self::assertEqualsWithDelta(105.00, $byAcc['343']['debit'] ?? 0.0, 0.001, 'Opravný DDKP snižuje DPH na výstupu → 343 MD.');
+        self::assertEqualsWithDelta(105.00, $byAcc['343.200']['debit'] ?? 0.0, 0.001, 'Opravný DDKP snižuje DPH na výstupu → 343 MD.');
         self::assertEqualsWithDelta(105.00, $byAcc['324']['credit'] ?? 0.0, 0.001, 'A vrací čerpání zálohy → 324 D.');
         self::assertSame(0.0, $byAcc['324']['debit'] ?? 0.0, 'Strany NESMÍ zůstat jako u kladného DDKP.');
         $this->assertBalancedEntry($entryId);
@@ -109,7 +109,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
         // Normální řádky faktury.
         self::assertEqualsWithDelta(1210.00, $byAcc['311']['debit'], 0.001, '311 MD = celková částka faktury.');
         self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'], 0.001, '602 D = výnos.');
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['credit'], 0.001, '343 D = DPH.');
+        self::assertEqualsWithDelta(210.00, $byAcc['343.200']['credit'], 0.001, '343 D = DPH.');
         // Zúčtování zálohy v přesné výši přijaté zálohy (605).
         self::assertEqualsWithDelta(605.00, $byAcc['324']['debit'], 0.001, '324 MD = zúčtování přijaté zálohy.');
         self::assertEqualsWithDelta(605.00, $byAcc['311']['credit'], 0.001, '311 D = snížení pohledávky o zálohu.');
@@ -151,7 +151,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $byAcc   = $this->linesByAccountCode($entryId);
 
         self::assertEqualsWithDelta(1000.00, $byAcc['518']['debit'], 0.001, '518 MD = náklad.');
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['debit'], 0.001, '343 MD = odpočet DPH.');
+        self::assertEqualsWithDelta(210.00, $byAcc['343.100']['debit'], 0.001, '343 MD = odpočet DPH.');
         self::assertEqualsWithDelta(1210.00, $byAcc['321']['credit'], 0.001, '321 D = závazek.');
         self::assertEqualsWithDelta(605.00, $byAcc['321']['debit'], 0.001, '321 MD = zúčtování zaplacené zálohy.');
         self::assertEqualsWithDelta(605.00, $byAcc['314']['credit'], 0.001, '314 D = zúčtování poskytnuté zálohy.');
@@ -251,7 +251,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
 
         self::assertEqualsWithDelta(1210.00, $byAcc['311']['debit'], 0.001);
         self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAcc['343.200']['credit'], 0.001);
         self::assertArrayNotHasKey('324', $byAcc, 'Faktura bez proformy nezúčtovává zálohu.');
         self::assertSame(0.0, $byAcc['311']['credit'] ?? 0.0, 'Žádné zúčtování zálohy proti 311.');
         $this->assertBalancedEntry($entryId);
@@ -387,7 +387,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $ddkp, $lines, ['entry_date' => self::YEAR . '-06-16']);
         $byAcc   = $this->linesByAccountCode($entryId);
 
-        self::assertEqualsWithDelta(105.00, $byAcc['343']['debit'], 0.001, '343 MD = odpočet DPH ze zálohy.');
+        self::assertEqualsWithDelta(105.00, $byAcc['343.100']['debit'], 0.001, '343 MD = odpočet DPH ze zálohy.');
         self::assertEqualsWithDelta(105.00, $byAcc['314']['credit'], 0.001, '314 D = čerpání poskytnuté zálohy o DPH.');
         self::assertArrayNotHasKey('518', $byAcc, 'DDKP nezakládá náklad 518.');
         self::assertArrayNotHasKey('321', $byAcc, 'DDKP nezakládá závazek 321.');

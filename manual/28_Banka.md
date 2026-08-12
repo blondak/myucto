@@ -411,6 +411,14 @@ naváže jedinou odpovídající `legacy` platbu a plně kryté položky označe
 `auto_partial` uzavře jako plné. Nejednoznačné nebo skutečně částečné vazby nechá
 k ruční kontrole.
 
+Nespárované transakce (odvody, poplatky, převody mezi vlastními účty) back-fill ve
+výchozím stavu vůbec nevyhodnocuje. S `--rules` je vyhodnotí, ale výsledek uloží
+vždy jen jako **návrh**. S `--auto` (implikuje `--rules`) se řídí nastavením
+**Automatika účtování** dané firmy: co má úroveň `auto`, dávka rovnou **zaúčtuje**,
+co má `suggest`, navrhne jako dosud. Firma bez nastavené automatiky má výchozí
+`suggest`, takže se pro ni ani s `--auto` nic nemění. Zavřená a schválená období se
+přeskočí (`period_closed`) bez ohledu na přepínače.
+
 ### 28.7.2 Pravidla účtování opakovaných plateb
 
 Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing…) se

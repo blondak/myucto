@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import {
@@ -7,9 +7,11 @@ import {
   type AccountingPeriod,
   type GeneralLedgerReport,
   type GeneralLedgerAccount,
+  type AccountStatementItem,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney } from '@/composables/useFormat'
+import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -64,6 +66,7 @@ async function load() {
   if (!filters.period_id) return
   loading.value = true
   expandedId.value = null
+  closeMonth()
   try {
     report.value = await accountingApi.getGeneralLedger(queryParams())
   } catch (e: any) {
@@ -76,15 +79,95 @@ async function load() {
 
 const expandedId = ref<number | null>(null)
 function toggleExpand(a: GeneralLedgerAccount) {
-  expandedId.value = expandedId.value === a.account_id ? null : a.account_id
+  const next = expandedId.value === a.account_id ? null : a.account_id
+  expandedId.value = next
+  if (next === null) closeMonth()
 }
 
-function statementLink(a: GeneralLedgerAccount) {
+/** Karta účtu = rozcestník (kmen, analytiky, odkazy na opis/deník). */
+function accountLink(a: GeneralLedgerAccount) {
   return {
-    name: 'accounting-account-statement',
+    name: 'accounting-account-detail',
     params: { accountId: a.account_id },
     query: { from: report.value?.from, to: report.value?.to },
   }
+}
+
+function statementLink(a: GeneralLedgerAccount, from?: string, to?: string) {
+  return {
+    name: 'accounting-account-statement',
+    params: { accountId: a.account_id },
+    query: { from: from ?? report.value?.from, to: to ?? report.value?.to },
+  }
+}
+
+// ── Rozpad měsíce na řádky deníku ──────────────────────────────────────────
+// Data bere existující opis účtu (`account-statement`) zúžený na hranice měsíce —
+// tytéž pohyby, které se sčítají do měsíčního obratu, jen nezagregované. Vlastní
+// endpoint by znamenal druhý výklad toho, co do obratu patří.
+const MONTH_LINE_LIMIT = 200
+
+const openMonth = ref<string | null>(null)
+const monthLines = ref<AccountStatementItem[]>([])
+const monthTotal = ref(0)
+const monthLoading = ref(false)
+
+function monthBounds(ym: string): { from: string; to: string } {
+  const [y, m] = ym.split('-').map(Number)
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, '0')}` }
+}
+
+function closeMonth() {
+  openMonth.value = null
+  monthLines.value = []
+  monthTotal.value = 0
+}
+
+async function toggleMonth(a: GeneralLedgerAccount, ym: string) {
+  if (openMonth.value === ym) { closeMonth(); return }
+  openMonth.value = ym
+  monthLines.value = []
+  monthTotal.value = 0
+  monthLoading.value = true
+  const { from, to } = monthBounds(ym)
+  try {
+    const r = await accountingApi.getAccountStatement(a.account_id, {
+      from, to, page: 1, per_page: MONTH_LINE_LIMIT,
+    })
+    // Mezitím mohl uživatel měsíc zavřít nebo otevřít jiný — pozdní odpověď zahoď.
+    if (openMonth.value !== ym) return
+    monthLines.value = r.items
+    monthTotal.value = r.total
+  } catch (e: any) {
+    if (openMonth.value === ym) closeMonth()
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    monthLoading.value = false
+  }
+}
+
+function lineLink(it: AccountStatementItem) {
+  return journalSourceLink(it) ?? journalEntryLink(it.entry_id)
+}
+
+function monthStatementLink(a: GeneralLedgerAccount, ym: string) {
+  const { from, to } = monthBounds(ym)
+  return statementLink(a, from, to)
+}
+
+/**
+ * Proklik z karty účtu / jiné sestavy: `?account_id=` po načtení rozbalí ten účet
+ * a odroluje k němu. Hlavní kniha nemá filtr na účet — rozbalený řádek je nejbližší
+ * ekvivalent „knihy zúžené na účet" bez nové serverové varianty sestavy.
+ */
+async function focusAccountFromQuery() {
+  const id = Number(route.query.account_id || 0)
+  if (id <= 0 || !report.value) return
+  if (!report.value.accounts.some(a => a.account_id === id)) return
+  expandedId.value = id
+  await nextTick()
+  document.getElementById(`gl-account-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
 const exporting = ref(false)
@@ -174,10 +257,17 @@ onMounted(async () => {
   const def = open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
     : periods.value[0]
-  if (def) {
-    filters.period_id = def.id
-    await load()
-  }
+  // Drill-down z karty účtu / jiné sestavy — období, rozsah i rozpad analytik
+  // z URL mají přednost před výchozím otevřeným obdobím.
+  const q = route.query
+  const periodId = typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (def?.id ?? 0)
+  if (!periodId) return
+  filters.period_id = periodId
+  if (typeof q.from === 'string' && q.from) filters.from = q.from
+  if (typeof q.to === 'string' && q.to) filters.to = q.to
+  if (q.analytics === '1') filters.analytics = true
+  await load()
+  await focusAccountFromQuery()
 })
 </script>
 
@@ -328,13 +418,14 @@ onMounted(async () => {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <template v-for="a in report.accounts" :key="a.account_id">
-              <tr class="cursor-pointer hover:bg-neutral-50" @click="toggleExpand(a)">
+              <tr :id="`gl-account-${a.account_id}`" class="cursor-pointer hover:bg-neutral-50"
+                :class="{ 'bg-primary-50/40': expandedId === a.account_id }" @click="toggleExpand(a)">
                 <td class="px-3 py-2 text-neutral-400">
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === a.account_id }">▸</span>
                 </td>
                 <td v-if="tbl.isVisible('account')" class="px-3 py-2">
-                  <RouterLink :to="statementLink(a)" @click.stop
-                    class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
+                  <RouterLink :to="accountLink(a)" @click.stop :title="t('accounting.general_ledger.open_account')"
+                    class="row-link font-mono text-primary-600 hover:text-primary-700 hover:underline">
                     {{ a.account_code }}
                   </RouterLink>
                 </td>
@@ -352,23 +443,98 @@ onMounted(async () => {
               </tr>
               <tr v-if="expandedId === a.account_id">
                 <td :colspan="visibleColCount" class="px-3 py-3 bg-neutral-50">
-                  <div class="text-xs text-neutral-500 uppercase tracking-wide font-medium mb-2">
-                    {{ t('accounting.general_ledger.months_detail') }}
+                  <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                    <span class="text-xs text-neutral-500 uppercase tracking-wide font-medium">
+                      {{ t('accounting.general_ledger.months_detail') }}
+                    </span>
+                    <span class="text-xs text-neutral-400">{{ t('accounting.general_ledger.month_expand_hint') }}</span>
                   </div>
-                  <table class="w-full max-w-xl text-sm">
+                  <!-- Bez rozbaleného měsíce je to krátký seznam (užší je čitelnější);
+                       s řádky deníku uvnitř potřebuje tabulka celou šířku. -->
+                  <table class="w-full text-sm" :class="openMonth ? '' : 'max-w-2xl'">
                     <thead class="text-xs text-neutral-500 uppercase tracking-wide">
                       <tr>
+                        <th class="px-2 py-1 w-6"></th>
                         <th class="px-2 py-1 text-left font-medium">{{ t('accounting.general_ledger.col_month') }}</th>
                         <th class="px-2 py-1 text-right font-medium w-40">{{ t('accounting.general_ledger.col_turnover_md') }}</th>
                         <th class="px-2 py-1 text-right font-medium w-40">{{ t('accounting.general_ledger.col_turnover_d') }}</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-neutral-200">
-                      <tr v-for="m in report.months" :key="m">
-                        <td class="px-2 py-1 font-mono">{{ m }}</td>
-                        <td class="px-2 py-1 text-right font-mono">{{ formatMoney(a.months[m]?.md ?? 0) }}</td>
-                        <td class="px-2 py-1 text-right font-mono">{{ formatMoney(a.months[m]?.d ?? 0) }}</td>
-                      </tr>
+                      <template v-for="m in report.months" :key="m">
+                        <tr class="hover:bg-neutral-100"
+                          :class="[
+                            (a.months[m]?.md || a.months[m]?.d) ? 'cursor-pointer' : 'text-neutral-400',
+                            openMonth === m ? 'bg-neutral-100' : '',
+                          ]"
+                          @click="(a.months[m]?.md || a.months[m]?.d) && toggleMonth(a, m)">
+                          <td class="px-2 py-1 text-neutral-400">
+                            <span v-if="a.months[m]?.md || a.months[m]?.d"
+                              class="inline-block transition-transform" :class="{ 'rotate-90': openMonth === m }">▸</span>
+                          </td>
+                          <td class="px-2 py-1 font-mono">{{ m }}</td>
+                          <td class="px-2 py-1 text-right font-mono">{{ formatMoney(a.months[m]?.md ?? 0) }}</td>
+                          <td class="px-2 py-1 text-right font-mono">{{ formatMoney(a.months[m]?.d ?? 0) }}</td>
+                        </tr>
+                        <tr v-if="openMonth === m">
+                          <td colspan="4" class="px-2 py-2">
+                            <div class="bg-surface border border-neutral-200 rounded-md overflow-hidden">
+                              <div class="px-2 py-1.5 bg-neutral-50 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-2">
+                                <span class="text-xs font-medium text-neutral-500">
+                                  {{ t('accounting.general_ledger.month_lines', { month: m }) }}
+                                </span>
+                                <RouterLink :to="monthStatementLink(a, m)"
+                                  class="text-xs text-primary-600 hover:text-primary-700 hover:underline">
+                                  {{ t('accounting.account_statement.title') }}
+                                </RouterLink>
+                              </div>
+                              <div v-if="monthLoading" class="px-2 py-4 text-center text-xs text-neutral-500">{{ t('common.loading') }}</div>
+                              <div v-else-if="monthLines.length === 0" class="px-2 py-4 text-center text-xs text-neutral-500">
+                                {{ t('accounting.general_ledger.month_empty') }}
+                              </div>
+                              <div v-else class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                  <thead class="text-xs text-neutral-500 uppercase tracking-wide bg-neutral-50">
+                                    <tr>
+                                      <th class="px-2 py-1 text-left font-medium w-24">{{ t('accounting.account_statement.col_date') }}</th>
+                                      <th class="px-2 py-1 text-left font-medium w-36">{{ t('accounting.account_statement.col_document') }}</th>
+                                      <th class="px-2 py-1 text-left font-medium w-24">{{ t('accounting.account_statement.col_line_account') }}</th>
+                                      <th class="px-2 py-1 text-left font-medium">{{ t('accounting.account_statement.col_description') }}</th>
+                                      <th class="px-2 py-1 text-right font-medium w-28">{{ t('accounting.account_statement.col_md') }}</th>
+                                      <th class="px-2 py-1 text-right font-medium w-28">{{ t('accounting.account_statement.col_d') }}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody class="divide-y divide-neutral-100">
+                                    <tr v-for="(it, idx) in monthLines" :key="`${it.entry_id}-${idx}`" class="hover:bg-neutral-50">
+                                      <td class="px-2 py-1 whitespace-nowrap">{{ formatDate(it.entry_date) }}</td>
+                                      <td class="px-2 py-1">
+                                        <RouterLink :to="lineLink(it)"
+                                          class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
+                                          {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
+                                        </RouterLink>
+                                      </td>
+                                      <td class="px-2 py-1 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
+                                      <td class="px-2 py-1">{{ it.description || '—' }}</td>
+                                      <td class="px-2 py-1 text-right font-mono">
+                                        <template v-if="it.side === 'debit'">{{ formatMoney(it.amount) }}</template>
+                                      </td>
+                                      <td class="px-2 py-1 text-right font-mono">
+                                        <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                              <div v-if="monthTotal > monthLines.length" class="px-2 py-1.5 border-t border-neutral-100 text-xs text-neutral-500">
+                                {{ t('accounting.general_ledger.month_more', { shown: monthLines.length, total: monthTotal }) }}
+                                <RouterLink :to="monthStatementLink(a, m)" class="text-primary-600 hover:underline ml-1">
+                                  {{ t('accounting.account_statement.title') }}
+                                </RouterLink>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
                     </tbody>
                   </table>
                 </td>

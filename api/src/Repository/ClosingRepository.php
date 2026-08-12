@@ -854,13 +854,24 @@ final class ClosingRepository
                  WHERE ip.supplier_id = ? AND ip.bank_transaction_id IS NOT NULL
                  GROUP BY ip.bank_transaction_id
             ), settled_bank AS (
-                SELECT ip.invoice_id,
+                -- Úhrada proformy se musí započítat FINÁLNÍ faktuře, ne proformě.
+                -- Proforma sama nemá předpis na 311 (nezakládá pohledávku), takže by
+                -- ji `JOIN booked` zahodilo a konečná faktura by svítila jako
+                -- neuhrazená, přestože je zaplacená předem.
+                SELECT COALESCE(ch.id, ip.invoice_id) AS invoice_id,
                        SUM(bc.net_credit * ip.amount / NULLIF(a.total_alloc, 0)) AS settled
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
                   JOIN bank_credit bc ON bc.bank_transaction_id = ip.bank_transaction_id
+                  LEFT JOIN invoices pf ON pf.id = ip.invoice_id
+                                       AND pf.supplier_id = ip.supplier_id
+                                       AND pf.invoice_type = 'proforma'
+                  LEFT JOIN invoices ch ON ch.parent_invoice_id = pf.id
+                                       AND ch.supplier_id = ip.supplier_id
+                                       AND ch.invoice_type <> 'proforma'
+                                       AND ch.cancelled_at IS NULL
                  WHERE ip.supplier_id = ?
-                 GROUP BY ip.invoice_id
+                 GROUP BY COALESCE(ch.id, ip.invoice_id)
             ), settled_bank_matched AS (
                 -- Úhrady spárované jen přes bank_transactions.matched_invoice_id (bez
                 -- invoice_payments vazby) — legacy import / ruční match cizoměnové platby
@@ -1030,6 +1041,29 @@ final class ClosingRepository
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
+    /**
+     * Účet, na který firma účtuje inkaso přijaté zálohy. Standardně 324, ale firma
+     * si ho může přesměrovat kontací `advance.received.collection` — některé účetní
+     * 324 nevedou vůbec a platbu zálohy dávají rovnou na pohledávku 311. Kontrola
+     * „zaplacená proforma bez závazku ze zálohy“ pak musí hledat tenhle účet, jinak
+     * by u takové firmy hlásila jako chybu úplně každou zaplacenou proformu.
+     */
+    private function advanceReceivedAccount(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT credit_account_code FROM posting_rules
+              WHERE rule_key = 'advance.received.collection' AND is_active = 1
+                AND (supplier_id = ? OR supplier_id IS NULL)
+                AND credit_account_code IS NOT NULL
+              ORDER BY supplier_id IS NULL, priority
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId]);
+        $code = $stmt->fetchColumn();
+
+        return is_string($code) && $code !== '' ? $code : '324';
+    }
+
     public function paidProformasWithoutAdvance(int $supplierId, string $asOf): array
     {
         $sql =
@@ -1053,7 +1087,7 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE '324%' OR COALESCE(pa.account_code, '') LIKE '324%')
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM cash_documents cd
@@ -1064,11 +1098,12 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE cd.supplier_id = i.supplier_id AND cd.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE '324%' OR COALESCE(pa.account_code, '') LIKE '324%')
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
                 )
               ORDER BY i.id";
+        $adv = $this->advanceReceivedAccount($supplierId) . '%';
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $asOf, $asOf, $asOf]);
+        $stmt->execute([$supplierId, $asOf, $asOf, $adv, $adv, $asOf, $adv, $adv]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

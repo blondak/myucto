@@ -140,6 +140,32 @@ final class AccountNumberNormalizerTest extends TestCase
     }
 
     /**
+     * REGRESE (nezaúčtované převody mezi vlastními účty): týž účet přijde ve výpisech
+     * jednou jako `112866706` a jindy jako nulami vycpaný `0000000112866706`. Obě
+     * podoby MUSÍ dát tentýž kanonický klíč, jinak
+     * {@see \MyInvoice\Repository\SupplierBankAccountRepository::matchCounterparty()}
+     * protistranu nenajde, {@see \MyInvoice\Service\Accounting\Bank\OwnTransferDetector::detect()}
+     * vrátí null a převod se nikdy nespáruje — bez jediné chybové hlášky.
+     *
+     * Účet BEZ předčíslí je zákeřný v tom, že padding je jen vodicí nula navíc:
+     * kdyby se `canonical()` kdy vrátil k `substr($digits, 6)` (což dělá
+     * {@see AccountNumberNormalizer::czechAccountBase()} u 16místného zápisu),
+     * rozešly by se.
+     */
+    public function testZeroPaddedStatementFormCanonicalisesLikeThePlainOne(): void
+    {
+        $plain = AccountNumberNormalizer::canonical('112866706');
+        $padded = AccountNumberNormalizer::canonical('0000000112866706');
+
+        self::assertSame('112866706', $plain);
+        self::assertSame($plain, $padded, 'Vycpaná GPC podoba je týž účet jako holé číslo.');
+        self::assertTrue(AccountNumberNormalizer::equals('112866706', '0000000112866706'));
+
+        // A totéž s kódem banky za lomítkem, jak číslo chodí z UI nastavení.
+        self::assertSame($plain, AccountNumberNormalizer::canonical('112866706/0300'));
+    }
+
+    /**
      * `normalize()` a `canonical()` se ZÁMĚRNĚ rozcházejí a sjednotit je NELZE.
      *
      * `normalize()` je čistý strip cifer — jeho výstup se persistuje

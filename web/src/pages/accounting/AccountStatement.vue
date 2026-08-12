@@ -11,6 +11,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -70,16 +71,28 @@ function goToPage(p: number) {
   }
 }
 
-/** Drill-down na prvotní doklad dle source_type; ostatní vede do deníku. */
+/**
+ * Drill-down na prvotní doklad dle source_type (sdílené s deníkem a hlavní knihou,
+ * viz utils/journalSourceLink.ts); bez rozpoznaného zdroje se jde do deníku na zápis.
+ * Dokud tu mapování žilo lokálně, uměl opis prokliknout jen faktury — banka,
+ * pokladna, majetek i zápočet končily v deníku.
+ */
 function itemLink(it: AccountStatementItem) {
-  if (it.source_type === 'invoice' && it.source_id) {
-    return { name: 'invoice-detail', params: { id: it.source_id } }
-  }
-  if (it.source_type === 'purchase_invoice' && it.source_id) {
-    return { name: 'purchase-invoice-detail', params: { id: it.source_id } }
-  }
-  return { path: '/accounting/journal', query: { entry_id: String(it.entry_id) } }
+  return journalSourceLink(it) ?? journalEntryLink(it.entry_id)
 }
+
+/** Karta účtu — kmen, analytiky a odkazy zpátky do knihy/deníku. */
+const accountCardLink = computed(() => ({
+  name: 'accounting-account-detail',
+  params: { accountId: accountId.value },
+  query: { from: filters.from, to: filters.to },
+}))
+
+/** Zobrazovat sloupec s analytikou má smysl jen u syntetiky (opis pak míchá víc účtů). */
+const showLineAccount = computed(() => {
+  const items = report.value?.items ?? []
+  return items.some(i => i.account_id !== report.value?.account.id)
+})
 
 const exporting = ref(false)
 async function exportFile(format: 'pdf' | 'xlsx') {
@@ -120,15 +133,25 @@ onMounted(load)
   <div>
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-2xl font-semibold">
-          {{ t('accounting.account_statement.title') }}
+        <!-- Kód a název jako samostatné položky flexu s gapem — mezera v textu se při
+             zalomení dlouhého názvu ztratí a kód by se na název nalepil. -->
+        <h1 class="text-2xl font-semibold flex flex-wrap items-baseline gap-x-2">
+          <span>{{ t('accounting.account_statement.title') }}</span>
           <template v-if="report">
-            — <span class="font-mono">{{ report.account.code }}</span> {{ report.account.name }}
+            <span class="text-neutral-400">—</span>
+            <RouterLink :to="accountCardLink" class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
+              {{ report.account.code }}
+            </RouterLink>
+            <span>{{ report.account.name }}</span>
           </template>
         </h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.account_statement.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <RouterLink v-if="report" :to="accountCardLink" :class="btnOutline('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" /></svg>
+          {{ t('accounting.account_statement.account_card') }}
+        </RouterLink>
         <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.account_statement.export_pdf') }}
@@ -187,6 +210,7 @@ onMounted(load)
             <tr>
               <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.account_statement.col_date') }}</th>
               <th class="px-3 py-2 text-left font-medium w-36">{{ t('accounting.account_statement.col_document') }}</th>
+              <th v-if="showLineAccount" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.account_statement.col_line_account') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('accounting.account_statement.col_description') }}</th>
               <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_md') }}</th>
               <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_d') }}</th>
@@ -203,6 +227,12 @@ onMounted(load)
                   <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                   </svg>
+                </RouterLink>
+              </td>
+              <td v-if="showLineAccount" class="px-3 py-2">
+                <RouterLink :to="{ name: 'accounting-account-detail', params: { accountId: it.account_id }, query: { from: filters.from, to: filters.to } }"
+                  class="font-mono text-xs text-neutral-500 hover:text-primary-600 hover:underline" :title="it.account_name">
+                  {{ it.account_code }}
                 </RouterLink>
               </td>
               <td class="px-3 py-2">{{ it.description || '—' }}</td>

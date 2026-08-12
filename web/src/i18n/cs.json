@@ -3710,6 +3710,32 @@
       "deactivate": "Deaktivovat",
       "reactivate": "Aktivovat",
       "deactivate_confirm": "Opravdu deaktivovat účet {code}? Účty se nemažou, jen deaktivují.",
+      "open_detail": "Otevřít kartu účtu",
+      "detail": {
+        "title": "Karta účtu",
+        "subtitle": "Kmenová data účtu, jeho analytiky a zůstatky za zvolené období.",
+        "not_found": "Účet nenalezen.",
+        "master_data": "Kmenová data",
+        "parent": "Nadřízená syntetika",
+        "kind": "Druh",
+        "children_count": "Analytik",
+        "created_at": "Založen",
+        "status": "Stav",
+        "active": "Aktivní",
+        "inactive": "Neaktivní",
+        "period": "Období",
+        "filter_from": "Od",
+        "filter_to": "Do",
+        "analytics": "Analytiky",
+        "analytics_hint": "Zůstatky jednotlivých analytik za zvolený rozsah. Součty nahoře už je zahrnují.",
+        "analytics_empty": "Tento účet nemá žádné analytiky.",
+        "col_lines": "Řádků",
+        "no_movement": "Bez pohybu v rozsahu",
+        "statement": "Opis účtu",
+        "general_ledger": "Hlavní kniha",
+        "journal": "Deník",
+        "back_to_chart": "Účtový rozvrh"
+      },
       "class": {
         "0": "Třída 0 — Dlouhodobý majetek",
         "1": "Třída 1 — Zásoby",
@@ -4011,7 +4037,8 @@
         "fx_revaluation": "Kurzové přecenění",
         "stock": "Sklad",
         "offset": "Vzájemný zápočet",
-        "settlement": "Zápočet proti účtu"
+        "settlement": "Zápočet proti účtu",
+        "vat_clearing": "Zúčtování DPH"
       },
       "history": {
         "title": "Historie",
@@ -4350,6 +4377,11 @@
       "synthetic": "Syntetický",
       "analytic": "Analytický",
       "months_detail": "Měsíční obraty",
+      "month_lines": "Řádky měsíce {month}",
+      "month_expand_hint": "Kliknutím na měsíc zobrazíš jeho řádky deníku.",
+      "month_empty": "V tomto měsíci nejsou žádné řádky.",
+      "month_more": "Zobrazeno prvních {shown} z {total} řádků — pokračovat v opisu účtu.",
+      "open_account": "Karta účtu",
       "totals": "Součty"
     },
     "reports": {
@@ -4553,7 +4585,10 @@
       "col_md": "MD",
       "col_d": "Dal",
       "col_balance": "Zůstatek",
-      "journal_link": "Deník #{id}"
+      "journal_link": "Deník #{id}",
+      "account_card": "Karta účtu",
+      "general_ledger": "Hlavní kniha",
+      "col_line_account": "Analytika"
     },
     "section18": {
       "title": "Peněžní toky a změny vlastního kapitálu",
@@ -10438,6 +10473,7 @@
     "freq_weekdays_0915": "Po–Pá v 09:15",
     "freq_weekdays_0930": "Po–Pá v 09:30",
     "freq_monthly_day1_0400": "1. den v měsíci ve 04:00",
+    "freq_monthly_day1_0430": "1. den v měsíci ve 04:30",
     "setup_hint": "Nastavení cronu: viz {link} v manuálu.",
     "setup_link": "§ 2.4.1 Cron skripty",
     "report_label": "Report",

@@ -115,12 +115,21 @@ final class LedgerReportRepository
      * Měsíční obraty per účet pro hlavní knihu — jen pohyby v rozsahu (PS dodá
      * trialBalanceRows).
      *
+     * Vylučuje TYTÉŽ technické zápisy jako obratový sloupec v trialBalanceRows,
+     * jinak Σ měsíců ≠ obrat za období: otevírací zápis z prvního dne období patří
+     * do PS, ne do obratů, ale měsíční rozpad ho počítal do ledna — 221 za 2026
+     * hlásilo v lednu MD 5 840 411,19 při ročním obratu 10 624 925,33, tedy o celý
+     * počáteční stav 4 696 179,60 víc, než kolik součet měsíců smí dát. Nesrovnalost
+     * byla vidět až po rozkliknutí měsíce na jednotlivé řádky deníku.
+     *
      * @param array{vendor?:string, client?:string, item?:string} $filters viz {@see counterpartyFilter()}
      * @return list<array{account_id:int, month:string, md:float, d:float}>
      */
-    public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = []): array
+    public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false): array
     {
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $stmt = $this->db->pdo()->prepare(
             "SELECT CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
                     DATE_FORMAT(e.entry_date, '%Y-%m') AS ym,
@@ -129,10 +138,11 @@ final class LedgerReportRepository
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?{$filterSql}
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
+                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$filterSql}{$closingSql}
               GROUP BY acc_id, ym"
         );
-        $stmt->execute([$analytics ? 1 : 0, $supplierId, $from, $to, ...$filterParams]);
+        $stmt->execute([$analytics ? 1 : 0, $supplierId, $from, $to, $from, ...$filterParams, ...$closingParams]);
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['acc_id'],
             'month'      => (string) $r['ym'],
@@ -147,6 +157,12 @@ final class LedgerReportRepository
      * SELECT — running_delta je tedy kumulativní od začátku rozsahu i na dalších
      * stránkách; running_balance = opening + running_delta dopočítá service.
      *
+     * Řádky nesou i obohacení o ZDROJOVÝ DOKLAD (source_statement_id, source_doc_number,
+     * source_register_id, source_asset_id/name, source_settlement_doc_type/id) — stejná
+     * sada sloupců jako {@see JournalEntryRepository::paginate()}, aby drill-down z opisu
+     * účtu vedl na tentýž doklad jako z deníku (bez toho končila banka/pokladna/majetek
+     * jen v deníku). JOINy jsou 1:1 přes PK, řádky se tedy neznásobují.
+     *
      * @return list<array<string,mixed>>
      */
     public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false): array
@@ -157,13 +173,33 @@ final class LedgerReportRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
-                       ca.account_code, l.side, l.amount, l.line_no,
+                       ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
+                       l.side, l.amount, l.line_no,
+                       bt.statement_id AS source_statement_id,
+                       cd.doc_number AS source_doc_number,
+                       cd.register_id AS source_register_id,
+                       ast.id AS source_asset_id,
+                       ast.name AS source_asset_name,
+                       stl.doc_type AS source_settlement_doc_type,
+                       stl.doc_id AS source_settlement_doc_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
                          OVER (ORDER BY e.entry_date, e.id, l.line_no
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+             LEFT JOIN bank_transactions bt ON e.source_type = 'bank' AND bt.id = e.source_id
+             LEFT JOIN cash_documents cd    ON e.source_type = 'cash' AND cd.id = e.source_id
+             LEFT JOIN invoice_settlements stl ON e.source_type = 'settlement'
+                    AND stl.id = e.source_id AND stl.supplier_id = e.supplier_id
+             LEFT JOIN depreciation_entries dep ON e.source_type = 'depreciation'
+                    AND dep.id = e.source_id AND dep.supplier_id = e.supplier_id
+             LEFT JOIN assets ast ON ast.supplier_id = e.supplier_id
+                    AND ast.id = CASE
+                        WHEN e.source_type IN ('asset', 'asset_disposal') THEN e.source_id
+                        WHEN e.source_type = 'depreciation' THEN dep.asset_id
+                        ELSE NULL
+                    END
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date BETWEEN ? AND ?{$technicalSql}
@@ -178,6 +214,10 @@ final class LedgerReportRepository
             $r['amount'] = round((float) $r['amount'], 2);
             $r['line_no'] = (int) $r['line_no'];
             $r['running_delta'] = round((float) $r['running_delta'], 2);
+            $r['line_account_id'] = (int) $r['line_account_id'];
+            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'] as $k) {
+                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
+            }
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }

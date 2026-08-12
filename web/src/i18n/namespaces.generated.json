@@ -308,6 +308,9 @@
       "codebookTransfer",
       "users"
     ],
+    "accounting-account-detail": [
+      "accounting"
+    ],
     "accounting-periods": [
       "accounting"
     ],

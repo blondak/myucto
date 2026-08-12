@@ -38,6 +38,47 @@ export interface UpdateAccountPayload {
   is_active?: boolean
 }
 
+/** PS / obraty / KS účtu za zvolený rozsah (kladné = MD). */
+export interface AccountBalances {
+  opening_balance: number
+  turnover_md: number
+  turnover_d: number
+  closing_balance: number
+  line_count: number
+}
+
+export interface AccountDetailChild extends AccountBalances {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+}
+
+/**
+ * Karta účtu — kmenová data, analytiky se zůstatky a součty za rozsah.
+ * Součty syntetiky zahrnují i pohyby jejích analytik (roll-up jako v hlavní knize).
+ */
+export interface AccountDetailReport {
+  account: {
+    id: number
+    code: string
+    name: string
+    account_type: AccountType
+    normal_side: NormalSide | null
+    is_synthetic: boolean
+    is_active: boolean
+    parent_id: number | null
+    created_at: string | null
+  }
+  parent: { id: number; code: string; name: string } | null
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string; status: string } | null
+  from: string
+  to: string
+  after_closing: boolean
+  totals: AccountBalances
+  children: AccountDetailChild[]
+}
+
 // ── Účetní období (accounting periods) ─────────────────────────────────────
 export type PeriodStatus = 'open' | 'closing' | 'closed'
 
@@ -926,6 +967,18 @@ export interface AccountStatementItem {
   side: JournalSide
   amount: number
   balance: number
+  /** Účet ŘÁDKU — u syntetiky je opis složený z jejích analytik. */
+  account_id: number
+  account_code: string
+  account_name: string
+  /** Obohacení pro drill-down na prvotní doklad — viz utils/journalSourceLink.ts. */
+  source_statement_id: number | null
+  source_doc_number: string | null
+  source_register_id: number | null
+  source_asset_id: number | null
+  source_asset_name: string | null
+  source_settlement_doc_type: string | null
+  source_settlement_doc_id: number | null
 }
 
 export interface AccountStatementReport {
@@ -1275,6 +1328,9 @@ export const accountingApi = {
     if (opts?.includeInactive) params.include_inactive = '1'
     return api.get<ChartAccount[]>('/accounting/accounts', { params }).then(r => r.data)
   },
+  /** Karta účtu: kmen + analytiky se zůstatky + PS/obraty/KS za rozsah. */
+  getAccountDetail: (id: number, params?: { from?: string; to?: string; after_closing?: 0 | 1 }) =>
+    api.get<AccountDetailReport>(`/accounting/accounts/${id}`, { params }).then(r => r.data),
   createAccount: (payload: CreateAccountPayload) =>
     api.post<ChartAccount>('/accounting/accounts', payload).then(r => r.data),
   updateAccount: (id: number, payload: UpdateAccountPayload) =>

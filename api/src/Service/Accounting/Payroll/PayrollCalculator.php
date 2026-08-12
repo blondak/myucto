@@ -185,9 +185,19 @@ final class PayrollCalculator
             max(0.0, $minimumWage - $gross) * (float) $p['health_total']
         );
 
-        // Úhrn ZP musí sedět na 13,5 % z vyměřovacího základu; zaměstnavatel doplácí zbytek.
+        // Úhrn ZP se zaokrouhluje JEDNOU, z vyměřovacího základu (13,5 %) — ne jako
+        // součet samostatně zaokrouhlených složek. Zaměstnavatel je dopočet do úhrnu,
+        // takže rozpad nemůže dát o korunu víc, než se reálně odvede na ZP.
         $healthTotal = self::roundUp($assessmentBase * (float) $p['health_total']);
-        $employerHealth = max(0, $healthTotal - $employeeHealth - $healthMinTopup);
+
+        // Pojistka na to, aby složky VŽDY daly úhrn. U mikroskopické hrubé mzdy může
+        // ceil zaměstnancových 4,5 % převážit floor doplatku a součet úhrn přestřelit;
+        // dřívější `max(0, …)` sice udrželo zaměstnavatele nezáporného, ale rozpad pak
+        // tvrdil víc, než kolik `health_total` (a s ním `remittance_total`) uvádí.
+        // Ořezává se strana zaměstnance, protože úhrn je zákonná veličina.
+        $employeeHealth = min($employeeHealth, $healthTotal);
+        $healthMinTopup = min($healthMinTopup, $healthTotal - $employeeHealth);
+        $employerHealth = $healthTotal - $employeeHealth - $healthMinTopup;
         // Strop §15a platí pro OBĚ strany — zaměstnavatel nad ním neplatí taky.
         $employerSocial = self::roundUp($socialBase * (float) $p['employer_social']);
 
@@ -310,13 +320,27 @@ final class PayrollCalculator
      * případ, saldo 331/366 se tak měsíc co měsíc vynuluje a přeúčtování i storno mzdy
      * s ním zacházejí automaticky (jeden `source_id` = RRRRMM).
      *
+     * ── Konfigurovatelné účty a rozpad 336 ──────────────────────────────────
+     * Konkrétní kódy dodává {@see PayrollPostingAccounts} (bez nich platí syntetiky
+     * jako dosud). Vede-li firma sociální a zdravotní na ODDĚLENÝCH analytikách
+     * (336.100 / 336.200), rozdělí se i závazek — jinak by na jedné analytice visel
+     * součet a saldo by neodpovídalo hromadnému příkazu, který má dva příjemce.
+     * Se společným účtem se řádky slijí zpátky do jednoho, aby se deníku firem bez
+     * analytiky nic nezměnilo.
+     *
      * @param array<string,int> $b výstup {@see self::compute()}
      * @param string|null $settlementAccount kód účtu pro čistou mzdu; NULL = ponechat závazek
+     * @param PayrollPostingAccounts|null $accounts kontace firmy; NULL = syntetiky
      * @return list<array{account_code:string,side:string,amount:float,description?:string}>
      */
-    public static function lines(array $b, string $type, ?string $settlementAccount = null): array
-    {
-        $a = self::accounts($type);
+    public static function lines(
+        array $b,
+        string $type,
+        ?string $settlementAccount = null,
+        ?PayrollPostingAccounts $accounts = null,
+    ): array {
+        $accounts ??= PayrollPostingAccounts::defaults();
+        $a = $accounts->forType($type);
         $lines = [];
         $add = static function (string $code, string $side, int $amount, string $desc) use (&$lines): void {
             if ($amount === 0) {
@@ -330,20 +354,47 @@ final class PayrollCalculator
             ];
         };
 
+        /**
+         * Závazek z pojistného na stranu D: buď jedním řádkem (společná 336), nebo
+         * rozdělený na sociální a zdravotní. Rozděluje se jen tehdy, když složky
+         * SEDÍ na úhrn — starší snapshot `payroll_monthly_records.breakdown` je mít
+         * nemusí a vymyšlený rozpad by zápis rozvážil.
+         */
+        $addInsurance = static function (int $social, int $health, int $total, string $desc) use ($accounts, $add): void {
+            if ($accounts->insuranceIsPooled() || $social + $health !== $total) {
+                $add($accounts->socialPayable, 'credit', $total, $desc);
+                return;
+            }
+            $add($accounts->socialPayable, 'credit', $social, $desc . ' — sociální');
+            $add($accounts->healthPayable, 'credit', $health, $desc . ' — zdravotní');
+        };
+
         $add($a['expense'], 'debit',  $b['gross'], 'Hrubá mzda');
         $add($a['payable'], 'credit', $b['gross'], 'Hrubá mzda');
 
-        $add('524', 'debit',  $b['employer_total'], 'Zákonné pojistné zaměstnavatele');
-        $add('336', 'credit', $b['employer_total'], 'Zákonné pojistné zaměstnavatele');
+        $add($accounts->employerInsurance, 'debit', $b['employer_total'], 'Zákonné pojistné zaměstnavatele');
+        $addInsurance(
+            (int) ($b['employer_social'] ?? 0),
+            (int) ($b['employer_health'] ?? 0),
+            (int) $b['employer_total'],
+            'Zákonné pojistné zaměstnavatele',
+        );
 
         $add($a['payable'], 'debit', $b['employee_deductions'], 'Pojistné zaměstnance');
-        $add('336', 'credit', $b['employee_deductions'], 'Pojistné zaměstnance');
+        $addInsurance(
+            (int) ($b['employee_social'] ?? 0),
+            // Doplatek do minimálního VZ je zdravotní pojistné — patří na tutéž
+            // analytiku jako 4,5 %, ne na sociální.
+            (int) ($b['employee_health'] ?? 0) + (int) ($b['health_min_topup'] ?? 0),
+            (int) $b['employee_deductions'],
+            'Pojistné zaměstnance',
+        );
 
         // Fallback na `advance_tax`: snapshoty uložené před zavedením slev
         // (payroll_monthly_records.breakdown) klíč `advance_tax_withheld` nemají.
         $withheld = $b['advance_tax_withheld'] ?? $b['advance_tax'];
         $add($a['payable'], 'debit', $withheld, 'Záloha na daň z příjmu');
-        $add('342', 'credit', $withheld, 'Záloha na daň z příjmu');
+        $add($accounts->incomeTaxPayable, 'credit', $withheld, 'Záloha na daň z příjmu');
 
         // Přeúčtování čisté mzdy (1178). `net` je to, co po srážkách zbylo na 331/366 —
         // stejná částka, jakou by jinak účetní ručně započetla na konci roku.

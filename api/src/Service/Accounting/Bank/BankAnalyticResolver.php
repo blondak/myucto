@@ -31,8 +31,9 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
  * se nepřepisuje.
  *
  * Přepisuje se JEN řádek s PŘESNÝM kódem '221' (default bankovní nohy z
- * BankPostingRule). Konkrétní analytiky (221100 termínovaný vklad) zůstávají
- * nedotčené. Bez shody vlastního účtu výpisu = beze změny (no-op).
+ * BankPostingRule). Konkrétní analytiky (221.100 termínovaný vklad) zůstávají
+ * nedotčené — a to i v bezteččkovém tvaru (221100) z doby před migrací 1322.
+ * Bez shody vlastního účtu výpisu = beze změny (no-op).
  */
 final class BankAnalyticResolver
 {

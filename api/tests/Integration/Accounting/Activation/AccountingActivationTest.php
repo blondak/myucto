@@ -348,7 +348,7 @@ final class AccountingActivationTest extends TestCase
         $draft = $this->opening->prefill($this->supplierId, $asOf);
         $bankRows = array_values(array_filter(
             $draft['rows'],
-            static fn (array $row): bool => preg_match('/^221[0-9]+$/', (string) $row['account_code']) === 1
+            static fn (array $row): bool => preg_match('/^221[.][0-9]+$/', (string) $row['account_code']) === 1
                 && abs((float) $row['amount'] - 500.00) < 0.005,
         ));
 
@@ -408,7 +408,7 @@ final class AccountingActivationTest extends TestCase
         $stmt = $this->db->pdo()->prepare('SELECT analytic_suffix FROM supplier_bank_accounts WHERE id = ?');
         $stmt->execute([$bankAccountId]);
         $suffix = (string) ($stmt->fetchColumn() ?: '');
-        return $suffix === '' ? null : '221' . $suffix;
+        return $suffix === '' ? null : '221.' . $suffix;
     }
 
     private function request(string $method, ?int $supplierId = null): \Psr\Http\Message\ServerRequestInterface

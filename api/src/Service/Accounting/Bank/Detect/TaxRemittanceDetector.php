@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -299,6 +300,23 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         return $row === false ? null : $row;
     }
 
+    /** @var array<string, bool> per-request cache "supplierId|code" => účet je v osnově a aktivní. */
+    private array $activeAccountCache = [];
+
+    private function hasActiveAccount(int $supplierId, string $code): bool
+    {
+        $key = $supplierId . '|' . $code;
+        if (!array_key_exists($key, $this->activeAccountCache)) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ? AND is_active = 1 LIMIT 1'
+            );
+            $stmt->execute([$supplierId, $code]);
+            $this->activeAccountCache[$key] = $stmt->fetchColumn() !== false;
+        }
+
+        return $this->activeAccountCache[$key];
+    }
+
     private function fromRule(
         int $supplierId,
         string $operation,
@@ -319,7 +337,12 @@ final class TaxRemittanceDetector implements BankTransactionDetector
             OperationType::REMITTANCE_SOCIAL_EMPLOYER, OperationType::REMITTANCE_HEALTH_EMPLOYER => '336',
             OperationType::REMITTANCE_INCOME, OperationType::REMITTANCE_FLAT => '341',
             OperationType::REMITTANCE_WITHHOLDING, OperationType::REMITTANCE_PAYROLL => '342',
-            OperationType::REMITTANCE_VAT => '343',
+            // Úhrada / vratka DPH míří na ZÚČTOVACÍ analytiku 343.900, ne na holé 343:
+            // interní doklad na konci období ({@see \MyInvoice\Service\Accounting\Vat\VatClearingService})
+            // tam převede daň období z 343.100/343.200, takže právě 343.900 nese to, co se
+            // reálně odvádí. Platba svedená na syntetiku by zůstatek zúčtovacího účtu
+            // nevynulovala a saldo vůči FÚ by trvale viselo.
+            OperationType::REMITTANCE_VAT => PostingService::VAT_SETTLEMENT_ACCOUNT,
             // Daň v režimu OSS má vlastní ANALYTIKU, ne jen vlastní syntetický účet:
             // předpis ji účtuje na 345.100 ({@see \MyInvoice\Service\Accounting\PostingService}),
             // takže úhrada svedená na holé 345 (kde sedí daň z nemovitostí a silniční)
@@ -332,9 +355,26 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         if ($expectedDebit === null) {
             return null;
         }
+        // Pojistka je PREFIXOVÁ, default je KONKRÉTNÍ účet. U DPH se ty dvě věci rozešly:
+        // přijatelná je jakákoli analytika 343 (tenant, který si vědomě nechal plochý účet,
+        // se nesmí přebít), ale když kontace chybí nebo míří jinam, doplní se 343.900.
+        // Dřív se pro obojí bralo totéž '343', takže se každé pravidlo srovnávalo na
+        // syntetiku a analytika zúčtování se nemohla uplatnit vůbec.
+        $expectedPrefix = $expectedDebit === PostingService::VAT_SETTLEMENT_ACCOUNT
+            ? PostingService::VAT_SYNTHETIC
+            : $expectedDebit;
+        // Degradace na syntetiku, dokud tenant analytiku nemá (nedoběhlá migrace 1323,
+        // ručně smazaný účet) — zrcadlo PostingService::vatAccount(). Bez toho by návrh
+        // mířil na účet, který v osnově není, a zaúčtování by spadlo na `unknown_account`.
+        if ($expectedDebit === PostingService::VAT_SETTLEMENT_ACCOUNT
+            && !$this->hasActiveAccount($supplierId, $expectedDebit)
+            && $this->hasActiveAccount($supplierId, PostingService::VAT_SYNTHETIC)
+        ) {
+            $expectedDebit = PostingService::VAT_SYNTHETIC;
+        }
         $debit = (string) ($rule['debit_account_code'] ?? '');
         $credit = (string) ($rule['credit_account_code'] ?? '');
-        if (!str_starts_with($debit, $expectedDebit) || !str_starts_with($credit, '221')) {
+        if (!str_starts_with($debit, $expectedPrefix) || !str_starts_with($credit, '221')) {
             $debit = $expectedDebit;
             $credit = '221';
         }

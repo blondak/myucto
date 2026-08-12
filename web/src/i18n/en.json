@@ -3710,6 +3710,32 @@
       "deactivate": "Deactivate",
       "reactivate": "Activate",
       "deactivate_confirm": "Really deactivate account {code}? Accounts are never deleted, only deactivated.",
+      "open_detail": "Open account card",
+      "detail": {
+        "title": "Account card",
+        "subtitle": "Account master data, its analytic accounts and balances for the selected period.",
+        "not_found": "Account not found.",
+        "master_data": "Master data",
+        "parent": "Parent synthetic account",
+        "kind": "Kind",
+        "children_count": "Analytic accounts",
+        "created_at": "Created",
+        "status": "Status",
+        "active": "Active",
+        "inactive": "Inactive",
+        "period": "Period",
+        "filter_from": "From",
+        "filter_to": "To",
+        "analytics": "Analytic accounts",
+        "analytics_hint": "Balances of individual analytic accounts for the selected range. The totals above already include them.",
+        "analytics_empty": "This account has no analytic accounts.",
+        "col_lines": "Lines",
+        "no_movement": "No movement in range",
+        "statement": "Account statement",
+        "general_ledger": "General ledger",
+        "journal": "Journal",
+        "back_to_chart": "Chart of accounts"
+      },
       "class": {
         "0": "Class 0 — Fixed assets",
         "1": "Class 1 — Inventory",
@@ -4011,7 +4037,8 @@
         "fx_revaluation": "FX revaluation",
         "stock": "Stock",
         "offset": "Mutual set-off",
-        "settlement": "Set-off against account"
+        "settlement": "Set-off against account",
+        "vat_clearing": "VAT clearing"
       },
       "history": {
         "title": "History",
@@ -4350,6 +4377,11 @@
       "synthetic": "Synthetic",
       "analytic": "Analytic",
       "months_detail": "Monthly turnovers",
+      "month_lines": "Lines for {month}",
+      "month_expand_hint": "Click a month to show its journal lines.",
+      "month_empty": "No lines in this month.",
+      "month_more": "Showing the first {shown} of {total} lines — continue in the account statement.",
+      "open_account": "Account card",
       "totals": "Totals"
     },
     "reports": {
@@ -4553,7 +4585,10 @@
       "col_md": "Dr",
       "col_d": "Cr",
       "col_balance": "Balance",
-      "journal_link": "Journal #{id}"
+      "journal_link": "Journal #{id}",
+      "account_card": "Account card",
+      "general_ledger": "General ledger",
+      "col_line_account": "Analytic account"
     },
     "section18": {
       "title": "Cash flows and changes in equity",
@@ -10438,6 +10473,7 @@
     "freq_weekdays_0915": "Mon–Fri at 09:15",
     "freq_weekdays_0930": "Mon–Fri at 09:30",
     "freq_monthly_day1_0400": "1st day of the month at 04:00",
+    "freq_monthly_day1_0430": "1st day of the month at 04:30",
     "setup_hint": "Cron setup: see {link} in the manual.",
     "setup_link": "§ 2.4.1 Cron scripts",
     "report_label": "Report",

@@ -121,6 +121,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/rulesets', name: 'payroll-rulesets', component: () => import('@/pages/payroll/PayrollRulesets.vue'), meta: { requiresSupplier: true } },
       // Účetnictví (Epic F1 — podvojné účetnictví; jen supplier.accounting_mode === 'double_entry')
       { path: 'accounting/accounts',      name: 'accounting-accounts',      component: () => import('@/pages/accounting/ChartOfAccounts.vue'), meta: { requiresDoubleEntry: true } },
+      // Karta účtu — rozcestník drill-through (osnova → účet → analytiky → opis/kniha/deník).
+      { path: 'accounting/accounts/:accountId(\\d+)', name: 'accounting-account-detail', component: () => import('@/pages/accounting/AccountDetail.vue'), meta: { requiresDoubleEntry: true } },
       // Předkontace, Kurzový režim, Repo sazba, Archiv účetnictví a Hromadný export
       // jsou teď záložky sjednocené stránky /utilities (Nástroje) — redirecty
       // zachovávají bookmarks i route names. Export/Import se odsud vyčlenilo (reorg UX
@@ -406,7 +408,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],
   documents: ['documents'], 'document-detail': ['documents'], 'document-requests': ['documents.requests'],
-  'accounting-accounts': ['accounting'], 'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'],
+  'accounting-accounts': ['accounting'], 'accounting-account-detail': ['accounting'],
+  'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'],
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],

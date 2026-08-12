@@ -58,6 +58,20 @@ final class AccountStatementService
                 'side'        => (string) $l['side'],
                 'amount'      => (float) $l['amount'],
                 'balance'     => round($opening + (float) $l['running_delta'], 2),
+                // Účet ŘÁDKU — u syntetiky je opis složený z analytik, bez tohohle
+                // sloupce nešlo poznat, na které z nich pohyb visí.
+                'account_id'   => (int) $l['line_account_id'],
+                'account_code' => (string) $l['account_code'],
+                'account_name' => (string) $l['line_account_name'],
+                // Drill-down na prvotní doklad — shodná sada polí jako v deníku
+                // (JournalEntryRepository::paginate), aby proklik vedl na tentýž doklad.
+                'source_statement_id'       => $l['source_statement_id'],
+                'source_doc_number'         => $l['source_doc_number'],
+                'source_register_id'        => $l['source_register_id'],
+                'source_asset_id'           => $l['source_asset_id'],
+                'source_asset_name'         => $l['source_asset_name'],
+                'source_settlement_doc_type' => $l['source_settlement_doc_type'],
+                'source_settlement_doc_id'  => $l['source_settlement_doc_id'],
             ];
         }
 

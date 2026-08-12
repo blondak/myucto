@@ -38,7 +38,7 @@ final class GeneralLedgerService
         $periodStart = (string) $period['starts_on'];
 
         $rows    = $this->ledger->trialBalanceRows($supplierId, $from, $to, $periodStart, $analytics, $filters, !$afterClosing);
-        $monthly = $this->ledger->monthlyTurnovers($supplierId, $from, $to, $analytics, $filters);
+        $monthly = $this->ledger->monthlyTurnovers($supplierId, $from, $to, $analytics, $filters, !$afterClosing);
         $months  = $this->monthsBetween($from, $to);
 
         $monthlyByAccount = [];

@@ -7,7 +7,8 @@ declare(strict_types=1);
  *
  * Zaúčtuje historické spárované platby (221/311 | 321/221, guard předpisu H1) a — s
  * přepínačem --rules — navrhne opakované platby dle pravidel (VŽDY jen jako suggest;
- * auto režim se při dávce degraduje). Volá týž engine jako import
+ * auto režim se při dávce degraduje). S --auto se degradace vypne a rozhoduje
+ * tenantova politika automatiky (auto_posting_policy). Volá týž engine jako import
  * ({@see \MyInvoice\Service\Accounting\Bank\BankPostingService::handleTransaction}),
  * žádná druhá logika (R9). Idempotentní: zápisy jsou vázané na ('bank', bt.id), druhý
  * běh nic neduplikuje.
@@ -29,12 +30,17 @@ declare(strict_types=1);
  *   php api/bin/backfill-bank-posting.php --supplier=1 --apply            # ostrý běh
  *   php api/bin/backfill-bank-posting.php --supplier=1 --from=2026-01-01  # jen od data
  *   php api/bin/backfill-bank-posting.php --supplier=1 --apply --rules    # i návrhy z pravidel
+ *   php api/bin/backfill-bank-posting.php --supplier=1 --apply --auto     # + zaúčtovat, kde politika říká auto
  *
  * Argumenty:
  *   --supplier=<id>   (povinné) firma (musí vést podvojné účetnictví)
  *   --from=<YYYY-MM-DD> (volitelné) jen transakce od data — řídí, aby fronta nenabobtnala historií
  *   --apply           ostrý běh (bez něj DRY-RUN — nic nezapíše)
  *   --rules           vyhodnotit i nespárované transakce dle pravidel (jen suggest)
+ *   --auto            respektovat auto_posting_policy: co má úroveň `auto`, dávka ZAÚČTUJE
+ *                     (implikuje --rules). Bez tohoto přepínače se chování nemění, takže
+ *                     nikoho neobsluhovaná dávka nepřekvapí. Firma bez nastavené politiky
+ *                     má default `suggest` → i s --auto dostane jen návrhy.
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -57,10 +63,11 @@ function argValue(array $argv, string $key): ?string
 $supplierId = (int) (argValue($argv, 'supplier') ?? 0);
 $from       = argValue($argv, 'from');
 $apply      = in_array('--apply', $argv, true);
-$withRules  = in_array('--rules', $argv, true);
+$honourPolicy = in_array('--auto', $argv, true);
+$withRules  = in_array('--rules', $argv, true) || $honourPolicy;
 
 if ($supplierId <= 0) {
-    fwrite(STDERR, "Chybí --supplier=<id>.\nPoužití: php api/bin/backfill-bank-posting.php --supplier=<id> [--from=YYYY-MM-DD] [--apply] [--rules]\n");
+    fwrite(STDERR, "Chybí --supplier=<id>.\nPoužití: php api/bin/backfill-bank-posting.php --supplier=<id> [--from=YYYY-MM-DD] [--apply] [--rules] [--auto]\n");
     exit(2);
 }
 
@@ -81,14 +88,16 @@ if ((string) $mode !== 'double_entry') {
 
 $prefix = $apply ? '' : '[DRY-RUN] ';
 $scope  = $from !== null ? "od {$from}" : 'celá historie';
-$rules  = $withRules ? 'ano (jen suggest)' : 'ne (jen spárované platby)';
+$rules  = $withRules
+    ? ($honourPolicy ? 'ano (dle auto_posting_policy — auto se ZAÚČTUJE)' : 'ano (jen suggest)')
+    : 'ne (jen spárované platby)';
 echo "{$prefix}Backfill bankovních transakcí — firma #{$supplierId}, {$scope}.\n";
 echo "Pravidla (nespárované): {$rules}\n";
 echo "POZOR: spouštěj až PO backfill-accounting.php (předpisy dokladů musí být v deníku dřív).\n\n";
 
 /** @var BankPostingBackfill $runner */
 $runner = $container->get(BankPostingBackfill::class);
-$report = $runner->run($supplierId, $from, $apply, $withRules);
+$report = $runner->run($supplierId, $from, $apply, $withRules, null, false, $honourPolicy);
 
 echo "═══ REPORT ═════════════════════════════════════════════════════\n";
 printf("  kandidátů:  %d\n", $report['candidates']);
@@ -110,6 +119,12 @@ if ($report['skip_reasons'] !== []) {
     arsort($report['skip_reasons']);
     foreach ($report['skip_reasons'] as $reason => $n) {
         printf("     %-24s %d×\n", $reason, $n);
+    }
+}
+if (($report['errors'] ?? []) !== []) {
+    echo "  ── tvrdé chyby (text výjimky) ──\n";
+    foreach ($report['errors'] as $err) {
+        printf("     tx #%-7d %-22s %s\n", $err['tx_id'], $err['reason'], $err['message']);
     }
 }
 echo "═══════════════════════════════════════════════════════════════\n";

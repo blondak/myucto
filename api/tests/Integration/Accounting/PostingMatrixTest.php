@@ -57,7 +57,7 @@ final class PostingMatrixTest extends BankPostingTestCase
      */
     private const ISSUED = [
         'invoice' => [
-            'journal'    => ['debit' => ['311'], 'credit' => ['602', '343']],
+            'journal'    => ['debit' => ['311'], 'credit' => ['602', '343.200']],
             'cash_basis' => ['income' => true],
             'note'       => 'Běžná vydaná faktura: pohledávka proti výnosu a dani na výstupu.',
         ],
@@ -77,7 +77,7 @@ final class PostingMatrixTest extends BankPostingTestCase
                 . 'dřív, než vznikly. Stejný důvod jako u proformy. V kasové bázi je příjmem až platba.',
         ],
         'credit_note' => [
-            'journal'    => ['debit' => ['602', '343'], 'credit' => ['311']],
+            'journal'    => ['debit' => ['602', '343.200'], 'credit' => ['311']],
             'cash_basis' => ['income' => true],
             'note'       => 'Dobropis obrací obě strany běžné faktury (vratka výnosu i daně).',
         ],
@@ -87,13 +87,13 @@ final class PostingMatrixTest extends BankPostingTestCase
             'note'       => 'Stornovací doklad se neúčtuje; oprava zápisu jde protizápisem (§ 12 ZoÚ).',
         ],
         'tax_document' => [
-            'journal'    => ['debit' => ['324'], 'credit' => ['343'], 'forbidden' => ['311', '602']],
+            'journal'    => ['debit' => ['324'], 'credit' => ['343.200'], 'forbidden' => ['311', '602']],
             'cash_basis' => ['income' => false],
             'note'       => 'DDKP (§ 28) přiznává jen DPH ze zálohy: 324/343. ŽÁDNÁ pohledávka, ŽÁDNÝ výnos — '
                 . 'peníze i příjem už proběhly na proformě.',
         ],
         'penalty' => [
-            'journal'    => ['debit' => ['311'], 'credit' => ['644'], 'forbidden' => ['343']],
+            'journal'    => ['debit' => ['311'], 'credit' => ['644'], 'forbidden' => ['343.200']],
             'cash_basis' => ['income' => true],
             'note'       => 'Úrok z prodlení je mimo předmět DPH (§ 2 ZDPH) → žádná noha 343.',
         ],
@@ -108,17 +108,17 @@ final class PostingMatrixTest extends BankPostingTestCase
      */
     private const RECEIVED = [
         'invoice' => [
-            'journal'    => ['debit' => ['518', '343'], 'credit' => ['321']],
+            'journal'    => ['debit' => ['518', '343.100'], 'credit' => ['321']],
             'cash_basis' => ['expense' => true],
             'note'       => 'Běžná přijatá faktura: náklad a odpočet daně proti závazku.',
         ],
         'receipt' => [
-            'journal'    => ['debit' => ['518', '343'], 'credit' => ['321']],
+            'journal'    => ['debit' => ['518', '343.100'], 'credit' => ['321']],
             'cash_basis' => ['expense' => true],
             'note'       => 'Účtenka se účtuje shodně s fakturou; liší se jen průkazností dokladu, ne kontací.',
         ],
         'credit_note' => [
-            'journal'    => ['debit' => ['321'], 'credit' => ['518', '343']],
+            'journal'    => ['debit' => ['321'], 'credit' => ['518', '343.100']],
             'cash_basis' => ['expense' => true],
             'note'       => 'Přijatý dobropis obrací obě strany. V kasové bázi vratka SNIŽUJE výdaj (N-010).',
         ],
@@ -130,7 +130,7 @@ final class PostingMatrixTest extends BankPostingTestCase
                 . 'Tahle asymetrie je ZÁMĚRNÁ; hlídá ji CashJournalScenariosTest.',
         ],
         'tax_document' => [
-            'journal'    => ['debit' => ['343'], 'credit' => ['314'], 'forbidden' => ['518', '321']],
+            'journal'    => ['debit' => ['343.100'], 'credit' => ['314'], 'forbidden' => ['518', '321']],
             'cash_basis' => ['expense' => false],
             'note'       => 'DDKP k POSKYTNUTÉ záloze (§ 28): jen odpočet DPH 343/314. NIKDY náklad — ten nese '
                 . 'vyúčtovací faktura v plné výši. Přesně tady žila chyba #2 (N-001) i N-011.',

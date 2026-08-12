@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { useRowLink } from '@/composables/useRowLink'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
@@ -120,6 +122,16 @@ async function toggleActive(a: ChartAccount) {
   }
 }
 
+/** Proklik na kartu účtu (kmen + analytiky + zůstatky) — odtud dál na opis/knihu/deník. */
+function detailLink(a: ChartAccount) {
+  return { name: 'accounting-account-detail', params: { accountId: a.id } }
+}
+
+const navigateRow = useRowLink()
+function openDetail(a: ChartAccount, e: MouseEvent) {
+  navigateRow(detailLink(a), e)
+}
+
 function typeLabel(type: string): string {
   return t(`accounting.accounts.type.${type}`)
 }
@@ -182,9 +194,15 @@ function sideLabel(side: string | null): string {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="a in g.rows" :key="a.id" :class="{ 'opacity-50': !a.is_active }">
+              <tr v-for="a in g.rows" :key="a.id" class="cursor-pointer hover:bg-neutral-50"
+                :class="{ 'opacity-50': !a.is_active }"
+                @click="openDetail(a, $event)" @auxclick.prevent="openDetail(a, $event)">
                 <td class="px-3 py-2 font-mono" :class="a.is_synthetic ? 'font-semibold' : 'text-neutral-500'">
-                  <span v-if="!a.is_synthetic" class="text-neutral-300 mr-1">└</span>{{ a.account_code }}
+                  <span v-if="!a.is_synthetic" class="text-neutral-300 mr-1">└</span>
+                  <RouterLink :to="detailLink(a)" class="row-link text-primary-600 hover:text-primary-700 hover:underline"
+                    :title="t('accounting.accounts.open_detail')" @click.stop>
+                    {{ a.account_code }}
+                  </RouterLink>
                 </td>
                 <td class="px-3 py-2">{{ a.name }}</td>
                 <td class="px-3 py-2 text-neutral-600">{{ typeLabel(a.account_type) }}</td>
@@ -200,7 +218,7 @@ function sideLabel(side: string | null): string {
                   <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="px-3 py-2 text-right">
-                  <button v-if="auth.canWrite('accounting') && !a.is_synthetic" @click="toggleActive(a)"
+                  <button v-if="auth.canWrite('accounting') && !a.is_synthetic" @click.stop="toggleActive(a)"
                     class="cursor-pointer text-xs"
                     :class="a.is_active ? 'text-danger-500 hover:text-danger-600' : 'text-primary-600 hover:text-primary-700'">
                     {{ a.is_active ? t('accounting.accounts.deactivate') : t('accounting.accounts.reactivate') }}
@@ -214,7 +232,8 @@ function sideLabel(side: string | null): string {
         <div class="md:hidden divide-y divide-neutral-100">
           <div v-for="a in g.rows" :key="`m-${a.id}`" class="p-3 space-y-1" :class="{ 'opacity-50': !a.is_active }">
             <div class="flex items-baseline justify-between gap-2">
-              <span class="font-mono" :class="a.is_synthetic ? 'font-semibold' : 'text-neutral-500'">{{ a.account_code }}</span>
+              <RouterLink :to="detailLink(a)" class="font-mono text-primary-600"
+                :class="a.is_synthetic ? 'font-semibold' : ''">{{ a.account_code }}</RouterLink>
               <span class="text-xs text-neutral-500">{{ typeLabel(a.account_type) }}</span>
             </div>
             <div class="text-neutral-900">{{ a.name }}</div>

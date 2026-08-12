@@ -64,8 +64,51 @@ final class PostingService
      */
     private const OSS_OUTPUT_VAT_ACCOUNT = '345.100';
 
+    /**
+     * Analytiky DPH (migrace 1323). Do teď měla KAŽDÁ noha daně holé '343', takže se
+     * daň na vstupu a na výstupu na jednom účtu okamžitě vzájemně vynetovala. Účetní
+     * je vede odděleně a na konci každého zdaňovacího období je interním dokladem
+     * převádí na zúčtovací účet (viz {@see Vat\VatClearingService}):
+     *   MD 343.200 / D 343.900  … daň na výstupu za období
+     *   MD 343.900 / D 343.100  … daň na vstupu za období
+     * Po něm jsou 343.100 i 343.200 za období nulové a na 343.900 leží přesně to, co
+     * se odvede (nebo vrátí) — úhrada z banky ho pak vynuluje.
+     *
+     * Jsou to FALLBACKY: přednost má vždy kontace z `posting_rules` (viz {@see ruleCode()}),
+     * ať si tenant může analytiky přepnout nebo zůstat na plochém 343.
+     */
+    /** Syntetika DPH — prefix, pod který všechny tři analytiky patří. */
+    public const VAT_SYNTHETIC = '343';
+
+    public const INPUT_VAT_ACCOUNT = '343.100';
+    public const OUTPUT_VAT_ACCOUNT = '343.200';
+    public const VAT_SETTLEMENT_ACCOUNT = '343.900';
+
     /** @var array<int, ?string> per-request cache supplier_id => locked_until (B8). */
     private array $lockedUntilCache = [];
+
+    /** @var array<string, bool> per-request cache "supplierId|code" => účet je v osnově a aktivní. */
+    private array $postableAccountCache = [];
+
+    /** @var array<int, array<string,string>> per-request cache supplier_id => [syntetika => jediná analytika]. */
+    private array $singleAnalyticCache = [];
+
+    /**
+     * Syntetiky, u kterých analytiku vybírá KONTEXT dokladu, ne osnova — proto se na ně
+     * automatický přesměr {@see singleAnalyticMap()} nikdy nepoužije:
+     *
+     *  - 221 / 211 … analytika je dána bankovním účtem výpisu, resp. pokladnou dokladu
+     *    ({@see Bank\BankAnalyticResolver}, CashRegisterService). Firma může mít dnes
+     *    jeden účet a zítra dva; „jediná analytika" je u nich náhodný okamžitý stav a
+     *    svést na ni nespárovaný pohyb by zamaskovalo neznámou protistranu.
+     *  - 343 … vstup/výstup/zúčtování rozhoduje směr daně ({@see vatAccount()},
+     *    Vat\VatClearingService). Se třemi analytikami by přesměr stejně nenaskočil,
+     *    ale kdyby si tenant dvě smazal, nesmí zbylá spolknout všechno.
+     *  - 345 … šablona pod ním veze 345.100 = DPH v režimu OSS, tedy daň JINÉHO státu.
+     *    To je podmnožina, ne náhrada: daň z nemovitostí ani silniční na ni nepatří.
+     *    Bez téhle výjimky by přesměr nastal u KAŽDÉHO tenanta hned po naseedování.
+     */
+    private const CONTEXT_DRIVEN_SYNTHETICS = ['211', '221', '343', '345'];
 
     public function __construct(
         private readonly Connection $db,
@@ -81,7 +124,7 @@ final class PostingService
      * Sestaví a zapíše vyvážený účetní zápis. Vrací id zápisu (existující při
      * re-postu, nový jinak).
      *
-     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll' $sourceType
+     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll'|'vat_clearing' $sourceType
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array{
      *     entry_date:string, document_date?:?string, document_no?:?string, description?:?string,
@@ -643,7 +686,7 @@ final class PostingService
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
         $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet, $cc);
         if ($vat !== 0.0) {
-            $lines[] = $this->line('343', $otherSide, abs($vat), $cc);
+            $lines[] = $this->line($this->outputVatAccount($supplierId), $otherSide, abs($vat), $cc);
         }
         // Daň odváděná do jiného členského státu na vlastní účet (kontace oss.output.vat,
         // default analytika 345.100). Tohle je celý smysl rozdělení: na 343 zůstane přesně
@@ -699,7 +742,7 @@ final class PostingService
         }
         $ruleKey = $opts['rule_key'] ?? 'advance.received.vatdocument';
         $draw    = $this->ruleCode($supplierId, $ruleKey, 'debit', '324');
-        $vatAcc  = $this->ruleCode($supplierId, $ruleKey, 'credit', '343');
+        $vatAcc  = $this->vatAccount($supplierId, $ruleKey, 'credit', self::OUTPUT_VAT_ACCOUNT);
         $cc = $opts['cost_center'] ?? null;
 
         // Opravný DDKP (snížení dříve přiznané DPH ze zálohy, vat < 0) obrací strany:
@@ -914,8 +957,11 @@ final class PostingService
             // Vendor fakturuje bez DPH → závazek = základ; daň se samovyměří na 343 (obě strany).
             $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
             if ($vat !== 0.0) {
-                $lines[] = $this->line('343', $expenseSide, abs($vat), $cc); // nárok na odpočet
-                $lines[] = $this->line('343', $payableSide, abs($vat), $cc); // povinnost přiznat daň
+                // Samovyměření: obě nohy jsou tatáž částka, ale patří na RŮZNÉ analytiky —
+                // odpočet na vstup, přiznaná daň na výstup. Na plochém 343 se okamžitě
+                // vynetovaly a v zúčtování období po nich nezůstala stopa.
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);  // nárok na odpočet
+                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($vat), $cc); // povinnost přiznat daň
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net, $cc, $totalOnCredit);
@@ -930,14 +976,14 @@ final class PostingService
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
             $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line('343', $expenseSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } else {
             $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
             if ($vat !== 0.0) {
-                $lines[] = $this->line('343', $expenseSide, abs($vat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
@@ -998,7 +1044,7 @@ final class PostingService
             );
         }
         $ruleKey = $opts['rule_key'] ?? 'advance.paid.vatdocument';
-        $vatAcc  = $this->ruleCode($supplierId, $ruleKey, 'debit', '343');  // odpočet DPH
+        $vatAcc  = $this->vatAccount($supplierId, $ruleKey, 'debit', self::INPUT_VAT_ACCOUNT);  // odpočet DPH
         $draw    = $this->ruleCode($supplierId, $ruleKey, 'credit', '314'); // čerpání zálohy o DPH
         $cc = $opts['cost_center'] ?? null;
 
@@ -1303,7 +1349,7 @@ final class PostingService
                 $lines[] = $this->line((string) $allocation['account_code'], $debitSide, abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line('343', $debitSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $debitSide, abs($deductibleVat), $cc);
             }
             $allocatedCzk = round($allocatedCzk + $accountAmount + $deductibleVat, 2);
         }
@@ -1640,6 +1686,138 @@ final class PostingService
         return is_string($code) && $code !== '' ? $code : $fallback;
     }
 
+    /**
+     * Účet daně na VSTUPU (nárok na odpočet) — kontace `invoice.vat.input`, fallback
+     * {@see INPUT_VAT_ACCOUNT}. Tenant, který chce zůstat na plochém 343, si rule_key
+     * přepíše na '343' a chování se vrátí do stavu před migrací 1323.
+     */
+    private function inputVatAccount(int $supplierId): string
+    {
+        return $this->vatAccount($supplierId, 'invoice.vat.input', 'debit', self::INPUT_VAT_ACCOUNT);
+    }
+
+    /** Účet daně na VÝSTUPU — kontace `invoice.vat.output`, fallback {@see OUTPUT_VAT_ACCOUNT}. */
+    private function outputVatAccount(int $supplierId): string
+    {
+        return $this->vatAccount($supplierId, 'invoice.vat.output', 'credit', self::OUTPUT_VAT_ACCOUNT);
+    }
+
+    /**
+     * Daňový účet s DEGRADACÍ NA SYNTETIKU. Pořadí: kontace → analytika ze šablony →
+     * holé 343.
+     *
+     * Ta poslední větev je záměrná pojistka pro nasazení, kde kód už běží, ale migrace
+     * 1323 ještě neproběhla (rolling deploy, kontejner nahozený před entrypointem), nebo
+     * kde si tenant analytiku smazal či deaktivoval. Bez ní by KAŽDÝ doklad s DPH spadl
+     * na `unknown_account` — účtování by se u takové firmy zastavilo úplně. Degradace na
+     * syntetiku je horší účetně (vstup a výstup se na 343 vynetují, měsíční zúčtování
+     * takovou firmu přeskočí), ale je to stav, ve kterém aplikace fungovala doteď.
+     *
+     * Naopak když v osnově není ANI 343 (firma bez podvojného účetnictví, nezaseedovaná
+     * osnova), vrací se kód z kontace beze změny — ať chybu nahlásí resolveLines()
+     * hlasitě a se správným kódem, místo aby ji tahle metoda zamaskovala.
+     *
+     * Bankovní ani pokladní analytiky (221.x / 211.x) obdobnou pojistku NEPOTŘEBUJÍ:
+     * {@see \MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner::ensureChartAccount()}
+     * a CashRegisterService si chybějící analytiku samy dohrají do osnovy dřív, než na ni
+     * pošlou řádek.
+     */
+    private function vatAccount(int $supplierId, string $ruleKey, string $side, string $fallback): string
+    {
+        $code = $this->ruleCode($supplierId, $ruleKey, $side, $fallback);
+        if ($code === self::VAT_SYNTHETIC || $this->isPostableAccount($supplierId, $code)) {
+            return $code;
+        }
+
+        return $this->isPostableAccount($supplierId, self::VAT_SYNTHETIC) ? self::VAT_SYNTHETIC : $code;
+    }
+
+    /**
+     * Mapa „trojmístná syntetika → její JEDINÁ aktivní analytika" pro firmu.
+     *
+     * PROČ. Jakmile syntetika dostane potomka, nesmí se na ni dál účtovat — součet
+     * analytik by neseděl na syntetiku a v hlavní knize by účet měl vlastní zůstatek
+     * vedle svých dětí. Kontace se přesměrovat dají (a jsou), ale spousta účtů se
+     * v enginu volí NATVRDO podle druhu operace: 511 u servisu vozidla, 563/663
+     * u kurzových rozdílů, 648/548 u haléřového dorovnání, 261 u převodu mezi
+     * vlastními účty. Honit každý literál zvlášť je nekonečná práce; když má
+     * syntetika právě jednu analytiku, je odpověď jednoznačná — patří tam.
+     *
+     * KDY SE PŘESMĚR NEDĚLÁ (a proč se to nedá zjednodušit):
+     *  - firma přepínač vypnula (`accounting_supplier_settings.single_analytic_redirect`),
+     *  - syntetika má 0 nebo 2+ aktivních analytik → volba není jednoznačná, řeší ji
+     *    kontace nebo kontext (proto se nic nemění firmám bez analytik — ty mají 0),
+     *  - jde o {@see CONTEXT_DRIVEN_SYNTHETICS} (221/211/343/345),
+     *  - analytika NENÍ v tečkovaném tvaru `NNN.NNN`. Tahle podmínka je zásadní:
+     *    šablona osnovy veze pod 311 účet `311D` (dlouhodobé pohledávky) a pod 461
+     *    účet `461K` (krátkodobá část úvěrů). Obojí je ÚZCE ÚČELOVÁ podmnožina, ne
+     *    náhrada syntetiky — bez téhle podmínky by se úplně všechny pohledávky
+     *    každého tenanta přesypaly na 311D. Tečkovaný tvar naproti tomu znamená
+     *    „běžná analytika" v konvenci, kterou drží zbytek osnovy (501.100, 221.100).
+     *
+     * @return array<string,string> kód syntetiky → kód analytiky (prázdné = neměň nic)
+     */
+    private function singleAnalyticMap(int $supplierId): array
+    {
+        if (isset($this->singleAnalyticCache[$supplierId])) {
+            return $this->singleAnalyticCache[$supplierId];
+        }
+        if (!$this->singleAnalyticRedirectEnabled($supplierId)) {
+            return $this->singleAnalyticCache[$supplierId] = [];
+        }
+        $excluded = implode(', ', array_fill(0, count(self::CONTEXT_DRIVEN_SYNTHETICS), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT p.account_code AS synthetic, MIN(c.account_code) AS analytic
+               FROM chart_of_accounts p
+               JOIN chart_of_accounts c
+                 ON c.supplier_id = p.supplier_id AND c.parent_id = p.id AND c.is_active = 1
+              WHERE p.supplier_id = ?
+                AND p.is_active = 1
+                AND p.account_code REGEXP '^[0-9]{3}$'
+                AND p.account_code NOT IN ({$excluded})
+              GROUP BY p.id, p.account_code
+             HAVING COUNT(*) = 1
+                AND MIN(c.account_code) REGEXP '^[0-9]{3}[.][0-9]{1,6}$'"
+        );
+        $stmt->execute([$supplierId, ...self::CONTEXT_DRIVEN_SYNTHETICS]);
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(string) $row['synthetic']] = (string) $row['analytic'];
+        }
+
+        return $this->singleAnalyticCache[$supplierId] = $map;
+    }
+
+    /**
+     * Přepínač přesměru (migrace 1326). Default zapnuto — firmy bez analytik se
+     * nezmění tak jako tak (nemají co přesměrovat) a firma, která si jedinou
+     * analytiku vědomě založila, ji chce používat. Kill switch je tu pro případ,
+     * kdy je jediná analytika naopak úzce účelová a syntetika má zůstat výchozí.
+     */
+    private function singleAnalyticRedirectEnabled(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT single_analytic_redirect FROM accounting_supplier_settings WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+
+        // Chybějící řádek nastavení = firma si nic neměnila → platí default (zapnuto).
+        return $value === false || (bool) $value;
+    }
+
+    /** Je kód v osnově firmy a aktivní? Per-request cache — volá se na každý daňový řádek. */
+    private function isPostableAccount(int $supplierId, string $code): bool
+    {
+        $key = $supplierId . '|' . $code;
+        if (!array_key_exists($key, $this->postableAccountCache)) {
+            $account = $this->accounts->findByCode($supplierId, $code);
+            $this->postableAccountCache[$key] = $account !== null && !empty($account['is_active']);
+        }
+
+        return $this->postableAccountCache[$key];
+    }
+
     // ── vyváženost (pure — jednotkově testovatelné bez DB) ────────────────────
 
     /**
@@ -1687,7 +1865,7 @@ final class PostingService
     /**
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array<string, array{id:int, is_active:bool, account_type:string}> $codeMap
-     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll' $sourceType
+     * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll'|'vat_clearing' $sourceType
      * @return list<array{account_id:int, side:'debit'|'credit', amount:float, cost_center:?string}>
      */
     private function resolveLines(int $supplierId, array $lines, array $codeMap, string $sourceType): array
@@ -1695,8 +1873,11 @@ final class PostingService
         $out = [];
         $sawOffbalance = false;
         $sawOnBalance = false;
+        $singleAnalytics = $this->singleAnalyticMap($supplierId);
         foreach ($lines as $i => $line) {
             $code = (string) $line['account_code'];
+            // Syntetika s JEDINOU analytikou → účtuj na tu analytiku (viz singleAnalyticMap()).
+            $code = $singleAnalytics[$code] ?? $code;
             if (!isset($codeMap[$code])) {
                 throw new PostingException(
                     'unknown_account',

@@ -41,6 +41,22 @@ use PDO;
  *     rozdíl v konfrontaci, ne tiše špatně). Plná/hotovostní úhrada (přes
  *     `status='paid'`) tímto zkreslením netrpí.
  *
+ * DATUM VYROVNÁNÍ musí být totéž, které zná HLAVNÍ KNIHA (jinak konfrontace nesedí):
+ * u bankovních úhrad se proto NEBERE `invoice_payments.paid_on` / `purchase_invoices.paid_at`
+ * (den z dokladu, u legacy importů běžně den vystavení faktury), ale `entry_date`
+ * ZAÚČTOVANÉHO bankovního zápisu, s fallbackem na `bank_transactions.posted_at` a teprve
+ * pak na doklad. Lednový výpis k prosincové faktuře tak fakturu k 31. 12. NESKRYJE —
+ * HK ji k tomu dni také má otevřenou. Nezaúčtovaný výpis fallbackem propadne na datum
+ * pohybu, takže se v konfrontaci projeví jako ROZDÍL — což je žádoucí, je to nález
+ * („banka není zaúčtovaná"), ne chyba sestavy.
+ *
+ * ZÁLOHA INKASOVANÁ PŘÍMO NA SALDOKONTNÍ ÚČET (bez 324/314) — viz
+ * {@see advanceOnAccountSql}: proforma je samostatný doklad a platba míří na NI, ne na
+ * finální fakturu; když ji účetní účtuje rovnou na 311, vypadá plně předplacená faktura
+ * jako celá otevřená. Poddotaz proto přičte takovou zálohu do čitatele i jmenovatele
+ * poměru — a protože je podmíněný tím, že úhrada zálohy dopadla NA TENHLE účet, tenantů
+ * používajících 324/314 se nedotkne.
+ *
  * Storno (H4): dřívější filtr `reversed_by IS NULL` odrážel AKTUÁLNÍ stav, ne stav
  * K ASOF — doklad stornovaný AŽ PO rozvahovém dni by k asOf zmizel ze seznamu,
  * přestože k tomu dni byl v hlavní knize ještě živý. Filtrujeme proto podle
@@ -63,6 +79,26 @@ use PDO;
  */
 final class SaldoRepository
 {
+    /**
+     * Den, ke kterému HLAVNÍ KNIHA uznává bankovní úhradu přijaté faktury (`payment_matches`
+     * ⇄ `bank_transactions bt`): `entry_date` zaúčtovaného bankovního zápisu, a když zápis
+     * neexistuje (nezaúčtovaný výpis), fallback na datum pohybu. Právě tenhle den, ne
+     * `paid_at`/`paid_on` z dokladu, řídí, kdy z účtu 321 mizí závazek — konfrontace se
+     * zůstatkem HK proto musí počítat se stejným datem. Obsahuje JEDEN placeholder (asOf
+     * pro časově uvědomělé storno protizápisem).
+     */
+    private const MATCH_SETTLEMENT_DATE =
+        "COALESCE(
+            (SELECT MIN(pbe.entry_date)
+               FROM journal_entries pbe
+               LEFT JOIN journal_entries pbrev ON pbrev.id = pbe.reversed_by
+              WHERE pbe.supplier_id = pm.supplier_id
+                AND pbe.source_type = 'bank' AND pbe.source_id = pm.bank_transaction_id
+                AND pbe.posted_at IS NOT NULL
+                AND (pbe.reversed_by IS NULL OR pbrev.entry_date > ?)),
+            DATE(bt.posted_at)
+        )";
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -390,8 +426,21 @@ final class SaldoRepository
                     d.amount_to_pay,
                     (SELECT COALESCE(SUM(ip.amount), 0)
                        FROM invoice_payments ip
+                       LEFT JOIN bank_transactions ipbt ON ipbt.id = ip.bank_transaction_id
                       WHERE ip.supplier_id = d.supplier_id AND ip.invoice_id = d.id
-                        AND ip.paid_on <= ?) AS paid_as_of,
+                        AND COALESCE(
+                                (SELECT MIN(be.entry_date)
+                                   FROM journal_entries be
+                                   LEFT JOIN journal_entries brev ON brev.id = be.reversed_by
+                                  WHERE be.supplier_id = ip.supplier_id
+                                    AND be.source_type = 'bank'
+                                    AND be.source_id = ip.bank_transaction_id
+                                    AND be.posted_at IS NOT NULL
+                                    AND (be.reversed_by IS NULL OR brev.entry_date > ?)),
+                                DATE(ipbt.posted_at),
+                                ip.paid_on
+                            ) <= ?) AS paid_as_of,
+                    " . $this->advanceOnAccountSql('credit') . " AS advance_on_account,
                     SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked_signed,
                     SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                              THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
@@ -414,9 +463,18 @@ final class SaldoRepository
                        cl.id, cl.company_name, cur.code, d.amount_to_pay
               ORDER BY cl.company_name, d.due_date, d.id";
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$asOf, $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf]);
+        $stmt->execute([
+            $asOf, $asOf,                       // paid_as_of (storno guard + settlement date)
+            $asOf, $asOf, $accountId, $accountId, // advance_on_account
+            $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf,
+        ]);
 
         return array_map(function (array $r): array {
+            // Předplacení z proformy uhrazené PŘÍMO na tenhle účet (viz advanceOnAccountSql):
+            // vstupuje do čitatele i jmenovatele poměru. `amount_to_pay` finální faktury je
+            // o zálohu snížené (u plně předplacené je nulové), takže bez téhle korekce vyjde
+            // poměr 0 (nebo 1 z nesouvisejícího zbytku) a doklad svítí jako celý otevřený.
+            $advance = round((float) $r['advance_on_account'], 2);
             return [
                 'doc_type'       => 'invoice',
                 'doc_id'         => (int) $r['doc_id'],
@@ -431,9 +489,75 @@ final class SaldoRepository
                 'foreign_signed' => round((float) $r['foreign_signed'], 2),
                 // Stejnoměnný poměr k asOf; invoice_payments pokrývá bankovní,
                 // hotovostní i ruční platby jednotně.
-                'paid_ratio'     => $this->paidRatio(false, (float) $r['paid_as_of'], (float) $r['amount_to_pay']),
+                'paid_ratio'     => $this->paidRatio(
+                    false,
+                    (float) $r['paid_as_of'] + $advance,
+                    (float) $r['amount_to_pay'] + $advance,
+                ),
             ];
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Korelovaný poddotaz: kolik z dokladu `d` je předplaceno ZÁLOHOU (proformou /
+     * zálohovou PF), jejíž úhrada je zaúčtovaná PŘÍMO NA TENHLE saldokontní účet —
+     * tedy bez průchodu přes 324/314.
+     *
+     * Proč to musí být: proforma je samostatný doklad (`invoices.invoice_type='proforma'`,
+     * resp. `purchase_invoices.document_kind='advance'`) a finální faktura na ni ukazuje
+     * přes `parent_invoice_id` / `advance_purchase_invoice_id`. `invoice_payments.invoice_id`
+     * i `payment_matches.purchase_invoice_id` míří na ZÁLOHU, ne na finální doklad. Účetní,
+     * která inkaso proformy účtuje rovnou na 311 (a ne na 324), tak dostane finální fakturu
+     * se `amount_to_pay = 0`, žádnou vlastní platbou a plným předpisem na 311 → doklad
+     * svítí jako celý otevřený, přestože hlavní kniha ho má vyrovnaný.
+     *
+     * Podmínka „úhrada zálohy je zaúčtovaná na TENHLE účet" je zároveň rozlišovací znak
+     * proti tenantům, kteří 324/314 POUŽÍVAJÍ: tam inkaso kredituje 324 (ne 311) a finální
+     * faktura si zálohu zúčtuje sama zápisem 324 MD / 311 D ve VLASTNÍM zápisu, takže
+     * `booked_signed` už přichází netto. Pro ně vyjde tenhle poddotaz 0 a chování se nemění.
+     *
+     * @param 'credit'|'debit' $side strana, na kterou úhrada zálohy dopadá na daném účtu
+     *                               (311 pohledávka → credit, 321 závazek → debit)
+     */
+    private function advanceOnAccountSql(string $side): string
+    {
+        $link = $side === 'credit'
+            ? "pf.id = d.parent_invoice_id AND pf.invoice_type = 'proforma'"
+            : "pf.id = d.advance_purchase_invoice_id AND pf.document_kind = 'advance'";
+        $payments = $side === 'credit'
+            ? "JOIN invoice_payments pip ON pip.supplier_id = pf.supplier_id AND pip.invoice_id = pf.id"
+            : "JOIN payment_matches pip ON pip.supplier_id = pf.supplier_id AND pip.purchase_invoice_id = pf.id";
+        $table = $side === 'credit' ? 'invoices' : 'purchase_invoices';
+        $cashLink = $side === 'credit'
+            ? 'cd.invoice_payment_id = pip.id'
+            : 'cd.purchase_invoice_id = pf.id';
+
+        return
+            "(SELECT COALESCE(SUM(pip.amount), 0)
+                FROM {$table} pf
+                {$payments}
+               WHERE {$link} AND pf.supplier_id = d.supplier_id
+                 AND EXISTS (
+                     SELECT 1
+                       FROM journal_entries pe
+                       JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
+                       JOIN chart_of_accounts pca ON pca.id = pl.account_id
+                       LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                      WHERE pe.supplier_id = pip.supplier_id
+                        AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                        AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                        AND pl.side = '{$side}'
+                        AND (pca.id = ? OR pca.parent_id = ?)
+                        AND (
+                            (pip.bank_transaction_id IS NOT NULL
+                             AND pe.source_type = 'bank' AND pe.source_id = pip.bank_transaction_id)
+                            OR EXISTS (
+                                SELECT 1 FROM cash_documents cd
+                                 WHERE cd.supplier_id = pip.supplier_id AND {$cashLink}
+                                   AND pe.source_type = 'cash' AND pe.source_id = cd.id
+                            )
+                        )
+                 ))";
     }
 
     /**
@@ -450,8 +574,15 @@ final class SaldoRepository
                     d.amount_to_pay,
                     (SELECT COALESCE(SUM(pm.amount), 0)
                        FROM payment_matches pm
-                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id AND bt.posted_at <= ?
-                      WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id) AS paid_from_matches,
+                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                      WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id
+                        AND " . self::MATCH_SETTLEMENT_DATE . " <= ?) AS paid_from_matches,
+                    (SELECT COUNT(*)
+                       FROM payment_matches pm
+                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                      WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id
+                        AND " . self::MATCH_SETTLEMENT_DATE . " > ?) AS matches_after_as_of,
+                    " . $this->advanceOnAccountSql('debit') . " AS advance_on_account,
                     SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked_signed,
                     SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
                              THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
@@ -474,12 +605,27 @@ final class SaldoRepository
                        cl.id, cl.company_name, cur.code, d.amount_to_pay
               ORDER BY cl.company_name, d.due_date, d.id";
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$asOf, $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf]);
+        $stmt->execute([
+            $asOf, $asOf,                         // paid_from_matches
+            $asOf, $asOf,                         // matches_after_as_of
+            $asOf, $asOf, $accountId, $accountId, // advance_on_account
+            $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf,
+        ]);
 
         return array_map(function (array $r) use ($asOf): array {
+            // `status='paid'` je stav DOKLADU (kdy ho účetní odkliká), ne datum, ke kterému
+            // úhradu zná HLAVNÍ KNIHA. Když k dokladu existuje bankovní párování, které deník
+            // uznává AŽ PO rozvahovém dni (PF vystavená 31. 12., zaplacená v lednu, ale
+            // `paid_at` doklad nese v prosinci), zkratka „paid ⇒ ratio 1" doklad ze salda
+            // vyhodí, přestože HK ho k asOf má otevřený — a konfrontace pak nesedí o celou
+            // fakturu. V takovém případě zkratku potlačíme a poměr počítáme z DATOVANÝCH
+            // úhrad. Dokladům BEZ bankovního párování (hotovost, ruční „označit zaplaceno")
+            // zkratka zůstává — jinak by se z nich staly trvale otevřené položky.
             $paidByStatusAsOf = (string) $r['status'] === 'paid'
                 && $r['paid_at'] !== null
-                && substr((string) $r['paid_at'], 0, 10) <= $asOf;
+                && substr((string) $r['paid_at'], 0, 10) <= $asOf
+                && (int) $r['matches_after_as_of'] === 0;
+            $advance = round((float) $r['advance_on_account'], 2);
             return [
                 'doc_type'       => 'purchase_invoice',
                 'doc_id'         => (int) $r['doc_id'],
@@ -493,8 +639,13 @@ final class SaldoRepository
                 'booked_signed'  => round((float) $r['booked_signed'], 2),
                 'foreign_signed' => round((float) $r['foreign_signed'], 2),
                 // status='paid' je autoritativní až od paid_at; jinak best-effort ze Σ payment_matches
-                // (jen bankovní párování — KNOWN GAP H3, viz doc-komentář třídy).
-                'paid_ratio'     => $this->paidRatio($paidByStatusAsOf, (float) $r['paid_from_matches'], (float) $r['amount_to_pay']),
+                // (jen bankovní párování — KNOWN GAP H3, viz doc-komentář třídy). Zálohová PF
+                // uhrazená přímo na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
+                'paid_ratio'     => $this->paidRatio(
+                    $paidByStatusAsOf,
+                    (float) $r['paid_from_matches'] + $advance,
+                    (float) $r['amount_to_pay'] + $advance,
+                ),
             ];
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }

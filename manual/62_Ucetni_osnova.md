@@ -128,7 +128,31 @@ invarianty:
 Tyto kontroly běží na backendu i při volání API. Omezení webového výběru proto
 nelze obejít vlastním požadavkem.
 
-## 62.7 Oprávnění a chyby
+## 62.7 Karta účtu
+
+Kliknutí na řádek účtu (nebo na jeho kód) otevře **kartu účtu** — rozcestník
+pro procházení účetnictví po jednom účtu.
+
+Karta obsahuje:
+
+- **počáteční stav, obrat MD, obrat Dal a konečný zůstatek** za zvolený rozsah;
+  počítají se stejně jako v [Hlavní knize](48_Hlavni_kniha.md) a v opisu účtu,
+  u syntetiky včetně pohybů jejích analytik,
+- **kmenová data** — kód, typ, obvyklá strana, syntetika/analytika, aktivita a
+  počet analytik,
+- **analytiky** se zůstatky za tentýž rozsah; každá je odkaz na svoji vlastní
+  kartu,
+- u analytiky odkaz na **nadřízenou syntetiku**.
+
+Rozsah se nastavuje poli **Od / Do** nebo zkratkou na účetní období. Tlačítka
+v hlavičce vedou na [Opis účtu](48_Hlavni_kniha.md#485-opis-účtu), do
+[Hlavní knihy](48_Hlavni_kniha.md) (kniha účet sama rozbalí) a do
+[Účetního deníku](45_Ucetni_denik.md) filtrovaného na tento účet a rozsah;
+u syntetiky pokrývá filtr i její analytiky.
+
+Karta je jen ke čtení — název a aktivitu se mění v seznamu účtů.
+
+## 62.8 Oprávnění a chyby
 
 Čtení a export vyžadují oprávnění `accounting`. Založení analytiky, změna
 aktivity a import vyžadují zápisové účetní oprávnění; readonly role vidí pouze

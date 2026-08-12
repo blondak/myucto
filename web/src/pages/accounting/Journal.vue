@@ -29,6 +29,7 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
+import { journalSourceLink } from '@/utils/journalSourceLink'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -79,7 +80,7 @@ const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'bank', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
-  'offset', 'settlement',
+  'offset', 'settlement', 'vat_clearing',
 ] as const
 
 // Drill-down z detailu dokladu (FV/PF): ?source_type=&source_id= → filtruje deník na
@@ -368,9 +369,14 @@ onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
-  // Předvyplnění filtrů z query (drill-down z uzávěrky / sestav).
+  // Předvyplnění filtrů z query (drill-down z uzávěrky / sestav / karty účtu).
   const qPeriod = Number(route.query.period_id || 0)
   if (qPeriod > 0) filters.period_id = qPeriod
+  // Rozsah účtu + datumu — proklik „Deník" z karty účtu a z opisu účtu.
+  for (const key of ['account_from', 'account_to', 'date_from', 'date_to'] as const) {
+    const v = route.query[key]
+    if (typeof v === 'string' && v) filters[key] = v
+  }
   const qSource = String(route.query.source_type || '')
   if ((SOURCE_TYPES as readonly string[]).includes(qSource)) {
     filters.source_type = qSource as typeof filters.source_type
@@ -535,50 +541,12 @@ function sourceLabel(type: string): string {
 }
 
 /**
- * Cíl drill-down odkazu na zdrojový doklad (audit 2026-07: rozšířeno o banku/pokladnu,
- * dále o majetek — FEATURA C). Banka: source_id je bank_transactions.id, ale existující
- * stránka detailu výpisu (`bank-detail`) čeká ID VÝPISU — proklikneme na výpis obohacený
- * BE o statement_id (source_statement_id). Pokladna: nemá samostatnou detail-stránku, jen
- * seznam (`accounting-cash`) filtrovatelný přes `q` (prefix na doc_number) — nejbližší
- * smysluplný cíl bez vymýšlení nové routy.
- *
- * Majetek: 'asset' (zařazení) a 'asset_disposal' (vyřazení) mají source_id = ID karty
- * majetku přímo. 'depreciation' (odpis) má source_id = ID řádku depreciation_entries,
- * NE ID karty — proto se pro tenhle typ používá BE-obohacené `source_asset_id`
- * (JOIN přes depreciation_entries.asset_id, viz JournalEntryRepository::paginate()).
+ * Cíl drill-down odkazu na zdrojový doklad. Mapování source_type → routa je sdílené
+ * s opisem účtu a rozpadem měsíce v hlavní knize (utils/journalSourceLink.ts) —
+ * dokud žilo jen tady, vedla z opisu účtu proklikem jen faktura.
  */
 function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
-  if (entry.source_type === 'invoice' && entry.source_id) {
-    return { name: 'invoice-detail', params: { id: entry.source_id } }
-  }
-  if (entry.source_type === 'purchase_invoice' && entry.source_id) {
-    return { name: 'purchase-invoice-detail', params: { id: entry.source_id } }
-  }
-  if (entry.source_type === 'bank' && entry.source_statement_id) {
-    return { name: 'bank-detail', params: { id: entry.source_statement_id } }
-  }
-  if (entry.source_type === 'cash' && entry.source_doc_number) {
-    return {
-      name: 'accounting-cash',
-      query: {
-        ...(entry.source_register_id ? { register_id: String(entry.source_register_id) } : {}),
-        q: entry.source_doc_number,
-      },
-    }
-  }
-  if ((entry.source_type === 'asset' || entry.source_type === 'asset_disposal') && entry.source_id) {
-    return { name: 'accounting-asset-detail', params: { id: entry.source_id } }
-  }
-  if (entry.source_type === 'depreciation' && entry.source_asset_id) {
-    return { name: 'accounting-asset-detail', params: { id: entry.source_asset_id } }
-  }
-  // Zápočet: source_id je ID zápočtu, proklik vede na vyrovnanou fakturu.
-  if (entry.source_type === 'settlement' && entry.source_settlement_doc_id) {
-    return entry.source_settlement_doc_type === 'invoice'
-      ? { name: 'invoice-detail', params: { id: entry.source_settlement_doc_id } }
-      : { name: 'purchase-invoice-detail', params: { id: entry.source_settlement_doc_id } }
-  }
-  return null
+  return journalSourceLink(entry)
 }
 </script>
 

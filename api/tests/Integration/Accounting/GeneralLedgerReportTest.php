@@ -197,6 +197,45 @@ final class GeneralLedgerReportTest extends TestCase
         self::assertSame(self::cents(1000.00), self::cents($a211['closing_md']), 'KS = PS + (nulové) obraty.');
     }
 
+    /**
+     * Otevírací zápis prvního dne období patří do PS, ne do lednového obratu —
+     * a to i v MĚSÍČNÍM rozpadu. Dokud měsíční agregace technický zápis
+     * nevylučovala, hlásil leden obrat o celý počáteční stav vyšší, než kolik
+     * dával obratový sloupec téhož řádku; nesrovnalost se projevila až při
+     * rozkliknutí měsíce na jednotlivé řádky deníku.
+     */
+    public function testOpeningEntryStaysOutOfMonthlyTurnover(): void
+    {
+        $this->insertJournalEntry('opening', $this->periodId, '211', '411', 5000.00, self::YEAR . '-01-01');
+        $this->manual([
+            self::l('211', 'debit', 1000.00),
+            self::l('602', 'credit', 1000.00),
+        ], self::YEAR . '-01-10');
+
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+
+        $a211 = $this->accountByCode($data['accounts'], '211');
+        self::assertNotNull($a211);
+        self::assertSame(self::cents(5000.00), self::cents($a211['opening_md']), 'Otevírací zápis = PS.');
+        self::assertSame(self::cents(1000.00), self::cents($a211['turnover_md']), 'Obrat za období bez otevíracího zápisu.');
+        self::assertSame(
+            self::cents(1000.00),
+            self::cents($a211['months'][self::YEAR . '-01']['md']),
+            'Lednový obrat nesmí obsahovat otevírací zápis.',
+        );
+
+        foreach ($data['accounts'] as $acc) {
+            $mMd = 0;
+            $mD  = 0;
+            foreach ($acc['months'] as $m) {
+                $mMd += self::cents($m['md']);
+                $mD  += self::cents($m['d']);
+            }
+            self::assertSame(self::cents($acc['turnover_md']), $mMd, 'Σ měsíčních MD == obrat MD (' . $acc['account_code'] . ').');
+            self::assertSame(self::cents($acc['turnover_d']), $mD, 'Σ měsíčních D == obrat D (' . $acc['account_code'] . ').');
+        }
+    }
+
     // ── T6: hledání dle dodavatele/odběratele/položky faktury ─────────────────
 
     public function testVendorFilterLimitsAggregationToMatchingPurchaseInvoice(): void

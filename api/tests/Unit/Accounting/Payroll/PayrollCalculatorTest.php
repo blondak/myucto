@@ -585,4 +585,85 @@ final class PayrollCalculatorTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         PayrollCalculator::compute(4500.0, ['minimum_wage' => 20800]);
     }
+
+    // ── Zaokrouhlení zdravotního pojištění — jedno, ne po složkách ─────────────
+    // Účetní počítá ÚHRN jako 13,5 % z vyměřovacího základu a zaměstnancovu část
+    // dopočítává jako úhrn − zaměstnavatel. Kdyby se každá složka zaokrouhlila
+    // nahoru zvlášť (4,5 % → 203 a doplatek 2 200,50 → 2 201), vyšlo by o korunu
+    // víc na 336.200 a o korunu míň na čisté mzdě — a to KAŽDÝ měsíc, takže by
+    // rozdíl narůstal (za rok 2025 by dělal 12 Kč).
+
+    /**
+     * @return array<string, array{0:int, 1:int, 2:int, 3:int, 4:int, 5:int}>
+     *   rok, min. mzda, úhrn ZP, zaměstnavatel, zaměstnanec (4,5 % + doplatek), čistá mzda
+     */
+    public static function healthRoundingCases(): array
+    {
+        return [
+            // 13,5 % × 20 800 = 2 808; zaměstnanec 2 808 − 405 = 2 403; čistá 1 102.
+            '2025 / min. mzda 20 800' => [2025, 20800, 2808, 405, 2403, 1102],
+            // 13,5 % × 22 400 = 3 024; zaměstnanec 3 024 − 405 = 2 619; čistá 886.
+            '2026 / min. mzda 22 400' => [2026, 22400, 3024, 405, 2619, 886],
+        ];
+    }
+
+    #[DataProvider("healthRoundingCases")]
+    public function testHealthTotalIsRoundedOnceAndSplitExactly(
+        int $year,
+        int $minimumWage,
+        int $healthTotal,
+        int $employerHealth,
+        int $employeeHealthShare,
+        int $net,
+    ): void {
+        $c = TaxConstants::forYear($year);
+        self::assertSame($minimumWage, $c['minimum_wage'], 'předpoklad testu — minimální mzda ročníku');
+
+        $b = PayrollCalculator::compute(4500.0, $c);
+        $employeeShare = $b['employee_health'] + $b['health_min_topup'];
+
+        self::assertSame($healthTotal, $b['health_total'], 'úhrn = 13,5 % ze základu, zaokrouhleno JEDNOU');
+        self::assertSame($employerHealth, $b['employer_health'], '9 % z hrubé mzdy');
+        self::assertSame($employeeHealthShare, $employeeShare, 'zaměstnanec = úhrn − zaměstnavatel');
+        self::assertSame(
+            $b['health_total'],
+            $employeeShare + $b['employer_health'],
+            'složky ZP musí dát úhrn na korunu — jinak odvod na ZP nesedí s rozpadem'
+        );
+        self::assertSame($net, $b['net'], 'čistá mzda dle deníku účetní');
+    }
+
+    /**
+     * Invariant „složky = úhrn" nesmí platit jen v golden hodnotách. Prochází se
+     * široký rozsah hrubých mezd včetně těch, kde se doplatek do min. VZ láme na
+     * půlkorunu a kde se ceil zaměstnancových 4,5 % potkává s floor doplatku.
+     */
+    public function testHealthPartsAlwaysSumToTotal(): void
+    {
+        foreach ([2024, 2025, 2026] as $year) {
+            $c = TaxConstants::forYear($year);
+            foreach ([0, 1, 7, 11, 100, 999, 4000, 4500, 4501, 10000, 18899, 20800, 22400, 33333, 150000] as $gross) {
+                $b = PayrollCalculator::compute((float) $gross, $c);
+                self::assertSame(
+                    $b['health_total'],
+                    $b['employee_health'] + $b['health_min_topup'] + $b['employer_health'],
+                    "{$year} / hrubá {$gross}: složky ZP nedaly úhrn"
+                );
+                self::assertGreaterThanOrEqual(0, $b['employer_health'], "{$year} / hrubá {$gross}");
+                self::assertGreaterThanOrEqual(0, $b['health_min_topup'], "{$year} / hrubá {$gross}");
+            }
+        }
+    }
+
+    /**
+     * Doplatek do minimálního VZ vychází v každém ročníku na půlkorunu
+     * (2024: 2 011,50 | 2025: 2 200,50 | 2026: 2 416,50). Zaokrouhluje se DOLŮ,
+     * protože nahoru by úhrn ZP přestřelil 13,5 % z vyměřovacího základu.
+     */
+    public function testMinimumTopUpRoundsDownSoTotalHolds(): void
+    {
+        self::assertSame(2011, PayrollCalculator::compute(4000.0, TaxConstants::forYear(2024))['health_min_topup']);
+        self::assertSame(2200, PayrollCalculator::compute(4500.0, TaxConstants::forYear(2025))['health_min_topup']);
+        self::assertSame(2416, PayrollCalculator::compute(4500.0, TaxConstants::forYear(2026))['health_min_topup']);
+    }
 }

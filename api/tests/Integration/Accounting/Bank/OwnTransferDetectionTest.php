@@ -73,6 +73,54 @@ final class OwnTransferDetectionTest extends BankPostingTestCase
     }
 
     /**
+     * Peníze na cestě jdou na analytiku 261.100, když ji firma vede.
+     *
+     * TransferPairService staví nohu natvrdo jako '261' (kontace se tam nepoužije),
+     * takže přesměr na jedinou analytiku musí zabrat až v
+     * {@see \MyInvoice\Service\Accounting\PostingService::resolveLines()} — tudy jde
+     * KAŽDÝ zápis. Bez toho by 261 zůstalo na syntetice, přestože pod ní visí
+     * analytika, a součet analytik by neseděl na syntetiku.
+     */
+    public function testTransitLegLandsOnTheSingleAnalyticWhenTenantHasOne(): void
+    {
+        $transit = $this->accounts->findByCode($this->supplierId, '261');
+        self::assertNotNull($transit, 'Syntetika 261 musí být v osnově.');
+        $this->accounts->insert($this->supplierId, [
+            'account_code' => '261.100',
+            'name'         => 'Peníze na cestě — převody',
+            'account_type' => $transit['account_type'],
+            'normal_side'  => $transit['normal_side'],
+            'is_synthetic' => false,
+            'parent_id'    => (int) $transit['id'],
+            'is_active'    => true,
+        ]);
+
+        $this->registerAccount(self::SECOND_ACCOUNT, self::SECOND_BANK, 'CZK');
+        $amount = 12345.67;
+        $outTx = $this->transaction($this->statement(), -$amount, [
+            'counterparty_account' => self::SECOND_ACCOUNT,
+            'counterparty_bank' => self::SECOND_BANK,
+        ]);
+        $inTx = $this->transaction($this->statement(self::SECOND_ACCOUNT, self::SECOND_BANK), $amount, [
+            'counterparty_account' => self::ACCOUNT,
+            'counterparty_bank' => self::BANK_CODE,
+            'posted_at' => self::YEAR . '-06-16',
+        ]);
+
+        $out = $this->service->handleTransaction($outTx, $this->userId);
+        $in = $this->service->handleTransaction($inTx, $this->userId);
+        $outEntry = $this->service->approveSuggestion($this->supplierId, (int) $out['suggestion_id'], $this->meta());
+        $inEntry = $this->service->approveSuggestion($this->supplierId, (int) $in['suggestion_id'], $this->meta());
+
+        $outLines = $this->linesByAccountCode($outEntry);
+        $inLines = $this->linesByAccountCode($inEntry);
+        self::assertArrayNotHasKey('261', $outLines, 'Na holé syntetice 261 nesmí zůstat nic.');
+        self::assertArrayNotHasKey('261', $inLines);
+        self::assertEqualsWithDelta($amount, $outLines['261.100']['debit'], 0.001);
+        self::assertEqualsWithDelta($amount, $inLines['261.100']['credit'], 0.001);
+    }
+
+    /**
      * #9 — okno párování nohou převodu rozšířeno z ±3 na ±7 dní (PAIR_WINDOW_DAYS). Mezi
      * odepsáním z jednoho účtu a připsáním na druhý bývá i víc než 3 dny (mezibankovní, víkend).
      */

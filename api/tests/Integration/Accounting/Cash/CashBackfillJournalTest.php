@@ -118,7 +118,7 @@ final class CashBackfillJournalTest extends TestCase
         $byAcc = $this->linesByAccountCode($result['journal_entry_id']);
         self::assertEqualsWithDelta(1210.00, $byAcc[$register['code']]['debit'], 0.001);
         self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAcc['343.200']['credit'], 0.001);
 
         self::assertSame($result['journal_entry_id'], $this->docJournalEntryId($docId), 'Doklad je propojen na nový zápis.');
         self::assertSame(1, $this->entryCount(), 'Vznikl právě jeden zápis.');
@@ -149,7 +149,7 @@ final class CashBackfillJournalTest extends TestCase
         }
         self::assertEqualsWithDelta(605.00, $byCode[$register['code']]['debit'], 0.001);
         self::assertEqualsWithDelta(500.00, $byCode['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(105.00, $byCode['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(105.00, $byCode['343.200']['credit'], 0.001);
 
         // Dry-run — nic se do dokladu ani deníku nezapsalo.
         self::assertNull($this->docJournalEntryId($docId));

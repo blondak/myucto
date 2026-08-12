@@ -94,7 +94,7 @@ final class SupplierBankAccountApiTest extends BankPostingTestCase
         self::assertNotNull($row);
         self::assertNotNull($row['analytic_suffix'], 'Účet dostal analytiku už při výpisu nastavení.');
         self::assertNotNull(
-            $this->accounts->findByCode($this->supplierId, '221' . $row['analytic_suffix']),
+            $this->accounts->findByCode($this->supplierId, '221.' . $row['analytic_suffix']),
             'Přidělená analytika existuje i v osnově.',
         );
     }

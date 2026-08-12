@@ -105,7 +105,7 @@ final class CashDocumentServiceTest extends TestCase
         $byAcc = $this->linesByAccountCode($sale['journal_entry_id']);
         self::assertEqualsWithDelta(1210.00, $byAcc['211']['debit'], 0.001);
         self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAcc['343.200']['credit'], 0.001);
 
         $purchase = $this->service->create($this->supplierId, $this->doc([
             'purpose' => 'purchase', 'doc_type' => 'out', 'total_amount' => 1210.00, 'vat_mode' => 'vat',
@@ -113,7 +113,7 @@ final class CashDocumentServiceTest extends TestCase
         ], $reg), $this->userId);
         $byAcc = $this->linesByAccountCode($purchase['journal_entry_id']);
         self::assertEqualsWithDelta(1000.00, $byAcc['501']['debit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAcc['343']['debit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAcc['343.100']['debit'], 0.001);
         self::assertEqualsWithDelta(1210.00, $byAcc['211']['credit'], 0.001);
     }
 
@@ -144,10 +144,10 @@ final class CashDocumentServiceTest extends TestCase
         ], $reg), $this->userId);
 
         $entry = $this->journal->find($res['journal_entry_id'], $this->supplierId);
-        $lines343 = array_filter($entry['lines'], fn ($l) => $this->code((int) $l['account_id']) === '343');
+        $lines343 = array_filter($entry['lines'], fn ($l) => $this->code((int) $l['account_id']) === '343.200');
         self::assertCount(2, $lines343, 'Dva řádky 343 (per sazba).');
         $byAcc = $this->linesByAccountCode($res['journal_entry_id']);
-        self::assertEqualsWithDelta(330.00, $byAcc['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(330.00, $byAcc['343.200']['credit'], 0.001);
         self::assertEqualsWithDelta(2000.00, $byAcc['602']['credit'], 0.001);
     }
 
@@ -809,7 +809,7 @@ final class CashDocumentServiceTest extends TestCase
         $byAcc = $this->linesByAccountCode($sale['journal_entry_id']);
         self::assertEqualsWithDelta(2500.00, $byAcc['211500']['debit'], 0.001);
         self::assertEqualsWithDelta(2066.00, $byAcc['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(434.00, $byAcc['343']['credit'], 0.001);
+        self::assertEqualsWithDelta(434.00, $byAcc['343.200']['credit'], 0.001);
 
         // Uložený rozpad je v CZK a Σ(základ+daň) == total_amount.
         $stored = $this->service->get($this->supplierId, $sale['id']);

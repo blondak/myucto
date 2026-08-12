@@ -123,7 +123,7 @@ final class OssPostingTest extends TestCase
 
         self::assertEqualsWithDelta(1805.00, $byAccount['311']['debit'], 0.001, '311 MD = celá částka dokladu vč. OSS daně.');
         self::assertEqualsWithDelta(1500.00, $byAccount['602']['credit'], 0.001, '602 D = základ obou řádků (výnos je výnos bez ohledu na stát daně).');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['credit'], 0.001, '343 D = POUZE česká daň na výstupu.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001, '343 D = POUZE česká daň na výstupu.');
         self::assertEqualsWithDelta(95.00, $byAccount[self::OSS_ACCOUNT]['credit'], 0.001, 'OSS daň patří na vlastní účet, ne na 343.');
         self::assertArrayNotHasKey('648', $byAccount, 'Žádné haléřové dorovnání — doklad sedí přesně.');
         self::assertArrayNotHasKey('548', $byAccount, 'Žádné haléřové dorovnání — doklad sedí přesně.');
@@ -137,13 +137,13 @@ final class OssPostingTest extends TestCase
     public function testAccount343MovesExactlyByVatReturnOutputTax(): void
     {
         $outputBefore = $this->vatReturnOutputTax();
-        $balanceBefore = $this->accountBalance('343');
+        $balanceBefore = $this->accountBalance('343.200');
 
         $invoiceId = $this->mixedInvoice('FV-2097-002');
         $byAccount = $this->postAndGroup($invoiceId);
 
         $outputDelta  = round($this->vatReturnOutputTax() - $outputBefore, 2);
-        $balanceDelta = round($this->accountBalance('343') - $balanceBefore, 2);
+        $balanceDelta = round($this->accountBalance('343.200') - $balanceBefore, 2);
 
         self::assertEqualsWithDelta(210.00, $outputDelta, 0.001, 'Do přiznání jde jen česká daň — OSS řádek je vyloučený.');
         self::assertEqualsWithDelta(
@@ -187,7 +187,7 @@ final class OssPostingTest extends TestCase
         self::assertEqualsWithDelta(952.00, $byAccount['311']['debit'], 0.001, '311 MD = základ + OSS daň.');
         self::assertEqualsWithDelta(800.00, $byAccount['602']['credit'], 0.001, '602 D = základ.');
         self::assertEqualsWithDelta(152.00, $byAccount[self::OSS_ACCOUNT]['credit'], 0.001, 'Celá daň na OSS účtu.');
-        self::assertArrayNotHasKey('343', $byAccount, 'Doklad bez českého plnění nesmí zanechat stopu na 343.');
+        self::assertArrayNotHasKey('343.200', $byAccount, 'Doklad bez českého plnění nesmí zanechat stopu na 343.');
     }
 
     /** Dobropis obrací obě daňové nohy — 343 i OSS. */
@@ -198,7 +198,7 @@ final class OssPostingTest extends TestCase
 
         self::assertEqualsWithDelta(1805.00, $byAccount['311']['credit'], 0.001, 'Dobropis: 311 na straně D.');
         self::assertEqualsWithDelta(1500.00, $byAccount['602']['debit'], 0.001, 'Dobropis: výnos se odúčtuje na MD.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001, 'Dobropis: česká daň zpět na MD.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['debit'], 0.001, 'Dobropis: česká daň zpět na MD.');
         self::assertEqualsWithDelta(95.00, $byAccount[self::OSS_ACCOUNT]['debit'], 0.001, 'Dobropis: OSS daň zpět na MD.');
     }
 
@@ -218,7 +218,7 @@ final class OssPostingTest extends TestCase
         $byAccount = $this->linesByAccountCode($reversal['lines']);
 
         self::assertEqualsWithDelta(95.00, $byAccount[self::OSS_ACCOUNT]['debit'], 0.001, 'Protizápis vrací OSS daň na opačnou stranu.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001, 'Protizápis vrací i českou daň.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['debit'], 0.001, 'Protizápis vrací i českou daň.');
         $this->assertBalanced($reversal['lines']);
     }
 
@@ -240,7 +240,7 @@ final class OssPostingTest extends TestCase
 
         self::assertEqualsWithDelta(95.00, $byAccount['379']['credit'], 0.001, 'OSS daň jde na účet z per-tenant kontace.');
         self::assertArrayNotHasKey(self::OSS_ACCOUNT, $byAccount, 'Výchozí OSS účet se při override nepoužije.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['credit'], 0.001, 'Česká daň zůstává na 343 i při override.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001, 'Česká daň zůstává na 343 i při override.');
     }
 
     /** Regrese: doklad bez OSS řádků se musí účtovat úplně stejně jako dosud. */
@@ -251,7 +251,7 @@ final class OssPostingTest extends TestCase
 
         self::assertEqualsWithDelta(1210.00, $byAccount['311']['debit'], 0.001);
         self::assertEqualsWithDelta(1000.00, $byAccount['602']['credit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['credit'], 0.001, 'Bez OSS řádků nese 343 celou daň.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001, 'Bez OSS řádků nese 343 celou daň.');
         self::assertArrayNotHasKey(self::OSS_ACCOUNT, $byAccount, 'Bez OSS řádků nesmí vzniknout OSS noha.');
     }
 

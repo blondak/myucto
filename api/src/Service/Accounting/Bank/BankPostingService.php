@@ -147,7 +147,11 @@ final class BankPostingService
     /**
      * Hlavní hook po každém (re)match/importu. Nikdy nevyhazuje (best-effort, loguje).
      *
-     * @return array{action:string, reason?:string, entry_id?:int, suggestion_id?:int}
+     * Při výjimce vrací `reason='error'` a NAVÍC `message` s textem výjimky. Bez toho
+     * je dávkový běh slepý: 14 transakcí padalo na chybějící sloupec z neaplikované
+     * migrace a report ukazoval jen `error`, takže se příčina musela dolovat reflexí.
+     *
+     * @return array{action:string, reason?:string, message?:string, entry_id?:int, suggestion_id?:int}
      */
     public function handleTransaction(
         int $txId,
@@ -184,7 +188,7 @@ final class BankPostingService
                     ['message' => $e->getMessage()]);
             } catch (\Throwable) {
             }
-            return ['action' => 'skipped', 'reason' => 'error'];
+            return ['action' => 'skipped', 'reason' => 'error', 'message' => $e->getMessage()];
         }
     }
 

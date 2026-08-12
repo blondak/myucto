@@ -130,7 +130,7 @@ final class PostingServiceTest extends TestCase
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1210.00, $byAccount['311']['debit'], 0.001, '311 MD = celková částka.');
         self::assertEqualsWithDelta(1000.00, $byAccount['602']['credit'], 0.001, '602 D = základ.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['credit'], 0.001, '343 D = DPH z VatLedgerService.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001, '343 D = DPH z VatLedgerService.');
 
         $this->assertBalanced($entry['lines']);
         foreach ($entry['lines'] as $l) {
@@ -156,7 +156,7 @@ final class PostingServiceTest extends TestCase
         self::assertNotNull($entry);
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(2000.00, $byAccount['518']['debit'], 0.001, '518 MD = základ nákladu.');
-        self::assertEqualsWithDelta(420.00, $byAccount['343']['debit'], 0.001, '343 MD = odpočet DPH.');
+        self::assertEqualsWithDelta(420.00, $byAccount['343.100']['debit'], 0.001, '343 MD = odpočet DPH.');
         self::assertEqualsWithDelta(2420.00, $byAccount['321']['credit'], 0.001, '321 D = závazek.');
         $this->assertBalanced($entry['lines']);
     }
@@ -731,7 +731,7 @@ final class PostingServiceTest extends TestCase
         self::assertEqualsWithDelta(12100.00, $byAccount['311']['debit'], 0.001, '311 MD = celková částka.');
         self::assertEqualsWithDelta(10000.00, $byAccount['641']['credit'], 0.001, 'Výnos jde na 641, ne 602.');
         self::assertArrayNotHasKey('602', $byAccount, 'Prodej majetku nesmí spadnout na 602.');
-        self::assertEqualsWithDelta(2100.00, $byAccount['343']['credit'], 0.001, '343 D = DPH.');
+        self::assertEqualsWithDelta(2100.00, $byAccount['343.200']['credit'], 0.001, '343 D = DPH.');
         $this->assertBalanced($entry['lines']);
     }
 
@@ -761,7 +761,7 @@ final class PostingServiceTest extends TestCase
         self::assertEqualsWithDelta(3000.00, $byAccount['642']['credit'], 0.001, 'Drobný majetek na 642.');
         self::assertEqualsWithDelta(10000.00, $byAccount['641']['credit'], 0.001, 'Dlouhodobý majetek na 641.');
         self::assertEqualsWithDelta(18150.00, $byAccount['311']['debit'], 0.001, 'Pohledávka se rozpadem nehnula.');
-        self::assertEqualsWithDelta(3150.00, $byAccount['343']['credit'], 0.001, 'DPH se rozpadem nehnula.');
+        self::assertEqualsWithDelta(3150.00, $byAccount['343.200']['credit'], 0.001, 'DPH se rozpadem nehnula.');
         $this->assertBalanced($entry['lines']);
     }
 
@@ -878,7 +878,7 @@ final class PostingServiceTest extends TestCase
 
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1210.00, $byAccount['518']['debit'], 0.001, '518 MD = základ + DPH (bez nároku na odpočet).');
-        self::assertArrayNotHasKey('343', $byAccount, 'Bez nároku na odpočet žádný řádek 343.');
+        self::assertArrayNotHasKey('343.100', $byAccount, 'Bez nároku na odpočet žádný řádek 343.');
         self::assertEqualsWithDelta(1210.00, $byAccount['321']['credit'], 0.001);
         $this->assertBalanced($entry['lines']);
     }
@@ -908,7 +908,7 @@ final class PostingServiceTest extends TestCase
         $entry   = $this->journal->find($entryId, $this->supplierId);
 
         $byAccount = $this->linesByAccountCode($entry['lines']);
-        self::assertEqualsWithDelta(105.00, $byAccount['343']['debit'], 0.001, '343 MD = 50 % z 210 Kč DPH (uplatněná část).');
+        self::assertEqualsWithDelta(105.00, $byAccount['343.100']['debit'], 0.001, '343 MD = 50 % z 210 Kč DPH (uplatněná část).');
         self::assertEqualsWithDelta(1105.00, $byAccount['518']['debit'], 0.001, '518 MD = 1000 základ + 105 neuplatněná DPH.');
         self::assertEqualsWithDelta(1210.00, $byAccount['321']['credit'], 0.001);
         $this->assertBalanced($entry['lines']);
@@ -1000,7 +1000,7 @@ final class PostingServiceTest extends TestCase
         $entry = $this->journal->find($entryId, $this->supplierId);
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(984.12, $byAccount['518']['debit'], 0.001);
-        self::assertEqualsWithDelta(206.67, $byAccount['343']['debit'], 0.001);
+        self::assertEqualsWithDelta(206.67, $byAccount['343.100']['debit'], 0.001);
         self::assertEqualsWithDelta(282.20, $byAccount['355']['debit'], 0.001);
         self::assertEqualsWithDelta(1472.99, $byAccount['321']['credit'], 0.001);
         $this->assertBalanced($entry['lines']);
@@ -1060,7 +1060,7 @@ final class PostingServiceTest extends TestCase
 
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1000.00, $byAccount['518']['debit'], 0.001);
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAccount['343.100']['debit'], 0.001);
         self::assertEqualsWithDelta(1210.00, $byAccount['321']['credit'], 0.001);
         $this->assertBalanced($entry['lines']);
     }
@@ -1113,8 +1113,8 @@ final class PostingServiceTest extends TestCase
 
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1000.00, $byAccount['518']['debit'], 0.001, 'RC: náklad = základ.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001, 'RC: nárok na odpočet.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['credit'], 0.001, 'RC: povinnost přiznat daň (vyruší se).');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.100']['debit'], 0.001, 'RC: nárok na odpočet.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001, 'RC: povinnost přiznat daň (vyruší se).');
         self::assertEqualsWithDelta(1000.00, $byAccount['321']['credit'], 0.001, 'RC: závazek = jen základ (DPH samovyměřená).');
         $this->assertBalanced($entry['lines']);
     }
@@ -1151,7 +1151,7 @@ final class PostingServiceTest extends TestCase
 
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1000.00, $byAccount['518']['debit'], 0.001, '518 MD = základ (ledger řádek nalezen i v pozdějším roce).');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001, '343 MD = odpočet DPH.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.100']['debit'], 0.001, '343 MD = odpočet DPH.');
         self::assertEqualsWithDelta(1210.00, $byAccount['321']['credit'], 0.001, '321 D = závazek.');
         $this->assertBalanced($entry['lines']);
     }
@@ -1196,7 +1196,7 @@ final class PostingServiceTest extends TestCase
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(1210.00, $byAccount['311']['credit'], 0.001, '311 D = snížení pohledávky (abs).');
         self::assertEqualsWithDelta(1000.00, $byAccount['602']['debit'], 0.001, '602 MD = storno výnosu.');
-        self::assertEqualsWithDelta(210.00, $byAccount['343']['debit'], 0.001, '343 MD = storno DPH.');
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['debit'], 0.001, '343 MD = storno DPH.');
         $this->assertBalanced($entry['lines']);
     }
 
@@ -1263,7 +1263,7 @@ final class PostingServiceTest extends TestCase
         $byAccount = $this->linesByAccountCode($entry['lines']);
         self::assertEqualsWithDelta(2420.00, $byAccount['321']['debit'], 0.001, '321 MD = snížení závazku.');
         self::assertEqualsWithDelta(2000.00, $byAccount['518']['credit'], 0.001, '518 D = storno nákladu.');
-        self::assertEqualsWithDelta(420.00, $byAccount['343']['credit'], 0.001, '343 D = storno odpočtu.');
+        self::assertEqualsWithDelta(420.00, $byAccount['343.100']['credit'], 0.001, '343 D = storno odpočtu.');
         $this->assertBalanced($entry['lines']);
     }
 

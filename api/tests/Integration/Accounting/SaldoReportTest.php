@@ -238,6 +238,205 @@ final class SaldoReportTest extends TestCase
         self::assertTrue($afterPaymentAcc['matches']);
     }
 
+    // ── T3b: záloha inkasovaná PŘÍMO na saldokontní účet (bez 324/314) ───────
+
+    /**
+     * Účetní, která přijatou zálohu neúčtuje přes 324, ale rovnou na pohledávku
+     * (221 MD / 311 D), rozbíjela konfrontaci na dvě strany naráz: proforma je
+     * SAMOSTATNÝ doklad, takže `invoice_payments.invoice_id` míří na ni, ne na
+     * finální fakturu — ta pak neměla ŽÁDNOU vlastní platbu, `amount_to_pay` jí
+     * záloha srazila na nulu a předpis na 311 zůstal plný. Výsledek: plně
+     * předplacená faktura svítila jako celá otevřená a Σ položek byla proti
+     * hlavní knize nafouklá o dvojnásobek zálohy.
+     */
+    public function testProformaPaidStraightToReceivableClosesPrepaidInvoice(): void
+    {
+        $client = $this->client('Předplatitel s.r.o.');
+
+        $proforma = $this->proforma($client, 1210.00, self::YEAR . '-03-01', self::YEAR . '-03-08');
+        $txId = $this->bankInvoicePayment($proforma, 1210.00, self::YEAR . '-03-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 1210.00),
+            self::l('311', 'credit', 1210.00),
+        ], ['entry_date' => self::YEAR . '-03-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        // Finální faktura navázaná na proformu: plný předpis na 311, amount_to_pay = 0
+        // (generovaný sloupec total_with_vat − advance_paid_amount).
+        $final = $this->invoice($client, 1210.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = ? WHERE id = ?')
+            ->execute([$proforma, 1210.00, $final]);
+        $this->postInvoice($final, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-03-10');
+
+        $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($acc);
+        self::assertSame(0, self::cents($acc['gl_balance']), 'HK: předpis 1210 − inkaso zálohy 1210 = 0.');
+        self::assertSame(0, self::cents($acc['open_items_total']), 'Předplacená faktura NENÍ otevřená položka.');
+        self::assertSame(0, self::cents($acc['difference']));
+        self::assertTrue($acc['matches']);
+        self::assertNull($this->partner($acc, $client), 'Ani partner se v saldu neobjeví.');
+    }
+
+    /**
+     * Zrcadlo předchozího testu na ČÁSTEČNOU zálohu: v saldu smí zůstat přesně
+     * nedoplatek. Chytí obě chybné implementace naráz — jak původní (záloha se
+     * nezapočte vůbec → otevřeno 1210), tak naivní opravu odečtem celé zálohy od
+     * zbytku (→ otevřeno 0 nebo dokonce záporná položka).
+     */
+    public function testPartialProformaPrepaymentLeavesOnlyRemainderOpen(): void
+    {
+        $client = $this->client('Předplatitel částečný s.r.o.');
+
+        $proforma = $this->proforma($client, 1210.00, self::YEAR . '-03-01', self::YEAR . '-03-08');
+        $txId = $this->bankInvoicePayment($proforma, 605.00, self::YEAR . '-03-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 605.00),
+            self::l('311', 'credit', 605.00),
+        ], ['entry_date' => self::YEAR . '-03-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $final = $this->invoice($client, 1210.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = ? WHERE id = ?')
+            ->execute([$proforma, 605.00, $final]);
+        $this->postInvoice($final, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+        ], self::YEAR . '-03-10');
+
+        $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($acc);
+        self::assertSame(self::cents(605.00), self::cents($acc['gl_balance']));
+        self::assertSame(self::cents(605.00), self::cents($acc['open_items_total']), 'Otevřený je jen nedoplatek 605.');
+        self::assertSame(0, self::cents($acc['difference']));
+        self::assertTrue($acc['matches']);
+
+        $p = $this->partner($acc, $client);
+        self::assertNotNull($p);
+        self::assertSame(self::cents(1210.00), self::cents($p['items'][0]['booked_czk']));
+        self::assertSame(self::cents(605.00), self::cents($p['items'][0]['paid_czk']));
+        self::assertSame(self::cents(605.00), self::cents($p['items'][0]['remaining_czk']));
+    }
+
+    /**
+     * Regresní pojistka pro tenanty, kteří 324 POUŽÍVAJÍ: inkaso proformy kredituje
+     * 324 (ne 311) a finální faktura si zálohu zúčtuje sama zápisem 324 MD / 311 D
+     * ve VLASTNÍM zápisu — `booked_signed` proto přichází už netto. Záloha se tedy
+     * NESMÍ započítat podruhé přes vazbu parent_invoice_id, jinak by se plně
+     * uhrazená část odečetla dvakrát a položka spadla pod nulu.
+     */
+    public function testAdvanceOn324IsNotCountedTwiceAgainstFinalInvoice(): void
+    {
+        $client = $this->client('Zálohový přes 324 s.r.o.');
+
+        $proforma = $this->proforma($client, 1210.00, self::YEAR . '-03-01', self::YEAR . '-03-08');
+        $txId = $this->bankInvoicePayment($proforma, 605.00, self::YEAR . '-03-05');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 605.00),
+            self::l('324', 'credit', 605.00),
+        ], ['entry_date' => self::YEAR . '-03-05', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $final = $this->invoice($client, 1210.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = ? WHERE id = ?')
+            ->execute([$proforma, 605.00, $final]);
+        $this->postInvoice($final, [
+            self::l('311', 'debit', 1210.00),
+            self::l('602', 'credit', 1000.00),
+            self::l('343', 'credit', 210.00),
+            self::l('324', 'debit', 605.00),
+            self::l('311', 'credit', 605.00),
+        ], self::YEAR . '-03-10');
+
+        $acc = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($acc);
+        self::assertSame(self::cents(605.00), self::cents($acc['gl_balance']), 'Předpis 1210 − zúčtování zálohy 605.');
+        self::assertSame(self::cents(605.00), self::cents($acc['open_items_total']), 'Záloha z 324 se na 311 NEodečítá podruhé.');
+        self::assertSame(0, self::cents($acc['difference']));
+        self::assertTrue($acc['matches']);
+
+        $p = $this->partner($acc, $client);
+        self::assertNotNull($p);
+        self::assertSame(self::cents(605.00), self::cents($p['items'][0]['booked_czk']), 'Předpis přichází už netto o zúčtovanou zálohu.');
+        self::assertSame(self::cents(605.00), self::cents($p['items'][0]['remaining_czk']));
+    }
+
+    // ── T3c: úhrada, kterou deník uznává až PO rozvahovém dni ────────────────
+
+    /**
+     * `invoice_payments.paid_on` je datum, které si zapsala účetní; hlavní kniha ale
+     * pohledávku odúčtuje až `entry_date` bankovního zápisu. Legacy importy (a lednové
+     * výpisy k prosincovým fakturám) tyhle dva dny běžně rozcházejí — a saldokonto pak
+     * fakturu k 31. 12. skrylo, přestože ji HK měla otevřenou. Konfrontace musí měřit
+     * stejným datem jako deník.
+     */
+    public function testPaymentPostedAfterAsOfKeepsInvoiceOpen(): void
+    {
+        $client = $this->client('Lednový výpis s.r.o.');
+        $invoiceId = $this->invoice($client, 1000.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->postInvoice($invoiceId, [
+            self::l('311', 'debit', 1000.00),
+            self::l('602', 'credit', 1000.00),
+        ], self::YEAR . '-03-10');
+
+        // Doklad nese paid_on v červnu, banka pohyb i zápis až v srpnu.
+        $txId = $this->bankInvoicePayment($invoiceId, 1000.00, self::YEAR . '-06-30', self::YEAR . '-08-01');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('221', 'debit', 1000.00),
+            self::l('311', 'credit', 1000.00),
+        ], ['entry_date' => self::YEAR . '-08-01', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $before = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-06-30', '311'), '311');
+        self::assertNotNull($before);
+        self::assertSame(self::cents(1000.00), self::cents($before['gl_balance']));
+        self::assertSame(self::cents(1000.00), self::cents($before['open_items_total']), 'K 30. 6. deník úhradu ještě nezná — položka je otevřená.');
+        self::assertTrue($before['matches']);
+
+        $after = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($after);
+        self::assertSame(0, self::cents($after['gl_balance']));
+        self::assertSame(0, self::cents($after['open_items_total']));
+        self::assertTrue($after['matches']);
+    }
+
+    /**
+     * Přijatá strana téhož: `status='paid'` + `paid_at` je stav DOKLADU. Když k PF
+     * existuje bankovní párování, které deník uznává až po rozvahovém dni, zkratka
+     * „paid ⇒ uzavřeno" ze salda odstraní závazek, který HK k tomu dni pořád má.
+     * PF BEZ bankovního párování (hotovost, ruční „označit zaplaceno") si zkratku
+     * ponechává — to hlídá T7 výše.
+     */
+    public function testPurchasePaidInDocumentButPostedAfterAsOfStaysOpen(): void
+    {
+        $vendor = $this->client('Dodavatel lednový s.r.o.');
+        $pi = $this->purchaseInvoice($vendor, 1000.00, self::YEAR . '-03-10', self::YEAR . '-03-24');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            self::l('518', 'debit', 1000.00),
+            self::l('321', 'credit', 1000.00),
+        ], ['entry_date' => self::YEAR . '-03-10', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $txId = $this->bankPayment($pi, 1000.00, self::YEAR . '-08-01');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            self::l('321', 'debit', 1000.00),
+            self::l('221', 'credit', 1000.00),
+        ], ['entry_date' => self::YEAR . '-08-01', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->purchaseInvoices->setStatus($pi, 'paid', $this->supplierId, self::YEAR . '-05-31');
+
+        $before = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-06-30', '321'), '321');
+        self::assertNotNull($before);
+        self::assertSame(self::cents(1000.00), self::cents($before['gl_balance']));
+        self::assertSame(self::cents(1000.00), self::cents($before['open_items_total']), 'PF označená jako zaplacená, ale v deníku k 30. 6. neuhrazená, zůstává otevřená.');
+        self::assertSame(0, self::cents($before['difference']));
+        self::assertTrue($before['matches']);
+
+        $after = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '321'), '321');
+        self::assertNotNull($after);
+        self::assertSame(0, self::cents($after['gl_balance']));
+        self::assertSame(0, self::cents($after['open_items_total']));
+        self::assertTrue($after['matches']);
+    }
+
     // ── T4: tenant izolace ───────────────────────────────────────────────────
 
     public function testTenantIsolation(): void
@@ -607,6 +806,50 @@ final class SaldoReportTest extends TestCase
         $vs = (string) random_int(1000000000, 1999999999);
         $stmt->execute([$sid, $vs, $clientId, $issue, $due, $this->currencyId, $this->userId, $total]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Proforma (zálohová faktura): samostatný doklad, na který finál ukazuje parent_invoice_id. */
+    private function proforma(int $clientId, float $total, string $issue, string $due): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "INSERT INTO invoices (supplier_id, varsymbol, invoice_type, client_id, issue_date, due_date, currency_id, created_by, total_with_vat, status)
+             VALUES (?, ?, 'proforma', ?, ?, ?, ?, ?, ?, 'issued')"
+        );
+        $stmt->execute([
+            $this->supplierId, (string) random_int(1000000000, 1999999999), $clientId,
+            $issue, $due, $this->currencyId, $this->userId, $total,
+        ]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * Bankovní úhrada VYDANÉ faktury (nebo proformy): výpis + pohyb + invoice_payments.
+     * `$postedOn` (den pohybu v bance) smí být jiný než `$paidOn` (den z dokladu) —
+     * přesně tak vypadá lednový výpis k prosincové faktuře. Vrací id pohybu.
+     */
+    private function bankInvoicePayment(int $invoiceId, float $amount, string $paidOn, ?string $postedOn = null): int
+    {
+        $pdo = $this->db->pdo();
+        $hash = hash('sha256', 'saldo-inv-' . $invoiceId . '-' . random_int(1, PHP_INT_MAX));
+        $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, bank_code, statement_date)
+             VALUES (?, "gpc", ?, ?, "1000000005", "0100", ?)'
+        )->execute([$this->supplierId, 'saldo-inv.gpc', $hash, $postedOn ?? $paidOn]);
+        $statementId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, source, posted_at, amount, currency, counterparty_name, description, match_status, matched_invoice_id)
+             VALUES (?, "statement", ?, ?, "CZK", "Odběratel", "Úhrada faktury", "manual", ?)'
+        )->execute([$statementId, $postedOn ?? $paidOn, $amount, $invoiceId]);
+        $txId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, bank_transaction_id)
+             VALUES (?, ?, ?, ?, "CZK", "bank", ?)'
+        )->execute([$this->supplierId, $invoiceId, $paidOn, $amount, $txId]);
+
+        return $txId;
     }
 
     /** Dobropis: invoice_type='credit_note', total_with_vat konvenčně záporné. */

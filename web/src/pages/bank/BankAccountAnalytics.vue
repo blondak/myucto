@@ -19,6 +19,11 @@ const toast = useToast()
 
 const KINDS: BankAccountKind[] = ['current', 'savings', 'term_deposit']
 
+// Tvar kódu analytiky — TEČKOVANÝ, shodně se zbytkem osnovy (501.100, 345.100) i se
+// serverem (BankAnalyticAssigner::codeFor, migrace 1322). Ukládá se pořád jen suffix
+// ('100'), prefix je čistě zobrazení.
+const BANK_PREFIX = '221.'
+
 const accounts = ref<SupplierBankAccount[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -85,7 +90,7 @@ async function saveAll() {
         (o) => o.id !== a.id && (drafts.value[o.id]?.analytic_suffix ?? '') === d.analytic_suffix && d.analytic_suffix !== '',
       )
       if (clash) {
-        toast.error(t('bank.analytics.suffix_taken', { suffix: '221' + d.analytic_suffix, account: accountLabel(clash) }))
+        toast.error(t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) }))
         return
       }
       await bankPostingApi.updateAccount(a.id, {
@@ -165,13 +170,13 @@ onMounted(load)
                 <td class="px-3 py-2">
                   <div class="flex items-center gap-2 font-mono">
                     <div class="flex items-center gap-1">
-                      <span class="text-neutral-400">221</span>
+                      <span class="text-neutral-400">{{ BANK_PREFIX }}</span>
                       <input v-model="drafts[a.id].analytic_suffix" type="text" maxlength="6" :disabled="!canWrite"
                              placeholder="—"
                              class="w-20 h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface font-mono disabled:bg-neutral-50" />
                     </div>
                     <span v-if="drafts[a.id].analytic_suffix" class="text-neutral-500 whitespace-nowrap">
-                      = {{ '221' + drafts[a.id].analytic_suffix }}
+                      = {{ BANK_PREFIX + drafts[a.id].analytic_suffix }}
                     </span>
                   </div>
                 </td>

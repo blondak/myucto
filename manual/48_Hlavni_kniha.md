@@ -59,27 +59,40 @@ daného fiskálního období.
 Peníze se pro součty převádějí na haléře. Účet bez PS i bez obratu se
 nezobrazuje. Řádek **Součty** sčítá všechny zobrazené účty.
 
-## 48.4 Měsíční rozpad
+## 48.4 Měsíční rozpad a řádky měsíce
 
 Šipka na začátku řádku rozbalí obrat MD a Dal po kalendářních měsících
 zasahujících do nastaveného rozsahu. Jde o rozpad obratu, nikoli zůstatku:
 měsíc bez pohybu proto ukazuje nuly. Měsíční částky se seskupují stejně jako
-hlavní řádek — podle syntetiky, nebo po analytikách.
+hlavní řádek — podle syntetiky, nebo po analytikách. Součet měsíců se rovná
+obratu za celý rozsah; otevírací zápis prvního dne období je i tady součástí
+počátečního stavu, ne lednového obratu.
+
+Kliknutí na měsíc s pohybem rozbalí **jednotlivé řádky deníku** za ten měsíc:
+datum, doklad, analytiku, popis a částku na správné straně. Doklad vede na
+prvotní doklad (viz [48.5](#485-opis-účtu)). Zobrazí se prvních 200 řádků;
+u delších měsíců odkaz v patičce pokračuje v opisu účtu za stejný měsíc.
+
+Kliknutí na **kód účtu** otevře [kartu účtu](62_Ucetni_osnova.md#627-karta-účtu)
+se zachovaným rozsahem `Od / Do`. Z karty vede odkaz zpět do hlavní knihy;
+kniha pak dotčený účet sama rozbalí a odroluje k němu.
 
 ## 48.5 Opis účtu
 
-Kliknutí na kód účtu otevře opis se zachovaným rozsahem `Od / Do`. Opis
-syntetického účtu zahrnuje i jeho analytiky a nahoře ukazuje PS, obrat MD,
-obrat Dal a KS.
+Opis účtu otevřeš z karty účtu nebo z rozbaleného měsíce; rozsah `Od / Do`
+se přenáší. Opis syntetického účtu zahrnuje i jeho analytiky a nahoře ukazuje
+PS, obrat MD, obrat Dal a KS. Je-li opis složený z víc analytik, přibude
+sloupec **Analytika** s odkazem na kartu příslušného účtu.
 
 Pohyby jsou řazené podle data, ID zápisu a čísla řádku. Sloupec **Zůstatek**
 je běžící saldo `PS + MD − Dal` počítané nad celým rozsahem, takže navazuje
 správně i na dalších stránkách. Výchozí stránka má 50 řádků. Kladný zůstatek
 znamená MD, záporný Dal.
 
-Doklad v opisu vede podle zdroje na vydanou fakturu, přijatou fakturu nebo na
-konkrétní zápis účetního deníku. PDF/XLSX opisu obsahuje celý zvolený rozsah,
-nejen aktuální stránku.
+Doklad v opisu vede podle zdroje na vydanou fakturu, přijatou fakturu, bankovní
+výpis, pokladní doklad, kartu majetku nebo na vyrovnaný doklad zápočtu; bez
+rozpoznaného zdroje na konkrétní zápis účetního deníku. PDF/XLSX opisu obsahuje
+celý zvolený rozsah, nejen aktuální stránku.
 
 ## 48.6 Export a návaznosti
 

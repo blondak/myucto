@@ -749,8 +749,12 @@ final class CashDocumentService
         $revenue = $this->ruleAccount($supplierId, 'cash.revenue', 'credit', '602');
         $lines = [$this->line($cashAccount, 'debit', $total)];
         $lines[] = $this->line($revenue, 'credit', $baseSum);
+        // Analytika daně na VÝSTUPU (343.200) — táž kontace jako u vydané faktury
+        // (PostingService::outputVatAccount). Kdyby pokladna zůstala na plochém 343,
+        // vypadla by z měsíčního zúčtování DPH (VatClearingService sčítá analytiky).
+        $outputVat = $this->vatAccount($supplierId, 'invoice.vat.output', 'credit', PostingService::OUTPUT_VAT_ACCOUNT);
         foreach ($vatLines as $vl) {
-            $lines[] = $this->line('343', 'credit', (float) $vl['vat_amount']);
+            $lines[] = $this->line($outputVat, 'credit', (float) $vl['vat_amount']);
         }
         return $lines;
     }
@@ -763,8 +767,10 @@ final class CashDocumentService
     {
         $expense = $this->ruleAccount($supplierId, 'cash.purchase', 'debit', '501');
         $lines = [$this->line($expense, 'debit', $baseSum)];
+        // Analytika daně na VSTUPU (343.100) — zrcadlo buildSale, viz komentář tamtéž.
+        $inputVat = $this->vatAccount($supplierId, 'invoice.vat.input', 'debit', PostingService::INPUT_VAT_ACCOUNT);
         foreach ($vatLines as $vl) {
-            $lines[] = $this->line('343', 'debit', (float) $vl['vat_amount']);
+            $lines[] = $this->line($inputVat, 'debit', (float) $vl['vat_amount']);
         }
         $lines[] = $this->line($cashAccount, 'credit', $total);
         return $lines;
@@ -897,6 +903,26 @@ final class CashDocumentService
         $rule = $this->rules->resolve($supplierId, $ruleKey);
         $code = $rule[$side . '_account_code'] ?? null;
         return $code !== null && $code !== '' ? (string) $code : $fallback;
+    }
+
+    /**
+     * Daňový účet pokladního dokladu s degradací na syntetiku 343 — zrcadlo
+     * {@see PostingService::vatAccount()}. Když analytika u tenanta (ještě) není,
+     * doklad se zaúčtuje postaru na ploché 343 místo aby spadl na `unknown_account`.
+     */
+    private function vatAccount(int $supplierId, string $ruleKey, string $side, string $fallback): string
+    {
+        $code = $this->ruleAccount($supplierId, $ruleKey, $side, $fallback);
+        if ($code === PostingService::VAT_SYNTHETIC) {
+            return $code;
+        }
+        $account = $this->accounts->findByCode($supplierId, $code);
+        if ($account !== null && !empty($account['is_active'])) {
+            return $code;
+        }
+        $synthetic = $this->accounts->findByCode($supplierId, PostingService::VAT_SYNTHETIC);
+
+        return ($synthetic !== null && !empty($synthetic['is_active'])) ? PostingService::VAT_SYNTHETIC : $code;
     }
 
     /**

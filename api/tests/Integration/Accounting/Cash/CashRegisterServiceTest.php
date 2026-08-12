@@ -181,11 +181,11 @@ final class CashRegisterServiceTest extends TestCase
 
     public function testForeignCurrencyRegisterAutoAnalytic(): void
     {
-        // Bez zadané analytiky se přidělí první volná 211xxx automaticky.
+        // Bez zadané analytiky se přidělí první volná 211.xxx automaticky (tečkovaný tvar).
         $id = $this->service->create($this->supplierId, ['name' => 'USD pokladna', 'currency_code' => 'USD']);
         $detail = $this->service->get($this->supplierId, $id);
         self::assertSame('USD', $detail['currency_code']);
-        self::assertMatchesRegularExpression('/^211\d{3}$/', (string) $detail['account_code'], 'Auto-přidělená analytika 211NNN.');
+        self::assertMatchesRegularExpression('/^211[.]\d{3}$/', (string) $detail['account_code'], 'Auto-přidělená analytika 211.NNN.');
         self::assertNotNull($detail['account_id']);
     }
 
@@ -243,12 +243,14 @@ final class CashRegisterServiceTest extends TestCase
     public function testForeignAutoAnalyticPrefersCoaFreeCode(): void
     {
         // 211001 už existuje v osnově (bez ledgeru) → auto-přidělení ho PŘESKOČÍ a vezme
-        // první kód BEZ účtu v osnově (211002), aby neadoptovalo cizí analytiku.
+        // první kód BEZ účtu v osnově, aby neadoptovalo cizí analytiku. Zároveň se tím
+        // ověřuje, že obsazenost čísla se hlídá i na BEZTEČKOVÉM tvaru z doby před
+        // migrací 1322 — nový kód se skládá tečkovaně (211.002).
         $this->seedAnalytic('211001');
         $id = $this->service->create($this->supplierId, ['name' => 'EUR auto', 'currency_code' => 'EUR']);
         $detail = $this->service->get($this->supplierId, $id);
         self::assertNotSame('211001', $detail['account_code'], 'Auto-přidělení nesmí adoptovat existující analytiku.');
-        self::assertSame('211002', $detail['account_code']);
+        self::assertSame('211.002', $detail['account_code']);
     }
 
     public function testForeignRegisterRejectsAccountWithLedgerHistory(): void

@@ -164,6 +164,20 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Interní doklad zúčtování DPH — převod daně období z 343.100/343.200
+                // na zúčtovací 343.900. Měsíční úloha ze stejného důvodu jako mzdy:
+                // účtuje uzavřené období, takže musí běžet až po jeho konci. 04:30 je
+                // půl hodiny po mzdách, ať se doklad počítá nad kompletním deníkem.
+                // `max_age_hours` = 33 dní (nejdelší mezera mezi běhy + rezerva).
+                'script' => 'cron-vat-clearing',
+                'recommended' => 'monthly_day1_0430',
+                'linux_cron' => '30 4 1 * *',
+                'windows_schtasks' => '/sc monthly /d 1 /st 04:30',
+                'max_age_hours' => 792,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 // VH-01: propíše plánované změny plátcovství DPH (budoucí účinnost)
                 // do živé cache supplier.is_vat_payer/is_identified. Běží krátce po
                 // půlnoci, aby nový stav platil od začátku dne účinnosti.

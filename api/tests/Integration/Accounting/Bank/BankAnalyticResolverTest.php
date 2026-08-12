@@ -11,7 +11,7 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Bankovní noha na dedikované analytice vlastního účtu (BankAnalyticResolver +
- * BankAnalyticAssigner). Každý bankovní účet firmy má vlastní 221xxx — chybějící
+ * BankAnalyticAssigner). Každý bankovní účet firmy má vlastní 221.xxx — chybějící
  * analytika se přidělí automaticky, ručně přiřazená se nikdy nepřepíše.
  * Sdílí izolovanou DB transakci s BankPostingTestCase (rollback v tearDown).
  */
@@ -63,12 +63,12 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
 
         $out = $this->resolver->apply($this->supplierId, $this->tx('2000000055', '0300'), $lines);
 
-        self::assertSame('221500', $out[0]['account_code'], 'Bankovní noha na dedikované analytice 221500.');
+        self::assertSame('221.500', $out[0]['account_code'], 'Bankovní noha na dedikované analytice 221.500.');
         self::assertSame('EUR', $out[0]['currency_code'], 'FX stopa řádku se zachová.');
         self::assertSame('311', $out[1]['account_code'], 'Protiúčet (saldokonto) beze změny.');
 
-        $created = $this->accounts->findByCode($this->supplierId, '221500');
-        self::assertNotNull($created, 'Analytika 221500 se dohrála do osnovy.');
+        $created = $this->accounts->findByCode($this->supplierId, '221.500');
+        self::assertNotNull($created, 'Analytika 221.500 se dohrála do osnovy.');
         self::assertFalse((bool) $created['is_synthetic']);
         $parent = $this->accounts->findByCode($this->supplierId, '221');
         self::assertSame((int) $parent['id'], (int) $created['parent_id'], 'Analytika visí pod syntetickým 221.');
@@ -79,16 +79,16 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
     public function testLeavesSpecificAnalyticsAndCounterUntouched(): void
     {
         $this->ownAccount('2000000056', '0300', '500');
-        // Termínovaný vklad (221100) i protiúčet 261 se NEsmí přepsat — přepisuje se jen holé '221'.
+        // Termínovaný vklad (221.100) i protiúčet 261 se NEsmí přepsat — přepisuje se jen holé '221'.
         $lines = [
-            ['account_code' => '221100', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '221.100', 'side' => 'debit', 'amount' => 500.0],
             ['account_code' => '221', 'side' => 'credit', 'amount' => 500.0],
         ];
 
         $out = $this->resolver->apply($this->supplierId, $this->tx('2000000056', '0300'), $lines);
 
-        self::assertSame('221100', $out[0]['account_code'], 'Konkrétní analytika 221100 zůstává.');
-        self::assertSame('221500', $out[1]['account_code'], 'Jen holé 221 se přesměruje.');
+        self::assertSame('221.100', $out[0]['account_code'], 'Konkrétní analytika 221.100 zůstává.');
+        self::assertSame('221.500', $out[1]['account_code'], 'Jen holé 221 se přesměruje.');
     }
 
     /**
@@ -107,11 +107,11 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
 
         $code = (string) $out[0]['account_code'];
         self::assertNotSame('221', $code, 'Bankovní noha se nesmí nechat na plochém 221.');
-        self::assertMatchesRegularExpression('/^221[0-9]{1,6}$/', $code);
+        self::assertMatchesRegularExpression('/^221[.][0-9]{1,6}$/', $code);
         self::assertSame('311', $out[1]['account_code'], 'Protiúčet zůstává beze změny.');
 
         $stored = $this->bankAccounts->find($this->supplierId, $id);
-        self::assertSame($code, '221' . (string) $stored['analytic_suffix'], 'Suffix se uložil k účtu.');
+        self::assertSame($code, '221.' . (string) $stored['analytic_suffix'], 'Suffix se uložil k účtu.');
         self::assertNotNull($this->accounts->findByCode($this->supplierId, $code), 'Analytika je v osnově.');
     }
 
@@ -126,7 +126,7 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
 
         self::assertSame($first[0]['account_code'], $second[0]['account_code']);
         $stored = $this->bankAccounts->find($this->supplierId, $id);
-        self::assertSame($first[0]['account_code'], '221' . (string) $stored['analytic_suffix']);
+        self::assertSame($first[0]['account_code'], '221.' . (string) $stored['analytic_suffix']);
     }
 
     /** Dva účty firmy nesmí dostat totéž číslo — jinak by se jejich zůstatky promíchaly. */
@@ -153,20 +153,20 @@ final class BankAnalyticResolverTest extends BankPostingTestCase
             [['account_code' => '221', 'side' => 'debit', 'amount' => 10.0]],
         );
 
-        self::assertSame('221742', $out[0]['account_code']);
+        self::assertSame('221.742', $out[0]['account_code']);
         $stored = $this->bankAccounts->find($this->supplierId, $id);
         self::assertSame('742', (string) $stored['analytic_suffix']);
     }
 
     /**
      * Analytika, na které UŽ NĚCO LEŽÍ, se automaticky nepřidělí — bankovní účet by
-     * zdědil cizí zůstatek (typicky ručně vedený termínovaný vklad na 221100).
+     * zdědil cizí zůstatek (typicky ručně vedený termínovaný vklad na 221.100).
      */
     public function testAssignerSkipsAnalyticWithLedgerHistory(): void
     {
         $free = $this->assigner->nextFreeSuffix($this->supplierId);
         self::assertNotNull($free);
-        $code = '221' . $free;
+        $code = '221.' . $free;
 
         // Analytika s jedním řádkem v deníku → další volání ji musí přeskočit.
         $accountId = $this->assigner->ensureChartAccount($this->supplierId, $free, 'Obsazená analytika');

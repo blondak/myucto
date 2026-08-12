@@ -40,6 +40,7 @@ final class PayrollPostingService
         private readonly PayrollEmployeeRepository $employees,
         private readonly PayrollMonthlyRecordRepository $records,
         private readonly PayrollPeriodOwnershipService $periodOwnership,
+        private readonly PayrollPostingAccountResolver $accountResolver,
     ) {}
 
     /**
@@ -62,6 +63,7 @@ final class PayrollPostingService
      *   taxpayer_credit:bool, child_count:int,
      *   credits:array{taxpayer:int,children:int,total:int},
      *   breakdown:array<string,int>,
+     *   accounts:array<string,string>,
      *   lines:list<array{account_code:string,side:string,amount:float,description?:string}>
      * }
      */
@@ -78,6 +80,12 @@ final class PayrollPostingService
     ): array {
         $this->assertPeriod($year, $month);
         $this->assertType($taxpayerType);
+
+        // Kontace firmy (analytika účetní / `payroll_employer_settings`); bez známé
+        // firmy zůstávají syntetiky — náhled bez `supplier_id` se do deníku nedostane.
+        $accounts = $supplierId !== null
+            ? $this->accountResolver->forSupplier($supplierId)
+            : PayrollPostingAccounts::defaults();
 
         $settlementAccount = null;
         if ($supplierId !== null && $employeeId !== null) {
@@ -111,7 +119,7 @@ final class PayrollPostingService
 
         $withholding = $employee === null ? null : $this->withholdingFor($employee, $constants, $gross);
         if ($withholding !== null) {
-            $preview = $this->withholdingPreview($year, $month, $taxpayerType, $withholding);
+            $preview = $this->withholdingPreview($year, $month, $taxpayerType, $withholding, $accounts);
             $preview['replaces_gross'] = $replaces;
             $preview['warnings'] = array_merge(
                 $preview['warnings'] ?? [],
@@ -137,7 +145,8 @@ final class PayrollPostingService
             'credits'         => $credits,
             'breakdown'       => $breakdown,
             'settlement_account' => $settlementAccount,
-            'lines'           => PayrollCalculator::lines($breakdown, $taxpayerType, $settlementAccount),
+            'accounts'        => $accounts->toMap(),
+            'lines'           => PayrollCalculator::lines($breakdown, $taxpayerType, $settlementAccount, $accounts),
             'replaces_gross' => $replaces,
             'warnings'        => self::replacementWarnings($replaces, $gross),
         ];
@@ -306,16 +315,22 @@ final class PayrollPostingService
      * @param array<string,mixed> $w výsledek WithholdingTaxCalculator::compute()
      * @return array<string,mixed>
      */
-    private function withholdingPreview(int $year, int $month, string $taxpayerType, array $w): array
-    {
-        $accounts = PayrollCalculator::accounts($taxpayerType);
+    private function withholdingPreview(
+        int $year,
+        int $month,
+        string $taxpayerType,
+        array $w,
+        ?PayrollPostingAccounts $accounts = null,
+    ): array {
+        $accounts ??= PayrollPostingAccounts::defaults();
+        $pair = $accounts->forType($taxpayerType);
         $lines = [
-            ['account_code' => $accounts['expense'], 'side' => 'debit',  'amount' => (float) $w['gross'], 'description' => 'Odměna z DPP'],
-            ['account_code' => $accounts['payable'], 'side' => 'credit', 'amount' => (float) $w['gross'], 'description' => 'Odměna z DPP'],
+            ['account_code' => $pair['expense'], 'side' => 'debit',  'amount' => (float) $w['gross'], 'description' => 'Odměna z DPP'],
+            ['account_code' => $pair['payable'], 'side' => 'credit', 'amount' => (float) $w['gross'], 'description' => 'Odměna z DPP'],
         ];
         if ($w['tax'] > 0) {
-            $lines[] = ['account_code' => $accounts['payable'], 'side' => 'debit',  'amount' => (float) $w['tax'], 'description' => 'Srážková daň (§ 6/4 ZDP)'];
-            $lines[] = ['account_code' => '342', 'side' => 'credit', 'amount' => (float) $w['tax'], 'description' => 'Srážková daň (§ 6/4 ZDP)'];
+            $lines[] = ['account_code' => $pair['payable'], 'side' => 'debit',  'amount' => (float) $w['tax'], 'description' => 'Srážková daň (§ 6/4 ZDP)'];
+            $lines[] = ['account_code' => $accounts->incomeTaxPayable, 'side' => 'credit', 'amount' => (float) $w['tax'], 'description' => 'Srážková daň (§ 6/4 ZDP)'];
         }
 
         return [
@@ -330,6 +345,7 @@ final class PayrollPostingService
             'child_count'     => 0,
             'credits'         => ['taxpayer' => 0, 'children' => 0, 'total' => 0],
             'withholding'     => $w,
+            'accounts'        => $accounts->toMap(),
             'breakdown'       => [
                 'gross'                => $w['gross'],
                 'employee_deductions'  => 0,

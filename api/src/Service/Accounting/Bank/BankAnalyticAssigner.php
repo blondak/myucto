@@ -9,15 +9,23 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 
 /**
- * Přidělování analytiky 221<suffix> vlastním bankovním účtům (SSOT).
+ * Přidělování analytiky 221.<suffix> vlastním bankovním účtům (SSOT).
  *
- * Účetní požadavek: KAŽDÝ bankovní účet firmy má vlastní analytiku (221100, 221200…),
+ * Účetní požadavek: KAŽDÝ bankovní účet firmy má vlastní analytiku (221.100, 221.200…),
  * ne společné ploché 221. Bez toho leží na jednom účtu několik reálných účtů, zůstatek
  * syntetiky nesedí na žádný výpis, inventarizace k rozvahovému dni (§ 29/30 ZoÚ) se
  * nedá doložit a cizoměnová pozice se navíc promíchá (viz {@see BankAnalyticResolver}).
  *
+ * TVAR KÓDU — TEČKOVANÝ. Zbytek osnovy vede analytiky tečkovaně (501.100, 511.100,
+ * 345.100 v {@see \MyInvoice\Service\Accounting\ChartOfAccountsTemplate}) a stejně je
+ * vede i účetní. Banka a pokladna se historicky psaly bez tečky (221100), takže jedna
+ * osnova míchala dva zápisy téže věci. Migrace 1322 to sjednotila na TEČKOVANÝ tvar a
+ * tahle třída je jediné místo, které kód skládá — {@see codeFor()}.
+ * `analytic_suffix` v `supplier_bank_accounts` nese POUZE číslo ('100'), nikdy prefix,
+ * takže sjednocení tvaru se do dat účtů nepromítá.
+ *
  * Tahle třída drží JEDINÉ místo, které rozhoduje, JAKÉ číslo účet dostane:
- *   1. tier — násobky sta: 100, 200 … 900  (221100, 221200 … 221900)
+ *   1. tier — násobky sta: 100, 200 … 900  (221.100, 221.200 … 221.900)
  *   2. tier — násobky deseti: 010, 020 … 990
  *   3. tier — zbytek: 001 … 999
  * Bere se první VOLNÝ kandidát, přičemž volný znamená:
@@ -25,12 +33,12 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
  *   - v osnově buď vůbec neexistuje, nebo existuje jako aktivní analytika BEZ jediného
  *     řádku v deníku.
  * Druhá podmínka je záměrná pojistka proti adopci cizí historie: analytika, na které
- * už něco leží (typicky ručně vedený termínovaný vklad na 221100), se automaticky
+ * už něco leží (typicky ručně vedený termínovaný vklad na 221.100), se automaticky
  * NEPŘIDĚLÍ — jinak by bankovní účet zdědil zůstatek, který mu nepatří. Namapovat ji
  * na konkrétní účet jde ručně v nastavení (tam je to vědomé rozhodnutí uživatele).
  *
  * Stejný koncept pro pokladny žije v CashRegisterService::nextFreeCashAnalytic()
- * (211xxx) — odlišnost je jen v syntetice a v tom, že pokladna analytiku dostává
+ * (211.xxx) — odlišnost je jen v syntetice a v tom, že pokladna analytiku dostává
  * povinně až u valutové, kdežto banka ji má mít vždy.
  */
 final class BankAnalyticAssigner
@@ -38,7 +46,14 @@ final class BankAnalyticAssigner
     /** Syntetický účet banky, pod který analytiky patří. */
     public const BANK_SYNTHETIC = '221';
 
-    /** Povolený tvar suffixu (sdílený s FE i API validací). */
+    /** Oddělovač analytiky (tečkovaný tvar — sjednoceno migrací 1322). */
+    public const ANALYTIC_SEPARATOR = '.';
+
+    /**
+     * Povolený tvar suffixu (sdílený s FE i API validací). ZÁMĚRNĚ jen číslice bez
+     * tečky: tečku přidává až {@see codeFor()}, takže uložený `analytic_suffix`
+     * zůstal beze změny i po přechodu na tečkovaný tvar kódu.
+     */
     public const SUFFIX_PATTERN = '/^[0-9]{1,6}$/';
 
     public function __construct(
@@ -73,9 +88,10 @@ final class BankAnalyticAssigner
         return is_string($suffix) && preg_match(self::SUFFIX_PATTERN, $suffix) === 1;
     }
 
+    /** Kód analytiky pro suffix — JEDINÉ místo, kde se skládá (tečkovaný tvar). */
     public static function codeFor(string $suffix): string
     {
-        return self::BANK_SYNTHETIC . $suffix;
+        return self::BANK_SYNTHETIC . self::ANALYTIC_SEPARATOR . $suffix;
     }
 
     /**
@@ -169,7 +185,7 @@ final class BankAnalyticAssigner
             if (isset($taken[$suffix])) {
                 continue;
             }
-            $state = $chart[self::codeFor($suffix)] ?? null;
+            $state = $chart[$suffix] ?? null;
             if ($state === null) {
                 return $suffix;
             }
@@ -182,7 +198,14 @@ final class BankAnalyticAssigner
     }
 
     /**
-     * Stav analytik pod 221 v osnově firmy: kód → [aktivní?, má řádky v deníku?].
+     * Stav analytik pod 221 v osnově firmy: SUFFIX → [aktivní?, má řádky v deníku?].
+     *
+     * Klíčem je ZÁMĚRNĚ suffix, ne celý kód: migrace 1322 sice kódy sjednotila na
+     * tečkovaný tvar, ale tam, kde tečkovaná varianta už existovala, se bezteččková
+     * kvůli kolizi s `uq_coa_supplier_code` přejmenovat nemohla (typicky ručně vedený
+     * termínovaný vklad 221100 vedle nového 221.100). Obě varianty proto sytí TÝŽ
+     * suffix a kandidát je volný jen tehdy, když je čistá KAŽDÁ z nich — jinak by
+     * bankovní účet dostal číslo, pod kterým už leží cizí historie.
      *
      * @return array<string, array{is_active:bool, has_lines:bool}>
      */
@@ -195,16 +218,20 @@ final class BankAnalyticAssigner
                              WHERE jel.supplier_id = c.supplier_id AND jel.account_id = c.id) AS has_lines
                FROM chart_of_accounts c
               WHERE c.supplier_id = ?
-                AND c.account_code LIKE '221%'
-                AND c.account_code <> '221'"
+                AND c.account_code REGEXP '^221[.]?[0-9]{1,6}$'"
         );
         $stmt->execute([$supplierId]);
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $out[(string) $row['account_code']] = [
-                'is_active' => (bool) $row['is_active'],
-                'has_lines' => (bool) $row['has_lines'],
-            ];
+            $suffix = ltrim(substr((string) $row['account_code'], 3), self::ANALYTIC_SEPARATOR);
+            $isActive = (bool) $row['is_active'];
+            $hasLines = (bool) $row['has_lines'];
+            if (isset($out[$suffix])) {
+                // Dvě varianty téhož čísla: adoptovatelné jen když jsou čisté OBĚ.
+                $isActive = $isActive && $out[$suffix]['is_active'];
+                $hasLines = $hasLines || $out[$suffix]['has_lines'];
+            }
+            $out[$suffix] = ['is_active' => $isActive, 'has_lines' => $hasLines];
         }
         return $out;
     }

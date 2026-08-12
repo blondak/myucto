@@ -130,7 +130,7 @@ final class CashVatRecomputeTest extends TestCase
         ], $reg), $this->userId);
 
         $byAcc = $this->linesByAccountCode((int) $res['journal_entry_id']);
-        self::assertEqualsWithDelta(21.00, $byAcc['343']['credit'], 0.001, 'Na 343 patří přepočtená daň.');
+        self::assertEqualsWithDelta(21.00, $byAcc['343.200']['credit'], 0.001, 'Na 343 patří přepočtená daň.');
         self::assertEqualsWithDelta(100.00, $byAcc['602']['credit'], 0.001);
         self::assertEqualsWithDelta(121.00, $byAcc['211']['debit'], 0.001);
     }

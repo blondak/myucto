@@ -92,6 +92,26 @@ final class ChartOfAccountsRepository
     }
 
     /**
+     * Analytiky pod syntetickým účtem (přímé děti) — karta účtu (drill-through
+     * syntetika → analytiky). Neaktivní se vrací taky, aby zůstatek z historie
+     * nezmizel; příznak `is_active` si zobrazí volající.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function childrenOf(int $supplierId, int $parentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, account_code, name, account_type, normal_side,
+                    is_synthetic, parent_id, is_active, created_at
+               FROM chart_of_accounts
+              WHERE supplier_id = ? AND parent_id = ?
+              ORDER BY account_code ASC'
+        );
+        $stmt->execute([$supplierId, $parentId]);
+        return array_map(fn ($r) => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Vloží účet (analytiku i syntetiku) do osnovy firmy. Vrací id.
      *
      * @param array{account_code:string, name:string, account_type:string,
