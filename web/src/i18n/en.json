@@ -8560,7 +8560,7 @@
         "numbering_period_year": "Yearly (January 1)",
         "numbering_period_month": "Monthly",
         "numbering_period_none": "Never (single global counter)",
-        "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars).",
+        "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars). Year and month accept an offset: YY+30 · MM-1 · YYYY+1. The offset only changes the printed number, not when the series resets.",
         "projects": "Projects",
         "no_projects": "No projects.",
         "new_project": "+ New project",
@@ -10281,7 +10281,7 @@
         "numbering_period_year": "Yearly (January 1)",
         "numbering_period_month": "Monthly",
         "numbering_period_none": "Never (single global counter)",
-        "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars).",
+        "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars). Year and month accept an offset: YY+30 · MM-1 · YYYY+1. The offset only changes the printed number, not when the series resets.",
         "numbering_preview": "Preview",
         "numbering_must_have_counter": "Missing counter — add e.g. CCC in curly braces."
     },

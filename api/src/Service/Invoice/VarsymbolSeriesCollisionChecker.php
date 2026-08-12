@@ -190,7 +190,8 @@ final class VarsymbolSeriesCollisionChecker
     /**
      * "Digitální skeleton" šablony — jen to, co v renderovaném VS přežije normalizaci na
      * číslice (viz {@see \MyInvoice\Service\Bank\VariableSymbolNormalizer::digits()}).
-     * Placeholdery: `{YYYY}` → `Y4`, `{YY}` → `Y2`, `{MM}` → `M2`, `{C+}` (n znaků) → `Cn`,
+     * Placeholdery: `{YYYY}` → `Y4`, `{YY}` → `Y2`, `{MM}` → `M2` (posun je součástí tokenu,
+     * `{YY+30}` → `Y2+30` — stejná šířka, ale nikdy stejná hodnota), `{C+}` (n znaků) → `Cn`,
      * `{PP}` (přijaté faktury — vždy 2 písmena PF/PN/KU/KN/NU/NN) → zahozeno. Literální
      * znaky: číslice zůstávají (jako `L<digits>` segment ve svém pořadí), cokoliv jiného
      * (písmena, pomlčky, lomítka, mezery) se zahodí — přesně jako `\D` v normalizeru.
@@ -206,7 +207,7 @@ final class VarsymbolSeriesCollisionChecker
     public static function digitSkeleton(string $template): string
     {
         $parts = preg_split(
-            '/(\{YYYY\}|\{YY\}|\{MM\}|\{C+\}|\{PP\})/',
+            '/(\{(?:YYYY|YY|MM)(?:[+-]\d{1,3})?\}|\{C+\}|\{PP\})/',
             $template,
             -1,
             PREG_SPLIT_DELIM_CAPTURE,
@@ -217,16 +218,12 @@ final class VarsymbolSeriesCollisionChecker
             if ($part === '') {
                 continue;
             }
-            if ($part === '{YYYY}') {
-                $tokens[] = 'Y4';
-                continue;
-            }
-            if ($part === '{YY}') {
-                $tokens[] = 'Y2';
-                continue;
-            }
-            if ($part === '{MM}') {
-                $tokens[] = 'M2';
+            // Posun je součástí identity tokenu: {YY} a {YY+30} mají stejnou ŠÍŘKU, ale
+            // nikdy stejnou HODNOTU, takže se o kolizi nejedná a nesmí se sloučit.
+            if (preg_match('/^\{(YYYY|YY|MM)([+-]\d{1,3})?\}$/', $part, $m) === 1) {
+                $offset = (int) ($m[2] ?? 0);
+                $tokens[] = ($m[1] === 'YYYY' ? 'Y4' : ($m[1] === 'YY' ? 'Y2' : 'M2'))
+                    . ($offset !== 0 ? sprintf('%+d', $offset) : '');
                 continue;
             }
             if ($part === '{PP}') {

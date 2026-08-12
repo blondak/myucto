@@ -191,6 +191,15 @@ Placeholdery:
 | `{MM}` | číslo měsíce (01..12) | `04` |
 | `{C}`, `{CC}`, `{CCC}`… | counter, padding podle počtu C | `42`, `42`, `042` |
 
+U roku i měsíce lze zapsat **posun** ve tvaru `±N`: `{YY+30}` → `56`,
+`{YYYY+1}` → `2027`, `{MM-1}` → `03`. Rok se posouvá po letech, měsíc po
+měsících včetně přetečení roku (`{MM+8}` v květnu → `01`).
+
+> ⚠️ **Posun mění jen vypsané číslo, ne kdy se řada resetuje.** Období čítače
+> řídí výhradně volba *Reset číslování*. Řada `{YY+30}{CCC}` tedy v roce 2026
+> vypisuje `56001`, `56002`… a přeskočí zpátky na `001` k 1. lednu 2027 —
+> podle skutečného roku, ne podle toho posunutého.
+
 > 🛈 Pole nech **prázdné** a systém použije fallback z `cfg.varsymbol.templates`
 > (default `{YY}{MM}{CCC}` pro fakturu, `9{YY}{MM}{CCC}` pro proformu,
 > `7{YY}{MM}{CCC}` pro dobropis). Vyplň, jen když chceš vlastní řadu.

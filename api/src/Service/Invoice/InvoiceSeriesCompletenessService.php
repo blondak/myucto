@@ -457,54 +457,57 @@ final class InvoiceSeriesCompletenessService
             return null;
         }
 
-        $year = ''; $year2 = ''; $month = '';
-        if ($period === 'year') {
-            $year = $bucketKey;
-            $year2 = substr($bucketKey, 2, 2);
-        } elseif ($period === 'month') {
-            $year = substr($bucketKey, 0, 4);
-            $year2 = substr($year, 2, 2);
-            $month = substr($bucketKey, 4, 2);
-        }
+        [$year, $month] = self::bucketYearMonth($bucketKey, $period);
 
-        $marked = preg_replace(
-            ['/\{YYYY\}/', '/\{YY\}/', '/\{MM\}/', '/\{C+\}/'],
-            ["\x00Y4\x00", "\x00Y2\x00", "\x00M2\x00", "\x00C\x00"],
+        $parts = preg_split(
+            '/(\{(?:YYYY|YY|MM)(?:[+-]\d{1,3})?\}|\{C+\})/',
             $template,
-        ) ?? $template;
-
-        $parts = preg_split("/(\x00Y4\x00|\x00Y2\x00|\x00M2\x00|\x00C\x00)/", $marked, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$marked];
+            -1,
+            PREG_SPLIT_DELIM_CAPTURE,
+        ) ?: [$template];
 
         $regex = '';
         foreach ($parts as $part) {
-            $regex .= match ($part) {
-                "\x00Y4\x00" => $year !== '' ? preg_quote($year, '/') : '\d{4}',
-                "\x00Y2\x00" => $year2 !== '' ? preg_quote($year2, '/') : '\d{2}',
-                "\x00M2\x00" => $month !== '' ? preg_quote($month, '/') : '\d{2}',
-                "\x00C\x00"  => '(\d+)',
-                default      => preg_quote($part, '/'),
-            };
+            if (preg_match('/^\{C+\}$/', $part) === 1) {
+                $regex .= '(\d+)';
+                continue;
+            }
+            if (preg_match(InvoiceNumberFormat::DATE_TOKEN_RE, $part, $m) === 1 && $m[0] === $part) {
+                // Období nefixuje rok (period='none') nebo měsíc (period='year') → wildcard
+                // o šířce tokenu; posun na šířku nemá vliv.
+                $value = InvoiceNumberFormat::tokenValue($m[1], (int) ($m[2] ?? 0), $year, $month);
+                $regex .= $value !== null
+                    ? preg_quote($value, '/')
+                    : '\d{' . InvoiceNumberFormat::tokenWidth($m[1]) . '}';
+                continue;
+            }
+            $regex .= preg_quote($part, '/');
         }
         return '/^' . $regex . '$/';
+    }
+
+    /**
+     * Rok/měsíc, které dané období fixuje. `null` = období hodnotu neurčuje, takže
+     * ji regex nesmí zadrátovat (roční řada nezná měsíc, `none` nezná ani rok).
+     *
+     * @return array{0: ?int, 1: ?int}
+     */
+    private static function bucketYearMonth(string $bucketKey, string $period): array
+    {
+        return match ($period) {
+            'year'  => [(int) $bucketKey, null],
+            'month' => [(int) substr($bucketKey, 0, 4), (int) substr($bucketKey, 4, 2)],
+            default => [null, null],
+        };
     }
 
     /** Náhled chybějícího čísla vyrenderovaný přes stejnou šablonu (pro čitelnost v UI). */
     private static function previewRender(string $template, string $bucketKey, string $period, int $counter): string
     {
-        $year = '0000'; $month = '01';
-        if ($period === 'year') {
-            $year = $bucketKey;
-        } elseif ($period === 'month') {
-            $year = substr($bucketKey, 0, 4);
-            $month = substr($bucketKey, 4, 2);
-        }
-        $date = \DateTimeImmutable::createFromFormat('Y-m-d', "{$year}-{$month}-01") ?: new \DateTimeImmutable('today');
+        [$year, $month] = self::bucketYearMonth($bucketKey, $period);
+        $date = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year ?? 0, $month ?? 1));
 
-        $rendered = strtr($template, [
-            '{YYYY}' => $date->format('Y'),
-            '{YY}'   => $date->format('y'),
-            '{MM}'   => $date->format('m'),
-        ]);
+        $rendered = InvoiceNumberFormat::expandDateTokens($template, $date);
         return preg_replace_callback('/\{(C+)\}/', static function (array $m) use ($counter): string {
             return str_pad((string) $counter, strlen($m[1]), '0', STR_PAD_LEFT);
         }, $rendered) ?? $rendered;

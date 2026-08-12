@@ -23,6 +23,62 @@ final class InvoiceNumberFormat
     public const PERIODS = ['year', 'month', 'none'];
 
     /**
+     * Datumové tokeny řady včetně volitelného posunu — `{YY+30}`, `{MM-1}`, `{YYYY+1}`.
+     * Posun je čistě ZOBRAZOVACÍ: neovlivňuje `invoice_number_period`, tedy kdy se čítač
+     * resetuje. `{YY+30}` v roční řadě pořád přeskočí na 1 k 1. lednu skutečného roku.
+     *
+     * Sémantika posunu se drží {@see DescriptionPlaceholders} (pravidelné fakturace):
+     * rok se posouvá po letech, měsíc po měsících včetně přetečení roku, a měsíční
+     * tokeny jsou kotvené na 1. den měsíce, takže 31. 1. `{MM+1}` je 02 a ne 03.
+     */
+    public const DATE_TOKEN_RE = '/\{(YYYY|YY|MM)([+-]\d{1,3})?\}/';
+
+    /** Počet číslic, které token vyprodukuje — šířka je na posunu nezávislá. */
+    public static function tokenWidth(string $token): int
+    {
+        return $token === 'YYYY' ? 4 : 2;
+    }
+
+    /**
+     * Hodnota jednoho tokenu. `$year`/`$month` = null znamená „období to nefixuje"
+     * (např. roční řada nezná měsíc) → vrací null a volající si dosadí wildcard.
+     */
+    public static function tokenValue(string $token, int $offset, ?int $year, ?int $month): ?string
+    {
+        if ($year === null) {
+            return null;
+        }
+        if ($token === 'YYYY' || $token === 'YY') {
+            $shifted = sprintf('%04d', $year + $offset);
+            return $token === 'YYYY' ? $shifted : substr($shifted, -2);
+        }
+        if ($month === null) {
+            return null;
+        }
+        return (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))
+            ->modify(sprintf('%+d months', $offset))
+            ->format('m');
+    }
+
+    /**
+     * Dosadí datumové tokeny konkrétním datem; `{C+}` zůstává netknutý pro volajícího.
+     * Jediná cesta, kterou se řada renderuje — generátor, náhled i report úplnosti
+     * musí vidět tentýž řetězec, jinak si číslování přestane rozumět s vlastní historií.
+     */
+    public static function expandDateTokens(string $template, \DateTimeInterface $date): string
+    {
+        $year  = (int) $date->format('Y');
+        $month = (int) $date->format('n');
+
+        return preg_replace_callback(
+            self::DATE_TOKEN_RE,
+            static fn (array $m): string
+                => self::tokenValue($m[1], (int) ($m[2] ?? 0), $year, $month) ?? $m[0],
+            $template,
+        ) ?? $template;
+    }
+
+    /**
      * Template override číselné řady. Prázdná hodnota → NULL (dědí se z nadřazené
      * úrovně). Whitelistne placeholdery a délku — uživatel nesmí protlačit template,
      * který by VarsymbolGenerator odmítl až při vystavení faktury.
@@ -38,9 +94,12 @@ final class InvoiceNumberFormat
         if (strlen($v) > self::MAX_TEMPLATE_LENGTH) {
             throw new \InvalidArgumentException("{$key} smí mít max " . self::MAX_TEMPLATE_LENGTH . ' znaků.');
         }
-        $stripped = preg_replace('/\{(YYYY|YY|MM|C+)\}/', '', $v) ?? '';
+        $stripped = preg_replace(['/\{(YYYY|YY|MM)([+-]\d{1,3})?\}/', '/\{C+\}/'], '', $v) ?? '';
         if (preg_match('/[{}]/', $stripped)) {
-            throw new \InvalidArgumentException("{$key} obsahuje neznámý placeholder. Dovolené: {YYYY} {YY} {MM} {C+}.");
+            throw new \InvalidArgumentException(
+                "{$key} obsahuje neznámý placeholder. Dovolené: {YYYY} {YY} {MM} {C+},"
+                . ' u datumových volitelně s posunem, např. {YY+30} nebo {MM-1}.'
+            );
         }
         return $v;
     }

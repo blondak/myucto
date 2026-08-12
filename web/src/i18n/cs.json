@@ -8560,7 +8560,7 @@
         "numbering_period_year": "Každý rok (1. ledna)",
         "numbering_period_month": "Každý měsíc",
         "numbering_period_none": "Nikdy (jedno globální počítadlo)",
-        "numbering_placeholders_hint": "Placeholdery (vždy ve složených závorkách): YYYY rok 4-místně · YY rok 2-místně · MM měsíc · C+ pořadové číslo, počet C určuje šířku (CCCC = 4 znaky).",
+        "numbering_placeholders_hint": "Placeholdery (vždy ve složených závorkách): YYYY rok 4-místně · YY rok 2-místně · MM měsíc · C+ pořadové číslo, počet C určuje šířku (CCCC = 4 znaky). U roku a měsíce lze přidat posun: YY+30 · MM-1 · YYYY+1. Posun mění jen vypsané číslo, ne to, kdy se řada resetuje.",
         "projects": "Zakázky",
         "no_projects": "Žádné zakázky.",
         "new_project": "+ Nová zakázka",
@@ -10281,7 +10281,7 @@
         "numbering_period_year": "Každý rok (1. ledna)",
         "numbering_period_month": "Každý měsíc",
         "numbering_period_none": "Nikdy (jedno globální počítadlo)",
-        "numbering_placeholders_hint": "Placeholdery (vždy ve složených závorkách): YYYY rok 4-místně · YY rok 2-místně · MM měsíc · C+ pořadové číslo, počet C určuje šířku (CCCC = 4 znaky).",
+        "numbering_placeholders_hint": "Placeholdery (vždy ve složených závorkách): YYYY rok 4-místně · YY rok 2-místně · MM měsíc · C+ pořadové číslo, počet C určuje šířku (CCCC = 4 znaky). U roku a měsíce lze přidat posun: YY+30 · MM-1 · YYYY+1. Posun mění jen vypsané číslo, ne to, kdy se řada resetuje.",
         "numbering_preview": "Náhled",
         "numbering_must_have_counter": "Chybí counter — vlož např. CCC ve složených závorkách."
     },

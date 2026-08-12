@@ -312,11 +312,7 @@ final class VarsymbolGenerator
             return [null, ''];
         }
 
-        $withDate = strtr($template, [
-            '{YYYY}' => $for->format('Y'),
-            '{YY}'   => $for->format('y'),
-            '{MM}'   => $for->format('m'),
-        ]);
+        $withDate = InvoiceNumberFormat::expandDateTokens($template, $for);
 
         // Označ counter sentinelem (mimo regex escaping), rozsekni a escapuj literály.
         $marked = preg_replace('/\{C+\}/', "\x00C\x00", $withDate) ?? $withDate;
@@ -450,12 +446,7 @@ final class VarsymbolGenerator
 
     public function render(string $template, \DateTimeInterface $date, int $counter): string
     {
-        $vars = [
-            '{YYYY}' => $date->format('Y'),
-            '{YY}'   => $date->format('y'),
-            '{MM}'   => $date->format('m'),
-        ];
-        $rendered = strtr($template, $vars);
+        $rendered = InvoiceNumberFormat::expandDateTokens($template, $date);
 
         // Counter: matchuj sekvenci {CC...} pro variabilní padding ({C}, {CC}, {CCCCCC}, ...)
         $rendered = preg_replace_callback('/\{(C+)\}/', function ($m) use ($counter) {
