@@ -462,10 +462,23 @@
     "stock-document-detail": [
       "stock"
     ],
-    "stock-vendor-offers": [
+    "stock-purchase-orders": [
       "stock"
     ],
+    "stock-purchase-order-new": [
+      "purchase_invoice",
+      "stock",
+      "vendor"
+    ],
+    "stock-purchase-order-detail": [
+      "purchase_invoice",
+      "stock",
+      "vendor"
+    ],
     "stock-warehouses": [
+      "stock"
+    ],
+    "stock-vendor-offers": [
       "stock"
     ],
     "stock-takes": [

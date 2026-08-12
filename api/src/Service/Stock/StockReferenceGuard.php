@@ -50,6 +50,7 @@ final class StockReferenceGuard
     public const DIRECT = [
         'invoice_id'          => 'invoices',
         'purchase_invoice_id' => 'purchase_invoices',
+        'purchase_order_id'   => 'purchase_orders',
         'stock_take_id'       => 'stock_takes',
     ];
 
@@ -61,6 +62,12 @@ final class StockReferenceGuard
     public const VIA_PARENT = [
         'invoice_item_id'          => ['invoice_items', 'invoice_id', 'invoices'],
         'purchase_invoice_item_id' => ['purchase_invoice_items', 'purchase_invoice_id', 'purchase_invoices'],
+        // `purchase_order_lines` vlastní `supplier_id` MÁ (denormalizace pro tenant
+        // filtr), takže by šel i DIRECT tvar. Přes rodiče se ověřuje záměrně: DIRECT
+        // sloupce guard čte z HLAVIČKY dokladu, kdežto tenhle chodí per ŘÁDEK —
+        // a JOIN na `purchase_orders.supplier_id` je navíc odolný vůči rozjetí
+        // denormalizovaného sloupce vůči hlavičce objednávky.
+        'purchase_order_line_id'   => ['purchase_order_lines', 'order_id', 'purchase_orders'],
     ];
 
     public function __construct(private readonly Connection $db) {}

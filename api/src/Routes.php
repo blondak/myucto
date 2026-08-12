@@ -1761,6 +1761,16 @@ final class Routes
             $g->patch ('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'patch']);
             $g->delete('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'delete']);
 
+            // Tři dimenze množství pohromadě (fáze 2) — skladem / rezervováno /
+            // na cestě / u dodavatele. Karta bez jediného pohybu musí vrátit nuly,
+            // ne prázdno (rozhodnutí #12). Stávající /availability zůstává beze změny.
+            $g->get   ('/quantities',                   [\MyInvoice\Action\Stock\StockQuantityAction::class, 'quantities']);
+            $g->get   ('/in-transit',                   [\MyInvoice\Action\Stock\StockQuantityAction::class, 'inTransit']);
+            $g->get   ('/reservations',                 [\MyInvoice\Action\Stock\StockQuantityAction::class, 'reservations']);
+            $g->get   ('/replenishment',                [\MyInvoice\Action\Stock\StockQuantityAction::class, 'replenishment']);
+
+            // Objednávky dodavatelům (fáze 1) — literální /bulk PŘED generickým /{id}.
+            $g->post  ('/purchase-orders/bulk',                    [\MyInvoice\Action\Stock\PurchaseOrderBulkAction::class, 'create']);
             $g->get   ('/purchase-orders',                         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'list']);
             $g->post  ('/purchase-orders',                         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'create']);
             $g->get   ('/purchase-orders/{id:[0-9]+}',             [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'get']);
@@ -1772,6 +1782,12 @@ final class Routes
             $g->post  ('/purchase-orders/{id:[0-9]+}/close',       [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'close']);
             $g->post  ('/purchase-orders/{id:[0-9]+}/reopen',      [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'reopen']);
             $g->get   ('/purchase-orders/{id:[0-9]+}/pdf',         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'pdf']);
+            // Příjem z objednávky (fáze 2) — zakládá DRAFT stock_documents
+            // s origin='purchase_order'. Zaúčtování zůstává na existujícím
+            // POST /api/stock/documents/{id}/post, žádný paralelní post endpoint.
+            $g->get   ('/purchase-orders/{id:[0-9]+}/receipt',     [\MyInvoice\Action\Stock\PurchaseOrderReceiptAction::class, 'propose']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/receipt',     [\MyInvoice\Action\Stock\PurchaseOrderReceiptAction::class, 'create']);
+            $g->get   ('/purchase-orders/{id:[0-9]+}/receipts',    [\MyInvoice\Action\Stock\PurchaseOrderReceiptAction::class, 'list']);
 
             $g->get   ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'list']);
             $g->post  ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'create']);

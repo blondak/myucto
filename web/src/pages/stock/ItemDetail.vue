@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockItem, type StockLedgerRow } from '@/api/stock'
+import { purchaseOrdersApi, type StockQuantityRow } from '@/api/purchaseOrders'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
@@ -17,6 +18,18 @@ const route = useRoute()
 const id = computed(() => Number(route.params.id))
 const item = ref<StockItem | null>(null)
 const loading = ref(false)
+
+// Odvozené kvantity (Epic SKLAD, fáze 4) — skladem/rezervováno/na cestě/u dodavatele.
+// BE vrací řádek se samými nulami i pro kartu bez jediného pohybu/objednávky — nikdy
+// se nespoléhat na to, že `items` bude prázdné, ale i tak drž `quantities` nullable
+// pro dobu, než se odpověď vrátí.
+const quantities = ref<StockQuantityRow | null>(null)
+async function loadQuantities() {
+  try {
+    const r = await purchaseOrdersApi.quantities([id.value])
+    quantities.value = r.items[0] ?? null
+  } catch { quantities.value = null }
+}
 
 const movements = ref<StockLedgerRow[]>([])
 const openingBalance = ref('0')
@@ -56,6 +69,7 @@ async function loadMovements(reset = false) {
 onMounted(async () => {
   await loadItem()
   await loadMovements(true)
+  loadQuantities()
 })
 
 function exportFile(format: 'pdf' | 'xlsx') {
@@ -126,6 +140,32 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
           </p>
         </div>
         <ActionBar :actions="actions" />
+      </div>
+
+      <!-- Odvozené kvantity (Epic SKLAD, fáze 4) — musí vykreslit 0, i když karta
+           nemá jediný pohyb ani objednávku (BE vrací nulový řádek, ne prázdno). -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.quantities.on_hand') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ quantities?.on_hand ?? '0' }}</div>
+          <div class="text-xs text-neutral-400 mt-0.5">{{ t('stock.quantities.available_to_promise') }}: {{ quantities?.available_to_promise ?? '0' }}</div>
+        </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.quantities.reserved') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ quantities?.reserved ?? '0' }}</div>
+        </div>
+        <RouterLink :to="`/stock/purchase-orders?stock_item_id=${id}`"
+          class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 hover:border-primary-300 hover:bg-primary-50/40 transition-colors">
+          <div class="text-xs text-neutral-500">{{ t('stock.quantities.in_transit') }}</div>
+          <div class="text-lg font-semibold font-mono text-primary-700">{{ quantities?.in_transit ?? '0' }}</div>
+          <div v-if="quantities?.earliest_expected_date" class="text-xs text-neutral-400 mt-0.5">
+            {{ t('stock.quantities.earliest_expected', { date: formatDate(quantities.earliest_expected_date) }) }}
+          </div>
+        </RouterLink>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+          <div class="text-xs text-neutral-500">{{ t('stock.quantities.at_vendor') }}</div>
+          <div class="text-lg font-semibold font-mono">{{ quantities?.at_vendor ?? '0' }}</div>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">

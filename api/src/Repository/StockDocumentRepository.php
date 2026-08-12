@@ -23,7 +23,7 @@ final class StockDocumentRepository
 {
     private const COLUMNS =
         'id, supplier_id, doc_type, origin, warehouse_id, warehouse_to_id, doc_number, doc_date,
-         description, partner_name, invoice_id, purchase_invoice_id, stock_take_id,
+         description, partner_name, invoice_id, purchase_invoice_id, purchase_order_id, stock_take_id,
          journal_entry_id, reversal_document_id, status, booked_at, booked_by,
          created_by, created_at, updated_at';
 
@@ -62,7 +62,8 @@ final class StockDocumentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT l.id, l.document_id, l.supplier_id, l.stock_item_id, l.doc_date, l.qty,
                     l.unit_cost, l.value_total, l.extra_cost, l.invoice_item_id,
-                    l.purchase_invoice_item_id, l.source_description, l.source_qty,
+                    l.purchase_invoice_item_id, l.purchase_order_line_id,
+                    l.source_description, l.source_qty,
                     l.line_no, l.note,
                     si.sku, si.name, si.unit
                FROM stock_document_lines l
@@ -187,8 +188,8 @@ final class StockDocumentRepository
             'INSERT INTO stock_documents
                 (supplier_id, doc_type, origin, warehouse_id, warehouse_to_id, doc_number,
                  doc_date, description, partner_name, invoice_id, purchase_invoice_id,
-                 stock_take_id, status, created_by)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 purchase_order_id, stock_take_id, status, created_by)
+             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['doc_type'],
@@ -200,6 +201,7 @@ final class StockDocumentRepository
             $data['partner_name'] ?? null,
             isset($data['invoice_id']) && (int) $data['invoice_id'] > 0 ? (int) $data['invoice_id'] : null,
             isset($data['purchase_invoice_id']) && (int) $data['purchase_invoice_id'] > 0 ? (int) $data['purchase_invoice_id'] : null,
+            isset($data['purchase_order_id']) && (int) $data['purchase_order_id'] > 0 ? (int) $data['purchase_order_id'] : null,
             isset($data['stock_take_id']) && (int) $data['stock_take_id'] > 0 ? (int) $data['stock_take_id'] : null,
             (string) ($data['status'] ?? 'draft'),
             isset($data['created_by']) && (int) $data['created_by'] > 0 ? (int) $data['created_by'] : null,
@@ -216,9 +218,9 @@ final class StockDocumentRepository
         $pdo->prepare(
             'INSERT INTO stock_document_lines
                 (document_id, supplier_id, stock_item_id, doc_date, qty, unit_cost, value_total,
-                 extra_cost, invoice_item_id, purchase_invoice_item_id, source_description,
-                 source_qty, line_no, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id,
+                 source_description, source_qty, line_no, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             (int) $data['document_id'],
             $supplierId,
@@ -230,6 +232,7 @@ final class StockDocumentRepository
             (string) ($data['extra_cost'] ?? '0'),
             isset($data['invoice_item_id']) && (int) $data['invoice_item_id'] > 0 ? (int) $data['invoice_item_id'] : null,
             isset($data['purchase_invoice_item_id']) && (int) $data['purchase_invoice_item_id'] > 0 ? (int) $data['purchase_invoice_item_id'] : null,
+            isset($data['purchase_order_line_id']) && (int) $data['purchase_order_line_id'] > 0 ? (int) $data['purchase_order_line_id'] : null,
             $data['source_description'] ?? null,
             $data['source_qty'] ?? null,
             (int) ($data['line_no'] ?? 0),
@@ -249,7 +252,7 @@ final class StockDocumentRepository
             "UPDATE stock_documents SET
                 doc_type = ?, origin = ?, warehouse_id = ?, warehouse_to_id = ?, doc_date = ?,
                 description = ?, partner_name = ?, invoice_id = ?, purchase_invoice_id = ?,
-                stock_take_id = ?
+                purchase_order_id = ?, stock_take_id = ?
               WHERE id = ? AND supplier_id = ? AND status = 'draft'"
         );
         $stmt->execute([
@@ -262,6 +265,7 @@ final class StockDocumentRepository
             $data['partner_name'] ?? null,
             isset($data['invoice_id']) && (int) $data['invoice_id'] > 0 ? (int) $data['invoice_id'] : null,
             isset($data['purchase_invoice_id']) && (int) $data['purchase_invoice_id'] > 0 ? (int) $data['purchase_invoice_id'] : null,
+            isset($data['purchase_order_id']) && (int) $data['purchase_order_id'] > 0 ? (int) $data['purchase_order_id'] : null,
             isset($data['stock_take_id']) && (int) $data['stock_take_id'] > 0 ? (int) $data['stock_take_id'] : null,
             $id,
             $supplierId,
@@ -561,6 +565,7 @@ final class StockDocumentRepository
         $r['warehouse_to_id'] = $r['warehouse_to_id'] !== null ? (int) $r['warehouse_to_id'] : null;
         $r['invoice_id'] = $r['invoice_id'] !== null ? (int) $r['invoice_id'] : null;
         $r['purchase_invoice_id'] = $r['purchase_invoice_id'] !== null ? (int) $r['purchase_invoice_id'] : null;
+        $r['purchase_order_id'] = $r['purchase_order_id'] !== null ? (int) $r['purchase_order_id'] : null;
         $r['stock_take_id'] = $r['stock_take_id'] !== null ? (int) $r['stock_take_id'] : null;
         $r['journal_entry_id'] = $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null;
         $r['reversal_document_id'] = $r['reversal_document_id'] !== null ? (int) $r['reversal_document_id'] : null;
@@ -578,6 +583,7 @@ final class StockDocumentRepository
         $r['stock_item_id'] = (int) $r['stock_item_id'];
         $r['invoice_item_id'] = $r['invoice_item_id'] !== null ? (int) $r['invoice_item_id'] : null;
         $r['purchase_invoice_item_id'] = $r['purchase_invoice_item_id'] !== null ? (int) $r['purchase_invoice_item_id'] : null;
+        $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
         $r['line_no'] = (int) $r['line_no'];
         return $r;
     }

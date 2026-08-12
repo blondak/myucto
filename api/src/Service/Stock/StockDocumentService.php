@@ -35,7 +35,7 @@ use PDO;
 final class StockDocumentService
 {
     private const DOC_TYPES = ['receipt', 'issue', 'transfer'];
-    private const ORIGINS   = ['manual', 'invoice', 'credit_note', 'purchase_invoice', 'inventory'];
+    private const ORIGINS   = ['manual', 'invoice', 'credit_note', 'purchase_invoice', 'inventory', 'purchase_order'];
 
     /** doc_type → kód číselné řady (PRI/VYD/PRE). */
     private const SERIES = [
@@ -63,6 +63,7 @@ final class StockDocumentService
         private readonly StockTakeRepository $takes,
         private readonly StockLandedCostRepository $landedCosts,
         private readonly StockReferenceGuard $references,
+        private readonly PurchaseOrderStateService $orderStates,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -278,6 +279,11 @@ final class StockDocumentService
             $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
         }
 
+        // 7b) Stav objednávek dotčených tímhle pohybem — UVNITŘ téže transakce.
+        //     Kdyby se přepočet dělal až po commitu, existovalo by okno, ve kterém
+        //     zboží na skladě leží, ale objednávka pořád tvrdí, že je na cestě.
+        $this->recomputeTouchedOrders($supplierId, $lines);
+
         // 8) Způsob B — žádný deníkový zápis.
         $posted = $this->docs->findWithLines($supplierId, $id);
         if ($posted === null) {
@@ -362,11 +368,23 @@ final class StockDocumentService
                 'partner_name'        => $orig['partner_name'],
                 'invoice_id'          => $orig['invoice_id'],
                 'purchase_invoice_id' => $orig['purchase_invoice_id'],
+                // Protidoklad musí nést i vazbu na objednávku, jinak se storno
+                // ztratí ze seznamu příjemek objednávky (§6, R-1).
+                'purchase_order_id'   => $orig['purchase_order_id'],
                 'stock_take_id'       => $orig['stock_take_id'],
                 'created_by'          => $userId,
             ]);
             foreach ($origLines as $line) {
                 // Stejné hodnoty (hodnotová neutralita §4.4) — NEpřeceňuje se.
+                //
+                // KRITICKÉ: `purchase_order_line_id` a `invoice_item_id` se MUSÍ
+                // zkopírovat do protidokladu. Obojí „na cestě" i „rezervováno" je
+                // ODVOZENÉ ze `stock_document_lines` vzorcem
+                // SUM(receipt) − SUM(issue) přes tuhle vazbu, takže bez ní se
+                // protidoklad nemá k čemu přiřadit a zboží se TIŠE nevrátí ani na
+                // cestu, ani do rezervací — bez chyby, bez varování, jen jiné číslo
+                // na kartě. Regresi hlídá InTransitTest (R-1 + zrcadlový případ
+                // výdejky), který bez těchhle dvou řádků padá.
                 $this->docs->insertLine($supplierId, [
                     'document_id'              => $counterId,
                     'stock_item_id'            => (int) $line['stock_item_id'],
@@ -376,6 +394,7 @@ final class StockDocumentService
                     'extra_cost'               => (string) $line['extra_cost'],
                     'invoice_item_id'          => $line['invoice_item_id'],
                     'purchase_invoice_item_id' => $line['purchase_invoice_item_id'],
+                    'purchase_order_line_id'   => $line['purchase_order_line_id'],
                     'source_description'       => $line['source_description'],
                     'source_qty'               => $line['source_qty'],
                     'line_no'                  => (int) $line['line_no'],
@@ -399,6 +418,10 @@ final class StockDocumentService
                 $this->recompute->replay($supplierId, $pair['warehouse_id'], $pair['stock_item_id'], $docDate);
             }
 
+            // Storno příjemky vrací zboží „na cestu" → stav objednávky se musí
+            // vrátit z received/partially_received zpátky, ve stejné transakci.
+            $this->recomputeTouchedOrders($supplierId, $origLines);
+
             $original = $this->docs->findWithLines($supplierId, $id);
             $reversal = $this->docs->findWithLines($supplierId, $counterId);
             if ($original === null || $reversal === null) {
@@ -406,6 +429,48 @@ final class StockDocumentService
             }
             return ['original' => $original, 'reversal' => $reversal];
         });
+    }
+
+    /**
+     * Přepočte stav objednávek, na jejichž řádky doklad odkazuje.
+     *
+     * `partially_received` / `received` nesmí nastavit nikdo jiný než
+     * {@see PurchaseOrderStateService} — proto se sem jen deleguje. Volá se
+     * z `post()` i `reverse()` a VŽDY uvnitř transakce, která hýbe skladem.
+     *
+     * @param list<array<string,mixed>> $lines
+     */
+    private function recomputeTouchedOrders(int $supplierId, array $lines): void
+    {
+        $lineIds = [];
+        foreach ($lines as $line) {
+            $polId = (int) ($line['purchase_order_line_id'] ?? 0);
+            if ($polId > 0) {
+                $lineIds[$polId] = true;
+            }
+        }
+        if ($lineIds === []) {
+            return;
+        }
+        foreach ($this->orderIdsForLines($supplierId, array_keys($lineIds)) as $orderId) {
+            $this->orderStates->recompute($supplierId, $orderId);
+        }
+    }
+
+    /**
+     * @param list<int> $lineIds
+     * @return list<int>
+     */
+    private function orderIdsForLines(int $supplierId, array $lineIds): array
+    {
+        $place = implode(',', array_fill(0, count($lineIds), '?'));
+        $stmt  = $this->db->pdo()->prepare(
+            "SELECT DISTINCT order_id FROM purchase_order_lines
+              WHERE supplier_id = ? AND id IN ($place)"
+        );
+        $stmt->execute([$supplierId, ...$lineIds]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
 
     // ── interní: post pomocníci ─────────────────────────────────────────────────
@@ -743,6 +808,7 @@ final class StockDocumentService
                 'extra_cost'               => StockValuation::cToDecimal($extraC),
                 'invoice_item_id'          => isset($rl['invoice_item_id']) && (int) $rl['invoice_item_id'] > 0 ? (int) $rl['invoice_item_id'] : null,
                 'purchase_invoice_item_id' => isset($rl['purchase_invoice_item_id']) && (int) $rl['purchase_invoice_item_id'] > 0 ? (int) $rl['purchase_invoice_item_id'] : null,
+                'purchase_order_line_id'   => isset($rl['purchase_order_line_id']) && (int) $rl['purchase_order_line_id'] > 0 ? (int) $rl['purchase_order_line_id'] : null,
                 'source_description'       => self::nullableString($rl['source_description'] ?? null),
                 'source_qty'               => isset($rl['source_qty']) && $rl['source_qty'] !== null && $rl['source_qty'] !== ''
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,
@@ -771,6 +837,7 @@ final class StockDocumentService
             'partner_name'        => self::nullableString($body['partner_name'] ?? null),
             'invoice_id'          => isset($body['invoice_id']) && (int) $body['invoice_id'] > 0 ? (int) $body['invoice_id'] : null,
             'purchase_invoice_id' => isset($body['purchase_invoice_id']) && (int) $body['purchase_invoice_id'] > 0 ? (int) $body['purchase_invoice_id'] : null,
+            'purchase_order_id'   => isset($body['purchase_order_id']) && (int) $body['purchase_order_id'] > 0 ? (int) $body['purchase_order_id'] : null,
             'stock_take_id'       => isset($body['stock_take_id']) && (int) $body['stock_take_id'] > 0 ? (int) $body['stock_take_id'] : null,
             'status'              => 'draft',
         ];

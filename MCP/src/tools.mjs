@@ -2647,6 +2647,491 @@ export const TOOLS = [
   },
 
   // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — tři dimenze množství
+  //
+  // „Kolik toho máme" má tři různé odpovědi a plete se to i lidem, takže je
+  // katalog nabízí pohromadě a pojmenovaně:
+  //   skladem (on_hand)      — co fyzicky leží ve skladu,
+  //   rezervováno (reserved) — kusy, které drží vystavená faktura bez výdejky,
+  //   na cestě (in_transit)  — objednané u dodavatele, ještě nedorazilo,
+  //   u dodavatele           — co hlásí dodavatel, že má on.
+  //
+  // Prodat se dá `sellable` = skladem − rezervováno. „Na cestě" se do prodejní
+  // dostupnosti ZÁMĚRNĚ nepočítá (zboží u dopravce nelze zákazníkovi vydat),
+  // vstupuje až do `available_to_promise`, což je číslo pro plánování nákupu.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'stock_quantities',
+    title: 'Množství ve třech dimenzích',
+    description:
+      'Pro každé zboží vrátí `on_hand` (skladem), `reserved` (drží vystavená faktura), '
+      + '`sellable` = skladem − rezervováno, `in_transit` (objednáno a na cestě), '
+      + '`at_vendor` (co hlásí dodavatelé) a `available_to_promise` = skladem − '
+      + 'rezervováno + na cestě. K tomu rozpad po skladech, seznam objednávek, '
+      + 'které zboží vezou, a nabídky dodavatelů.\n\n'
+      + 'Zákazníkovi slibuj `sellable`, ne `on_hand` — jinak prodáš kus, který už '
+      + 'někdo koupil. `available_to_promise` je interní číslo pro plánování nákupu, '
+      + 'protože zahrnuje i to, co teprve dorazí; může vyjít i záporně (prodalo se '
+      + 'víc, než je skladem), a to je signál k urgentnímu doobjednání.\n\n'
+      + 'Karta bez jediného pohybu vrátí samé nuly, ne chybu — zboží se dá mít '
+      + 'v katalogu dřív, než se poprvé nakoupí.',
+    inputSchema: schema({
+      item_ids: arrayOf('ID zboží. Bez nich projde celý katalog (max 500 karet).', undefined, [], {
+        items: { type: 'integer' },
+      }),
+      warehouse_id: int('Omezit na jeden sklad.'),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/quantities', {
+      item_ids: Array.isArray(a.item_ids) && a.item_ids.length > 0 ? a.item_ids.join(',') : undefined,
+      warehouse_id: a.warehouse_id,
+    }, tool),
+  },
+  {
+    name: 'stock_in_transit',
+    title: 'Zboží na cestě',
+    description:
+      'Kolik kusů je objednáno u dodavatelů a ještě nedorazilo, s rozpadem na konkrétní '
+      + 'objednávky (číslo, dodavatel, očekávaný termín) a nejbližší očekávané datum.\n\n'
+      + 'Počítá se od stavu, který má firma nastavený (výchozí „odeslaná objednávka"), '
+      + 'a odečítá se z něj to, co už na příjemkách dorazilo. Stornovaná příjemka vrátí '
+      + 'kusy zpátky na cestu.',
+    inputSchema: schema({
+      item_ids: arrayOf('ID zboží. Bez nich všechno, co je na cestě.', undefined, [], {
+        items: { type: 'integer' },
+      }),
+      warehouse_id: int('Jen zboží mířící na tento sklad.'),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/in-transit', {
+      item_ids: Array.isArray(a.item_ids) && a.item_ids.length > 0 ? a.item_ids.join(',') : undefined,
+      warehouse_id: a.warehouse_id,
+    }, tool),
+  },
+  {
+    name: 'stock_reservations',
+    title: 'Rezervované zboží',
+    description:
+      'Kusy, které jsou fyzicky skladem, ale drží je vystavená faktura bez zaúčtované '
+      + 'výdejky — s rozpadem na konkrétní faktury (číslo, odběratel, množství, datum), '
+      + 'aby šlo dohledat, co který kus drží.\n\n'
+      + 'Zálohová faktura nerezervuje (není závazek dodat), rozpracovaná a stornovaná '
+      + 'taky ne. Firmy, kde výdejka vzniká rovnou při vystavení faktury, tu budou mít '
+      + 'trvale nulu — u nich žádné okno mezi závazkem a výdejem není a je to správně.',
+    inputSchema: schema({
+      item_ids: arrayOf('ID zboží. Bez nich všechny rezervace.', undefined, [], {
+        items: { type: 'integer' },
+      }),
+      warehouse_id: int('Jen rezervace na tomto skladu.'),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/reservations', {
+      item_ids: Array.isArray(a.item_ids) && a.item_ids.length > 0 ? a.item_ids.join(',') : undefined,
+      warehouse_id: a.warehouse_id,
+    }, tool),
+  },
+  {
+    name: 'replenishment_suggest',
+    title: 'Co objednat',
+    description:
+      'Zboží pod minimální zásobou i s návrhem, kolik ho doobjednat:\n\n'
+      + '    návrh = minimum × koeficient − skladem + rezervováno − na cestě\n\n'
+      + 'Odečtení „na cestě" je celý smysl téhle sestavy: bez něj by se navrhlo '
+      + 'doobjednat zboží, které už je objednané, a koupilo by se dvakrát. Rezervace '
+      + 'se naopak přičítá — ty kusy sice leží ve skladu, ale jsou fakticky pryč.\n\n'
+      + 'Výsledek se zaokrouhlí nahoru na balení preferovaného dodavatele a podlahuje '
+      + 'se jeho minimální objednávkou. Návrh můžeš poslat rovnou do '
+      + '`purchase_orders_bulk_create`, který ho rozdělí po dodavatelích.',
+    inputSchema: schema({
+      warehouse_id: int('Počítat zásobu jen na tomto skladu.'),
+      below_min: bool('Jen zboží, které je vážně pod minimem (ne to, co jen chybí do cíle).'),
+      item_ids: arrayOf('Omezit na konkrétní zboží.', undefined, [], { items: { type: 'integer' } }),
+      coefficient: num('Kolikanásobek minima doplňovat. Výchozí 1.', { exclusiveMinimum: 0 }),
+      ...WINDOW,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/replenishment', {
+      warehouse_id: a.warehouse_id,
+      below_min: a.below_min === undefined ? undefined : (a.below_min ? 1 : 0),
+      item_ids: Array.isArray(a.item_ids) && a.item_ids.length > 0 ? a.item_ids.join(',') : undefined,
+      coefficient: a.coefficient,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — objednávky dodavatelům
+  //
+  // Objednávka NENÍ účetní doklad: nepřešlo vlastnictví, nevznikl závazek,
+  // nic se neúčtuje. Proto je celá agenda zapisovatelná — chyba se opraví
+  // v aplikaci a nemá daňovou dohru.
+  //
+  // Stejně jako u skladových dokladů má dvě fáze: `draft` se dá libovolně
+  // měnit i smazat a do „na cestě" nevstupuje, teprve `purchase_orders_send`
+  // přidělí číslo OBJ a zboží se začne počítat jako objednané. Nástroje ty
+  // fáze schválně nespojují.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'purchase_orders_list',
+    title: 'Objednávky dodavatelům',
+    description:
+      'Objednávky vydané dodavatelům s dodavatelem, skladem, termínem, stavem '
+      + 'a plněním (objednáno / přijato / zbývá).\n\n'
+      + 'Stavy: `draft` (rozpracovaná, nepočítá se na cestě), `sent` (odeslaná), '
+      + '`confirmed` (dodavatel potvrdil), `partially_received` (část dorazila), '
+      + '`received` (vše dorazilo), `closed` (zbytek už nepřijde), `cancelled`. '
+      + 'Pro „co ještě čekáme" použij `open: true`.',
+    inputSchema: schema({
+      state: str('Jen objednávky v tomto stavu.', {
+        enum: ['draft', 'sent', 'confirmed', 'partially_received', 'received', 'closed', 'cancelled'],
+      }),
+      open: bool('Jen objednávky, ze kterých ještě něco může dorazit.'),
+      vendor_id: int('Jen objednávky tomuto dodavateli.'),
+      warehouse_id: int('Jen objednávky na tento sklad.'),
+      stock_item_id: int('Jen objednávky obsahující tohle zboží.'),
+      from: date('Objednávky od tohoto data.'),
+      to: date('Objednávky do tohoto data.'),
+      expected_to: date('Jen objednávky s očekávaným dodáním do tohoto data.'),
+      query: str('Fulltext přes číslo objednávky, referenci dodavatele a název dodavatele.'),
+      ...WINDOW,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/purchase-orders', {
+      state: a.state,
+      open: a.open === undefined ? undefined : (a.open ? 1 : 0),
+      vendor_id: a.vendor_id,
+      warehouse_id: a.warehouse_id,
+      stock_item_id: a.stock_item_id,
+      from: a.from,
+      to: a.to,
+      expected_to: a.expected_to,
+      q: a.query,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'purchase_orders_get',
+    title: 'Detail objednávky',
+    description:
+      'Jedna objednávka včetně řádků a plnění. U každého řádku je `qty_ordered` '
+      + '(objednáno), `qty_confirmed` (co potvrdil dodavatel — má přednost), '
+      + '`qty_cancelled` (uzavřený nedodaný zbytek), `qty_received` (skutečně přijato '
+      + 'podle příjemek) a `qty_remaining` (kolik ještě čekáme). Navíc napárované '
+      + 'přijaté faktury a vystavené příjemky.',
+    inputSchema: schema({ id: int('ID objednávky.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/stock/purchase-orders/${a.id}`, null, tool),
+  },
+  {
+    name: 'purchase_orders_create',
+    title: 'Založit objednávku',
+    description:
+      'Vytvoří objednávku jako ROZPRACOVANOU (draft): číslo zatím nedostane a do '
+      + '„na cestě" se nepočítá. Odešli ji až `purchase_orders_send`.\n\n'
+      + 'Sklad z hlavičky platí pro všechny řádky, jednotlivý řádek ho může přebít. '
+      + 'Řádek bez `stock_item_id` je služba (doprava, balné) — započítá se do ceny, '
+      + 'ale ne do skladového plnění.',
+    inputSchema: schema({
+      vendor_id: int('ID dodavatele (`search_clients` s `role: "vendors"`).'),
+      order_date: date('Datum objednávky.'),
+      warehouse_id: int('Sklad, kam se má dodat.'),
+      currency_id: int('Měna objednávky (`list_currencies`).'),
+      expected_date: date('Požadovaný termín dodání.'),
+      exchange_rate: num('Orientační kurz. Skutečné ocenění určí až příjemka nebo faktura.', { exclusiveMinimum: 0 }),
+      vendor_reference: str('Číslo objednávky u dodavatele.', { maxLength: 50 }),
+      note: str('Poznámka pro dodavatele (tiskne se na objednávku).'),
+      internal_note: str('Interní poznámka (netiskne se).'),
+      lines: arrayOf(
+        'Řádky objednávky.',
+        {
+          stock_item_id: int('ID zboží. Vynech u služby (doprava, balné).'),
+          warehouse_id: int('Přebije sklad z hlavičky jen pro tenhle řádek.'),
+          description: str('Popis položky. U zboží se doplní z karty.', { maxLength: 500 }),
+          vendor_sku: str('Kód položky u dodavatele.', { maxLength: 80 }),
+          unit: str('Měrná jednotka.', { maxLength: 20 }),
+          qty_ordered: num('Objednané množství.', { exclusiveMinimum: 0 }),
+          unit_price: num('Cena za jednotku bez DPH.', { minimum: 0 }),
+          vat_rate_id: int('Sazba DPH (jen pro orientační celkovou cenu).'),
+          expected_date: date('Termín pro tenhle řádek, liší-li se od hlavičky.'),
+          note: str('Poznámka k řádku.', { maxLength: 255 }),
+        },
+        ['qty_ordered'],
+        { minItems: 1 },
+      ),
+    }, ['vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'lines']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/purchase-orders', changed(a, [
+      'vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'expected_date',
+      'exchange_rate', 'vendor_reference', 'note', 'internal_note', 'lines',
+    ]), tool),
+  },
+  {
+    name: 'purchase_orders_update',
+    title: 'Upravit objednávku',
+    description:
+      'Přepíše rozpracovanou (draft) objednávku VČETNĚ ŘÁDKŮ — pošli je všechny, '
+      + 'chybějící se smaže. Načti si proto nejdřív `purchase_orders_get`.\n\n'
+      + 'Odeslanou objednávku upravit nejde (409): u dodavatele už existuje. '
+      + 'Změnu množství zaznamenej přes `purchase_orders_confirm`, nedodaný zbytek '
+      + 'přes `purchase_orders_close`.',
+    inputSchema: schema({
+      id: int('ID rozpracované objednávky.'),
+      vendor_id: int('ID dodavatele.'),
+      order_date: date('Datum objednávky.'),
+      warehouse_id: int('Sklad, kam se má dodat.'),
+      currency_id: int('Měna objednávky.'),
+      expected_date: date('Požadovaný termín dodání.'),
+      exchange_rate: num('Orientační kurz.', { exclusiveMinimum: 0 }),
+      vendor_reference: str('Číslo objednávky u dodavatele.', { maxLength: 50 }),
+      note: str('Poznámka pro dodavatele.'),
+      internal_note: str('Interní poznámka.'),
+      lines: arrayOf(
+        'ÚPLNÝ seznam řádků po úpravě.',
+        {
+          stock_item_id: int('ID zboží. Vynech u služby.'),
+          warehouse_id: int('Přebije sklad z hlavičky.'),
+          description: str('Popis položky.', { maxLength: 500 }),
+          vendor_sku: str('Kód u dodavatele.', { maxLength: 80 }),
+          unit: str('Měrná jednotka.', { maxLength: 20 }),
+          qty_ordered: num('Objednané množství.', { exclusiveMinimum: 0 }),
+          unit_price: num('Cena za jednotku bez DPH.', { minimum: 0 }),
+          vat_rate_id: int('Sazba DPH.'),
+          expected_date: date('Termín pro tenhle řádek.'),
+          note: str('Poznámka k řádku.', { maxLength: 255 }),
+        },
+        ['qty_ordered'],
+        { minItems: 1 },
+      ),
+    }, ['id', 'vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'lines']),
+    write: true,
+    run: (c, a, tool) => c.put(`/stock/purchase-orders/${a.id}`, changed(a, [
+      'vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'expected_date',
+      'exchange_rate', 'vendor_reference', 'note', 'internal_note', 'lines',
+    ]), tool),
+  },
+  {
+    name: 'purchase_orders_send',
+    title: 'Odeslat objednávku',
+    description:
+      'Přepne rozpracovanou objednávku na odeslanou, přidělí jí číslo z řady OBJ '
+      + 'a od té chvíle se její zboží počítá jako „na cestě" — objeví se v '
+      + '`stock_in_transit` a přestane se navrhovat v `replenishment_suggest`.\n\n'
+      + 'Samotný e-mail dodavateli nástroj neposílá; PDF objednávky je na '
+      + '`GET /api/stock/purchase-orders/{id}/pdf`. Opakované volání číslo znovu '
+      + 'nepřidělí, jen vrátí objednávku beze změny.',
+    inputSchema: schema({ id: int('ID rozpracované objednávky.') }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/send`, {}, tool),
+  },
+  {
+    name: 'purchase_orders_confirm',
+    title: 'Potvrdit objednávku dodavatelem',
+    description:
+      'Zaznamená, že dodavatel objednávku potvrdil — volitelně s JINÝM množstvím '
+      + 'nebo termínem, než jsme chtěli.\n\n'
+      + 'Potvrzené množství (`qty_confirmed`) NAHRAZUJE objednané ve všech dalších '
+      + 'výpočtech: „na cestě" i „zbývá přijmout" se od té chvíle počítají z něj. '
+      + 'Když dodavatel potvrdil vše beze změny, stačí zavolat nástroj bez řádků.',
+    inputSchema: schema({
+      id: int('ID odeslané objednávky.'),
+      expected_date: date('Termín potvrzený dodavatelem pro celou objednávku.'),
+      lines: arrayOf(
+        'Řádky, u kterých dodavatel něco změnil. Ostatní zůstanou beze změny.',
+        {
+          id: int('ID řádku objednávky (z `purchase_orders_get`, NE id zboží).'),
+          qty_confirmed: num('Množství potvrzené dodavatelem.', { minimum: 0 }),
+          expected_date: date('Termín pro tenhle řádek.'),
+        },
+        ['id'],
+        { minItems: 1 },
+      ),
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/confirm`, changed(a, [
+      'expected_date', 'lines',
+    ]), tool),
+  },
+  {
+    name: 'purchase_orders_close',
+    title: 'Uzavřít nedodaný zbytek',
+    description:
+      'Uzavře objednávku s tím, že co nedorazilo, už nedorazí: nedodaný zbytek se '
+      + 'označí za stornovaný, zmizí z „na cestě" a zboží se zase začne navrhovat '
+      + 'k doobjednání.\n\n'
+      + 'Tohle je správný krok u částečně dodané objednávky — `purchase_orders_cancel` '
+      + 'tam server odmítne, protože přijaté zboží už na skladě leží. Uzavření lze '
+      + 'vzít zpět přes `purchase_orders_reopen`.',
+    inputSchema: schema({
+      id: int('ID objednávky.'),
+      reason: str('Proč zbytek nedorazí (uloží se k objednávce).', { maxLength: 255 }),
+      confirm: CONFIRM,
+    }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const order = await c.get(`/stock/purchase-orders/${a.id}`, null, tool);
+      requireConfirm(
+        a,
+        'Uzavřít se má nedodaný zbytek objednávky',
+        `${order?.order_number ?? `#${a.id}`} (${order?.vendor_name ?? '?'}) — objednáno `
+        + `${order?.qty_ordered_total ?? '?'}, přijato ${order?.qty_received_total ?? '?'}, `
+        + `neuzavřený zbytek ${order?.qty_remaining_total ?? '?'}`,
+      );
+      return c.post(`/stock/purchase-orders/${a.id}/close`, { reason: a.reason }, tool);
+    },
+  },
+  {
+    name: 'purchase_orders_cancel',
+    title: 'Stornovat objednávku',
+    description:
+      'Stornuje objednávku a vyřadí ji z „na cestě". Jde to JEN dokud se z ní nic '
+      + 'nepřijalo — jinak server vrátí 409 a je potřeba `purchase_orders_close`, '
+      + 'protože přijaté zboží na skladě leží a nesmí ztratit svůj původ.\n\n'
+      + 'Rozpracovanou objednávku, která nikdy neodešla, můžeš rovnou smazat přes '
+      + '`purchase_orders_delete`.',
+    inputSchema: schema({
+      id: int('ID objednávky.'),
+      reason: str('Důvod storna.', { maxLength: 255 }),
+      confirm: CONFIRM,
+    }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const order = await c.get(`/stock/purchase-orders/${a.id}`, null, tool);
+      requireConfirm(
+        a,
+        'Stornovat se má objednávka',
+        `${order?.order_number ?? `#${a.id}`} (${order?.vendor_name ?? '?'}) `
+        + `za ${order?.total_without_vat ?? '?'} bez DPH`,
+      );
+      return c.post(`/stock/purchase-orders/${a.id}/cancel`, { reason: a.reason }, tool);
+    },
+  },
+  {
+    name: 'purchase_orders_reopen',
+    title: 'Znovu otevřít objednávku',
+    description:
+      'Vrátí uzavřenou objednávku zpět mezi živé: vynuluje uzavřený zbytek a stav '
+      + 'dopočítá podle toho, co už reálně dorazilo. Zboží se tím vrátí do „na cestě".',
+    inputSchema: schema({ id: int('ID uzavřené objednávky.') }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/reopen`, {}, tool),
+  },
+  {
+    name: 'purchase_orders_delete',
+    title: 'Smazat objednávku',
+    description:
+      'Smaže objednávku i s řádky. Server to dovolí jen u ROZPRACOVANÉ (draft) '
+      + 'objednávky — odeslaná se stornuje přes `purchase_orders_cancel`, ať po ní '
+      + 'zůstane stopa.',
+    inputSchema: schema({ id: int('ID rozpracované objednávky.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/purchase-orders/${a.id}`,
+        action: 'Smazat se má objednávka',
+        label: (row) => `${row?.order_number ?? `#${a.id}`} — ${row?.vendor_name ?? '?'}`,
+      });
+      return { deleted: was, result: await c.del(`/stock/purchase-orders/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'purchase_orders_receipt',
+    title: 'Příjem z objednávky na sklad',
+    description:
+      'Založí PŘÍJEMKU z objednávky — jako DRAFT, takže se stavem skladu zatím nic '
+      + 'nedělá. Pohyb provede až `post_stock_document` s vráceným `id`, a ten '
+      + 'zároveň posune stav objednávky na částečně/plně přijatou.\n\n'
+      + 'Bez `lines` se přijme celý zbývající zbytek. Pořizovací cena se bere '
+      + 'z napárované přijaté faktury; když ještě nedorazila, použije se cena '
+      + 'z objednávky jako ODHAD (odpověď to hlásí v `cost_is_estimate`) — po '
+      + 'doručení faktury je pak potřeba ocenění zkontrolovat.\n\n'
+      + 'Přijmout víc, než bylo objednáno, server odmítne (409); vědomou nadměrnou '
+      + 'dodávku pusť přes `allow_over_delivery`. Objednané množství se tím nikdy '
+      + 'nezvyšuje, jen se řádek označí.',
+    inputSchema: schema({
+      id: int('ID objednávky.'),
+      doc_date: date('Datum příjemky.'),
+      warehouse_id: int('Sklad příjmu. Výchozí je sklad z objednávky.'),
+      description: str('Popis příjemky.', { maxLength: 255 }),
+      allow_over_delivery: bool('Přijmout i víc, než bylo objednáno.'),
+      lines: arrayOf(
+        'Co se přijímá. Bez tohohle pole se přijme celý zbývající zbytek.',
+        {
+          purchase_order_line_id: int('ID řádku objednávky (z `purchase_orders_get`).'),
+          qty: num('Přijímané množství.', { exclusiveMinimum: 0 }),
+          unit_cost: num('Pořizovací cena za MJ. Bez ní se použije cena z faktury nebo odhad z objednávky.', { minimum: 0 }),
+        },
+        ['purchase_order_line_id', 'qty'],
+        { minItems: 1 },
+      ),
+    }, ['id', 'doc_date']),
+    write: true,
+    run: async (c, a, tool) => {
+      let lines = a.lines;
+      if (!Array.isArray(lines) || lines.length === 0) {
+        const proposal = await c.get(`/stock/purchase-orders/${a.id}/receipt`, null, tool);
+        lines = rows(proposal?.lines ?? [])
+          .filter((l) => Number(l?.remaining_qty ?? 0) > 0)
+          .map((l) => ({ purchase_order_line_id: l.purchase_order_line_id, qty: Number(l.remaining_qty) }));
+        if (lines.length === 0) {
+          throw new Error(
+            `NEPROVEDENO — z objednávky #${a.id} už není co přijmout. `
+            + 'Zkontroluj `purchase_orders_get`, jestli není celá přijatá nebo uzavřená.',
+          );
+        }
+      }
+      return c.post(`/stock/purchase-orders/${a.id}/receipt`, {
+        doc_date: a.doc_date,
+        warehouse_id: a.warehouse_id,
+        description: a.description,
+        allow_over_delivery: a.allow_over_delivery,
+        lines,
+      }, tool);
+    },
+  },
+  {
+    name: 'purchase_orders_bulk_create',
+    title: 'Hromadně objednat',
+    description:
+      'Z plochého seznamu „tohle zboží v tomhle množství" založí objednávky '
+      + 'SESKUPENÉ PO DODAVATELÍCH — jedna objednávka na dodavatele. Přesně tak se '
+      + 'zpracuje výstup `replenishment_suggest`.\n\n'
+      + 'Dodavatel se bere z `vendor_id` u položky, jinak z hlavního dodavatele zboží '
+      + '(`vendor_offers_list`). Zboží, které dodavatele nemá, se do žádné objednávky '
+      + 'nedostane a vrátí se ve `skipped` — projdi ten seznam, jinak objednáš míň, '
+      + 'než sis myslel.\n\n'
+      + 'Objednávky vzniknou jako ROZPRACOVANÉ. Do „na cestě" se dostanou až po '
+      + '`purchase_orders_send`, které je potřeba zavolat na každou zvlášť.',
+    inputSchema: schema({
+      order_date: date('Datum objednávek. Výchozí dnešek.'),
+      expected_date: date('Požadovaný termín dodání pro všechny.'),
+      warehouse_id: int('Sklad dodání. Výchozí je výchozí sklad firmy.'),
+      currency_id: int('Měna objednávek. Výchozí je výchozí měna firmy.'),
+      note: str('Poznámka pro dodavatele na všechny objednávky.'),
+      items: arrayOf(
+        'Zboží k objednání.',
+        {
+          stock_item_id: int('ID zboží.'),
+          qty: num('Objednávané množství.', { exclusiveMinimum: 0 }),
+          vendor_id: int('Dodavatel. Bez něj se vezme hlavní dodavatel zboží.'),
+          warehouse_id: int('Sklad jen pro tuhle položku.'),
+          unit_price: num('Nákupní cena bez DPH. Bez ní se vezme z nabídky dodavatele.', { minimum: 0 }),
+        },
+        ['stock_item_id', 'qty'],
+        { minItems: 1 },
+      ),
+    }, ['items']),
+    write: true,
+    run: (c, a, tool) => c.post('/stock/purchase-orders/bulk', changed(a, [
+      'order_date', 'expected_date', 'warehouse_id', 'currency_id', 'note', 'items',
+    ]), tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Sklad — příjemky, výdejky, převodky
   //
   // Doklad má dvě fáze: draft se dá libovolně upravovat i smazat a se stavem

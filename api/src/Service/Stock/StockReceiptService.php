@@ -100,6 +100,10 @@ final class StockReceiptService
                 $unitCost = $qty > 0 ? ($base / $qty) * $rate : 0.0;
                 $stockLines[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
+                    // Příjem z faktury musí zavírat i objednávku, na kterou je řádek
+                    // napárovaný — bez toho by zboží zůstalo věčně „na cestě",
+                    // přestože fyzicky leží ve skladu.
+                    'purchase_order_line_id'   => $it['purchase_order_line_id'],
                     'stock_item_id'            => (int) $it['stock_item_id'],
                     'description'              => (string) $it['description'],
                     'quantity'                 => number_format($qty, 3, '.', ''),
@@ -225,6 +229,7 @@ final class StockReceiptService
                     'unit_cost'                => number_format($unitCost, 6, '.', ''),
                     'extra_cost'               => '0',
                     'purchase_invoice_item_id' => $piItemId,
+                    'purchase_order_line_id'   => $piItem['purchase_order_line_id'] ?? null,
                     'source_description'       => (string) $piItem['description'],
                     'source_qty'               => (string) $piItem['quantity'],
                 ];
@@ -364,8 +369,8 @@ final class StockReceiptService
     private function purchaseInvoiceItems(int $supplierId, int $piId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pii.stock_item_id, pii.description, pii.quantity,
-                    pii.total_without_vat, pii.total_with_vat
+            'SELECT pii.id, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
+                    pii.quantity, pii.total_without_vat, pii.total_with_vat
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
               WHERE pi.supplier_id = ? AND pii.purchase_invoice_id = ?
@@ -376,6 +381,7 @@ final class StockReceiptService
         foreach ($rows as &$r) {
             $r['id']            = (int) $r['id'];
             $r['stock_item_id'] = $r['stock_item_id'] !== null ? (int) $r['stock_item_id'] : null;
+            $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
         }
         unset($r);
         return $rows;
