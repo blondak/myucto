@@ -17,6 +17,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
@@ -250,7 +251,16 @@ function onViewClick(f: SavedFilter) {
   else saved.apply(f)
 }
 
+// Rozpad po analytikách si stránka pamatuje mezi návštěvami (viz useTablePrefs.flag).
+// Uložený filtr i `?analytics=` v adrese jsou explicitní volba a mají přednost.
+function onAnalyticsToggle() {
+  tbl.setFlag('analytics', filters.analytics)
+  return load()
+}
+
 onMounted(async () => {
+  await ensurePrefsLoaded()
+  filters.analytics = tbl.flag('analytics')
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   const open = periods.value.filter(p => p.status === 'open')
@@ -353,7 +363,7 @@ onMounted(async () => {
         </div>
         <div class="flex items-end pb-2">
           <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input v-model="filters.analytics" type="checkbox" @change="load" class="rounded border-neutral-300" />
+            <input v-model="filters.analytics" type="checkbox" @change="onAnalyticsToggle" class="rounded border-neutral-300" />
             {{ t('accounting.general_ledger.filter_analytics') }}
           </label>
         </div>

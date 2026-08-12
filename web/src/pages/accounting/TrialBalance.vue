@@ -13,6 +13,7 @@ import { formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -99,7 +100,17 @@ const COLUMNS: ColumnDef[] = [
 ]
 const tbl = useTablePrefs('trial_balance', COLUMNS)
 
+// Rozpad po analytikách je volba pohledu, ne filtr dat — firma, která analytiky
+// vede, je chce vidět pokaždé. Bez zapamatování předvaha default zobrazí holé
+// syntetiky a účetní z toho čte, že analytiky v systému nejsou.
+function onAnalyticsToggle() {
+  tbl.setFlag('analytics', filters.analytics)
+  return load()
+}
+
 onMounted(async () => {
+  await ensurePrefsLoaded()
+  filters.analytics = tbl.flag('analytics')
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   const open = periods.value.filter(p => p.status === 'open')
   const def = open.length
@@ -156,7 +167,7 @@ onMounted(async () => {
         </div>
         <div class="flex items-end pb-2">
           <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input v-model="filters.analytics" type="checkbox" @change="load" class="rounded border-neutral-300" />
+            <input v-model="filters.analytics" type="checkbox" @change="onAnalyticsToggle" class="rounded border-neutral-300" />
             {{ t('accounting.trial_balance.filter_analytics') }}
           </label>
         </div>

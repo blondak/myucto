@@ -17,6 +17,10 @@ export interface TablePrefs {
   shown?: string[] | null                // explicitně ODKRYTÉ doplňkové (defaultHidden) sloupce
   sort?: SortPref | null
   density?: 'comfortable' | 'compact'
+  // Lepkavé přepínače pohledu, které nejsou filtrem dat, ale způsobem zobrazení
+  // (dnes `analytics` = rozpad po analytikách v hlavní knize a předvaze). Ukládají
+  // se sem, ne mezi filtry: účetní si je nastaví jednou a čeká je i příště.
+  flags?: Record<string, boolean> | null
 }
 
 export interface NavOrderPrefs {

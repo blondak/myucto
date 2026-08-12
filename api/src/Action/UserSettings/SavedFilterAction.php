@@ -34,9 +34,15 @@ final class SavedFilterAction
      * stránky je odvozují od názvu routy (`stock-items`) a týmž literálem si drží
      * i sloupcové předvolby přes useTablePrefs(); přejmenování by je rozešlo uvnitř
      * jednoho souboru. Dokud tu chyběly, končilo uložení pohledu ve skladu na 422.
+     *
+     * Seznam je whitelist i pro `table.*` preference (viz UserPreferenceAction) —
+     * stránka volající useTablePrefs() s klíčem, který tu není, dostane na PUT 422
+     * a její volba sloupců/hustoty se tiše neuloží. Tak dlouho tiše přicházely
+     * o předvolby předvaha, peněžní deník, pokladní kniha i pohledávky/závazky.
      */
     public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger',
-        'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents', 'cash_documents',
+        'trial_balance', 'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents',
+        'cash_documents', 'cash_book', 'cash_journal', 'receivables_payables',
         'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
         'stock-items', 'stock-documents', 'stock-purchase-orders'];
 

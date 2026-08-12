@@ -68,6 +68,15 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   }
   const densityClass = computed(() => (density.value === 'compact' ? 'tbl-compact' : ''))
 
+  // Lepkavé přepínače pohledu (např. „rozpad po analytikách"). Čtou se až po
+  // ensurePrefsLoaded() — stránka si je proto bere v onMounted PŘED prvním load().
+  function flag(key: string, fallback = false): boolean {
+    return prefs.value.flags?.[key] ?? fallback
+  }
+  function setFlag(key: string, value: boolean): void {
+    patchPagePrefs(pageKey, { flags: { ...(prefs.value.flags ?? {}), [key]: value } })
+  }
+
   const sort = computed<SortPref | null>(() => prefs.value.sort ?? null)
   // Cyklus asc → desc → výchozí; persistuje do prefs.
   function toggleSort(key: string): void {
@@ -84,6 +93,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
     isVisible, toggleColumn, resetColumns,
     density, setDensity, densityClass,
     sort, toggleSort,
+    flag, setFlag,
     ready,
   }
 }
