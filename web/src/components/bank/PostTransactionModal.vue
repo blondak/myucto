@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import { formatMoney, formatDate } from '@/composables/useFormat'
@@ -15,7 +16,10 @@ import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import RuleForm from './RuleForm.vue'
 import RuleTemplatesModal from './RuleTemplatesModal.vue'
 
+/** Saldokonta — do PRAVIDLA nepatří (H2). Jednorázové ruční zaúčtování je smí. */
 const SALDO_PREFIXES = ['311', '321', '314', '324', '325']
+/** Bankovní strana zápisu je vždy 221* (R6) — back-end to vynucuje, nabídka to respektuje. */
+const BANK_PREFIX = '221'
 
 const props = defineProps<{ tx: BankTransaction; currency: string }>()
 const emit = defineEmits<{ posted: [{ result: PostResult; debit: string; credit: string }]; close: [] }>()
@@ -32,17 +36,22 @@ const accountByCode = computed<Record<string, ChartAccount>>(() => {
   for (const a of accounts.value) m[a.account_code] = a
   return m
 })
-const activeAccounts = computed(() =>
-  accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)),
-)
+const activeAccounts = computed(() => accountPickerOptions(accounts.value))
 function isSaldo(code: string): boolean {
   return SALDO_PREFIXES.some(p => code.startsWith(p))
 }
-// Ne-bankovní strana: incoming → credit protiúčet, outgoing → debit.
-const nonBankOptions = computed(() => activeAccounts.value.filter(a => !isSaldo(a.account_code)))
+// Bankovní strana (incoming → MD, outgoing → D) smí být jen 221*. Zúžená nabídka
+// je jediné místo, kde se uživatel dozví, na které analytiky 221 firma účtuje —
+// v seznamu 278 účtů se ztratí.
+const bankOptions = computed(() => accountPickerOptions(accounts.value, a => a.account_code.startsWith(BANK_PREFIX)))
+// Protiúčet: CELÁ osnova včetně saldokont. Ruční zaúčtování je jednorázový úkon
+// člověka, který doklad má — na rozdíl od pravidla (H2) saldokonto zakázané nemá,
+// stejně jako ho nemá rozúčtování na víc řádků. Filtrovat ho z nabídky znamenalo,
+// že po napsání „311" nepřišla ŽÁDNÁ nápověda: ani syntetika, ani 311.100.
+const counterOptions = activeAccounts
 
-const debit = ref(isIncoming.value ? '221' : '')
-const credit = ref(isIncoming.value ? '' : '221')
+const debit = ref(isIncoming.value ? BANK_PREFIX : '')
+const credit = ref(isIncoming.value ? '' : BANK_PREFIX)
 const description = ref(props.tx.description ?? props.tx.counterparty_name ?? '')
 const aiOpen = ref(false)
 const aiQuery = ref('')
@@ -56,6 +65,20 @@ function accountName(code: string): string {
 }
 const debitValid = computed(() => !!debit.value && !!accountByCode.value[debit.value])
 const creditValid = computed(() => !!credit.value && !!accountByCode.value[credit.value])
+
+/** Strana, na kterou musí padnout banka: příchozí = MD, odchozí = D (R6). */
+const bankSideCode = computed(() => (isIncoming.value ? debit.value : credit.value))
+const counterSideCode = computed(() => (isIncoming.value ? credit.value : debit.value))
+/** Chybu bankovní strany hlásil dřív až back-end po odeslání — teď je vidět hned. */
+const bankSideValid = computed(() => bankSideCode.value.startsWith(BANK_PREFIX))
+/**
+ * Holé „221" back-end přesměruje na analytiku vlastního účtu výpisu (221.100 …),
+ * stejně jako u automatiky. Bez téhle věty vypadá předvyplněná syntetika jako
+ * chyba a uživatel ji „opravuje" ručně.
+ */
+const bankSideRoutedToAnalytic = computed(() => bankSideCode.value === BANK_PREFIX)
+/** Pravidlo se saldokontem back-end odmítne (H2) — nabízet ho u takové kontace nemá smysl. */
+const counterIsSaldo = computed(() => !!counterSideCode.value && isSaldo(counterSideCode.value))
 
 // ── Rozúčtování na víc řádků ──────────────────────────────────────────────────
 // Dvojice MD/D z principu neumí případ, kde se částka řádku liší od částky pohybu: prodej cenných
@@ -124,7 +147,8 @@ const splitValid = computed(() =>
   && splitDiff.value === 0
   && splitBankOk.value)
 
-const canSubmit = computed(() => (splitMode.value ? splitValid.value : debitValid.value && creditValid.value))
+const canSubmit = computed(() =>
+  splitMode.value ? splitValid.value : debitValid.value && creditValid.value && bankSideValid.value)
 
 // Volitelné pravidlo z této platby
 const withRule = ref(false)
@@ -161,6 +185,9 @@ function toggleRule() {
     rulePayload.credit_account_code = credit.value
   }
 }
+// Přepnutí protiúčtu na saldokonto po zaškrtnutí by jinak nechalo zaškrtnuté pravidlo,
+// které back-end odmítne (rule_saldo_forbidden) — a s ním se rollbackne i celý zápis.
+watch(counterIsSaldo, (saldo) => { if (saldo) withRule.value = false })
 
 const saving = ref(false)
 useHotkey('escape', () => { if (!saving.value) emit('close') })
@@ -285,6 +312,10 @@ onMounted(async () => {
             <div v-else-if="credit" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
           </div>
         </div>
+        <p v-if="!bankSideValid" class="text-xs text-danger-500 mt-1">{{ t('bank.posting.err_rule_bank_side') }}</p>
+        <p v-else-if="bankSideRoutedToAnalytic" class="text-xs text-neutral-500 mt-1">
+          {{ t('bank.posting.bank_analytic_hint') }}
+        </p>
         <button type="button" class="mt-2 text-xs text-primary-600 hover:underline" @click="templatesOpen = true">
           {{ t('bank.posting.use_template') }}
         </button>
@@ -342,23 +373,23 @@ onMounted(async () => {
       <button v-if="canSplit" type="button" class="mt-2 text-xs text-primary-600 hover:underline" @click="toggleSplit">
         {{ splitMode ? t('bank.posting.split_off') : t('bank.posting.split_on') }}
       </button>
-      <!-- Rozúčtování smí i saldokonta (na rozdíl od dvojice MD/D) — nabídni tedy plnou osnovu. -->
+      <!-- Plná osnova (rozúčtování i protiúčet dvojice) — analytiky před svou syntetikou. -->
       <datalist id="ptm-coa-split">
         <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>
       </datalist>
       <datalist id="ptm-coa-debit">
-        <option v-for="a in (isIncoming ? activeAccounts : nonBankOptions)" :key="a.id" :value="a.account_code">
+        <option v-for="a in (isIncoming ? bankOptions : counterOptions)" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>
       </datalist>
       <datalist id="ptm-coa-credit">
-        <option v-for="a in (isIncoming ? nonBankOptions : activeAccounts)" :key="a.id" :value="a.account_code">
+        <option v-for="a in (isIncoming ? counterOptions : bankOptions)" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>
       </datalist>
-      <p v-if="!splitMode" class="text-xs text-neutral-500 mt-1">{{ t('bank.posting.saldo_hint') }}</p>
+      <p v-if="!splitMode" class="text-xs text-neutral-500 mt-1">{{ t('bank.posting.saldo_manual_hint') }}</p>
 
       <!-- Popis -->
       <div class="mt-3">
@@ -424,11 +455,13 @@ onMounted(async () => {
         <div class="text-xs text-neutral-400 mt-1">{{ formatDate(tx.posted_at) }} · {{ description || '—' }}</div>
       </div>
 
-      <!-- Volitelné pravidlo — jen u dvojice MD/D; z rozúčtování ho back-end založit nedovolí. -->
-      <label v-if="!splitMode" class="flex items-center gap-2 mt-3 text-sm text-neutral-700 cursor-pointer">
-        <input type="checkbox" :checked="withRule" @change="toggleRule" class="rounded border-neutral-300" />
+      <!-- Volitelné pravidlo — jen u dvojice MD/D bez saldokonta; jinak ho back-end založit nedovolí. -->
+      <label v-if="!splitMode" class="flex items-center gap-2 mt-3 text-sm cursor-pointer"
+        :class="counterIsSaldo ? 'text-neutral-400 cursor-not-allowed' : 'text-neutral-700'">
+        <input type="checkbox" :checked="withRule" :disabled="counterIsSaldo" @change="toggleRule" class="rounded border-neutral-300" />
         {{ t('bank.posting.create_rule_checkbox') }}
       </label>
+      <p v-if="!splitMode && counterIsSaldo" class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.saldo_hint') }}</p>
       <div v-if="withRule && !splitMode" class="mt-3 border-t border-neutral-200 pt-3">
         <RuleForm v-model="rulePayload" :accounts="accounts" mode="create" :base-amount="absAmount" />
       </div>

@@ -8988,6 +8988,8 @@
       "mode_hint": "Automaticky účtuje jen při jednoznačné shodě; vyžaduje rozsah částky a alespoň jedno úspěšné použití.",
       "mode_suggest_only_hint": "Nové pravidlo vždy jen navrhuje. Na automatické účtování ho přepneš po prvním úspěšném použití.",
       "saldo_hint": "Platby faktur se párují, ne účtují pravidlem.",
+      "saldo_manual_hint": "Úhradu faktury raději spárujte s dokladem. Saldokontní účet (311, 321…) tu použijte jen tam, kde párování nepřipadá v úvahu.",
+      "bank_analytic_hint": "Holé 221 se zaúčtuje na analytiku vlastního účtu tohoto výpisu.",
       "dry_run": "Otestovat na historii",
       "dry_run_result": "Vzor odpovídá {count} transakcím za 12 měsíců",
       "dry_run_already": "z toho {count} už zaúčtované",

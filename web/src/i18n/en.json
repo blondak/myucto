@@ -8988,6 +8988,8 @@
       "mode_hint": "Auto-posts only on an unambiguous match; requires an amount range and at least one successful hit.",
       "mode_suggest_only_hint": "A new rule always only suggests. Switch it to automatic posting after its first successful hit.",
       "saldo_hint": "Invoice payments are matched, not posted by rules.",
+      "saldo_manual_hint": "Prefer matching an invoice payment to its document. Use a receivable/payable account (311, 321…) here only where matching is not an option.",
+      "bank_analytic_hint": "A bare 221 is posted to the analytic account of this statement's own bank account.",
       "dry_run": "Test against history",
       "dry_run_result": "Pattern matches {count} transactions in 12 months",
       "dry_run_already": "of which {count} already posted",

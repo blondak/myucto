@@ -2109,7 +2109,12 @@ final class BankPostingService
             if ($debit === '' || $credit === '') {
                 throw new PostingException('validation_failed', 'Zadej kontaci MD/D nebo řádky rozúčtování.');
             }
-            $this->assertSaldoBlacklist($signedAmount, $debit, $credit);
+            // Saldokonto se tu — na rozdíl od pravidel (H2) — NEzakazuje. Zákaz mířil na
+            // automatiku a do dvojice MD/D se dostal jen souběhem s R6 guardem; ruční
+            // rozúčtování na víc řádků saldokonta odjakživa smí ({@see manualLines}) a
+            // vzniká z něj TÝŽ zápis, takže zákaz nic nechránil — jen z nabídky vyřízl
+            // celé 311/321/…, takže našeptávač po napsání „311" nenabídl ani 311.100.
+            $this->assertBankSide($signedAmount, $debit, $credit);
             $lines = $fxRate === null
                 ? [
                     $this->line($debit, 'debit', $absAmount),
@@ -2132,7 +2137,11 @@ final class BankPostingService
         }
         try {
             $pending = $this->suggestions->pendingForTx($supplierId, $txId);
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
+            // Bankovní noha patří na analytiku vlastního účtu výpisu (#35) — stejně jako
+            // u automatiky i schvalování návrhu. Ruční zaúčtování jako jediné tenhle krok
+            // vynechávalo, takže holé '221' z modalu skončilo na syntetice a rozbilo
+            // jednoúčtovou (a tím jednoměnovou) analytiku, kterou zbytek systému udržuje.
+            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
                 'document_no'   => $this->documentNo($tx),
@@ -2635,11 +2644,35 @@ final class BankPostingService
             if ($debit === null || $credit === null) {
                 return null;
             }
+            [$debit, $credit] = self::genericBankLeg($debit, $credit);
             $key = $debit . '/' . $credit;
             $seen[$key] = true;
             $result = ['debit_account_code' => $debit, 'credit_account_code' => $credit];
         }
         return count($seen) === 1 ? $result : null;
+    }
+
+    /**
+     * Bankovní noha zpět na obecné '221' — kontace se čte ze zaúčtované HISTORIE, ale
+     * míří do PRAVIDLA (resp. návrhu), který platí i pro platby na jiném vlastním účtu.
+     * V deníku už na bankovní noze leží analytika účtu výpisu (#35, `221.400`); kdyby se
+     * opsala do pravidla, přibila by ho k jednomu bankovnímu účtu a platba na jiném by
+     * skončila na cizí analytice. Konkrétní účet dosadí až {@see withBankAnalytic()}
+     * podle výpisu — přesně proto pravidla v DB vedou holé '221'.
+     *
+     * Převod mezi vlastními účty (obě nohy 221*) se nechává být: tam nesou obě analytiky
+     * význam a která z nich je „účet výpisu" se z kontace poznat nedá.
+     *
+     * @return array{0:string, 1:string}
+     */
+    private static function genericBankLeg(string $debit, string $credit): array
+    {
+        $debitBank  = str_starts_with($debit, '221');
+        $creditBank = str_starts_with($credit, '221');
+        if ($debitBank === $creditBank) {
+            return [$debit, $credit];
+        }
+        return $debitBank ? ['221', $credit] : [$debit, '221'];
     }
 
     /**
@@ -2676,7 +2709,14 @@ final class BankPostingService
 
     // ── validace / helpers ──────────────────────────────────────────────────────
 
-    /** Saldokontní blacklist (H2) na OBOU stranách + R6 guard: bankovní strana dle směru = 221*. */
+    /**
+     * Saldokontní blacklist (H2) na OBOU stranách + R6 guard.
+     *
+     * Platí pro AUTOMATIKU — pravidla, šablony a schvalování návrhů: kontace účtující
+     * 311 naslepo u každé odpovídající platby rozvrátí saldo ve velkém a bez dokladu
+     * v ruce. Jednorázové ruční zaúčtování člověka, který doklad má, si volá jen
+     * {@see assertBankSide()} (stejně jako ruční rozúčtování na víc řádků).
+     */
     private function assertSaldoBlacklist(float $amount, string $debit, string $credit): void
     {
         foreach (self::SALDO_BLACKLIST as $prefix) {
@@ -2685,7 +2725,12 @@ final class BankPostingService
                     'Platby faktur se párují, ne účtují pravidlem.');
             }
         }
-        // Bankovní pohyb vždy hýbe bankou: incoming = MD 221x, outgoing = D 221x.
+        $this->assertBankSide($amount, $debit, $credit);
+    }
+
+    /** R6 guard: bankovní pohyb vždy hýbe bankou — incoming = MD 221x, outgoing = D 221x. */
+    private function assertBankSide(float $amount, string $debit, string $credit): void
+    {
         $bank = $amount > 0 ? $debit : $credit;
         if (!str_starts_with($bank, '221')) {
             throw new PostingException('rule_bank_side_required',
@@ -2797,7 +2842,8 @@ final class BankPostingService
      *    To je klíčový invariant multi-line režimu — bez něj by šlo zaúčtovat pohyb na jinou
      *    částku, než jaká reálně odešla z účtu, a 221 by se rozešel s výpisem.
      *
-     * Saldokontní účty tu — na rozdíl od dvojice MD/D a od pravidel (H2) — POVOLENÉ jsou.
+     * Saldokontní účty tu — na rozdíl od pravidel (H2) — POVOLENÉ jsou (a od té doby,
+     * co byl zákaz z ruční dvojice MD/D odstraněn, platí totéž i pro ni).
      * H2 míří na automatiku: pravidlo účtující 311 naslepo u každé odpovídající platby by
      * saldo rozvrátilo ve velkém a bez dokladu v ruce. Ruční rozúčtování je jednorázový
      * úkon člověka, který doklad má, a bez 311 nejde zaúčtovat legitimní případ „cizoměnová
