@@ -361,6 +361,103 @@ export interface StockReceiptPayload {
   landed_costs?: StockReceiptLandedCost[]
 }
 
+// ── Nabídky dodavatelů („u dodavatele", fáze 3) ──────────────────────────────
+
+export type VendorAvailabilityState = 'in_stock' | 'on_order' | 'unavailable' | 'unknown'
+export type VendorOfferDataSource = 'manual' | 'import' | 'feed'
+
+/**
+ * Zboží × dodavatel nad `stock_item_vendors`. `on_hand` je vlastní stav skladu
+ * napříč sklady — karta bez jediného pohybu vrací „0", ne prázdno, aby šla
+ * evidovat nabídka i u zboží, které se nikdy nekupovalo.
+ */
+export interface VendorOffer {
+  id: number
+  supplier_id: number
+  stock_item_id: number
+  client_id: number
+  client_name: string
+  sku: string
+  item_name: string
+  unit: string
+  vendor_sku: string | null
+  purchase_price: string | null
+  currency_code: string
+  delivery_days: number | null
+  stock_qty: string | null
+  /** Informativní razítko — hlášená skladovost platí, dokud ji dodavatel nezmění. */
+  stock_qty_updated_at: string | null
+  availability_state: VendorAvailabilityState
+  min_order_qty: string | null
+  package_qty: string | null
+  price_valid_to: string | null
+  data_source: VendorOfferDataSource
+  is_active: boolean
+  is_preferred: boolean
+  note: string | null
+  on_hand: string
+  updated_at: string
+}
+
+/** Částečný update — pošli jen pole, která se mají změnit. */
+export interface VendorOfferPatch {
+  vendor_sku?: string | null
+  purchase_price?: string | number | null
+  currency_code?: string
+  delivery_days?: number | null
+  stock_qty?: string | number | null
+  stock_qty_updated_at?: string | null
+  availability_state?: VendorAvailabilityState
+  min_order_qty?: string | number | null
+  package_qty?: string | number | null
+  price_valid_to?: string | null
+  data_source?: VendorOfferDataSource
+  is_active?: boolean
+  is_preferred?: boolean
+  note?: string | null
+}
+
+export interface VendorOfferPayload extends VendorOfferPatch {
+  stock_item_id: number
+  client_id: number
+}
+
+export interface VendorOfferFilters {
+  stock_item_id?: number
+  client_id?: number
+  availability_state?: VendorAvailabilityState | ''
+  active?: boolean
+  preferred?: boolean
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface VendorOfferListResponse {
+  items: VendorOffer[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface VendorOfferImportRow {
+  line: number
+  key: string
+  status: 'create' | 'update' | 'skip' | 'error'
+  changes?: Record<string, { from: unknown; to: unknown }>
+  message?: string
+}
+
+export interface VendorOfferImportReport {
+  ok: boolean
+  dry_run: boolean
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  rows: VendorOfferImportRow[]
+}
+
 function toParams<T extends object>(f: T = {} as T): Record<string, string | number> {
   const out: Record<string, string | number> = {}
   for (const [k, v] of Object.entries(f)) {
@@ -460,4 +557,24 @@ export const stockApi = {
     api.post<StockDocument>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, payload).then(r => r.data),
   receiptList: (purchaseInvoiceId: number) =>
     api.get<StockDocument[]>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipts`).then(r => r.data),
+
+  // ── Nabídky dodavatelů („u dodavatele") ─────────────────────────────────
+  listVendorOffers: (filters: VendorOfferFilters = {}) =>
+    api.get<VendorOfferListResponse>('/stock/vendor-offers', { params: toParams(filters) }).then(r => r.data),
+  getVendorOffer: (id: number) => api.get<VendorOffer>(`/stock/vendor-offers/${id}`).then(r => r.data),
+  createVendorOffer: (payload: VendorOfferPayload) =>
+    api.post<VendorOffer>('/stock/vendor-offers', payload).then(r => r.data),
+  /** Partial update — klíč, který v payloadu není, se nemění. */
+  patchVendorOffer: (id: number, payload: VendorOfferPatch) =>
+    api.patch<VendorOffer>(`/stock/vendor-offers/${id}`, payload).then(r => r.data),
+  deleteVendorOffer: (id: number) =>
+    api.delete<{ deleted: true }>(`/stock/vendor-offers/${id}`).then(r => r.data),
+  importVendorOffers: (file: File, dryRun: boolean) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('dry_run', dryRun ? '1' : '0')
+    return api.post<VendorOfferImportReport>('/stock/vendor-offers/import', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }

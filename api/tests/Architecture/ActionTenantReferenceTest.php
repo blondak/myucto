@@ -145,6 +145,17 @@ final class ActionTenantReferenceTest extends TestCase
         // jehož SELECT má `supplier_id = ?` v predikátu (Section46Service:477–480) — cizí
         // doklad se ani nenačte a skončí na 'Doklad #N nenalezen.'.
         'Section46Action.php:invoice_id' => 'Section46Service::fetchInvoice($supplierId, …) (Section46Service:477)',
+
+        // Nabídky dodavatelů („u dodavatele") — VendorOfferAction::create() ř. ~123 pouští
+        // `client_id` přes StockItemVendorRepository::filterOwnedVendors($supplierId, […]),
+        // jehož SELECT má v predikátu `supplier_id = ?` A NAVÍC `is_vendor = 1`
+        // (StockItemVendorRepository:313–323). Je to tedy PŘÍSNĚJŠÍ vazba než guard:
+        // cizí klient neprojde a vlastní klient bez příznaku dodavatele taky ne,
+        // obojí jako 422 `vendor_invalid`. Guardem duplicitně netaháme — byl by to
+        // dotaz navíc se slabší podmínkou.
+        // Dvoutenantní protějšek: VendorOfferTest::testVendorMustBeMarkedAsVendorAndOwned()
+        // a ::testForeignTenantSeesNothing().
+        'VendorOfferAction.php:client_id' => 'StockItemVendorRepository::filterOwnedVendors($supplierId, …) (StockItemVendorRepository:313)',
     ];
 
     /**

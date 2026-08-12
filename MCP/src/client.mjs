@@ -155,6 +155,15 @@ export class MyUctoClient {
   }
 
   /**
+   * Částečná úprava — pošle jen předaná pole. Na rozdíl od `put` (celý objekt)
+   * nemá vynechaný klíč význam „vynuluj", takže agent může změnit jednu hodnotu,
+   * aniž by si musel načíst a poslat zpátky zbytek záznamu.
+   */
+  patch(path, body, tool) {
+    return this.request('PATCH', path, { body, tool });
+  }
+
+  /**
    * `delete` je v JS rezervované slovo, takže metoda je `del`.
    *
    * Tělo se záměrně neposílá: mazací endpointy API ho nečtou a prázdný

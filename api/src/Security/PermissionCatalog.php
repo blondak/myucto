@@ -113,6 +113,7 @@ final class PermissionCatalog
             ['stock', 'stock', 'Sklad', $staffOnly],
             ['stock.items.write', 'stock', 'Skladové karty', $staffOnly],
             ['stock.documents.write', 'stock', 'Skladové doklady', $staffOnly],
+            ['stock.vendors.write', 'stock', 'Nabídky dodavatelů', $staffOnly],
             ['stock.take', 'stock', 'Inventura', $staffOnly],
             ['stock.close', 'stock', 'Skladová uzávěrka', $staffOnly],
             ['eshop', 'eshop', 'E-shop číselníky', $staffOnly],

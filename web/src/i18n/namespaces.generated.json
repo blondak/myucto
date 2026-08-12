@@ -462,6 +462,9 @@
     "stock-document-detail": [
       "stock"
     ],
+    "stock-vendor-offers": [
+      "stock"
+    ],
     "stock-warehouses": [
       "stock"
     ],

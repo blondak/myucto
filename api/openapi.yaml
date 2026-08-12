@@ -11858,6 +11858,167 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: OK }
+  /api/v1/stock/vendor-offers:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Nabídky dodavatelů („u dodavatele")
+      description: |
+        Zboží × dodavatel: nákupní cena, kód u dodavatele, dodací lhůta, množství
+        hlášené dodavatelem, dostupnost, minimální objednávka a balení.
+
+        Vrací i karty, které nikdy neměly skladový pohyb — `on_hand` je pak `0`,
+        ne chybějící řádek. Katalogová karta smí existovat dřív, než se cokoli
+        objedná.
+      parameters:
+        - in: query
+          name: stock_item_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: client_id
+          schema: { type: integer, format: int64 }
+          description: Jen nabídky tohoto dodavatele (karta klienta s `is_vendor`).
+        - in: query
+          name: availability_state
+          schema: { type: string, enum: [in_stock, on_order, unavailable, unknown] }
+        - in: query
+          name: active
+          schema: { type: boolean }
+          description: Filtr na `is_active`; vynecháno = aktivní i vyřazené.
+        - in: query
+          name: preferred
+          schema: { type: boolean }
+          description: Jen hlavní dodavatele.
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Hledá v SKU, názvu zboží, kódu u dodavatele a názvu dodavatele.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockVendorOffer' }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '403': { description: Skladový modul není pro firmu zapnutý. }
+    post:
+      tags: [Stock]
+      summary: Nová nabídka dodavatele
+      description: |
+        Dvojice zboží × dodavatel je unikátní — druhý pokus vrátí `409
+        vendor_offer_exists`. Nastavením `is_preferred` se předchozí hlavní
+        dodavatel karty odznačí (nejvýš jeden na kartu).
+
+        Po zápisu se přepočítají prodejní ceny karty (cenotvorba s
+        `pricing_base=manual` bere nákupní cenu hlavního dodavatele).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockVendorOfferCreate' }
+      responses:
+        '201':
+          description: Vytvořeno
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockVendorOffer' }
+        '409': { description: Dodavatel už u karty nabídku má. }
+        '422': { description: Neplatná data nebo dodavatel není označen jako dodavatel. }
+  /api/v1/stock/vendor-offers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Stock]
+      summary: Detail nabídky dodavatele
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockVendorOffer' }
+        '404': { description: Nenalezeno }
+    patch:
+      tags: [Stock]
+      summary: Částečná úprava nabídky dodavatele
+      description: |
+        Zapíše JEN předaná pole — klíč, který v těle není, se nemění; `null`
+        u nullable pole hodnotu maže. Změna `stock_qty` orazítkuje
+        `stock_qty_updated_at`; razítko je informativní, hlášená skladovost
+        platí, dokud ji dodavatel nezmění.
+
+        Po zápisu se přepočítají prodejní ceny karty, stejně jako u
+        `PUT /api/eshop/products/{id}/vendors`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockVendorOfferPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockVendorOffer' }
+        '404': { description: Nenalezeno }
+        '422': { description: Neplatná data }
+    delete:
+      tags: [Stock]
+      summary: Smazat nabídku dodavatele
+      responses:
+        '200': { description: Smazáno }
+        '404': { description: Nenalezeno }
+  /api/v1/stock/vendor-offers/import:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Import ceníku dodavatele (XLSX/CSV)
+      description: |
+        Identita řádku = SKU karty × dodavatel. Import NIKDY nemaže a NIKDY
+        nezakládá karty ani klienty — neznámé SKU i neznámý dodavatel skončí jako
+        chyba řádku. Dodavatel se hledá podle IČO (sloupec `ico`), jinak podle
+        názvu (`dodavatel`).
+
+        `dry_run` (výchozí) jen spočítá report. Ostrý běh je vše-nebo-nic:
+        jediný chybný řádek zruší celý zápis. Zapsané řádky dostanou
+        `data_source=import`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'XLSX nebo CSV, max 2 MB.' }
+                dry_run: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Report importu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockVendorOfferImportReport' }
+        '415': { description: Nepodporovaný formát souboru. }
+        '422': { description: Soubor je příliš velký nebo má příliš mnoho řádků. }
   /api/v1/stock/documents:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -15060,6 +15221,97 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    StockVendorOfferPatch:
+      type: object
+      description: >
+        Pole nabídky dodavatele. Všechna jsou volitelná — pošli jen ta, která se
+        mají změnit. Peněžní a množstevní hodnoty jdou jako řetězec (DECIMAL,
+        žádné floatování).
+      properties:
+        vendor_sku: { type: [string, "null"], maxLength: 80, description: Kód zboží u dodavatele. }
+        purchase_price: { type: [string, "null"], description: Nákupní cena bez DPH. }
+        currency_code: { type: string, minLength: 3, maxLength: 3, default: CZK }
+        delivery_days: { type: [integer, "null"], minimum: 0, maximum: 65535 }
+        stock_qty: { type: [string, "null"], description: Množství, které dodavatel hlásí skladem. }
+        stock_qty_updated_at:
+          type: [string, "null"]
+          description: >
+            Kdy naposled množství přišlo. Doplní se samo při změně `stock_qty`.
+            INFORMATIVNÍ — hlášená skladovost platí, dokud ji dodavatel nezmění;
+            žádný práh stárnutí se neuplatňuje.
+        availability_state:
+          type: string
+          enum: [in_stock, on_order, unavailable, unknown]
+          default: unknown
+        min_order_qty: { type: [string, "null"], description: Minimální objednací množství (kladné). }
+        package_qty: { type: [string, "null"], description: Velikost balení; objednávka se na ni zaokrouhluje nahoru. }
+        price_valid_to: { type: [string, "null"], format: date, description: Do kdy platí ceníková cena. }
+        data_source:
+          type: string
+          enum: [manual, import, feed]
+          default: manual
+          description: Odkud hodnoty přišly — ruční zápis, import ceníku, automatický kanál.
+        is_active: { type: boolean, default: true, description: Vyřazená nabídka zůstává kvůli historii, ale nenabízí se. }
+        is_preferred: { type: boolean, description: Hlavní dodavatel karty; nejvýš jeden — ostatní se odznačí. }
+        note: { type: [string, "null"], maxLength: 255 }
+    StockVendorOfferCreate:
+      allOf:
+        - type: object
+          required: [stock_item_id, client_id]
+          properties:
+            stock_item_id: { type: integer, format: int64, description: Skladová karta. }
+            client_id:
+              type: integer
+              format: int64
+              description: Karta klienta s příznakem „je dodavatel" (`is_vendor`).
+        - $ref: '#/components/schemas/StockVendorOfferPatch'
+    StockVendorOffer:
+      allOf:
+        - $ref: '#/components/schemas/StockVendorOfferPatch'
+        - type: object
+          required: [id, stock_item_id, client_id]
+          properties:
+            id: { type: integer, format: int64 }
+            supplier_id: { type: integer }
+            stock_item_id: { type: integer, format: int64 }
+            client_id: { type: integer, format: int64 }
+            client_name: { type: string, description: Název dodavatele. }
+            sku: { type: string }
+            item_name: { type: string }
+            unit: { type: string }
+            on_hand:
+              type: string
+              description: >
+                Vlastní stav na skladě napříč sklady. Karta bez jediného pohybu
+                nemá řádek ve `stock_levels` a vrací `0`, ne prázdno.
+            updated_at: { type: string }
+    StockVendorOfferImportReport:
+      type: object
+      required: [ok, dry_run, created, updated, skipped, failed, rows]
+      properties:
+        ok: { type: boolean, description: Žádný chybný řádek. }
+        dry_run: { type: boolean }
+        created: { type: integer }
+        updated: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, key, status]
+            properties:
+              line: { type: integer, description: Číslo řádku v souboru (1-based včetně hlavičky). }
+              key: { type: string, description: 'SKU / dodavatel.' }
+              status: { type: string, enum: [create, update, skip, error] }
+              changes:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    from: {}
+                    to: {}
+              message: { type: string }
     EshopPromoPriceInput:
       type: object
       required: [promo_price]

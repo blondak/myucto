@@ -2525,6 +2525,128 @@ export const TOOLS = [
   },
 
   // ──────────────────────────────────────────────────────────────────────────
+  // Sklad — u dodavatele (nabídky dodavatelů)
+  //
+  // Odpovídá na „kdo to má, za kolik a kolik kusů" JEŠTĚ NEŽ se cokoli objedná.
+  // Katalogová karta nemusí mít jediný skladový pohyb — `on_hand` je pak 0, ne
+  // chybějící údaj, takže nabídku lze evidovat i u zboží, které firma nikdy
+  // nekupovala.
+  //
+  // Proti `set_product_vendors` (celá sada dodavatelů jedné karty, chybějící
+  // řádek = smazání) je tohle pohled „řádek = nabídka": mění se jedna dvojice
+  // zboží × dodavatel a zbytek zůstává, jak byl. Obojí píše do stejných dat.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'vendor_offers_list',
+    title: 'Nabídky dodavatelů',
+    description:
+      'Dvojice zboží × dodavatel: nákupní cena a měna, kód u dodavatele, dodací lhůta, '
+      + 'množství hlášené dodavatelem, dostupnost, minimální objednávka a balení. '
+      + 'Přidává i `on_hand` = kolik má firma sama na skladě, takže se dá rovnou '
+      + 'porovnat „naše zásoba vs. co má dodavatel".\n\n'
+      + '`stock_qty_updated_at` říká, kdy hlášené množství naposled přišlo. Je to jen '
+      + 'informace — množství platí, dokud ho dodavatel nezmění, nic po čase '
+      + 'nevyprší.',
+    inputSchema: schema({
+      stock_item_id: int('Jen nabídky k tomuto zboží.'),
+      client_id: int('Jen nabídky tohoto dodavatele (`search_clients` s `role: "vendors"`).'),
+      availability_state: str('Filtr na dostupnost u dodavatele.', {
+        enum: ['in_stock', 'on_order', 'unavailable', 'unknown'],
+      }),
+      active: bool('Jen aktivní (true) nebo jen vyřazené (false) nabídky.'),
+      preferred: bool('Jen hlavní dodavatele.'),
+      query: str('Fulltext přes SKU, název zboží, kód u dodavatele a název dodavatele.'),
+      ...WINDOW,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/stock/vendor-offers', {
+      stock_item_id: a.stock_item_id,
+      client_id: a.client_id,
+      availability_state: a.availability_state,
+      active: a.active === undefined ? undefined : (a.active ? 1 : 0),
+      preferred: a.preferred === undefined ? undefined : (a.preferred ? 1 : 0),
+      q: a.query,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'vendor_offer_upsert',
+    title: 'Uložit nabídku dodavatele',
+    description:
+      'Založí nebo upraví nabídku pro dvojici zboží × dodavatel. Jestli už dvojice '
+      + 'existuje, nástroj si zjistí sám — proto „upsert": stejné volání jde použít '
+      + 'na první zadání i na pozdější aktualizaci ceníku.\n\n'
+      + 'Mění se JEN předaná pole; co nepošleš, zůstane, jak bylo. Vynechané pole '
+      + 'tedy neznamená „vynuluj" (to je rozdíl proti `set_product_vendors`, kde '
+      + 'chybějící dodavatel ze zboží zmizí).\n\n'
+      + '`client_id` musí být karta s příznakem „je dodavatel" (`search_clients` '
+      + 's `role: "vendors"`), jinak server vrátí 422. `is_preferred: true` odznačí '
+      + 'předchozího hlavního dodavatele téhož zboží — nejvýš jeden na kartu. '
+      + 'Po zápisu se přepočítají prodejní ceny, pokud je cenotvorba karty vázaná '
+      + 'na nákupní cenu.',
+    inputSchema: schema({
+      stock_item_id: int('ID zboží (skladové karty).'),
+      client_id: int('ID dodavatele — karta odběratele s příznakem „je dodavatel".'),
+      vendor_sku: str('Kód zboží u dodavatele.', { maxLength: 80 }),
+      purchase_price: num('Nákupní cena bez DPH.', { minimum: 0 }),
+      currency_code: str('Měna nákupní ceny (ISO 4217). Výchozí CZK.', { minLength: 3, maxLength: 3 }),
+      delivery_days: int('Dodací lhůta ve dnech.', { minimum: 0, maximum: 65535 }),
+      stock_qty: num('Množství, které dodavatel hlásí skladem.', { minimum: 0 }),
+      availability_state: str('Co dodavatel hlásí o dostupnosti.', {
+        enum: ['in_stock', 'on_order', 'unavailable', 'unknown'],
+      }),
+      min_order_qty: num('Minimální objednací množství.', { exclusiveMinimum: 0 }),
+      package_qty: num('Velikost balení — objednávka se na ni zaokrouhluje nahoru.', { exclusiveMinimum: 0 }),
+      price_valid_to: date('Do kdy platí ceníková cena (RRRR-MM-DD).'),
+      data_source: str('Odkud hodnoty přišly.', { enum: ['manual', 'import', 'feed'] }),
+      is_active: bool('Aktivní nabídka. `false` ji skryje, ale historie zůstane.'),
+      is_preferred: bool('Hlavní dodavatel zboží. Nejvýš jeden — ostatní se odznačí.'),
+      note: str('Poznámka.', { maxLength: 255 }),
+    }, ['stock_item_id', 'client_id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const fields = [
+        'vendor_sku', 'purchase_price', 'currency_code', 'delivery_days', 'stock_qty',
+        'availability_state', 'min_order_qty', 'package_qty', 'price_valid_to',
+        'data_source', 'is_active', 'is_preferred', 'note',
+      ];
+      const existing = await c.get('/stock/vendor-offers', {
+        stock_item_id: a.stock_item_id, client_id: a.client_id, limit: 1,
+      }, tool);
+      const current = existing?.items?.[0] ?? null;
+      if (current) {
+        return c.patch(`/stock/vendor-offers/${current.id}`, changed(a, fields), tool);
+      }
+      return c.post('/stock/vendor-offers', {
+        stock_item_id: a.stock_item_id,
+        client_id: a.client_id,
+        ...changed(a, fields),
+      }, tool);
+    },
+  },
+  {
+    name: 'vendor_offer_delete',
+    title: 'Smazat nabídku dodavatele',
+    description:
+      'Odebere nabídku dodavatele u zboží. Většinou stačí `vendor_offer_upsert` '
+      + 's `is_active: false` — vyřazená nabídka se nenabízí, ale zůstane dohledatelné, '
+      + 'za kolik se kdysi nakupovalo. Mazat má smysl u překlepu, ne u ukončené '
+      + 'spolupráce.',
+    inputSchema: schema({ id: int('ID nabídky (z `vendor_offers_list`).'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const was = await confirmed(c, a, tool, {
+        path: `/stock/vendor-offers/${a.id}`,
+        action: 'Smazat se má nabídka dodavatele',
+        label: (row) => `${row?.sku ?? '?'} — ${row?.client_name ?? '?'}`,
+      });
+      return { deleted: was, result: await c.del(`/stock/vendor-offers/${a.id}`, tool) };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Sklad — příjemky, výdejky, převodky
   //
   // Doklad má dvě fáze: draft se dá libovolně upravovat i smazat a se stavem

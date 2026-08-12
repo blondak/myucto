@@ -1752,6 +1752,15 @@ final class Routes
             $g->get   ('/levels',                       [\MyInvoice\Action\Stock\StockLevelAction::class, 'levels']);
             $g->get   ('/availability',                 [\MyInvoice\Action\Stock\StockLevelAction::class, 'availability']);
 
+            // „U dodavatele" (fáze 3) — nabídky nad stock_item_vendors.
+            // /import je literální cesta, musí být PŘED generickým /{id}.
+            $g->post  ('/vendor-offers/import',         [\MyInvoice\Action\Stock\VendorOfferImportAction::class, 'import']);
+            $g->get   ('/vendor-offers',                [\MyInvoice\Action\Stock\VendorOfferAction::class, 'list']);
+            $g->post  ('/vendor-offers',                [\MyInvoice\Action\Stock\VendorOfferAction::class, 'create']);
+            $g->get   ('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'get']);
+            $g->patch ('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'patch']);
+            $g->delete('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'delete']);
+
             $g->get   ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'list']);
             $g->post  ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'create']);
             $g->get   ('/documents/{id:[0-9]+}',        [\MyInvoice\Action\Stock\StockDocumentAction::class, 'get']);

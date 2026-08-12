@@ -294,6 +294,9 @@ final class RoutePermissionMap
         ['*', '#^/api/stock/documents(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/.*/close$#', 'stock.close', AccessLevel::WRITE],
         ['*', '#^/api/stock/takes(/|$)#', 'stock.take', AccessLevel::WRITE],
+        // „U dodavatele" — nabídky dodavatelů; musí být PŘED catch-all pravidlem
+        // ^/api/stock, jinak by zápis spadl pod obecné právo `stock`.
+        ['*', '#^/api/stock/vendor-offers(/|$)#', 'stock.vendors.write', AccessLevel::WRITE],
         ['*', '#^/api/stock(/|$)#', 'stock', AccessLevel::WRITE],
         ['GET', '#^/api/eshop(/|$)#', 'eshop', AccessLevel::READ],
         ['*', '#^/api/eshop(/|$)#', 'eshop.write', AccessLevel::WRITE],

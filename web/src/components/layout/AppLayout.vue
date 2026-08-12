@@ -359,6 +359,8 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/stock/items',      label: t('nav.stock_items'),      icon: ICONS.stock_items,      newTo: '/stock/items/new' },
         { to: '/stock/documents',  label: t('nav.stock_documents'),  icon: ICONS.stock_documents,  newTo: '/stock/documents/new' },
+        // „U dodavatele" — kdo zboží nabízí, za kolik a kolik kusů (fáze 3 epicu SKLAD).
+        { to: '/stock/vendor-offers', label: t('nav.stock_vendor_offers'), icon: ICONS.factory },
         // E-shop — číselníky (Sklady/Výrobci/Kategorie/Atributy/Tagy/Poplatky) + import
         // jako záložky; 3. položka sekce „Zboží" (za Skladovými doklady).
         { to: '/eshop',            label: t('nav.section_eshop'),    icon: ICONS.folderOpen },

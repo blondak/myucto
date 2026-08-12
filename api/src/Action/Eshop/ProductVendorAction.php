@@ -68,6 +68,16 @@ final class ProductVendorAction
         $body = (array) ($request->getParsedBody() ?? []);
         $rows = is_array($body['vendors'] ?? null) ? $body['vendors'] : [];
 
+        // Zápis je replace-all (delete + insert). Pole nabídky z migrace 1329
+        // (dostupnost, minimální objednávka, balení, platnost ceny, zdroj dat)
+        // tenhle endpoint vůbec nezná — bez přenesení by je editace dodavatelů
+        // na kartě zboží tiše vynulovala. Snapshot podle client_id se proto
+        // přenese na řádky, které v nové sadě zůstávají.
+        $before = [];
+        foreach ($this->vendors->listForItem($supplierId, $itemId) as $prev) {
+            $before[(int) $prev['client_id']] = $prev;
+        }
+
         // Validace + guard is_vendor/tenant.
         $prepared = [];
         $clientIds = [];
@@ -90,15 +100,25 @@ final class ProductVendorAction
                 $preferredCount++;
             }
             $clientIds[] = $clientId;
+            $stockQty = $this->numOrNull($r['stock_qty'] ?? null);
+            $prev = $before[$clientId] ?? null;
             $prepared[] = [
                 'client_id'      => $clientId,
                 'vendor_sku'     => $this->strOrNull($r['vendor_sku'] ?? null),
                 'purchase_price' => $price,
                 'currency_code'  => $currency,
                 'delivery_days'  => isset($r['delivery_days']) && $r['delivery_days'] !== null && $r['delivery_days'] !== '' ? (int) $r['delivery_days'] : null,
-                'stock_qty'      => $this->numOrNull($r['stock_qty'] ?? null),
+                'stock_qty'      => $stockQty,
                 'is_preferred'   => $preferred,
                 'note'           => $this->strOrNull($r['note'] ?? null),
+                // Přenesená pole nabídky (1329) — endpoint je needituje.
+                'availability_state'   => (string) ($prev['availability_state'] ?? 'unknown'),
+                'stock_qty_updated_at' => $this->carriedStockQtyStamp($prev, $stockQty),
+                'min_order_qty'  => $prev['min_order_qty'] ?? null,
+                'package_qty'    => $prev['package_qty'] ?? null,
+                'price_valid_to' => $prev['price_valid_to'] ?? null,
+                'data_source'    => (string) ($prev['data_source'] ?? 'manual'),
+                'is_active'      => $prev === null ? true : (bool) $prev['is_active'],
             ];
         }
         if ($preferredCount > 1) {
@@ -139,6 +159,23 @@ final class ProductVendorAction
         $this->dispatcher->recomputeItem($supplierId, $itemId);
         $this->log($request, 'eshop.vendors_updated', $itemId, ['count' => count($prepared)]);
         return Json::ok($response, $this->vendors->listForItem($supplierId, $itemId));
+    }
+
+    /**
+     * Razítko skladovosti u dodavatele. Nová hodnota množství = nové razítko,
+     * jinak se přenese původní. Je INFORMATIVNÍ — hlášená skladovost platí,
+     * dokud ji dodavatel nezmění (rozhodnutí #7 plánu), nic se podle stáří
+     * neznehodnocuje.
+     *
+     * @param array<string,mixed>|null $prev
+     */
+    private function carriedStockQtyStamp(?array $prev, ?string $stockQty): ?string
+    {
+        $previousQty = $prev['stock_qty'] ?? null;
+        if ($stockQty !== null && (string) $previousQty !== (string) $stockQty) {
+            return date('Y-m-d H:i:s');
+        }
+        return $prev['stock_qty_updated_at'] ?? null;
     }
 
     private function numOrNull(mixed $v): ?string

@@ -203,6 +203,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'stock/documents/new',        name: 'stock-document-new',     component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/documents/:id(\\d+)',  name: 'stock-document-detail',  component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true } },
       { path: 'stock/warehouses',       name: 'stock-warehouses',      component: () => import('@/pages/stock/Warehouses.vue'),   meta: { requiresStock: true } },
+      // „U dodavatele" — nabídky dodavatelů (zboží × dodavatel), fáze 3 epicu.
+      { path: 'stock/vendor-offers',    name: 'stock-vendor-offers',   component: () => import('@/pages/stock/VendorOffers.vue'), meta: { requiresStock: true } },
       { path: 'stock/takes',            name: 'stock-takes',           component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/takes/:id(\\d+)',  name: 'stock-take-detail',     component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/reports',          name: 'stock-reports',         component: () => import('@/pages/stock/Reports.vue'),      meta: { requiresStock: true } },
@@ -448,7 +450,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
-  'stock-warehouses': ['stock'], 'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
+  'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
+  'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
