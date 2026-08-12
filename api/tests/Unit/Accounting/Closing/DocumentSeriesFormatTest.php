@@ -35,9 +35,12 @@ final class DocumentSeriesFormatTest extends TestCase
                 'cash_in' => 'PPD', 'cash_out' => 'VPD', // mini-epic POKLADNA (#14)
                 'stock_in' => 'PRI', 'stock_out' => 'VYD', 'stock_transfer' => 'PRE', // Epic SKLAD (#16)
                 'offset' => 'ZAP', // Fáze F (audit 2026-07): zápočty
+                // Epic SKLAD „na cestě": objednávka není účetní doklad, ale číslo
+                // z řady dostává — musí být unikátní a bez souběhových děr.
+                'purchase_order' => 'OBJ',
             ],
             DocumentSeriesService::DEFAULT_PREFIXES,
-            'Výchozí prefixy řad dle R13 + pokladní řady (#14) + skladové řady (#16) + zápočty (audit 2026-07 Fáze F).',
+            'Výchozí prefixy řad dle R13 + pokladní řady (#14) + skladové řady (#16) + zápočty (audit 2026-07 Fáze F) + objednávky dodavatelům.',
         );
     }
 }

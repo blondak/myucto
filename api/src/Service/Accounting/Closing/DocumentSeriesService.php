@@ -31,6 +31,10 @@ final class DocumentSeriesService
         'stock_out'      => 'VYD',
         'stock_transfer' => 'PRE',
         'offset'         => 'ZAP',
+        // Objednávka vydaná dodavateli (Epic SKLAD „na cestě"). Není účetní
+        // doklad (§ 11 ZoÚ), řadu ale sdílí — číslo musí být unikátní a bez
+        // souběhových děr stejně jako u dokladů.
+        'purchase_order' => 'OBJ',
     ];
 
     private const PREFIX_PATTERN = '/^[A-Z0-9]{1,10}$/';

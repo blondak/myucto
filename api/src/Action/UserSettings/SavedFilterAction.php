@@ -38,7 +38,7 @@ final class SavedFilterAction
     public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger',
         'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents', 'cash_documents',
         'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
-        'stock-items', 'stock-documents'];
+        'stock-items', 'stock-documents', 'stock-purchase-orders'];
 
     private const MAX_FILTERS = 30;
 

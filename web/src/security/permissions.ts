@@ -23,7 +23,7 @@ export const PERMISSION_KEYS = [
   'payroll.insolvency', 'payroll.reports', 'payroll.rulesets', 'payroll.documents',
   'cash', 'cash.document.write', 'cash.close',
   'assets', 'assets.write', 'assets.depreciation', 'assets.dispose',
-  'stock', 'stock.items.write', 'stock.documents.write', 'stock.vendors.write',
+  'stock', 'stock.items.write', 'stock.documents.write', 'stock.orders.write', 'stock.vendors.write',
   'stock.take', 'stock.close',
   'eshop', 'eshop.write',
   'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',

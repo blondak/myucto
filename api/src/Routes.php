@@ -1761,6 +1761,18 @@ final class Routes
             $g->patch ('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'patch']);
             $g->delete('/vendor-offers/{id:[0-9]+}',    [\MyInvoice\Action\Stock\VendorOfferAction::class, 'delete']);
 
+            $g->get   ('/purchase-orders',                         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'list']);
+            $g->post  ('/purchase-orders',                         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'create']);
+            $g->get   ('/purchase-orders/{id:[0-9]+}',             [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'get']);
+            $g->put   ('/purchase-orders/{id:[0-9]+}',             [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'update']);
+            $g->delete('/purchase-orders/{id:[0-9]+}',             [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'delete']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/send',        [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'send']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/confirm',     [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'confirm']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/cancel',      [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'cancel']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/close',       [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'close']);
+            $g->post  ('/purchase-orders/{id:[0-9]+}/reopen',      [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'reopen']);
+            $g->get   ('/purchase-orders/{id:[0-9]+}/pdf',         [\MyInvoice\Action\Stock\PurchaseOrderAction::class, 'pdf']);
+
             $g->get   ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'list']);
             $g->post  ('/documents',                    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'create']);
             $g->get   ('/documents/{id:[0-9]+}',        [\MyInvoice\Action\Stock\StockDocumentAction::class, 'get']);

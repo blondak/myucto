@@ -123,6 +123,10 @@ abstract class StockTestCase extends TestCase
             $pdo->prepare('DELETE FROM chart_of_accounts WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM invoices WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM purchase_invoices WHERE supplier_id = ?')->execute([$sid]);
+            // Objednávky (1330) drží RESTRICT FK na clients (vendor_id) i currencies,
+            // takže musí zmizet PŘED nimi. Jejich řádky kaskádují z hlavičky a vazby
+            // ze skladových dokladů / řádků PF jsou ON DELETE SET NULL.
+            $pdo->prepare('DELETE FROM purchase_orders WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM clients WHERE supplier_id = ?')->execute([$sid]);
             // Vlastní tenant-scoped currencies řádek (createSupplier()) — RESTRICT,
             // nikdy nesahej na sdílenou globální currencyId (patří supplieru 1).

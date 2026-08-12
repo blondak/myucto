@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Objednávka</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #15131D; }
+    .doc-title { font-size: 16pt; font-weight: bold; }
+    .doc-number { font-size: 12pt; font-weight: bold; text-align: right; }
+    .doc-status { font-size: 9pt; font-weight: bold; color: #B42318; text-align: right; }
+    table.head { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.head td { vertical-align: top; padding: 0; }
+    .party-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .party-table td { vertical-align: top; width: 50%; padding: 2.5mm 3mm; border: 0.3pt solid #ccc; }
+    .party-label { font-size: 7.5pt; color: #777; margin-bottom: 1mm; }
+    .party-name { font-size: 10pt; font-weight: bold; }
+    .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    .meta-table td { padding: 1.2mm 3mm; font-size: 9pt; border-bottom: 0.2pt solid #eee; }
+    .meta-label { color: #777; width: 40mm; }
+    table.lines { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+    table.lines th { font-size: 7.5pt; color: #555; text-align: left; padding: 1.2mm 2mm; border-bottom: 0.3pt solid #ccc; }
+    table.lines th.num { text-align: right; }
+    table.lines td { font-size: 9pt; padding: 1.2mm 2mm; border-bottom: 0.2pt solid #eee; }
+    table.lines td.num { text-align: right; }
+    table.lines tfoot td { font-weight: bold; border-top: 0.5pt solid #333; }
+    .note { font-size: 8.5pt; color: #444; margin-bottom: 5mm; white-space: pre-line; }
+    table.sign { width: 100%; border-collapse: collapse; margin-top: 8mm; }
+    table.sign td { width: 50%; padding: 0 3mm; font-size: 8pt; color: #555; text-align: center; vertical-align: top; }
+    .sign-line { border-top: 0.4pt solid #999; padding-top: 1.5mm; }
+    .num { text-align: right; }
+</style>
+</head>
+<body>
+
+<table class="head">
+    <tr>
+        <td style="width:60%;">
+            <div class="doc-title">Objednávka</div>
+            {% if warehouse %}
+                <div class="party-label">Dodat na sklad {{ warehouse.code }} — {{ warehouse.name }}</div>
+            {% endif %}
+        </td>
+        <td style="width:40%;">
+            <div class="doc-number">{{ order.order_number ?: ('koncept #' ~ order.id) }}</div>
+            {% if state_label %}<div class="doc-status">{{ state_label }}</div>{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table class="party-table">
+    <tr>
+        <td>
+            <div class="party-label">Objednatel</div>
+            <div class="party-name">{{ supplier.company_name }}</div>
+            {% if supplier.street %}<div>{{ supplier.street }}</div>{% endif %}
+            {% if supplier.zip or supplier.city %}<div>{{ supplier.zip }} {{ supplier.city }}</div>{% endif %}
+            {% if supplier.ic %}<div>IČ: {{ supplier.ic }}</div>{% endif %}
+            {% if supplier.dic %}<div>DIČ: {{ supplier.dic }}</div>{% endif %}
+        </td>
+        <td>
+            <div class="party-label">Dodavatel</div>
+            <div class="party-name">{{ vendor.company_name ?: '—' }}</div>
+            {% if vendor.street %}<div>{{ vendor.street }}</div>{% endif %}
+            {% if vendor.zip or vendor.city %}<div>{{ vendor.zip }} {{ vendor.city }}</div>{% endif %}
+            {% if vendor.ic %}<div>IČ: {{ vendor.ic }}</div>{% endif %}
+            {% if vendor.dic %}<div>DIČ: {{ vendor.dic }}</div>{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table class="meta-table">
+    <tr>
+        <td class="meta-label">Datum objednávky</td>
+        <td>{{ order.order_date|cz_date }}</td>
+    </tr>
+    {% if order.expected_date %}
+    <tr>
+        <td class="meta-label">Požadovaný termín</td>
+        <td>{{ order.expected_date|cz_date }}</td>
+    </tr>
+    {% endif %}
+    {% if order.vendor_reference %}
+    <tr>
+        <td class="meta-label">Reference dodavatele</td>
+        <td>{{ order.vendor_reference }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <td class="meta-label">Měna</td>
+        <td>{{ currency_code }}</td>
+    </tr>
+</table>
+
+<table class="lines">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Kód</th>
+            <th>Položka</th>
+            <th class="num">Množství</th>
+            <th>MJ</th>
+            <th class="num">Cena/MJ</th>
+            <th class="num">Celkem</th>
+            <th>Termín</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for l in order.lines %}
+            <tr>
+                <td>{{ l.line_no }}</td>
+                <td>{{ l.vendor_sku ?: (l.sku ?: '—') }}</td>
+                <td>{{ l.description }}</td>
+                <td class="num">{{ (l.qty_confirmed ?: l.qty_ordered)|cz_money }}</td>
+                <td>{{ l.unit }}</td>
+                <td class="num">{{ l.unit_price|cz_money }}</td>
+                <td class="num">{{ ((l.qty_confirmed ?: l.qty_ordered) * l.unit_price)|cz_money }}</td>
+                <td>{{ l.expected_date ? l.expected_date|cz_date : '' }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="6">Celkem bez DPH</td>
+            <td class="num">{{ order.total_without_vat|cz_money }}</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td colspan="6">Celkem včetně DPH</td>
+            <td class="num">{{ order.total_with_vat|cz_money }}</td>
+            <td></td>
+        </tr>
+    </tfoot>
+</table>
+
+{% if order.note %}<div class="note">{{ order.note }}</div>{% endif %}
+
+<table class="sign">
+    <tr>
+        <td><div class="sign-line">Vystavil</div></td>
+        <td><div class="sign-line">Schválil</div></td>
+    </tr>
+</table>
+
+</body>
+</html>
