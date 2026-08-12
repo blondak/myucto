@@ -37,8 +37,13 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
 }))
 
+// `route.query` pohání deep-link `?period_id=&as_of=&account=&view=…`; testy
+// jedou bez query, takže vychází výchozí chování stránky.
+const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  useRoute: () => ({ query: routeQuery.value }),
 }))
 
 import Saldokonto from '@/pages/accounting/Saldokonto.vue'
@@ -164,5 +169,42 @@ describe('Saldokonto.vue', () => {
     expect(wrapper.text()).toContain('accounting.saldo.period_mismatch_hint')
     const switchBtn = wrapper.findAll('button').find(b => b.text().includes('period_mismatch_switch'))
     expect(switchBtn).toBeTruthy()
+  })
+
+  it('(f) konfrontace se zůstatkem hlavní knihy je i v plochém pohledu', async () => {
+    m.getSaldo.mockResolvedValue(makeReport({
+      accounts: [{ ...makeReport().accounts[0], open_items_total: 1200, difference: 300, matches: false }],
+    }))
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    // Výchozí pohled je plochý; bez konfrontace by uživatel četl seznam dokladů
+    // jako úplný, i kdyby se účet lišil o statisíce.
+    expect(wrapper.text()).toContain('accounting.saldo.gl_balance')
+    expect(wrapper.text()).toContain('accounting.saldo.open_items_total')
+    expect(wrapper.text()).toContain('accounting.saldo.difference_hint')
+  })
+
+  it('(g) deep-link z adresy předvyplní období, rozvahový den, účet i pohled', async () => {
+    routeQuery.value = { period_id: '6', as_of: '2099-03-31', account: '321', view: 'partner' }
+    m.getSaldo.mockResolvedValue(makeReport())
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    expect(m.getSaldo).toHaveBeenCalledWith({ period_id: 6, as_of: '2099-03-31', account: '321' })
+    // Pohled z query, ne výchozí plochý.
+    const partnerBtn = wrapper.findAll('button').find(b => b.text() === 'accounting.saldo.view_by_partner')
+    expect(partnerBtn!.classes()).toContain('btn-filled')
+    routeQuery.value = {}
+  })
+
+  it('(h) neexistující období z adresy nezhodí načtení, spadne na výchozí rok', async () => {
+    routeQuery.value = { period_id: '999' }
+    m.getSaldo.mockResolvedValue(makeReport())
+    mount(Saldokonto)
+    await flushPromises()
+
+    expect(m.getSaldo).toHaveBeenCalledWith({ period_id: 6, as_of: undefined, account: 'all' })
+    routeQuery.value = {}
   })
 })

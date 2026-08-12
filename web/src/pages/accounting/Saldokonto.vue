@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -18,6 +18,7 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const route = useRoute()
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<SaldoReport | null>(null)
@@ -186,14 +187,39 @@ function accountBlockLabel(b: SaldoAccountBlock) {
   return `${b.account.code} — ${b.account.name}`
 }
 
+/**
+ * Deep-link `?period_id=&as_of=&account=&view=&partner_id=&min_overdue_days=`.
+ * Bez toho odkaz na konkrétní saldokonto (typicky „účet 311 k rozvahovému dni")
+ * otevřel stránku ve výchozím nastavení a query tiše zahodil — příjemce viděl
+ * jiná čísla, než co mu odesílatel poslal.
+ */
+function applyQuery(): { periodId: number | null } {
+  const q = route.query
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str(q.as_of))) filters.as_of = str(q.as_of)
+  if (ACCOUNT_OPTIONS.includes(str(q.account))) filters.account = str(q.account)
+  if (str(q.view) === 'partner' || str(q.view) === 'flat') viewMode.value = str(q.view) as ViewMode
+  const partnerId = Number(str(q.partner_id))
+  if (Number.isInteger(partnerId) && partnerId > 0) flatFilters.partner_id = partnerId
+  const minDays = Number(str(q.min_overdue_days))
+  if (Number.isInteger(minDays) && minDays > 0) flatFilters.min_overdue_days = minDays
+  const periodId = Number(str(q.period_id))
+  return { periodId: Number.isInteger(periodId) && periodId > 0 ? periodId : null }
+}
+
 onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  const { periodId } = applyQuery()
   const open = periods.value.filter(p => p.status === 'open')
   const def = open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
     : periods.value[0]
-  if (def) {
-    filters.period_id = def.id
+  // Období z adresy jen tehdy, když opravdu existuje — jinak by překlep v odkazu
+  // shodil načtení na 404 místo toho, aby stránka ukázala výchozí rok.
+  const fromQuery = periodId !== null && periods.value.some(p => p.id === periodId) ? periodId : null
+  const use = fromQuery ?? def?.id ?? null
+  if (use !== null) {
+    filters.period_id = use
     await load()
   }
 })
@@ -285,6 +311,39 @@ onMounted(async () => {
 
     <!-- Task #2: plochý seznam dokladů — jedna tabulka napříč partnery/účty -->
     <template v-else-if="viewMode === 'flat'">
+      <!-- Konfrontace se zůstatkem hlavní knihy patří do OBOU pohledů. Dokud byla
+           jen v pohledu podle partnera, četl uživatel seznam dokladů jako úplný,
+           i když se na účtu lišil o statisíce (ruční zápisy, nezaúčtované úhrady). -->
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <div v-for="b in report.accounts" :key="b.account.id" class="border-b border-neutral-100 last:border-b-0">
+          <div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+            <div>
+              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.col_account') }}</div>
+              <div class="font-semibold">{{ accountBlockLabel(b) }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.gl_balance') }}</div>
+              <div class="font-mono font-semibold">{{ formatMoney(b.gl_balance) }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.open_items_total') }}</div>
+              <div class="font-mono font-semibold">{{ formatMoney(b.open_items_total) }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.difference') }}</div>
+              <div class="font-mono font-semibold flex items-center gap-1"
+                :class="b.matches ? 'text-success-600' : 'text-danger-500'">
+                <span>{{ b.matches ? '✓' : '✗' }}</span>
+                <span>{{ formatMoney(b.difference) }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-t border-danger-500/20">
+            {{ t('accounting.saldo.difference_hint') }}
+          </div>
+        </div>
+      </div>
+
       <EmptyState v-if="filteredFlatRows.length === 0" boxed accent="neutral" icon="search" :title="t('accounting.saldo.flat_empty')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
