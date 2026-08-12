@@ -361,6 +361,31 @@ Nevysvětlený zbytek nad toleranci zůstává červený a blokující.
 > (že jsi o rozdílu věděl/a a přesto jsi stáhl/a) se spolu s celým rozpisem rozdílu
 > zaloguje do auditní stopy.
 
+### Převod DPH na zúčtovací účet
+
+Po skončení zdaňovacího období vzniká interní doklad **„převod DPH"**, který přesune
+výstupní daň z `343.200` a vstupní daň z `343.100` na zúčtovací účet `343.900`. Po něm
+drží `343.900` přesně tu částku, kterou finančnímu úřadu dlužíte nebo kterou od něj
+čekáte — a tu pak uzavře platba z banky.
+
+**Doklad se řídí přiznáním, ne kalendářem.** Založí a přepočítá se ve chvíli, kdy
+přiznání **podáte**, takže hlavní kniha ukazuje přesně to, co odešlo na úřad. Dodatečné
+i opravné přiznání ho přepočítají znovu. Sestavení návrhu přiznání už existující doklad
+osvěží, ale nový nezaloží — návrh není podání.
+
+To řeší situaci, kvůli které dřívější řešení na kalendáři selhávalo: když doklad za dané
+období dorazí až po termínu, změní přiznání — a s ním i převod.
+
+> [!NOTE]
+> Když se v už vyrovnaném období něco změní, doklad přestane odpovídat a v přehledu DPH
+> se objeví štítek **Neaktuální** spolu s uzávěrkovou kontrolou. Přepočítat ho můžete
+> ručně tlačítkem v agendě DPH — před zápisem uvidíte náhled s výstupní daní, vstupní
+> daní a výsledným zůstatkem. Rozdíly do 1 Kč se ignorují: roky zaúčtované ručně
+> v celých korunách by jinak hlásily nález trvale.
+>
+> Do **uzavřeného nebo zamčeného** období se doklad nikdy nepřepíše ani nesmaže — jen
+> se ohlásí nález. Aktualizace jinak probíhá přepisem původního dokladu, nikoli stornem.
+
 > [!NOTE]
 > Kontrola obratu účtu 343 se automaticky **přeskočí** (zobrazí se jen informativní
 > šedá poznámka, ne červené varování a nic neblokuje), pokud v období existují ještě
