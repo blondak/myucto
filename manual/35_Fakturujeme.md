@@ -426,13 +426,14 @@ s místní účetní.
 
 ### MyÚčto **nedělá**
 
-- **Produkční mzdy.** Modul [Úplné mzdy](58_Uplne_mzdy.md) je **testovací
-  alfa**: zákonné výpočty pojistného, daně a čisté mzdy jsou napojené, ale
-  výsledek, odvody, dokumenty i podání je vždy nutné ověřit proti jinému
-  důvěryhodnému zdroji. Nepoužívej ho jako jediný podklad pro výplatu ani pro
-  zákonné podání. Pro zaúčtování slouží
-  [Mzdová rekapitulace](57_Mzdy.md); plnohodnotnou personalistiku, složité mzdy
-  a legislativní servis řeší specializovaný mzdový systém
+- **Produkční mzdy — zatím.** Modul [Úplné mzdy](58_Uplne_mzdy.md) je
+  **testovací alfa**: zákonné výpočty pojistného, daně a čisté mzdy jsou
+  napojené, ale výsledek, odvody, dokumenty i podání je vždy nutné ověřit proti
+  jinému důvěryhodnému zdroji. Do ostrého spuštění, které je plánované na
+  **září 2026**, ho nepoužívej jako jediný podklad pro výplatu ani pro zákonné
+  podání. Pro zaúčtování slouží [Mzdová rekapitulace](57_Mzdy.md);
+  plnohodnotnou personalistiku, složité mzdy a legislativní servis řeší
+  specializovaný mzdový systém
 - **IOSS ani režim mimo EU** — vede se pouze **režim EU** OSS
 - **Podání OSS přes EPO** — `OSSEI1` se podává v samostatné aplikaci
   **MOSS/OSS** Daňového portálu, přímý ani asistovaný kanál ho proto nenabízí

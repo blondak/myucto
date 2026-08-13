@@ -7,7 +7,8 @@ o personální profil a více pracovních vztahů. Nevytváří druhý seznam li
 nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
-> **Úplné mzdy jsou testovací alfa a nejsou určené pro produkční zpracování.**
+> **Úplné mzdy jsou zatím testovací alfa a nejsou určené pro produkční
+> zpracování; ostré spuštění je plánované na září 2026.**
 > V modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
 > účtáren, osobní karty, pracovní vztahy, vstupy, absence, evidence srážek,
 > řízený mzdový běh a archiv výstupů. Zákonné výpočty sociálního a zdravotního
