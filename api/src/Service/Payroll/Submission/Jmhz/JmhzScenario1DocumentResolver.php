@@ -122,6 +122,8 @@ final class JmhzScenario1DocumentResolver
             );
             $this->inspectUnsupportedTax($tax, $employeeId, $blockers);
             $this->inspectDeductions($net, $employeeId, $blockers);
+            $advanceTaxCzk = $this->advanceTaxCzk($tax, $employeeId, $blockers);
+            $declarationSigned = null;
 
             $normalizedEmployments = [];
             foreach ($employments as $employment) {
@@ -135,6 +137,15 @@ final class JmhzScenario1DocumentResolver
                         'person',
                         $employeeId,
                         ['10495'],
+                    );
+                } else {
+                    // 10419 nese SDZ, a ta se vyplňuje jednou za zaměstnance na
+                    // primárním PPV. Proto se prohlášení čte z účinného termu
+                    // právě toho vztahu, ne z prvního v pořadí.
+                    $declarationSigned = $this->taxpayerDeclaration(
+                        $employment['term'] ?? null,
+                        $employeeId,
+                        $blockers,
                     );
                 }
                 $earnings = $this->earnings(
@@ -238,6 +249,8 @@ final class JmhzScenario1DocumentResolver
                     'deductions_recorded' => $ordinaryEvidence === []
                         ? null
                         : ($ordinaryEvidence['attribute_values']['10116'] ?? null),
+                    'taxpayer_declaration_signed' => $declarationSigned,
+                    'advance_tax_czk' => $advanceTaxCzk,
                 ],
                 'employments' => $normalizedEmployments,
             ];
@@ -339,6 +352,7 @@ final class JmhzScenario1DocumentResolver
             'employer' => [
                 'source' => $preparation->payload['employer_summary']['employer'] ?? null,
                 'pvpoj' => $pvpojPayload,
+                'summary_totals' => $this->employerTaxTotals($normalizedPeople),
             ],
             'people' => $normalizedPeople,
             'interactions' => [
@@ -435,18 +449,188 @@ final class JmhzScenario1DocumentResolver
                 ['10307', '10309'],
             );
         }
-        $advance = $this->object($tax['advance_tax'] ?? null);
-        foreach (['tax_credits_minor_units', 'tax_bonus_minor_units'] as $field) {
-            if (is_int($advance[$field] ?? null) && $advance[$field] > 0) {
+        // `MonthlyAdvanceTaxResult` neexportuje `tax_credits_minor_units` — ten
+        // klíč nikdy nevznikne a podmínka na něj byla fail-open, takže
+        // poplatník s podepsaným prohlášením (tedy s uplatněnou základní slevou)
+        // procházel jako zelený, přestože rozpad 10299–10304 nemáme čím naplnit.
+        $advance = $tax['advance_tax'] ?? null;
+        if (!is_array($advance) || array_is_list($advance)) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_advance_tax_missing',
+                'person',
+                $employeeId,
+                ['10297', '10298', '10305', '10306'],
+            );
+
+            return;
+        }
+        foreach ([
+            'non_refundable_credits_minor_units' =>
+                ['10299', '10300', '10301', '10302'],
+            'child_credit_minor_units' => ['10303', '10304'],
+            'tax_bonus_minor_units' => ['10306'],
+        ] as $field => $attributeIds) {
+            $value = $advance[$field] ?? null;
+            if (!is_int($value)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_income_tax_result_not_calculated',
+                    'person',
+                    $employeeId,
+                    $attributeIds,
+                );
+            } elseif ($value > 0 && $field !== 'tax_bonus_minor_units') {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_tax_credit_breakdown_unavailable',
                     'person',
                     $employeeId,
                     ['10299', '10300', '10301', '10302', '10303', '10304'],
                 );
-                break;
             }
         }
+    }
+
+    /**
+     * @param array<string,mixed> $tax
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array{base:?int,computed:?int,after_credits:?int,bonus:?int,taxable_income:?int}
+     */
+    private function advanceTaxCzk(
+        array $tax,
+        ?int $employeeId,
+        array &$blockers,
+    ): array {
+        $advance = $tax['advance_tax'] ?? null;
+        if (!is_array($advance) || array_is_list($advance)) {
+            return [
+                'base' => null,
+                'computed' => null,
+                'after_credits' => null,
+                'bonus' => null,
+                'taxable_income' => null,
+            ];
+        }
+        return [
+            'base' => $this->advanceTaxField(
+                $advance,
+                'rounded_tax_base_minor_units',
+                '10297',
+                $employeeId,
+                $blockers,
+            ),
+            'computed' => $this->advanceTaxField(
+                $advance,
+                'tax_before_credits_minor_units',
+                '10298',
+                $employeeId,
+                $blockers,
+            ),
+            'after_credits' => $this->advanceTaxField(
+                $advance,
+                'tax_after_credits_minor_units',
+                '10305',
+                $employeeId,
+                $blockers,
+            ),
+            'bonus' => $this->advanceTaxField(
+                $advance,
+                'tax_bonus_minor_units',
+                '10306',
+                $employeeId,
+                $blockers,
+            ),
+            'taxable_income' => $this->advanceTaxField(
+                $advance,
+                'taxable_income_minor_units',
+                '10535',
+                $employeeId,
+                $blockers,
+            ),
+        ];
+    }
+
+    /**
+     * @param array<mixed> $advance
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function advanceTaxField(
+        array $advance,
+        string $field,
+        string $attributeId,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?int {
+        $minor = $advance[$field] ?? null;
+        if (!is_int($minor) || $minor < 0) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_advance_tax_incomplete',
+                'person',
+                $employeeId,
+                [$attributeId],
+            );
+
+            return null;
+        }
+
+        return $this->wholeCzk(
+            $minor,
+            $attributeId,
+            'person',
+            $employeeId,
+            $blockers,
+        );
+    }
+
+    /** @param list<JmhzScenario1Blocker> $blockers */
+    private function taxpayerDeclaration(
+        mixed $term,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?bool {
+        $signed = $this->object($term)['tax_declaration_signed'] ?? null;
+        if (!is_bool($signed)) {
+            $blockers[] = $this->blocker(
+                'jmhz_taxpayer_declaration_unresolved',
+                'person',
+                $employeeId,
+                ['10419'],
+            );
+
+            return null;
+        }
+
+        return $signed;
+    }
+
+    /**
+     * Souhrnná vrstva se skládá až z normalizovaných osob, aby úhrn nikdy
+     * nevznikl z jiného zdroje než jednotlivé součásti. Chybí-li kterékoli
+     * osobě zmrazená hodnota, zůstává úhrn `null` — nulou se nedoplňuje.
+     *
+     * @param list<array<string,mixed>> $people
+     * @return array{advance_tax_after_credits:?int,tax_bonus:?int}
+     */
+    private function employerTaxTotals(array $people): array
+    {
+        $totals = ['advance_tax_after_credits' => 0, 'tax_bonus' => 0];
+        foreach ($people as $person) {
+            $advance = $this->object(
+                $this->object($person['summary'] ?? null)['advance_tax_czk'] ?? null,
+            );
+            foreach ([
+                'advance_tax_after_credits' => 'after_credits',
+                'tax_bonus' => 'bonus',
+            ] as $totalKey => $personKey) {
+                if ($totals[$totalKey] === null) {
+                    continue;
+                }
+                $value = $advance[$personKey] ?? null;
+                $totals[$totalKey] = is_int($value)
+                    ? $totals[$totalKey] + $value
+                    : null;
+            }
+        }
+
+        return $totals;
     }
 
     /**

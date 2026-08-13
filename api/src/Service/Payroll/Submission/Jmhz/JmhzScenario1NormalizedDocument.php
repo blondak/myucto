@@ -8,7 +8,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final readonly class JmhzScenario1NormalizedDocument
 {
-    public const SCHEMA_REFERENCE = 'payroll-jmhz-scenario1-document.v1';
+    public const SCHEMA_REFERENCE = 'payroll-jmhz-scenario1-document.v2';
 
     /** @param array<string,mixed> $payload */
     public function __construct(public array $payload) {}

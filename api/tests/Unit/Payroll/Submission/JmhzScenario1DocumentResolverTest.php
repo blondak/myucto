@@ -102,6 +102,25 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         self::assertFalse(
             $resolution->candidate?->payload['people'][0]['summary']['deductions_recorded'],
         );
+        self::assertFalse(
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['taxpayer_declaration_signed'],
+        );
+        self::assertSame(
+            [
+                'base' => 1000,
+                'computed' => 150,
+                'after_credits' => 150,
+                'bonus' => 0,
+                'taxable_income' => 1000,
+            ],
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['advance_tax_czk'],
+        );
+        self::assertSame(
+            ['advance_tax_after_credits' => 150, 'tax_bonus' => 0],
+            $resolution->candidate?->payload['employer']['summary_totals'],
+        );
     }
 
     public function testHistoricalPreparationIsVerifiedButNotNormalized(): void
@@ -229,6 +248,66 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    public function testClaimedTaxCreditBlocksBreakdownThatCannotBeFilled(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['people'][0]['person_summary']['statutory']['income_tax']
+            ['advance_tax']['non_refundable_credits_minor_units'] = 257_000;
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            $codes,
+        );
+    }
+
+    public function testMissingAdvanceTaxKeysNeverBecomeSilentZero(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset(
+            $payload['people'][0]['person_summary']['statutory']['income_tax']
+                ['advance_tax']['tax_after_credits_minor_units'],
+            $payload['people'][0]['employments'][0]['term']
+                ['tax_declaration_signed'],
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertContains('jmhz_scenario1_advance_tax_incomplete', $codes);
+        self::assertContains('jmhz_taxpayer_declaration_unresolved', $codes);
+        self::assertNull(
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['advance_tax_czk']['after_credits'],
+        );
+        self::assertNull(
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['taxpayer_declaration_signed'],
+        );
+        self::assertNull(
+            $resolution->candidate?->payload['employer']['summary_totals']
+                ['advance_tax_after_credits'],
+        );
+    }
+
     public function testBlockedCandidateCannotBeUsedAsResolvedDocument(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
@@ -298,7 +377,12 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                             'withholding_tax_minor_units' => 0,
                             'withholding_groups' => [],
                             'advance_tax' => [
-                                'tax_credits_minor_units' => 0,
+                                'taxable_income_minor_units' => 100_000,
+                                'rounded_tax_base_minor_units' => 100_000,
+                                'tax_before_credits_minor_units' => 15_000,
+                                'non_refundable_credits_minor_units' => 0,
+                                'child_credit_minor_units' => 0,
+                                'tax_after_credits_minor_units' => 15_000,
                                 'tax_bonus_minor_units' => 0,
                             ],
                         ],
@@ -321,6 +405,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                     'term' => [
                         'activity_code' => '1',
                         'jmhz_relationship_detail_code' => '1',
+                        'tax_declaration_signed' => false,
                     ],
                     'scenario_resolution' => ['scenario_key' => 'scenario_1'],
                     'eldp' => ['confirmation' => ['in03_active' => false, 'in04_active' => false]],
