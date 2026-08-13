@@ -58,6 +58,53 @@ final class CzechWorkingDaysTest extends TestCase
         }
     }
 
+    /**
+     * Termíny přiznání a přehledů jsou v daňových konstantách uložené jako holý
+     * den v roce. Dokud se nečetly přes posun, vycházel elektronický termín
+     * DPFO pro rok 2026 na sobotu 2. 5. a pro 2027 na neděli 2. 5.
+     */
+    public function testFilingDeadlineFromMonthDayShiftsToWorkingDay(): void
+    {
+        self::assertSame(
+            '2026-05-04',
+            CzechWorkingDays::deadlineFromMonthDay(2026, '05-02'),
+            'DPFO elektronicky 2026 — 2. 5. je sobota.',
+        );
+        self::assertSame(
+            '2027-05-03',
+            CzechWorkingDays::deadlineFromMonthDay(2027, '05-02'),
+            'DPFO elektronicky 2027 — 2. 5. je neděle.',
+        );
+        self::assertSame(
+            '2028-04-03',
+            CzechWorkingDays::deadlineFromMonthDay(2028, '04-01'),
+            'DPFO papírově 2028 — 1. 4. je sobota.',
+        );
+        self::assertSame(
+            '2026-08-03',
+            CzechWorkingDays::deadlineFromMonthDay(2026, '08-01'),
+            'Přehledy s poradcem 2026 — 1. 8. je sobota.',
+        );
+    }
+
+    public function testFilingDeadlineOnWorkingDayDoesNotMove(): void
+    {
+        self::assertSame(
+            '2026-07-01',
+            CzechWorkingDays::deadlineFromMonthDay(2026, '07-01'),
+            'Středa zůstává.',
+        );
+    }
+
+    /** Tvar hlídá číselník; posun se na nesmysl nesmí pokusit aplikovat. */
+    public function testFilingDeadlineWithInvalidShapeIsReturnedUnchanged(): void
+    {
+        self::assertSame(
+            '2026-13-40',
+            CzechWorkingDays::deadlineFromMonthDay(2026, '13-40'),
+        );
+    }
+
     public function testWeekendIsNotWorkingDay(): void
     {
         self::assertFalse(CzechWorkingDays::isWorkingDay(new DateTimeImmutable('2026-07-25')), 'sobota');

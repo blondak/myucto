@@ -45,6 +45,31 @@ final class CzechWorkingDays
         )->format('Y-m-d');
     }
 
+    /**
+     * Lhůta zadaná jako `MM-DD` v roce podání, posunutá podle § 33/4 DŘ.
+     *
+     * Termíny přiznání a přehledů jsou v daňových konstantách uložené jako holý
+     * den v roce a jsou navíc uživatelsky editovatelné, takže posun se musí
+     * uplatnit až při ČTENÍ — zapéct ho do konstanty by znamenalo, že platí
+     * jen pro rok, ve kterém ji někdo naposledy přepsal. Neplatný vstup se
+     * vrací beze změny, aby validaci tvaru řešila jediná vrstva (kodebook).
+     */
+    public static function deadlineFromMonthDay(int $year, string $monthDay): string
+    {
+        if (preg_match('/^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/D', $monthDay) !== 1) {
+            return sprintf('%04d-%s', $year, $monthDay);
+        }
+        $date = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            sprintf('%04d-%s', $year, $monthDay),
+        );
+        if (!$date instanceof \DateTimeImmutable) {
+            return sprintf('%04d-%s', $year, $monthDay);
+        }
+
+        return self::shiftToWorkingDay($date)->format('Y-m-d');
+    }
+
     /** Posune datum na nejbližší NÁSLEDUJÍCÍ pracovní den (samo o sobě včetně). */
     public static function shiftToWorkingDay(\DateTimeImmutable $d): \DateTimeImmutable
     {

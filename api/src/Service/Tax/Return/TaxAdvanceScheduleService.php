@@ -9,6 +9,7 @@ use MyInvoice\Repository\TaxAdvanceOverrideRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
 /**
@@ -244,7 +245,8 @@ final class TaxAdvanceScheduleService
         }
 
         $paperDeadline = (string) ($deadlines['dpfo_paper'] ?? '04-01');
-        $filingDeadline = (string) ($next['filing_deadline'] ?? sprintf('%04d-%s', $periodYear, $paperDeadline));
+        $filingDeadline = (string) ($next['filing_deadline']
+            ?? CzechWorkingDays::deadlineFromMonthDay($periodYear, $paperDeadline));
         $months = $regime === 'semiannual'
             ? (array) ($c['advance_semiannual_months'] ?? [6, 12])
             : (array) ($c['advance_quarterly_months'] ?? [3, 6, 9, 12]);

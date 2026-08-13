@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Repository\TaxReturnRepository;
 
 /**
@@ -91,13 +92,19 @@ final class InsuranceSummaryService
     private function deadlines(int $year, array $rules): array
     {
         $next = $year + 1;
-        $regular = (string) ($rules['insurance_electronic'] ?? '06-02');
-        $advisor = (string) ($rules['insurance_advisor'] ?? '08-01');
+        $regular = CzechWorkingDays::deadlineFromMonthDay(
+            $next,
+            (string) ($rules['insurance_electronic'] ?? '06-02'),
+        );
+        $advisor = CzechWorkingDays::deadlineFromMonthDay(
+            $next,
+            (string) ($rules['insurance_advisor'] ?? '08-01'),
+        );
         return [
-            'social' => sprintf('%04d-%s', $next, $regular),
-            'health' => sprintf('%04d-%s', $next, $regular),
+            'social' => $regular,
+            'health' => $regular,
             'note' => sprintf('Přehledy se podávají v řádné lhůtě do %s a s daňovým poradcem do %s.',
-                sprintf('%04d-%s', $next, $regular), sprintf('%04d-%s', $next, $advisor)),
+                $regular, $advisor),
         ];
     }
 }

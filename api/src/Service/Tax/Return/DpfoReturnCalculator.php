@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Tax\DpfoCalculator;
 
 /**
@@ -380,8 +381,10 @@ final class DpfoReturnCalculator
                 'count' => $advanceRegime === 'quarterly' ? 4 : ($advanceRegime === 'semiannual' ? 2 : 0),
                 'employment_income_share' => round($employmentShare, 4),
                 'reduction_factor' => $advanceFactor,
-                'filing_deadline' => sprintf('%04d-%s', (int) ($data['year'] ?? date('Y')) + 1,
-                    (string) (($c['filing_deadlines']['dpfo_paper'] ?? '04-01'))),
+                'filing_deadline' => CzechWorkingDays::deadlineFromMonthDay(
+                    (int) ($data['year'] ?? date('Y')) + 1,
+                    (string) ($c['filing_deadlines']['dpfo_paper'] ?? '04-01'),
+                ),
             ],
             'warnings' => $warnings,
         ];
