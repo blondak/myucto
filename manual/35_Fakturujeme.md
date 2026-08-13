@@ -409,34 +409,47 @@ s místní účetní.
   automat účtování
 - **Sklad a e-shop** — skladové karty, příjemky/výdejky, inventury, oceňování
   klouzavým průměrem, katalog, cenotvorbu z nákupní ceny
-- XML pro EPO portál MFČR: **přiznání k DPH (DPHDP3), kontrolní hlášení,
-  souhrnné hlášení, daň z příjmů (DPFO/DPPO — řádné, opravné i dodatečné,
-  vč. hospodářského roku)** a **OSS přiznání (OSSEI1)** pro portál MOSS/OSS
+- XML pro EPO portál MFČR: **přiznání k DPH (DPHDP3), kontrolní hlášení
+  (DPHKH1), souhrnné hlášení (DPHSHV), daň z příjmů (DPFO/DPPO — řádné,
+  opravné i dodatečné, vč. hospodářského roku)** a **OSS přiznání (OSSEI1)**
+- **Podání na EPO** ve dvou režimech: **přímé podání se ZAREP** (uznávaný
+  elektronický podpis kvalifikovaným certifikátem, test oficiální podatelny
+  a po samostatném potvrzení skutečné odeslání) a **asistované podání**
+  (odeslání snapshotu na oficiální endpoint a otevření předvyplněného
+  formuláře) — viz [70. EPO podání a archiv](70_Archiv_podani_a_rekonciliace.md)
 - Rozšířené opravy DPH — **§ 43, § 46, § 74b, § 79 a § 79a**
-- Pojistné OSVČ: přehled sociálního pojištění pro ČSSZ **včetně XML e-podání**
-  a přehled pro zdravotní pojišťovnu jako PDF pomůcku
-- Archiv podání s otiskem SHA-256 a **rekonciliaci** podaného stavu proti
-  dnešním datům
+- Pojistné OSVČ: přehled sociálního pojištění pro ČSSZ **jako validovanou XML
+  datovou větu** a přehled pro zdravotní pojišťovnu jako PDF pomůcku
+- Archiv podání s otiskem SHA-256, doručenkami a **rekonciliaci** podaného
+  stavu proti dnešním datům
 - **REST API v1 (OpenAPI 3.1)**, MCP server a klientský portál
 
 ### MyÚčto **nedělá**
 
+- **Produkční mzdy.** Modul [Úplné mzdy](58_Uplne_mzdy.md) je **testovací
+  alfa**: zákonné výpočty pojistného, daně a čisté mzdy jsou napojené, ale
+  výsledek, odvody, dokumenty i podání je vždy nutné ověřit proti jinému
+  důvěryhodnému zdroji. Nepoužívej ho jako jediný podklad pro výplatu ani pro
+  zákonné podání. Pro zaúčtování slouží
+  [Mzdová rekapitulace](57_Mzdy.md); plnohodnotnou personalistiku, složité mzdy
+  a legislativní servis řeší specializovaný mzdový systém
 - **IOSS ani režim mimo EU** — vede se pouze **režim EU** OSS
-- **Automatické odeslání XML na portál** — soubor vytvoří a archivuje, podání a
-  odbornou kontrolu nechává na uživateli
+- **Podání OSS přes EPO** — `OSSEI1` se podává v samostatné aplikaci
+  **MOSS/OSS** Daňového portálu, přímý ani asistovaný kanál ho proto nenabízí
+  ([§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava))
+- **Podání na ePortál ČSSZ a na portály zdravotních pojišťoven** — XML pro
+  ČSSZ vytvoří, odeslání je na uživateli; zdravotní pojišťovny nemají jednotné
+  rozhraní, k dispozici je PDF pomůcka
+- **Podání bez tvého potvrzení** — ani přímý kanál nic neodešle sám; kontrola
+  částek a rozhodnutí podat zůstává na člověku
 - **Výrobu a kusovníky** (marži lze spočítat, ale výrobní zakázky ne)
 - **Insolvenční rejstřík**
-- **Produkční zpracování úplných mezd bez nezávislé kontroly** — modul
-  [Úplné mzdy](58_Uplne_mzdy.md) je testovací alfa; pro zaúčtování používej
-  [Mzdovou rekapitulaci](57_Mzdy.md)
-- **E-podání přehledu OSVČ pro zdravotní pojišťovny** — pojišťovny nemají
-  jednotné rozhraní, dostupná je PDF pomůcka
 - **Daňové poradenství** — všechny výstupy jsou pomůcka k ověření
 
 Standardní tok je: **MyÚčto vystaví doklady → zaúčtuje je → vygeneruje výkazy →
-uživatel nebo účetní je zkontroluje a podá.** Export do Pohody, Sterea, Money S3
-nebo ISDOC je **volitelný** — hodí se, když část agendy řešíš jinde, ale není
-nutnou součástí postupu.
+uživatel nebo účetní je zkontroluje → podá se přímo z aplikace a archivuje se
+doručenka.** Export do Pohody, Sterea, Money S3 nebo ISDOC je **volitelný** —
+hodí se, když část agendy řešíš jinde, ale není nutnou součástí postupu.
 
 ## 35.7 Když si nejsi jistý
 
