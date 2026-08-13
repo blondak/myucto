@@ -1,0 +1,47 @@
+{
+    "manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "payload": {
+        "schema_version": "jmhz-spec-package.v1",
+        "package_key": "jmhz-test-dictionary-1.4.1.7-manifest-v1",
+        "versions": {
+            "xsd": "1.4.3.4",
+            "dictionary": "1.4.1.7"
+        },
+        "snapshot_date": "2026-09-01",
+        "counts": {
+            "codebooks": 3,
+            "embedded_codebooks": 2,
+            "external_reference_codebooks": 1,
+            "codebook_entries": 4
+        },
+        "codebooks": [
+            {
+                "codebook_key": "druh_cinnosti",
+                "source_kind": "embedded",
+                "entry_count": 3,
+                "content_hash": "aaaa1111",
+                "entries": [
+                    {"item_code": "A", "label": "Pracovní poměr", "ordinal": 1, "row_hash": "hash-a"},
+                    {"item_code": "B", "label": "Dohoda o provedení práce (nově)", "ordinal": 2, "row_hash": "hash-b2"},
+                    {"item_code": "D", "label": "Nová činnost", "ordinal": 3, "row_hash": "hash-d"}
+                ]
+            },
+            {
+                "codebook_key": "novy",
+                "source_kind": "embedded",
+                "entry_count": 1,
+                "content_hash": "dddd0000",
+                "entries": [
+                    {"item_code": "N", "label": "Nový číselník", "ordinal": 1, "row_hash": "hash-n"}
+                ]
+            },
+            {
+                "codebook_key": "obce",
+                "source_kind": "external_reference",
+                "entry_count": 0,
+                "content_hash": "bbbb0000",
+                "entries": []
+            }
+        ]
+    }
+}

@@ -1,0 +1,41 @@
+{
+    "description": "Odpovědi blob storage MPSV zaznamenané 13. 8. 2026 metodou HEAD. `pinned_url` je URL tak, jak stojí v manifestu (bez procentního kódování); `statuses` i `expected_request_url` jsou už zakódované požadavky, aby byl zápis normalizace v souboru jednoznačný. MPSV míchá klíče v NFC i NFD, takže stejný soubor bývá dostupný jen v jedné podobě názvu.",
+    "recorded_on": "2026-08-13",
+    "cases": {
+        "nfd_only": {
+            "comment": "Reálně ověřený případ: klíč je uložený v NFD, připnutá URL v NFC vrací 404.",
+            "pinned_url": "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam zaměstnanců.csv",
+            "expected_request_url": "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zame%CC%8Cstnancu%CC%8A.csv",
+            "statuses": {
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zam%C4%9Bstnanc%C5%AF.csv": 404,
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zame%CC%8Cstnancu%CC%8A.csv": 200
+            }
+        },
+        "pinned_form_available": {
+            "comment": "Připnutá podoba existuje — fallback se nesmí použít.",
+            "pinned_url": "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam zaměstnanců.csv",
+            "expected_request_url": "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zam%C4%9Bstnanc%C5%AF.csv",
+            "statuses": {
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zam%C4%9Bstnanc%C5%AF.csv": 200,
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zame%CC%8Cstnancu%CC%8A.csv": 200
+            }
+        },
+        "missing": {
+            "comment": "Soubor neexistuje v žádné normalizaci — běh musí skončit fail-closed.",
+            "pinned_url": "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam zaměstnanců.csv",
+            "expected_request_url": null,
+            "statuses": {
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zam%C4%9Bstnanc%C5%AF.csv": 404,
+                "https://developers.mpsv.cz/assets/documents/aa42df67-2cd2-4221-a569-a4a312a2cfb8/Seznam%20zame%CC%8Cstnancu%CC%8A.csv": 410
+            }
+        },
+        "ascii_only": {
+            "comment": "Název bez diakritiky má jedinou podobu; druhý pokus vůbec nevzniká.",
+            "pinned_url": "https://developers.mpsv.cz/assets/documents/f389e547-8bc0-4470-9531-f8319ff4d11e/datovy_slovnik_1.4.1.6.xlsx",
+            "expected_request_url": "https://developers.mpsv.cz/assets/documents/f389e547-8bc0-4470-9531-f8319ff4d11e/datovy_slovnik_1.4.1.6.xlsx",
+            "statuses": {
+                "https://developers.mpsv.cz/assets/documents/f389e547-8bc0-4470-9531-f8319ff4d11e/datovy_slovnik_1.4.1.6.xlsx": 200
+            }
+        }
+    }
+}

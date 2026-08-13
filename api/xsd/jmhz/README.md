@@ -37,6 +37,9 @@ toho by Windows checkout dostal CRLF, Linux LF a manifest by seděl vždy jen na
 jedné platformě. Hashe generuje downloader z rozbaleného archivu, takže se
 připínají skutečné bajty ČSSZ/MPSV, ne lokálně znormalizovaná kopie.
 
+Stejným způsobem jsou připnuté číselníky a datový slovník; jejich manifest,
+downloader a postup obnovy popisuje `api/resources/payroll/jmhz/README.md`.
+
 Změna URL, verze, kontrolního součtu, počtu souborů nebo entry pointu musí být
 vědomá a musí ji doprovodit aktualizace tohoto manifestu, této tabulky a testů.
 XSD ověřuje syntaxi a strukturu; nenahrazuje verzovaná aplikační business

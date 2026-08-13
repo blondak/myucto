@@ -1,0 +1,47 @@
+{
+    "manifest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "payload": {
+        "schema_version": "jmhz-spec-package.v1",
+        "package_key": "jmhz-test-dictionary-1.4.1.6-manifest-v1",
+        "versions": {
+            "xsd": "1.4.3.4",
+            "dictionary": "1.4.1.6"
+        },
+        "snapshot_date": "2026-08-13",
+        "counts": {
+            "codebooks": 3,
+            "embedded_codebooks": 2,
+            "external_reference_codebooks": 1,
+            "codebook_entries": 4
+        },
+        "codebooks": [
+            {
+                "codebook_key": "druh_cinnosti",
+                "source_kind": "embedded",
+                "entry_count": 3,
+                "content_hash": "aaaa0000",
+                "entries": [
+                    {"item_code": "A", "label": "Pracovní poměr", "ordinal": 1, "row_hash": "hash-a"},
+                    {"item_code": "B", "label": "Dohoda o provedení práce", "ordinal": 2, "row_hash": "hash-b"},
+                    {"item_code": "C", "label": "Zrušená činnost", "ordinal": 3, "row_hash": "hash-c"}
+                ]
+            },
+            {
+                "codebook_key": "obce",
+                "source_kind": "external_reference",
+                "entry_count": 0,
+                "content_hash": "bbbb0000",
+                "entries": []
+            },
+            {
+                "codebook_key": "zanikly",
+                "source_kind": "embedded",
+                "entry_count": 1,
+                "content_hash": "cccc0000",
+                "entries": [
+                    {"item_code": "Z", "label": "Zaniklý číselník", "ordinal": 1, "row_hash": "hash-z"}
+                ]
+            }
+        ]
+    }
+}
