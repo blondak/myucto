@@ -464,7 +464,7 @@ final class JournalEntryRepository
      * Stránkovaný seznam zápisů pro firmu s filtry (období / rozsah dat / typ zdroje /
      * stav zaúčtování). Vrací hlavičky (bez řádků) + celkový počet pro paginaci.
      *
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
      * @return array{items:list<array<string,mixed>>, total:int}
      */
     public function paginate(int $supplierId, array $filters, int $limit, int $offset): array
@@ -575,7 +575,7 @@ final class JournalEntryRepository
      * ukazoval v hlavičkovém řádku (ReportXlsxExporter::journal(), journal.twig)
      * cizí číslo (Σ MD celého zápisu), ne částku vybraného účtu.
      *
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
      * @return list<array<string,mixed>> hlavičky BEZ lines (viz linesForEntries)
      */
     public function forExport(int $supplierId, array $filters, int $limit): array
@@ -752,7 +752,7 @@ final class JournalEntryRepository
     }
 
     /**
-     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
+     * @param array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float} $filters
      * @return array{0:string, 1:list<mixed>}
      */
     private function buildWhere(int $supplierId, array $filters): array
@@ -844,6 +844,18 @@ final class JournalEntryRepository
         if (!empty($filters['entry_id'])) {
             $where[] = 'je.id = ?';
             $params[] = (int) $filters['entry_id'];
+        }
+        // Výčet konkrétních zápisů (filtr „jen nálezy kontroly integrity" —
+        // JournalAction::parseFilters si seznam vytáhne z JournalIntegrityService).
+        // PRÁZDNÝ seznam znamená „žádné nálezy", ne „bez filtru" — proto isset(),
+        // ne !empty(), a nemožná podmínka místo vynechání filtru.
+        if (isset($filters['entry_ids'])) {
+            $ids = array_values(array_unique(array_map('intval', (array) $filters['entry_ids'])));
+            if ($ids === []) {
+                $where[] = '1 = 0';
+            } else {
+                $where[] = 'je.id IN (' . implode(',', $ids) . ')';
+            }
         }
         if (array_key_exists('posted', $filters) && $filters['posted'] !== null) {
             $where[] = $filters['posted'] ? 'je.posted_at IS NOT NULL' : 'je.posted_at IS NULL';

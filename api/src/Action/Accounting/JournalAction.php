@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\JournalHistoryService;
+use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -55,6 +56,13 @@ final class JournalAction
 
     private const MAX_PER_PAGE = 200;
 
+    /**
+     * Strop počtu zápisů, které filtr `?integrity=` promítne do WHERE ... IN (…).
+     * Nálezů integrity bývají jednotky až desítky; strop je pojistka proti
+     * neomezenému IN listu, kdyby se v datech něco rozjelo.
+     */
+    private const INTEGRITY_FILTER_LIMIT = 1000;
+
     /** Strop počtu dokladů v jedné dávce hromadného zaúčtování (audit Fáze A review). */
     private const BULK_POST_LIMIT = 500;
 
@@ -80,6 +88,7 @@ final class JournalAction
         private readonly JournalLinkService $links,
         private readonly JournalEntryAttachmentRepository $attachments,
         private readonly JournalAttachmentStorage $attachmentStorage,
+        private readonly JournalIntegrityService $integrity,
         private readonly LoggerInterface $log,
     ) {}
 
@@ -94,7 +103,7 @@ final class JournalAction
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $result = $this->journal->paginate($supplierId, $this->parseFilters($q), $perPage, $offset);
+        $result = $this->journal->paginate($supplierId, $this->parseFilters($q, $supplierId), $perPage, $offset);
         $provenance = $this->automationProvenance->forJournalEntries(
             $supplierId,
             array_map(static fn (array $item): int => (int) $item['id'], $result['items']),
@@ -132,7 +141,7 @@ final class JournalAction
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
 
-        $filters = $this->parseFilters($request->getQueryParams());
+        $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
         try {
             $data = $this->exportService->build($supplierId, $filters);
             $out = $format === 'pdf'
@@ -181,11 +190,19 @@ final class JournalAction
 
     /**
      * @param array<string,mixed> $q query params (Request::getQueryParams())
-     * @return array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float}
+     * @return array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float}
      */
-    private function parseFilters(array $q): array
+    private function parseFilters(array $q, int $supplierId): array
     {
         $filters = [];
+        // „Jen nálezy kontroly integrity deníku" — dashboard akce journal_integrity
+        // umí prokliknout jen JEDEN zápis, takže u víc nálezů uživatel skončil na
+        // nefiltrovaném deníku a neměl jak zjistit, co vlastně nesedí. Seznam se
+        // počítá NAŽIVO (ne z journal_integrity_findings, kde je jen vzorek 100
+        // nálezů z posledního nočního běhu), aby filtr odpovídal aktuálním datům.
+        if (($q['integrity'] ?? '') === JournalIntegrityService::TYPE_AMOUNT_MISMATCH) {
+            $filters['entry_ids'] = $this->integrity->amountMismatchEntryIds($supplierId, self::INTEGRITY_FILTER_LIMIT);
+        }
         if (!empty($q['document_no'])) $filters['document_no'] = mb_substr(trim((string) $q['document_no']), 0, 50);
         if (!empty($q['period_id']))   $filters['period_id'] = (int) $q['period_id'];
         if (!empty($q['date_from']))   $filters['date_from'] = (string) $q['date_from'];

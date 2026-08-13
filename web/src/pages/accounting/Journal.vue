@@ -62,6 +62,10 @@ const filters = reactive({
   account_to: '',
   amount_from: '' as number | '',
   amount_to: '' as number | '',
+  // Nálezy noční kontroly integrity deníku (JournalIntegrityService). Backend si
+  // seznam dotčených zápisů dopočítá naživo — proklik z dashboardu jinak umí
+  // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
+  integrity: '' as '' | 'amount_mismatch',
 })
 
 // Účtová osnova pro našeptávání rozsahu účtu ve filtru. Datalist je stejný vzor,
@@ -113,6 +117,7 @@ async function load() {
       account_to: filters.account_to || undefined,
       amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
       amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
+      integrity: filters.integrity || undefined,
     })
     entries.value = r.items
     total.value = r.total
@@ -143,6 +148,7 @@ function resetFilters() {
   filters.account_to = ''
   filters.amount_from = ''
   filters.amount_to = ''
+  filters.integrity = ''
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
   applyFilters()
@@ -167,6 +173,7 @@ function buildQuery(): Record<string, string> {
   if (filters.account_to) q.account_to = filters.account_to
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
+  if (filters.integrity) q.integrity = filters.integrity
   return q
 }
 
@@ -203,6 +210,7 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.account_to = q.account_to ?? ''
   filters.amount_from = q.amount_from ? Number(q.amount_from) : ''
   filters.amount_to = q.amount_to ? Number(q.amount_to) : ''
+  filters.integrity = q.integrity === 'amount_mismatch' ? 'amount_mismatch' : ''
   applyFilters()
 }
 
@@ -224,6 +232,7 @@ const activeFilterCount = computed(() => {
   if (filters.q) n++
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
+  if (filters.integrity) n++
   return n
 })
 
@@ -252,6 +261,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (filters.amount_from !== '' || filters.amount_to !== '') {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
+  if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
   return chips
 })
 
@@ -266,6 +276,7 @@ function clearFilter(key: string) {
     case 'q': filters.q = ''; break
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
+    case 'integrity': filters.integrity = ''; break
   }
   applyFilters()
 }
@@ -343,6 +354,7 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.account_to) q.account_to = filters.account_to
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
+  if (filters.integrity) q.integrity = filters.integrity
   return q
 }
 async function exportFile(format: 'pdf' | 'xlsx') {
@@ -504,6 +516,7 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.account_to = ''
   filters.amount_from = ''
   filters.amount_to = ''
+  filters.integrity = ''
   sourceIdFilter.value = ''
   entryIdFilter.value = entryId
   filters.date_from = d.entry_date
@@ -670,6 +683,15 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
             <option value="approved">{{ t('automation.origin_approved') }}</option>
             <option value="manual">{{ t('automation.origin_manual') }}</option>
           </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_integrity') }}</label>
+          <select v-model="filters.integrity" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
+          </select>
+          <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_q') }}</label>

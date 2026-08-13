@@ -4214,6 +4214,9 @@
             "filter_account_to": "Account to",
             "filter_amount_from": "Amount from",
             "filter_amount_to": "Amount to",
+            "filter_integrity": "Document ↔ journal mismatches",
+            "filter_integrity_amount_mismatch": "Entry amount does not match the document",
+            "filter_integrity_hint": "Entries where the document total does not appear in the posting at all — typically a document changed after it was posted.",
             "reset_filters": "Reset filters",
             "posted": "Posted",
             "draft": "Draft",
@@ -12263,7 +12266,11 @@
         "require_mfa_label": "Require multi-factor authentication (MFA) for all users",
         "require_mfa_hint": "After entering a password, users must use a passkey or TOTP according to the allowed methods.",
         "require_mfa_methods_hint": "Both a passkey and TOTP are allowed — the user picks one. You can narrow the methods later in cfg.php (auth.allowed_mfa_methods).",
-        "mfa_setup_next": "MFA enforcement is active. Continue to finish setting up an allowed method."
+        "mfa_setup_next": "MFA enforcement is active. Continue to finish setting up an allowed method.",
+        "terms_label": "I accept the licence agreement and the terms and conditions of MyÚčto.cz",
+        "terms_licence": "Licence agreement",
+        "terms_conditions": "Terms and conditions",
+        "terms_required": "You cannot continue with the setup without accepting the licence and the terms and conditions."
     },
     "mfa_setup": {
         "title": "Set up multi-factor authentication",

@@ -25,11 +25,11 @@ final class JournalIntegrityLinkTest extends TestCase
 {
     private const BASE = '/accounting/journal';
 
-    private static function link(int $count, mixed $detail): string
+    private static function link(int $count, mixed $detail, string $findingType = ''): string
     {
         $m = new \ReflectionMethod(CrmAggregationService::class, 'journalIntegrityLink');
         $svc = (new \ReflectionClass(CrmAggregationService::class))->newInstanceWithoutConstructor();
-        return (string) $m->invoke($svc, $count, $detail);
+        return (string) $m->invoke($svc, $count, $detail, $findingType);
     }
 
     /**
@@ -72,6 +72,27 @@ final class JournalIntegrityLinkTest extends TestCase
     }
 
     /**
+     * Víc nálezů `amount_mismatch` → filtr deníku. Deep-link umí jen JEDEN zápis,
+     * takže bez filtru uživatel skončil na nefiltrovaném deníku a neměl jak zjistit,
+     * které zápisy nesedí (na ostrých datech jich bylo 368).
+     */
+    public function testManyAmountMismatchFindingsLinkToJournalFilter(): void
+    {
+        $detail = json_encode([['entry_id' => 59354, 'source_type' => 'purchase_invoice', 'source_id' => 21306]]);
+        self::assertSame(
+            self::BASE . '?integrity=amount_mismatch',
+            self::link(368, $detail, 'amount_mismatch'),
+        );
+    }
+
+    /** Ostatní typy filtr nemají → chovají se jako dřív (nefiltrovaný deník). */
+    public function testManyFindingsOfOtherTypeStillLinkToPlainJournal(): void
+    {
+        $detail = json_encode([['entry_id' => 777, 'source_type' => 'invoice', 'source_id' => 999999]]);
+        self::assertSame(self::BASE, self::link(5, $detail, 'orphan_entry'));
+    }
+
+    /**
      * Parametry, které deep-link používá, musí stránka deníku skutečně číst.
      * Guard proti tichému rozpadu kontraktu při refaktoru frontendu.
      */
@@ -79,7 +100,7 @@ final class JournalIntegrityLinkTest extends TestCase
     {
         $page = file_get_contents(dirname(__DIR__, 5) . '/web/src/pages/accounting/Journal.vue');
         self::assertIsString($page);
-        foreach (['route.query.entry_id', 'route.query.source_type', 'route.query.source_id'] as $param) {
+        foreach (['route.query.entry_id', 'route.query.source_type', 'route.query.source_id', 'q.integrity'] as $param) {
             self::assertStringContainsString($param, $page, "Journal.vue přestal číst {$param} — deep-link z dashboardu je mrtvý.");
         }
     }

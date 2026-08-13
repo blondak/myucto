@@ -92,6 +92,17 @@ final class JournalIntegrityService
     /** Haléřová tolerance porovnání částek (0,5 haléře). */
     private const CENT_TOLERANCE = 0.005;
 
+    /**
+     * Tolerance porovnání celkové částky dokladu se zápisem (1 Kč). Přičítá se
+     * k ní zaokrouhlení dokladu — viz {@see amountMismatchFrom}. Řádově vyšší než
+     * {@see CENT_TOLERANCE} záměrně: daň lze počítat ze základu i shora (§ 37
+     * odst. 1 a 2 ZDPH) a po jednotlivých položkách i ze součtu, takže daň
+     * přepočtená z položek se od daně vytištěné na dokladu dodavatele běžně liší
+     * o haléře až desetihaléře. To není nekonzistence deníku — kontrola má hledat
+     * MATERIÁLNÍ rozdíl (doklad změněný po zaúčtování, přímý zásah do DB).
+     */
+    private const AMOUNT_TOLERANCE = 1.00;
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -410,50 +421,125 @@ final class JournalIntegrityService
      */
     private function checkAmountMismatch(int $supplierId): array
     {
-        // Očekávaná celková částka dokladu v CZK = total_with_vat × kurz
-        // (CZK/NULL měna → 1). Zápis musí mít saldokontní řádek s touto částkou
-        // (311 u FV / 321 u PF nese vždy celkový total). Žádný takový řádek =
-        // doklad se po zaúčtování změnil (nebo přímý DB zásah).
-        //
-        // Daňový doklad k přijaté platbě (§ 28 ZDPH) je výjimka na OBOU větvích —
-        // účtuje se jen o DPH (vydaný 324/343, přijatý DDKP 343/314), základ už
-        // sedí na zálohovém účtu z úhrady. Očekávaná částka je proto total_vat.
-        // Vydaná větev: invoice_type='tax_document'; přijatá: document_kind='tax_document'
-        // (PostingService::buildPurchaseAdvanceVatDocumentLines). Symetrii hlídá
-        // Architecture\DocumentBranchParityGuardsTest.
+        $sql    = 'FROM ' . $this->amountMismatchFrom();
+        $params = $this->amountMismatchParams($supplierId);
+        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no,
+                          ROUND(doc.expected, 2) AS expected " . $sql
+            . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
+        return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
+    }
+
+    /**
+     * ID zápisů, které aktuálně (NAŽIVO, ne z findings tabulky) padají na
+     * {@see TYPE_AMOUNT_MISMATCH}. Slouží filtru deníku, aby si uživatel mohl
+     * nálezy prohlédnout — dashboard umí prokliknout jen jeden zápis.
+     *
+     * @return list<int>
+     */
+    public function amountMismatchEntryIds(int $supplierId, int $limit = 1000): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT je.id FROM ' . $this->amountMismatchFrom()
+            . ' ORDER BY je.entry_date DESC, je.id DESC LIMIT ' . max(1, $limit)
+        );
+        $stmt->execute($this->amountMismatchParams($supplierId));
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /** @return array<string,int> */
+    private function amountMismatchParams(int $supplierId): array
+    {
+        return ['sid' => $supplierId, 'sid2' => $supplierId, 'sid3' => $supplierId];
+    }
+
+    /**
+     * Sdílené FROM+WHERE pro {@see checkAmountMismatch} a {@see amountMismatchEntryIds}
+     * (jeden zdroj pravdy — jinak by se filtr deníku rozešel s počtem na dashboardu).
+     *
+     * Očekávaná celková částka dokladu v CZK = total_with_vat × kurz (CZK/NULL měna
+     * → 1). Doklad se po zaúčtování změnil (nebo přímý DB zásah), když se tahle
+     * částka v zápisu NIKDE neobjeví. „Nikde" se vyhodnocuje ve třech tvarech,
+     * protože zaúčtování saldokonta má víc legitimních podob:
+     *   1. jeden řádek = celková částka (dnešní PostingService: 311/321 nese total),
+     *   2. součet řádků TÉHOŽ účtu na TÉŽE straně (starší i ručně pořízené zápisy
+     *      rozpadají saldokonto na základ + DPH — dohromady dají celkovou částku),
+     *   3. saldo TÉHOŽ účtu (MD − D) — zápis nese protizápis na tomtéž účtu
+     *      (haléřové vyrovnání, storno řádek, sleva zaúčtovaná opačnou stranou).
+     * Tvar 1 je podmnožinou tvaru 2 (jeden řádek = jednoprvková skupina), ale
+     * kontroluje se zvlášť: skupina se dvěma řádky, z nichž jeden sedí přesně,
+     * by jinak nově propadla jako nález.
+     *
+     * Tolerance je haléř plus zaokrouhlení dokladu: rozpad po sazbách dá jiné
+     * haléře než hlavička a zaokrouhlovací rozdíl se v zápisu nese vlastním
+     * řádkem (nebo je rovnou v saldokontní částce). Kontrola má hledat MATERIÁLNÍ
+     * rozdíl, ne haléře.
+     *
+     * Doklad plně krytý zálohou (advance_paid_amount ≥ celková částka) se
+     * přeskakuje — saldokonto u něj vůbec nevzniká, závazek/pohledávka se
+     * uzavírá proti zálohovému účtu (314/324), takže celková částka dokladu
+     * v zápisu být nemá.
+     *
+     * Daňový doklad k přijaté platbě (§ 28 ZDPH) je výjimka na OBOU větvích —
+     * účtuje se jen o DPH (vydaný 324/343, přijatý DDKP 343/314), základ už
+     * sedí na zálohovém účtu z úhrady. Očekávaná částka je proto total_vat.
+     * Vydaná větev: invoice_type='tax_document'; přijatá: document_kind='tax_document'
+     * (PostingService::buildPurchaseAdvanceVatDocumentLines). Symetrii hlídá
+     * Architecture\DocumentBranchParityGuardsTest.
+     */
+    private function amountMismatchFrom(): string
+    {
         $docExpr =
             "SELECT 'invoice' AS source_type, i.id AS source_id,
                     (CASE WHEN i.invoice_type = 'tax_document' THEN i.total_vat ELSE i.total_with_vat END)
-                    * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS expected
+                    * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS expected,
+                    " . self::AMOUNT_TOLERANCE . " + ABS(COALESCE(i.rounding, 0))
+                    * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS tol,
+                    ABS(COALESCE(i.total_with_vat, 0)) - ABS(COALESCE(i.advance_paid_amount, 0)) AS unsettled
                FROM invoices i
                LEFT JOIN currencies ci ON ci.id = i.currency_id
               WHERE i.supplier_id = :sid
              UNION ALL
              SELECT 'purchase_invoice', p.id,
                     (CASE WHEN p.document_kind = 'tax_document' THEN p.total_vat ELSE p.total_with_vat END)
-                    * (CASE WHEN cp.code = 'CZK' OR cp.code IS NULL THEN 1 ELSE COALESCE(p.exchange_rate, 1) END)
+                    * (CASE WHEN cp.code = 'CZK' OR cp.code IS NULL THEN 1 ELSE COALESCE(p.exchange_rate, 1) END),
+                    " . self::AMOUNT_TOLERANCE . " + ABS(COALESCE(p.rounding, 0))
+                    * (CASE WHEN cp.code = 'CZK' OR cp.code IS NULL THEN 1 ELSE COALESCE(p.exchange_rate, 1) END),
+                    ABS(COALESCE(p.total_with_vat, 0)) - ABS(COALESCE(p.advance_paid_amount, 0))
                FROM purchase_invoices p
                LEFT JOIN currencies cp ON cp.id = p.currency_id
               WHERE p.supplier_id = :sid2";
 
-        $sql =
-            "FROM journal_entries je
+        // DECIMAL aritmetika je přesná, ROUND na haléře jen srovná měřítko po
+        // násobení kurzem (jinak by 0,67 vs 0,67 selhalo na 15. desetinném místě).
+        $matches = static fn(string $amount): string =>
+            "ABS(ROUND(ABS($amount), 2) - ROUND(ABS(doc.expected), 2)) <= ROUND(doc.tol, 2)";
+
+        return
+            "journal_entries je
              JOIN ( " . $docExpr . " ) doc
                ON doc.source_type = je.source_type AND doc.source_id = je.source_id
              WHERE je.supplier_id = :sid3
                AND je.source_type IN ('invoice','purchase_invoice')
                AND je.posted_at IS NOT NULL
                AND je.reversed_by IS NULL
+               AND doc.unsettled > doc.tol
                AND NOT EXISTS (
                    SELECT 1 FROM journal_entry_lines l
                     WHERE l.entry_id = je.id
-                      AND ABS(ABS(l.amount) - ABS(doc.expected)) <= " . self::CENT_TOLERANCE . "
+                      AND " . $matches('l.amount') . "
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM journal_entry_lines l
+                    WHERE l.entry_id = je.id
+                    GROUP BY l.account_id, l.side
+                   HAVING " . $matches('SUM(l.amount)') . "
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM journal_entry_lines l
+                    WHERE l.entry_id = je.id
+                    GROUP BY l.account_id
+                   HAVING " . $matches("SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)") . "
                )";
-        $params = ['sid' => $supplierId, 'sid2' => $supplierId, 'sid3' => $supplierId];
-        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no,
-                          ROUND(doc.expected, 2) AS expected " . $sql
-            . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
-        return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
     }
 
     // ── EP-11: tenantové/strukturální invarianty (read-only SQL) ───────────────

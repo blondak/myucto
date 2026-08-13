@@ -1279,7 +1279,9 @@ final class CrmAggregationService
                         continue;
                     }
                     $integrityTotal += $cnt;
-                    $link = $this->journalIntegrityLink($cnt, $row['detail']);
+                    $link = $this->journalIntegrityLink($cnt, $row['detail'], (string) $row['finding_type']);
+                    // Odkaz posledního NENULOVÉHO typu. Když je nenulový právě jeden
+                    // (běžný případ), použije ho i hlavní odkaz karty.
                     $singleLink = $link;
                     $intBreakdown[] = [
                         'key'   => (string) $row['finding_type'],
@@ -1294,8 +1296,14 @@ final class CrmAggregationService
                         'title'     => 'Zkontroluj integritu deníku',
                         'hint'      => sprintf('%d %s konzistence doklad ↔ deník', $integrityTotal,
                             $integrityTotal === 1 ? 'nález' : ($integrityTotal < 5 ? 'nálezy' : 'nálezů')),
-                        // Jediný nález napříč všemi typy → hlavní odkaz míří rovnou na něj.
-                        'link'      => (count($intRows) === 1 && $integrityTotal === 1 && $singleLink !== null)
+                        // Hlavní odkaz karty vede tam, kde nález uvidíš: u jediného
+                        // nenulového typu na jeho deep-link (jeden zápis), resp. na
+                        // filtr deníku (víc nálezů). Podmínka SMÍ koukat jen na
+                        // $intBreakdown, ne na $intRows — ty nesou VŠECHNY typy
+                        // posledního běhu včetně nulových (jeden řádek per typ), takže
+                        // count($intRows) === 1 nebylo nikdy splněno a karta mířila na
+                        // nefiltrovaný deník i u jediného nálezu.
+                        'link'      => (count($intBreakdown) === 1 && $singleLink !== null)
                             ? $singleLink
                             : '/accounting/journal',
                         'count'     => $integrityTotal,
@@ -2370,17 +2378,25 @@ final class CrmAggregationService
      * Odkaz na konkrétní nález integrity deníku. `journal_integrity_findings.detail`
      * nese JSON vzorek nálezů (viz migrace 1034) — u JEDINÉHO nálezu z něj složíme
      * deep-link, aby uživatel neskončil na nefiltrovaném seznamu celého deníku.
-     * U více nálezů se odkazuje na deník bez filtru (stránka umí jen jedno ID).
      *
      * Volba parametru je daná typem nálezu:
      *   - `entry_id` (preferováno — Journal.vue rovnou rozbalí detail zápisu). Chybí
      *     u `booked_without_entry`, kde zápis z definice neexistuje.
      *   - `source_type` + `source_id` jako fallback. NEPOUŽITELNÉ u `orphan_entry`,
      *     kde `source_id` ukazuje na neexistující doklad — tam ale `entry_id` je.
+     *
+     * U VÍC nálezů `amount_mismatch` míří odkaz na filtr `?integrity=amount_mismatch`
+     * (JournalAction si seznam zápisů dopočítá naživo) — deník umí filtrovat jen na
+     * jedno ID, takže bez toho uživatel skončil na nefiltrovaném seznamu a neměl jak
+     * zjistit, které zápisy nesedí. Ostatní typy takový filtr zatím nemají a padají
+     * na nefiltrovaný deník jako dřív.
      */
-    private function journalIntegrityLink(int $count, mixed $detailJson): string
+    private function journalIntegrityLink(int $count, mixed $detailJson, string $findingType = ''): string
     {
         $base = '/accounting/journal';
+        if ($count > 1 && $findingType === JournalIntegrityService::TYPE_AMOUNT_MISMATCH) {
+            return $base . '?integrity=' . JournalIntegrityService::TYPE_AMOUNT_MISMATCH;
+        }
         if ($count !== 1 || !is_string($detailJson) || $detailJson === '') {
             return $base;
         }

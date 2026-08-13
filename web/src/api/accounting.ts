@@ -454,6 +454,8 @@ export interface JournalFilters {
   account_to?: string
   amount_from?: number
   amount_to?: number
+  /** Jen zápisy s nálezem noční kontroly integrity deníku (JournalIntegrityService). */
+  integrity?: 'amount_mismatch'
   page?: number
   per_page?: number
 }
@@ -1360,6 +1362,7 @@ export const accountingApi = {
     if (filters?.account_to) params.account_to = filters.account_to
     if (filters?.amount_from !== undefined) params.amount_from = filters.amount_from
     if (filters?.amount_to !== undefined) params.amount_to = filters.amount_to
+    if (filters?.integrity) params.integrity = filters.integrity
     if (filters?.page) params.page = filters.page
     if (filters?.per_page) params.per_page = filters.per_page
     return api.get<JournalListResponse>('/accounting/journal', { params }).then(r => r.data)

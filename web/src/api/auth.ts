@@ -177,6 +177,8 @@ export interface TotpSetup {
 
 export interface SetupPayload {
   admin: { name: string; email: string; password: string }
+  /** Přijetí licenčního ujednání a obchodních podmínek — backend vyžaduje `true`. */
+  terms_accepted: boolean
   require_mfa?: boolean
   allowed_mfa_methods?: Array<'passkey' | 'totp'>
   /** Legacy kompatibilita pro starší backendy/klienty. */
