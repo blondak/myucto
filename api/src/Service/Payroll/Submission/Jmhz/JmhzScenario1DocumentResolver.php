@@ -108,11 +108,9 @@ final class JmhzScenario1DocumentResolver
                 ['10297', '10298', '10305', '10306', '10535'],
                 $blockers,
             );
-            $net = $this->calculatedResult(
+            $net = $this->netResult(
                 $statutory['net_pay'] ?? null,
-                'jmhz_scenario1_net_result_not_calculated',
                 $employeeId,
-                ['10116', '10344'],
                 $blockers,
             );
             $this->inspectUnsupportedTax($tax, $employeeId, $blockers);
@@ -354,9 +352,9 @@ final class JmhzScenario1DocumentResolver
         array &$blockers,
     ): array {
         $result = $this->object($value);
-        $issues = $result['issues'] ?? [];
+        $issues = $result['issues'] ?? null;
         if (($result['status'] ?? null) !== 'calculated'
-            || !is_array($issues) || $issues !== []
+            || !is_array($issues) || !array_is_list($issues) || $issues !== []
         ) {
             $blockers[] = $this->blocker(
                 $code,
@@ -369,14 +367,54 @@ final class JmhzScenario1DocumentResolver
     }
 
     /**
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>
+     */
+    private function netResult(
+        mixed $value,
+        ?int $employeeId,
+        array &$blockers,
+    ): array {
+        $result = $this->object($value);
+        if (!is_int($result['net_before_deductions_minor_units'] ?? null)
+            || !is_int($result['deducted_minor_units'] ?? null)
+            || !is_int($result['net_payable_minor_units'] ?? null)
+            || !is_array($result['relationships'] ?? null)
+            || !array_is_list($result['relationships'])
+            || !is_array($result['deductions'] ?? null)
+            || !array_is_list($result['deductions'])
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_net_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10116', '10344'],
+            );
+        }
+        return $result;
+    }
+
+    /**
      * @param array<string,mixed> $tax
      * @param list<JmhzScenario1Blocker> $blockers
      */
     private function inspectUnsupportedTax(array $tax, ?int $employeeId, array &$blockers): void
     {
-        if (($tax['withholding_tax_minor_units'] ?? 0) !== 0
-            || $this->rows($tax['withholding_groups'] ?? null) !== []
+        $withholdingTax = $tax['withholding_tax_minor_units'] ?? null;
+        $withholdingGroups = $tax['withholding_groups'] ?? null;
+        if (!is_int($withholdingTax)
+            || !is_array($withholdingGroups)
+            || !array_is_list($withholdingGroups)
         ) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_income_tax_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10297', '10298', '10305', '10306', '10535'],
+            );
+            return;
+        }
+        if ($withholdingTax !== 0 || $withholdingGroups !== []) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_withholding_tax_unsupported',
                 'person',
@@ -404,9 +442,15 @@ final class JmhzScenario1DocumentResolver
      */
     private function inspectDeductions(array $net, ?int $employeeId, array &$blockers): void
     {
-        if (($net['deducted_minor_units'] ?? 0) !== 0
-            || $this->rows($net['deductions'] ?? null) !== []
+        $deducted = $net['deducted_minor_units'] ?? null;
+        $deductions = $net['deductions'] ?? null;
+        if (!is_int($deducted)
+            || !is_array($deductions)
+            || !array_is_list($deductions)
         ) {
+            return;
+        }
+        if ($deducted !== 0 || $deductions !== []) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_deductions_unsupported',
                 'person',

@@ -113,6 +113,47 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         self::assertContains('jmhz_scenario1_pvpoj_unavailable', $codes);
     }
 
+    public function testMissingHealthOrTaxIssuesEvidenceIsNotTreatedAsEmpty(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset($payload['people'][0]['person_summary']['statutory']['health_insurance']['issues']);
+        unset($payload['people'][0]['person_summary']['statutory']['income_tax']['issues']);
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertContains('jmhz_scenario1_health_result_not_calculated', $codes);
+        self::assertContains('jmhz_scenario1_income_tax_result_not_calculated', $codes);
+        self::assertNotContains('jmhz_scenario1_net_result_not_calculated', $codes);
+    }
+
+    public function testMissingWithholdingOrDeductionKeysNeverBecomeSilentZero(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset($payload['people'][0]['person_summary']['statutory']['income_tax']['withholding_tax_minor_units']);
+        unset($payload['people'][0]['person_summary']['statutory']['net_pay']['deductions']);
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertContains('jmhz_scenario1_income_tax_result_not_calculated', $codes);
+        self::assertContains('jmhz_scenario1_net_result_not_calculated', $codes);
+    }
+
     public function testMissingExplicitZeroAndHalereNeverBecomeSilentZero(): void
     {
         $preparation = $this->preparation();
@@ -213,10 +254,10 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                             ],
                         ],
                         'net_pay' => [
-                            'status' => 'calculated',
-                            'issues' => [],
+                            'relationships' => [['relationship_id' => 'employment:101']],
                             'net_before_deductions_minor_units' => 86_500,
                             'deducted_minor_units' => 0,
+                            'net_payable_minor_units' => 86_500,
                             'deductions' => [],
                         ],
                     ],

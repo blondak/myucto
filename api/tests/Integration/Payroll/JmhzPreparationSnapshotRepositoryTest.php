@@ -181,6 +181,32 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         }
     }
 
+    public function testVerifiedLoaderRejectsSupersededSourceRevision(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-loader-superseded',
+            null,
+        );
+        $this->createSecondRevision($this->db->pdo(), $this->runId);
+
+        try {
+            $this->service->loadVerified(
+                $this->supplierId,
+                'test',
+                (int) $created['id'],
+            );
+            self::fail('Zastaralá příprava JMHZ nesmí být aktuálním zdrojem dokumentu.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_preparation_source_not_current',
+                $exception->validationCode,
+            );
+        }
+    }
+
     public function testScenarioResolverIsReadOnlyAndKeepsUnfrozenInteractionsBlocked(): void
     {
         $created = $this->service->freeze(
