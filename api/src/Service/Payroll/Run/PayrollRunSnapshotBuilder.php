@@ -13,7 +13,6 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorUnavailableException;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use PDO;
 
@@ -21,7 +20,7 @@ final class PayrollRunSnapshotBuilder
 {
     public function __construct(
         private readonly Connection $db,
-        private readonly ?PayrollRulesetProvider $rulesets = null,
+        private readonly PayrollRulesetProvider $rulesets,
         private readonly ?EnforcementCaseSource $enforcement = null,
         private readonly ?PayrollPersonStatutoryEvidenceRepository $statutoryEvidence = null,
         private readonly ?PayrollStatutoryPeriodResolver $periods = null,
@@ -63,8 +62,7 @@ final class PayrollRunSnapshotBuilder
         $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
         $statutoryPeriod = ($this->periods ?? new PayrollStatutoryPeriodResolver())
             ->resolve($periodStart, $paymentDate);
-        $provider = $this->rulesets ?? CzechPayrollRulesets2026::provider();
-        $manifest = $provider->canonicalManifest();
+        $manifest = $this->rulesets->canonicalManifest();
         $manifestJson = CanonicalJson::encode(['rulesets' => $manifest]);
         $employerPolicy = $this->employerPolicySnapshot(
             $supplierId,

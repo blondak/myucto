@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Tests\Support\PhpSourceRegions;
 use PHPUnit\Framework\TestCase;
 
@@ -35,6 +36,77 @@ final class PayrollRulesetSingleSourceGuardTest extends TestCase
      * @var array<string, list<string>> relativní cesta => jména symbolů
      */
     private const ALLOWED_SYMBOLS = [];
+
+    public function testRulesetProviderIsARequiredDependency(): void
+    {
+        $files = self::payrollSourceFiles();
+        foreach ($files as $file) {
+            require_once $file;
+        }
+        $paths = [];
+        foreach ($files as $relative => $file) {
+            $real = realpath($file);
+            if (is_string($real)) {
+                $paths[strtolower($real)] = $relative;
+            }
+        }
+        $optional = [];
+        foreach (get_declared_classes() as $class) {
+            $reflection = new \ReflectionClass($class);
+            $file = $reflection->getFileName();
+            $relative = is_string($file) ? ($paths[strtolower($file)] ?? null) : null;
+            if ($relative === null) {
+                continue;
+            }
+            $constructor = $reflection->getConstructor();
+            foreach ($constructor?->getParameters() ?? [] as $parameter) {
+                if (self::isNullableRulesetProvider($parameter)) {
+                    $optional[] = "{$relative}::\${$parameter->getName()}";
+                }
+            }
+        }
+
+        self::assertSame(
+            [],
+            $optional,
+            "PayrollRulesetProvider nesmí být volitelná závislost. PHP-DI by použilo null "
+            . "a výpočet by tiše přešel na vestavěný ruleset místo administrátorského nastavení.\n"
+            . implode("\n", $optional),
+        );
+    }
+
+    public function testRulesetProviderGuardRecognizesNullableSyntaxVariants(): void
+    {
+        $variants = [
+            static fn (?PayrollRulesetProvider $provider = null): mixed => $provider,
+            static fn (PayrollRulesetProvider|null $provider = null): mixed => $provider,
+            static fn (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider|null $provider = null): mixed =>
+                $provider,
+        ];
+
+        foreach ($variants as $variant) {
+            $parameter = (new \ReflectionFunction($variant))->getParameters()[0];
+            self::assertTrue(self::isNullableRulesetProvider($parameter));
+        }
+    }
+
+    private static function isNullableRulesetProvider(\ReflectionParameter $parameter): bool
+    {
+        $type = $parameter->getType();
+        if (!$type instanceof \ReflectionType || !$type->allowsNull()) {
+            return false;
+        }
+        $types = $type instanceof \ReflectionUnionType ? $type->getTypes() : [$type];
+        foreach ($types as $candidate) {
+            if ($candidate instanceof \ReflectionNamedType
+                && ltrim($candidate->getName(), '\\') === PayrollRulesetProvider::class
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public function testNoSecondCopyOfLegislativeValuesOutsideTheRulesetRegistry(): void
     {

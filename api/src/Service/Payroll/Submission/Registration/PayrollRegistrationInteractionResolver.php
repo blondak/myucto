@@ -11,15 +11,8 @@ final class PayrollRegistrationInteractionResolver
      * od spuštění registrační agendy. Pro starší rozhodné datum se neodvozuje
      * nic — resolver raději nevrátí interakci, než aby hádal starý formulář.
      *
-     * POZOR — hodnota je NEOVĚŘENÁ. Převzala se z rozpracované verze a v repu
-     * pro ni není podklad: připnutá XSD žádné datum účinnosti neuvádějí
-     * a `private/MZDY.md` § 9.3/9.4 uvádí jako začátek režimu 1. 7. 2026
-     * („do 30. 6. platila pro běžné tuzemské nástupy následná osmidenní
-     * registrace"), tedy o týden později. Konstanta je tím pádem mírnější,
-     * ne přísnější, než dokumentovaný přechod. Nepřebírat jako fakt.
-     * Potvrdit ji může jedině oficiální metodika ČSSZ/MPSV k JMHZ
-     * (developers.mpsv.cz, „Pokyny k vyplnění" + katalog kontrol MH), kterou
-     * lokálně nemáme; do té doby se hodnota vědomě nemění.
+     * ČSSZ umožnila podat P1 už osm dnů před účinností povinnosti od 1. 7. 2026,
+     * tedy od 23. 6. 2026. Datum je ověřené oficiální metodikou PREZEC 1.4.
      */
     private const SUPPORTED_FROM = '2026-06-23';
 

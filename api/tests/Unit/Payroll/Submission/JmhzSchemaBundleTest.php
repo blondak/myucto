@@ -119,6 +119,23 @@ final class JmhzSchemaBundleTest extends TestCase
         self::assertSame($expected, $actual);
     }
 
+    public function testOrezamPackagePinsTheOfficialArchiveBytes(): void
+    {
+        $expected = [
+            'OREZAM26.xsd' => '599762bcfaad8e742c30b50b29f4bc8161d2f524734e006fb91c210286f5248d',
+            'ZREZAM26.xsd' => 'fb19cb5b3235f316d39511f661a01e7806fd3dea194d4a641ce45c2c0f5ef89d',
+            'baseTypes2.xsd' => '579888e1dd29a60eb66b26dcf32031658ead51618c74f9f96fabf8d7a1305747',
+        ];
+
+        foreach ($expected as $file => $hash) {
+            self::assertSame(
+                $hash,
+                hash_file('sha256', self::ROOT . '/orezam-zrezam-1.0/' . $file),
+                $file . ' neodpovídá bajtům v oficiálním OREZAM/ZREZAM 1.0 archivu.',
+            );
+        }
+    }
+
     /** @return list<string> */
     private function schemaFiles(): array
     {
