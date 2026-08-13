@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollEmploymentValidatorTest extends TestCase
@@ -64,7 +65,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
     public function testAcceptsCompleteJmhzCoreEvidenceAndCanonicalizesIt(): void
     {
         $terms = $this->terms();
-        $terms['work_place'] = '  Praha  ';
+        $terms['work_place'] = '  Hlavní město Praha  ';
         $terms['jmhz_workplace_municipality_code'] = '554782';
         $terms['jmhz_workplace_country_code'] = 'cz';
         $terms['jmhz_apz_contribution_status'] = 'yes';
@@ -74,10 +75,30 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
         $result = $this->validator()->terms($terms);
 
-        self::assertSame('Praha', $result['work_place']);
+        self::assertSame('Hlavní město Praha', $result['work_place']);
         self::assertSame('554782', $result['jmhz_workplace_municipality_code']);
         self::assertSame('CZ', $result['jmhz_workplace_country_code']);
         self::assertSame('3', $result['jmhz_apz_instrument_code']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $result['jmhz_external_codebook_manifest_sha256'],
+        );
+    }
+
+    public function testFutureJmhzEvidenceCanBePlannedButPredatesOverlayCannot(): void
+    {
+        $future = $this->terms();
+        $future['effective_from'] = '2026-09-01';
+        $future['work_place'] = 'Hlavní město Praha';
+        $future['jmhz_workplace_municipality_code'] = '554782';
+        $future['jmhz_workplace_country_code'] = 'CZ';
+        self::assertSame('554782', $this->validator()->terms($future)['jmhz_workplace_municipality_code']);
+
+        $past = $future;
+        $past['effective_from'] = '2025-12-31';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nejsou pro datum');
+        $this->validator()->terms($past);
     }
 
     public function testRejectsPartialWorkplaceAndUnknownApzCode(): void
@@ -158,7 +179,10 @@ final class PayrollEmploymentValidatorTest extends TestCase
     private function validator(): PayrollEmploymentValidator
     {
         return new PayrollEmploymentValidator(
-            new PayrollEmploymentJmhzEvidenceCatalog(new JmhzSpecPackageCatalog()),
+            new PayrollEmploymentJmhzEvidenceCatalog(
+                new JmhzSpecPackageCatalog(),
+                new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog()),
+            ),
         );
     }
 }

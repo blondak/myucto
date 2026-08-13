@@ -102,6 +102,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             ...$this->termsPayload(true, '2026-02-01'),
             'weekly_hours' => '30',
             'workload_basis_points' => 7500,
+            'work_place' => 'Hlavní město Praha',
             'jmhz_workplace_municipality_code' => '554782',
             'jmhz_workplace_country_code' => 'CZ',
             'jmhz_apz_contribution_status' => 'yes',
@@ -251,6 +252,21 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         $options = $this->json($response)['options'];
         self::assertSame(64, strlen((string) $options['manifest_sha256']));
         self::assertSame(['1', '2', '3', '4'], array_column($options['apz_instruments'], 'code'));
+        self::assertSame(250, count($options['countries']));
+        self::assertSame('2026-08-13', $options['external_codebooks']['verified_through']);
+
+        $municipalities = $this->action->jmhzMunicipalities(
+            $this->request(
+                'GET',
+                '/api/payroll/jmhz/municipalities?q=Nymburk&limit=20',
+            ),
+            new Response(),
+        );
+        self::assertSame(200, $municipalities->getStatusCode());
+        self::assertSame(
+            [['code' => '537004', 'label' => 'Nymburk']],
+            $this->json($municipalities)['items'],
+        );
 
         $bearer = $this->action->jmhzEvidenceOptions(
             $this->request(

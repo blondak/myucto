@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -36,7 +37,10 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         string $employmentType,
     ): void {
         $result = (new PayrollPersonCreateValidator(new PayrollEmploymentValidator(
-            new PayrollEmploymentJmhzEvidenceCatalog(new JmhzSpecPackageCatalog()),
+            new PayrollEmploymentJmhzEvidenceCatalog(
+                new JmhzSpecPackageCatalog(),
+                new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog()),
+            ),
         )))->validate([
             'full_name' => 'Syntetická Osoba',
             'birth_date' => null,

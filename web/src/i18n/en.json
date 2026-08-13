@@ -1816,8 +1816,11 @@
                 "functional_benefits": "Functional benefits",
                 "temporary_assignment": "Temporary assignment",
                 "select_apz": "Select an instrument",
-                "options_failed": "The pinned APZ codebook could not be loaded. Saving a yes value is blocked.",
-                "external_codebook_warning": "CISOB and CZEM are not yet available as verifiable codebooks in the package. Values are stored as unverified evidence and submission remains fail-closed.",
+                "options_failed": "The pinned JMHZ codebooks could not be loaded. Saving validated evidence is blocked.",
+                "search_municipality": "Start typing a municipality name or code",
+                "searching_municipality": "Searching municipalities…",
+                "no_municipality": "No matching municipality",
+                "external_codebook_verified": "Municipality and country are checked against pinned codebooks verified through {date}.",
                 "temporary_assignment_blocker": "A yes temporary assignment still requires the identity of at least one user. JMHZ cannot be prepared until it is completed.",
                 "state": {
                     "unverified": "Unverified",

@@ -274,8 +274,14 @@ strukturovanou obec pracoviště, kód obce a stát, příspěvek a nástroj APZ
 funkční požitky a dočasné přidělení. Příznaky používají tři stavy **Neověřeno**,
 **Ne** a **Ano**; chybějící historický údaj se nikdy automaticky nepovažuje za
 „ne“. Obec, její kód a stát se ukládají jen jako úplná trojice. Dokud nejsou
-externí číselníky CISOB a CZEM dostupné v připnutém balíku, jde o neověřenou
-evidenci a úplné podání JMHZ zůstává zablokované. Při dočasném přidělení
+údaje vybrané z autoritativních číselníků CISOB a CZEM, aplikace kontroluje
+shodu názvu obce s kódem i platnost státu. Obec se vybírá našeptávačem; stát z
+připnuté nabídky. Podmínky před začátkem účinnosti připnutých číselníků nelze
+takto označit jako ověřené. Budoucí personální změnu lze naplánovat podle
+posledního připnutého snapshotu, ale mzdový snapshot ji pro JMHZ označí jako
+neověřenou, pokud vykazované období přesahuje jeho ověřené pokrytí. Taková data
+nesmějí projít budoucí readiness bránou ani se odeslat bez novějšího snapshotu.
+Při dočasném přidělení
 **Ano** je navíc nutné doplnit identitu alespoň jednoho uživatele; samotný
 příznak nestačí k přípravě podání.
 

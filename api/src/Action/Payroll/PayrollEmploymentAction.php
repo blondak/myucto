@@ -37,6 +37,28 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['options' => $this->jmhzEvidence->options()]);
     }
 
+    public function jmhzMunicipalities(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorizeRead($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $query = $request->getQueryParams();
+            $search = is_string($query['q'] ?? null) ? $query['q'] : '';
+            $limitRaw = $query['limit'] ?? 20;
+            $limit = filter_var($limitRaw, FILTER_VALIDATE_INT);
+            if ($limit === false) {
+                throw new \InvalidArgumentException('Limit vyhledávání obcí není celé číslo.');
+            }
+            return Json::ok($response, [
+                'items' => $this->jmhzEvidence->municipalities($search, $limit),
+                'external_codebooks' => $this->jmhzEvidence->externalCodebookProvenance(),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+    }
+
     /** @param array{id:string} $args */
     public function create(Request $request, Response $response, array $args): Response
     {

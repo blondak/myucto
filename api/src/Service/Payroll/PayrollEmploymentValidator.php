@@ -18,6 +18,8 @@ namespace MyInvoice\Service\Payroll;
  *   regular_workplace:?string,
  *   jmhz_workplace_municipality_code:?string,
  *   jmhz_workplace_country_code:?string,
+ *   jmhz_external_codebook_overlay_key:?string,
+ *   jmhz_external_codebook_manifest_sha256:?string,
  *   jmhz_apz_contribution_status:string,
  *   jmhz_apz_instrument_code:?string,
  *   jmhz_functional_benefits_status:string,
@@ -155,19 +157,34 @@ final class PayrollEmploymentValidator
             $this->optionalText($input, 'jmhz_workplace_country_code', 2) ?? '',
         );
         $workplaceCountry = $workplaceCountry === '' ? null : $workplaceCountry;
-        if (($municipalityCode === null) !== ($workplaceCountry === null)
-            || ($municipalityCode !== null && $workPlace === null)
-        ) {
-            throw new \InvalidArgumentException(
-                'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+        if ($municipalityCode === null) {
+            if ($workplaceCountry !== null) {
+                throw new \InvalidArgumentException(
+                    'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+                );
+            }
+        } else {
+            if ($workplaceCountry === null || $workPlace === null) {
+                throw new \InvalidArgumentException(
+                    'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+                );
+            }
+            if (preg_match('/^[0-9]{6}$/', $municipalityCode) !== 1) {
+                throw new \InvalidArgumentException('Kód obce pracoviště JMHZ musí mít přesně šest číslic.');
+            }
+            if (preg_match('/^[A-Z]{2}$/', $workplaceCountry) !== 1) {
+                throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
+            }
+            $this->jmhzEvidence->requireWorkplace(
+                $municipalityCode,
+                $workPlace,
+                $workplaceCountry,
+                $effectiveFrom,
             );
         }
-        if ($municipalityCode !== null && preg_match('/^[0-9]{6}$/', $municipalityCode) !== 1) {
-            throw new \InvalidArgumentException('Kód obce pracoviště JMHZ musí mít přesně šest číslic.');
-        }
-        if ($workplaceCountry !== null && preg_match('/^[A-Z]{2}$/', $workplaceCountry) !== 1) {
-            throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
-        }
+        $externalCodebook = $municipalityCode === null
+            ? null
+            : $this->jmhzEvidence->externalCodebookProvenance();
 
         $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
         $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);
@@ -195,6 +212,8 @@ final class PayrollEmploymentValidator
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
             'jmhz_workplace_municipality_code' => $municipalityCode,
             'jmhz_workplace_country_code' => $workplaceCountry,
+            'jmhz_external_codebook_overlay_key' => $externalCodebook['overlay_key'] ?? null,
+            'jmhz_external_codebook_manifest_sha256' => $externalCodebook['manifest_sha256'] ?? null,
             'jmhz_apz_contribution_status' => $apzStatus,
             'jmhz_apz_instrument_code' => $apzCode,
             'jmhz_functional_benefits_status' => $functionalBenefits,

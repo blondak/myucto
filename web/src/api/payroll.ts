@@ -98,6 +98,8 @@ export interface PayrollEmploymentTerms {
   regular_workplace: string | null
   jmhz_workplace_municipality_code: string | null
   jmhz_workplace_country_code: string | null
+  jmhz_external_codebook_overlay_key?: string | null
+  jmhz_external_codebook_manifest_sha256?: string | null
   jmhz_apz_contribution_status: PayrollVerifiedTriState
   jmhz_apz_instrument_code: string | null
   jmhz_functional_benefits_status: PayrollVerifiedTriState
@@ -141,7 +143,8 @@ export interface PayrollEmploymentEvent {
 
 export type PayrollEmploymentTermsPayload = Omit<
   PayrollEmploymentTerms,
-  'id' | 'office_code' | 'effective_to' | 'row_version' | 'created_at'
+  'id' | 'office_code' | 'effective_to' | 'jmhz_external_codebook_overlay_key'
+    | 'jmhz_external_codebook_manifest_sha256' | 'row_version' | 'created_at'
 >
 
 export interface PayrollEmploymentCreatePayload {
@@ -554,7 +557,21 @@ export type PayrollVerifiedTriState = 'unverified' | 'no' | 'yes'
 export interface PayrollEmploymentJmhzEvidenceOptions {
   package_key: string
   manifest_sha256: string
+  external_codebooks: {
+    overlay_key: string
+    manifest_sha256: string
+    snapshot_date: string
+    effective_from: string
+    verified_through: string
+    base_spec_manifest_sha256: string
+  }
   apz_instruments: Array<{ code: string; label: string }>
+  countries: Array<{ code: string; label: string }>
+}
+
+export interface PayrollJmhzMunicipalityOption {
+  code: string
+  label: string
 }
 
 export interface PayrollComponentJmhzMapping {
@@ -1867,6 +1884,11 @@ export const payrollApi = {
     api.get<{ options: PayrollEmploymentJmhzEvidenceOptions }>(
       '/payroll/jmhz/employment-evidence-options',
     ).then(response => response.data.options),
+  searchJmhzMunicipalities: (query: string, limit = 20) =>
+    api.get<{ items: PayrollJmhzMunicipalityOption[] }>(
+      '/payroll/jmhz/municipalities',
+      { params: { q: query, limit } },
+    ).then(response => response.data.items),
   transitionEmployment: (
     employmentId: number,
     target: PayrollEmploymentStatus,

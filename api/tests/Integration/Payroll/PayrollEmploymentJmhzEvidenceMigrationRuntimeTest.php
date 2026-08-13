@@ -85,18 +85,29 @@ final class PayrollEmploymentJmhzEvidenceMigrationRuntimeTest extends TestCase
                  VALUES ('yes', NULL)",
             );
         });
+        $this->expectDatabaseConstraint(static function () use ($db): void {
+            $db->exec(
+                "INSERT INTO payroll_employment_terms
+                    (jmhz_external_codebook_overlay_key)
+                 VALUES ('orphan-overlay')",
+            );
+        });
 
         $db->exec(
             "DELETE FROM migrations
-              WHERE filename = '1345_payroll_employment_jmhz_core_evidence.sql'",
+              WHERE filename IN (
+                '1345_payroll_employment_jmhz_core_evidence.sql',
+                '1346_payroll_employment_jmhz_external_codebook_provenance.sql'
+              )",
         );
         $this->runMigrator();
-        self::assertSame(2, (int) $db->query(
+        self::assertSame(3, (int) $db->query(
             "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
               WHERE CONSTRAINT_SCHEMA = DATABASE()
                 AND CONSTRAINT_NAME IN (
                   'chk_payroll_employment_jmhz_workplace',
-                  'chk_payroll_employment_jmhz_apz'
+                  'chk_payroll_employment_jmhz_apz',
+                  'chk_payroll_employment_jmhz_external_codebook_provenance'
                 )",
         )->fetchColumn());
     }
@@ -133,7 +144,7 @@ final class PayrollEmploymentJmhzEvidenceMigrationRuntimeTest extends TestCase
             PHP_BINARY,
             $this->rootDir . '/api/bin/migrate.php',
             '--no-backfills',
-            '--only=1345_payroll_employment_jmhz_core_evidence.sql',
+            '--only=1345_payroll_employment_jmhz_core_evidence.sql,1346_payroll_employment_jmhz_external_codebook_provenance.sql',
         ];
         $environment = getenv();
         $environment['MYINVOICE_DB_NAME'] = $this->database;

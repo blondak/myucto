@@ -787,6 +787,10 @@ final class Routes
                 '/jmhz/employment-evidence-options',
                 [PayrollEmploymentAction::class, 'jmhzEvidenceOptions'],
             );
+            $g->get(
+                '/jmhz/municipalities',
+                [PayrollEmploymentAction::class, 'jmhzMunicipalities'],
+            );
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',

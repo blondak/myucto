@@ -188,6 +188,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::class,
+                    ),
                 ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(

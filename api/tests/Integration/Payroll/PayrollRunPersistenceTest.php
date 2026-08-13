@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
@@ -606,27 +607,46 @@ final class PayrollRunPersistenceTest extends TestCase
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms
-                SET work_place = "Praha",
+                SET work_place = "Hlavní město Praha",
                     jmhz_workplace_municipality_code = "554782",
                     jmhz_workplace_country_code = "CZ",
+                    jmhz_external_codebook_overlay_key = ?,
+                    jmhz_external_codebook_manifest_sha256 = ?,
                     jmhz_apz_contribution_status = "yes",
                     jmhz_apz_instrument_code = "4",
                     jmhz_functional_benefits_status = "no",
                     jmhz_temporary_assignment_status = "unverified"
               WHERE supplier_id = ? AND employment_id = ?'
-        )->execute([$this->supplierId, $this->employmentId]);
+        )->execute([
+            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $this->supplierId,
+            $this->employmentId,
+        ]);
 
         $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
             ->build($this->supplierId, '2026-06-01', '2026-07-15');
         $term = $snapshot->data['people'][0]['employments'][0]['term'];
 
-        self::assertSame('Praha', $term['work_place']);
+        self::assertSame('Hlavní město Praha', $term['work_place']);
         self::assertSame('554782', $term['jmhz_workplace_municipality_code']);
         self::assertSame('CZ', $term['jmhz_workplace_country_code']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $term['jmhz_external_codebook_manifest_sha256'],
+        );
+        self::assertTrue($term['jmhz_external_codebooks_verified_for_period']);
         self::assertSame('yes', $term['jmhz_apz_contribution_status']);
         self::assertSame('4', $term['jmhz_apz_instrument_code']);
         self::assertSame('no', $term['jmhz_functional_benefits_status']);
         self::assertSame('unverified', $term['jmhz_temporary_assignment_status']);
+
+        $futureSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-09-01', '2026-10-15');
+        self::assertFalse(
+            $futureSnapshot->data['people'][0]['employments'][0]['term']
+                ['jmhz_external_codebooks_verified_for_period'],
+        );
     }
 
     public function testPostTerminationInputKeepsEndedRelationshipInSnapshot(): void

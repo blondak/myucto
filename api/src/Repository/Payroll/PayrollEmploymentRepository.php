@@ -528,6 +528,8 @@ final class PayrollEmploymentRepository
                     terms.work_place, terms.regular_workplace,
                     terms.jmhz_workplace_municipality_code,
                     terms.jmhz_workplace_country_code,
+                    terms.jmhz_external_codebook_overlay_key,
+                    terms.jmhz_external_codebook_manifest_sha256,
                     terms.jmhz_apz_contribution_status,
                     terms.jmhz_apz_instrument_code,
                     terms.jmhz_functional_benefits_status,
@@ -619,6 +621,8 @@ final class PayrollEmploymentRepository
                  work_place, regular_workplace, cz_isco_code, activity_code,
                  jmhz_workplace_municipality_code,
                  jmhz_workplace_country_code,
+                 jmhz_external_codebook_overlay_key,
+                 jmhz_external_codebook_manifest_sha256,
                  jmhz_apz_contribution_status, jmhz_apz_instrument_code,
                  jmhz_functional_benefits_status,
                  jmhz_temporary_assignment_status,
@@ -626,7 +630,7 @@ final class PayrollEmploymentRepository
                  tax_regime, foreign_legislation_country_code,
                  a1_certificate_until, risky_work, tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -644,6 +648,8 @@ final class PayrollEmploymentRepository
             $data['activity_code'],
             $data['jmhz_workplace_municipality_code'],
             $data['jmhz_workplace_country_code'],
+            $data['jmhz_external_codebook_overlay_key'],
+            $data['jmhz_external_codebook_manifest_sha256'],
             $data['jmhz_apz_contribution_status'],
             $data['jmhz_apz_instrument_code'],
             $data['jmhz_functional_benefits_status'],

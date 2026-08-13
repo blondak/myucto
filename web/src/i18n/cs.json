@@ -1816,8 +1816,11 @@
                 "functional_benefits": "Funkční požitky",
                 "temporary_assignment": "Dočasné přidělení",
                 "select_apz": "Vyberte nástroj",
-                "options_failed": "Připnutý číselník APZ se nepodařilo načíst. Uložení hodnoty ano je zablokované.",
-                "external_codebook_warning": "CISOB a CZEM zatím nejsou v balíku dostupné jako ověřitelné číselníky. Údaje se uloží jako neověřená evidence a podání zůstane fail-closed.",
+                "options_failed": "Připnuté číselníky JMHZ se nepodařilo načíst. Uložení ověřovaných údajů je zablokované.",
+                "search_municipality": "Začněte psát název nebo kód obce",
+                "searching_municipality": "Hledám obec…",
+                "no_municipality": "Žádná odpovídající obec",
+                "external_codebook_verified": "Obec a stát se ověřují proti připnutým číselníkům platným nejpozději k {date}.",
                 "temporary_assignment_blocker": "Dočasné přidělení ano vyžaduje ještě identitu alespoň jednoho uživatele. Dokud nebude doplněna, JMHZ nelze připravit.",
                 "state": {
                     "unverified": "Neověřeno",

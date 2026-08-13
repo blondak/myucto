@@ -15,5 +15,7 @@
 # Git je nesmí nijak konvertovat, jinak manifest sedí jen na jedné platformě.
 *.xsd -text
 *.xlsx -text
+api/resources/payroll/jmhz/**/*.csv -text -diff
+api/resources/payroll/jmhz/**/*.ttl -text -diff
 api/xsd/jmhz/SHA256SUMS text eol=lf
 api/resources/payroll/jmhz/**/*.json text eol=lf

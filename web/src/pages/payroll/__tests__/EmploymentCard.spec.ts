@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import type { PayrollEmployment } from '@/api/payroll'
+import { payrollApi, type PayrollEmployment } from '@/api/payroll'
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
@@ -10,8 +10,20 @@ vi.mock('@/api/payroll', () => ({
     employmentJmhzEvidenceOptions: vi.fn().mockResolvedValue({
       package_key: 'synthetic',
       manifest_sha256: 'a'.repeat(64),
+      external_codebooks: {
+        overlay_key: 'synthetic-overlay',
+        manifest_sha256: 'b'.repeat(64),
+        snapshot_date: '2026-08-13',
+        effective_from: '2026-01-01',
+        verified_through: '2026-08-13',
+        base_spec_manifest_sha256: 'a'.repeat(64),
+      },
       apz_instruments: [{ code: '1', label: 'VPP' }],
+      countries: [{ code: 'CZ', label: 'Česko' }],
     }),
+    searchJmhzMunicipalities: vi.fn().mockResolvedValue([
+      { code: '554782', label: 'Hlavní město Praha' },
+    ]),
   },
 }))
 
@@ -158,5 +170,51 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
+  })
+
+  it('vybere obec atomicky z připnutého CISOB a odešle kanonický název i kód', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const municipality = wrapper.findComponent({ name: 'SearchableSelect' })
+    municipality.vm.$emit('search', 'Praha')
+    await flushPromises()
+    municipality.vm.$emit('update:modelValue', '554782')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('Ověření pracoviště')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.jmhz_workplace_municipality_code).toBe('554782')
+    expect(payload?.work_place).toBe('Hlavní město Praha')
+    expect(payload?.jmhz_workplace_country_code).toBe('CZ')
+
+    const reopen = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await reopen!.trigger('click')
+    await flushPromises()
+    const reopenedMunicipality = wrapper.findComponent({ name: 'SearchableSelect' })
+    reopenedMunicipality.vm.$emit('search', 'Praha')
+    await flushPromises()
+    reopenedMunicipality.vm.$emit('update:modelValue', '554782')
+    await flushPromises()
+    reopenedMunicipality.vm.$emit('update:modelValue', null)
+    await flushPromises()
+    await wrapper.get('textarea').setValue('Vymazání pracoviště')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const cleared = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(cleared?.jmhz_workplace_municipality_code).toBeNull()
+    expect(cleared?.work_place).toBeNull()
+    expect(cleared?.jmhz_workplace_country_code).toBeNull()
   })
 })

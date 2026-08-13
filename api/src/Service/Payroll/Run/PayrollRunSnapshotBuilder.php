@@ -14,6 +14,9 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorUnavailableException
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use PDO;
 
 final class PayrollRunSnapshotBuilder
@@ -27,6 +30,7 @@ final class PayrollRunSnapshotBuilder
         private readonly ?PayrollStatutoryAccumulatorRepository $statutoryAccumulators = null,
         private readonly ?PayrollEmployerSettingsRepository $employerSettings = null,
         private readonly ?PayrollEmployerPolicyRepository $employerPolicies = null,
+        private readonly ?JmhzExternalCodebookCatalog $jmhzExternalCodebooks = null,
     ) {}
 
     public function build(
@@ -187,24 +191,10 @@ final class PayrollRunSnapshotBuilder
                 ),
                 'employments' => [],
             ];
-            $people[$employeeId]['employments'][] = [
-                'employment' => [
-                    'id' => $employmentId,
-                    'employee_id' => $employeeId,
-                    'office_id' => $row['office_id'] === null
-                        ? null
-                        : (int) $row['office_id'],
-                    'code' => (string) $row['employment_code'],
-                    'relation_type' => (string) $row['relation_type'],
-                    'status' => (string) $row['employment_status'],
-                    'start_date' => $row['start_date'],
-                    'actual_start_date' => $row['actual_start_date'],
-                    'end_date' => $row['end_date'],
-                    'monthly_gross_minor' => $row['monthly_gross_minor'] === null
-                        ? null
-                        : (int) $row['monthly_gross_minor'],
-                ],
-                'term' => $row['term_id'] === null ? null : [
+            $termSnapshot = null;
+            if ($row['term_id'] !== null) {
+                $jmhzCodebooksVerified = $this->jmhzCodebooksVerifiedForPeriod($row, $periodEnd);
+                $termSnapshot = [
                     'id' => (int) $row['term_id'],
                     'row_version' => (int) $row['term_row_version'],
                     'effective_from' => (string) $row['effective_from'],
@@ -218,6 +208,11 @@ final class PayrollRunSnapshotBuilder
                         $row['jmhz_workplace_municipality_code'],
                     'jmhz_workplace_country_code' =>
                         $row['jmhz_workplace_country_code'],
+                    'jmhz_external_codebook_overlay_key' =>
+                        $row['jmhz_external_codebook_overlay_key'],
+                    'jmhz_external_codebook_manifest_sha256' =>
+                        $row['jmhz_external_codebook_manifest_sha256'],
+                    'jmhz_external_codebooks_verified_for_period' => $jmhzCodebooksVerified,
                     'jmhz_apz_contribution_status' =>
                         (string) $row['jmhz_apz_contribution_status'],
                     'jmhz_apz_instrument_code' => $row['jmhz_apz_instrument_code'],
@@ -236,7 +231,26 @@ final class PayrollRunSnapshotBuilder
                     'foreign_legislation_country_code' =>
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
+                ];
+            }
+            $people[$employeeId]['employments'][] = [
+                'employment' => [
+                    'id' => $employmentId,
+                    'employee_id' => $employeeId,
+                    'office_id' => $row['office_id'] === null
+                        ? null
+                        : (int) $row['office_id'],
+                    'code' => (string) $row['employment_code'],
+                    'relation_type' => (string) $row['relation_type'],
+                    'status' => (string) $row['employment_status'],
+                    'start_date' => $row['start_date'],
+                    'actual_start_date' => $row['actual_start_date'],
+                    'end_date' => $row['end_date'],
+                    'monthly_gross_minor' => $row['monthly_gross_minor'] === null
+                        ? null
+                        : (int) $row['monthly_gross_minor'],
                 ],
+                'term' => $termSnapshot,
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
@@ -275,6 +289,30 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /** @param array<string,mixed> $row */
+    private function jmhzCodebooksVerifiedForPeriod(array $row, string $periodEnd): bool
+    {
+        $code = $row['jmhz_workplace_municipality_code'];
+        $country = $row['jmhz_workplace_country_code'];
+        $name = $row['work_place'];
+        $overlayKey = $row['jmhz_external_codebook_overlay_key'];
+        $manifestHash = $row['jmhz_external_codebook_manifest_sha256'];
+        if (!is_string($code) || !is_string($country) || !is_string($name)
+            || $overlayKey !== JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY
+            || $manifestHash !== JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256
+            || $this->jmhzExternalCodebooks === null
+        ) {
+            return false;
+        }
+        try {
+            $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodEnd);
+            $this->jmhzExternalCodebooks->requireCountry($country, $periodEnd);
+            return true;
+        } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException) {
+            return false;
+        }
     }
 
     /**
@@ -355,6 +393,8 @@ final class PayrollRunSnapshotBuilder
                     term.work_place,
                     term.jmhz_workplace_municipality_code,
                     term.jmhz_workplace_country_code,
+                    term.jmhz_external_codebook_overlay_key,
+                    term.jmhz_external_codebook_manifest_sha256,
                     term.jmhz_apz_contribution_status,
                     term.jmhz_apz_instrument_code,
                     term.jmhz_functional_benefits_status,

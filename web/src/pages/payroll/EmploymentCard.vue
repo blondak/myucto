@@ -7,9 +7,11 @@ import {
   type PayrollEmployment,
   type PayrollEmploymentStatus,
   type PayrollEmploymentJmhzEvidenceOptions,
+  type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
@@ -34,6 +36,8 @@ const transitionDate = ref(todayIso())
 const termsForm = ref<PayrollEmploymentTermsPayload | null>(null)
 const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
 const jmhzOptionsFailed = ref(false)
+const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
+const municipalitiesLoading = ref(false)
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
 const openChecklist = computed(() =>
@@ -99,6 +103,41 @@ async function startTermsEdit() {
 function onApzStatusChange() {
   if (termsForm.value?.jmhz_apz_contribution_status !== 'yes' && termsForm.value) {
     termsForm.value.jmhz_apz_instrument_code = null
+  }
+}
+
+const selectedMunicipality = computed(() => {
+  const code = termsForm.value?.jmhz_workplace_municipality_code
+  const label = termsForm.value?.work_place
+  return code && label ? { value: code, label, secondary: code } : null
+})
+
+async function searchMunicipalities(query: string) {
+  if (!termsForm.value || query.trim().length < 2) {
+    municipalityOptions.value = []
+    return
+  }
+  municipalitiesLoading.value = true
+  try {
+    municipalityOptions.value = await payrollApi.searchJmhzMunicipalities(query)
+  } catch {
+    municipalityOptions.value = []
+  } finally {
+    municipalitiesLoading.value = false
+  }
+}
+
+function selectMunicipality(code: string | null) {
+  if (!termsForm.value) return
+  const selected = municipalityOptions.value.find(option => option.code === code)
+  termsForm.value.jmhz_workplace_municipality_code = selected?.code ?? null
+  termsForm.value.work_place = selected?.label ?? null
+  if (!selected) {
+    termsForm.value.jmhz_workplace_country_code = null
+    return
+  }
+  if (selected && !termsForm.value.jmhz_workplace_country_code) {
+    termsForm.value.jmhz_workplace_country_code = 'CZ'
   }
 }
 
@@ -230,10 +269,24 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600 sm:col-span-2">{{ t('payroll.people.regular_workplace') }}<input v-model="termsForm.regular_workplace" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <fieldset data-test="jmhz-evidence" class="grid grid-cols-1 gap-3 rounded-md border border-payroll-200 bg-surface p-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-4 lg:grid-cols-4">
           <legend class="px-1 text-xs font-semibold text-payroll-800">{{ t('payroll.people.jmhz_evidence.title') }}</legend>
-          <label class="text-xs text-neutral-600 lg:col-span-2">{{ t('payroll.people.jmhz_evidence.municipality_name') }}<input v-model="termsForm.work_place" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.municipality_code') }}<input v-model="termsForm.jmhz_workplace_municipality_code" maxlength="6" inputmode="numeric" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm font-mono"></label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.country_code') }}<input v-model="termsForm.jmhz_workplace_country_code" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm font-mono uppercase"></label>
-          <p class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.external_codebook_warning') }}</p>
+          <label class="text-xs text-neutral-600 lg:col-span-3">{{ t('payroll.people.jmhz_evidence.municipality_name') }}
+            <SearchableSelect
+              :model-value="termsForm.jmhz_workplace_municipality_code"
+              :options="municipalityOptions.map(option => ({ value: option.code, label: option.label, secondary: option.code }))"
+              :selected-option="selectedMunicipality"
+              :remote="true"
+              :loading="municipalitiesLoading"
+              :loading-label="t('payroll.people.jmhz_evidence.searching_municipality')"
+              :no-results-label="t('payroll.people.jmhz_evidence.no_municipality')"
+              :placeholder="t('payroll.people.jmhz_evidence.search_municipality')"
+              accent="payroll"
+              class="mt-1"
+              @search="searchMunicipalities"
+              @update:model-value="selectMunicipality"
+            />
+          </label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.country_code') }}<select v-model="termsForm.jmhz_workplace_country_code" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">—</option><option v-for="country in jmhzOptions?.countries ?? []" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option></select></label>
+          <p v-if="jmhzOptions" class="text-xs text-success-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.external_codebook_verified', { date: jmhzOptions.external_codebooks.verified_through }) }}</p>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.apz_status') }}<select v-model="termsForm.jmhz_apz_contribution_status" data-test="jmhz-apz-status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="onApzStatusChange"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>
           <label v-if="termsForm.jmhz_apz_contribution_status === 'yes'" class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.apz_instrument') }}<select v-model="termsForm.jmhz_apz_instrument_code" data-test="jmhz-apz-instrument" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null" disabled>{{ t('payroll.people.jmhz_evidence.select_apz') }}</option><option v-for="option in jmhzOptions?.apz_instruments ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.functional_benefits') }}<select v-model="termsForm.jmhz_functional_benefits_status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>

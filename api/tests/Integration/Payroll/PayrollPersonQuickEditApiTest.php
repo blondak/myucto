@@ -320,7 +320,7 @@ final class PayrollPersonQuickEditApiTest extends TestCase
             'fixed_term_end_on' => null,
             'weekly_hours' => $weeklyHours,
             'workload_basis_points' => 10000,
-            'work_place' => 'Praha',
+            'work_place' => 'Hlavní město Praha',
             'regular_workplace' => 'Praha',
             'jmhz_workplace_municipality_code' => '554782',
             'jmhz_workplace_country_code' => 'CZ',
