@@ -1919,17 +1919,16 @@ final class CrmAggregationService
     }
 
     /**
-     * Nejbližší datum, které NENÍ víkend ani 1. 5. (Svátek práce — pevný český
-     * svátek, na který typicky padá elektronický termín DP). Zjednodušené: neřeší
-     * plný kalendář státních svátků (viz taxCalendarItems), jen nejčastější kolizi.
+     * Nejbližší pracovní den. Dřív si tahle metoda držela vlastní zjednodušený
+     * kalendář (víkendy a 1. 5.), který pro jediné dnešní volání — posun
+     * elektronického termínu DP od 1. 5. — vracel shodné výsledky, protože
+     * z 1. 5. se nedá dojít dál než na 4. 5. Pro jakékoli jiné datum by ale
+     * tichý neúplný kalendář vrátil dřívější termín, než jaký zákon dává.
      */
     private function nextBusinessDayCz(string $ymd): string
     {
-        $d = new \DateTimeImmutable($ymd);
-        while ((int) $d->format('N') >= 6 || $d->format('m-d') === '05-01') {
-            $d = $d->modify('+1 day');
-        }
-        return $d->format('Y-m-d');
+        return CzechWorkingDays::shiftToWorkingDay(new \DateTimeImmutable($ymd))
+            ->format('Y-m-d');
     }
 
     /**

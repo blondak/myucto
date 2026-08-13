@@ -4,6 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+use MyInvoice\Service\Report\CzechWorkingDays;
+
+/**
+ * Pojmenovaný kalendář svátků pro fond pracovní doby. Sadu dnů drží shodnou
+ * s `CzechWorkingDays`, který je zdrojem pro lhůty — tady navíc přibývá kód
+ * a název svátku, které fond potřebuje a lhůty ne.
+ *
+ * Velikonoce se počítají výhradně algoritmem z `CzechWorkingDays`. Vlastní
+ * výpočet přes `easter_days()` tady vracel shodné datum, ale vyžadoval
+ * `ext-calendar`, kterou `composer.json` nedeklaruje a kterou se reports
+ * vrstva vědomě rozhodla nepoužívat, aby helper běžel všude.
+ */
 final class CzechHolidayCalendar
 {
     /** @return array<string,array{code:string,name:string}> */
@@ -27,8 +39,7 @@ final class CzechHolidayCalendar
             "{$year}-12-26" => ['code' => 'boxing_day', 'name' => '2. svátek vánoční'],
         ];
 
-        $easterSunday = (new \DateTimeImmutable("{$year}-03-21"))
-            ->modify('+' . easter_days($year) . ' days');
+        $easterSunday = CzechWorkingDays::easterSunday($year);
         $goodFriday = $easterSunday->modify('-2 days')->format('Y-m-d');
         $easterMonday = $easterSunday->modify('+1 day')->format('Y-m-d');
         $holidays[$goodFriday] = ['code' => 'good_friday', 'name' => 'Velký pátek'];
