@@ -19,6 +19,7 @@ const fieldErrors = ref<Record<string, string[]>>({})
 
 const admin = ref({ name: '', email: '', password: '', password_confirm: '' })
 const requireMfa = ref(false)
+const termsAccepted = ref(false)
 const skipSupplier = ref(false)
 const generateSample = ref(false)
 const sampleResult = ref<SetupSampleResult | null>(null)
@@ -172,6 +173,9 @@ const adminValid = computed(
     passwordOk.value &&
     passwordMatch.value,
 )
+// Bez přijetí licence a obchodních podmínek se ze setupu dál nejde; backend
+// stejnou podmínku ověřuje znovu (SetupAction), tohle je jen UI brána.
+const step1Valid = computed(() => adminValid.value && termsAccepted.value)
 
 onMounted(async () => {
   await auth.fetchSetupStatus()
@@ -181,7 +185,7 @@ onMounted(async () => {
 })
 
 function nextStep() {
-  if (step.value === 1 && adminValid.value) {
+  if (step.value === 1 && step1Valid.value) {
     // Pre-fill supplier emailu admin emailem, pokud ho ještě uživatel needitoval.
     if (!supplier.value.email.trim()) {
       supplier.value.email = admin.value.email.trim()
@@ -204,6 +208,7 @@ async function submit() {
       },
       require_mfa: requireMfa.value,
       require_totp: false,
+      terms_accepted: termsAccepted.value,
     }
     if (!skipSupplier.value && supplier.value.company_name.trim()) {
       payload.supplier = {
@@ -269,6 +274,7 @@ async function submit() {
         'supplier.city':         t('client.city'),
         'supplier.zip':          t('client.zip'),
         'supplier.email':        `${t('settings.supplier')} – ${t('auth.email')}`,
+        'terms_accepted':        t('setup.terms_label'),
       }
       const names = Object.keys(fieldErrors.value).map(k => labels[k] ?? k)
       error.value = (locale.value === 'cs'
@@ -342,7 +348,31 @@ async function submit() {
               </p>
             </div>
 
-            <button type="submit" :disabled="!adminValid" class="w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition">
+            <div class="pt-2 border-t border-neutral-200">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  v-model="termsAccepted"
+                  type="checkbox"
+                  required
+                  class="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span class="text-sm">
+                  <span class="font-medium text-neutral-800">
+                    {{ t('setup.terms_label') }} <span class="text-danger-500">*</span>
+                  </span>
+                  <span class="block text-xs text-neutral-500 mt-0.5">
+                    <a href="https://myucto.cz/licence" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('setup.terms_licence') }}</a>
+                    <span class="mx-1">·</span>
+                    <a href="https://myucto.cz/obchodni-podminky" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('setup.terms_conditions') }}</a>
+                  </span>
+                </span>
+              </label>
+              <p v-if="!termsAccepted" class="mt-2 ml-7 text-xs text-neutral-500">
+                {{ t('setup.terms_required') }}
+              </p>
+            </div>
+
+            <button type="submit" :disabled="!step1Valid" class="w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition">
               {{ t('common.next') }}
             </button>
           </form>

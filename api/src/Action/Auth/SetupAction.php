@@ -26,6 +26,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SetupAction
 {
+    /** Dokumenty, jejichž přijetí musí uživatel v prvotním setupu potvrdit. */
+    private const TERMS_DOCUMENTS = [
+        'https://myucto.cz/licence',
+        'https://myucto.cz/obchodni-podminky',
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PasswordHasher $hasher,
@@ -74,6 +80,9 @@ final class SetupAction
         $admin = (array) ($body['admin'] ?? []);
         $supplier = isset($body['supplier']) && is_array($body['supplier']) ? $body['supplier'] : null;
         $requireTotp = !empty($body['require_totp']);
+        // Přijetí licence a obchodních podmínek je podmínkou dokončení setupu;
+        // wizard bez zaškrtnutí dál nepustí, tady se to ověřuje znovu server-side.
+        $termsAccepted = ($body['terms_accepted'] ?? null) === true;
         if (array_key_exists('require_mfa', $body) && !is_bool($body['require_mfa'])) {
             return Json::error($response, 'validation_failed', 'require_mfa musí být boolean.', 400);
         }
@@ -118,7 +127,7 @@ final class SetupAction
             }
         }
 
-        $errors = $this->validate($admin, $supplier);
+        $errors = $this->validate($admin, $supplier, $termsAccepted);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
@@ -178,6 +187,8 @@ final class SetupAction
                 'require_totp' => $requireTotp,
                 'require_mfa' => $requireMfa,
                 'allowed_mfa_methods' => $allowedMfaMethods,
+                'terms_accepted' => true,
+                'terms_documents' => self::TERMS_DOCUMENTS,
             ], $ip, $request->getHeaderLine('User-Agent'));
 
             $pdo->commit();
@@ -417,9 +428,13 @@ final class SetupAction
      * @param array<string,mixed>|null $supplier
      * @return array<string,list<string>>
      */
-    private function validate(array $admin, ?array $supplier): array
+    private function validate(array $admin, ?array $supplier, bool $termsAccepted): array
     {
         $errors = [];
+
+        if (!$termsAccepted) {
+            $errors['terms_accepted'][] = 'Bez přijetí licenčního ujednání a obchodních podmínek nelze setup dokončit.';
+        }
 
         if (empty($admin['name']) || !is_string($admin['name'])) {
             $errors['admin.name'][] = 'Jméno je povinné';

@@ -12263,7 +12263,11 @@
         "require_mfa_label": "Vynutit vícefaktorové ověření (MFA) pro všechny uživatele",
         "require_mfa_hint": "Uživatel musí po zadání hesla použít přístupový klíč nebo TOTP podle povolených metod.",
         "require_mfa_methods_hint": "Povolený je přístupový klíč i TOTP — uživatel si vybere. Zúžit metody lze později v cfg.php (auth.allowed_mfa_methods).",
-        "mfa_setup_next": "Vynucení MFA je aktivní. Po pokračování dokončíš nastavení zvolené metody."
+        "mfa_setup_next": "Vynucení MFA je aktivní. Po pokračování dokončíš nastavení zvolené metody.",
+        "terms_label": "Přijímám licenční ujednání a obchodní podmínky produktu MyÚčto.cz",
+        "terms_licence": "Licenční ujednání",
+        "terms_conditions": "Obchodní podmínky",
+        "terms_required": "Bez přijetí licence a obchodních podmínek nelze v nastavení pokračovat."
     },
     "mfa_setup": {
         "title": "Nastavení vícefaktorového ověření",
