@@ -1325,6 +1325,55 @@ export interface PayrollJmhzOrdinaryEvidence {
   created: boolean
 }
 
+export interface PayrollJmhzPreparation {
+  id: number
+  environment: 'test' | 'production'
+  run_id: number
+  source_revision_id: number
+  period_start: string
+  scenario_key: string
+  builder_version: string
+  readiness_status: 'blocked' | 'source_ready'
+  issue_count: number
+  issues: Array<{
+    code: string
+    entity_type: string
+    count: number
+    attribute_ids: string[]
+  }>
+  source_manifest_sha256: string
+  readiness_sha256: string
+  snapshot_fingerprint: string
+  official_submission_supported: false
+  created: boolean
+}
+
+export interface PayrollJmhzXmlDryRunBlocker {
+  code: string
+  entity_type: string
+  entity_id: number | null
+  attribute_ids: string[]
+}
+
+export interface PayrollJmhzXmlDryRun {
+  status: 'blocked' | 'dry_run_valid'
+  preparation_id: number
+  blockers: PayrollJmhzXmlDryRunBlocker[]
+  xml?: string
+  xml_sha256?: string
+  schema?: {
+    package_key: string
+    data_version: string
+    bundle_sha256: string
+    document_sha256: string
+  }
+  official_submission: {
+    supported: false
+    reason_code: string
+    reason: string
+  }
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
@@ -2106,6 +2155,22 @@ export const payrollApi = {
       evidence_confirmed: true,
     },
     { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  freezeJmhzPreparation: (
+    revisionId: number,
+    idempotencyKey: string,
+    environment: 'test' | 'production' = 'test',
+  ) => api.post<PayrollJmhzPreparation>(
+    `/payroll/submissions/jmhz-preparation/${revisionId}`,
+    { environment },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  jmhzXmlDryRun: (
+    preparationId: number,
+    environment: 'test' | 'production' = 'test',
+  ) => api.get<PayrollJmhzXmlDryRun>(
+    `/payroll/submissions/jmhz-xml-dry-run/${preparationId}`,
+    { params: { environment } },
   ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
     preview: PayrollJmhzPvpojPreview,

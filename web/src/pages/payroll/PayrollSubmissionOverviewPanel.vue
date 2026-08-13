@@ -13,6 +13,7 @@ import {
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
+import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{
@@ -768,6 +769,11 @@ onMounted(load)
       </section>
 
       <PayrollJmhzOrdinaryEvidencePanel
+        v-if="mode === 'jmhz'"
+        :runs="jmhzApprovedRuns"
+      />
+
+      <PayrollJmhzXmlDryRunPanel
         v-if="mode === 'jmhz'"
         :runs="jmhzApprovedRuns"
       />

@@ -87,6 +87,7 @@ use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
+use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
@@ -887,6 +888,10 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}',
                 [PayrollJmhzOrdinaryEvidenceAction::class, 'confirm'],
+            );
+            $g->post(
+                '/submissions/jmhz-preparation/{revisionId:[0-9]+}',
+                PayrollJmhzPreparationAction::class,
             );
             $g->get(
                 '/submissions/jmhz-xml-dry-run/{preparationId:[0-9]+}',
