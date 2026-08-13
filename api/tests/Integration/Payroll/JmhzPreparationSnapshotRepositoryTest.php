@@ -172,15 +172,21 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
             'payroll-jmhz-preparation-request.v1',
         ];
         yield 'v2' => [
-            JmhzPreparationSnapshotBuilder::PREVIOUS_BUILDER_VERSION,
-            JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V2_BUILDER_VERSION,
+            JmhzPreparationSnapshot::PREVIOUS_V2_SCHEMA_REFERENCE,
             'payroll-jmhz-preparation-source-manifest.v2',
             'payroll-jmhz-preparation-request.v2',
+        ];
+        yield 'v3' => [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_BUILDER_VERSION,
+            JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,
+            'payroll-jmhz-preparation-source-manifest.v3',
+            'payroll-jmhz-preparation-request.v3',
         ];
     }
 
     #[DataProvider('historicalPreparationContracts')]
-    public function testHistoricalPreparationRemainsVerifiableAfterV3Upgrade(
+    public function testHistoricalPreparationRemainsVerifiableAfterV4Upgrade(
         string $builderVersion,
         string $snapshotSchema,
         string $manifestSchema,

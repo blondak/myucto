@@ -15,11 +15,13 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
 final readonly class JmhzPreparationSnapshotService
 {
     private const LEGACY_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v1';
-    private const PREVIOUS_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v3';
+    private const PREVIOUS_V2_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
+    private const PREVIOUS_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v3';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v4';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
-    private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
+    private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
+    private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v4';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -513,6 +515,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
                 'manifest_schema' => self::LEGACY_MANIFEST_SCHEMA,
                 'request_schema' => self::LEGACY_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V2_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V2_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V2_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V2_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::PREVIOUS_BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,

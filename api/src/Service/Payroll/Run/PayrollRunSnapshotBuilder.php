@@ -252,8 +252,10 @@ final class PayrollRunSnapshotBuilder
                     'monthly_gross_minor' => $row['monthly_gross_minor'] === null
                         ? null
                         : (int) $row['monthly_gross_minor'],
+                    'is_primary' => (bool) $row['employment_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
@@ -384,6 +386,7 @@ final class PayrollRunSnapshotBuilder
                     employment.actual_start_date,
                     employment.end_date,
                     employment.monthly_gross_minor,
+                    employment.is_primary AS employment_is_primary,
                     employee.full_name,
                     employee.is_active AS employee_active,
                     profile.profile_status,
@@ -410,7 +413,19 @@ final class PayrollRunSnapshotBuilder
                     term.tax_declaration_signed,
                     term.risky_work,
                     term.foreign_legislation_country_code,
-                    term.a1_certificate_until
+                    term.a1_certificate_until,
+                    average.id AS average_earning_id,
+                    average.row_version AS average_earning_row_version,
+                    average.applicable_year AS average_earning_year,
+                    average.applicable_quarter AS average_earning_quarter,
+                    average.revision_no AS average_earning_revision_no,
+                    average.source_kind AS average_earning_source_kind,
+                    average.average_hourly_minor,
+                    average.support_status AS average_earning_support_status,
+                    average.status AS average_earning_status,
+                    average.ruleset_id AS average_earning_ruleset_id,
+                    average.ruleset_hash AS average_earning_ruleset_hash,
+                    HEX(average.input_hash) AS average_earning_input_hash
                FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -451,6 +466,24 @@ final class PayrollRunSnapshotBuilder
                      ORDER BY selected.effective_from DESC, selected.id DESC
                      LIMIT 1
                 )
+          LEFT JOIN payroll_average_earning_snapshots average
+                 ON average.supplier_id = employment.supplier_id
+                AND average.employment_id = employment.id
+                AND average.applicable_year = YEAR(?)
+                AND average.applicable_quarter = QUARTER(?)
+                AND average.status = "approved"
+                AND average.id = (
+                    SELECT selected_average.id
+                      FROM payroll_average_earning_snapshots selected_average
+                     WHERE selected_average.supplier_id = employment.supplier_id
+                       AND selected_average.employment_id = employment.id
+                       AND selected_average.applicable_year = YEAR(?)
+                       AND selected_average.applicable_quarter = QUARTER(?)
+                       AND selected_average.status = "approved"
+                     ORDER BY selected_average.revision_no DESC,
+                              selected_average.id DESC
+                     LIMIT 1
+                )
               WHERE employment.effective_status IS NOT NULL
                 AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
@@ -486,12 +519,42 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
             $periodEnd,
             $periodEnd,
+            $periodStart,
+            $periodStart,
+            $periodStart,
+            $periodStart,
             $periodEnd,
             $periodStart,
             $periodStart,
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>|null
+     */
+    private function averageEarningSnapshot(array $row): ?array
+    {
+        if ($row['average_earning_id'] === null) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['average_earning_id'],
+            'row_version' => (int) $row['average_earning_row_version'],
+            'applicable_year' => (int) $row['average_earning_year'],
+            'applicable_quarter' => (int) $row['average_earning_quarter'],
+            'revision_no' => (int) $row['average_earning_revision_no'],
+            'source_kind' => (string) $row['average_earning_source_kind'],
+            'average_hourly_minor' => (int) $row['average_hourly_minor'],
+            'support_status' => (string) $row['average_earning_support_status'],
+            'status' => (string) $row['average_earning_status'],
+            'ruleset_id' => (string) $row['average_earning_ruleset_id'],
+            'ruleset_hash' => strtolower((string) $row['average_earning_ruleset_hash']),
+            'input_hash' => strtolower((string) $row['average_earning_input_hash']),
+        ];
     }
 
     /** @return array<string,mixed> */

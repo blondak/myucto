@@ -9,8 +9,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzPreparationSnapshotBuilder
 {
     public const LEGACY_BUILDER_VERSION = 'jmhz-preparation-source.v1';
-    public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v2';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v3';
+    public const PREVIOUS_V2_BUILDER_VERSION = 'jmhz-preparation-source.v2';
+    public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v3';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v4';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -109,6 +110,7 @@ final class JmhzPreparationSnapshotBuilder
             }
             $employmentResults = $this->indexResultEmployments($personResult);
             $normalizedEmployments = [];
+            $primaryEmploymentCount = 0;
             foreach ($this->rows($person['employments'] ?? null, "input.people.{$personIndex}.employments") as $employmentIndex => $entry) {
                 $employment = $this->object(
                     $entry['employment'] ?? null,
@@ -119,6 +121,17 @@ final class JmhzPreparationSnapshotBuilder
                     $this->invalid('jmhz_employment_scope_mismatch', 'Zmrazeny vztah nema jednoznacneho vlastnika.');
                 }
                 $seenEmployments[$employmentId] = true;
+                $isPrimary = $employment['is_primary'] ?? null;
+                if ($isPrimary === true) {
+                    $primaryEmploymentCount++;
+                } elseif ($isPrimary !== false) {
+                    $issues[] = $this->issue(
+                        'jmhz_primary_employment_unresolved',
+                        'employment',
+                        $employmentId,
+                        ['10495'],
+                    );
+                }
                 $term = $entry['term'] ?? null;
                 $scenarioResolution = null;
                 if (!is_array($term) || array_is_list($term)) {
@@ -149,6 +162,12 @@ final class JmhzPreparationSnapshotBuilder
                     }
                 }
                 $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
+                $averageEarning = $this->inspectAverageEarning(
+                    $entry['average_earning'] ?? null,
+                    $employmentId,
+                    $periodStart,
+                    $issues,
+                );
                 $workSummary = is_array($entry['time_month'] ?? null)
                     ? ($entry['time_month']['jmhz_work_summary'] ?? null)
                     : null;
@@ -267,6 +286,7 @@ final class JmhzPreparationSnapshotBuilder
                     'scenario_resolution' => $scenarioResolution,
                     'eldp' => is_array($eldp) ? $eldp['payload'] : null,
                     'work_month' => $entry['time_month'] ?? null,
+                    'average_earning' => $averageEarning,
                     'earnings_by_attribute_minor' => $earnings,
                     'insurance' => $insurance,
                     'calculation' => $employmentResult,
@@ -321,6 +341,15 @@ final class JmhzPreparationSnapshotBuilder
                     'work_summary_sha256' => is_array($workSummary)
                         ? ($workSummary['summary_sha256'] ?? null)
                         : null,
+                    'average_earning_id' => is_array($averageEarning)
+                        ? ($averageEarning['id'] ?? null)
+                        : null,
+                    'average_earning_row_version' => is_array($averageEarning)
+                        ? ($averageEarning['row_version'] ?? null)
+                        : null,
+                    'average_earning_input_hash' => is_array($averageEarning)
+                        ? ($averageEarning['input_hash'] ?? null)
+                        : null,
                     'eldp_evidence_id' => is_array($eldp) ? ($eldp['id'] ?? null) : null,
                     'eldp_source_manifest_sha256' => is_array($eldp)
                         ? ($eldp['source_manifest_sha256'] ?? null)
@@ -331,6 +360,14 @@ final class JmhzPreparationSnapshotBuilder
                     'identity' => $identityVersions,
                     'mappings' => $mappingVersions,
                 ];
+            }
+            if ($primaryEmploymentCount !== 1) {
+                $issues[] = $this->issue(
+                    'jmhz_primary_employment_unresolved',
+                    'person',
+                    $employeeId,
+                    ['10495'],
+                );
             }
             if (count($employmentResults) !== count($normalizedEmployments)) {
                 $this->invalid(
@@ -360,7 +397,7 @@ final class JmhzPreparationSnapshotBuilder
         $office = $source['office'] ?? null;
         if (!is_array($office)
             || !is_string($office['social_security_variable_symbol'] ?? null)
-            || preg_match('/^[0-9]{1,10}$/D', $office['social_security_variable_symbol']) !== 1
+            || preg_match('/^[0-9]{10}$/D', $office['social_security_variable_symbol']) !== 1
         ) {
             $issues[] = $this->issue('social_security_variable_symbol_missing', 'run', $runId, ['10221']);
             $office = null;
@@ -412,6 +449,72 @@ final class JmhzPreparationSnapshotBuilder
         ];
 
         return new JmhzPreparationSnapshot($payload, $issues);
+    }
+
+    /**
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @return array<string,mixed>|null
+     */
+    private function inspectAverageEarning(
+        mixed $value,
+        int $employmentId,
+        string $periodStart,
+        array &$issues,
+    ): ?array {
+        if ($value === null) {
+            $issues[] = $this->issue(
+                'jmhz_average_hourly_earning_missing',
+                'employment',
+                $employmentId,
+                ['10345'],
+            );
+            return null;
+        }
+        $average = $this->object($value, 'employment.average_earning');
+        $year = (int) substr($periodStart, 0, 4);
+        $quarter = intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1;
+        if (($average['applicable_year'] ?? null) !== $year
+            || ($average['applicable_quarter'] ?? null) !== $quarter
+            || ($average['status'] ?? null) !== 'approved'
+        ) {
+            $this->invalid(
+                'jmhz_average_hourly_earning_mismatch',
+                'Prumerny hodinovy vydelek neodpovida obdobi nebo neni schvaleny.',
+            );
+        }
+        $this->positiveInt($average['id'] ?? null, 'average_earning.id');
+        $this->positiveInt(
+            $average['row_version'] ?? null,
+            'average_earning.row_version',
+        );
+        $this->positiveInt(
+            $average['revision_no'] ?? null,
+            'average_earning.revision_no',
+        );
+        $this->hash($average['ruleset_hash'] ?? null, 'average_earning.ruleset_hash');
+        $this->hash($average['input_hash'] ?? null, 'average_earning.input_hash');
+        if (!is_string($average['ruleset_id'] ?? null)
+            || trim($average['ruleset_id']) === ''
+            || !in_array($average['source_kind'] ?? null, ['actual', 'probable'], true)
+            || !is_int($average['average_hourly_minor'] ?? null)
+            || $average['average_hourly_minor'] <= 0
+        ) {
+            $this->invalid(
+                'jmhz_average_hourly_earning_invalid',
+                'Zmrazeny prumerny hodinovy vydelek nema platna data.',
+            );
+        }
+        if (($average['support_status'] ?? null) !== 'supported') {
+            $issues[] = $this->issue(
+                'jmhz_average_hourly_earning_unverified',
+                'employment',
+                $employmentId,
+                ['10345'],
+            );
+        }
+
+        return $average;
     }
 
     private function scenarioSelector(): JmhzScenario1SelectorResolver

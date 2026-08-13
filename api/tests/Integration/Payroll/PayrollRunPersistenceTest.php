@@ -656,6 +656,57 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testInputSnapshotPinsPrimaryEmploymentAndApprovedAverageEarning(): void
+    {
+        $inputTrace = CanonicalJson::encode(['synthetic' => true]);
+        $inputHash = hash('sha256', $inputTrace);
+        $rulesetHash = str_repeat('a', 64);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year,
+                 applicable_quarter, revision_no, source_kind,
+                 decisive_from, decisive_to, gross_earnings_minor,
+                 longer_period_allocated_minor, worked_minutes, worked_days,
+                 average_hourly_minor, rationale, support_status, status,
+                 ruleset_id, ruleset_hash, input_hash, input_trace,
+                 created_by, approved_by, approved_at)
+             VALUES (?, ?, 2026, 2, 1, "probable",
+                     "2026-01-01", "2026-03-31", 0, 0, 0, 0,
+                     27550, "Syntetický pravděpodobný výdělek", "supported",
+                     "approved", "synthetic-average-v1", ?, UNHEX(?), ?,
+                     ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $rulesetHash,
+            $inputHash,
+            $inputTrace,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $averageId = (int) $this->db->pdo()->lastInsertId();
+
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $entry = $snapshot->data['people'][0]['employments'][0];
+
+        self::assertTrue($entry['employment']['is_primary']);
+        self::assertSame([
+            'id' => $averageId,
+            'row_version' => 1,
+            'applicable_year' => 2026,
+            'applicable_quarter' => 2,
+            'revision_no' => 1,
+            'source_kind' => 'probable',
+            'average_hourly_minor' => 27550,
+            'support_status' => 'supported',
+            'status' => 'approved',
+            'ruleset_id' => 'synthetic-average-v1',
+            'ruleset_hash' => $rulesetHash,
+            'input_hash' => $inputHash,
+        ], $entry['average_earning']);
+    }
+
     public function testInputSnapshotPinsImmutableJmhzWorkMonthCoreRevision(): void
     {
         $this->db->pdo()->prepare(

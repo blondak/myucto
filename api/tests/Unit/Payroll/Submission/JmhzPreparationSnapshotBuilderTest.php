@@ -22,7 +22,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v3',
+            'payroll-jmhz-preparation-source.v4',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -31,6 +31,14 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             $snapshot->payload['readiness_issue_codes'],
         );
         self::assertNotContains('scenario_selector_not_frozen', $snapshot->payload['readiness_issue_codes']);
+        self::assertNotContains(
+            'jmhz_average_hourly_earning_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertNotContains(
+            'jmhz_primary_employment_unresolved',
+            $snapshot->payload['readiness_issue_codes'],
+        );
         self::assertArrayHasKey('header', $snapshot->payload);
         self::assertArrayHasKey('employer_summary', $snapshot->payload);
         self::assertArrayHasKey('people', $snapshot->payload);
@@ -43,6 +51,16 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertSame(
             'scenario_1',
             $snapshot->payload['people'][0]['employments'][0]['scenario_resolution']['scenario_key'],
+        );
+        self::assertSame(
+            27550,
+            $snapshot->payload['people'][0]['employments'][0]
+                ['average_earning']['average_hourly_minor'],
+        );
+        self::assertSame(
+            str_repeat('9', 64),
+            $snapshot->payload['source_versions']['employments'][0]
+                ['average_earning_input_hash'],
         );
         $public = CanonicalJson::encode($snapshot->readiness());
         self::assertStringNotContainsString('101', $public);
@@ -89,6 +107,53 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
 
         self::assertContains(
             'jmhz_scenario_activity_code_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    public function testMissingAverageEarningAndPrimaryEmploymentStayBlocked(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        unset($input['people'][0]['employments'][0]['average_earning']);
+        $input['people'][0]['employments'][0]['employment']['is_primary'] = false;
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+
+        self::assertContains(
+            'jmhz_average_hourly_earning_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_primary_employment_unresolved',
             $snapshot->payload['readiness_issue_codes'],
         );
     }
@@ -274,6 +339,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'id' => 101,
                 'employee_id' => 11,
                 'relation_type' => 'employment',
+                'is_primary' => true,
             ],
             'term' => [
                 'id' => 201,
@@ -288,6 +354,20 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'risky_work' => false,
             ],
             'time_month' => null,
+            'average_earning' => [
+                'id' => 701,
+                'row_version' => 1,
+                'applicable_year' => 2026,
+                'applicable_quarter' => 3,
+                'revision_no' => 1,
+                'source_kind' => 'probable',
+                'average_hourly_minor' => 27550,
+                'support_status' => 'supported',
+                'status' => 'approved',
+                'ruleset_id' => 'synthetic-average-v1',
+                'ruleset_hash' => str_repeat('8', 64),
+                'input_hash' => str_repeat('9', 64),
+            ],
             'inputs' => $inputs,
         ];
         $input = [
