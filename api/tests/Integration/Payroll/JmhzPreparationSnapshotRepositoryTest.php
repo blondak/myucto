@@ -21,6 +21,7 @@ use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 #[Group('integration')]
@@ -161,9 +162,32 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         self::assertSame(2, (int) $statement->fetchColumn());
     }
 
-    public function testLegacyV1PreparationRemainsVerifiableAfterV2Upgrade(): void
+    /** @return iterable<string,array{string,string,string,string}> */
+    public static function historicalPreparationContracts(): iterable
     {
-        $key = 'synthetic-jmhz-v1-replay';
+        yield 'v1' => [
+            JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
+            'payroll-jmhz-preparation-source-manifest.v1',
+            'payroll-jmhz-preparation-request.v1',
+        ];
+        yield 'v2' => [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_BUILDER_VERSION,
+            JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,
+            'payroll-jmhz-preparation-source-manifest.v2',
+            'payroll-jmhz-preparation-request.v2',
+        ];
+    }
+
+    #[DataProvider('historicalPreparationContracts')]
+    public function testHistoricalPreparationRemainsVerifiableAfterV3Upgrade(
+        string $builderVersion,
+        string $snapshotSchema,
+        string $manifestSchema,
+        string $requestSchema,
+    ): void
+    {
+        $key = 'synthetic-jmhz-historical-' . $builderVersion;
         $idempotencyHash = hash('sha256', $key, true);
         $revision = $this->repository->lockSource($this->supplierId, $this->revisionId);
         self::assertIsArray($revision);
@@ -200,8 +224,8 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         ];
         $sourceVersions = ['office_id' => null, 'employments' => []];
         $payload = [
-            'schema_reference' => JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
-            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'schema_reference' => $snapshotSchema,
+            'builder_version' => $builderVersion,
             'scope' => $scope,
             'specification' => $specification,
             'source_revision' => $sourceRevision,
@@ -226,8 +250,8 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         $readinessJson = CanonicalJson::encode($snapshot->readiness());
         $readinessHash = hash('sha256', $readinessJson);
         $manifestJson = CanonicalJson::encode([
-            'schema_reference' => 'payroll-jmhz-preparation-source-manifest.v1',
-            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'schema_reference' => $manifestSchema,
+            'builder_version' => $builderVersion,
             'scope' => $scope,
             'specification' => $specification,
             'source_revision' => $sourceRevision,
@@ -237,7 +261,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         ]);
         $manifestHash = hash('sha256', $manifestJson);
         $requestFingerprint = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+            'schema_reference' => $requestSchema,
             'supplier_id' => $this->supplierId,
             'environment' => 'test',
             'source_revision_id' => $this->revisionId,
@@ -254,7 +278,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
             'source_revision_id' => $this->revisionId,
             'period_start' => '2026-07-01',
             'scenario_key' => 'scenario_1',
-            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'builder_version' => $builderVersion,
             'readiness_status' => 'blocked',
             'issue_count' => 1,
             'source_manifest_json' => $manifestJson,
@@ -292,7 +316,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         self::assertFalse($replay['created']);
         self::assertSame($id, $replay['id']);
         self::assertSame(
-            JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            $builderVersion,
             $replay['builder_version'],
         );
     }

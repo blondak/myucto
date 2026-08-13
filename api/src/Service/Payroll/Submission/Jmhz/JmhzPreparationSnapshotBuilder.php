@@ -9,7 +9,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzPreparationSnapshotBuilder
 {
     public const LEGACY_BUILDER_VERSION = 'jmhz-preparation-source.v1';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v2';
+    public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v2';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v3';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -18,6 +19,7 @@ final class JmhzPreparationSnapshotBuilder
      * @param array<int,array<string,mixed>> $identitySources
      * @param array<int,array<string,mixed>> $mappingSources
      * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $sourceIssues
+     * @param array<int,array<string,mixed>> $eldpSources
      */
     public function build(
         int $supplierId,
@@ -26,6 +28,7 @@ final class JmhzPreparationSnapshotBuilder
         array $identitySources,
         array $mappingSources,
         array $sourceIssues = [],
+        array $eldpSources = [],
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -146,12 +149,31 @@ final class JmhzPreparationSnapshotBuilder
                     }
                 }
                 $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
-                $issues[] = $this->issue('eldp_block_missing', 'employment', $employmentId, [
-                    '10240', '10241', '10242', '10245', '10356', '10357',
-                    '10358', '10359', '10360', '10362', '10366', '10375',
-                    '10462', '10463', '10464', '10465', '10466', '10468',
-                    '10469', '10473', '10474', '10475',
-                ]);
+                $workSummary = is_array($entry['time_month'] ?? null)
+                    ? ($entry['time_month']['jmhz_work_summary'] ?? null)
+                    : null;
+                $eldp = $eldpSources[$employmentId] ?? null;
+                if (!is_array($eldp)) {
+                    $issues[] = $this->issue('jmhz_eldp_evidence_missing', 'employment', $employmentId, [
+                        '10240', '10241', '10242', '10245', '10354', '10355',
+                        '10356', '10357', '10358', '10359', '10360', '10362',
+                        '10536', '10366', '10375', '10462', '10463', '10464',
+                        '10465', '10466', '10468', '10469', '10473', '10474',
+                        '10475',
+                    ]);
+                    $eldp = null;
+                } else {
+                    $this->assertEldpSource(
+                        $eldp,
+                        $supplierId,
+                        $revision,
+                        $employeeId,
+                        $employmentId,
+                        $periodStart,
+                        $term,
+                        $workSummary,
+                    );
+                }
                 $componentMappings = [];
                 $earnings = [];
                 foreach ($this->rows($entry['inputs'] ?? null, 'employment.inputs') as $inputRow) {
@@ -243,6 +265,7 @@ final class JmhzPreparationSnapshotBuilder
                     'employment' => $employment,
                     'term' => $term,
                     'scenario_resolution' => $scenarioResolution,
+                    'eldp' => is_array($eldp) ? $eldp['payload'] : null,
                     'work_month' => $entry['time_month'] ?? null,
                     'earnings_by_attribute_minor' => $earnings,
                     'insurance' => $insurance,
@@ -275,9 +298,6 @@ final class JmhzPreparationSnapshotBuilder
                     ],
                     $componentMappings,
                 );
-                $workSummary = is_array($entry['time_month'] ?? null)
-                    ? ($entry['time_month']['jmhz_work_summary'] ?? null)
-                    : null;
                 $sourceVersions[] = [
                     'employee_id' => $employeeId,
                     'employment_id' => $employmentId,
@@ -300,6 +320,13 @@ final class JmhzPreparationSnapshotBuilder
                         : null,
                     'work_summary_sha256' => is_array($workSummary)
                         ? ($workSummary['summary_sha256'] ?? null)
+                        : null,
+                    'eldp_evidence_id' => is_array($eldp) ? ($eldp['id'] ?? null) : null,
+                    'eldp_source_manifest_sha256' => is_array($eldp)
+                        ? ($eldp['source_manifest_sha256'] ?? null)
+                        : null,
+                    'eldp_snapshot_fingerprint' => is_array($eldp)
+                        ? ($eldp['snapshot_fingerprint'] ?? null)
                         : null,
                     'identity' => $identityVersions,
                     'mappings' => $mappingVersions,
@@ -556,6 +583,51 @@ final class JmhzPreparationSnapshotBuilder
                 'jmhz_social_relationship_mismatch',
                 'Socialni vysledek neobsahuje presne zmrazene pracovni vztahy.',
             );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $eldp
+     * @param array<string,mixed> $revision
+     */
+    private function assertEldpSource(
+        array $eldp,
+        int $supplierId,
+        array $revision,
+        int $employeeId,
+        int $employmentId,
+        string $periodStart,
+        mixed $term,
+        mixed $workSummary,
+    ): void {
+        $payload = $this->object($eldp['payload'] ?? null, 'eldp.payload');
+        $scope = $this->object($payload['scope'] ?? null, 'eldp.scope');
+        $sourceRevision = $this->object($payload['source_revision'] ?? null, 'eldp.source_revision');
+        $sourceEvidence = $this->object($payload['source_evidence'] ?? null, 'eldp.source_evidence');
+        $sections = $this->rows($payload['eldp_sections'] ?? null, 'eldp.sections');
+        $revisionId = $this->positiveInt($revision['id'] ?? null, 'revision.id');
+        if (($payload['schema_reference'] ?? null) !== JmhzEldpEvidenceSnapshot::SCHEMA_REFERENCE
+            || ($scope['supplier_id'] ?? null) !== $supplierId
+            || ($scope['source_revision_id'] ?? null) !== $revisionId
+            || ($scope['employee_id'] ?? null) !== $employeeId
+            || ($scope['employment_id'] ?? null) !== $employmentId
+            || ($scope['period_start'] ?? null) !== $periodStart
+            || ($scope['scenario_key'] ?? null) !== 'scenario_1'
+            || ($sourceRevision['input_snapshot_hash'] ?? null) !== ($revision['input_snapshot_hash'] ?? null)
+            || ($sourceRevision['result_snapshot_hash'] ?? null) !== ($revision['result_snapshot_hash'] ?? null)
+            || ($sourceRevision['ruleset_manifest_hash'] ?? null) !== ($revision['ruleset_manifest_hash'] ?? null)
+            || !is_array($term) || array_is_list($term)
+            || ($sourceEvidence['term_id'] ?? null) !== ($term['id'] ?? null)
+            || ($sourceEvidence['term_row_version'] ?? null) !== ($term['row_version'] ?? null)
+            || !is_array($workSummary) || array_is_list($workSummary)
+            || ($sourceEvidence['work_summary_id'] ?? null) !== ($workSummary['id'] ?? null)
+            || ($sourceEvidence['work_summary_sha256'] ?? null) !== ($workSummary['summary_sha256'] ?? null)
+            || count($sections) !== 1
+            || !is_int($eldp['id'] ?? null)
+            || !is_string($eldp['source_manifest_sha256'] ?? null)
+            || !is_string($eldp['snapshot_fingerprint'] ?? null)
+        ) {
+            $this->invalid('jmhz_eldp_evidence_mismatch', 'Evidence ELDP neodpovídá zmrazenému pracovnímu vztahu.');
         }
     }
 

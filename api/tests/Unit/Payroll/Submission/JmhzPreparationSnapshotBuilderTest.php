@@ -22,12 +22,12 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v2',
+            'payroll-jmhz-preparation-source.v3',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
         self::assertContains(
-            'eldp_block_missing',
+            'jmhz_eldp_evidence_missing',
             $snapshot->payload['readiness_issue_codes'],
         );
         self::assertNotContains('scenario_selector_not_frozen', $snapshot->payload['readiness_issue_codes']);
@@ -90,6 +90,92 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertContains(
             'jmhz_scenario_activity_code_missing',
             $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    public function testVerifiedEldpEvidenceRemovesOnlyEldpBlocker(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month'] = [
+            'status' => 'approved',
+            'jmhz_work_summary_status' => 'frozen_work_summary',
+            'jmhz_work_summary' => [
+                'id' => 301,
+                'derivation_version' => 'jmhz-work-month.v2',
+                'summary_sha256' => str_repeat('d', 64),
+            ],
+        ];
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash('sha256', $source['revision']['input_snapshot_json']);
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+        $eldp = [
+            'id' => 901,
+            'source_manifest_sha256' => str_repeat('e', 64),
+            'snapshot_fingerprint' => str_repeat('f', 64),
+            'payload' => [
+                'schema_reference' => 'payroll-jmhz-eldp-evidence.v1',
+                'scope' => [
+                    'supplier_id' => 7,
+                    'run_id' => 401,
+                    'source_revision_id' => 301,
+                    'employee_id' => 11,
+                    'employment_id' => 101,
+                    'period_start' => '2026-07-01',
+                    'scenario_key' => 'scenario_1',
+                ],
+                'source_revision' => [
+                    'input_snapshot_hash' => $source['revision']['input_snapshot_hash'],
+                    'result_snapshot_hash' => $source['revision']['result_snapshot_hash'],
+                    'ruleset_manifest_hash' => $source['revision']['ruleset_manifest_hash'],
+                ],
+                'source_evidence' => [
+                    'term_id' => 201,
+                    'term_row_version' => 1,
+                    'work_summary_id' => 301,
+                    'work_summary_sha256' => str_repeat('d', 64),
+                ],
+                'eldp_sections' => [[
+                    'ordinal' => 1,
+                    'code' => '1++',
+                ]],
+            ],
+        ];
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+            [],
+            [101 => $eldp],
+        );
+
+        self::assertNotContains(
+            'jmhz_eldp_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertSame(
+            '1++',
+            $snapshot->payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'],
+        );
+        self::assertSame(
+            901,
+            $snapshot->payload['source_versions']['employments'][0]['eldp_evidence_id'],
         );
     }
 

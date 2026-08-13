@@ -15,9 +15,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
 final readonly class JmhzPreparationSnapshotService
 {
     private const LEGACY_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v1';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
+    private const PREVIOUS_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v3';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
+    private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -26,6 +28,7 @@ final readonly class JmhzPreparationSnapshotService
         private PayrollComponentJmhzMappingRepository $mappings,
         private PayrollSensitiveData $sensitiveData,
         private SecretEncryption $encryption,
+        private JmhzEldpEvidenceSnapshotService $eldpEvidence,
     ) {}
 
     /** @return array<string,mixed> */
@@ -136,9 +139,10 @@ final readonly class JmhzPreparationSnapshotService
             $periodEnd = (new \DateTimeImmutable((string) ($revision['period_start'] ?? '')))
                 ->modify('last day of this month')
                 ->format('Y-m-d');
-            [$identitySources, $mappingSources, $sourceIssues] = $this->supplements(
+            [$identitySources, $mappingSources, $sourceIssues, $eldpSources] = $this->supplements(
                 $supplierId,
                 $environment,
+                $sourceRevisionId,
                 $periodEnd,
                 $input,
             );
@@ -149,6 +153,7 @@ final readonly class JmhzPreparationSnapshotService
                 $identitySources,
                 $mappingSources,
                 $sourceIssues,
+                $eldpSources,
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -244,16 +249,17 @@ final readonly class JmhzPreparationSnapshotService
 
     /**
      * @param array<string,mixed> $input
-     * @return array{array<int,array<string,mixed>>,array<int,array<string,mixed>>,list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>}
+     * @return array{array<int,array<string,mixed>>,array<int,array<string,mixed>>,list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>,array<int,array<string,mixed>>}
      */
-    private function supplements(int $supplierId, string $environment, string $periodEnd, array $input): array
+    private function supplements(int $supplierId, string $environment, int $sourceRevisionId, string $periodEnd, array $input): array
     {
         $identities = [];
         $mappings = [];
         $issues = [];
+        $eldpSources = [];
         $people = $input['people'] ?? [];
         if (!is_array($people) || !array_is_list($people)) {
-            return [$identities, $mappings, $issues];
+            return [$identities, $mappings, $issues, $eldpSources];
         }
         foreach ($people as $person) {
             if (!is_array($person) || array_is_list($person)) {
@@ -276,6 +282,15 @@ final readonly class JmhzPreparationSnapshotService
                     ? $employment['id']
                     : 0;
                 if ($employeeId > 0 && $employmentId > 0) {
+                    $eldp = $this->eldpEvidence->snapshotForPreparation(
+                        $supplierId,
+                        $environment,
+                        $sourceRevisionId,
+                        $employmentId,
+                    );
+                    if ($eldp !== null) {
+                        $eldpSources[$employmentId] = $eldp;
+                    }
                     try {
                         $identity = $this->identities->sensitiveSnapshotSourceAt(
                             $supplierId,
@@ -329,7 +344,8 @@ final readonly class JmhzPreparationSnapshotService
         }
         ksort($identities, SORT_NUMERIC);
         ksort($mappings, SORT_NUMERIC);
-        return [$identities, $mappings, $issues];
+        ksort($eldpSources, SORT_NUMERIC);
+        return [$identities, $mappings, $issues, $eldpSources];
     }
 
     /** @param array<string,mixed> $stored */
@@ -497,6 +513,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
                 'manifest_schema' => self::LEGACY_MANIFEST_SCHEMA,
                 'request_schema' => self::LEGACY_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
