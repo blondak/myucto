@@ -95,6 +95,7 @@ final class PayrollPersonCreateValidator
                 'jmhz_temporary_assignment_status' => 'unverified',
                 'cz_isco_code' => null,
                 'activity_code' => null,
+                'jmhz_relationship_detail_code' => null,
                 'social_insurance_participation' => 'automatic',
                 'health_insurance_participation' => 'automatic',
                 'tax_regime' => 'advance',

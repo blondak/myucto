@@ -619,6 +619,8 @@ final class PayrollRunPersistenceTest extends TestCase
                     jmhz_apz_instrument_code = "4",
                     jmhz_functional_benefits_status = "no",
                     jmhz_temporary_assignment_status = "unverified"
+                    , activity_code = "1"
+                    , jmhz_relationship_detail_code = "1"
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([
             JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
@@ -643,6 +645,8 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('4', $term['jmhz_apz_instrument_code']);
         self::assertSame('no', $term['jmhz_functional_benefits_status']);
         self::assertSame('unverified', $term['jmhz_temporary_assignment_status']);
+        self::assertSame('1', $term['activity_code']);
+        self::assertSame('1', $term['jmhz_relationship_detail_code']);
 
         $futureSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
             ->build($this->supplierId, '2026-09-01', '2026-10-15');

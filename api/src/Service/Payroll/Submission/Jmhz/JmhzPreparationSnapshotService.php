@@ -14,6 +14,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
 
 final readonly class JmhzPreparationSnapshotService
 {
+    private const LEGACY_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v1';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
+    private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
+
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
         private JmhzPreparationSnapshotBuilder $builder,
@@ -158,7 +163,7 @@ final readonly class JmhzPreparationSnapshotService
                 throw new \UnexpectedValueException('Scope pripravy JMHZ neni objekt.');
             }
             $sourceManifestJson = CanonicalJson::encode([
-                'schema_reference' => 'payroll-jmhz-preparation-source-manifest.v1',
+                'schema_reference' => self::CURRENT_MANIFEST_SCHEMA,
                 'builder_version' => JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
                 'scope' => $scope,
                 'specification' => $snapshot->payload['specification'],
@@ -169,7 +174,7 @@ final readonly class JmhzPreparationSnapshotService
             ]);
             $sourceManifestHash = hash('sha256', $sourceManifestJson);
             $requestFingerprint = hash('sha256', CanonicalJson::encode([
-                'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+                'schema_reference' => self::CURRENT_REQUEST_SCHEMA,
                 'supplier_id' => $supplierId,
                 'environment' => $environment,
                 'source_revision_id' => $sourceRevisionId,
@@ -365,9 +370,10 @@ final readonly class JmhzPreparationSnapshotService
             );
         }
         $scope = $manifest['scope'] ?? null;
+        $contracts = $this->contracts((string) ($stored['builder_version'] ?? ''));
         if (!is_array($scope) || array_is_list($scope)
             || ($manifest['schema_reference'] ?? null)
-                !== 'payroll-jmhz-preparation-source-manifest.v1'
+                !== $contracts['manifest_schema']
             || ($manifest['builder_version'] ?? null)
                 !== ($stored['builder_version'] ?? null)
             || ($manifest['snapshot_fingerprint'] ?? null)
@@ -418,9 +424,9 @@ final readonly class JmhzPreparationSnapshotService
         if (!is_array($snapshotScope) || array_is_list($snapshotScope)
             || !is_array($snapshotIssues) || !array_is_list($snapshotIssues)
             || ($snapshot['schema_reference'] ?? null)
-                !== JmhzPreparationSnapshot::SCHEMA_REFERENCE
+                !== $contracts['snapshot_schema']
             || ($snapshot['builder_version'] ?? null)
-                !== JmhzPreparationSnapshotBuilder::BUILDER_VERSION
+                !== ($stored['builder_version'] ?? null)
             || CanonicalJson::encode($snapshotScope) !== CanonicalJson::encode($scope)
             || CanonicalJson::encode($snapshot['specification'] ?? null)
                 !== CanonicalJson::encode($manifest['specification'] ?? null)
@@ -469,7 +475,7 @@ final readonly class JmhzPreparationSnapshotService
             );
         }
         $expectedRequest = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+            'schema_reference' => $contracts['request_schema'],
             'supplier_id' => $stored['supplier_id'],
             'environment' => $stored['environment'],
             'source_revision_id' => $stored['source_revision_id'],
@@ -481,6 +487,27 @@ final readonly class JmhzPreparationSnapshotService
                 'Request fingerprint pripravy JMHZ nesouhlasi.',
             );
         }
+    }
+
+    /** @return array{snapshot_schema:string,manifest_schema:string,request_schema:string} */
+    private function contracts(string $builderVersion): array
+    {
+        return match ($builderVersion) {
+            JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
+                'manifest_schema' => self::LEGACY_MANIFEST_SCHEMA,
+                'request_schema' => self::LEGACY_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
+                'manifest_schema' => self::CURRENT_MANIFEST_SCHEMA,
+                'request_schema' => self::CURRENT_REQUEST_SCHEMA,
+            ],
+            default => throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_version_unsupported',
+                'Verze uložené přípravy JMHZ není podporovaná.',
+            ),
+        };
     }
 
     private function encryptionContext(int $supplierId, string $environment, int $revisionId, string $snapshotFingerprint, string $manifestHash, string $readinessHash): string

@@ -1837,6 +1837,7 @@
                 "apz_instrument": "APZ instrument",
                 "functional_benefits": "Functional benefits",
                 "temporary_assignment": "Temporary assignment",
+                "relationship_detail": "Employment relationship detail",
                 "select_apz": "Select an instrument",
                 "options_failed": "The pinned JMHZ codebooks could not be loaded. Saving validated evidence is blocked.",
                 "search_municipality": "Start typing a municipality name or code",

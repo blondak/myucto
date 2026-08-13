@@ -55,20 +55,42 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         }
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
+    public function requireActivityCode(string $code): void
+    {
+        try {
+            $this->codebooks->requireValue('druh_cinnosti', $code);
+        } catch (JmhzCodebookValueException $e) {
+            throw new \InvalidArgumentException('Druh činnosti není v připnutém číselníku JMHZ.', 0, $e);
+        }
+    }
+
+    public function requireRelationshipDetailCode(string $code): void
+    {
+        try {
+            $this->codebooks->requireValue('blizsi_urceni_pracovnepravn', $code);
+        } catch (JmhzCodebookValueException $e) {
+            throw new \InvalidArgumentException('Bližší určení pracovněprávního vztahu není v připnutém číselníku JMHZ.', 0, $e);
+        }
+    }
+
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string>,activity_codes:list<array{code:string,label:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
     public function options(): array
     {
-        $options = [];
+        $apzOptions = [];
         foreach (['1', '2', '3', '4'] as $code) {
             $entry = $this->codebooks->requireValue('nastroj_opatreni', $code);
-            $options[] = ['code' => $code, 'label' => (string) $entry['label']];
+            $apzOptions[] = ['code' => $code, 'label' => (string) $entry['label']];
         }
 
         return [
             'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
             'manifest_sha256' => $this->manifest['manifest_sha256'],
             'external_codebooks' => $this->externalCodebooks->provenance(),
-            'apz_instruments' => $options,
+            'activity_codes' => $this->codebookOptions('druh_cinnosti'),
+            'relationship_detail_codes' => $this->codebookOptions(
+                'blizsi_urceni_pracovnepravn',
+            ),
+            'apz_instruments' => $apzOptions,
             'countries' => $this->externalCodebooks->countries(
                 $this->externalCodebooks->provenance()['snapshot_date'],
             ),
@@ -89,5 +111,20 @@ final class PayrollEmploymentJmhzEvidenceCatalog
     public function externalCodebookProvenance(): array
     {
         return $this->externalCodebooks->provenance();
+    }
+
+    /** @return list<array{code:string,label:string}> */
+    private function codebookOptions(string $key): array
+    {
+        $options = [];
+        foreach ($this->codebooks->entries($key) as $entry) {
+            $code = $entry['item_code'] ?? null;
+            $label = $entry['label'] ?? null;
+            if (!is_string($code) || !is_string($label)) {
+                throw new \UnexpectedValueException('Připnutý číselník JMHZ má neplatnou položku.');
+            }
+            $options[] = ['code' => $code, 'label' => $label];
+        }
+        return $options;
     }
 }

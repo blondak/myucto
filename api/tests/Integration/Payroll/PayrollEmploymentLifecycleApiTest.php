@@ -109,6 +109,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'jmhz_apz_instrument_code' => '2',
             'jmhz_functional_benefits_status' => 'no',
             'jmhz_temporary_assignment_status' => 'yes',
+            'jmhz_relationship_detail_code' => '2',
             'change_reason' => 'Změna úvazku',
         ]);
         self::assertSame(4, $changed['row_version']);
@@ -119,12 +120,18 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame('554782', $changed['terms'][0]['jmhz_workplace_municipality_code']);
         self::assertSame('yes', $changed['terms'][0]['jmhz_apz_contribution_status']);
         self::assertSame('yes', $changed['terms'][0]['jmhz_temporary_assignment_status']);
+        self::assertSame('2', $changed['terms'][0]['jmhz_relationship_detail_code']);
+        self::assertSame('1', $changed['terms'][1]['jmhz_relationship_detail_code']);
         self::assertSame(
             'unverified',
             $changed['terms'][1]['jmhz_functional_benefits_status'],
         );
         self::assertArrayHasKey(
             'jmhz_workplace_municipality_code',
+            $changed['timeline'][0]['diff'],
+        );
+        self::assertArrayHasKey(
+            'jmhz_relationship_detail_code',
             $changed['timeline'][0]['diff'],
         );
         self::assertCount(7, $changed['checklist']);
@@ -251,6 +258,11 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         $options = $this->json($response)['options'];
         self::assertSame(64, strlen((string) $options['manifest_sha256']));
+        self::assertCount(44, $options['activity_codes']);
+        self::assertSame(
+            ['1', '2', '3'],
+            array_column($options['relationship_detail_codes'], 'code'),
+        );
         self::assertSame(['1', '2', '3', '4'], array_column($options['apz_instruments'], 'code'));
         self::assertSame(250, count($options['countries']));
         self::assertSame('2026-08-13', $options['external_codebooks']['verified_through']);
@@ -404,6 +416,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => '43110',
             'activity_code' => '1',
+            'jmhz_relationship_detail_code' => '1',
             'social_insurance_participation' => 'automatic',
             'health_insurance_participation' => 'automatic',
             'tax_regime' => 'advance',

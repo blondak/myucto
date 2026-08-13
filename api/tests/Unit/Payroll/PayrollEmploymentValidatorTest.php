@@ -164,6 +164,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
             'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => '43110',
             'activity_code' => '1',
+            'jmhz_relationship_detail_code' => '1',
             'social_insurance_participation' => 'foreign',
             'health_insurance_participation' => 'foreign',
             'tax_regime' => 'foreign',
@@ -174,6 +175,29 @@ final class PayrollEmploymentValidatorTest extends TestCase
             'is_primary' => true,
             'change_reason' => 'Počáteční podmínky',
         ];
+    }
+
+    public function testRelationshipDetailRequiresPinnedCodeAndApplicableActivity(): void
+    {
+        $valid = $this->terms();
+        $validated = $this->validator()->terms($valid);
+        self::assertSame('1', $validated['activity_code']);
+        self::assertSame('1', $validated['jmhz_relationship_detail_code']);
+
+        $notApplicable = $valid;
+        $notApplicable['activity_code'] = 'A';
+        try {
+            $this->validator()->terms($notApplicable);
+            self::fail('Bližší určení nesmí být u druhu činnosti mimo 1 až 9.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('jen pro druh činnosti 1 až 9', $exception->getMessage());
+        }
+
+        $unknown = $valid;
+        $unknown['jmhz_relationship_detail_code'] = '9';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Bližší určení pracovněprávního vztahu');
+        $this->validator()->terms($unknown);
     }
 
     private function validator(): PayrollEmploymentValidator

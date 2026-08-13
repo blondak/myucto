@@ -270,8 +270,11 @@ nepřepíše. Historie drží zejména:
 - příznak primárního pracovního vztahu a důvod změny.
 
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
-strukturovanou obec pracoviště, kód obce a stát, příspěvek a nástroj APZ,
-funkční požitky a dočasné přidělení. Příznaky používají tři stavy **Neověřeno**,
+strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení
+pracovněprávního vztahu, příspěvek a nástroj APZ, funkční požitky a dočasné
+přidělení. Druh činnosti i bližší určení se vybírají z připnutých číselníků
+JMHZ. U druhů 1 až 9 je bližší určení povinným podkladem pro výběr scénáře;
+chybějící hodnota se nikdy nevykládá jako „Žádné“. Příznaky používají tři stavy **Neověřeno**,
 **Ne** a **Ano**; chybějící historický údaj se nikdy automaticky nepovažuje za
 „ne“. Obec, její kód a stát se ukládají jen jako úplná trojice. Dokud nejsou
 údaje vybrané z autoritativních číselníků CISOB a CZEM, aplikace kontroluje

@@ -22,18 +22,15 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v1',
+            'payroll-jmhz-preparation-source.v2',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
         self::assertContains(
-            'scenario_selector_not_frozen',
-            $snapshot->payload['readiness_issue_codes'],
-        );
-        self::assertContains(
             'eldp_block_missing',
             $snapshot->payload['readiness_issue_codes'],
         );
+        self::assertNotContains('scenario_selector_not_frozen', $snapshot->payload['readiness_issue_codes']);
         self::assertArrayHasKey('header', $snapshot->payload);
         self::assertArrayHasKey('employer_summary', $snapshot->payload);
         self::assertArrayHasKey('people', $snapshot->payload);
@@ -43,10 +40,57 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             101,
             $snapshot->payload['people'][0]['employments'][0]['employment_id'],
         );
+        self::assertSame(
+            'scenario_1',
+            $snapshot->payload['people'][0]['employments'][0]['scenario_resolution']['scenario_key'],
+        );
         $public = CanonicalJson::encode($snapshot->readiness());
         self::assertStringNotContainsString('101', $public);
         self::assertStringNotContainsString('Synthetic Person', $public);
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
+    }
+
+    public function testLegacyRunWithoutSelectorEvidenceRemainsBlocked(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        unset($input['people'][0]['employments'][0]['term']['activity_code']);
+        unset($input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code']);
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+
+        self::assertContains(
+            'jmhz_scenario_activity_code_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
     }
 
     public function testRejectsResultThatDoesNotBelongToInputSnapshot(): void
@@ -148,6 +192,8 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             'term' => [
                 'id' => 201,
                 'row_version' => 1,
+                'activity_code' => '1',
+                'jmhz_relationship_detail_code' => '1',
                 'jmhz_external_codebooks_verified_for_period' => false,
                 'jmhz_apz_contribution_status' => 'unverified',
                 'jmhz_apz_instrument_code' => null,

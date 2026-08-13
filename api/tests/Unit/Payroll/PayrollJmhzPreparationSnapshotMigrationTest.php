@@ -70,4 +70,30 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
         self::assertSame(2, substr_count($sql, 'CREATE TRIGGER '));
         self::assertStringNotContainsString('ON DELETE CASCADE', $sql);
     }
+
+    public function testScenarioSelectorEvidenceIsAdditiveAndVersioned(): void
+    {
+        $sql = file_get_contents(
+            dirname(__DIR__, 4)
+            . '/db/migrations/1362_payroll_jmhz_scenario_selector.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString(
+            'ADD COLUMN IF NOT EXISTS jmhz_relationship_detail_code',
+            $sql,
+        );
+        self::assertStringContainsString(
+            "activity_code IN ('1','2','3','4','5','6','7','8','9')",
+            $sql,
+        );
+        self::assertStringContainsString(
+            "'jmhz-preparation-source.v1',",
+            $sql,
+        );
+        self::assertStringContainsString(
+            "'jmhz-preparation-source.v2'",
+            $sql,
+        );
+        self::assertStringNotContainsString('UPDATE ', $sql);
+    }
 }

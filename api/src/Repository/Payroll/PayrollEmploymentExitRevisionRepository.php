@@ -135,7 +135,8 @@ final class PayrollEmploymentExitRevisionRepository
         );
         $terms = $this->exactEffectiveRow(
             'SELECT id, effective_from, effective_to, actual_start_on,
-                    weekly_hours, cz_isco_code, activity_code, risky_work,
+                    weekly_hours, cz_isco_code, activity_code,
+                    jmhz_relationship_detail_code, risky_work,
                     row_version
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?

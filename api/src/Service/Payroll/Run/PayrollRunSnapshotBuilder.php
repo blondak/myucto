@@ -203,6 +203,9 @@ final class PayrollRunSnapshotBuilder
                         ? null
                         : (string) $row['weekly_hours'],
                     'workload_basis_points' => (int) $row['workload_basis_points'],
+                    'activity_code' => $row['activity_code'],
+                    'jmhz_relationship_detail_code' =>
+                        $row['jmhz_relationship_detail_code'],
                     'work_place' => $row['work_place'],
                     'jmhz_workplace_municipality_code' =>
                         $row['jmhz_workplace_municipality_code'],
@@ -390,6 +393,8 @@ final class PayrollRunSnapshotBuilder
                     term.effective_to,
                     term.weekly_hours,
                     term.workload_basis_points,
+                    term.activity_code,
+                    term.jmhz_relationship_detail_code,
                     term.work_place,
                     term.jmhz_workplace_municipality_code,
                     term.jmhz_workplace_country_code,

@@ -106,6 +106,7 @@ export interface PayrollEmploymentTerms {
   jmhz_temporary_assignment_status: PayrollVerifiedTriState
   cz_isco_code: string | null
   activity_code: string | null
+  jmhz_relationship_detail_code: string | null
   social_insurance_participation: PayrollInsuranceParticipation
   health_insurance_participation: PayrollInsuranceParticipation
   tax_regime: PayrollTaxRegime
@@ -626,6 +627,8 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
     verified_through: string
     base_spec_manifest_sha256: string
   }
+  activity_codes: Array<{ code: string; label: string }>
+  relationship_detail_codes: Array<{ code: string; label: string }>
   apz_instruments: Array<{ code: string; label: string }>
   countries: Array<{ code: string; label: string }>
 }

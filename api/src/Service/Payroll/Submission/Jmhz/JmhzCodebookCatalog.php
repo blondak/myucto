@@ -49,4 +49,22 @@ final class JmhzCodebookCatalog
             "Hodnota {$itemCode} není v číselníku JMHZ {$codebookKey}.",
         );
     }
+
+    /** @return list<array<string,mixed>> */
+    public function entries(string $codebookKey): array
+    {
+        $codebook = $this->codebooks[$codebookKey] ?? null;
+        if ($codebook === null || ($codebook['source_kind'] ?? null) !== 'embedded') {
+            throw new JmhzCodebookUnavailableException(
+                "Číselník JMHZ {$codebookKey} není vložený v připnutém balíku.",
+            );
+        }
+        $entries = $codebook['entries'] ?? null;
+        if (!is_array($entries) || !array_is_list($entries)) {
+            throw new JmhzCodebookUnavailableException(
+                "Číselník JMHZ {$codebookKey} nemá platné položky.",
+            );
+        }
+        return $entries;
+    }
 }

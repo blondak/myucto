@@ -397,6 +397,7 @@ function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayl
     jmhz_temporary_assignment_status: terms.jmhz_temporary_assignment_status,
     cz_isco_code: terms.cz_isco_code,
     activity_code: terms.activity_code,
+    jmhz_relationship_detail_code: terms.jmhz_relationship_detail_code,
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
     tax_regime: terms.tax_regime,

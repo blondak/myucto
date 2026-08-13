@@ -19,6 +19,11 @@ vi.mock('@/api/payroll', () => ({
         base_spec_manifest_sha256: 'a'.repeat(64),
       },
       apz_instruments: [{ code: '1', label: 'VPP' }],
+      activity_codes: [
+        { code: '1', label: 'Pracovní poměr' },
+        { code: 'A', label: 'Dohoda' },
+      ],
+      relationship_detail_codes: [{ code: '1', label: 'Žádné' }],
       countries: [{ code: 'CZ', label: 'Česko' }],
     }),
     searchJmhzMunicipalities: vi.fn().mockResolvedValue([
@@ -87,6 +92,7 @@ function employment(): PayrollEmployment {
       jmhz_temporary_assignment_status: 'unverified',
       cz_isco_code: null,
       activity_code: null,
+      jmhz_relationship_detail_code: null,
       social_insurance_participation: 'automatic',
       health_insurance_participation: 'automatic',
       tax_regime: 'advance',
@@ -170,6 +176,23 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
+  })
+
+  it('vyžádá 10502 jen pro druh činnosti 1 až 9 a při změně jej vyčistí', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="jmhz-activity-code"]').setValue('1')
+    expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(true)
+    await wrapper.get('[data-test="jmhz-relationship-detail"]').setValue('1')
+    await wrapper.get('[data-test="jmhz-activity-code"]').setValue('A')
+    expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(false)
   })
 
   it('vybere obec atomicky z připnutého CISOB a odešle kanonický název i kód', async () => {

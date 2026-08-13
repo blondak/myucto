@@ -7,9 +7,16 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
@@ -27,6 +34,8 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
     private int $supplierId;
     private int $runId;
     private int $revisionId;
+    private PayrollSensitiveData $sensitiveData;
+    private SecretEncryption $encryption;
 
     protected function setUp(): void
     {
@@ -41,6 +50,8 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         $service = $container->get(JmhzPreparationSnapshotService::class);
         self::assertInstanceOf(JmhzPreparationSnapshotService::class, $service);
         $this->service = $service;
+        $this->sensitiveData = $container->get(PayrollSensitiveData::class);
+        $this->encryption = $container->get(SecretEncryption::class);
         $pdo = $db->pdo();
         $pdo->beginTransaction();
         $sourceSupplierId = (int) $pdo->query(
@@ -148,6 +159,142 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         );
         $statement->execute([$this->supplierId, $first['id']]);
         self::assertSame(2, (int) $statement->fetchColumn());
+    }
+
+    public function testLegacyV1PreparationRemainsVerifiableAfterV2Upgrade(): void
+    {
+        $key = 'synthetic-jmhz-v1-replay';
+        $idempotencyHash = hash('sha256', $key, true);
+        $revision = $this->repository->lockSource($this->supplierId, $this->revisionId);
+        self::assertIsArray($revision);
+        $row = $revision['revision'];
+        self::assertIsArray($row);
+        $issues = [[
+            'code' => 'scenario_selector_not_frozen',
+            'entity_type' => 'revision',
+            'entity_id' => $this->revisionId,
+            'attribute_ids' => ['10239'],
+        ]];
+        $scope = [
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'run_id' => $this->runId,
+            'source_revision_id' => $this->revisionId,
+            'revision_no' => 1,
+            'period_start' => '2026-07-01',
+            'period_end' => '2026-07-31',
+            'scenario_key' => 'scenario_1',
+        ];
+        $specification = [
+            'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+            'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
+            'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+            'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+            'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
+        ];
+        $sourceRevision = [
+            'input_snapshot_hash' => $row['input_snapshot_hash'],
+            'result_snapshot_hash' => $row['result_snapshot_hash'],
+            'ruleset_manifest_hash' => $row['ruleset_manifest_hash'],
+        ];
+        $sourceVersions = ['office_id' => null, 'employments' => []];
+        $payload = [
+            'schema_reference' => JmhzPreparationSnapshot::LEGACY_SCHEMA_REFERENCE,
+            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'scope' => $scope,
+            'specification' => $specification,
+            'source_revision' => $sourceRevision,
+            'header' => [
+                'period_start' => '2026-07-01',
+                'period_end' => '2026-07-31',
+                'environment' => 'test',
+            ],
+            'employer_summary' => ['employer' => null, 'office' => null],
+            'people' => [],
+            'source_versions' => $sourceVersions,
+            'readiness_issue_codes' => ['scenario_selector_not_frozen'],
+            'readiness_issues' => $issues,
+        ];
+        $snapshot = new JmhzPreparationSnapshot($payload, $issues);
+        $plaintext = $snapshot->canonicalJson();
+        $fingerprint = $this->sensitiveData->keyedFingerprint(
+            $plaintext,
+            'jmhz-preparation-snapshot',
+            $this->supplierId,
+        );
+        $readinessJson = CanonicalJson::encode($snapshot->readiness());
+        $readinessHash = hash('sha256', $readinessJson);
+        $manifestJson = CanonicalJson::encode([
+            'schema_reference' => 'payroll-jmhz-preparation-source-manifest.v1',
+            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'scope' => $scope,
+            'specification' => $specification,
+            'source_revision' => $sourceRevision,
+            'source_versions' => $sourceVersions,
+            'snapshot_fingerprint' => $fingerprint,
+            'readiness_sha256' => $readinessHash,
+        ]);
+        $manifestHash = hash('sha256', $manifestJson);
+        $requestFingerprint = hash('sha256', CanonicalJson::encode([
+            'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'source_revision_id' => $this->revisionId,
+            'source_manifest_sha256' => $manifestHash,
+        ]));
+        $ciphertext = $this->encryption->encryptFor(
+            $plaintext,
+            "payroll:jmhz-preparation:{$this->supplierId}:test:{$this->revisionId}:{$fingerprint}:{$manifestHash}:{$readinessHash}",
+        );
+        $id = $this->repository->insert([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'run_id' => $this->runId,
+            'source_revision_id' => $this->revisionId,
+            'period_start' => '2026-07-01',
+            'scenario_key' => 'scenario_1',
+            'builder_version' => JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            'readiness_status' => 'blocked',
+            'issue_count' => 1,
+            'source_manifest_json' => $manifestJson,
+            'source_manifest_sha256' => $manifestHash,
+            'readiness_json' => $readinessJson,
+            'readiness_sha256' => $readinessHash,
+            'snapshot_ciphertext' => $ciphertext,
+            'snapshot_fingerprint' => $fingerprint,
+            'request_fingerprint' => $requestFingerprint,
+            'idempotency_key_hash' => $idempotencyHash,
+            'created_by' => null,
+        ]);
+        self::assertTrue($this->repository->insertIdempotencyClaim(
+            $this->supplierId,
+            'test',
+            $idempotencyHash,
+            $this->revisionId,
+            null,
+        ));
+        $this->repository->bindIdempotencyClaim(
+            $this->supplierId,
+            'test',
+            $idempotencyHash,
+            $id,
+        );
+
+        $replay = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            $key,
+            null,
+        );
+
+        self::assertFalse($replay['created']);
+        self::assertSame($id, $replay['id']);
+        self::assertSame(
+            JmhzPreparationSnapshotBuilder::LEGACY_BUILDER_VERSION,
+            $replay['builder_version'],
+        );
     }
 
     public function testIdempotencyClaimRejectsDifferentSourceRevision(): void

@@ -8,7 +8,10 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzPreparationSnapshotBuilder
 {
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v1';
+    public const LEGACY_BUILDER_VERSION = 'jmhz-preparation-source.v1';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v2';
+
+    private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
     /**
      * @param array<string,mixed> $source
@@ -80,7 +83,6 @@ final class JmhzPreparationSnapshotBuilder
         $resultPeople = $this->indexResultPeople($result);
 
         $issues = $sourceIssues;
-        $issues[] = $this->issue('scenario_selector_not_frozen', 'revision', $revisionId, ['10239']);
         if (($revision['revision_kind'] ?? null) !== 'regular') {
             $issues[] = $this->issue(
                 'jmhz_correction_revision_unsupported',
@@ -115,10 +117,33 @@ final class JmhzPreparationSnapshotBuilder
                 }
                 $seenEmployments[$employmentId] = true;
                 $term = $entry['term'] ?? null;
+                $scenarioResolution = null;
                 if (!is_array($term) || array_is_list($term)) {
                     $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
                 } else {
                     $this->inspectTerm($term, $employmentId, $issues);
+                    $selection = $this->scenarioSelector()->resolve(
+                        is_string($term['activity_code'] ?? null)
+                            ? $term['activity_code']
+                            : null,
+                        is_string($term['jmhz_relationship_detail_code'] ?? null)
+                            ? $term['jmhz_relationship_detail_code']
+                            : null,
+                    );
+                    if (!$selection['supported']) {
+                        $issueCode = $selection['issue_code'];
+                        if (!is_string($issueCode)) {
+                            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil blocker.');
+                        }
+                        $issues[] = $this->issue(
+                            $issueCode,
+                            'employment',
+                            $employmentId,
+                            $selection['attribute_ids'],
+                        );
+                    } else {
+                        $scenarioResolution = $selection['evidence'];
+                    }
                 }
                 $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
                 $issues[] = $this->issue('eldp_block_missing', 'employment', $employmentId, [
@@ -217,6 +242,7 @@ final class JmhzPreparationSnapshotBuilder
                     'identity' => $identity,
                     'employment' => $employment,
                     'term' => $term,
+                    'scenario_resolution' => $scenarioResolution,
                     'work_month' => $entry['time_month'] ?? null,
                     'earnings_by_attribute_minor' => $earnings,
                     'insurance' => $insurance,
@@ -258,6 +284,16 @@ final class JmhzPreparationSnapshotBuilder
                     'term_id' => is_array($term) ? ($term['id'] ?? null) : null,
                     'term_row_version' => is_array($term)
                         ? ($term['row_version'] ?? null)
+                        : null,
+                    'scenario_resolution' => is_array($scenarioResolution)
+                        ? [
+                            'scenario_row_sha256' =>
+                                $scenarioResolution['scenario_row_sha256'] ?? null,
+                            'matrix_sha256' =>
+                                $scenarioResolution['matrix_sha256'] ?? null,
+                            'matrix_row_sha256' =>
+                                $scenarioResolution['matrix_row_sha256'] ?? null,
+                        ]
                         : null,
                     'work_summary_id' => is_array($workSummary)
                         ? ($workSummary['id'] ?? null)
@@ -305,7 +341,7 @@ final class JmhzPreparationSnapshotBuilder
 
         $issues = $this->normalizeIssues($issues);
         $payload = [
-            'schema_reference' => JmhzPreparationSnapshot::SCHEMA_REFERENCE,
+            'schema_reference' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
             'builder_version' => self::BUILDER_VERSION,
             'scope' => [
                 'supplier_id' => $supplierId,
@@ -349,6 +385,11 @@ final class JmhzPreparationSnapshotBuilder
         ];
 
         return new JmhzPreparationSnapshot($payload, $issues);
+    }
+
+    private function scenarioSelector(): JmhzScenario1SelectorResolver
+    {
+        return $this->scenarioSelector ??= JmhzScenario1SelectorResolver::load();
     }
 
     /**

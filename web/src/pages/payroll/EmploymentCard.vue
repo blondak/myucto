@@ -80,6 +80,7 @@ async function startTermsEdit() {
     jmhz_temporary_assignment_status: terms.jmhz_temporary_assignment_status,
     cz_isco_code: terms.cz_isco_code,
     activity_code: terms.activity_code,
+    jmhz_relationship_detail_code: terms.jmhz_relationship_detail_code,
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
     tax_regime: terms.tax_regime,
@@ -103,6 +104,13 @@ async function startTermsEdit() {
 function onApzStatusChange() {
   if (termsForm.value?.jmhz_apz_contribution_status !== 'yes' && termsForm.value) {
     termsForm.value.jmhz_apz_instrument_code = null
+  }
+}
+
+function onActivityCodeChange() {
+  if (!termsForm.value) return
+  if (!/^[1-9]$/.test(termsForm.value.activity_code ?? '')) {
+    termsForm.value.jmhz_relationship_detail_code = null
   }
 }
 
@@ -295,7 +303,8 @@ const actions = computed<ActionItem[]>(() => [
           <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
         </fieldset>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.cz_isco_code') }}<input v-model="termsForm.cz_isco_code" maxlength="16" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.activity_code') }}<input v-model="termsForm.activity_code" maxlength="32" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.activity_code') }}<select v-model="termsForm.activity_code" data-test="jmhz-activity-code" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="onActivityCodeChange"><option :value="null">—</option><option v-for="option in jmhzOptions?.activity_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
+        <label v-if="/^[1-9]$/.test(termsForm.activity_code ?? '')" class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.relationship_detail') }}<select v-model="termsForm.jmhz_relationship_detail_code" data-test="jmhz-relationship-detail" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">—</option><option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.health_mode') }}<select v-model="termsForm.health_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.tax_regime_label') }}<select v-model="termsForm.tax_regime" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option></select></label>

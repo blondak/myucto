@@ -535,6 +535,7 @@ final class PayrollEmploymentRepository
                     terms.jmhz_functional_benefits_status,
                     terms.jmhz_temporary_assignment_status,
                     terms.cz_isco_code, terms.activity_code,
+                    terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
                     terms.health_insurance_participation, terms.tax_regime,
                     terms.foreign_legislation_country_code,
@@ -619,6 +620,7 @@ final class PayrollEmploymentRepository
                  contract_signed_on, planned_start_on, actual_start_on,
                  fixed_term_end_on, weekly_hours, workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
+                 jmhz_relationship_detail_code,
                  jmhz_workplace_municipality_code,
                  jmhz_workplace_country_code,
                  jmhz_external_codebook_overlay_key,
@@ -630,7 +632,7 @@ final class PayrollEmploymentRepository
                  tax_regime, foreign_legislation_country_code,
                  a1_certificate_until, risky_work, tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -646,6 +648,7 @@ final class PayrollEmploymentRepository
             $data['regular_workplace'],
             $data['cz_isco_code'],
             $data['activity_code'],
+            $data['jmhz_relationship_detail_code'],
             $data['jmhz_workplace_municipality_code'],
             $data['jmhz_workplace_country_code'],
             $data['jmhz_external_codebook_overlay_key'],

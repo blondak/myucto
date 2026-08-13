@@ -8,7 +8,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final readonly class JmhzPreparationSnapshot
 {
-    public const SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v1';
+    public const LEGACY_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v1';
+    public const CURRENT_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v2';
 
     /**
      * @param array<string,mixed> $payload
