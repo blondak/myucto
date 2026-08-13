@@ -1446,7 +1446,17 @@
                 "evidence_days": "Evidence days (10265): {count}",
                 "note": "Source and confirmation reason",
                 "confirm": "Confirm summary and approve",
-                "unworked_followup": "The source includes an absence. The follow-up IN07/IN08 unworked-hours summary is not yet available, so future JMHZ readiness remains blocked."
+                "unworked_evidence_hint": "The source includes an absence. Treat it as review evidence and explicitly confirm the conditional-block values.",
+                "unworked_occurred": "Were there any unworked hours in the month (IN07)?",
+                "obstacles_occurred": "Were there any work obstacles in the month (IN08)?",
+                "unworked_total": "Total unworked hours (10275)",
+                "unworked_paid": "Paid or unreduced hours (10276)",
+                "dpn_without_compensation": "Temporary incapacity without employer compensation (10277)",
+                "dpn_with_compensation": "Temporary incapacity with employer compensation (10278)",
+                "vacation": "Vacation taken (10279)",
+                "care": "Care with nursing-benefit entitlement (10280)",
+                "employee_obstacle": "Paid employee-side obstacles (10471)",
+                "employer_obstacle": "Employer-side obstacles (10472)"
             },
             "bulk": {
                 "approve": "Approve selected ({count})",

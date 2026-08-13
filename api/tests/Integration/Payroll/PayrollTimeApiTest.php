@@ -261,6 +261,8 @@ final class PayrollTimeApiTest extends TestCase
                         'agreed_fund_hours' => '168',
                         'weekly_work_hours' => '40',
                         'worked_hours' => '7.5',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
                         'confirmation_note' => 'Potvrzeno ze syntetické docházky.',
                     ],
                 ]),
@@ -296,6 +298,310 @@ final class PayrollTimeApiTest extends TestCase
         self::assertIsArray($approvalEvent);
         self::assertNotNull($approvalEvent['jmhz_work_summary_revision_id']);
         self::assertSame($revision['summary_sha256'], $approvalEvent['jmhz_work_summary_hash']);
+
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_time_month_events
+                    (supplier_id, time_month_id, revision_no, action, reason,
+                     snapshot_hash, jmhz_work_summary_revision_id,
+                     jmhz_work_summary_hash, actor_id)
+                 SELECT supplier_id, time_month_id, time_month_revision_no,
+                        "approved", "tampered", UNHEX(REPEAT("00", 32)),
+                        id, REPEAT("0", 64), approved_by
+                   FROM payroll_jmhz_work_month_revisions
+                  WHERE supplier_id = ? AND employment_id = ?'
+            )->execute([$this->supplierId, $this->employmentId]);
+            self::fail('Approval event s cizím hashem souhrnu nesmí projít.');
+        } catch (\PDOException $e) {
+            self::assertStringContainsString(
+                'Payroll time approval event does not match JMHZ summary',
+                $e->getMessage(),
+            );
+        }
+
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_time_month_events
+                    (supplier_id, time_month_id, revision_no, action, reason,
+                     snapshot_hash, jmhz_work_summary_revision_id,
+                     jmhz_work_summary_hash, actor_id)
+                 SELECT supplier_id, time_month_id, time_month_revision_no,
+                        "approved", "missing summary", UNHEX(REPEAT("00", 32)),
+                        NULL, NULL, approved_by
+                   FROM payroll_jmhz_work_month_revisions
+                  WHERE supplier_id = ? AND employment_id = ?'
+            )->execute([$this->supplierId, $this->employmentId]);
+            self::fail('Nový approval event bez JMHZ souhrnu nesmí projít.');
+        } catch (\PDOException $e) {
+            self::assertStringContainsString(
+                'Payroll time approval event does not match JMHZ summary',
+                $e->getMessage(),
+            );
+        }
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_time_month_events
+                    SET jmhz_work_summary_revision_id = NULL,
+                        jmhz_work_summary_hash = NULL
+                  WHERE supplier_id = ? AND action = "approved"'
+            )->execute([$this->supplierId]);
+            self::fail('Approval event musí zůstat neměnný.');
+        } catch (\PDOException $e) {
+            self::assertStringContainsString(
+                'Payroll time month events are immutable',
+                $e->getMessage(),
+            );
+        }
+    }
+
+    public function testJmhzConditionalWorkBlocksAreExplicitAndFailClosed(): void
+    {
+        $calendar = $this->action->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+                ->withParsedBody($this->calendarPayload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $calendar->getStatusCode());
+        $entry = $this->saveEntry(monthVersion: 0);
+        self::assertSame(201, $entry->getStatusCode());
+        $monthVersion = (int) $this->json($entry)['month']['row_version'];
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
+        $core = [
+            'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+            'standard_fund_hours' => '168',
+            'agreed_fund_hours' => '168',
+            'weekly_work_hours' => '40',
+            'worked_hours' => '7.5',
+            'confirmation_note' => 'Potvrzeno ze syntetické docházky a absencí.',
+        ];
+
+        $missingDecision = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => $core,
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $missingDecision->getStatusCode());
+
+        $orphanObstacles = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => $core + [
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => true,
+                        'employee_obstacle_paid_hours' => '8',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $orphanObstacles->getStatusCode());
+
+        $detailWithoutInteraction = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => $core + [
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
+                        'vacation_hours' => '8',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $detailWithoutInteraction->getStatusCode());
+
+        $invalidCases = [
+            'boolean_as_string' => [
+                'unworked_hours_occurred' => 'false',
+                'work_obstacles_occurred' => false,
+            ],
+            'missing_total' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => false,
+            ],
+            'empty_optional_value' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => false,
+                'unworked_total_hours' => '8',
+                'vacation_hours' => '',
+            ],
+            'obstacle_without_value' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => true,
+                'unworked_total_hours' => '8',
+            ],
+            'vacation_above_paid' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => false,
+                'unworked_total_hours' => '16',
+                'unworked_paid_hours' => '7.999',
+                'vacation_hours' => '8',
+            ],
+            'obstacle_above_fund' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => true,
+                'unworked_total_hours' => '169',
+                'employee_obstacle_paid_hours' => '168.001',
+            ],
+            'conditional_value_above_product_cap' => [
+                'unworked_hours_occurred' => true,
+                'work_obstacles_occurred' => false,
+                'unworked_total_hours' => '100000',
+            ],
+            'core_value_above_product_cap' => [
+                'standard_fund_hours' => '10000',
+                'unworked_hours_occurred' => false,
+                'work_obstacles_occurred' => false,
+            ],
+        ];
+        foreach ($invalidCases as $name => $invalid) {
+            $response = $this->action->approve(
+                $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                    ->withParsedBody([
+                        'employment_id' => $this->employmentId,
+                        'row_version' => $monthVersion,
+                        'jmhz_work_summary' => array_replace($core, $invalid),
+                    ]),
+                new Response(),
+                ['period' => '2026-05'],
+            );
+            self::assertSame(422, $response->getStatusCode(), $name);
+        }
+
+        $approved = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => $core + [
+                        'unworked_hours_occurred' => true,
+                        'work_obstacles_occurred' => true,
+                        'unworked_total_hours' => '80',
+                        'unworked_paid_hours' => '0',
+                        'dpn_without_employer_compensation_hours' => null,
+                        'dpn_with_employer_compensation_hours' => '80',
+                        'vacation_hours' => null,
+                        'care_hours' => null,
+                        'employee_obstacle_paid_hours' => '80',
+                        'employer_obstacle_hours' => null,
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(200, $approved->getStatusCode());
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT derivation_version, conditional_blocks_confirmed,
+                    unworked_hours_occurred, work_obstacles_occurred,
+                    unworked_total_millihours, unworked_paid_millihours,
+                    vacation_millihours, employee_obstacle_paid_millihours
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $stored->execute([$this->supplierId, $this->employmentId]);
+        $revision = $stored->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($revision);
+        self::assertSame('jmhz-work-month.v2', $revision['derivation_version']);
+        self::assertSame(1, (int) $revision['conditional_blocks_confirmed']);
+        self::assertSame(1, (int) $revision['unworked_hours_occurred']);
+        self::assertSame(1, (int) $revision['work_obstacles_occurred']);
+        self::assertSame(80000, (int) $revision['unworked_total_millihours']);
+        self::assertSame(0, (int) $revision['unworked_paid_millihours']);
+        self::assertNull($revision['vacation_millihours']);
+        self::assertSame(80000, (int) $revision['employee_obstacle_paid_millihours']);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, revision_no,
+                 row_version, last_changed_by, approved_by, approved_at)
+             VALUES (?, ?, "2026-06-01", "approved", 1, 1, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->userId,
+            $this->userId,
+        ]);
+        $juneMonthId = (int) $this->db->pdo()->lastInsertId();
+        $constraintFailure = null;
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_jmhz_work_month_revisions
+                    (supplier_id, employment_id, time_month_id, time_month_revision_no,
+                     period_start, spec_package_id, spec_manifest_sha256,
+                     scenario_catalog_key, scenario_manifest_sha256, derivation_version,
+                     source_snapshot_json, source_snapshot_sha256,
+                     standard_fund_millihours, agreed_fund_millihours,
+                     weekly_work_centihours, evidence_days, worked_millihours,
+                     conditional_blocks_confirmed, unworked_hours_occurred,
+                     work_obstacles_occurred, confirmation_note, provenance_json,
+                     summary_sha256, approved_by, approved_at)
+                 SELECT supplier_id, employment_id, ?, 1, "2026-06-01", spec_package_id,
+                        spec_manifest_sha256, scenario_catalog_key, scenario_manifest_sha256,
+                        derivation_version, source_snapshot_json, source_snapshot_sha256,
+                        standard_fund_millihours, agreed_fund_millihours,
+                        weekly_work_centihours, 30, worked_millihours,
+                        1, NULL, NULL, confirmation_note, provenance_json,
+                        summary_sha256, approved_by, approved_at
+                   FROM payroll_jmhz_work_month_revisions
+                  WHERE supplier_id = ? AND employment_id = ? AND period_start = "2026-05-01"'
+            )->execute([$juneMonthId, $this->supplierId, $this->employmentId]);
+        } catch (\PDOException $exception) {
+            $constraintFailure = $exception;
+        }
+        self::assertInstanceOf(\PDOException::class, $constraintFailure);
+        self::assertStringContainsString(
+            'chk_payroll_jmhz_work_month_conditional_confirmation',
+            $constraintFailure->getMessage(),
+        );
+
+        $missingTotalFailure = null;
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_jmhz_work_month_revisions
+                    (supplier_id, employment_id, time_month_id, time_month_revision_no,
+                     period_start, spec_package_id, spec_manifest_sha256,
+                     scenario_catalog_key, scenario_manifest_sha256, derivation_version,
+                     source_snapshot_json, source_snapshot_sha256,
+                     standard_fund_millihours, agreed_fund_millihours,
+                     weekly_work_centihours, evidence_days, worked_millihours,
+                     conditional_blocks_confirmed, unworked_hours_occurred,
+                     work_obstacles_occurred, confirmation_note, provenance_json,
+                     summary_sha256, approved_by, approved_at)
+                 SELECT supplier_id, employment_id, ?, 1, "2026-06-01", spec_package_id,
+                        spec_manifest_sha256, scenario_catalog_key, scenario_manifest_sha256,
+                        derivation_version, source_snapshot_json, source_snapshot_sha256,
+                        standard_fund_millihours, agreed_fund_millihours,
+                        weekly_work_centihours, 30, worked_millihours,
+                        1, 1, 0, confirmation_note, provenance_json,
+                        summary_sha256, approved_by, approved_at
+                   FROM payroll_jmhz_work_month_revisions
+                  WHERE supplier_id = ? AND employment_id = ? AND period_start = "2026-05-01"'
+            )->execute([$juneMonthId, $this->supplierId, $this->employmentId]);
+        } catch (\PDOException $exception) {
+            $missingTotalFailure = $exception;
+        }
+        self::assertInstanceOf(\PDOException::class, $missingTotalFailure);
+        self::assertStringContainsString(
+            'chk_payroll_jmhz_work_month_unworked_block',
+            $missingTotalFailure->getMessage(),
+        );
     }
 
     public function testJmhzCoreWorkSummaryRejectsStalePreviewAndRoundingGuess(): void
@@ -344,6 +650,8 @@ final class PayrollTimeApiTest extends TestCase
                         'agreed_fund_hours' => '168',
                         'weekly_work_hours' => '40',
                         'worked_hours' => '0.017',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
                         'confirmation_note' => 'Nepotvrzený zaokrouhlený odhad.',
                     ],
                 ]),
@@ -376,6 +684,8 @@ final class PayrollTimeApiTest extends TestCase
                         'agreed_fund_hours' => '168',
                         'weekly_work_hours' => '40',
                         'worked_hours' => '0.0167',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
                         'confirmation_note' => 'Hodnota má nepovolenou přesnost.',
                     ],
                 ]),

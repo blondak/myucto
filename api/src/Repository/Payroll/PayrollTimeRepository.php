@@ -195,9 +195,17 @@ final class PayrollTimeRepository
                     summary.spec_manifest_sha256, summary.scenario_catalog_key,
                     summary.scenario_manifest_sha256,
                     summary.derivation_version, summary.source_snapshot_sha256,
+                    summary.control_catalog_key, summary.control_manifest_sha256,
                     summary.standard_fund_millihours, summary.agreed_fund_millihours,
                     summary.weekly_work_centihours, summary.evidence_days,
-                    summary.worked_millihours, summary.confirmation_note,
+                    summary.worked_millihours, summary.conditional_blocks_confirmed,
+                    summary.unworked_hours_occurred, summary.work_obstacles_occurred,
+                    summary.unworked_total_millihours, summary.unworked_paid_millihours,
+                    summary.dpn_without_employer_compensation_millihours,
+                    summary.dpn_with_employer_compensation_millihours,
+                    summary.vacation_millihours, summary.care_millihours,
+                    summary.employee_obstacle_paid_millihours,
+                    summary.employer_obstacle_millihours, summary.confirmation_note,
                     summary.provenance_json, summary.summary_sha256,
                     summary.approved_by, summary.approved_at
                FROM payroll_jmhz_work_month_revisions summary
@@ -222,6 +230,13 @@ final class PayrollTimeRepository
             'id', 'time_month_id', 'time_month_revision_no',
             'standard_fund_millihours', 'agreed_fund_millihours',
             'weekly_work_centihours', 'evidence_days', 'worked_millihours',
+            'conditional_blocks_confirmed', 'unworked_hours_occurred',
+            'work_obstacles_occurred', 'unworked_total_millihours',
+            'unworked_paid_millihours',
+            'dpn_without_employer_compensation_millihours',
+            'dpn_with_employer_compensation_millihours', 'vacation_millihours',
+            'care_millihours', 'employee_obstacle_paid_millihours',
+            'employer_obstacle_millihours',
             'approved_by',
         ] as $field) {
             $row[$field] = $row[$field] === null ? null : (int) $row[$field];
@@ -1280,17 +1295,28 @@ final class PayrollTimeRepository
     ): array {
         $values = PayrollTimeValue::row($summary['values'] ?? null, 'values');
         $provenance = PayrollTimeValue::row($summary['provenance'] ?? null, 'provenance');
+        $interactions = PayrollTimeValue::row(
+            $summary['interactions'] ?? null,
+            'interactions',
+        );
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_jmhz_work_month_revisions
                 (supplier_id, employment_id, time_month_id, time_month_revision_no,
                  period_start, spec_package_id, spec_manifest_sha256,
                  scenario_catalog_key, scenario_manifest_sha256,
+                 control_catalog_key, control_manifest_sha256,
                  derivation_version, source_snapshot_json,
                  source_snapshot_sha256, standard_fund_millihours,
                  agreed_fund_millihours, weekly_work_centihours, evidence_days,
-                 worked_millihours, confirmation_note, provenance_json, summary_sha256,
+                 worked_millihours, conditional_blocks_confirmed,
+                 unworked_hours_occurred, work_obstacles_occurred,
+                 unworked_total_millihours, unworked_paid_millihours,
+                 dpn_without_employer_compensation_millihours,
+                 dpn_with_employer_compensation_millihours, vacation_millihours,
+                 care_millihours, employee_obstacle_paid_millihours,
+                 employer_obstacle_millihours, confirmation_note, provenance_json, summary_sha256,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $specification = PayrollTimeValue::row(
             $summary['specification'] ?? null,
@@ -1315,6 +1341,14 @@ final class PayrollTimeRepository
                 $specification['scenario_manifest_sha256'] ?? null,
                 'scenario_manifest_sha256',
             ),
+            PayrollTimeValue::string(
+                $specification['control_catalog_key'] ?? null,
+                'control_catalog_key',
+            ),
+            PayrollTimeValue::string(
+                $specification['control_manifest_sha256'] ?? null,
+                'control_manifest_sha256',
+            ),
             PayrollTimeValue::string($summary['derivation_version'] ?? null, 'derivation_version'),
             PayrollTimeValue::string($summary['source_snapshot_json'] ?? null, 'source_snapshot_json'),
             PayrollTimeValue::string($summary['source_snapshot_sha256'] ?? null, 'source_snapshot_sha256'),
@@ -1323,6 +1357,17 @@ final class PayrollTimeRepository
             PayrollTimeValue::int($values['weekly_work_centihours'] ?? null, 'weekly_work_centihours'),
             PayrollTimeValue::int($values['evidence_days'] ?? null, 'evidence_days'),
             PayrollTimeValue::int($values['worked_millihours'] ?? null, 'worked_millihours'),
+            1,
+            PayrollTimeValue::bool($interactions['IN07'] ?? null, 'IN07') ? 1 : 0,
+            PayrollTimeValue::bool($interactions['IN08'] ?? null, 'IN08') ? 1 : 0,
+            $values['unworked_total_millihours'],
+            $values['unworked_paid_millihours'],
+            $values['dpn_without_employer_compensation_millihours'],
+            $values['dpn_with_employer_compensation_millihours'],
+            $values['vacation_millihours'],
+            $values['care_millihours'],
+            $values['employee_obstacle_paid_millihours'],
+            $values['employer_obstacle_millihours'],
             PayrollTimeValue::string(
                 $summary['confirmation_note'] ?? null,
                 'confirmation_note',

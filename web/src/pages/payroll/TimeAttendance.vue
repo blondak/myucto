@@ -52,6 +52,16 @@ const approvalStandardFund = ref('')
 const approvalAgreedFund = ref('')
 const approvalWeeklyWork = ref('')
 const approvalWorked = ref('')
+const approvalUnworkedOccurred = ref<boolean | null>(null)
+const approvalObstaclesOccurred = ref<boolean | null>(null)
+const approvalUnworkedTotal = ref('')
+const approvalUnworkedPaid = ref('')
+const approvalDpnWithoutCompensation = ref('')
+const approvalDpnWithCompensation = ref('')
+const approvalVacation = ref('')
+const approvalCare = ref('')
+const approvalEmployeeObstacle = ref('')
+const approvalEmployerObstacle = ref('')
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
 const reopenReason = ref('')
@@ -69,6 +79,16 @@ const selectableItems = computed(() =>
 const allSelectableSelected = computed(() =>
   selectableItems.value.length > 0
   && selectableItems.value.every(item => selectedEmploymentIds.value.includes(item.employment.id)),
+)
+const approvalConditionalComplete = computed(() =>
+  approvalUnworkedOccurred.value !== null
+  && approvalObstaclesOccurred.value !== null
+  && (!approvalUnworkedOccurred.value || Boolean(approvalUnworkedTotal.value.trim()))
+  && (!approvalObstaclesOccurred.value
+    || Boolean(
+      approvalEmployeeObstacle.value.trim()
+      || approvalEmployerObstacle.value.trim(),
+    )),
 )
 
 const categories: PayrollTimeCategory[] = [
@@ -172,7 +192,45 @@ function openApproval(item: PayrollTimeOverviewItem) {
   approvalAgreedFund.value = suggestions?.agreed_fund_hours ?? ''
   approvalWeeklyWork.value = suggestions?.weekly_work_hours ?? ''
   approvalWorked.value = suggestions?.worked_hours ?? ''
+  approvalUnworkedOccurred.value = null
+  approvalObstaclesOccurred.value = null
+  clearConditionalValues()
   approvalNote.value = ''
+}
+
+function clearConditionalValues() {
+  approvalUnworkedTotal.value = ''
+  approvalUnworkedPaid.value = ''
+  approvalDpnWithoutCompensation.value = ''
+  approvalDpnWithCompensation.value = ''
+  approvalVacation.value = ''
+  approvalCare.value = ''
+  approvalEmployeeObstacle.value = ''
+  approvalEmployerObstacle.value = ''
+}
+
+function setUnworkedOccurred(value: boolean) {
+  const previous = approvalUnworkedOccurred.value
+  approvalUnworkedOccurred.value = value
+  if (!value) {
+    approvalObstaclesOccurred.value = false
+    clearConditionalValues()
+  } else if (previous === false) {
+    approvalObstaclesOccurred.value = null
+  }
+}
+
+function setObstaclesOccurred(value: boolean) {
+  approvalObstaclesOccurred.value = value
+  if (!value) {
+    approvalEmployeeObstacle.value = ''
+    approvalEmployerObstacle.value = ''
+  }
+}
+
+function optionalHours(value: string): string | null {
+  const normalized = value.trim()
+  return normalized === '' ? null : normalized
 }
 
 function closeApproval() {
@@ -181,6 +239,9 @@ function closeApproval() {
   approvalAgreedFund.value = ''
   approvalWeeklyWork.value = ''
   approvalWorked.value = ''
+  approvalUnworkedOccurred.value = null
+  approvalObstaclesOccurred.value = null
+  clearConditionalValues()
   approvalNote.value = ''
 }
 
@@ -188,6 +249,10 @@ async function approve() {
   const item = approvalItem.value
   const preview = item?.jmhz_work_summary.preview
   if (!item || !preview) return
+  if (!approvalConditionalComplete.value
+    || approvalUnworkedOccurred.value === null
+    || approvalObstaclesOccurred.value === null
+  ) return
   saving.value = true
   try {
     await payrollApi.approveTimeMonth(period.value, {
@@ -199,6 +264,18 @@ async function approve() {
         agreed_fund_hours: approvalAgreedFund.value.trim(),
         weekly_work_hours: approvalWeeklyWork.value.trim(),
         worked_hours: approvalWorked.value.trim(),
+        unworked_hours_occurred: approvalUnworkedOccurred.value,
+        work_obstacles_occurred: approvalObstaclesOccurred.value,
+        unworked_total_hours: optionalHours(approvalUnworkedTotal.value),
+        unworked_paid_hours: optionalHours(approvalUnworkedPaid.value),
+        dpn_without_employer_compensation_hours:
+          optionalHours(approvalDpnWithoutCompensation.value),
+        dpn_with_employer_compensation_hours:
+          optionalHours(approvalDpnWithCompensation.value),
+        vacation_hours: optionalHours(approvalVacation.value),
+        care_hours: optionalHours(approvalCare.value),
+        employee_obstacle_paid_hours: optionalHours(approvalEmployeeObstacle.value),
+        employer_obstacle_hours: optionalHours(approvalEmployerObstacle.value),
         confirmation_note: approvalNote.value.trim(),
       },
     })
@@ -598,7 +675,7 @@ onMounted(load)
           v-if="approvalItem.jmhz_work_summary.preview?.requires_unworked_hours_followup"
           class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700"
         >
-          {{ t('payroll.time.jmhz.unworked_followup') }}
+          {{ t('payroll.time.jmhz.unworked_evidence_hint') }}
         </p>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label class="block">
@@ -621,6 +698,72 @@ onMounted(load)
         <p class="text-sm text-neutral-600">
           {{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}
         </p>
+        <fieldset class="space-y-2 rounded-lg border border-neutral-200 p-3">
+          <legend class="px-1 text-sm font-medium text-neutral-700">
+            {{ t('payroll.time.jmhz.unworked_occurred') }}
+          </legend>
+          <div class="flex flex-wrap gap-5">
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input data-test="jmhz-unworked-yes" type="radio" name="jmhz-unworked" :checked="approvalUnworkedOccurred === true" @change="setUnworkedOccurred(true)">
+              {{ t('common.yes') }}
+            </label>
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input data-test="jmhz-unworked-no" type="radio" name="jmhz-unworked" :checked="approvalUnworkedOccurred === false" @change="setUnworkedOccurred(false)">
+              {{ t('common.no') }}
+            </label>
+          </div>
+        </fieldset>
+        <div v-if="approvalUnworkedOccurred === true" class="grid grid-cols-1 gap-4 rounded-lg border border-neutral-200 p-3 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.unworked_total') }}</span>
+            <input v-model="approvalUnworkedTotal" data-test="jmhz-unworked-total" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.unworked_paid') }}</span>
+            <input v-model="approvalUnworkedPaid" data-test="jmhz-unworked-paid" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.dpn_without_compensation') }}</span>
+            <input v-model="approvalDpnWithoutCompensation" data-test="jmhz-dpn-without-compensation" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.dpn_with_compensation') }}</span>
+            <input v-model="approvalDpnWithCompensation" data-test="jmhz-dpn-with-compensation" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.vacation') }}</span>
+            <input v-model="approvalVacation" data-test="jmhz-vacation" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.care') }}</span>
+            <input v-model="approvalCare" data-test="jmhz-care" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+        </div>
+        <fieldset class="space-y-2 rounded-lg border border-neutral-200 p-3">
+          <legend class="px-1 text-sm font-medium text-neutral-700">
+            {{ t('payroll.time.jmhz.obstacles_occurred') }}
+          </legend>
+          <div class="flex flex-wrap gap-5">
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input data-test="jmhz-obstacles-yes" type="radio" name="jmhz-obstacles" :disabled="approvalUnworkedOccurred !== true" :checked="approvalObstaclesOccurred === true" @change="setObstaclesOccurred(true)">
+              {{ t('common.yes') }}
+            </label>
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input data-test="jmhz-obstacles-no" type="radio" name="jmhz-obstacles" :checked="approvalObstaclesOccurred === false" @change="setObstaclesOccurred(false)">
+              {{ t('common.no') }}
+            </label>
+          </div>
+        </fieldset>
+        <div v-if="approvalObstaclesOccurred === true" class="grid grid-cols-1 gap-4 rounded-lg border border-neutral-200 p-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.employee_obstacle') }}</span>
+            <input v-model="approvalEmployeeObstacle" data-test="jmhz-employee-obstacle" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.employer_obstacle') }}</span>
+            <input v-model="approvalEmployerObstacle" data-test="jmhz-employer-obstacle" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+        </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.note') }}</span>
           <textarea v-model="approvalNote" data-test="jmhz-note" required minlength="5" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
@@ -633,7 +776,7 @@ onMounted(load)
           <button
             type="submit"
             :class="btnFilled('success')"
-            :disabled="saving || !approvalNote.trim() || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
+            :disabled="saving || !approvalNote.trim() || !approvalConditionalComplete || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
             {{ t('payroll.time.jmhz.confirm') }}

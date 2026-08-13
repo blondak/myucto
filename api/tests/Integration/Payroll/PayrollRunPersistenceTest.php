@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
@@ -738,6 +739,124 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame($summaryHash, $timeMonth['jmhz_work_summary']['summary_sha256']);
         self::assertSame($sourceHash, $timeMonth['jmhz_work_summary']['source_snapshot_sha256']);
         self::assertSame($values, $timeMonth['jmhz_work_summary']['values']);
+    }
+
+    public function testInputSnapshotPinsConditionalJmhzWorkMonthRevision(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, revision_no,
+                 row_version, last_changed_by, approved_by, approved_at)
+             VALUES (?, ?, "2026-06-01", "approved", 1, 2, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $timeMonthId = (int) $this->db->pdo()->lastInsertId();
+        $sourceJson = CanonicalJson::encode([
+            'schema_version' => 'jmhz-work-month.v2',
+            'synthetic_source' => true,
+        ]);
+        $sourceHash = hash('sha256', $sourceJson);
+        $specification = [
+            'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+            'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
+            'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+            'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+            'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
+        ];
+        $values = [
+            'standard_fund_millihours' => 168000,
+            'agreed_fund_millihours' => 168000,
+            'weekly_work_centihours' => 4000,
+            'evidence_days' => 30,
+            'worked_millihours' => 80000,
+            'unworked_total_millihours' => 80000,
+            'unworked_paid_millihours' => 0,
+            'dpn_without_employer_compensation_millihours' => null,
+            'dpn_with_employer_compensation_millihours' => 80000,
+            'vacation_millihours' => null,
+            'care_millihours' => null,
+            'employee_obstacle_paid_millihours' => 80000,
+            'employer_obstacle_millihours' => null,
+        ];
+        $interactions = ['IN07' => true, 'IN08' => true];
+        $provenance = [
+            'decimal_policy' => 'exact_user_confirmed_value_without_rounding',
+            'validated_controls' => [23, 144, 145, 286],
+        ];
+        $confirmationNote = 'Potvrzeno syntetickým integračním testem.';
+        $summaryPayload = [
+            'derivation_version' => 'jmhz-work-month.v2',
+            'specification' => $specification,
+            'source_snapshot_sha256' => $sourceHash,
+            'conditional_blocks_confirmed' => true,
+            'interactions' => $interactions,
+            'values' => $values,
+            'provenance' => $provenance,
+            'confirmation_note' => $confirmationNote,
+        ];
+        $summaryHash = hash('sha256', CanonicalJson::encode($summaryPayload));
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_jmhz_work_month_revisions
+                (supplier_id, employment_id, time_month_id, time_month_revision_no,
+                 period_start, spec_package_id, spec_manifest_sha256,
+                 scenario_catalog_key, scenario_manifest_sha256,
+                 control_catalog_key, control_manifest_sha256,
+                 derivation_version, source_snapshot_json, source_snapshot_sha256,
+                 standard_fund_millihours, agreed_fund_millihours,
+                 weekly_work_centihours, evidence_days, worked_millihours,
+                 conditional_blocks_confirmed, unworked_hours_occurred,
+                 work_obstacles_occurred, unworked_total_millihours,
+                 unworked_paid_millihours,
+                 dpn_without_employer_compensation_millihours,
+                 dpn_with_employer_compensation_millihours, vacation_millihours,
+                 care_millihours, employee_obstacle_paid_millihours,
+                 employer_obstacle_millihours, confirmation_note, provenance_json,
+                 summary_sha256, approved_by, approved_at)
+             VALUES (?, ?, ?, 1, "2026-06-01", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     1, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $timeMonthId,
+            (int) $this->db->pdo()->query(
+                'SELECT id FROM payroll_jmhz_spec_packages
+                  WHERE package_key = ' . $this->db->pdo()->quote(
+                    JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                )
+            )->fetchColumn(),
+            $specification['spec_manifest_sha256'],
+            $specification['scenario_catalog_key'],
+            $specification['scenario_manifest_sha256'],
+            $specification['control_catalog_key'],
+            $specification['control_manifest_sha256'],
+            'jmhz-work-month.v2',
+            $sourceJson,
+            $sourceHash,
+            ...array_values(array_slice($values, 0, 5, true)),
+            ...array_values(array_slice($values, 5, null, true)),
+            $confirmationNote,
+            CanonicalJson::encode($provenance),
+            $summaryHash,
+            $this->actors[0],
+        ]);
+
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $timeMonth = $snapshot->data['people'][0]['employments'][0]['time_month'];
+
+        self::assertSame('frozen_work_summary', $timeMonth['jmhz_work_summary_status']);
+        self::assertSame($summaryHash, $timeMonth['jmhz_work_summary']['summary_sha256']);
+        self::assertSame($interactions, $timeMonth['jmhz_work_summary']['interactions']);
+        self::assertSame($values, $timeMonth['jmhz_work_summary']['values']);
+        self::assertSame(
+            JmhzControlSourceCatalog::MANIFEST_SHA256,
+            $timeMonth['jmhz_work_summary']['specification']['control_manifest_sha256'],
+        );
     }
 
     public function testPostTerminationInputKeepsEndedRelationshipInSnapshot(): void

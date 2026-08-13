@@ -429,6 +429,8 @@ export interface PayrollTimeEntry {
 
 export interface PayrollJmhzWorkSummaryPreview {
   derivation_version: string
+  control_catalog_key: string | null
+  control_manifest_sha256: string | null
   source_snapshot_sha256: string
   suggestions: {
     standard_fund_hours: string | null
@@ -449,6 +451,17 @@ export interface PayrollJmhzWorkSummaryRevision {
   source_snapshot_sha256: string
   summary_sha256: string
   confirmation_note: string
+  conditional_blocks_confirmed: 1 | null
+  unworked_hours_occurred: 0 | 1 | null
+  work_obstacles_occurred: 0 | 1 | null
+  unworked_total_millihours: number | null
+  unworked_paid_millihours: number | null
+  dpn_without_employer_compensation_millihours: number | null
+  dpn_with_employer_compensation_millihours: number | null
+  vacation_millihours: number | null
+  care_millihours: number | null
+  employee_obstacle_paid_millihours: number | null
+  employer_obstacle_millihours: number | null
   approved_at: string
 }
 
@@ -458,6 +471,16 @@ export interface PayrollJmhzWorkSummaryApproval {
   agreed_fund_hours: string
   weekly_work_hours: string
   worked_hours: string
+  unworked_hours_occurred: boolean
+  work_obstacles_occurred: boolean
+  unworked_total_hours: string | null
+  unworked_paid_hours: string | null
+  dpn_without_employer_compensation_hours: string | null
+  dpn_with_employer_compensation_hours: string | null
+  vacation_hours: string | null
+  care_hours: string | null
+  employee_obstacle_paid_hours: string | null
+  employer_obstacle_hours: string | null
   confirmation_note: string
 }
 

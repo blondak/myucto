@@ -180,7 +180,7 @@ describe('TimeAttendance', () => {
         },
         jmhz_work_summary: {
           preview: {
-            derivation_version: 'jmhz-work-month-core.v1',
+            derivation_version: 'jmhz-work-month.v2',
             source_snapshot_sha256: 'a'.repeat(64),
             suggestions: {
               standard_fund_hours: null,
@@ -208,6 +208,10 @@ describe('TimeAttendance', () => {
     await approve!.trigger('click')
     await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
     await wrapper.get('[data-test="jmhz-note"]').setValue('Potvrzeno ze syntetické docházky.')
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-obstacles-no"]').setValue(true)
     await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
     await flushPromises()
 
@@ -220,8 +224,48 @@ describe('TimeAttendance', () => {
         agreed_fund_hours: '168',
         weekly_work_hours: '40',
         worked_hours: '7.5',
+        unworked_hours_occurred: false,
+        work_obstacles_occurred: false,
+        unworked_total_hours: null,
+        unworked_paid_hours: null,
+        dpn_without_employer_compensation_hours: null,
+        dpn_with_employer_compensation_hours: null,
+        vacation_hours: null,
+        care_hours: null,
+        employee_obstacle_paid_hours: null,
+        employer_obstacle_hours: null,
         confirmation_note: 'Potvrzeno ze syntetické docházky.',
       },
     })
+
+    const approveAgain = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approveAgain!.trigger('click')
+    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="jmhz-note"]').setValue('Potvrzeno ze syntetické absence.')
+    await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-unworked-yes"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-unworked-total"]').setValue('80')
+    await wrapper.get('[data-test="jmhz-unworked-paid"]').setValue('0')
+    await wrapper.get('[data-test="jmhz-dpn-with-compensation"]').setValue('80')
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="jmhz-obstacles-yes"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-employee-obstacle"]').setValue('80')
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenLastCalledWith(expect.any(String),
+      expect.objectContaining({
+        jmhz_work_summary: expect.objectContaining({
+          unworked_hours_occurred: true,
+          work_obstacles_occurred: true,
+          unworked_total_hours: '80',
+          unworked_paid_hours: '0',
+          dpn_with_employer_compensation_hours: '80',
+          employee_obstacle_paid_hours: '80',
+        }),
+      }),
+    )
   })
 })

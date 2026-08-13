@@ -457,8 +457,16 @@ jsou pouze dohledatelný podklad; před schválením je potvrď jako přesná de
 čísla a uveď zdroj. Aplikace zde potichu nezaokrouhluje minuty ani nedopočítá
 chybějící profesní fond. Potvrzený souhrn je neměnný a navázaný na konkrétní
 revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potvrzení.
-Absence zatím zachová explicitní upozornění, že navazující rozpad
-neodpracovaných hodin IN07/IN08 ještě není připraven k odeslání.
+
+Součástí potvrzení jsou také dvě povinná rozhodnutí **Ano/Ne**: zda v měsíci
+nastaly neodpracované hodiny (IN07) a zda nastaly překážky v práci (IN08).
+Systém žádnou z odpovědí nepředvyplní jako **Ne**. Při IN07 se uvádí celkový
+rozsah a případně placené hodiny, DPN s náhradou nebo bez ní, dovolená a péče.
+Při IN08 musí být uvedena alespoň jedna hodnota překážek na straně zaměstnance
+nebo zaměstnavatele. Jednotlivé kategorie se mohou překrývat, proto se jejich
+součet nesmí automaticky rovnat celkovým neodpracovaným hodinám. Evidence
+absencí slouží jako podklad k ruční kontrole, nikoli jako automatická právní
+klasifikace. Nevyřízená absence nebo čekající oprava schválení měsíce blokuje.
 
 > [!WARNING]
 > Agenda je označena **Vyžaduje ruční kontrolu**. Bez schváleného průměru,

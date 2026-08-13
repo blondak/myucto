@@ -6,13 +6,14 @@ namespace MyInvoice\Service\Payroll\Time;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month-core.v1';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v2';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -68,6 +69,18 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'code' => 'employment_terms_not_unique_for_month',
                 'message' => 'Měsíc nemá jedinou konzistentní verzi týdenní pracovní doby.',
             ]];
+        $absenceIssues = [];
+        foreach ($absences as $absence) {
+            if ($absence['status'] === 'requested'
+                || ($absence['correction_pending'] ?? false) === true
+            ) {
+                $absenceIssues[] = [
+                    'code' => 'absence_not_final',
+                    'message' => 'Měsíc obsahuje neuzavřenou absenci nebo čekající opravu.',
+                ];
+                break;
+            }
+        }
         [$workedMinutes, $entryIssues] = self::workedMinutes($entries, $periodStart);
         $source = [
             'schema_version' => self::DERIVATION_VERSION,
@@ -92,7 +105,12 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => self::minutesSuggestion($workedMinutes),
             ],
-            'issues' => array_merge($employmentIssues, $calendarIssues, $entryIssues),
+            'issues' => array_merge(
+                $employmentIssues,
+                $calendarIssues,
+                $entryIssues,
+                $absenceIssues,
+            ),
             'requires_unworked_hours_followup' => $absences !== [],
         ];
     }
@@ -146,6 +164,75 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 8,
             ),
         ];
+        self::assertScaledMaximum(
+            $values['standard_fund_millihours'],
+            9999999,
+            'standard_fund_hours',
+        );
+        self::assertScaledMaximum(
+            $values['agreed_fund_millihours'],
+            9999999,
+            'agreed_fund_hours',
+        );
+        self::assertScaledMaximum(
+            $values['weekly_work_centihours'],
+            9999999,
+            'weekly_work_hours',
+        );
+        self::assertScaledMaximum(
+            $values['worked_millihours'],
+            99999999,
+            'worked_hours',
+        );
+        $unworkedHoursOccurred = self::strictBool(
+            $input['unworked_hours_occurred'] ?? null,
+            'unworked_hours_occurred',
+        );
+        $workObstaclesOccurred = self::strictBool(
+            $input['work_obstacles_occurred'] ?? null,
+            'work_obstacles_occurred',
+        );
+        $conditionalValues = [
+            'unworked_total_millihours' => self::nullableScaledDecimal(
+                $input['unworked_total_hours'] ?? null,
+                'unworked_total_hours',
+            ),
+            'unworked_paid_millihours' => self::nullableScaledDecimal(
+                $input['unworked_paid_hours'] ?? null,
+                'unworked_paid_hours',
+            ),
+            'dpn_without_employer_compensation_millihours' => self::nullableScaledDecimal(
+                $input['dpn_without_employer_compensation_hours'] ?? null,
+                'dpn_without_employer_compensation_hours',
+            ),
+            'dpn_with_employer_compensation_millihours' => self::nullableScaledDecimal(
+                $input['dpn_with_employer_compensation_hours'] ?? null,
+                'dpn_with_employer_compensation_hours',
+            ),
+            'vacation_millihours' => self::nullableScaledDecimal(
+                $input['vacation_hours'] ?? null,
+                'vacation_hours',
+            ),
+            'care_millihours' => self::nullableScaledDecimal(
+                $input['care_hours'] ?? null,
+                'care_hours',
+            ),
+            'employee_obstacle_paid_millihours' => self::nullableScaledDecimal(
+                $input['employee_obstacle_paid_hours'] ?? null,
+                'employee_obstacle_paid_hours',
+            ),
+            'employer_obstacle_millihours' => self::nullableScaledDecimal(
+                $input['employer_obstacle_hours'] ?? null,
+                'employer_obstacle_hours',
+            ),
+        ];
+        self::validateConditionalValues(
+            $unworkedHoursOccurred,
+            $workObstaclesOccurred,
+            $conditionalValues,
+            $values['agreed_fund_millihours'],
+        );
+        $values += $conditionalValues;
         $note = $input['confirmation_note'] ?? null;
         if (!is_string($note) || mb_strlen(trim($note)) < 5 || mb_strlen(trim($note)) > 500) {
             throw new \InvalidArgumentException(
@@ -160,16 +247,46 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 '10261' => 'explicit_confirmation_with_term_suggestion',
                 '10265' => 'employment_interval_derivation',
                 '10268' => 'explicit_confirmation_with_time_entry_suggestion',
+                '10275' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10276' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10277' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10278' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10279' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10280' => $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+                '10471' => $workObstaclesOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN08',
+                '10472' => $workObstaclesOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN08',
             ],
             'suggestions' => $preview['suggestions'],
-            'requires_unworked_hours_followup' =>
+            'source_contains_absences' =>
                 (bool) ($preview['requires_unworked_hours_followup'] ?? false),
             'decimal_policy' => 'exact_user_confirmed_value_without_rounding',
+            'validated_controls' => [23, 144, 145, 286],
         ];
         $summaryPayload = [
             'derivation_version' => self::DERIVATION_VERSION,
             'specification' => self::specification(),
             'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+            'conditional_blocks_confirmed' => true,
+            'interactions' => [
+                'IN07' => $unworkedHoursOccurred,
+                'IN08' => $workObstaclesOccurred,
+            ],
             'values' => $values,
             'provenance' => $provenance,
             'confirmation_note' => $note,
@@ -555,6 +672,109 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             + (int) str_pad($fraction, $scale, '0');
     }
 
+    private static function nullableScaledDecimal(mixed $value, string $field): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+        $scaled = self::scaledDecimal($value, $field, 3, 8);
+        if ($scaled > 99999999) {
+            throw new \InvalidArgumentException("{$field} překračuje podporovaný měsíční rozsah.");
+        }
+        return $scaled;
+    }
+
+    private static function assertScaledMaximum(int $value, int $maximum, string $field): void
+    {
+        if ($value > $maximum) {
+            throw new \InvalidArgumentException(
+                "{$field} překračuje podporovaný měsíční rozsah.",
+            );
+        }
+    }
+
+    private static function strictBool(mixed $value, string $field): bool
+    {
+        if (!is_bool($value)) {
+            throw new \InvalidArgumentException("{$field} musí být výslovně ano nebo ne.");
+        }
+        return $value;
+    }
+
+    /**
+     * @param array<string,?int> $values
+     */
+    private static function validateConditionalValues(
+        bool $unworkedHoursOccurred,
+        bool $workObstaclesOccurred,
+        array $values,
+        int $agreedFund,
+    ): void {
+        $unworkedFields = [
+            'unworked_total_millihours',
+            'unworked_paid_millihours',
+            'dpn_without_employer_compensation_millihours',
+            'dpn_with_employer_compensation_millihours',
+            'vacation_millihours',
+            'care_millihours',
+        ];
+        if (!$unworkedHoursOccurred) {
+            foreach ($unworkedFields as $field) {
+                if ($values[$field] !== null) {
+                    throw new \InvalidArgumentException(
+                        'Hodnoty 10275–10280 nelze uvést, pokud interakce IN07 nenastala.',
+                    );
+                }
+            }
+        }
+        $total = $values['unworked_total_millihours'];
+        if ($unworkedHoursOccurred && ($total === null || $total <= 0)) {
+            throw new \InvalidArgumentException(
+                'Při aktivní IN07 musí být celkové neodpracované hodiny kladné.',
+            );
+        }
+        if ($values['unworked_paid_millihours'] !== null
+            && $values['vacation_millihours'] !== null
+            && $values['unworked_paid_millihours'] < $values['vacation_millihours']
+        ) {
+            throw new \InvalidArgumentException(
+                'Placené neodpracované hodiny 10276 nesmí být nižší než dovolená 10279.',
+            );
+        }
+        $obstacleFields = [
+            'employee_obstacle_paid_millihours',
+            'employer_obstacle_millihours',
+        ];
+        if (!$workObstaclesOccurred) {
+            foreach ($obstacleFields as $field) {
+                if ($values[$field] !== null) {
+                    throw new \InvalidArgumentException(
+                        'Hodnoty 10471/10472 nelze uvést, pokud interakce IN08 nenastala.',
+                    );
+                }
+            }
+            return;
+        }
+        if (!$unworkedHoursOccurred) {
+            throw new \InvalidArgumentException('Interakce IN08 vyžaduje aktivní IN07.');
+        }
+        if ($values['employee_obstacle_paid_millihours'] === null
+            && $values['employer_obstacle_millihours'] === null
+        ) {
+            throw new \InvalidArgumentException(
+                'Při aktivní IN08 musí být uveden alespoň jeden atribut 10471/10472.',
+            );
+        }
+        foreach ($obstacleFields as $field) {
+            $value = $values[$field];
+            if ($value !== null && $value > $agreedFund) {
+                throw new \InvalidArgumentException(
+                    'Hodiny překážek nesmí překročit sjednaný fond 10260.',
+                );
+            }
+        }
+    }
+
     private static function nonNegativeInt(mixed $value, string $field): int
     {
         if (is_int($value) && $value >= 0) {
@@ -571,6 +791,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
             'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
             'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+            'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+            'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
         ];
     }
 }

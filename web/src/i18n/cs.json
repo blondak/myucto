@@ -1446,7 +1446,17 @@
                 "evidence_days": "Evidenční dny (10265): {count}",
                 "note": "Zdroj a důvod potvrzení",
                 "confirm": "Potvrdit souhrn a schválit",
-                "unworked_followup": "Zdroj obsahuje absenci. Navazující IN07/IN08 souhrn neodpracovaných hodin je ještě nutné doplnit; budoucí JMHZ readiness zůstane blokovaná."
+                "unworked_evidence_hint": "Zdroj obsahuje absenci. Berte ji jako podklad pro kontrolu; hodnoty podmíněných bloků potvrďte výslovně.",
+                "unworked_occurred": "Nastaly v měsíci neodpracované hodiny (IN07)?",
+                "obstacles_occurred": "Nastaly v měsíci překážky v práci (IN08)?",
+                "unworked_total": "Neodpracované hodiny celkem (10275)",
+                "unworked_paid": "Placené nebo nekrácené hodiny (10276)",
+                "dpn_without_compensation": "DPN bez náhrady zaměstnavatele (10277)",
+                "dpn_with_compensation": "DPN s náhradou zaměstnavatele (10278)",
+                "vacation": "Čerpaná dovolená (10279)",
+                "care": "Péče s nárokem na ošetřovné (10280)",
+                "employee_obstacle": "Placené překážky na straně zaměstnance (10471)",
+                "employer_obstacle": "Překážky na straně zaměstnavatele (10472)"
             },
             "bulk": {
                 "approve": "Schválit vybrané ({count})",

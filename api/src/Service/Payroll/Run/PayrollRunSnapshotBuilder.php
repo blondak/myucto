@@ -606,6 +606,8 @@ final class PayrollRunSnapshotBuilder
                     summary.spec_manifest_sha256,
                     summary.scenario_catalog_key,
                     summary.scenario_manifest_sha256,
+                    summary.control_catalog_key,
+                    summary.control_manifest_sha256,
                     summary.derivation_version,
                     summary.source_snapshot_json,
                     summary.source_snapshot_sha256,
@@ -614,6 +616,17 @@ final class PayrollRunSnapshotBuilder
                     summary.weekly_work_centihours,
                     summary.evidence_days,
                     summary.worked_millihours,
+                    summary.conditional_blocks_confirmed,
+                    summary.unworked_hours_occurred,
+                    summary.work_obstacles_occurred,
+                    summary.unworked_total_millihours,
+                    summary.unworked_paid_millihours,
+                    summary.dpn_without_employer_compensation_millihours,
+                    summary.dpn_with_employer_compensation_millihours,
+                    summary.vacation_millihours,
+                    summary.care_millihours,
+                    summary.employee_obstacle_paid_millihours,
+                    summary.employer_obstacle_millihours,
                     summary.confirmation_note,
                     summary.provenance_json,
                     summary.summary_sha256
@@ -656,13 +669,44 @@ final class PayrollRunSnapshotBuilder
                 'evidence_days' => (int) $row['evidence_days'],
                 'worked_millihours' => (int) $row['worked_millihours'],
             ];
+            $derivationVersion = (string) $row['derivation_version'];
+            $conditionalBlocksConfirmed = (int) $row['conditional_blocks_confirmed'] === 1;
+            $interactions = null;
+            if ($derivationVersion === 'jmhz-work-month.v2') {
+                if (!$conditionalBlocksConfirmed
+                    || !in_array($row['unworked_hours_occurred'], [0, 1, '0', '1'], true)
+                    || !in_array($row['work_obstacles_occurred'], [0, 1, '0', '1'], true)
+                ) {
+                    throw new \DomainException(
+                        'Podmíněné bloky pracovního souhrnu JMHZ nejsou potvrzené.',
+                    );
+                }
+                foreach ([
+                    'unworked_total_millihours',
+                    'unworked_paid_millihours',
+                    'dpn_without_employer_compensation_millihours',
+                    'dpn_with_employer_compensation_millihours',
+                    'vacation_millihours',
+                    'care_millihours',
+                    'employee_obstacle_paid_millihours',
+                    'employer_obstacle_millihours',
+                ] as $field) {
+                    $values[$field] = $row[$field] === null ? null : (int) $row[$field];
+                }
+                $interactions = [
+                    'IN07' => (int) $row['unworked_hours_occurred'] === 1,
+                    'IN08' => (int) $row['work_obstacles_occurred'] === 1,
+                ];
+            } elseif ($derivationVersion !== 'jmhz-work-month-core.v1') {
+                throw new \DomainException('Verze pracovního souhrnu JMHZ není podporovaná.');
+            }
             $sourceJson = (string) $row['source_snapshot_json'];
             $sourceHash = (string) $row['source_snapshot_sha256'];
             if (!hash_equals($sourceHash, hash('sha256', $sourceJson))) {
                 throw new \DomainException('Zdrojový hash pracovního souhrnu JMHZ nesouhlasí.');
             }
             $summaryPayload = [
-                'derivation_version' => (string) $row['derivation_version'],
+                'derivation_version' => $derivationVersion,
                 'specification' => [
                     'package_key' => (string) $row['spec_package_key'],
                     'spec_manifest_sha256' => (string) $row['spec_manifest_sha256'],
@@ -670,10 +714,18 @@ final class PayrollRunSnapshotBuilder
                     'scenario_manifest_sha256' => (string) $row['scenario_manifest_sha256'],
                 ],
                 'source_snapshot_sha256' => $sourceHash,
-                'values' => $values,
-                'provenance' => $provenance,
-                'confirmation_note' => (string) $row['confirmation_note'],
             ];
+            if ($derivationVersion === 'jmhz-work-month.v2') {
+                $summaryPayload['specification']['control_catalog_key'] =
+                    (string) $row['control_catalog_key'];
+                $summaryPayload['specification']['control_manifest_sha256'] =
+                    (string) $row['control_manifest_sha256'];
+                $summaryPayload['conditional_blocks_confirmed'] = true;
+                $summaryPayload['interactions'] = $interactions;
+            }
+            $summaryPayload['values'] = $values;
+            $summaryPayload['provenance'] = $provenance;
+            $summaryPayload['confirmation_note'] = (string) $row['confirmation_note'];
             $summaryHash = (string) $row['summary_sha256'];
             if (!hash_equals(
                 $summaryHash,
@@ -696,7 +748,9 @@ final class PayrollRunSnapshotBuilder
             'approved_at' => $row['approved_at'],
             'jmhz_work_summary_status' => $summary === null
                 ? 'unverified'
-                : 'frozen_core',
+                : ((string) $summary['derivation_version'] === 'jmhz-work-month.v2'
+                    ? 'frozen_work_summary'
+                    : 'frozen_core'),
             'jmhz_work_summary' => $summary,
         ];
     }
