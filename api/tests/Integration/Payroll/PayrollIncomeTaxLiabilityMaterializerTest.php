@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
@@ -102,6 +103,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
             new PayrollStatutoryResultRepository($connection),
             $institutions,
             $sensitive,
+            new PayrollLevyDeadlinePolicy(),
         );
     }
 

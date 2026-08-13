@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -18,6 +19,7 @@ final class PayrollHealthInsuranceLiabilityMaterializer
         private readonly PayrollStatutoryResultRepository $statutoryResults,
         private readonly PayrollInstitutionAccountRepository $institutions,
         private readonly PayrollSensitiveData $sensitiveData,
+        private readonly PayrollLevyDeadlinePolicy $deadlines,
     ) {}
 
     /**
@@ -94,15 +96,10 @@ final class PayrollHealthInsuranceLiabilityMaterializer
                 $revision['period_start'],
                 'období mzdového běhu',
             );
-            $nextMonth = (new \DateTimeImmutable($periodStart))
-                ->modify('first day of next month');
-            $dueOn = $nextMonth
-                ->setDate(
-                    (int) $nextMonth->format('Y'),
-                    (int) $nextMonth->format('m'),
-                    20,
-                )
-                ->format('Y-m-d');
+            $dueOn = $this->deadlines->dueOn(
+                PayrollLevyDeadlinePolicy::HEALTH_INSURANCE,
+                $periodStart,
+            );
 
             $targets = $this->currentTargets(
                 $supplierId,

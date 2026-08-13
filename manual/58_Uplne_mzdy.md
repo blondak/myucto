@@ -583,6 +583,13 @@ ke splatnosti. Zálohová a srážková daň se neslučují: každá má vlastn�
 finančního úřadu a platební symboly. Záloha je splatná 20. den následujícího
 měsíce, srážková daň jeho poslední den.
 
+Sociální i zdravotní pojistné je splatné od 1. do 20. dne následujícího měsíce.
+Připadne-li poslední den lhůty na sobotu, neděli nebo svátek, aplikace u všech
+zákonných odvodů zapíše jako splatnost nejblíže následující pracovní den —
+například odvody za 05/2026 nevyjdou na sobotu 20. 6. 2026, ale na pondělí
+22. 6. 2026. Posunuté datum je i to, co uvidíš v seznamu závazků a co se použije
+pro platební dávku; výplatní termín se neposouvá, ten se řídí mzdovým během.
+
 Opakované stisknutí **Připravit závazky** je bezpečné a nevytvoří duplicity.
 Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
 závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost,

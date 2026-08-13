@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
@@ -107,6 +108,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
                 new PayrollStatutoryResultRepository($connection),
                 $institutionRepository,
                 $sensitive,
+                new PayrollLevyDeadlinePolicy(),
             );
         $this->batches = new PayrollPaymentBatchBuilder(
             new PayrollPaymentBatchRepository($connection),

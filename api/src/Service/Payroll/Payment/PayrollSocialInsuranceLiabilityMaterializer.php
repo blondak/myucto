@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -21,6 +22,7 @@ final class PayrollSocialInsuranceLiabilityMaterializer
         private readonly PayrollInstitutionAccountRepository $institutions,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly Connection $db,
+        private readonly PayrollLevyDeadlinePolicy $deadlines,
     ) {}
 
     /** @return array{liability_ids:list<int>,created_count:int} */
@@ -190,7 +192,7 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                 );
             }
             $targetAmount = $this->add($employee, $employer);
-            $dueOn = $this->nextMonthTwentieth(
+            $dueOn = $this->statutoryDueOn(
                 $revision['period_start'],
             );
             $target = $this->target(
@@ -827,7 +829,7 @@ final class PayrollSocialInsuranceLiabilityMaterializer
         return $value;
     }
 
-    private function nextMonthTwentieth(string $periodStart): string
+    private function statutoryDueOn(string $periodStart): string
     {
         $period = $this->date($periodStart, 'mzdové období');
         if (substr($period, 8, 2) !== '01') {
@@ -836,10 +838,10 @@ final class PayrollSocialInsuranceLiabilityMaterializer
             );
         }
 
-        return (new \DateTimeImmutable($period))
-            ->modify('first day of next month')
-            ->modify('+19 days')
-            ->format('Y-m-d');
+        return $this->deadlines->dueOn(
+            PayrollLevyDeadlinePolicy::SOCIAL_INSURANCE,
+            $period,
+        );
     }
 
     private function add(int $left, int $right): int
