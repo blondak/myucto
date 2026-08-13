@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   timeMonth: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
+  approveTimeMonth: vi.fn(),
   reopenTimeMonth: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock('@/api/payroll', () => ({
     timeMonth: m.timeMonth,
     previewTimeImport: m.previewTimeImport,
     importTime: m.importTime,
+    approveTimeMonth: m.approveTimeMonth,
     reopenTimeMonth: m.reopenTimeMonth,
   },
 }))
@@ -51,6 +53,7 @@ describe('TimeAttendance', () => {
       errors: [],
     })
     m.reopenTimeMonth.mockResolvedValue({})
+    m.approveTimeMonth.mockResolvedValue({})
   })
 
   it('loads attendance CSV through the shared drag-and-drop control', async () => {
@@ -159,5 +162,66 @@ describe('TimeAttendance', () => {
     expect(m.reopenTimeMonth).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-test="reopen-modal"]').exists()).toBe(false)
     prompt.mockRestore()
+  })
+
+  it('freezes exact JMHZ core values together with month approval', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_080,
+          planned_minutes: 10_080,
+          actual_minutes: 450,
+          difference_minutes: -9_630,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month-core.v1',
+            source_snapshot_sha256: 'a'.repeat(64),
+            suggestions: {
+              standard_fund_hours: null,
+              agreed_fund_hours: '168',
+              weekly_work_hours: '40',
+              evidence_days: 31,
+              worked_hours: '7.5',
+            },
+            issues: [],
+            requires_unworked_hours_followup: false,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="jmhz-note"]').setValue('Potvrzeno ze syntetické docházky.')
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String), {
+      employment_id: 12,
+      row_version: 3,
+      jmhz_work_summary: {
+        source_snapshot_sha256: 'a'.repeat(64),
+        standard_fund_hours: '168',
+        agreed_fund_hours: '168',
+        weekly_work_hours: '40',
+        worked_hours: '7.5',
+        confirmation_note: 'Potvrzeno ze syntetické docházky.',
+      },
+    })
   })
 })

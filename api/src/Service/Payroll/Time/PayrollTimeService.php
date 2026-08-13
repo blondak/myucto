@@ -21,6 +21,7 @@ final class PayrollTimeService
     public function __construct(
         private readonly PayrollTimeRepository $repository,
         private readonly PayrollCalendarFundService $fund,
+        private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
     ) {}
 
     /** @return array<string,mixed> */
@@ -158,6 +159,11 @@ final class PayrollTimeService
                 'reopened_at' => null,
                 'reopen_reason' => null,
             ];
+            $jmhzRevision = $this->repository->jmhzWorkSummaryRevision(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+            );
             $item = [
                 'employment' => $employment,
                 'calendar' => $calendarDto,
@@ -169,6 +175,18 @@ final class PayrollTimeService
                     'difference_minutes' => $actualMinutes - $plannedMinutes,
                     'category_minutes' => $categories,
                     'incomplete' => $incomplete,
+                ],
+                'jmhz_work_summary' => [
+                    'preview' => $state['status'] === 'open'
+                        ? $this->publicJmhzPreview(
+                            $this->jmhzWorkSummary->preview(
+                                $supplierId,
+                                $employmentId,
+                                $periodStart,
+                            ),
+                        )
+                        : null,
+                    'current_revision' => $jmhzRevision,
                 ],
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
@@ -355,13 +373,33 @@ final class PayrollTimeService
         ?int $userId,
     ): array {
         [$periodStart] = $this->periodBounds($period);
+        $jmhzWorkSummary = null;
+        if (array_key_exists('jmhz_work_summary', $input)) {
+            if (!is_array($input['jmhz_work_summary'])) {
+                throw new \InvalidArgumentException(
+                    'Pracovní souhrn JMHZ musí být objekt.',
+                );
+            }
+            $jmhzWorkSummary = $input['jmhz_work_summary'];
+        }
         return $this->repository->approveMonth(
             $supplierId,
             $this->positiveInt($input, 'employment_id'),
             $periodStart,
             $this->nonNegativeInt($input, 'row_version'),
+            $jmhzWorkSummary,
             $userId,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $preview
+     * @return array<string,mixed>
+     */
+    private function publicJmhzPreview(array $preview): array
+    {
+        unset($preview['source_snapshot_json']);
+        return $preview;
     }
 
     /**

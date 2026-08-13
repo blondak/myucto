@@ -427,6 +427,40 @@ export interface PayrollTimeEntry {
   row_version: number
 }
 
+export interface PayrollJmhzWorkSummaryPreview {
+  derivation_version: string
+  source_snapshot_sha256: string
+  suggestions: {
+    standard_fund_hours: string | null
+    agreed_fund_hours: string | null
+    weekly_work_hours: string | null
+    evidence_days: number
+    worked_hours: string | null
+  }
+  issues: Array<{ code: string; message: string }>
+  requires_unworked_hours_followup: boolean
+}
+
+export interface PayrollJmhzWorkSummaryRevision {
+  id: number
+  time_month_id: number
+  time_month_revision_no: number
+  derivation_version: string
+  source_snapshot_sha256: string
+  summary_sha256: string
+  confirmation_note: string
+  approved_at: string
+}
+
+export interface PayrollJmhzWorkSummaryApproval {
+  source_snapshot_sha256: string
+  standard_fund_hours: string
+  agreed_fund_hours: string
+  weekly_work_hours: string
+  worked_hours: string
+  confirmation_note: string
+}
+
 export interface PayrollTimeOverviewItem {
   employment: {
     id: number
@@ -447,6 +481,10 @@ export interface PayrollTimeOverviewItem {
     difference_minutes: number
     category_minutes: Record<PayrollTimeCategory, number>
     incomplete: boolean
+  }
+  jmhz_work_summary: {
+    preview: PayrollJmhzWorkSummaryPreview | null
+    current_revision: PayrollJmhzWorkSummaryRevision | null
   }
   shifts: PayrollShift[]
   entries: PayrollTimeEntry[]
@@ -2248,7 +2286,11 @@ export const payrollApi = {
   importTime: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ import: Record<string, unknown> }>('/payroll/time/imports', payload)
       .then(response => response.data.import),
-  approveTimeMonth: (period: string, payload: { employment_id: number; row_version: number }) =>
+  approveTimeMonth: (period: string, payload: {
+    employment_id: number
+    row_version: number
+    jmhz_work_summary?: PayrollJmhzWorkSummaryApproval
+  }) =>
     api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/approve`, payload)
       .then(response => response.data.month),
   reopenTimeMonth: (period: string, payload: { employment_id: number; row_version: number; reason: string }) =>

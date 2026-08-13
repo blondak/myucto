@@ -1436,6 +1436,18 @@
             "reopen_reason": "Důvod opravy schváleného měsíce",
             "reopened": "Měsíc byl auditovaně znovu otevřen.",
             "reopen_failed": "Měsíc se nepodařilo znovu otevřít.",
+            "jmhz": {
+                "title": "Potvrzení pracovního souhrnu JMHZ",
+                "hint": "Potvrďte přesné desetinné hodnoty. Systém je nezaokrouhluje ani nedopočítá z neúplných podkladů.",
+                "standard_fund": "Stanovený měsíční fond (10259, hodiny)",
+                "agreed_fund": "Sjednaný měsíční fond (10260, hodiny)",
+                "weekly_work": "Stanovená týdenní doba (10261, hodiny)",
+                "worked": "Skutečně odpracováno (10268, hodiny)",
+                "evidence_days": "Evidenční dny (10265): {count}",
+                "note": "Zdroj a důvod potvrzení",
+                "confirm": "Potvrdit souhrn a schválit",
+                "unworked_followup": "Zdroj obsahuje absenci. Navazující IN07/IN08 souhrn neodpracovaných hodin je ještě nutné doplnit; budoucí JMHZ readiness zůstane blokovaná."
+            },
             "bulk": {
                 "approve": "Schválit vybrané ({count})",
                 "approved": "Schválené vztahy: {count}.",

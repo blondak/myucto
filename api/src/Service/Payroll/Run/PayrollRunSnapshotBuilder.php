@@ -598,20 +598,106 @@ final class PayrollRunSnapshotBuilder
         string $periodStart,
     ): ?array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, status, row_version, approved_at
-               FROM payroll_time_months
-              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?'
+            'SELECT month_row.id, month_row.status, month_row.revision_no,
+                    month_row.row_version, month_row.approved_at,
+                    summary.id AS summary_id,
+                    spec.package_key AS spec_package_key,
+                    spec.manifest_sha256 AS stored_spec_manifest_sha256,
+                    summary.spec_manifest_sha256,
+                    summary.scenario_catalog_key,
+                    summary.scenario_manifest_sha256,
+                    summary.derivation_version,
+                    summary.source_snapshot_json,
+                    summary.source_snapshot_sha256,
+                    summary.standard_fund_millihours,
+                    summary.agreed_fund_millihours,
+                    summary.weekly_work_centihours,
+                    summary.evidence_days,
+                    summary.worked_millihours,
+                    summary.confirmation_note,
+                    summary.provenance_json,
+                    summary.summary_sha256
+               FROM payroll_time_months month_row
+               LEFT JOIN payroll_jmhz_work_month_revisions summary
+                 ON summary.supplier_id = month_row.supplier_id
+                AND summary.time_month_id = month_row.id
+                AND summary.time_month_revision_no = month_row.revision_no
+               LEFT JOIN payroll_jmhz_spec_packages spec
+                 ON spec.id = summary.spec_package_id
+              WHERE month_row.supplier_id = ?
+                AND month_row.employment_id = ?
+                AND month_row.period_start = ?'
         );
         $stmt->execute([$supplierId, $employmentId, $periodStart]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
             return null;
         }
+        $summary = null;
+        if ($row['summary_id'] !== null) {
+            if (!hash_equals(
+                (string) $row['stored_spec_manifest_sha256'],
+                (string) $row['spec_manifest_sha256'],
+            )) {
+                throw new \DomainException('Pracovní souhrn JMHZ odkazuje na jiný balík specifikace.');
+            }
+            $provenance = json_decode(
+                (string) $row['provenance_json'],
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+            if (!is_array($provenance)) {
+                throw new \DomainException('Provenance pracovního souhrnu JMHZ je neplatná.');
+            }
+            $values = [
+                'standard_fund_millihours' => (int) $row['standard_fund_millihours'],
+                'agreed_fund_millihours' => (int) $row['agreed_fund_millihours'],
+                'weekly_work_centihours' => (int) $row['weekly_work_centihours'],
+                'evidence_days' => (int) $row['evidence_days'],
+                'worked_millihours' => (int) $row['worked_millihours'],
+            ];
+            $sourceJson = (string) $row['source_snapshot_json'];
+            $sourceHash = (string) $row['source_snapshot_sha256'];
+            if (!hash_equals($sourceHash, hash('sha256', $sourceJson))) {
+                throw new \DomainException('Zdrojový hash pracovního souhrnu JMHZ nesouhlasí.');
+            }
+            $summaryPayload = [
+                'derivation_version' => (string) $row['derivation_version'],
+                'specification' => [
+                    'package_key' => (string) $row['spec_package_key'],
+                    'spec_manifest_sha256' => (string) $row['spec_manifest_sha256'],
+                    'scenario_catalog_key' => (string) $row['scenario_catalog_key'],
+                    'scenario_manifest_sha256' => (string) $row['scenario_manifest_sha256'],
+                ],
+                'source_snapshot_sha256' => $sourceHash,
+                'values' => $values,
+                'provenance' => $provenance,
+                'confirmation_note' => (string) $row['confirmation_note'],
+            ];
+            $summaryHash = (string) $row['summary_sha256'];
+            if (!hash_equals(
+                $summaryHash,
+                hash('sha256', CanonicalJson::encode($summaryPayload)),
+            )) {
+                throw new \DomainException('Obsahový hash pracovního souhrnu JMHZ nesouhlasí.');
+            }
+            $summary = $summaryPayload + [
+                'id' => (int) $row['summary_id'],
+                'time_month_revision_no' => (int) $row['revision_no'],
+                'source_snapshot_json' => $sourceJson,
+                'summary_sha256' => $summaryHash,
+            ];
+        }
         return [
             'id' => (int) $row['id'],
             'status' => (string) $row['status'],
+            'revision_no' => (int) $row['revision_no'],
             'row_version' => (int) $row['row_version'],
             'approved_at' => $row['approved_at'],
+            'jmhz_work_summary_status' => $summary === null
+                ? 'unverified'
+                : 'frozen_core',
+            'jmhz_work_summary' => $summary,
         ];
     }
 

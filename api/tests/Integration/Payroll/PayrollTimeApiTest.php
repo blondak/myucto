@@ -226,6 +226,201 @@ final class PayrollTimeApiTest extends TestCase
         );
     }
 
+    public function testApprovalCanFreezeExactJmhzCoreWorkSummary(): void
+    {
+        $calendar = $this->action->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+                ->withParsedBody($this->calendarPayload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $calendar->getStatusCode());
+        $entry = $this->saveEntry(monthVersion: 0);
+        self::assertSame(201, $entry->getStatusCode());
+        $monthVersion = (int) $this->json($entry)['month']['row_version'];
+
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        self::assertSame(200, $overview->getStatusCode());
+        $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('168', $preview['suggestions']['agreed_fund_hours']);
+        self::assertSame('7.5', $preview['suggestions']['worked_hours']);
+        self::assertSame(31, $preview['suggestions']['evidence_days']);
+
+        $approved = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+                        'standard_fund_hours' => '168',
+                        'agreed_fund_hours' => '168',
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => '7.5',
+                        'confirmation_note' => 'Potvrzeno ze syntetické docházky.',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(200, $approved->getStatusCode());
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT standard_fund_millihours, agreed_fund_millihours,
+                    weekly_work_centihours, evidence_days, worked_millihours,
+                    source_snapshot_sha256, summary_sha256
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $stored->execute([$this->supplierId, $this->employmentId]);
+        $revision = $stored->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($revision);
+        self::assertSame(168000, (int) $revision['standard_fund_millihours']);
+        self::assertSame(168000, (int) $revision['agreed_fund_millihours']);
+        self::assertSame(4000, (int) $revision['weekly_work_centihours']);
+        self::assertSame(31, (int) $revision['evidence_days']);
+        self::assertSame(7500, (int) $revision['worked_millihours']);
+        self::assertSame($preview['source_snapshot_sha256'], $revision['source_snapshot_sha256']);
+
+        $event = $this->db->pdo()->prepare(
+            "SELECT jmhz_work_summary_revision_id, jmhz_work_summary_hash
+               FROM payroll_time_month_events
+              WHERE supplier_id = ? AND action = 'approved'"
+        );
+        $event->execute([$this->supplierId]);
+        $approvalEvent = $event->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($approvalEvent);
+        self::assertNotNull($approvalEvent['jmhz_work_summary_revision_id']);
+        self::assertSame($revision['summary_sha256'], $approvalEvent['jmhz_work_summary_hash']);
+    }
+
+    public function testJmhzCoreWorkSummaryRejectsStalePreviewAndRoundingGuess(): void
+    {
+        $calendar = $this->action->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+                ->withParsedBody($this->calendarPayload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $calendar->getStatusCode());
+        $entry = $this->saveEntry(
+            monthVersion: 0,
+            endsAt: '2026-05-04T08:31:00+02:00',
+        );
+        self::assertSame(201, $entry->getStatusCode());
+        $monthVersion = (int) $this->json($entry)['month']['row_version'];
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
+        self::assertNull($preview['suggestions']['worked_hours']);
+
+        $invalidShape = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => 'skip',
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $invalidShape->getStatusCode());
+
+        $rejected = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => str_repeat('0', 64),
+                        'standard_fund_hours' => '168',
+                        'agreed_fund_hours' => '168',
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => '0.017',
+                        'confirmation_note' => 'Nepotvrzený zaokrouhlený odhad.',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(409, $rejected->getStatusCode());
+        self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions'));
+        $month = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_time_months
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?'
+        );
+        $month->execute([$this->supplierId, $this->employmentId, '2026-05-01']);
+        self::assertSame('open', $month->fetchColumn());
+
+        $freshOverview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        $freshPreview = $this->json($freshOverview)['items'][0]['jmhz_work_summary']['preview'];
+        $overPrecision = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $freshPreview['source_snapshot_sha256'],
+                        'standard_fund_hours' => '168',
+                        'agreed_fund_hours' => '168',
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => '0.0167',
+                        'confirmation_note' => 'Hodnota má nepovolenou přesnost.',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $overPrecision->getStatusCode());
+        self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions'));
+    }
+
+    public function testJmhzWorkedSuggestionUsesEachEntryLocalMonth(): void
+    {
+        $newYork = $this->saveEntry(
+            monthVersion: 0,
+            startsAt: '2026-05-31T20:00:00-04:00',
+            endsAt: '2026-05-31T21:00:00-04:00',
+            timezone: 'America/New_York',
+            breakMinutes: 0,
+        );
+        self::assertSame(201, $newYork->getStatusCode());
+        $monthVersion = (int) $this->json($newYork)['month']['row_version'];
+
+        $auckland = $this->saveEntry(
+            monthVersion: $monthVersion,
+            startsAt: '2026-05-01T00:30:00+12:00',
+            endsAt: '2026-05-01T01:30:00+12:00',
+            timezone: 'Pacific/Auckland',
+            breakMinutes: 0,
+        );
+        self::assertSame(201, $auckland->getStatusCode());
+
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        self::assertSame(200, $overview->getStatusCode());
+        $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('2', $preview['suggestions']['worked_hours']);
+        self::assertNotContains(
+            'worked_interval_crosses_month',
+            array_column($preview['issues'], 'code'),
+        );
+    }
+
     public function testCsvPreviewPartialImportAndReplayAreIdempotent(): void
     {
         $csv = implode("\n", [
@@ -326,15 +521,17 @@ final class PayrollTimeApiTest extends TestCase
         string $endsAt = '2026-05-04T16:00:00+02:00',
         ?int $supersedesId = null,
         int $rowVersion = 0,
+        string $timezone = 'Europe/Prague',
+        int $breakMinutes = 30,
     ): Response {
         return $this->action->entry(
             $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
                 'employment_id' => $this->employmentId,
                 'starts_at' => $startsAt,
                 'ends_at' => $endsAt,
-                'timezone' => 'Europe/Prague',
+                'timezone' => $timezone,
                 'category' => 'regular',
-                'break_minutes' => 30,
+                'break_minutes' => $breakMinutes,
                 'row_version' => $rowVersion,
                 'month_row_version' => $monthVersion,
                 'supersedes_id' => $supersedesId,

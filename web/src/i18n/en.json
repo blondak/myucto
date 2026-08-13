@@ -1436,6 +1436,18 @@
             "reopen_reason": "Reason for correcting the approved month",
             "reopened": "The month was reopened with an audit trail.",
             "reopen_failed": "The month could not be reopened.",
+            "jmhz": {
+                "title": "Confirm JMHZ work summary",
+                "hint": "Confirm the exact decimal values. The system does not round them or infer them from incomplete evidence.",
+                "standard_fund": "Standard monthly fund (10259, hours)",
+                "agreed_fund": "Agreed monthly fund (10260, hours)",
+                "weekly_work": "Statutory weekly hours (10261)",
+                "worked": "Actual hours worked (10268)",
+                "evidence_days": "Evidence days (10265): {count}",
+                "note": "Source and confirmation reason",
+                "confirm": "Confirm summary and approve",
+                "unworked_followup": "The source includes an absence. The follow-up IN07/IN08 unworked-hours summary is not yet available, so future JMHZ readiness remains blocked."
+            },
             "bulk": {
                 "approve": "Approve selected ({count})",
                 "approved": "Approved employments: {count}.",

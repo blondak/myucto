@@ -5,11 +5,20 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use PDO;
 
 final class PayrollTimeRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
+        private readonly JmhzSpecPackageCatalog $jmhzSpecCatalog,
+        private readonly JmhzSpecPackageRepository $jmhzSpecPackages,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function employments(int $supplierId, string $periodStart, string $periodEnd): array
@@ -171,6 +180,59 @@ final class PayrollTimeRepository
         );
         $stmt->execute([$supplierId, $periodStart]);
         return self::rows($stmt);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function jmhzWorkSummaryRevision(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT summary.id, summary.time_month_id,
+                    summary.time_month_revision_no, summary.period_start,
+                    spec.package_key AS spec_package_key,
+                    summary.spec_manifest_sha256, summary.scenario_catalog_key,
+                    summary.scenario_manifest_sha256,
+                    summary.derivation_version, summary.source_snapshot_sha256,
+                    summary.standard_fund_millihours, summary.agreed_fund_millihours,
+                    summary.weekly_work_centihours, summary.evidence_days,
+                    summary.worked_millihours, summary.confirmation_note,
+                    summary.provenance_json, summary.summary_sha256,
+                    summary.approved_by, summary.approved_at
+               FROM payroll_jmhz_work_month_revisions summary
+               INNER JOIN payroll_time_months month_row
+                 ON month_row.supplier_id = summary.supplier_id
+                AND month_row.id = summary.time_month_id
+                AND month_row.revision_no = summary.time_month_revision_no
+                AND month_row.status = 'approved'
+               INNER JOIN payroll_jmhz_spec_packages spec
+                 ON spec.id = summary.spec_package_id
+              WHERE summary.supplier_id = ?
+                AND summary.employment_id = ?
+                AND summary.period_start = ?
+              ORDER BY summary.time_month_revision_no DESC, summary.id DESC LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        foreach ([
+            'id', 'time_month_id', 'time_month_revision_no',
+            'standard_fund_millihours', 'agreed_fund_millihours',
+            'weekly_work_centihours', 'evidence_days', 'worked_millihours',
+            'approved_by',
+        ] as $field) {
+            $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        $provenance = json_decode((string) $row['provenance_json'], true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($provenance)) {
+            throw new \UnexpectedValueException('Provenance pracovního souhrnu je neplatná.');
+        }
+        unset($row['provenance_json']);
+        $row['provenance'] = $provenance;
+        return $row;
     }
 
     /**
@@ -519,12 +581,16 @@ final class PayrollTimeRepository
         ];
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @param array<string,mixed>|null $jmhzWorkSummaryInput
+     * @return array<string,mixed>
+     */
     public function approveMonth(
         int $supplierId,
         int $employmentId,
         string $periodStart,
         int $expectedVersion,
+        ?array $jmhzWorkSummaryInput,
         ?int $userId,
     ): array {
         $pdo = $this->db->pdo();
@@ -597,6 +663,26 @@ final class PayrollTimeRepository
                     PayrollTimeValue::int($draftEntry['id'] ?? null, 'id'),
                 ]);
             }
+            $confirmedJmhzSummary = null;
+            $jmhzSpecPackageId = null;
+            if ($jmhzWorkSummaryInput !== null) {
+                JmhzScenarioRequirementSourceCatalog::load();
+                $jmhzSpecPackageId = $this->jmhzSpecPackages->install(
+                    $this->jmhzSpecCatalog->load(
+                        JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                        JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+                    ),
+                );
+                $confirmedJmhzSummary = $this->jmhzWorkSummary->confirm(
+                    $this->jmhzWorkSummary->preview(
+                        $supplierId,
+                        $employmentId,
+                        $periodStart,
+                        true,
+                    ),
+                    $jmhzWorkSummaryInput,
+                );
+            }
             $nextVersion = PayrollTimeValue::int($month['row_version'] ?? null, 'row_version') + 1;
             $update = $pdo->prepare(
                 "UPDATE payroll_time_months
@@ -626,7 +712,22 @@ final class PayrollTimeRepository
             $month['row_version'] = $nextVersion;
             $month['approved_by'] = $userId;
             $month['approved_at'] = $now;
-            $this->insertMonthEvent($month, 'approved', null, $userId);
+            $jmhzSummaryRevision = $confirmedJmhzSummary === null
+                ? null
+                : $this->insertJmhzWorkSummary(
+                    $month,
+                    $confirmedJmhzSummary,
+                    $jmhzSpecPackageId,
+                    $userId,
+                    $now,
+                );
+            $this->insertMonthEvent(
+                $month,
+                'approved',
+                null,
+                $userId,
+                $jmhzSummaryRevision,
+            );
             $this->commitTransactionScope($scope);
         } catch (\Throwable $e) {
             $this->rollBackTransactionScope($scope);
@@ -1128,12 +1229,16 @@ final class PayrollTimeRepository
         return $month;
     }
 
-    /** @param array<string,mixed> $month */
+    /**
+     * @param array<string,mixed> $month
+     * @param array<string,mixed>|null $jmhzSummaryRevision
+     */
     private function insertMonthEvent(
         array $month,
         string $action,
         ?string $reason,
         ?int $userId,
+        ?array $jmhzSummaryRevision = null,
     ): void {
         $snapshot = [
             'employment_id' => PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
@@ -1145,8 +1250,9 @@ final class PayrollTimeRepository
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_time_month_events
                 (supplier_id, time_month_id, revision_no, action, reason,
-                 snapshot_hash, actor_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                 snapshot_hash, jmhz_work_summary_revision_id,
+                 jmhz_work_summary_hash, actor_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             PayrollTimeValue::int($month['supplier_id'] ?? null, 'supplier_id'),
             PayrollTimeValue::int($month['id'] ?? null, 'id'),
@@ -1154,8 +1260,82 @@ final class PayrollTimeRepository
             $action,
             $reason,
             hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR), true),
+            $jmhzSummaryRevision['id'] ?? null,
+            $jmhzSummaryRevision['summary_sha256'] ?? null,
             $userId,
         ]);
+    }
+
+    /**
+     * @param array<string,mixed> $month
+     * @param array<string,mixed> $summary
+     * @return array{id:int,summary_sha256:string}
+     */
+    private function insertJmhzWorkSummary(
+        array $month,
+        array $summary,
+        int $specPackageId,
+        ?int $userId,
+        string $approvedAt,
+    ): array {
+        $values = PayrollTimeValue::row($summary['values'] ?? null, 'values');
+        $provenance = PayrollTimeValue::row($summary['provenance'] ?? null, 'provenance');
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_jmhz_work_month_revisions
+                (supplier_id, employment_id, time_month_id, time_month_revision_no,
+                 period_start, spec_package_id, spec_manifest_sha256,
+                 scenario_catalog_key, scenario_manifest_sha256,
+                 derivation_version, source_snapshot_json,
+                 source_snapshot_sha256, standard_fund_millihours,
+                 agreed_fund_millihours, weekly_work_centihours, evidence_days,
+                 worked_millihours, confirmation_note, provenance_json, summary_sha256,
+                 approved_by, approved_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $specification = PayrollTimeValue::row(
+            $summary['specification'] ?? null,
+            'specification',
+        );
+        $stmt->execute([
+            PayrollTimeValue::int($month['supplier_id'] ?? null, 'supplier_id'),
+            PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
+            PayrollTimeValue::int($month['id'] ?? null, 'time_month_id'),
+            PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no'),
+            PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
+            $specPackageId,
+            PayrollTimeValue::string(
+                $specification['spec_manifest_sha256'] ?? null,
+                'spec_manifest_sha256',
+            ),
+            PayrollTimeValue::string(
+                $specification['scenario_catalog_key'] ?? null,
+                'scenario_catalog_key',
+            ),
+            PayrollTimeValue::string(
+                $specification['scenario_manifest_sha256'] ?? null,
+                'scenario_manifest_sha256',
+            ),
+            PayrollTimeValue::string($summary['derivation_version'] ?? null, 'derivation_version'),
+            PayrollTimeValue::string($summary['source_snapshot_json'] ?? null, 'source_snapshot_json'),
+            PayrollTimeValue::string($summary['source_snapshot_sha256'] ?? null, 'source_snapshot_sha256'),
+            PayrollTimeValue::int($values['standard_fund_millihours'] ?? null, 'standard_fund_millihours'),
+            PayrollTimeValue::int($values['agreed_fund_millihours'] ?? null, 'agreed_fund_millihours'),
+            PayrollTimeValue::int($values['weekly_work_centihours'] ?? null, 'weekly_work_centihours'),
+            PayrollTimeValue::int($values['evidence_days'] ?? null, 'evidence_days'),
+            PayrollTimeValue::int($values['worked_millihours'] ?? null, 'worked_millihours'),
+            PayrollTimeValue::string(
+                $summary['confirmation_note'] ?? null,
+                'confirmation_note',
+            ),
+            CanonicalJson::encode($provenance),
+            PayrollTimeValue::string($summary['summary_sha256'] ?? null, 'summary_sha256'),
+            $userId,
+            $approvedAt,
+        ]);
+        return [
+            'id' => (int) $this->db->pdo()->lastInsertId(),
+            'summary_sha256' => (string) $summary['summary_sha256'],
+        ];
     }
 
     /** @return array<string,mixed>|null */

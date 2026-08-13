@@ -14,6 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Time\PayrollTimeCsvImportService;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkSummaryConflictException;
 use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -322,6 +323,13 @@ final class PayrollTimeAction
             return Json::ok($response, ['month' => $month]);
         } catch (PayrollTimeLockedException $e) {
             return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (PayrollJmhzWorkSummaryConflictException $e) {
+            return Json::error(
+                $response,
+                'payroll_jmhz_work_summary_stale',
+                $e->getMessage(),
+                409,
+            );
         } catch (PayrollTimeConflictException $e) {
             return $this->conflict($response, $e);
         } catch (\InvalidArgumentException $e) {

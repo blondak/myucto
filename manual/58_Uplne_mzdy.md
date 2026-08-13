@@ -450,6 +450,16 @@ označ tuto skutečnost; čtrnáctidenní okno pak začíná následujícím dne
 Výsledek uchovává použitý průměr, redukční hranice, pravidla, zaokrouhlení
 a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
 
+Při schválení měsíce v **Mzdy → Docházka a směny** se samostatně
+potvrzuje pracovní jádro JMHZ: stanovený a sjednaný měsíční fond, stanovená
+týdenní doba, evidenční dny a skutečně odpracované hodiny. Nabídnuté hodnoty
+jsou pouze dohledatelný podklad; před schválením je potvrď jako přesná desetinná
+čísla a uveď zdroj. Aplikace zde potichu nezaokrouhluje minuty ani nedopočítá
+chybějící profesní fond. Potvrzený souhrn je neměnný a navázaný na konkrétní
+revizi schváleného měsíce; po znovuotevření je nutné vytvořit nové potvrzení.
+Absence zatím zachová explicitní upozornění, že navazující rozpad
+neodpracovaných hodin IN07/IN08 ještě není připraven k odeslání.
+
 > [!WARNING]
 > Agenda je označena **Vyžaduje ruční kontrolu**. Bez schváleného průměru,
 > publikovaného rozvrhu nebo potvrzených zákonných podmínek výpočet bezpečně

@@ -47,6 +47,12 @@ const importContent = ref('')
 const importFileError = ref('')
 const importPreview = ref<PayrollTimeImportPreview | null>(null)
 const selectedEmploymentIds = ref<number[]>([])
+const approvalItem = ref<PayrollTimeOverviewItem | null>(null)
+const approvalStandardFund = ref('')
+const approvalAgreedFund = ref('')
+const approvalWeeklyWork = ref('')
+const approvalWorked = ref('')
+const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
 const reopenReason = ref('')
 const reopenError = ref('')
@@ -159,14 +165,45 @@ async function createCalendar(item: PayrollTimeOverviewItem) {
   }
 }
 
-async function approve(item: PayrollTimeOverviewItem) {
+function openApproval(item: PayrollTimeOverviewItem) {
+  const suggestions = item.jmhz_work_summary.preview?.suggestions
+  approvalItem.value = item
+  approvalStandardFund.value = suggestions?.standard_fund_hours ?? ''
+  approvalAgreedFund.value = suggestions?.agreed_fund_hours ?? ''
+  approvalWeeklyWork.value = suggestions?.weekly_work_hours ?? ''
+  approvalWorked.value = suggestions?.worked_hours ?? ''
+  approvalNote.value = ''
+}
+
+function closeApproval() {
+  approvalItem.value = null
+  approvalStandardFund.value = ''
+  approvalAgreedFund.value = ''
+  approvalWeeklyWork.value = ''
+  approvalWorked.value = ''
+  approvalNote.value = ''
+}
+
+async function approve() {
+  const item = approvalItem.value
+  const preview = item?.jmhz_work_summary.preview
+  if (!item || !preview) return
   saving.value = true
   try {
     await payrollApi.approveTimeMonth(period.value, {
       employment_id: item.employment.id,
       row_version: item.month.row_version,
+      jmhz_work_summary: {
+        source_snapshot_sha256: preview.source_snapshot_sha256,
+        standard_fund_hours: approvalStandardFund.value.trim(),
+        agreed_fund_hours: approvalAgreedFund.value.trim(),
+        weekly_work_hours: approvalWeeklyWork.value.trim(),
+        worked_hours: approvalWorked.value.trim(),
+        confirmation_note: approvalNote.value.trim(),
+      },
     })
     toast.success(t('payroll.time.approved'))
+    closeApproval()
     await load()
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.time.approve_failed'))
@@ -515,7 +552,7 @@ onMounted(load)
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
-                <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="approve(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
+                <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
               </div></td>
             </tr>
@@ -529,12 +566,81 @@ onMounted(load)
           <div class="mt-4 flex flex-wrap gap-2">
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
-            <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="approve(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
+            <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
             <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>
         </article>
       </div>
     </section>
+
+    <Modal
+      v-if="approvalItem"
+      :title="t('payroll.time.jmhz.title')"
+      width-class="max-w-2xl"
+      @close="closeApproval"
+    >
+      <form data-test="jmhz-work-summary-form" class="space-y-4" @submit.prevent="approve">
+        <p class="text-sm text-neutral-600">
+          {{ approvalItem.employment.full_name }} · {{ approvalItem.employment.code }}
+        </p>
+        <p class="rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-800">
+          {{ t('payroll.time.jmhz.hint') }}
+        </p>
+        <ul
+          v-if="approvalItem.jmhz_work_summary.preview?.issues.length"
+          class="space-y-1 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700"
+        >
+          <li v-for="issue in approvalItem.jmhz_work_summary.preview.issues" :key="issue.code">
+            {{ issue.message }}
+          </li>
+        </ul>
+        <p
+          v-if="approvalItem.jmhz_work_summary.preview?.requires_unworked_hours_followup"
+          class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700"
+        >
+          {{ t('payroll.time.jmhz.unworked_followup') }}
+        </p>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.standard_fund') }}</span>
+            <input v-model="approvalStandardFund" data-test="jmhz-standard-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.agreed_fund') }}</span>
+            <input v-model="approvalAgreedFund" data-test="jmhz-agreed-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.weekly_work') }}</span>
+            <input v-model="approvalWeeklyWork" data-test="jmhz-weekly-work" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.worked') }}</span>
+            <input v-model="approvalWorked" data-test="jmhz-worked" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+        </div>
+        <p class="text-sm text-neutral-600">
+          {{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}
+        </p>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.note') }}</span>
+          <textarea v-model="approvalNote" data-test="jmhz-note" required minlength="5" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+        </label>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeApproval">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            :class="btnFilled('success')"
+            :disabled="saving || !approvalNote.trim() || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+            {{ t('payroll.time.jmhz.confirm') }}
+          </button>
+        </div>
+      </form>
+    </Modal>
 
     <Modal
       v-if="reopenItem"
