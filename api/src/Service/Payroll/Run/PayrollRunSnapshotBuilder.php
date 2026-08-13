@@ -252,7 +252,9 @@ final class PayrollRunSnapshotBuilder
                     'monthly_gross_minor' => $row['monthly_gross_minor'] === null
                         ? null
                         : (int) $row['monthly_gross_minor'],
-                    'is_primary' => (bool) $row['employment_is_primary'],
+                    'is_primary' => $row['term_is_primary'] === null
+                        ? null
+                        : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
                 'average_earning' => $this->averageEarningSnapshot($row),
@@ -386,7 +388,6 @@ final class PayrollRunSnapshotBuilder
                     employment.actual_start_date,
                     employment.end_date,
                     employment.monthly_gross_minor,
-                    employment.is_primary AS employment_is_primary,
                     employee.full_name,
                     employee.is_active AS employee_active,
                     profile.profile_status,
@@ -411,6 +412,7 @@ final class PayrollRunSnapshotBuilder
                     term.health_insurance_participation,
                     term.tax_regime,
                     term.tax_declaration_signed,
+                    term.is_primary AS term_is_primary,
                     term.risky_work,
                     term.foreign_legislation_country_code,
                     term.a1_certificate_until,

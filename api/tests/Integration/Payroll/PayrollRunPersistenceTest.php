@@ -656,7 +656,7 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
-    public function testInputSnapshotPinsPrimaryEmploymentAndApprovedAverageEarning(): void
+    public function testInputSnapshotPinsEffectivePrimaryEmploymentAndApprovedAverageEarning(): void
     {
         $inputTrace = CanonicalJson::encode(['synthetic' => true]);
         $inputHash = hash('sha256', $inputTrace);
@@ -686,6 +686,27 @@ final class PayrollRunPersistenceTest extends TestCase
         ]);
         $averageId = (int) $this->db->pdo()->lastInsertId();
 
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET effective_to = "2026-08-31"
+              WHERE supplier_id = ? AND employment_id = ?
+                AND effective_from = "2026-01-01"'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on,
+                 actual_start_on, weekly_hours, workload_basis_points,
+                 social_insurance_participation,
+                 health_insurance_participation, tax_regime,
+                 tax_declaration_signed, is_primary)
+             VALUES (?, ?, "2026-09-01", "2026-01-01", "2026-01-01",
+                     40, 10000, "automatic", "automatic", "advance", 1, 0)'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET is_primary = 0
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
         $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
             ->build($this->supplierId, '2026-06-01', '2026-07-15');
         $entry = $snapshot->data['people'][0]['employments'][0];
@@ -705,6 +726,12 @@ final class PayrollRunPersistenceTest extends TestCase
             'ruleset_hash' => $rulesetHash,
             'input_hash' => $inputHash,
         ], $entry['average_earning']);
+
+        $future = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-09-01', '2026-10-15');
+        self::assertFalse(
+            $future->data['people'][0]['employments'][0]['employment']['is_primary'],
+        );
     }
 
     public function testInputSnapshotPinsImmutableJmhzWorkMonthCoreRevision(): void
