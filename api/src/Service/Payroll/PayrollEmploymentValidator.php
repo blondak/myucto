@@ -16,6 +16,12 @@ namespace MyInvoice\Service\Payroll;
  *   workload_basis_points:int,
  *   work_place:?string,
  *   regular_workplace:?string,
+ *   jmhz_workplace_municipality_code:?string,
+ *   jmhz_workplace_country_code:?string,
+ *   jmhz_apz_contribution_status:string,
+ *   jmhz_apz_instrument_code:?string,
+ *   jmhz_functional_benefits_status:string,
+ *   jmhz_temporary_assignment_status:string,
  *   cz_isco_code:?string,
  *   activity_code:?string,
  *   social_insurance_participation:string,
@@ -49,6 +55,11 @@ final class PayrollEmploymentValidator
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
     private const CHECKLIST_STATUSES = ['pending', 'completed', 'not_applicable'];
+    private const VERIFIED_STATES = ['unverified', 'no', 'yes'];
+
+    public function __construct(
+        private readonly PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
+    ) {}
 
     /** @param array<string,mixed> $input
      *  @return EmploymentCreateInput
@@ -138,6 +149,39 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException('Cizí režim vyžaduje kód státu právních předpisů.');
         }
 
+        $workPlace = $this->optionalText($input, 'work_place', 255);
+        $municipalityCode = $this->optionalText($input, 'jmhz_workplace_municipality_code', 6);
+        $workplaceCountry = strtoupper(
+            $this->optionalText($input, 'jmhz_workplace_country_code', 2) ?? '',
+        );
+        $workplaceCountry = $workplaceCountry === '' ? null : $workplaceCountry;
+        if (($municipalityCode === null) !== ($workplaceCountry === null)
+            || ($municipalityCode !== null && $workPlace === null)
+        ) {
+            throw new \InvalidArgumentException(
+                'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+            );
+        }
+        if ($municipalityCode !== null && preg_match('/^[0-9]{6}$/', $municipalityCode) !== 1) {
+            throw new \InvalidArgumentException('Kód obce pracoviště JMHZ musí mít přesně šest číslic.');
+        }
+        if ($workplaceCountry !== null && preg_match('/^[A-Z]{2}$/', $workplaceCountry) !== 1) {
+            throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
+        }
+
+        $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
+        $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);
+        if ($apzStatus === 'yes') {
+            if ($apzCode === null) {
+                throw new \InvalidArgumentException('Příspěvek APZ vyžaduje kód nástroje APZ.');
+            }
+            $this->jmhzEvidence->requireApzInstrument($apzCode);
+        } elseif ($apzCode !== null) {
+            throw new \InvalidArgumentException('Bez příspěvku APZ nesmí být kód nástroje APZ vyplněn.');
+        }
+        $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
+        $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
+
         return [
             'office_id' => $officeId,
             'effective_from' => $effectiveFrom,
@@ -147,8 +191,14 @@ final class PayrollEmploymentValidator
             'fixed_term_end_on' => $fixedEnd,
             'weekly_hours' => $hours === null ? null : (string) $hours,
             'workload_basis_points' => $workload,
-            'work_place' => $this->optionalText($input, 'work_place', 255),
+            'work_place' => $workPlace,
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
+            'jmhz_workplace_municipality_code' => $municipalityCode,
+            'jmhz_workplace_country_code' => $workplaceCountry,
+            'jmhz_apz_contribution_status' => $apzStatus,
+            'jmhz_apz_instrument_code' => $apzCode,
+            'jmhz_functional_benefits_status' => $functionalBenefits,
+            'jmhz_temporary_assignment_status' => $temporaryAssignment,
             'cz_isco_code' => $this->optionalCode($input, 'cz_isco_code', 16),
             'activity_code' => $this->optionalCode($input, 'activity_code', 32),
             'social_insurance_participation' => $social,
@@ -255,6 +305,19 @@ final class PayrollEmploymentValidator
         $value = $input[$key] ?? $default;
         if (!is_bool($value)) {
             throw new \InvalidArgumentException("Pole {$key} musí být boolean.");
+        }
+        return $value;
+    }
+
+    /** @param array<string,mixed> $input */
+    private function verifiedState(array $input, string $key): string
+    {
+        if (!array_key_exists($key, $input)) {
+            throw new \InvalidArgumentException("Pole {$key} musí být zadáno explicitně.");
+        }
+        $value = $this->inputString($input[$key]);
+        if (!in_array($value, self::VERIFIED_STATES, true)) {
+            throw new \InvalidArgumentException("Pole {$key} má neplatný stav ověření.");
         }
         return $value;
     }

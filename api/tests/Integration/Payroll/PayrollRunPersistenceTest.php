@@ -602,6 +602,33 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testInputSnapshotPinsEffectiveJmhzEmploymentEvidence(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET work_place = "Praha",
+                    jmhz_workplace_municipality_code = "554782",
+                    jmhz_workplace_country_code = "CZ",
+                    jmhz_apz_contribution_status = "yes",
+                    jmhz_apz_instrument_code = "4",
+                    jmhz_functional_benefits_status = "no",
+                    jmhz_temporary_assignment_status = "unverified"
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $term = $snapshot->data['people'][0]['employments'][0]['term'];
+
+        self::assertSame('Praha', $term['work_place']);
+        self::assertSame('554782', $term['jmhz_workplace_municipality_code']);
+        self::assertSame('CZ', $term['jmhz_workplace_country_code']);
+        self::assertSame('yes', $term['jmhz_apz_contribution_status']);
+        self::assertSame('4', $term['jmhz_apz_instrument_code']);
+        self::assertSame('no', $term['jmhz_functional_benefits_status']);
+        self::assertSame('unverified', $term['jmhz_temporary_assignment_status']);
+    }
+
     public function testPostTerminationInputKeepsEndedRelationshipInSnapshot(): void
     {
         $this->db->pdo()->prepare(

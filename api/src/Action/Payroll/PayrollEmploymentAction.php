@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,9 +24,18 @@ final class PayrollEmploymentAction
     public function __construct(
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollEmploymentValidator $validator,
+        private readonly PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
     ) {}
+
+    public function jmhzEvidenceOptions(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorizeRead($request, $response)) !== null) {
+            return $error;
+        }
+        return Json::ok($response, ['options' => $this->jmhzEvidence->options()]);
+    }
 
     /** @param array{id:string} $args */
     public function create(Request $request, Response $response, array $args): Response
@@ -137,6 +147,32 @@ final class PayrollEmploymentAction
             $response,
             'payroll.employment.write',
             AccessLevel::WRITE,
+            $error,
+        )) {
+            return $error ?? throw new \LogicException('Chybí chybová odpověď oprávnění.');
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error ?? throw new \LogicException('Chybí chybová odpověď modulu.');
+        }
+        return null;
+    }
+
+    private function authorizeRead(Request $request, Response $response): ?Response
+    {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+        }
+        $error = null;
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
             $error,
         )) {
             return $error ?? throw new \LogicException('Chybí chybová odpověď oprávnění.');

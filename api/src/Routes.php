@@ -783,6 +783,10 @@ final class Routes
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
+            $g->get(
+                '/jmhz/employment-evidence-options',
+                [PayrollEmploymentAction::class, 'jmhzEvidenceOptions'],
+            );
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',

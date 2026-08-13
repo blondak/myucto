@@ -96,6 +96,12 @@ export interface PayrollEmploymentTerms {
   workload_basis_points: number
   work_place: string | null
   regular_workplace: string | null
+  jmhz_workplace_municipality_code: string | null
+  jmhz_workplace_country_code: string | null
+  jmhz_apz_contribution_status: PayrollVerifiedTriState
+  jmhz_apz_instrument_code: string | null
+  jmhz_functional_benefits_status: PayrollVerifiedTriState
+  jmhz_temporary_assignment_status: PayrollVerifiedTriState
   cz_isco_code: string | null
   activity_code: string | null
   social_insurance_participation: PayrollInsuranceParticipation
@@ -541,6 +547,14 @@ export interface PayrollComponentJmhzTarget {
   ancestor_attribute_ids: string[]
   aggregation_role: 'detail' | 'catch_all_total'
   aggregation_scope: 'employment' | 'employee_summary'
+}
+
+export type PayrollVerifiedTriState = 'unverified' | 'no' | 'yes'
+
+export interface PayrollEmploymentJmhzEvidenceOptions {
+  package_key: string
+  manifest_sha256: string
+  apz_instruments: Array<{ code: string; label: string }>
 }
 
 export interface PayrollComponentJmhzMapping {
@@ -1849,6 +1863,10 @@ export const payrollApi = {
       row_version: rowVersion,
       ...payload,
     }).then(response => response.data.employment),
+  employmentJmhzEvidenceOptions: () =>
+    api.get<{ options: PayrollEmploymentJmhzEvidenceOptions }>(
+      '/payroll/jmhz/employment-evidence-options',
+    ).then(response => response.data.options),
   transitionEmployment: (
     employmentId: number,
     target: PayrollEmploymentStatus,

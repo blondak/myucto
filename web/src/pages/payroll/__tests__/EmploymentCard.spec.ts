@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { PayrollEmployment } from '@/api/payroll'
 
 vi.mock('@/api/payroll', () => ({
@@ -7,6 +7,11 @@ vi.mock('@/api/payroll', () => ({
     transitionEmployment: vi.fn(),
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
+    employmentJmhzEvidenceOptions: vi.fn().mockResolvedValue({
+      package_key: 'synthetic',
+      manifest_sha256: 'a'.repeat(64),
+      apz_instruments: [{ code: '1', label: 'VPP' }],
+    }),
   },
 }))
 
@@ -62,6 +67,12 @@ function employment(): PayrollEmployment {
       workload_basis_points: 10000,
       work_place: null,
       regular_workplace: null,
+      jmhz_workplace_municipality_code: null,
+      jmhz_workplace_country_code: null,
+      jmhz_apz_contribution_status: 'unverified',
+      jmhz_apz_instrument_code: null,
+      jmhz_functional_benefits_status: 'unverified',
+      jmhz_temporary_assignment_status: 'unverified',
       cz_isco_code: null,
       activity_code: null,
       social_insurance_participation: 'automatic',
@@ -128,5 +139,24 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.preregistered')
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.no_show')
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.new_terms')
+  })
+
+  it('edituje JMHZ evidenci jako tri-state a čte APZ z připnutých možností', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    expect(edit).toBeDefined()
+    await edit!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-evidence"]').exists()).toBe(true)
+    await wrapper.get('[data-test="jmhz-apz-status"]').setValue('yes')
+    expect(wrapper.get('[data-test="jmhz-apz-instrument"]').text()).toContain('1 · VPP')
+    await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
+    await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
+    expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
   })
 })

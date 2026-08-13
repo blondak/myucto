@@ -102,6 +102,12 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             ...$this->termsPayload(true, '2026-02-01'),
             'weekly_hours' => '30',
             'workload_basis_points' => 7500,
+            'jmhz_workplace_municipality_code' => '554782',
+            'jmhz_workplace_country_code' => 'CZ',
+            'jmhz_apz_contribution_status' => 'yes',
+            'jmhz_apz_instrument_code' => '2',
+            'jmhz_functional_benefits_status' => 'no',
+            'jmhz_temporary_assignment_status' => 'yes',
             'change_reason' => 'Změna úvazku',
         ]);
         self::assertSame(4, $changed['row_version']);
@@ -109,6 +115,17 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertCount(2, $changed['terms']);
         self::assertSame('2026-01-31', $changed['terms'][1]['effective_to']);
         self::assertArrayHasKey('weekly_hours', $changed['timeline'][0]['diff']);
+        self::assertSame('554782', $changed['terms'][0]['jmhz_workplace_municipality_code']);
+        self::assertSame('yes', $changed['terms'][0]['jmhz_apz_contribution_status']);
+        self::assertSame('yes', $changed['terms'][0]['jmhz_temporary_assignment_status']);
+        self::assertSame(
+            'unverified',
+            $changed['terms'][1]['jmhz_functional_benefits_status'],
+        );
+        self::assertArrayHasKey(
+            'jmhz_workplace_municipality_code',
+            $changed['timeline'][0]['diff'],
+        );
         self::assertCount(7, $changed['checklist']);
 
         $item = $changed['checklist'][0];
@@ -222,6 +239,31 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(403, $client->getStatusCode());
         self::assertSame('forbidden', $this->json($client)['error']['code']);
+    }
+
+    public function testJmhzEvidenceOptionsComeFromPinnedPackageAndRequireSession(): void
+    {
+        $response = $this->action->jmhzEvidenceOptions(
+            $this->request('GET', '/api/payroll/jmhz/employment-evidence-options'),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode());
+        $options = $this->json($response)['options'];
+        self::assertSame(64, strlen((string) $options['manifest_sha256']));
+        self::assertSame(['1', '2', '3', '4'], array_column($options['apz_instruments'], 'code'));
+
+        $bearer = $this->action->jmhzEvidenceOptions(
+            $this->request(
+                'GET',
+                '/api/payroll/jmhz/employment-evidence-options',
+                null,
+                'accountant',
+                'bearer',
+            ),
+            new Response(),
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
     }
 
     /** @return array<string,mixed> */
@@ -338,6 +380,12 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'workload_basis_points' => 10000,
             'work_place' => 'Praha',
             'regular_workplace' => 'Praha',
+            'jmhz_workplace_municipality_code' => null,
+            'jmhz_workplace_country_code' => null,
+            'jmhz_apz_contribution_status' => 'unverified',
+            'jmhz_apz_instrument_code' => null,
+            'jmhz_functional_benefits_status' => 'unverified',
+            'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => '43110',
             'activity_code' => '1',
             'social_insurance_participation' => 'automatic',

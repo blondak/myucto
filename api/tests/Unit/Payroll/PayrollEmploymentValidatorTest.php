@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll;
 
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollEmploymentValidatorTest extends TestCase
 {
     public function testAcceptsSmallScaleEmploymentAndHistoricalInputs(): void
     {
-        $result = (new PayrollEmploymentValidator())->create([
+        $result = $this->validator()->create([
             'code' => 'ZMR-2026-01',
             'relation_type' => 'small_scale_employment',
             'monthly_gross_minor' => 450000,
@@ -31,7 +33,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('kód státu');
-        (new PayrollEmploymentValidator())->terms($terms);
+        $this->validator()->terms($terms);
     }
 
     public function testRejectsInvalidDatesAndWorkload(): void
@@ -41,7 +43,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $terms['workload_basis_points'] = 0;
 
         $this->expectException(\InvalidArgumentException::class);
-        (new PayrollEmploymentValidator())->terms($terms);
+        $this->validator()->terms($terms);
     }
 
     public function testInitialCreateCannotBypassActualStartTransition(): void
@@ -51,12 +53,72 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Skutečný nástup');
-        (new PayrollEmploymentValidator())->create([
+        $this->validator()->create([
             'code' => 'HPP-1',
             'relation_type' => 'employment',
             'monthly_gross_minor' => 4000000,
             'terms' => $terms,
         ]);
+    }
+
+    public function testAcceptsCompleteJmhzCoreEvidenceAndCanonicalizesIt(): void
+    {
+        $terms = $this->terms();
+        $terms['work_place'] = '  Praha  ';
+        $terms['jmhz_workplace_municipality_code'] = '554782';
+        $terms['jmhz_workplace_country_code'] = 'cz';
+        $terms['jmhz_apz_contribution_status'] = 'yes';
+        $terms['jmhz_apz_instrument_code'] = '3';
+        $terms['jmhz_functional_benefits_status'] = 'no';
+        $terms['jmhz_temporary_assignment_status'] = 'unverified';
+
+        $result = $this->validator()->terms($terms);
+
+        self::assertSame('Praha', $result['work_place']);
+        self::assertSame('554782', $result['jmhz_workplace_municipality_code']);
+        self::assertSame('CZ', $result['jmhz_workplace_country_code']);
+        self::assertSame('3', $result['jmhz_apz_instrument_code']);
+    }
+
+    public function testRejectsPartialWorkplaceAndUnknownApzCode(): void
+    {
+        $partial = $this->terms();
+        $partial['work_place'] = 'Praha';
+        $partial['jmhz_workplace_municipality_code'] = null;
+        $partial['jmhz_workplace_country_code'] = 'CZ';
+
+        try {
+            $this->validator()->terms($partial);
+            self::fail('Neúplné pracoviště musí být odmítnuto.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('Pracoviště JMHZ', $e->getMessage());
+        }
+
+        $apz = $this->terms();
+        $apz['jmhz_apz_contribution_status'] = 'yes';
+        $apz['jmhz_apz_instrument_code'] = '9';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nástroje APZ');
+        $this->validator()->terms($apz);
+    }
+
+    public function testRequiresExplicitTriStateAndClearsNoApzCode(): void
+    {
+        $missing = $this->terms();
+        unset($missing['jmhz_functional_benefits_status']);
+        try {
+            $this->validator()->terms($missing);
+            self::fail('Chybějící tri-state nesmí být vyložen jako ne.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('jmhz_functional_benefits_status', $e->getMessage());
+        }
+
+        $no = $this->terms();
+        $no['jmhz_apz_contribution_status'] = 'no';
+        $no['jmhz_apz_instrument_code'] = '1';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Bez příspěvku APZ');
+        $this->validator()->terms($no);
     }
 
     /** @return array<string,mixed> */
@@ -73,6 +135,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
             'workload_basis_points' => 5000,
             'work_place' => 'Praha',
             'regular_workplace' => 'Praha',
+            'jmhz_workplace_municipality_code' => null,
+            'jmhz_workplace_country_code' => null,
+            'jmhz_apz_contribution_status' => 'unverified',
+            'jmhz_apz_instrument_code' => null,
+            'jmhz_functional_benefits_status' => 'unverified',
+            'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => '43110',
             'activity_code' => '1',
             'social_insurance_participation' => 'foreign',
@@ -85,5 +153,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
             'is_primary' => true,
             'change_reason' => 'Počáteční podmínky',
         ];
+    }
+
+    private function validator(): PayrollEmploymentValidator
+    {
+        return new PayrollEmploymentValidator(
+            new PayrollEmploymentJmhzEvidenceCatalog(new JmhzSpecPackageCatalog()),
+        );
     }
 }

@@ -213,6 +213,18 @@ final class PayrollRunSnapshotBuilder
                         ? null
                         : (string) $row['weekly_hours'],
                     'workload_basis_points' => (int) $row['workload_basis_points'],
+                    'work_place' => $row['work_place'],
+                    'jmhz_workplace_municipality_code' =>
+                        $row['jmhz_workplace_municipality_code'],
+                    'jmhz_workplace_country_code' =>
+                        $row['jmhz_workplace_country_code'],
+                    'jmhz_apz_contribution_status' =>
+                        (string) $row['jmhz_apz_contribution_status'],
+                    'jmhz_apz_instrument_code' => $row['jmhz_apz_instrument_code'],
+                    'jmhz_functional_benefits_status' =>
+                        (string) $row['jmhz_functional_benefits_status'],
+                    'jmhz_temporary_assignment_status' =>
+                        (string) $row['jmhz_temporary_assignment_status'],
                     'social_insurance_participation' =>
                         (string) $row['social_insurance_participation'],
                     'health_insurance_participation' =>
@@ -340,6 +352,13 @@ final class PayrollRunSnapshotBuilder
                     term.effective_to,
                     term.weekly_hours,
                     term.workload_basis_points,
+                    term.work_place,
+                    term.jmhz_workplace_municipality_code,
+                    term.jmhz_workplace_country_code,
+                    term.jmhz_apz_contribution_status,
+                    term.jmhz_apz_instrument_code,
+                    term.jmhz_functional_benefits_status,
+                    term.jmhz_temporary_assignment_status,
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,

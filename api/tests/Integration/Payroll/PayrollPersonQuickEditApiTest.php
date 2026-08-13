@@ -155,6 +155,17 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         self::assertSame('Nová Zaměstnankyně', $saved['profile']['full_name']);
         self::assertSame(4_500_000, $saved['employment']['monthly_gross_minor']);
         self::assertSame('37.50', $saved['employment']['terms'][0]['weekly_hours']);
+        self::assertSame(
+            '554782',
+            $saved['employment']['terms'][0]['jmhz_workplace_municipality_code'],
+        );
+        self::assertSame('yes', $saved['employment']['terms'][0]['jmhz_apz_contribution_status']);
+        self::assertSame('2', $saved['employment']['terms'][0]['jmhz_apz_instrument_code']);
+        self::assertSame('no', $saved['employment']['terms'][0]['jmhz_functional_benefits_status']);
+        self::assertSame(
+            'unverified',
+            $saved['employment']['terms'][0]['jmhz_temporary_assignment_status'],
+        );
         self::assertCount(2, $saved['employment']['terms']);
         self::assertArrayHasKey(
             'monthly_gross_minor',
@@ -311,6 +322,12 @@ final class PayrollPersonQuickEditApiTest extends TestCase
             'workload_basis_points' => 10000,
             'work_place' => 'Praha',
             'regular_workplace' => 'Praha',
+            'jmhz_workplace_municipality_code' => '554782',
+            'jmhz_workplace_country_code' => 'CZ',
+            'jmhz_apz_contribution_status' => 'yes',
+            'jmhz_apz_instrument_code' => '2',
+            'jmhz_functional_benefits_status' => 'no',
+            'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => null,
             'activity_code' => null,
             'social_insurance_participation' => 'automatic',

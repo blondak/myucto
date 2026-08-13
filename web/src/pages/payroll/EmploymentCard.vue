@@ -6,6 +6,7 @@ import {
   type PayrollChecklistStatus,
   type PayrollEmployment,
   type PayrollEmploymentStatus,
+  type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -31,6 +32,8 @@ const busy = ref(false)
 const editingTerms = ref(false)
 const transitionDate = ref(todayIso())
 const termsForm = ref<PayrollEmploymentTermsPayload | null>(null)
+const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
+const jmhzOptionsFailed = ref(false)
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
 const openChecklist = computed(() =>
@@ -51,7 +54,7 @@ function statusLabel(status: PayrollEmploymentStatus): string {
   return t(`payroll.people.employment_status.${status}`)
 }
 
-function startTermsEdit() {
+async function startTermsEdit() {
   const terms = currentTerms.value
   if (!terms) return
   termsForm.value = {
@@ -65,6 +68,12 @@ function startTermsEdit() {
     workload_basis_points: terms.workload_basis_points,
     work_place: terms.work_place,
     regular_workplace: terms.regular_workplace,
+    jmhz_workplace_municipality_code: terms.jmhz_workplace_municipality_code,
+    jmhz_workplace_country_code: terms.jmhz_workplace_country_code,
+    jmhz_apz_contribution_status: terms.jmhz_apz_contribution_status,
+    jmhz_apz_instrument_code: terms.jmhz_apz_instrument_code,
+    jmhz_functional_benefits_status: terms.jmhz_functional_benefits_status,
+    jmhz_temporary_assignment_status: terms.jmhz_temporary_assignment_status,
     cz_isco_code: terms.cz_isco_code,
     activity_code: terms.activity_code,
     social_insurance_participation: terms.social_insurance_participation,
@@ -78,6 +87,19 @@ function startTermsEdit() {
     change_reason: null,
   }
   editingTerms.value = true
+  if (jmhzOptions.value === null && !jmhzOptionsFailed.value) {
+    try {
+      jmhzOptions.value = await payrollApi.employmentJmhzEvidenceOptions()
+    } catch {
+      jmhzOptionsFailed.value = true
+    }
+  }
+}
+
+function onApzStatusChange() {
+  if (termsForm.value?.jmhz_apz_contribution_status !== 'yes' && termsForm.value) {
+    termsForm.value.jmhz_apz_instrument_code = null
+  }
 }
 
 async function transition(target: PayrollEmploymentStatus) {
@@ -155,7 +177,7 @@ const actions = computed<ActionItem[]>(() => [
     disabled: busy.value || currentTerms.value === null,
     show: props.canWrite
       && ['planned', 'preregistered', 'active', 'suspended'].includes(props.employment.status),
-    run: startTermsEdit,
+    run: () => void startTermsEdit(),
   },
 ])
 </script>
@@ -205,8 +227,20 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.fixed_end') }}<input v-model="termsForm.fixed_term_end_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="termsForm.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.workload_bps') }}<input v-model.number="termsForm.workload_basis_points" type="number" min="1" max="10000" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600 sm:col-span-2">{{ t('payroll.people.work_place') }}<input v-model="termsForm.work_place" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600 sm:col-span-2">{{ t('payroll.people.regular_workplace') }}<input v-model="termsForm.regular_workplace" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <fieldset data-test="jmhz-evidence" class="grid grid-cols-1 gap-3 rounded-md border border-payroll-200 bg-surface p-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-4 lg:grid-cols-4">
+          <legend class="px-1 text-xs font-semibold text-payroll-800">{{ t('payroll.people.jmhz_evidence.title') }}</legend>
+          <label class="text-xs text-neutral-600 lg:col-span-2">{{ t('payroll.people.jmhz_evidence.municipality_name') }}<input v-model="termsForm.work_place" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.municipality_code') }}<input v-model="termsForm.jmhz_workplace_municipality_code" maxlength="6" inputmode="numeric" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm font-mono"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.country_code') }}<input v-model="termsForm.jmhz_workplace_country_code" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm font-mono uppercase"></label>
+          <p class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.external_codebook_warning') }}</p>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.apz_status') }}<select v-model="termsForm.jmhz_apz_contribution_status" data-test="jmhz-apz-status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="onApzStatusChange"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>
+          <label v-if="termsForm.jmhz_apz_contribution_status === 'yes'" class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.apz_instrument') }}<select v-model="termsForm.jmhz_apz_instrument_code" data-test="jmhz-apz-instrument" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null" disabled>{{ t('payroll.people.jmhz_evidence.select_apz') }}</option><option v-for="option in jmhzOptions?.apz_instruments ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.functional_benefits') }}<select v-model="termsForm.jmhz_functional_benefits_status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.temporary_assignment') }}<select v-model="termsForm.jmhz_temporary_assignment_status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>
+          <p v-if="jmhzOptionsFailed" class="text-xs text-danger-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.options_failed') }}</p>
+          <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
+        </fieldset>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.cz_isco_code') }}<input v-model="termsForm.cz_isco_code" maxlength="16" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.activity_code') }}<input v-model="termsForm.activity_code" maxlength="32" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>

@@ -269,6 +269,16 @@ nepřepíše. Historie drží zejména:
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
 
+Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
+strukturovanou obec pracoviště, kód obce a stát, příspěvek a nástroj APZ,
+funkční požitky a dočasné přidělení. Příznaky používají tři stavy **Neověřeno**,
+**Ne** a **Ano**; chybějící historický údaj se nikdy automaticky nepovažuje za
+„ne“. Obec, její kód a stát se ukládají jen jako úplná trojice. Dokud nejsou
+externí číselníky CISOB a CZEM dostupné v připnutém balíku, jde o neověřenou
+evidenci a úplné podání JMHZ zůstává zablokované. Při dočasném přidělení
+**Ano** je navíc nutné doplnit identitu alespoň jednoho uživatele; samotný
+příznak nestačí k přípravě podání.
+
 Jedna osoba může mít souběžně například HPP a DPP nebo samostatný pracovní poměr
 a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah označen
 jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
