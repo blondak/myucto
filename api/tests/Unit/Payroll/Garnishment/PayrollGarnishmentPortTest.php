@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyInstruction;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
 use MyInvoice\Service\Payroll\Garnishment\RepositoryPayrollGarnishmentPort;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollGarnishmentPortTest extends TestCase
@@ -65,7 +66,10 @@ final class PayrollGarnishmentPortTest extends TestCase
                 );
             }
         };
-        $port = new RepositoryPayrollGarnishmentPort($source, new GarnishmentCalculator());
+        $port = new RepositoryPayrollGarnishmentPort(
+            $source,
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
+        );
 
         $calculation = $port->calculate(new EnforcementPersonMonthRequest(
             supplierId: 17,
@@ -127,7 +131,7 @@ final class PayrollGarnishmentPortTest extends TestCase
 
         $calculation = (new RepositoryPayrollGarnishmentPort(
             $source,
-            new GarnishmentCalculator(),
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
         ))->calculate(new EnforcementPersonMonthRequest(
             1,
             2,

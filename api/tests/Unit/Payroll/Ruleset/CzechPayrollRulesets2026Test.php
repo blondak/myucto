@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = 'd12810ddcff282efb2d1e86512132eac2e49f4f3ad052237a628da8060141f54';
+    private const EXPECTED_MANIFEST_SHA256 = 'e4252c4a671c57849199b4699df103136d29257c4124b7ccbf37e2d348d2cd96';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -45,7 +45,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 self::assertSame(CzechPayrollRulesets2026::RETRIEVED_ON, $source->retrievedOn);
                 self::assertStringStartsWith('https://', $source->url);
                 self::assertMatchesRegularExpression(
-                    '/\.(cssz|mpsv|gov|vzp|e-sbirka)\.cz|^https:\/\/financnisprava\.gov\.cz/',
+                    '/\.(cssz|mpsv|gov|vzp|e-sbirka|justice)\.cz|^https:\/\/financnisprava\.gov\.cz/',
                     $source->url,
                 );
             }

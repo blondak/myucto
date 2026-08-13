@@ -21,6 +21,7 @@ use MyInvoice\Service\Payroll\Net\NetRelationshipIncome;
 use MyInvoice\Service\Payroll\Net\PayrollDeductionRequest;
 use MyInvoice\Service\Payroll\Net\PayrollNetCalculator;
 use MyInvoice\Service\Payroll\Net\PayrollNetInput;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
 use PHPUnit\Framework\TestCase;
 
@@ -202,7 +203,7 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
         };
 
         return new PayrollRunGarnishmentProcessor(
-            new GarnishmentCalculator(),
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
             new PayrollGarnishmentRunIntegration($port, $writer),
         );
     }

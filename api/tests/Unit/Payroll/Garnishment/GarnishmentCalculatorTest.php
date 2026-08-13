@@ -7,7 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Garnishment;
 use MyInvoice\Service\Payroll\Garnishment\ClaimCategory;
 use MyInvoice\Service\Payroll\Garnishment\DeductionClaim;
 use MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis;
-use MyInvoice\Service\Payroll\Garnishment\EnforcementRuleset2026;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementDeductionPolicy2026;
 use MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeItem;
 use MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeKind;
 use MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeResolver;
@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyInstruction;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -324,7 +325,7 @@ final class GarnishmentCalculatorTest extends TestCase
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000),
         ], hasMultiplePayers: true);
 
-        $result = (new GarnishmentCalculator())->calculate($input);
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($input);
 
         self::assertSame(GarnishmentStatus::ManualReview, $result->status);
         self::assertContains('multiple_payers_protected_amount_decision_missing', $result->issues);
@@ -480,7 +481,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testVerifiedMultiplePayerDecisionOverridesProtectedAmount(): void
     {
-        $result = (new GarnishmentCalculator())->calculate($this->input(
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
             4_000_000,
             [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
             hasMultiplePayers: true,
@@ -496,7 +497,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testIncompleteClaimRegisterFailsClosedEvenWhenKnownClaimsAreValid(): void
     {
-        $result = (new GarnishmentCalculator())->calculate($this->input(
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
             4_000_000,
             [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000)],
             claimRegisterEvidenceComplete: false,
@@ -559,39 +560,41 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testRulesetSnapshotIsStableAndUsesOnlyOfficialSources(): void
     {
-        self::assertSame(EnforcementRuleset2026::EXPECTED_HASH, EnforcementRuleset2026::canonicalHash());
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', EnforcementRuleset2026::canonicalHash());
+        $policy = EnforcementDeductionPolicy2026::shipped();
+
         self::assertSame(
-            EnforcementRuleset2026::PROTECTED_CALCULATION_BASE_MINOR_UNITS,
-            EnforcementRuleset2026::LIFE_MINIMUM_MINOR_UNITS
-                + EnforcementRuleset2026::NORMATIVE_RENT_MINOR_UNITS
-                + EnforcementRuleset2026::ENERGY_FLAT_MINOR_UNITS,
+            CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
+            $policy->rulesetHash(),
+        );
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $policy->rulesetHash());
+        self::assertSame(
+            $policy->money('protected_amount.calculation_base.monthly'),
+            $policy->money('life_minimum.monthly')
+                + $policy->money('normative_rent.monthly')
+                + $policy->money('energy_flat.monthly'),
         );
         self::assertSame(
-            EnforcementRuleset2026::PROTECTED_DEBTOR_BASE_MINOR_UNITS,
+            $policy->money('protected_amount.debtor_base.monthly'),
             intdiv(
-                EnforcementRuleset2026::PROTECTED_CALCULATION_BASE_MINOR_UNITS
-                    * EnforcementRuleset2026::DEBTOR_SHARE_NUMERATOR,
-                EnforcementRuleset2026::DEBTOR_SHARE_DENOMINATOR,
+                $policy->money('protected_amount.calculation_base.monthly')
+                    * $policy->integer('debtor_share.numerator'),
+                $policy->integer('debtor_share.denominator'),
             ),
         );
         self::assertSame(
-            EnforcementRuleset2026::FULLY_ATTACHABLE_THRESHOLD_MINOR_UNITS,
+            $policy->money('fully_attachable.threshold.monthly'),
             intdiv(
-                EnforcementRuleset2026::PROTECTED_CALCULATION_BASE_MINOR_UNITS
-                    * EnforcementRuleset2026::FULLY_ATTACHABLE_FACTOR_NUMERATOR,
-                EnforcementRuleset2026::FULLY_ATTACHABLE_FACTOR_DENOMINATOR,
+                $policy->money('protected_amount.calculation_base.monthly')
+                    * $policy->integer('fully_attachable.factor_numerator'),
+                $policy->integer('fully_attachable.factor_denominator'),
             ),
         );
-        $sources = EnforcementRuleset2026::snapshot()['sources'] ?? null;
-        self::assertIsArray($sources);
-        foreach ($sources as $source) {
-            self::assertIsArray($source);
-            self::assertIsString($source['url'] ?? null);
-            self::assertContains(parse_url($source['url'], PHP_URL_HOST), [
+        foreach ($policy->ruleset->sources as $source) {
+            self::assertContains(parse_url($source->url, PHP_URL_HOST), [
                 'exekuce.justice.cz',
                 'insolvence.justice.cz',
                 'ppropo.mpsv.cz',
+                'www.e-sbirka.cz',
             ]);
         }
     }
@@ -628,7 +631,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testUnverifiedMultiplePayerDecisionFailsClosedEvenWithAmount(): void
     {
-        $result = (new GarnishmentCalculator())->calculate($this->input(
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
             4_000_000,
             [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000)],
             hasMultiplePayers: true,
@@ -645,7 +648,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testOlderPayrollPeriodPaidInRulesetYearIsSupported(): void
     {
-        $result = (new GarnishmentCalculator())->calculate($this->input(
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
             4_000_000,
             [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000)],
             period: '2025-12',
@@ -657,7 +660,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testRulesetUsesPaymentDateInsteadOfPayrollPeriod(): void
     {
-        $result = (new GarnishmentCalculator())->calculate($this->input(
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
             4_000_000,
             [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000)],
             period: '2026-12',
@@ -694,7 +697,9 @@ final class GarnishmentCalculatorTest extends TestCase
 
     public function testBackPayForDifferentMonthsIsCalculatedSeparately(): void
     {
-        $calculator = new GarnishmentBatchCalculator(new GarnishmentCalculator());
+        $calculator = new GarnishmentBatchCalculator(
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
+        );
         $results = $calculator->calculate([
             $this->input(2_000_000, [
                 $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
@@ -718,7 +723,7 @@ final class GarnishmentCalculatorTest extends TestCase
         PensionEvidence $pensionEvidence = PensionEvidence::None,
         ?InsolvencyInstruction $insolvency = null,
     ): \MyInvoice\Service\Payroll\Garnishment\GarnishmentResult {
-        return (new GarnishmentCalculator())->calculate(
+        return (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate(
             $this->input(
                 $netMinorUnits,
                 $claims,

@@ -12,6 +12,17 @@ final class CzechPayrollRulesets2026
 {
     public const RETRIEVED_ON = '2026-08-03';
 
+    /**
+     * Integritní pin nezabavitelných částek (§ 278 o. s. ř., nařízení vlády
+     * č. 595/2006 Sb.). Do MZ-14-W11 stejnou roli plnil `EXPECTED_HASH` nad
+     * konstantami v `EnforcementRuleset2026`; hodnoty se ale kvůli tomu nedaly
+     * změnit bez nasazení. Bydlí proto v registry jako každý jiný parametr
+     * a pin hlídá už jen VÝCHOZÍ sadu z kódu — override z administrace má
+     * vlastní `content_hash` a vlastní auditní stopu.
+     */
+    public const ENFORCEMENT_DEDUCTIONS_HASH =
+        '353471b01f6be8b43da321dcaceef65743a4a5ae917bc8bb9ec5ba5d72951a42';
+
     public static function provider(): PayrollRulesetProvider
     {
         $technicalReview = new RulesetTechnicalReview(
@@ -259,19 +270,55 @@ final class CzechPayrollRulesets2026
         );
     }
 
+    /**
+     * Nezabavitelné částky a pravidla pořadí exekučních srážek. Životní minimum
+     * i normativní náklady na bydlení mění vláda nařízením několikrát za rok,
+     * proto jsou hodnoty administrovatelné a výchozí sada je jen pinnutý default.
+     *
+     * Odvozené částky (základ pro výpočet, nezabavitelná částka na povinného,
+     * hranice plně zabavitelného zbytku) se ZÁMĚRNĚ vezou jako samostatné
+     * parametry, ne jako runtime dopočet: nařízení je vyhlašuje přímo v korunách
+     * a účetní je opisuje z tabulky. Jejich soulad se vstupy hlídá test.
+     */
     private static function enforcementDeductions(RulesetTechnicalReview $technicalReview): PayrollRulesetVersion
     {
         return self::version(
             'cz-payroll-2026.enforcement-deductions.v1',
             PayrollRulesetDomain::EnforcementDeductions,
-            PayrollRulesetCapability::ManualReview,
-            [self::civilProcedure()],
+            PayrollRulesetCapability::Supported,
             [
-                'calculation' => PayrollRuleValue::manualReview(
-                    'Protected amounts, dependants and priority ordering require a separately reviewed legal fixture.',
-                ),
+                self::civilProcedure(),
+                self::enforcementCalculator(),
+                self::enforcementIncome(),
+                self::insolvencyDebtRelief(),
+                self::labourCodeDeductions(),
+            ],
+            [
+                'debtor_share.denominator' => PayrollRuleValue::integer(100),
+                'debtor_share.numerator' => PayrollRuleValue::integer(85),
+                'dependant_share.denominator' => PayrollRuleValue::integer(4),
+                'dependant_share.numerator' => PayrollRuleValue::integer(1),
+                'employer_flat_fee.maximum.monthly' => PayrollRuleValue::moneyMinor(5_000),
+                'employer_flat_fee.order_effective_from' => PayrollRuleValue::text('2022-01-01'),
+                'energy_flat.monthly' => PayrollRuleValue::moneyMinor(230_000),
+                'four_enforcement_rule.pension_exception_limit' =>
+                    PayrollRuleValue::moneyMinor(108_900),
+                'fully_attachable.factor_denominator' => PayrollRuleValue::integer(10),
+                'fully_attachable.factor_numerator' => PayrollRuleValue::integer(19),
+                'fully_attachable.threshold.monthly' => PayrollRuleValue::moneyMinor(3_152_100),
+                'life_minimum.monthly' => PayrollRuleValue::moneyMinor(486_000),
+                'normative_rent.monthly' => PayrollRuleValue::moneyMinor(943_000),
+                'protected_amount.calculation_base.monthly' =>
+                    PayrollRuleValue::moneyMinor(1_659_000),
+                'protected_amount.debtor_base.monthly' => PayrollRuleValue::moneyMinor(1_410_150),
+                'rounding.proportional_allocation' =>
+                    PayrollRuleValue::text('floor_minor_units_then_largest_remainder'),
+                'rounding.protected_total' => PayrollRuleValue::text('ceil_to_whole_czk_after_sum'),
+                'rounding.thirds_base' =>
+                    PayrollRuleValue::text('floor_to_whole_czk_divisible_by_three'),
             ],
             $technicalReview,
+            self::ENFORCEMENT_DEDUCTIONS_HASH,
         );
     }
 
@@ -339,6 +386,7 @@ final class CzechPayrollRulesets2026
         array $sources,
         array $parameters,
         RulesetTechnicalReview $technicalReview,
+        ?string $expectedHash = null,
     ): PayrollRulesetVersion {
         ksort($parameters, SORT_STRING);
 
@@ -354,6 +402,7 @@ final class CzechPayrollRulesets2026
             $parameters,
             null,
             $technicalReview,
+            $expectedHash,
         );
     }
 
@@ -423,6 +472,46 @@ final class CzechPayrollRulesets2026
             'e-sbirka-civil-procedure',
             'e-Sbírka: občanský soudní řád č. 99/1963 Sb.',
             'https://www.e-sbirka.cz/sb/1963/99',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function enforcementCalculator(): RulesetSource
+    {
+        return new RulesetSource(
+            'justice-enforcement-calculator-2026',
+            'Justice.cz: výpočet srážek ze mzdy pro rok 2026',
+            'https://exekuce.justice.cz/vypocet-srazek-ze-mzdy/',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function enforcementIncome(): RulesetSource
+    {
+        return new RulesetSource(
+            'justice-enforcement-income',
+            'Justice.cz: srážky ze mzdy a jiných příjmů',
+            'https://exekuce.justice.cz/srazky-ze-mzdy-a-jinych-prijmu/',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function insolvencyDebtRelief(): RulesetSource
+    {
+        return new RulesetSource(
+            'justice-insolvency-debt-relief',
+            'Justice.cz: oddlužení — jak ven z dluhové pasti',
+            'https://insolvence.justice.cz/jak-ven-z-dluhove-pasti/oddluzeni/',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function labourCodeDeductions(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-labour-code-deductions',
+            'MPSV: srážky z příjmu z pracovněprávního vztahu',
+            'https://ppropo.mpsv.cz/pdf/XXI4Srazkyzprijmuzpracovnepravni.pdf',
             self::RETRIEVED_ON,
         );
     }

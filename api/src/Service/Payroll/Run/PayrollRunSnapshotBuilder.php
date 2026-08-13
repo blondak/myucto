@@ -21,6 +21,11 @@ use PDO;
 
 final class PayrollRunSnapshotBuilder
 {
+    /**
+     * `$rulesets` je POVINNÝ. Jako volitelný parametr s defaultem ho PHP-DI
+     * nevyplňovalo a snapshot běhu si tiše bral výchozí sadu z kódu, takže
+     * manifest rulesetů neodpovídal tomu, čím se běh doopravdy počítal.
+     */
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,

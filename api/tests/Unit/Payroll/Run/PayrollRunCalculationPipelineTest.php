@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentPort;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentRunIntegration;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentSnapshotWriter;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculator;
 use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
@@ -70,7 +71,7 @@ final class PayrollRunCalculationPipelineTest extends TestCase
         };
 
         return new PayrollRunGarnishmentProcessor(
-            new GarnishmentCalculator(),
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
             new PayrollGarnishmentRunIntegration($port, $writer),
         );
     }

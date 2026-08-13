@@ -62,11 +62,34 @@ final class PayrollRulesetProviderTest extends TestCase
     public function testManualReviewDomainRemainsBlockedAtParameterLevel(): void
     {
         $ruleset = CzechPayrollRulesets2026::provider()
-            ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-08-03');
+            ->forDate(PayrollRulesetDomain::Deadlines, '2026-08-03');
 
         $this->expectException(PayrollRulesetException::class);
         $this->expectExceptionMessage('requires manual review');
-        $ruleset->parameter('calculation');
+        $ruleset->parameter('submission_calendar');
+    }
+
+    /**
+     * MZ-14-W11: nezabavitelné částky se do registry přestěhovaly z konstant
+     * v kódu, takže musí být čitelné jako běžné parametry a doména nesmí zůstat
+     * zablokovaná na ruční kontrole.
+     */
+    public function testEnforcementDeductionsAreReadableParameters(): void
+    {
+        $ruleset = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-08-03');
+
+        self::assertSame(PayrollRulesetCapability::Supported, $ruleset->capability);
+        self::assertSame(486_000, $ruleset->parameter('life_minimum.monthly')->value);
+        self::assertSame(943_000, $ruleset->parameter('normative_rent.monthly')->value);
+        self::assertSame(
+            1_410_150,
+            $ruleset->parameter('protected_amount.debtor_base.monthly')->value,
+        );
+        self::assertSame(
+            CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
+            $ruleset->canonicalHash,
+        );
     }
 
     public function testManualReviewParameterFailsIndependentlyOfSupportedDomain(): void

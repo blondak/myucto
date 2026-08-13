@@ -5,35 +5,77 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Garnishment;
 
 use DateTimeImmutable;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use OverflowException;
 
 final class GarnishmentCalculator
 {
+    /**
+     * Provider je POVINNÁ závislost. Volitelný parametr s defaultem by PHP-DI
+     * nevyplnilo a výpočet by tiše četl výchozí sadu z kódu — administrátorská
+     * změna nezabavitelných částek by se neprojevila (chyba MZ-02-W08).
+     */
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
+
     public function calculate(GarnishmentInput $input): GarnishmentResult
     {
-        $issues = $this->validateInput($input);
-        if ($issues !== []) {
-            return $this->manualReview($input, $issues);
+        $policy = null;
+        $rulesetId = null;
+        $rulesetHash = null;
+        $rulesetIssues = [];
+        try {
+            $version = $this->rulesets->forDate(
+                PayrollRulesetDomain::EnforcementDeductions,
+                $input->paymentDate,
+            );
+            $rulesetId = $version->id;
+            $rulesetHash = $version->canonicalHash;
+            $policy = EnforcementDeductionPolicy2026::forRuleset($version);
+        } catch (\Throwable) {
+            $rulesetIssues[] = $rulesetId === null
+                ? 'payment_date_outside_ruleset_2026'
+                : 'enforcement_ruleset_incomplete';
+        }
+        if ($policy === null) {
+            // Identita se bere z ÚČINNÉHO rulesetu, kdykoli existuje — i zastavený
+            // výsledek musí říct, na čem se zastavil. Teprve když datum nepokrývá
+            // žádná sada, zbývá identita výchozí sady z kódu.
+            $shipped = EnforcementDeductionPolicy2026::shipped();
+
+            return $this->manualReview(
+                $input,
+                [...$this->validateInput($input, $shipped), ...$rulesetIssues],
+                $rulesetId ?? $shipped->rulesetId(),
+                $rulesetHash ?? $shipped->rulesetHash(),
+            );
         }
 
-        [$protectedAmount, $protectedTrace] = $this->protectedAmount($input);
+        $issues = $this->validateInput($input, $policy);
+        if ($issues !== []) {
+            return $this->manualReview(
+                $input,
+                $issues,
+                $policy->rulesetId(),
+                $policy->rulesetHash(),
+            );
+        }
+
+        $fullyAttachableThreshold = $policy->money('fully_attachable.threshold.monthly');
+        [$protectedAmount, $protectedTrace] = $this->protectedAmount($input, $policy);
         $income = $input->income->garnishableMinorUnits;
         $remainder = max(0, $income - $protectedAmount);
         $thirdsBase = intdiv(
-            min($remainder, EnforcementRuleset2026::FULLY_ATTACHABLE_THRESHOLD_MINOR_UNITS),
+            min($remainder, $fullyAttachableThreshold),
             300,
         ) * 300;
         $third = intdiv($thirdsBase, 3);
-        $excess = max(
-            0,
-            $remainder - EnforcementRuleset2026::FULLY_ATTACHABLE_THRESHOLD_MINOR_UNITS,
-        );
+        $excess = max(0, $remainder - $fullyAttachableThreshold);
         $roundingTrace = [
             $protectedTrace,
             [
                 'step' => 'thirds_base',
-                'input_minor_units' =>
-                    min($remainder, EnforcementRuleset2026::FULLY_ATTACHABLE_THRESHOLD_MINOR_UNITS),
+                'input_minor_units' => min($remainder, $fullyAttachableThreshold),
                 'multiple_minor_units' => 300,
                 'rounding' => 'floor',
                 'output_minor_units' => $thirdsBase,
@@ -47,8 +89,7 @@ final class GarnishmentCalculator
             ],
             [
                 'step' => 'fully_attachable_excess',
-                'threshold_minor_units' =>
-                    EnforcementRuleset2026::FULLY_ATTACHABLE_THRESHOLD_MINOR_UNITS,
+                'threshold_minor_units' => $fullyAttachableThreshold,
                 'output_minor_units' => $excess,
             ],
         ];
@@ -74,16 +115,26 @@ final class GarnishmentCalculator
                 $allocations,
                 [],
                 $roundingTrace,
-                EnforcementRuleset2026::ID,
-                EnforcementRuleset2026::canonicalHash(),
+                $policy->rulesetId(),
+                $policy->rulesetHash(),
             );
         }
 
         $claims = $this->activeClaims($input->claims);
-        $fourRule = $this->fourEnforcementRuleApplies($claims, $input->pensionEvidence, $third);
-        $allocation = $this->allocateClaims($claims, $third, $excess, $fourRule);
+        $fourRule = $this->fourEnforcementRuleApplies(
+            $claims,
+            $input->pensionEvidence,
+            $third,
+            $policy,
+        );
+        $allocation = $this->allocateClaims($claims, $third, $excess, $fourRule, $policy);
         if ($allocation === null) {
-            return $this->manualReview($input, ['employer_fee_iteration_did_not_converge']);
+            return $this->manualReview(
+                $input,
+                ['employer_fee_iteration_did_not_converge'],
+                $policy->rulesetId(),
+                $policy->rulesetHash(),
+            );
         }
 
         $allocations = [];
@@ -118,8 +169,8 @@ final class GarnishmentCalculator
             $allocations,
             [],
             $roundingTrace,
-            EnforcementRuleset2026::ID,
-            EnforcementRuleset2026::canonicalHash(),
+            $policy->rulesetId(),
+            $policy->rulesetHash(),
         );
     }
 
@@ -190,9 +241,15 @@ final class GarnishmentCalculator
      * }|null
      * @param list<DeductionClaim> $claims
      */
-    private function allocateClaims(array $claims, int $third, int $excess, bool $fourRule): ?array
-    {
+    private function allocateClaims(
+        array $claims,
+        int $third,
+        int $excess,
+        bool $fourRule,
+        EnforcementDeductionPolicy2026 $policy,
+    ): ?array {
         $requestedFee = 0;
+        $flatFeeMaximum = $policy->money('employer_flat_fee.maximum.monthly');
 
         for ($iteration = 0; $iteration < 64; $iteration++) {
             $balances = [];
@@ -213,9 +270,9 @@ final class GarnishmentCalculator
             $claimTotal = self::addExactly(self::sumExactly($first), $priorityUsed);
             $grossWithholding = self::addExactly($claimTotal, $actualFee);
 
-            $candidateFee = $this->hasEligibleFeeClaim($claims) && $grossWithholding > 0
+            $candidateFee = $this->hasEligibleFeeClaim($claims, $policy) && $grossWithholding > 0
                 ? min(
-                    EnforcementRuleset2026::EMPLOYER_FLAT_FEE_MAX_MINOR_UNITS,
+                    $flatFeeMaximum,
                     $generalBeforeFee,
                     self::ceilOneThirdToWholeCrown($grossWithholding),
                 )
@@ -403,12 +460,13 @@ final class GarnishmentCalculator
     /**
      * @param list<DeductionClaim> $claims
      */
-    private function hasEligibleFeeClaim(array $claims): bool
+    private function hasEligibleFeeClaim(array $claims, EnforcementDeductionPolicy2026 $policy): bool
     {
+        $feeOrderEffectiveFrom = $policy->text('employer_flat_fee.order_effective_from');
         foreach ($claims as $claim) {
             if (
                 $claim->legalBasis === DeductionLegalBasis::Statutory
-                && $claim->orderIssuedOn >= EnforcementRuleset2026::EMPLOYER_FLAT_FEE_ORDER_EFFECTIVE_FROM
+                && $claim->orderIssuedOn >= $feeOrderEffectiveFrom
             ) {
                 return true;
             }
@@ -424,6 +482,7 @@ final class GarnishmentCalculator
         array $claims,
         PensionEvidence $pensionEvidence,
         int $third,
+        EnforcementDeductionPolicy2026 $policy,
     ): bool {
         $orders = [];
         foreach ($claims as $claim) {
@@ -441,13 +500,15 @@ final class GarnishmentCalculator
 
         return !(
             $pensionEvidence === PensionEvidence::Verified
-            && $third < EnforcementRuleset2026::FOUR_ENFORCEMENT_PENSION_EXCEPTION_LIMIT_MINOR_UNITS
+            && $third < $policy->money('four_enforcement_rule.pension_exception_limit')
         );
     }
 
     /** @return array{int, array<string, int|string|bool>} */
-    private function protectedAmount(GarnishmentInput $input): array
-    {
+    private function protectedAmount(
+        GarnishmentInput $input,
+        EnforcementDeductionPolicy2026 $policy,
+    ): array {
         if ($input->hasMultiplePayers) {
             $amount = (int) $input->protectedAmountOverrideMinorUnits;
 
@@ -463,14 +524,14 @@ final class GarnishmentCalculator
         }
 
         $allowanceCount = $input->eligibleDependants + ($input->eligibleSpouse ? 1 : 0);
-        $factorNumerator =
-            EnforcementRuleset2026::DEPENDANT_SHARE_DENOMINATOR
-            + ($allowanceCount * EnforcementRuleset2026::DEPENDANT_SHARE_NUMERATOR);
+        $shareDenominator = $policy->integer('dependant_share.denominator');
+        $factorNumerator = $shareDenominator
+            + ($allowanceCount * $policy->integer('dependant_share.numerator'));
         $numerator = self::multiplyExactly(
-            EnforcementRuleset2026::PROTECTED_DEBTOR_BASE_MINOR_UNITS,
+            $policy->money('protected_amount.debtor_base.monthly'),
             $factorNumerator,
         );
-        $denominator = EnforcementRuleset2026::DEPENDANT_SHARE_DENOMINATOR;
+        $denominator = $shareDenominator;
         $amount = self::ceilFractionToMultiple($numerator, $denominator, 100);
 
         return [
@@ -489,16 +550,18 @@ final class GarnishmentCalculator
     }
 
     /** @return list<string> */
-    private function validateInput(GarnishmentInput $input): array
-    {
+    private function validateInput(
+        GarnishmentInput $input,
+        EnforcementDeductionPolicy2026 $policy,
+    ): array {
         $issues = [];
         if (!$this->isPeriod($input->period)) {
             $issues[] = 'invalid_payroll_period';
         }
         if (
             !$this->isDate($input->paymentDate)
-            || $input->paymentDate < EnforcementRuleset2026::EFFECTIVE_FROM
-            || $input->paymentDate > EnforcementRuleset2026::EFFECTIVE_TO
+            || $input->paymentDate < $policy->effectiveFrom()
+            || $input->paymentDate > $policy->effectiveTo()
         ) {
             $issues[] = 'payment_date_outside_ruleset_2026';
         }
@@ -652,8 +715,12 @@ final class GarnishmentCalculator
     }
 
     /** @param list<string> $issues */
-    private function manualReview(GarnishmentInput $input, array $issues): GarnishmentResult
-    {
+    private function manualReview(
+        GarnishmentInput $input,
+        array $issues,
+        string $rulesetId,
+        string $rulesetHash,
+    ): GarnishmentResult {
         sort($issues, SORT_STRING);
         $income = $input->income->garnishableMinorUnits;
 
@@ -672,8 +739,8 @@ final class GarnishmentCalculator
             [],
             array_values(array_unique($issues)),
             [],
-            EnforcementRuleset2026::ID,
-            EnforcementRuleset2026::canonicalHash(),
+            $rulesetId,
+            $rulesetHash,
         );
     }
 
