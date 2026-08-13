@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -32,6 +33,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
     private Connection $db;
     private JmhzPreparationSnapshotRepository $repository;
     private JmhzPreparationSnapshotService $service;
+    private JmhzScenario1DocumentService $scenario1;
     private int $supplierId;
     private int $runId;
     private int $revisionId;
@@ -51,6 +53,9 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         $service = $container->get(JmhzPreparationSnapshotService::class);
         self::assertInstanceOf(JmhzPreparationSnapshotService::class, $service);
         $this->service = $service;
+        $scenario1 = $container->get(JmhzScenario1DocumentService::class);
+        self::assertInstanceOf(JmhzScenario1DocumentService::class, $scenario1);
+        $this->scenario1 = $scenario1;
         $this->sensitiveData = $container->get(PayrollSensitiveData::class);
         $this->encryption = $container->get(SecretEncryption::class);
         $pdo = $db->pdo();
@@ -121,6 +126,107 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         self::assertStringStartsWith('enc:v2:', (string) $stored['snapshot_ciphertext']);
         self::assertStringNotContainsString('entity_id', (string) $stored['readiness_json']);
         self::assertStringNotContainsString('snapshot_ciphertext', CanonicalJson::encode($first));
+    }
+
+    public function testVerifiedLoaderReturnsTypedPayloadWithoutExposingCiphertext(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-verified-loader',
+            null,
+        );
+
+        $verified = $this->service->loadVerified(
+            $this->supplierId,
+            'test',
+            (int) $created['id'],
+        );
+
+        self::assertSame($created['id'], $verified->id);
+        self::assertSame($this->revisionId, $verified->sourceRevisionId);
+        self::assertSame('scenario_1', $verified->scenarioKey);
+        self::assertSame(
+            JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
+            $verified->payload['schema_reference'],
+        );
+        self::assertObjectNotHasProperty('snapshotCiphertext', $verified);
+    }
+
+    public function testVerifiedLoaderHidesCrossEnvironmentAndUnknownScope(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-loader-scope',
+            null,
+        );
+
+        foreach ([
+            [$this->supplierId, 'production', (int) $created['id']],
+            [$this->supplierId, 'test', PHP_INT_MAX],
+        ] as [$supplierId, $environment, $preparationId]) {
+            try {
+                $this->service->loadVerified(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                );
+                self::fail('Cizí scope přípravy JMHZ musí zůstat skrytý.');
+            } catch (JmhzPreparationSnapshotException $exception) {
+                self::assertSame('jmhz_preparation_not_found', $exception->validationCode);
+            }
+        }
+    }
+
+    public function testScenarioResolverIsReadOnlyAndKeepsUnfrozenInteractionsBlocked(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-read-only-resolver',
+            null,
+        );
+        $before = $this->tableCounts([
+            'payroll_jmhz_preparation_snapshots',
+            'payroll_jmhz_preparation_idempotency_claims',
+            'payroll_submissions',
+            'payroll_submission_artifacts',
+        ]);
+
+        $resolution = $this->scenario1->resolve(
+            $this->supplierId,
+            'test',
+            (int) $created['id'],
+        );
+
+        self::assertSame('blocked', $resolution->status());
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+        self::assertContains('jmhz_interaction_in13_unresolved', $codes);
+        self::assertContains('jmhz_interaction_in28_unresolved', $codes);
+        self::assertContains('jmhz_interaction_in30_unresolved', $codes);
+        self::assertSame($before, $this->tableCounts(array_keys($before)));
+    }
+
+    /**
+     * @param list<string> $tables
+     * @return array<string,int>
+     */
+    private function tableCounts(array $tables): array
+    {
+        $counts = [];
+        foreach ($tables as $table) {
+            $counts[$table] = (int) $this->db->pdo()
+                ->query("SELECT COUNT(*) FROM {$table}")
+                ->fetchColumn();
+        }
+        return $counts;
     }
 
     public function testDifferentIdempotencyKeysAreBothBoundToRequestDeduplication(): void

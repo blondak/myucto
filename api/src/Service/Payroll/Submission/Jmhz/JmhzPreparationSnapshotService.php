@@ -33,6 +33,65 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzEldpEvidenceSnapshotService $eldpEvidence,
     ) {}
 
+    public function loadVerified(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+    ): JmhzVerifiedPreparationSnapshot {
+        if ($supplierId <= 0 || $preparationId <= 0
+            || !in_array($environment, ['production', 'test'], true)
+        ) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_not_found',
+                'Příprava JMHZ nebyla nalezena.',
+            );
+        }
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $environment,
+            $preparationId,
+        ): JmhzVerifiedPreparationSnapshot {
+            $stored = $this->repository->find(
+                $supplierId,
+                $environment,
+                $preparationId,
+            );
+            if ($stored === null) {
+                throw new JmhzPreparationSnapshotException(
+                    'jmhz_preparation_not_found',
+                    'Příprava JMHZ nebyla nalezena.',
+                );
+            }
+            $verified = $this->verifyStored($stored);
+            $source = $this->repository->lockSource(
+                $supplierId,
+                $verified->sourceRevisionId,
+            );
+            $revision = is_array($source) ? ($source['revision'] ?? null) : null;
+            $sourceRevision = $verified->payload['source_revision'] ?? null;
+            if (!is_array($revision) || array_is_list($revision)
+                || !is_array($sourceRevision) || array_is_list($sourceRevision)
+                || ($revision['run_id'] ?? null) !== $verified->runId
+                || ($revision['revision_no'] ?? null) !== $verified->revisionNo
+                || ($revision['current_revision_no'] ?? null) !== $verified->revisionNo
+                || ($revision['status'] ?? null) !== 'approved'
+                || ($revision['revision_kind'] ?? null) !== 'regular'
+                || ($revision['input_snapshot_hash'] ?? null)
+                    !== ($sourceRevision['input_snapshot_hash'] ?? null)
+                || ($revision['result_snapshot_hash'] ?? null)
+                    !== ($sourceRevision['result_snapshot_hash'] ?? null)
+                || ($revision['ruleset_manifest_hash'] ?? null)
+                    !== ($sourceRevision['ruleset_manifest_hash'] ?? null)
+            ) {
+                throw new JmhzPreparationSnapshotException(
+                    'jmhz_preparation_source_not_current',
+                    'Příprava JMHZ již neodpovídá aktuální schválené revizi.',
+                );
+            }
+            return $verified;
+        });
+    }
+
     /** @return array<string,mixed> */
     public function freeze(
         int $supplierId,
@@ -351,7 +410,7 @@ final readonly class JmhzPreparationSnapshotService
     }
 
     /** @param array<string,mixed> $stored */
-    private function verifyStored(array $stored): void
+    private function verifyStored(array $stored): JmhzVerifiedPreparationSnapshot
     {
         foreach ([
             'source_manifest_json' => 'source_manifest_sha256',
@@ -505,6 +564,24 @@ final readonly class JmhzPreparationSnapshotService
                 'Request fingerprint pripravy JMHZ nesouhlasi.',
             );
         }
+        return new JmhzVerifiedPreparationSnapshot(
+            (int) $stored['id'],
+            (int) $stored['supplier_id'],
+            (string) $stored['environment'],
+            (int) $stored['run_id'],
+            (int) $stored['source_revision_id'],
+            (int) ($scope['revision_no'] ?? 0),
+            (string) $stored['period_start'],
+            (string) ($scope['period_end'] ?? ''),
+            (string) $stored['scenario_key'],
+            (string) $stored['builder_version'],
+            (string) $stored['source_manifest_sha256'],
+            (string) $stored['readiness_sha256'],
+            (string) $stored['snapshot_fingerprint'],
+            $manifest,
+            $readiness,
+            $snapshot,
+        );
     }
 
     /** @return array{snapshot_schema:string,manifest_schema:string,request_schema:string} */
