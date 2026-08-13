@@ -1,0 +1,524 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Submission\Jmhz;
+
+use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
+
+final readonly class JmhzPreparationSnapshotService
+{
+    public function __construct(
+        private JmhzPreparationSnapshotRepository $repository,
+        private JmhzPreparationSnapshotBuilder $builder,
+        private PayrollRegistrationIdentityService $identities,
+        private PayrollComponentJmhzMappingRepository $mappings,
+        private PayrollSensitiveData $sensitiveData,
+        private SecretEncryption $encryption,
+    ) {}
+
+    /** @return array<string,mixed> */
+    public function freeze(
+        int $supplierId,
+        int $sourceRevisionId,
+        string $environment,
+        string $idempotencyKey,
+        ?int $createdBy,
+    ): array {
+        if ($supplierId <= 0 || $sourceRevisionId <= 0) {
+            throw new \InvalidArgumentException('Firma a zdrojova revize musi byt kladna cisla.');
+        }
+        if (!in_array($environment, ['production', 'test'], true)) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_environment_invalid',
+                'Prostredi pripravy JMHZ neni platne.',
+            );
+        }
+        if ($createdBy !== null && $createdBy <= 0) {
+            throw new \InvalidArgumentException('Uzivatel pripravy musi byt kladne cislo.');
+        }
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 190) {
+            throw new \InvalidArgumentException('Idempotency klic musi mit 1 az 190 bajtu.');
+        }
+        $idempotencyHash = hash('sha256', $idempotencyKey, true);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $sourceRevisionId,
+            $environment,
+            $idempotencyHash,
+            $createdBy,
+        ): array {
+            $source = $this->repository->lockSource($supplierId, $sourceRevisionId);
+            if ($source === null) {
+                throw new JmhzPreparationSnapshotException(
+                    'jmhz_revision_not_found',
+                    'Zdrojova mzdova revize nebyla nalezena.',
+                );
+            }
+            $inserted = $this->repository->insertIdempotencyClaim(
+                $supplierId,
+                $environment,
+                $idempotencyHash,
+                $sourceRevisionId,
+                $createdBy,
+            );
+            if (!$inserted) {
+                $claim = $this->repository->findIdempotencyClaimForUpdate(
+                    $supplierId,
+                    $environment,
+                    $idempotencyHash,
+                );
+                if ($claim === null) {
+                    throw new JmhzPreparationSnapshotException(
+                        'jmhz_preparation_idempotency_incomplete',
+                        'Idempotentni vazbu pripravy JMHZ nelze nacist.',
+                    );
+                }
+                if ($claim['source_revision_id'] !== $sourceRevisionId) {
+                    throw new JmhzPreparationSnapshotException(
+                        'jmhz_preparation_idempotency_scope_mismatch',
+                        'Idempotentni opakovani neodpovida puvodni zdrojove revizi.',
+                    );
+                }
+                $preparationId = $claim['preparation_snapshot_id'] ?? null;
+                if (!is_int($preparationId)) {
+                    throw new JmhzPreparationSnapshotException(
+                        'jmhz_preparation_idempotency_incomplete',
+                        'Idempotentni vazba pripravy JMHZ neni dokoncena.',
+                    );
+                }
+                $idempotent = $this->repository->find(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                );
+                if ($idempotent === null) {
+                    throw new JmhzPreparationSnapshotException(
+                        'jmhz_preparation_idempotency_incomplete',
+                        'Idempotentni vazba pripravy JMHZ nema cilovy snapshot.',
+                    );
+                }
+                $this->verifyStored($idempotent);
+                return $this->result($idempotent, false);
+            }
+
+            JmhzScenarioRequirementSourceCatalog::load();
+            JmhzControlSourceCatalog::load();
+            (new JmhzSpecPackageCatalog())->load(
+                JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            );
+            $revision = $source['revision'];
+            if (!is_array($revision)) {
+                throw new \UnexpectedValueException('Zdroj revize neni objekt.');
+            }
+            $inputJson = $revision['input_snapshot_json'] ?? null;
+            if (!is_string($inputJson)) {
+                throw new JmhzPreparationSnapshotException('jmhz_snapshot_missing', 'Vstupni snapshot revize chybi.');
+            }
+            $input = json_decode($inputJson, true, flags: JSON_THROW_ON_ERROR);
+            if (!is_array($input) || array_is_list($input)) {
+                throw new JmhzPreparationSnapshotException('jmhz_snapshot_invalid', 'Vstupni snapshot revize neni objekt.');
+            }
+            $periodEnd = (new \DateTimeImmutable((string) ($revision['period_start'] ?? '')))
+                ->modify('last day of this month')
+                ->format('Y-m-d');
+            [$identitySources, $mappingSources, $sourceIssues] = $this->supplements(
+                $supplierId,
+                $environment,
+                $periodEnd,
+                $input,
+            );
+            $snapshot = $this->builder->build(
+                $supplierId,
+                $environment,
+                $source,
+                $identitySources,
+                $mappingSources,
+                $sourceIssues,
+            );
+            $snapshotJson = $snapshot->canonicalJson();
+            $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
+                $snapshotJson,
+                'jmhz-preparation-snapshot',
+                $supplierId,
+            );
+            $readinessJson = CanonicalJson::encode($snapshot->readiness());
+            $readinessHash = hash('sha256', $readinessJson);
+            $scope = $snapshot->payload['scope'];
+            if (!is_array($scope) || array_is_list($scope)) {
+                throw new \UnexpectedValueException('Scope pripravy JMHZ neni objekt.');
+            }
+            $sourceManifestJson = CanonicalJson::encode([
+                'schema_reference' => 'payroll-jmhz-preparation-source-manifest.v1',
+                'builder_version' => JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                'scope' => $scope,
+                'specification' => $snapshot->payload['specification'],
+                'source_revision' => $snapshot->payload['source_revision'],
+                'source_versions' => $snapshot->payload['source_versions'],
+                'snapshot_fingerprint' => $snapshotFingerprint,
+                'readiness_sha256' => $readinessHash,
+            ]);
+            $sourceManifestHash = hash('sha256', $sourceManifestJson);
+            $requestFingerprint = hash('sha256', CanonicalJson::encode([
+                'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'source_revision_id' => $sourceRevisionId,
+                'source_manifest_sha256' => $sourceManifestHash,
+            ]));
+            $existing = $this->repository->findByRequestForUpdate(
+                $supplierId,
+                $environment,
+                $requestFingerprint,
+            );
+            if ($existing !== null) {
+                $this->verifyStored($existing);
+                $this->repository->bindIdempotencyClaim(
+                    $supplierId,
+                    $environment,
+                    $idempotencyHash,
+                    (int) $existing['id'],
+                );
+                return $this->result($existing, false);
+            }
+            $ciphertext = $this->encryption->encryptFor(
+                $snapshotJson,
+                $this->encryptionContext(
+                    $supplierId,
+                    $environment,
+                    $sourceRevisionId,
+                    $snapshotFingerprint,
+                    $sourceManifestHash,
+                    $readinessHash,
+                ),
+            );
+            $readiness = $snapshot->readiness();
+            $id = $this->repository->insert([
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'run_id' => $scope['run_id'],
+                'source_revision_id' => $sourceRevisionId,
+                'period_start' => $scope['period_start'],
+                'scenario_key' => 'scenario_1',
+                'builder_version' => JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                'readiness_status' => $readiness['status'],
+                'issue_count' => $readiness['issue_count'],
+                'source_manifest_json' => $sourceManifestJson,
+                'source_manifest_sha256' => $sourceManifestHash,
+                'readiness_json' => $readinessJson,
+                'readiness_sha256' => $readinessHash,
+                'snapshot_ciphertext' => $ciphertext,
+                'snapshot_fingerprint' => $snapshotFingerprint,
+                'request_fingerprint' => $requestFingerprint,
+                'idempotency_key_hash' => $idempotencyHash,
+                'created_by' => $createdBy,
+            ]);
+            $stored = $this->repository->find($supplierId, $environment, $id);
+            if ($stored === null) {
+                throw new \RuntimeException('Ulozenou pripravu JMHZ nelze nacist.');
+            }
+            $this->repository->bindIdempotencyClaim(
+                $supplierId,
+                $environment,
+                $idempotencyHash,
+                $id,
+            );
+            $this->verifyStored($stored);
+            return $this->result($stored, true);
+        });
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array{array<int,array<string,mixed>>,array<int,array<string,mixed>>,list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>}
+     */
+    private function supplements(int $supplierId, string $environment, string $periodEnd, array $input): array
+    {
+        $identities = [];
+        $mappings = [];
+        $issues = [];
+        $people = $input['people'] ?? [];
+        if (!is_array($people) || !array_is_list($people)) {
+            return [$identities, $mappings, $issues];
+        }
+        foreach ($people as $person) {
+            if (!is_array($person) || array_is_list($person)) {
+                continue;
+            }
+            $employee = $person['employee'] ?? null;
+            $employeeId = is_array($employee) && is_int($employee['id'] ?? null)
+                ? $employee['id']
+                : 0;
+            $employments = $person['employments'] ?? [];
+            if (!is_array($employments) || !array_is_list($employments)) {
+                continue;
+            }
+            foreach ($employments as $entry) {
+                if (!is_array($entry) || array_is_list($entry)) {
+                    continue;
+                }
+                $employment = $entry['employment'] ?? null;
+                $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
+                    ? $employment['id']
+                    : 0;
+                if ($employeeId > 0 && $employmentId > 0) {
+                    try {
+                        $identity = $this->identities->sensitiveSnapshotSourceAt(
+                            $supplierId,
+                            $employeeId,
+                            $employmentId,
+                            $environment,
+                            $periodEnd,
+                        );
+                        $jmhz = $this->identities->sensitiveJmhzIdentityAt(
+                            $supplierId,
+                            $employeeId,
+                            $employmentId,
+                            $environment,
+                            $periodEnd,
+                        );
+                        $identities[$employmentId] = $identity + [
+                            'jmhz_environment' => $jmhz['environment'],
+                            'person_external_identifier' => $jmhz['person_external_identifier'],
+                            'jmhz_employment_external_identifier' => $jmhz['employment_external_identifier'],
+                        ];
+                    } catch (\DomainException $exception) {
+                        $issues[] = [
+                            'code' => $exception instanceof PayrollRegistrationIdentitySnapshotException
+                                ? $exception->validationCode
+                                : 'jmhz_identity_incomplete',
+                            'entity_type' => 'employment',
+                            'entity_id' => $employmentId,
+                            'attribute_ids' => ['10051', '10228'],
+                        ];
+                    }
+                }
+                $inputRows = $entry['inputs'] ?? [];
+                if (!is_array($inputRows) || !array_is_list($inputRows)) {
+                    continue;
+                }
+                foreach ($inputRows as $inputRow) {
+                    $component = is_array($inputRow) ? ($inputRow['component'] ?? null) : null;
+                    if (!is_array($component)
+                        || ($component['jmhz_treatment'] ?? null) !== 'included'
+                        || !is_int($component['component_id'] ?? null)
+                    ) {
+                        continue;
+                    }
+                    $componentId = $component['component_id'];
+                    try {
+                        $mappings[$componentId] = $this->mappings->snapshot($supplierId, $componentId);
+                    } catch (\DomainException) {
+                    }
+                }
+            }
+        }
+        ksort($identities, SORT_NUMERIC);
+        ksort($mappings, SORT_NUMERIC);
+        return [$identities, $mappings, $issues];
+    }
+
+    /** @param array<string,mixed> $stored */
+    private function verifyStored(array $stored): void
+    {
+        foreach ([
+            'source_manifest_json' => 'source_manifest_sha256',
+            'readiness_json' => 'readiness_sha256',
+        ] as $jsonField => $hashField) {
+            $json = $stored[$jsonField] ?? null;
+            $hash = $stored[$hashField] ?? null;
+            if (!is_string($json) || !is_string($hash)
+                || !hash_equals($hash, hash('sha256', $json))
+            ) {
+                throw new JmhzPreparationSnapshotException('jmhz_preparation_hash_mismatch', 'Otisk ulozene pripravy JMHZ nesouhlasi.');
+            }
+            $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+            if (!is_array($decoded) || CanonicalJson::encode($decoded) !== $json) {
+                throw new JmhzPreparationSnapshotException('jmhz_preparation_hash_mismatch', 'Ulozena priprava JMHZ neni kanonicka.');
+            }
+        }
+        $manifest = json_decode(
+            (string) $stored['source_manifest_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $readiness = json_decode(
+            (string) $stored['readiness_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        if (!is_array($manifest) || array_is_list($manifest)
+            || !is_array($readiness) || array_is_list($readiness)
+        ) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_hash_mismatch',
+                'Metadata pripravy JMHZ nemaji platny tvar.',
+            );
+        }
+        $scope = $manifest['scope'] ?? null;
+        if (!is_array($scope) || array_is_list($scope)
+            || ($manifest['schema_reference'] ?? null)
+                !== 'payroll-jmhz-preparation-source-manifest.v1'
+            || ($manifest['builder_version'] ?? null)
+                !== ($stored['builder_version'] ?? null)
+            || ($manifest['snapshot_fingerprint'] ?? null)
+                !== ($stored['snapshot_fingerprint'] ?? null)
+            || ($manifest['readiness_sha256'] ?? null)
+                !== ($stored['readiness_sha256'] ?? null)
+            || ($scope['supplier_id'] ?? null) !== ($stored['supplier_id'] ?? null)
+            || ($scope['environment'] ?? null) !== ($stored['environment'] ?? null)
+            || ($scope['run_id'] ?? null) !== ($stored['run_id'] ?? null)
+            || ($scope['source_revision_id'] ?? null)
+                !== ($stored['source_revision_id'] ?? null)
+            || ($scope['period_start'] ?? null) !== ($stored['period_start'] ?? null)
+            || ($scope['scenario_key'] ?? null) !== ($stored['scenario_key'] ?? null)
+            || ($readiness['status'] ?? null) !== ($stored['readiness_status'] ?? null)
+            || ($readiness['issue_count'] ?? null) !== ($stored['issue_count'] ?? null)
+            || ($readiness['official_submission_supported'] ?? null) !== false
+        ) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_hash_mismatch',
+                'Manifest pripravy JMHZ neodpovida archivnim metadatum.',
+            );
+        }
+        $plaintext = $this->encryption->decryptFor(
+            (string) $stored['snapshot_ciphertext'],
+            $this->encryptionContext(
+                (int) $stored['supplier_id'],
+                (string) $stored['environment'],
+                (int) $stored['source_revision_id'],
+                (string) $stored['snapshot_fingerprint'],
+                (string) $stored['source_manifest_sha256'],
+                (string) $stored['readiness_sha256'],
+            ),
+        );
+        $fingerprint = $this->sensitiveData->keyedFingerprint(
+            $plaintext,
+            'jmhz-preparation-snapshot',
+            (int) $stored['supplier_id'],
+        );
+        if (!hash_equals((string) $stored['snapshot_fingerprint'], $fingerprint)) {
+            throw new JmhzPreparationSnapshotException('jmhz_preparation_hash_mismatch', 'Citlivy snapshot pripravy JMHZ ma jiny otisk.');
+        }
+        $snapshot = json_decode($plaintext, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($snapshot) || CanonicalJson::encode($snapshot) !== $plaintext) {
+            throw new JmhzPreparationSnapshotException('jmhz_preparation_hash_mismatch', 'Citlivy snapshot pripravy JMHZ neni kanonicky.');
+        }
+        $snapshotScope = $snapshot['scope'] ?? null;
+        $snapshotIssues = $snapshot['readiness_issues'] ?? null;
+        if (!is_array($snapshotScope) || array_is_list($snapshotScope)
+            || !is_array($snapshotIssues) || !array_is_list($snapshotIssues)
+            || ($snapshot['schema_reference'] ?? null)
+                !== JmhzPreparationSnapshot::SCHEMA_REFERENCE
+            || ($snapshot['builder_version'] ?? null)
+                !== JmhzPreparationSnapshotBuilder::BUILDER_VERSION
+            || CanonicalJson::encode($snapshotScope) !== CanonicalJson::encode($scope)
+            || CanonicalJson::encode($snapshot['specification'] ?? null)
+                !== CanonicalJson::encode($manifest['specification'] ?? null)
+            || CanonicalJson::encode($snapshot['source_revision'] ?? null)
+                !== CanonicalJson::encode($manifest['source_revision'] ?? null)
+            || CanonicalJson::encode($snapshot['source_versions'] ?? null)
+                !== CanonicalJson::encode($manifest['source_versions'] ?? null)
+        ) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_hash_mismatch',
+                'Citlivy snapshot pripravy JMHZ neodpovida manifestu.',
+            );
+        }
+        $normalizedIssues = [];
+        foreach ($snapshotIssues as $issue) {
+            if (!is_array($issue) || array_is_list($issue)
+                || !is_string($issue['code'] ?? null)
+                || !is_string($issue['entity_type'] ?? null)
+                || (!is_int($issue['entity_id'] ?? null)
+                    && ($issue['entity_id'] ?? null) !== null)
+                || !is_array($issue['attribute_ids'] ?? null)
+                || !array_is_list($issue['attribute_ids'])
+            ) {
+                throw new JmhzPreparationSnapshotException(
+                    'jmhz_preparation_hash_mismatch',
+                    'Citlivy snapshot pripravy JMHZ ma neplatny blocker.',
+                );
+            }
+            $normalizedIssues[] = [
+                'code' => $issue['code'],
+                'entity_type' => $issue['entity_type'],
+                'entity_id' => $issue['entity_id'],
+                'attribute_ids' => $issue['attribute_ids'],
+            ];
+        }
+        $expectedReadiness = (new JmhzPreparationSnapshot(
+            $snapshot,
+            $normalizedIssues,
+        ))->readiness();
+        if (CanonicalJson::encode($expectedReadiness)
+            !== (string) $stored['readiness_json']
+        ) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_hash_mismatch',
+                'Readiness pripravy JMHZ neodpovida citlivemu snapshotu.',
+            );
+        }
+        $expectedRequest = hash('sha256', CanonicalJson::encode([
+            'schema_reference' => 'payroll-jmhz-preparation-request.v1',
+            'supplier_id' => $stored['supplier_id'],
+            'environment' => $stored['environment'],
+            'source_revision_id' => $stored['source_revision_id'],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+        ]));
+        if (!hash_equals((string) $stored['request_fingerprint'], $expectedRequest)) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_hash_mismatch',
+                'Request fingerprint pripravy JMHZ nesouhlasi.',
+            );
+        }
+    }
+
+    private function encryptionContext(int $supplierId, string $environment, int $revisionId, string $snapshotFingerprint, string $manifestHash, string $readinessHash): string
+    {
+        return "payroll:jmhz-preparation:{$supplierId}:{$environment}:{$revisionId}:{$snapshotFingerprint}:{$manifestHash}:{$readinessHash}";
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array<string,mixed>
+     */
+    private function result(array $stored, bool $created): array
+    {
+        $readiness = json_decode(
+            (string) $stored['readiness_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        if (!is_array($readiness) || array_is_list($readiness)) {
+            throw new \UnexpectedValueException('Readiness pripravy JMHZ neni objekt.');
+        }
+        return [
+            'id' => $stored['id'],
+            'supplier_id' => $stored['supplier_id'],
+            'environment' => $stored['environment'],
+            'run_id' => $stored['run_id'],
+            'source_revision_id' => $stored['source_revision_id'],
+            'period_start' => $stored['period_start'],
+            'scenario_key' => $stored['scenario_key'],
+            'builder_version' => $stored['builder_version'],
+            'readiness_status' => $stored['readiness_status'],
+            'issue_count' => $stored['issue_count'],
+            'issues' => $readiness['issues'] ?? [],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+            'readiness_sha256' => $stored['readiness_sha256'],
+            'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
+            'official_submission_supported' => false,
+            'created' => $created,
+        ];
+    }
+}
