@@ -108,6 +108,13 @@ final class JmhzScenario1DocumentResolver
                 ['10371', '10482'],
                 $blockers,
             );
+            $social = $this->calculatedResult(
+                $statutory['social_insurance'] ?? null,
+                'jmhz_scenario1_social_result_not_calculated',
+                $employeeId,
+                ['10370', '10481'],
+                $blockers,
+            );
             $tax = $this->calculatedResult(
                 $statutory['income_tax'] ?? null,
                 'jmhz_scenario1_income_tax_result_not_calculated',
@@ -242,6 +249,24 @@ final class JmhzScenario1DocumentResolver
                             ? $health['employer_contribution_minor_units']
                             : null,
                         '10482',
+                        'person',
+                        $employeeId,
+                        $blockers,
+                    ),
+                    'employee_social_czk' => $this->wholeCzk(
+                        is_int($social['employee_contribution_minor_units'] ?? null)
+                            ? $social['employee_contribution_minor_units']
+                            : null,
+                        '10370',
+                        'person',
+                        $employeeId,
+                        $blockers,
+                    ),
+                    'employer_social_czk' => $this->wholeCzk(
+                        is_int($social['employer_contribution_minor_units'] ?? null)
+                            ? $social['employer_contribution_minor_units']
+                            : null,
+                        '10481',
                         'person',
                         $employeeId,
                         $blockers,
@@ -501,6 +526,17 @@ final class JmhzScenario1DocumentResolver
     ): array {
         $advance = $tax['advance_tax'] ?? null;
         if (!is_array($advance) || array_is_list($advance)) {
+            // Blocker se přidává i tady, přestože ho `inspectUnsupportedTax()`
+            // pro tentýž stav hlásí taky. Spoléhat na pořadí volání by z toho
+            // udělalo přesně tu implicitní podmínku, kterou tahle vrstva jinde
+            // odstraňuje; duplicitu srovná `normalizeBlockers()`.
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_advance_tax_missing',
+                'person',
+                $employeeId,
+                ['10297', '10298', '10305', '10306'],
+            );
+
             return [
                 'base' => null,
                 'computed' => null,

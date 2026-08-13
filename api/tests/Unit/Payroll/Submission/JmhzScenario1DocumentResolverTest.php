@@ -371,6 +371,12 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                             'employee_contribution_minor_units' => 4_500,
                             'employer_contribution_minor_units' => 9_000,
                         ],
+                        'social_insurance' => [
+                            'status' => 'calculated',
+                            'issues' => [],
+                            'employee_contribution_minor_units' => 7_100,
+                            'employer_contribution_minor_units' => 24_800,
+                        ],
                         'income_tax' => [
                             'status' => 'calculated',
                             'issues' => [],
