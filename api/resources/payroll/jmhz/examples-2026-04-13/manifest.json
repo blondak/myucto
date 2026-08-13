@@ -1,0 +1,1321 @@
+{
+    "manifest_sha256": "cf251bed901af193add356be9027474538a2cb378bb9174f73c0dd75a713b683",
+    "payload": {
+        "schema_version": "jmhz-official-xml-example-source-catalog.v1",
+        "catalog_key": "jmhz-official-xml-examples-2026-04-13-source-v1",
+        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1",
+        "spec_manifest_sha256": "f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b",
+        "xsd_inventory_sha256": "72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c",
+        "usage_policy": "source_evidence_only",
+        "privacy_policy": "xml_bytes_external_not_redistributed",
+        "source_archive": {
+            "original_filename": "Příklady XML - REGZEC_REGZEL-DOPL_JMHZ_DZMH_2026-04-13.zip",
+            "availability": "external_evidence_only",
+            "byte_length": 76416,
+            "sha256": "d31c89be8e2f0e4e93b20edd0beda05030e48884aa45dbfb4db0ee88e313a507",
+            "zip_entry_count": 40,
+            "xml_entry_count": 35,
+            "total_uncompressed_bytes": 286380
+        },
+        "xsd_targets": [
+            {
+                "target_key": "dzmh-1.1",
+                "agenda": "dzmh",
+                "version": "1.1",
+                "entrypoint": "dzmh-1.1/DZMH25.xsd",
+                "entrypoint_sha256": "b0959ab50cf627a57abd7f8f78681848b6df7ac90d3e6ced1eb15be2bc7946d1",
+                "official_xsd_archive_sha256": "1e89ec55b56b3e00f3f6a066e92bf3e39d29b05a5e2f0f8c7be95ead65111d06"
+            },
+            {
+                "target_key": "jmhz-1.4.3.4",
+                "agenda": "jmhz",
+                "version": "1.4.3.4",
+                "entrypoint": "jmhz-1.4.3.4/jmhzPodani.xsd",
+                "entrypoint_sha256": "c602cdf018dc6a0c4379000e004f2c4609d7313d265defa323e70663efc66216",
+                "official_xsd_archive_sha256": "f189885ad637c4343b4b7ce195f13fd4f6f8b87f5b5b94c5c74fe85a9df0ee9d"
+            },
+            {
+                "target_key": "regzec-1.4.0.4",
+                "agenda": "regzec",
+                "version": "1.4.0.4",
+                "entrypoint": "regzec-1.4.0.4/REGZEC25.xsd",
+                "entrypoint_sha256": "bbf96586cccd36457283f8474a982d3bee8ae98bbdba120f240065aa6d40a83b",
+                "official_xsd_archive_sha256": "0d0396fd857a6602b01a3ecf234fe02da96f00f316eea34de6e67b06e4cc2b1f"
+            },
+            {
+                "target_key": "regzeldopl-1.2",
+                "agenda": "regzeldopl",
+                "version": "1.2",
+                "entrypoint": "regzeldopl-1.2/REGZELDOPL25.xsd",
+                "entrypoint_sha256": "566a124a708492d783a75296eb37a4f76a49ccc5d0aa7d5119a0fa02eee6eedf",
+                "official_xsd_archive_sha256": "6f0eb190573336d3250130206a34d84fa228c7bc9fec2f0dd9176cb29e120dd3"
+            }
+        ],
+        "archive_entries": [
+            {
+                "entry_index": 0,
+                "entry_path_raw": "Příklady XML/",
+                "entry_path_utf8_sha256": "a34ae68e3537c6a318337b735818c481c2fdf2170decc6e08ef4ef7c522436bc",
+                "entry_kind": "directory",
+                "compression_method": 0,
+                "crc32": "00000000",
+                "compressed_size": 0,
+                "byte_length": 0,
+                "sha256": null
+            },
+            {
+                "entry_index": 1,
+                "entry_path_raw": "Příklady XML/DZMH/",
+                "entry_path_utf8_sha256": "467182095adee7a919dda693d286c7cccd8e808e2472c6b9f20a9f8a0caddac6",
+                "entry_kind": "directory",
+                "compression_method": 0,
+                "crc32": "00000000",
+                "compressed_size": 0,
+                "byte_length": 0,
+                "sha256": null
+            },
+            {
+                "entry_index": 2,
+                "entry_path_raw": "Příklady XML/DZMH/DZMH_01_GUID.xml",
+                "entry_path_utf8_sha256": "ff6490c93210602a5746b977d0379e1ae9dce5daef0e4df08f987913ebc267ba",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "190c4b3e",
+                "compressed_size": 345,
+                "byte_length": 507,
+                "sha256": "1c36d08068a36bcd7164cbd89b2840b3deac1accea3bfc1c4b982a1907e33090"
+            },
+            {
+                "entry_index": 3,
+                "entry_path_raw": "Příklady XML/DZMH/DZMH_01_RokMesic.xml",
+                "entry_path_utf8_sha256": "f8a19a32c3c4ece1fc82842e8c65b02f9aa4112612ad5eac1af940a7edb11d32",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "46c7e3cb",
+                "compressed_size": 312,
+                "byte_length": 477,
+                "sha256": "5facd481667a09ced156ac2594cb50da9ce420a628774f625aefaa51761bb4db"
+            },
+            {
+                "entry_index": 4,
+                "entry_path_raw": "Příklady XML/JMHZ/",
+                "entry_path_utf8_sha256": "be97670dadc21741a836ace29ea07aead0341f65e7784146d71b0bc9cf2d863a",
+                "entry_kind": "directory",
+                "compression_method": 0,
+                "crc32": "00000000",
+                "compressed_size": 0,
+                "byte_length": 0,
+                "sha256": null
+            },
+            {
+                "entry_index": 5,
+                "entry_path_raw": "Příklady XML/JMHZ/Nulový formulář osoby - opravný formulář.xml",
+                "entry_path_utf8_sha256": "5c1dddca08d68fbd46275df54bd1280a1bd2d904bb51c4dfa9f779a1854d0b04",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "2cb66704",
+                "compressed_size": 3772,
+                "byte_length": 17125,
+                "sha256": "267a62703e5cfc8d3c248cfe0a49ad000af086b20bde724be2fc53b2a2a3564e"
+            },
+            {
+                "entry_index": 6,
+                "entry_path_raw": "Příklady XML/JMHZ/Nulový formulář osoby - řádný formulář.xml",
+                "entry_path_utf8_sha256": "6ff055e5eca24eed94ec462bc9d7f0ea1cf3dd972cd75cd4f19c0f18939479ae",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "7ce0fadd",
+                "compressed_size": 3946,
+                "byte_length": 17929,
+                "sha256": "4f72653a0274fe3c1b5dbca1996ff8b2a8397b3396bd95abf9ebc56e6cdb324b"
+            },
+            {
+                "entry_index": 7,
+                "entry_path_raw": "Příklady XML/JMHZ/ShopNow_v1_2026-04-09.xml",
+                "entry_path_utf8_sha256": "63b8fefd40177b37a432f359f1b95d814c6aa63f93b8b4669a6ef24d00fcb817",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "2f6c2500",
+                "compressed_size": 4159,
+                "byte_length": 33248,
+                "sha256": "876192794599b46bae412685419510cdb4dedf46ab81fcc78c37b04fe07feb6d"
+            },
+            {
+                "entry_index": 8,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 010 - Sleva na manzelku, rocni zuctovani.xml",
+                "entry_path_utf8_sha256": "f7e3e1099e1cae93acccb24665264f3214e78382b1ca9d3ba1bf8dfe39191951",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "d5ff24b7",
+                "compressed_size": 2927,
+                "byte_length": 14313,
+                "sha256": "71eb0a8abfd42a287f4b4d7a4b070259d4f9ed2f0b74544f2435da811ae7bdf8"
+            },
+            {
+                "entry_index": 9,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 036 - Jedna DPP do 11499 + 1 dite prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "ffeffa7983896fb1afc714a122278ead66156e730cc36e516d6825a79383dc1b",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "f7a3bb53",
+                "compressed_size": 2416,
+                "byte_length": 10645,
+                "sha256": "f78123e70bf8d81bc28fc211ee13793dc31cf7f712d3ffa6fab9079ebfd75bec"
+            },
+            {
+                "entry_index": 10,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 060 - Zakladni scenar - PN.xml",
+                "entry_path_utf8_sha256": "2509f7610505fd02714639fa0f3cb4af9c0d620489d9b8eb87ade09225e55b8c",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "b56995d8",
+                "compressed_size": 2349,
+                "byte_length": 9806,
+                "sha256": "87fa195f8ea1ee2f8763f7d2b37723ee6b6228b8cb484bce48111cf785c1dd29"
+            },
+            {
+                "entry_index": 11,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; C - Odložený příjem - Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů).xml",
+                "entry_path_utf8_sha256": "ceb3bc1d2bfd274a552f4d749b4d122af98c304fe9a760e92f295245b949f621",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "5e224c8c",
+                "compressed_size": 1780,
+                "byte_length": 6645,
+                "sha256": "94497cf86e5b8f1262825c7096f1d2357386effd2a2e7c7b1f1a6f2cec7bcd6b"
+            },
+            {
+                "entry_index": 12,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; D - Odložený příjem - Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů).xml",
+                "entry_path_utf8_sha256": "60ba11a20e78a39e94dfc683e1933aa740f673734cbc4345ad63e12ea1a5dca4",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "ba237579",
+                "compressed_size": 1794,
+                "byte_length": 6750,
+                "sha256": "b26a6f2d251a9d0c9bca84d1d23760413b1a38a1529024c4664450c3077c95d6"
+            },
+            {
+                "entry_index": 13,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; H - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá.xml",
+                "entry_path_utf8_sha256": "4e562c8a134d4f2070decf30f0fea97a8c78e0cb1610254241563e14aee01507",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "306d1872",
+                "compressed_size": 2023,
+                "byte_length": 12365,
+                "sha256": "a790e778a1ff666a534db90a981cbd2d165543fcb975f4748dcc8d2e2e0b9e53"
+            },
+            {
+                "entry_index": 14,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; I - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá - kopie.xml",
+                "entry_path_utf8_sha256": "3868dabcccc3f0a02ef14333c4b659f824ea5f53953f23c61cfe0e7fddea94fe",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "6771fc3b",
+                "compressed_size": 1946,
+                "byte_length": 12052,
+                "sha256": "b2151222eed28bdd1c0077cbeabd899a131738908c1abaf37e929103c3f26cf6"
+            },
+            {
+                "entry_index": 15,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; K - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá.xml",
+                "entry_path_utf8_sha256": "35bff2adc752b4b841f8860e00263e4ee4a6bad0b8f88b4d8ca8bcc4c53d27a3",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "b8673cee",
+                "compressed_size": 2057,
+                "byte_length": 12456,
+                "sha256": "8017f92d6cd4d9f4541f2c846b42ed5b7c2681063294e583c5fe0949b3f636bc"
+            },
+            {
+                "entry_index": 16,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; M+N - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále probíhá.xml",
+                "entry_path_utf8_sha256": "80b79507d6c40b2162fcf2ed6d6761cb635810a1e9348f7a1bbecc07bdebac83",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "57687424",
+                "compressed_size": 2787,
+                "byte_length": 16372,
+                "sha256": "529bee504fafdfb042ba1563b3eded39c388328716a96f61457334d6352c05ff"
+            },
+            {
+                "entry_index": 17,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; O - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru-Opravný.xml",
+                "entry_path_utf8_sha256": "0a1adb60b4d89cc85b6ea03b131c65c9223c874e2d65262d7cfd3777633fe8d2",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "515f4b79",
+                "compressed_size": 1912,
+                "byte_length": 7273,
+                "sha256": "2ad92ad00b2d1b27c9653c585bd182293c415e6928649829ec58c0bf122463b7"
+            },
+            {
+                "entry_index": 18,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; O - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru.xml",
+                "entry_path_utf8_sha256": "fa87bce8faf65a03e250fd59829ea466299776725193bfd69f0db578c143d5c2",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "9b0ba22b",
+                "compressed_size": 1792,
+                "byte_length": 6725,
+                "sha256": "86372da5bdcf0c3e25fc2749ebd024e3f6313732e020ec9ddd2fae227de04fa9"
+            },
+            {
+                "entry_index": 19,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; P - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru.xml",
+                "entry_path_utf8_sha256": "0a14435dbaed43eaeb4f1dcf523632595e8e518faba8c9a09718985ffa424aad",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "a2229df5",
+                "compressed_size": 1962,
+                "byte_length": 7546,
+                "sha256": "b3ec391b0337afb213c10da0a29325fc0090c23761f65a02ae688d465be40cbb"
+            },
+            {
+                "entry_index": 20,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;001SP - Vice zamestnancu.xml",
+                "entry_path_utf8_sha256": "c0ad3dd4d09eef584c1ffd49892c73cf9d67073b5f86161cc48bf4a12627be32",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "0a76244f",
+                "compressed_size": 2812,
+                "byte_length": 22579,
+                "sha256": "4816164d559c55cc005c8899a4481c0e07490d34f3c3275426097b103e5f583d"
+            },
+            {
+                "entry_index": 21,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;005 - Neplacene volno 10dnu.xml",
+                "entry_path_utf8_sha256": "24ce1324e7c50b4b58ba3ffcd25d171de1f276b1bd062d1c68e682225df31f69",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "0961adc3",
+                "compressed_size": 2127,
+                "byte_length": 8072,
+                "sha256": "24b702fa754787f1bf4906a326d3d8020096a7baa5cb8c0d97588d4b3bff04e5"
+            },
+            {
+                "entry_index": 22,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;021 - Jedna DPC do 4499 bez deti, prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "42d6accf9e01b628583383bc6c1114d602592f2bdd3f961d3305b438dacd6788",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "8525f330",
+                "compressed_size": 2004,
+                "byte_length": 8222,
+                "sha256": "06359787cc24a801ea3f38556c826682469c8292b3ee8ab8bd6d3f253f39f619"
+            },
+            {
+                "entry_index": 23,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;022 - Jedna DPC do 4499 bez deti bez prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "34057bf61cf7ddc572b05e70413bfc6fd2ae5d893d78ded41a535c8c0ca6fd06",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "7515762d",
+                "compressed_size": 1979,
+                "byte_length": 8015,
+                "sha256": "b27fdb2af84f0ad81e5eb0932d50d36427775266c2fd06a78b1fe5eabc581a33"
+            },
+            {
+                "entry_index": 24,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;025O - Jedna DPC nad 4499+1dite, prohlaseni poplatnika Opravne podani.xml",
+                "entry_path_utf8_sha256": "8743f34405a80fff00e24e37ca62225b9ec02a18bab9550d545ab8bd799bc241",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "45b2cc92",
+                "compressed_size": 2382,
+                "byte_length": 8960,
+                "sha256": "feee0c54bf099958ac2251e6ea978fb284b6ed78139c17881c3c5eecf04f7d17"
+            },
+            {
+                "entry_index": 25,
+                "entry_path_raw": "Příklady XML/JMHZ/Více kategorií rizika.xml",
+                "entry_path_utf8_sha256": "12b15dad615f316a671bc3054597045d1a1f19ce11e32cc6bf71d2c9686b4b44",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "6889a67c",
+                "compressed_size": 2915,
+                "byte_length": 9938,
+                "sha256": "99c26707bdb4c1bd47d0370f4869386bcdcc8ace5348abf5939d98468a40cde1"
+            },
+            {
+                "entry_index": 26,
+                "entry_path_raw": "Příklady XML/REGZEC/",
+                "entry_path_utf8_sha256": "b5b4ff71f9ffdcf89b35c7a942ee0c8c526a0aeada60db8f984f07423f59100d",
+                "entry_kind": "directory",
+                "compression_method": 0,
+                "crc32": "00000000",
+                "compressed_size": 0,
+                "byte_length": 0,
+                "sha256": null
+            },
+            {
+                "entry_index": 27,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce1_Cizinec_HRIS.xml",
+                "entry_path_utf8_sha256": "e4643eaf48689688d7c392bdb30c81ae4adf5f3eed911ffd910f46c152ac858f",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "7af9c9b9",
+                "compressed_size": 2805,
+                "byte_length": 7310,
+                "sha256": "2d7225edd7b46e699c0bfd5c7b45aeef674ddf73a55bc075a2d7974977988b03"
+            },
+            {
+                "entry_index": 28,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce1_CZ_HRIS.xml",
+                "entry_path_utf8_sha256": "c558dcd9d13963268a535d73a47c6482a9a4c01a2228e1aa5bcda893297c49ae",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "c4b612f6",
+                "compressed_size": 2345,
+                "byte_length": 5866,
+                "sha256": "c10426044f1ebab924cb5a54e0ff2a5a7238d906698a8a9ec5fee2aea16b19ca"
+            },
+            {
+                "entry_index": 29,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_BezPodkladu_rsn2_HRIS.xml",
+                "entry_path_utf8_sha256": "e1c29240ab91ba1d307c0a2546ce425d8777a532d9fa7056e04bc68fafe32a26",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "7c0a69d4",
+                "compressed_size": 773,
+                "byte_length": 1491,
+                "sha256": "d77eb277952999441494874e4cd0875d5e09121dbe4bd5ff3d1f99493159781f"
+            },
+            {
+                "entry_index": 30,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_BezPodkladu_rsn3_HRIS.xml",
+                "entry_path_utf8_sha256": "0d5a05625343c8deca85f3eb6b2fa24873461bf09486974601be2cc19b861dd8",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "ce9455fe",
+                "compressed_size": 746,
+                "byte_length": 1422,
+                "sha256": "7eee8aab2fbf04b79f48fc03fb6e39d738031475ca132753ce0610b4f3fa2bde"
+            },
+            {
+                "entry_index": 31,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_Podklady_HRIS.xml",
+                "entry_path_utf8_sha256": "6dd6c1941af7ea1d81d10806a28495b581f068ac473db66851a0e275886718ab",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "4ba7bf7a",
+                "compressed_size": 974,
+                "byte_length": 1969,
+                "sha256": "bcb774a4f904576099e08e96dc334b782cff8da14514345a6c8725e0f6dfd2c6"
+            },
+            {
+                "entry_index": 32,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce3_HRIS.xml",
+                "entry_path_utf8_sha256": "57f5c34ef22bf81b01a86ad8352bbdaf190658428d3a32cc24de6c87be933131",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "66089162",
+                "compressed_size": 1168,
+                "byte_length": 2572,
+                "sha256": "5bad51b2dd0f951466208ec40e0c4199256db06f0ea52e376c7f7c47f44861bf"
+            },
+            {
+                "entry_index": 33,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce4_HRIS.xml",
+                "entry_path_utf8_sha256": "8baa7f2f12376b223b1f168b51d0b73436516b1604fef290a1cfa87b19b2a81b",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "bab525d9",
+                "compressed_size": 833,
+                "byte_length": 1920,
+                "sha256": "fa166db875e57c31c50f6c204fa851e1e05dfbc5badb49b2d4136598c420823f"
+            },
+            {
+                "entry_index": 34,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce5_HRIS.xml",
+                "entry_path_utf8_sha256": "6807f52267195154492ffe6893b2440f5f9ff99913128ce1be1b6c534fb0b7d0",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "f55f24ed",
+                "compressed_size": 562,
+                "byte_length": 1571,
+                "sha256": "d7e8e0e5802bebed48ee97767cbd4882c61af4255a43b1d56fc898279f5506a9"
+            },
+            {
+                "entry_index": 35,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce6_HRIS.xml",
+                "entry_path_utf8_sha256": "28d47f7ed42461e382d8b8060806c4dbed781779d5f97ea47a47ba0ecad35537",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "ff13e357",
+                "compressed_size": 648,
+                "byte_length": 1210,
+                "sha256": "8041831587ea5c1361b29e41754183ee08e0a10173e15545bcf28b04c883be1d"
+            },
+            {
+                "entry_index": 36,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce7_HRIS.xml",
+                "entry_path_utf8_sha256": "447e1dbbf816d52d68cccd97df10c23fe718a1c4551c860190c8b37655b7d334",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "07389cd1",
+                "compressed_size": 645,
+                "byte_length": 1187,
+                "sha256": "71401e9bedc97d84283c5c545ea756f37770435310410140daf133b39bb26943"
+            },
+            {
+                "entry_index": 37,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce8_HRIS.xml",
+                "entry_path_utf8_sha256": "6fd0805840217550f53e384e236d100244426a129eeddce2774676e3c567a108",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "2bf5fa90",
+                "compressed_size": 509,
+                "byte_length": 904,
+                "sha256": "3b12ad5cd616a911f041be3dafab2ba7b645b9114c565030edb2e738d531f9f4"
+            },
+            {
+                "entry_index": 38,
+                "entry_path_raw": "Příklady XML/REGZEL-DOPL/",
+                "entry_path_utf8_sha256": "54e06830754aebef668dd89307601f7e53bcb8bde93bf4cc17c70b48a261c589",
+                "entry_kind": "directory",
+                "compression_method": 0,
+                "crc32": "00000000",
+                "compressed_size": 0,
+                "byte_length": 0,
+                "sha256": null
+            },
+            {
+                "entry_index": 39,
+                "entry_path_raw": "Příklady XML/REGZEL-DOPL/REGZEL_DOPL.xml",
+                "entry_path_utf8_sha256": "97e03d3b209aa820bcf62f97158d93f813ae2844b7652a900a6e442afa171ee1",
+                "entry_kind": "xml",
+                "compression_method": 8,
+                "crc32": "aeaafe0b",
+                "compressed_size": 446,
+                "byte_length": 938,
+                "sha256": "fcb5614617fb5a78f7c77f485a06664a6c96b6debc37ba45e99aa896d8557e14"
+            }
+        ],
+        "examples": [
+            {
+                "example_key": "example-003",
+                "archive_entry_index": 2,
+                "entry_path_raw": "Příklady XML/DZMH/DZMH_01_GUID.xml",
+                "entry_path_utf8_sha256": "ff6490c93210602a5746b977d0379e1ae9dce5daef0e4df08f987913ebc267ba",
+                "byte_length": 507,
+                "sha256": "1c36d08068a36bcd7164cbd89b2840b3deac1accea3bfc1c4b982a1907e33090",
+                "agenda": "dzmh",
+                "root_local_name": "DZMH",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/dotazNaStav/2025",
+                "well_formed": true,
+                "target_key": "dzmh-1.1",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "91afb506dbdf03bdecdd914c75be009891b0bc622d048c22e6ba329c499d27c1"
+            },
+            {
+                "example_key": "example-004",
+                "archive_entry_index": 3,
+                "entry_path_raw": "Příklady XML/DZMH/DZMH_01_RokMesic.xml",
+                "entry_path_utf8_sha256": "f8a19a32c3c4ece1fc82842e8c65b02f9aa4112612ad5eac1af940a7edb11d32",
+                "byte_length": 477,
+                "sha256": "5facd481667a09ced156ac2594cb50da9ce420a628774f625aefaa51761bb4db",
+                "agenda": "dzmh",
+                "root_local_name": "DZMH",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/dotazNaStav/2025",
+                "well_formed": true,
+                "target_key": "dzmh-1.1",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "10940983126db633b5c4e22e057d80afbbf317d643b396b66f4004d60c9c39e9"
+            },
+            {
+                "example_key": "example-006",
+                "archive_entry_index": 5,
+                "entry_path_raw": "Příklady XML/JMHZ/Nulový formulář osoby - opravný formulář.xml",
+                "entry_path_utf8_sha256": "5c1dddca08d68fbd46275df54bd1280a1bd2d904bb51c4dfa9f779a1854d0b04",
+                "byte_length": 17125,
+                "sha256": "267a62703e5cfc8d3c248cfe0a49ad000af086b20bde724be2fc53b2a2a3564e",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "23719efa996c9c25efd0dc272d903b08b51c93b76b52daeb3aaf01ace40ff299"
+            },
+            {
+                "example_key": "example-007",
+                "archive_entry_index": 6,
+                "entry_path_raw": "Příklady XML/JMHZ/Nulový formulář osoby - řádný formulář.xml",
+                "entry_path_utf8_sha256": "6ff055e5eca24eed94ec462bc9d7f0ea1cf3dd972cd75cd4f19c0f18939479ae",
+                "byte_length": 17929,
+                "sha256": "4f72653a0274fe3c1b5dbca1996ff8b2a8397b3396bd95abf9ebc56e6cdb324b",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "4201497ed6575afa33375891a49d1e7cc08519df76e0d55f2104e74ce5972602"
+            },
+            {
+                "example_key": "example-008",
+                "archive_entry_index": 7,
+                "entry_path_raw": "Příklady XML/JMHZ/ShopNow_v1_2026-04-09.xml",
+                "entry_path_utf8_sha256": "63b8fefd40177b37a432f359f1b95d814c6aa63f93b8b4669a6ef24d00fcb817",
+                "byte_length": 33248,
+                "sha256": "876192794599b46bae412685419510cdb4dedf46ab81fcc78c37b04fe07feb6d",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "1f43d271e0cd04015fb773b154ef87d5a36082fd687a23cfc01287366c81009f"
+            },
+            {
+                "example_key": "example-009",
+                "archive_entry_index": 8,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 010 - Sleva na manzelku, rocni zuctovani.xml",
+                "entry_path_utf8_sha256": "f7e3e1099e1cae93acccb24665264f3214e78382b1ca9d3ba1bf8dfe39191951",
+                "byte_length": 14313,
+                "sha256": "71eb0a8abfd42a287f4b4d7a4b070259d4f9ed2f0b74544f2435da811ae7bdf8",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "d6b3d850ecdb1a57b565bb3501ebe4e97733b3a704b435ceb734c4b98763c4f7"
+            },
+            {
+                "example_key": "example-010",
+                "archive_entry_index": 9,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 036 - Jedna DPP do 11499 + 1 dite prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "ffeffa7983896fb1afc714a122278ead66156e730cc36e516d6825a79383dc1b",
+                "byte_length": 10645,
+                "sha256": "f78123e70bf8d81bc28fc211ee13793dc31cf7f712d3ffa6fab9079ebfd75bec",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "3f1d239ba84c6678918e60ca1b626d8ef910d6ffd4f987393d514743d58e7850"
+            },
+            {
+                "example_key": "example-011",
+                "archive_entry_index": 10,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; 060 - Zakladni scenar - PN.xml",
+                "entry_path_utf8_sha256": "2509f7610505fd02714639fa0f3cb4af9c0d620489d9b8eb87ade09225e55b8c",
+                "byte_length": 9806,
+                "sha256": "87fa195f8ea1ee2f8763f7d2b37723ee6b6228b8cb484bce48111cf785c1dd29",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "b21410cf7751fdb1169031b4e9c7f6a4efec15adef70864ca96b0397d81aeb08"
+            },
+            {
+                "example_key": "example-012",
+                "archive_entry_index": 11,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; C - Odložený příjem - Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů).xml",
+                "entry_path_utf8_sha256": "ceb3bc1d2bfd274a552f4d749b4d122af98c304fe9a760e92f295245b949f621",
+                "byte_length": 6645,
+                "sha256": "94497cf86e5b8f1262825c7096f1d2357386effd2a2e7c7b1f1a6f2cec7bcd6b",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "b2c85bbd6414426d11a175571a388e457c0ca954466725b411d04ec00396063c"
+            },
+            {
+                "example_key": "example-013",
+                "archive_entry_index": 12,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; D - Odložený příjem - Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů).xml",
+                "entry_path_utf8_sha256": "60ba11a20e78a39e94dfc683e1933aa740f673734cbc4345ad63e12ea1a5dca4",
+                "byte_length": 6750,
+                "sha256": "b26a6f2d251a9d0c9bca84d1d23760413b1a38a1529024c4664450c3077c95d6",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "e924ddf80580c82f8065437bfc5862288d5465d1c9d21afb1b1b0a902f22037e"
+            },
+            {
+                "example_key": "example-014",
+                "archive_entry_index": 13,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; H - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá.xml",
+                "entry_path_utf8_sha256": "4e562c8a134d4f2070decf30f0fea97a8c78e0cb1610254241563e14aee01507",
+                "byte_length": 12365,
+                "sha256": "a790e778a1ff666a534db90a981cbd2d165543fcb975f4748dcc8d2e2e0b9e53",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "1a7f64f32663199de8f65845244bb899612e1284c0f4796eb24b100c4a7bba55"
+            },
+            {
+                "example_key": "example-015",
+                "archive_entry_index": 14,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; I - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá - kopie.xml",
+                "entry_path_utf8_sha256": "3868dabcccc3f0a02ef14333c4b659f824ea5f53953f23c61cfe0e7fddea94fe",
+                "byte_length": 12052,
+                "sha256": "b2151222eed28bdd1c0077cbeabd899a131738908c1abaf37e929103c3f26cf6",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "2c3635f21b53987fa53e66cab62558811610f787da802546fe69711f66f7c7dc"
+            },
+            {
+                "example_key": "example-016",
+                "archive_entry_index": 15,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; K - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá.xml",
+                "entry_path_utf8_sha256": "35bff2adc752b4b841f8860e00263e4ee4a6bad0b8f88b4d8ca8bcc4c53d27a3",
+                "byte_length": 12456,
+                "sha256": "8017f92d6cd4d9f4541f2c846b42ed5b7c2681063294e583c5fe0949b3f636bc",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "d3089307e2fbec249e38d08ec516867504eeb50a8c14081dba1d570e1b1d4211"
+            },
+            {
+                "example_key": "example-017",
+                "archive_entry_index": 16,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; M+N - Odložený příjem - Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále probíhá.xml",
+                "entry_path_utf8_sha256": "80b79507d6c40b2162fcf2ed6d6761cb635810a1e9348f7a1bbecc07bdebac83",
+                "byte_length": 16372,
+                "sha256": "529bee504fafdfb042ba1563b3eded39c388328716a96f61457334d6352c05ff",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "0efb94a054ee72a451cf194ea153c18d5b3fe3eb836d18f2201628c7cf29ea4d"
+            },
+            {
+                "example_key": "example-018",
+                "archive_entry_index": 17,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; O - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru-Opravný.xml",
+                "entry_path_utf8_sha256": "0a1adb60b4d89cc85b6ea03b131c65c9223c874e2d65262d7cfd3777633fe8d2",
+                "byte_length": 7273,
+                "sha256": "2ad92ad00b2d1b27c9653c585bd182293c415e6928649829ec58c0bf122463b7",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "22b4de3fdfdbb55190c6d4c6d5ba633506256003f69fa91d47d35f26dacbe3a8"
+            },
+            {
+                "example_key": "example-019",
+                "archive_entry_index": 18,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; O - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru.xml",
+                "entry_path_utf8_sha256": "fa87bce8faf65a03e250fd59829ea466299776725193bfd69f0db578c143d5c2",
+                "byte_length": 6725,
+                "sha256": "86372da5bdcf0c3e25fc2749ebd024e3f6313732e020ec9ddd2fae227de04fa9",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "8118fb2ddec34903b436f252bd5755aa6a3cbbd1ce76b676b9417bb85c70ae26"
+            },
+            {
+                "example_key": "example-020",
+                "archive_entry_index": 19,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4; P - Odložený příjem - Roční zúčtování po skončení zaměstnaneckého poměru.xml",
+                "entry_path_utf8_sha256": "0a14435dbaed43eaeb4f1dcf523632595e8e518faba8c9a09718985ffa424aad",
+                "byte_length": 7546,
+                "sha256": "b3ec391b0337afb213c10da0a29325fc0090c23761f65a02ae688d465be40cbb",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "e8d95c76384290a3f52eb2833c4bc840f9b8d4c00590e1d489f5fa3d18964ff4"
+            },
+            {
+                "example_key": "example-021",
+                "archive_entry_index": 20,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;001SP - Vice zamestnancu.xml",
+                "entry_path_utf8_sha256": "c0ad3dd4d09eef584c1ffd49892c73cf9d67073b5f86161cc48bf4a12627be32",
+                "byte_length": 22579,
+                "sha256": "4816164d559c55cc005c8899a4481c0e07490d34f3c3275426097b103e5f583d",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "7d6b557f62ebc736615a6c287e53fd1aa2b14f2fe462a735bd9b8a112f1d0254"
+            },
+            {
+                "example_key": "example-022",
+                "archive_entry_index": 21,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;005 - Neplacene volno 10dnu.xml",
+                "entry_path_utf8_sha256": "24ce1324e7c50b4b58ba3ffcd25d171de1f276b1bd062d1c68e682225df31f69",
+                "byte_length": 8072,
+                "sha256": "24b702fa754787f1bf4906a326d3d8020096a7baa5cb8c0d97588d4b3bff04e5",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "31255a91db7576521e822202f6c3ee737cd59383d08fe7211f656af597d8e745"
+            },
+            {
+                "example_key": "example-023",
+                "archive_entry_index": 22,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;021 - Jedna DPC do 4499 bez deti, prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "42d6accf9e01b628583383bc6c1114d602592f2bdd3f961d3305b438dacd6788",
+                "byte_length": 8222,
+                "sha256": "06359787cc24a801ea3f38556c826682469c8292b3ee8ab8bd6d3f253f39f619",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "c3c8787934672cd554942ca41dfaf42d683f3c0d69d920892a1b26bffcdfa014"
+            },
+            {
+                "example_key": "example-024",
+                "archive_entry_index": 23,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;022 - Jedna DPC do 4499 bez deti bez prohlaseni poplatnika.xml",
+                "entry_path_utf8_sha256": "34057bf61cf7ddc572b05e70413bfc6fd2ae5d893d78ded41a535c8c0ca6fd06",
+                "byte_length": 8015,
+                "sha256": "b27fdb2af84f0ad81e5eb0932d50d36427775266c2fd06a78b1fe5eabc581a33",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "657781705945d9f8d3dbf84dc4b5f9b0c9389d74fad1dc6f8227b5bfbe05bd25"
+            },
+            {
+                "example_key": "example-025",
+                "archive_entry_index": 24,
+                "entry_path_raw": "Příklady XML/JMHZ/TS 1.4;025O - Jedna DPC nad 4499+1dite, prohlaseni poplatnika Opravne podani.xml",
+                "entry_path_utf8_sha256": "8743f34405a80fff00e24e37ca62225b9ec02a18bab9550d545ab8bd799bc241",
+                "byte_length": 8960,
+                "sha256": "feee0c54bf099958ac2251e6ea978fb284b6ed78139c17881c3c5eecf04f7d17",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "xsd_year_below_pinned_minimum",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "source_version_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "e2076e9ce9dba4a1ab99f4074623833c3ee70b4dc96608fec6ad4942eb4085e8"
+            },
+            {
+                "example_key": "example-026",
+                "archive_entry_index": 25,
+                "entry_path_raw": "Příklady XML/JMHZ/Více kategorií rizika.xml",
+                "entry_path_utf8_sha256": "12b15dad615f316a671bc3054597045d1a1f19ce11e32cc6bf71d2c9686b4b44",
+                "byte_length": 9938,
+                "sha256": "99c26707bdb4c1bd47d0370f4869386bcdcc8ace5348abf5939d98468a40cde1",
+                "agenda": "jmhz",
+                "root_local_name": "jmhz",
+                "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
+                "well_formed": true,
+                "target_key": "jmhz-1.4.3.4",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "29dc2f02eb76877375cff86dbdb72851ca22f1a72a65d396595c2f648705cb74"
+            },
+            {
+                "example_key": "example-028",
+                "archive_entry_index": 27,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce1_Cizinec_HRIS.xml",
+                "entry_path_utf8_sha256": "e4643eaf48689688d7c392bdb30c81ae4adf5f3eed911ffd910f46c152ac858f",
+                "byte_length": 7310,
+                "sha256": "2d7225edd7b46e699c0bfd5c7b45aeef674ddf73a55bc075a2d7974977988b03",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "d1dd9848b415fa5e93e9ffb546145539972fafbe3337ca632dd05732e0ba3abe"
+            },
+            {
+                "example_key": "example-029",
+                "archive_entry_index": 28,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce1_CZ_HRIS.xml",
+                "entry_path_utf8_sha256": "c558dcd9d13963268a535d73a47c6482a9a4c01a2228e1aa5bcda893297c49ae",
+                "byte_length": 5866,
+                "sha256": "c10426044f1ebab924cb5a54e0ff2a5a7238d906698a8a9ec5fee2aea16b19ca",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "316886b9fa710396b60b9c2ab51e029bcb196c3fcd8de9eb4e6de1378b06652e"
+            },
+            {
+                "example_key": "example-030",
+                "archive_entry_index": 29,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_BezPodkladu_rsn2_HRIS.xml",
+                "entry_path_utf8_sha256": "e1c29240ab91ba1d307c0a2546ce425d8777a532d9fa7056e04bc68fafe32a26",
+                "byte_length": 1491,
+                "sha256": "d77eb277952999441494874e4cd0875d5e09121dbe4bd5ff3d1f99493159781f",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "616e3054c1a9eeb70f238a43506d9d5a5cf216e0a5289f658866ba98e6ac1c7f"
+            },
+            {
+                "example_key": "example-031",
+                "archive_entry_index": 30,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_BezPodkladu_rsn3_HRIS.xml",
+                "entry_path_utf8_sha256": "0d5a05625343c8deca85f3eb6b2fa24873461bf09486974601be2cc19b861dd8",
+                "byte_length": 1422,
+                "sha256": "7eee8aab2fbf04b79f48fc03fb6e39d738031475ca132753ce0610b4f3fa2bde",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "85483be8e93306b278a078f48e88550a23852f8079e66874632cf3426f40919a"
+            },
+            {
+                "example_key": "example-032",
+                "archive_entry_index": 31,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce2_Podklady_HRIS.xml",
+                "entry_path_utf8_sha256": "6dd6c1941af7ea1d81d10806a28495b581f068ac473db66851a0e275886718ab",
+                "byte_length": 1969,
+                "sha256": "bcb774a4f904576099e08e96dc334b782cff8da14514345a6c8725e0f6dfd2c6",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "e921668b75cd4294723f07e9d461f3fc07223b2bd00d81928148b2c9e0a7d283"
+            },
+            {
+                "example_key": "example-033",
+                "archive_entry_index": 32,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce3_HRIS.xml",
+                "entry_path_utf8_sha256": "57f5c34ef22bf81b01a86ad8352bbdaf190658428d3a32cc24de6c87be933131",
+                "byte_length": 2572,
+                "sha256": "5bad51b2dd0f951466208ec40e0c4199256db06f0ea52e376c7f7c47f44861bf",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "3ee7faa3c797dfdb682e7168529c88a1d816f5ad7046f7d1f6865989b076bd03"
+            },
+            {
+                "example_key": "example-034",
+                "archive_entry_index": 33,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce4_HRIS.xml",
+                "entry_path_utf8_sha256": "8baa7f2f12376b223b1f168b51d0b73436516b1604fef290a1cfa87b19b2a81b",
+                "byte_length": 1920,
+                "sha256": "fa166db875e57c31c50f6c204fa851e1e05dfbc5badb49b2d4136598c420823f",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "adfac49dfe6805b132ac8b0291ccd69a599f2a212e5119a3ab8903fe18b9824a"
+            },
+            {
+                "example_key": "example-035",
+                "archive_entry_index": 34,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce5_HRIS.xml",
+                "entry_path_utf8_sha256": "6807f52267195154492ffe6893b2440f5f9ff99913128ce1be1b6c534fb0b7d0",
+                "byte_length": 1571,
+                "sha256": "d7e8e0e5802bebed48ee97767cbd4882c61af4255a43b1d56fc898279f5506a9",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "01fc91bed107aba4adf9d9e5c01e1d139cbada8bd3a367655b1ed5170100fff2"
+            },
+            {
+                "example_key": "example-036",
+                "archive_entry_index": 35,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce6_HRIS.xml",
+                "entry_path_utf8_sha256": "28d47f7ed42461e382d8b8060806c4dbed781779d5f97ea47a47ba0ecad35537",
+                "byte_length": 1210,
+                "sha256": "8041831587ea5c1361b29e41754183ee08e0a10173e15545bcf28b04c883be1d",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "bc44d2fc2b1eb0e002952dc04d1fb097e4e5abce9b708a919af97fa25593bb5f"
+            },
+            {
+                "example_key": "example-037",
+                "archive_entry_index": 36,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce7_HRIS.xml",
+                "entry_path_utf8_sha256": "447e1dbbf816d52d68cccd97df10c23fe718a1c4551c860190c8b37655b7d334",
+                "byte_length": 1187,
+                "sha256": "71401e9bedc97d84283c5c545ea756f37770435310410140daf133b39bb26943",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "65dbd8f415609575fa98ff0626b583b4795c591e40416f9e4514882d511fe50a"
+            },
+            {
+                "example_key": "example-038",
+                "archive_entry_index": 37,
+                "entry_path_raw": "Příklady XML/REGZEC/REGZEC_Akce8_HRIS.xml",
+                "entry_path_utf8_sha256": "6fd0805840217550f53e384e236d100244426a129eeddce2774676e3c567a108",
+                "byte_length": 904,
+                "sha256": "3b12ad5cd616a911f041be3dafab2ba7b645b9114c565030edb2e738d531f9f4",
+                "agenda": "regzec",
+                "root_local_name": "REGZEC",
+                "root_namespace": "http://schemas.cssz.cz/REGZEC/2025",
+                "well_formed": true,
+                "target_key": "regzec-1.4.0.4",
+                "xsd_validation": "fail",
+                "classification": "unresolved",
+                "reason_code": "placeholder_identifier_rejected_by_pinned_xsd",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [
+                    "publisher_intent_not_established"
+                ],
+                "usage": "source_evidence_only",
+                "row_hash": "9099722a92374f51cc87218c9982922e9bd92dd91a3581255a23bcc324ff7000"
+            },
+            {
+                "example_key": "example-040",
+                "archive_entry_index": 39,
+                "entry_path_raw": "Příklady XML/REGZEL-DOPL/REGZEL_DOPL.xml",
+                "entry_path_utf8_sha256": "97e03d3b209aa820bcf62f97158d93f813ae2844b7652a900a6e442afa171ee1",
+                "byte_length": 938,
+                "sha256": "fcb5614617fb5a78f7c77f485a06664a6c96b6debc37ba45e99aa896d8557e14",
+                "agenda": "regzeldopl",
+                "root_local_name": "REGZELDOPL",
+                "root_namespace": "http://schemas.cssz.cz/REGZELDOPL/2025",
+                "well_formed": true,
+                "target_key": "regzeldopl-1.2",
+                "xsd_validation": "pass",
+                "classification": "valid_against_pinned_xsd",
+                "reason_code": "pinned_xsd_validation_passed",
+                "decision_evidence": [
+                    "pinned_xsd_validation"
+                ],
+                "blocking_reasons": [],
+                "usage": "source_evidence_only",
+                "row_hash": "951d37a863a0bbfbc8da488999ab06dfbaecb0231b5ef4aa005996df802696de"
+            }
+        ],
+        "counts": {
+            "archive_entries": 40,
+            "xml_examples": 35,
+            "well_formed": 35,
+            "xsd_pass": 17,
+            "xsd_fail": 18,
+            "valid_against_pinned_xsd": 17,
+            "different_version": 0,
+            "fragment": 0,
+            "intentionally_invalid": 0,
+            "unresolved": 18,
+            "dzmh": 2,
+            "jmhz": 21,
+            "regzec": 11,
+            "regzeldopl": 1
+        }
+    }
+}
