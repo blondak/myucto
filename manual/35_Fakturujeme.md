@@ -409,6 +409,10 @@ s místní účetní.
   automat účtování
 - **Sklad a e-shop** — skladové karty, příjemky/výdejky, inventury, oceňování
   klouzavým průměrem, katalog, cenotvorbu z nákupní ceny
+- **Mzdy** — [úplný mzdový modul](58_Uplne_mzdy.md) (osobní karty, pracovní
+  vztahy, docházka, absence a dovolená, mzdové složky, mzdový běh, srážky a
+  exekuce, výplatní pásky, mzdový list, platby odvodů a účetní můstek)
+  i jednodušší [Mzdovou rekapitulaci](57_Mzdy.md); k ostrému spuštění viz níže
 - XML pro EPO portál MFČR: **přiznání k DPH (DPHDP3), kontrolní hlášení
   (DPHKH1), souhrnné hlášení (DPHSHV), daň z příjmů (DPFO/DPPO — řádné,
   opravné i dodatečné, vč. hospodářského roku)** a **OSS přiznání (OSSEI1)**
@@ -426,14 +430,12 @@ s místní účetní.
 
 ### MyÚčto **nedělá**
 
-- **Produkční mzdy — zatím.** Modul [Úplné mzdy](58_Uplne_mzdy.md) je
-  **testovací alfa**: zákonné výpočty pojistného, daně a čisté mzdy jsou
-  napojené, ale výsledek, odvody, dokumenty i podání je vždy nutné ověřit proti
-  jinému důvěryhodnému zdroji. Do ostrého spuštění, které je plánované na
-  **září 2026**, ho nepoužívej jako jediný podklad pro výplatu ani pro zákonné
-  podání. Pro zaúčtování slouží [Mzdová rekapitulace](57_Mzdy.md);
-  plnohodnotnou personalistiku, složité mzdy a legislativní servis řeší
-  specializovaný mzdový systém
+- **Produkční mzdy — zatím.** [Mzdový modul](58_Uplne_mzdy.md) je funkčně
+  hotový, ale do **ostrého spuštění plánovaného na září 2026** běží ve
+  zkušebním provozu: výsledek, odvody, dokumenty i podání je nutné ověřit proti
+  jinému důvěryhodnému zdroji a modul nemá být jediným podkladem pro výplatu
+  ani pro zákonné podání. Zákonná hlášení se navíc zatím jen připravují a
+  stahují — aplikace je neodesílá
 - **IOSS ani režim mimo EU** — vede se pouze **režim EU** OSS
 - **Podání OSS přes EPO** — `OSSEI1` se podává v samostatné aplikaci
   **MOSS/OSS** Daňového portálu, přímý ani asistovaný kanál ho proto nenabízí

@@ -364,14 +364,20 @@ Agendy, kvůli kterým účetní v jednodušších systémech vede paralelní ta
 
 - **Majetek a odpisy** — daňové i účetní, s automatickým zaúčtováním
 - **Drobný majetek** a jeho životní cyklus
-- **Mzdová rekapitulace** — zaúčtování mezd z tvojí mzdovky, i importem CSV.
-  Plnohodnotná mzdová a personální agenda ale zůstává mimo scope; složité mzdy,
-  personalistiku a legislativní servis řeší specializovaný systém.
+- **Mzdy** — plnohodnotný mzdový modul: osobní karty a pracovní vztahy,
+  docházka, absence a dovolená, mzdové složky, řízený mzdový běh, srážky
+  a exekuce, výplatní pásky a mzdový list, platby odvodů, účetní můstek
+  a příprava zákonných hlášení. Modul je funkčně hotový a do **ostrého
+  spuštění plánovaného na září 2026** běží ve zkušebním provozu — výstupy
+  je do té doby potřeba ověřovat proti jinému zdroji.
+- **Mzdová rekapitulace** — jednodušší cesta pro zaúčtování mezd z cizí
+  mzdovky, i importem CSV
 - **Kniha jízd** — vozidla, cesty, tankování a daňové souhrny
 - **Dokumenty** — archiv s fulltextem a přiřazením k dokladům
 
-Viz [57. Mzdy](57_Mzdy.md), [59. Majetek a odpisy](59_Majetek.md),
-[32. Kniha jízd](32_Kniha_jizd.md) a [31. Dokumenty](31_Dokumenty.md).
+Viz [58. Úplné mzdy](58_Uplne_mzdy.md), [57. Mzdová rekapitulace](57_Mzdy.md),
+[59. Majetek a odpisy](59_Majetek.md), [32. Kniha jízd](32_Kniha_jizd.md)
+a [31. Dokumenty](31_Dokumenty.md).
 
 ## 1.17 Exporty, importy a API
 

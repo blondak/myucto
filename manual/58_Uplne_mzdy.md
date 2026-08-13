@@ -7,24 +7,28 @@ o personální profil a více pracovních vztahů. Nevytváří druhý seznam li
 nemění dosavadní Mzdovou rekapitulaci.
 
 > [!IMPORTANT]
-> **Úplné mzdy jsou zatím testovací alfa a nejsou určené pro produkční
-> zpracování; ostré spuštění je plánované na září 2026.**
-> V modulu je dostupná aktivace, nastavení zaměstnavatele a mzdových
-> účtáren, osobní karty, pracovní vztahy, vstupy, absence, evidence srážek,
-> řízený mzdový běh a archiv výstupů. Zákonné výpočty sociálního a zdravotního
-> pojištění, daně a čisté mzdy jsou napojené do neměnné revize, ale jejich
-> výsledek, odvody, dokumenty i podání vždy ověř proti jinému důvěryhodnému
-> zdroji. Nepoužívej tento modul jako jediný podklad pro výplatu nebo zákonné
-> podání. Neúplný či nepodporovaný scénář systém zastaví v ruční kontrole.
-> Pro zaúčtování nadále používej [Mzdovou rekapitulaci](57_Mzdy.md).
+> **Modul je funkčně hotový, ale zatím ve zkušebním provozu — ostré spuštění je
+> plánované na září 2026.** Agenda je kompletní: aktivace, nastavení
+> zaměstnavatele a mzdových účtáren, osobní karty, pracovní vztahy, docházka,
+> absence a dovolená, mzdové složky a vstupy, řízený mzdový běh, srážky
+> a exekuce, platby mezd i odvodů, účetní můstek, dokumenty a archiv výstupů.
+> Zákonné výpočty sociálního a zdravotního pojištění, daně a čisté mzdy jsou
+> napojené do neměnné revize.
+>
+> **Do ostrého spuštění ale výsledek, odvody, dokumenty i podání vždy ověř proti
+> jinému důvěryhodnému zdroji** a nepoužívej modul jako jediný podklad pro
+> výplatu nebo zákonné podání. Neúplný či nepodporovaný scénář systém zastaví
+> v ruční kontrole a **zákonná podání se zatím jen připravují a stahují, aplikace
+> je neodesílá** ([§ 58.15](#5815-podani-a-hlaseni)). Pro zaúčtování zůstává
+> k dispozici [Mzdová rekapitulace](57_Mzdy.md).
 
 ## 58.1 Zapnutí pro firmu
 
-V **Firma → Nastavení** je přepínač **Vést mzdy**. Je ve výchozím stavu vypnutý,
-není navázaný na samostatnou licenci a doprovází ho výrazné upozornění na
-testovací alfa stav. Je-li vypnutý, sekce Mzdy se skryje z menu a její přímé
-adresy nejsou dostupné. Zapnutí neznamená potvrzení správnosti výpočtů ani
-povolení produkčního použití.
+V **Firma → Nastavení** je přepínač **Vést mzdy**. Je ve výchozím stavu vypnutý
+a není navázaný na samostatnou licenci. Do ostrého spuštění ho v aplikaci
+doprovází výrazné upozornění, že modul je ve zkušebním provozu a jeho výstupy
+je nutné ověřovat. Je-li přepínač vypnutý, sekce Mzdy se skryje z menu a její
+přímé adresy nejsou dostupné. Zapnutí neznamená potvrzení správnosti výpočtů.
 
 Na přehledu mezd zvolíš první měsíc, od kterého má firma používat úplný mzdový
 modul. Rok musí být uvedený v matici podporovaného rozsahu; nemusí jít o budoucí
@@ -50,7 +54,7 @@ Přehled mezd ukazuje podporované roky a schopnosti modulu. Stav má tento výz
 
 Označení na přehledu je bezpečnostní hranice. Modul nesmí chybějící pravidlo
 nahradit nejbližším rokem nebo odhadem. Stav **Podporováno** popisuje technicky
-pokrytý scénář, ale neruší testovací alfa označení celého modulu.
+pokrytý scénář, ale neruší povinnost ověřovat výstupy do ostrého spuštění.
 
 ## 58.3 Nastavení zaměstnavatele
 
