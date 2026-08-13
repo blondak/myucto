@@ -101,6 +101,64 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertSame([], $unknown);
     }
 
+    /**
+     * Zaměstnanec s podepsaným prohlášením je běžný případ, ne okrajový —
+     * dokud rozpad slev nešel vykázat, blokoval se prakticky každý.
+     */
+    public function testSignedDeclarationWithCreditEmitsBreakdownAndStaysXsdValid(): void
+    {
+        $payload = $this->payload();
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['claimed_non_refundable_credits_minor_units'] = 257_000;
+        $tax['applied_non_refundable_credits_minor_units'] = 257_000;
+        $tax['claimed_non_refundable_credit_breakdown'] = ['taxpayer' => 257_000];
+        $tax['advance_tax']['non_refundable_credits_minor_units'] = 257_000;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 272_000;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 15_000;
+        unset($tax);
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<form:zakladniSleva>2570</form:zakladniSleva>',
+            $result['xml'],
+        );
+        self::assertStringNotContainsString('zakladniSlevaInvalidita12', $result['xml']);
+    }
+
+    public function testCreditWithoutSignedDeclarationIsRefused(): void
+    {
+        $payload = $this->payload();
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['claimed_non_refundable_credits_minor_units'] = 257_000;
+        $tax['applied_non_refundable_credits_minor_units'] = 257_000;
+        $tax['claimed_non_refundable_credit_breakdown'] = ['taxpayer' => 257_000];
+        $tax['advance_tax']['non_refundable_credits_minor_units'] = 257_000;
+        unset($tax);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Sleva bez podepsaného prohlášení musela podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_credit_without_declaration',
+                $exception->validationCode,
+            );
+        }
+    }
+
     public function testBlockedResolutionIsNeverSerialized(): void
     {
         $payload = $this->payload();
@@ -339,6 +397,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                             'issues' => [],
                             'withholding_tax_minor_units' => 0,
                             'withholding_groups' => [],
+                            'claimed_non_refundable_credits_minor_units' => 0,
+                            'applied_non_refundable_credits_minor_units' => 0,
+                            'claimed_non_refundable_credit_breakdown' => [],
                             'advance_tax' => [
                                 'taxable_income_minor_units' => 100_000,
                                 'rounded_tax_base_minor_units' => 100_000,

@@ -563,6 +563,7 @@ final class PayrollRunStatutoryResultPersisterTest extends TestCase
             0,
             0,
             0,
+            [],
             0,
             0,
             new AnnualTaxAccumulatorResult(

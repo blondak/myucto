@@ -248,17 +248,47 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
-    public function testClaimedTaxCreditBlocksBreakdownThatCannotBeFilled(): void
+    public function testFullyAppliedTaxCreditIsCarriedAsPerKindBreakdown(): void
     {
-        $preparation = $this->preparation();
-        $payload = $preparation->payload;
-        $payload['people'][0]['person_summary']['statutory']['income_tax']
-            ['advance_tax']['non_refundable_credits_minor_units'] = 257_000;
-        $payload['people'][0]['employments'][0]['term']
-            ['tax_declaration_signed'] = true;
-
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
-            $this->withPayload($preparation, $payload),
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithCredits(257_000, 257_000, [
+                    'taxpayer' => 257_000,
+                ]),
+            ),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertNotContains(
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            $codes,
+        );
+        self::assertSame(
+            [
+                'basic' => 2570,
+                'disability_basic' => null,
+                'disability_extended' => null,
+                'ztp_p' => null,
+            ],
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['tax_credits_czk'],
+        );
+    }
+
+    public function testPartiallyAppliedTaxCreditIsBlockedInsteadOfSplitByGuess(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithCredits(257_000, 150_00, [
+                    'taxpayer' => 257_000,
+                ]),
+            ),
             $this->pvpoj(),
         );
         $codes = array_map(
@@ -267,9 +297,77 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
 
         self::assertContains(
-            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            'jmhz_scenario1_partial_tax_credit_unsupported',
             $codes,
         );
+        self::assertNull(
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['tax_credits_czk']['basic'],
+        );
+    }
+
+    public function testBreakdownThatDoesNotSumToTheClaimedTotalIsRefused(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithCredits(257_000, 257_000, [
+                    'taxpayer' => 200_000,
+                ]),
+            ),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    public function testChildCreditStaysBlockedUntilItsOwnBlockIsFrozen(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['people'][0]['person_summary']['statutory']['income_tax']
+            ['advance_tax']['child_credit_minor_units'] = 161_700;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_child_credit_breakdown_unavailable',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * @param array<string,int> $breakdown
+     * @return array<string,mixed>
+     */
+    private function payloadWithCredits(
+        int $claimed,
+        int $applied,
+        array $breakdown,
+    ): array {
+        $payload = $this->preparation()->payload;
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['claimed_non_refundable_credits_minor_units'] = $claimed;
+        $tax['applied_non_refundable_credits_minor_units'] = $applied;
+        $tax['claimed_non_refundable_credit_breakdown'] = $breakdown;
+        $tax['advance_tax']['non_refundable_credits_minor_units'] = $claimed;
+        unset($tax);
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+
+        return $payload;
     }
 
     public function testMissingAdvanceTaxKeysNeverBecomeSilentZero(): void
@@ -382,6 +480,9 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                             'issues' => [],
                             'withholding_tax_minor_units' => 0,
                             'withholding_groups' => [],
+                            'claimed_non_refundable_credits_minor_units' => 0,
+                            'applied_non_refundable_credits_minor_units' => 0,
+                            'claimed_non_refundable_credit_breakdown' => [],
                             'advance_tax' => [
                                 'taxable_income_minor_units' => 100_000,
                                 'rounded_tax_base_minor_units' => 100_000,

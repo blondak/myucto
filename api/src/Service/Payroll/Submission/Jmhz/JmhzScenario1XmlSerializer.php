@@ -411,15 +411,52 @@ final class JmhzScenario1XmlSerializer
         }
         $node->appendChild($tax);
 
+        $declarationSigned = $this->bool(
+            $summary['taxpayer_declaration_signed'] ?? null,
+            '10419',
+        );
         $this->text(
             $dom,
             $node,
             JmhzSchemaCatalog::NS_FORM,
             'form:prohlaseniPoplatnika',
-            $this->bool($summary['taxpayer_declaration_signed'] ?? null, '10419')
-                ? 'true'
-                : 'false',
+            $declarationSigned ? 'true' : 'false',
         );
+        $credits = $this->object($summary['tax_credits_czk'] ?? null);
+        $claimed = array_filter(
+            [
+                'form:zakladniSleva' => ['basic', '10299'],
+                'form:zakladniSlevaInvalidita12' => ['disability_basic', '10300'],
+                'form:rozsirenaSlevaInvalidita3' => ['disability_extended', '10301'],
+                'form:slevaZTPP' => ['ztp_p', '10302'],
+            ],
+            static fn (array $pair): bool => ($credits[$pair[0]] ?? null) !== null,
+        );
+        if ($claimed !== []) {
+            if (!$declarationSigned) {
+                // Slevu lze uplatnit jen s podepsaným prohlášením; kdyby to
+                // vyšlo naopak, hlásili bychom vnitřně rozporný formulář.
+                $this->invalid(
+                    'jmhz_xml_credit_without_declaration',
+                    'Uplatněnou slevu na dani nelze vykázat bez podepsaného prohlášení poplatníka.',
+                );
+            }
+            $block = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:prohlaseniPoplatnikaDane',
+            );
+            foreach ($claimed as $element => [$key, $attributeId]) {
+                $this->text(
+                    $dom,
+                    $block,
+                    JmhzSchemaCatalog::NS_FORM,
+                    $element,
+                    (string) $this->int($credits[$key] ?? null, $attributeId),
+                );
+            }
+            $node->appendChild($block);
+        }
 
         $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
         $this->text(

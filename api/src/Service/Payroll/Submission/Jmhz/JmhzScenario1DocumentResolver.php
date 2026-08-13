@@ -130,6 +130,7 @@ final class JmhzScenario1DocumentResolver
             $this->inspectUnsupportedTax($tax, $employeeId, $blockers);
             $this->inspectDeductions($net, $employeeId, $blockers);
             $advanceTaxCzk = $this->advanceTaxCzk($tax, $employeeId, $blockers);
+            $taxCreditsCzk = $this->taxCreditsCzk($tax, $employeeId, $blockers);
             $declarationSigned = null;
 
             $normalizedEmployments = [];
@@ -276,6 +277,7 @@ final class JmhzScenario1DocumentResolver
                         : ($ordinaryEvidence['attribute_values']['10116'] ?? null),
                     'taxpayer_declaration_signed' => $declarationSigned,
                     'advance_tax_czk' => $advanceTaxCzk,
+                    'tax_credits_czk' => $taxCreditsCzk,
                 ],
                 'employments' => $normalizedEmployments,
             ];
@@ -503,15 +505,109 @@ final class JmhzScenario1DocumentResolver
                     $employeeId,
                     $attributeIds,
                 );
-            } elseif ($value > 0 && $field !== 'tax_bonus_minor_units') {
+            } elseif ($value > 0 && $field === 'child_credit_minor_units') {
+                // Daňové zvýhodnění na děti přináší vedle 10303 i blok
+                // `zvyhodneniDetiMesic` (10453, 10440, 10451) a ten zmrazený
+                // nemáme; vykázat samotnou částku by zamlčelo pořadí dětí.
                 $blockers[] = $this->blocker(
-                    'jmhz_scenario1_tax_credit_breakdown_unavailable',
+                    'jmhz_scenario1_child_credit_breakdown_unavailable',
                     'person',
                     $employeeId,
-                    ['10299', '10300', '10301', '10302', '10303', '10304'],
+                    ['10303', '10304', '10440', '10451', '10453'],
                 );
             }
         }
+    }
+
+    /**
+     * Rozpad nepřenositelných slev po druzích. Vykazuje se jen tehdy, když se
+     * nárokovaná částka uplatnila CELÁ — při částečném uplatnění není zákonem
+     * dané, která konkrétní sleva se zkrátila, a rozdělit ji odhadem by znamenalo
+     * vykázat nedoložený údaj.
+     *
+     * @param array<string,mixed> $tax
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array{
+     *   basic:?int,disability_basic:?int,disability_extended:?int,ztp_p:?int
+     * }
+     */
+    private function taxCreditsCzk(
+        array $tax,
+        ?int $employeeId,
+        array &$blockers,
+    ): array {
+        $empty = [
+            'basic' => null,
+            'disability_basic' => null,
+            'disability_extended' => null,
+            'ztp_p' => null,
+        ];
+        $claimed = $tax['claimed_non_refundable_credits_minor_units'] ?? null;
+        $applied = $tax['applied_non_refundable_credits_minor_units'] ?? null;
+        $breakdown = $tax['claimed_non_refundable_credit_breakdown'] ?? null;
+        // Prázdný rozpad je legitimní stav (žádná sleva se neuplatňuje) a
+        // `array_is_list([])` je `true`, takže se na prázdno testuje zvlášť.
+        if (!is_int($claimed) || !is_int($applied)
+            || !is_array($breakdown)
+            || ($breakdown !== [] && array_is_list($breakdown))
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_income_tax_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10299', '10300', '10301', '10302'],
+            );
+
+            return $empty;
+        }
+        if ($claimed === 0 && $applied === 0) {
+            return $empty;
+        }
+        if ($claimed !== $applied) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_partial_tax_credit_unsupported',
+                'person',
+                $employeeId,
+                ['10299', '10300', '10301', '10302'],
+            );
+
+            return $empty;
+        }
+        $result = $empty;
+        $total = 0;
+        foreach ([
+            'basic' => 'taxpayer',
+            'disability_basic' => 'disability_basic',
+            'disability_extended' => 'disability_extended',
+            'ztp_p' => 'ztp_p',
+        ] as $key => $kind) {
+            $minor = $breakdown[$kind] ?? null;
+            if ($minor === null) {
+                continue;
+            }
+            $result[$key] = $this->wholeCzk(
+                is_int($minor) ? $minor : null,
+                '10299',
+                'person',
+                $employeeId,
+                $blockers,
+            );
+            $total += is_int($minor) ? $minor : 0;
+        }
+        if ($total !== $claimed) {
+            // Kdyby rozpad neseděl na úhrn, mlčky bychom vykázali jiné číslo,
+            // než ze kterého se počítala záloha.
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_tax_credit_breakdown_unavailable',
+                'person',
+                $employeeId,
+                ['10299', '10300', '10301', '10302'],
+            );
+
+            return $empty;
+        }
+
+        return $result;
     }
 
     /**

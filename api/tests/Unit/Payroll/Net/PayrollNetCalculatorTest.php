@@ -258,6 +258,7 @@ final class PayrollNetCalculatorTest extends TestCase
             withholdingTaxMinorUnits: $withholdingTax,
             claimedNonRefundableCreditsMinorUnits: 200_000,
             appliedNonRefundableCreditsMinorUnits: 200_000,
+            claimedNonRefundableCreditBreakdown: ['taxpayer' => 200_000],
             claimedChildCreditMinorUnits: 126_700,
             appliedChildCreditMinorUnits: 126_700,
             annualAccumulator: new AnnualTaxAccumulatorResult(

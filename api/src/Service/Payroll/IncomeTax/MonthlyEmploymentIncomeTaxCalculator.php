@@ -138,6 +138,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 0,
                 $creditResolution['amount'],
                 0,
+                $creditResolution['breakdown'],
                 $childResolution['amount'],
                 0,
                 $this->annualResult($input, $policy, null, 0, 0, 0, 0),
@@ -248,6 +249,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $withholdingTax,
             $creditResolution['amount'],
             $appliedNonRefundable,
+            $creditResolution['breakdown'],
             $childResolution['amount'],
             $appliedChild,
             $this->annualResult(
@@ -381,7 +383,10 @@ final class MonthlyEmploymentIncomeTaxCalculator
     }
 
     /**
-     * @return array{amount:int,other:int,taxpayer:bool,issues:list<string>}
+     * @return array{
+     *   amount:int,other:int,taxpayer:bool,
+     *   breakdown:array<string,int>,issues:list<string>
+     * }
      */
     private function resolveCredits(
         MonthlyEmploymentIncomeTaxInput $input,
@@ -421,24 +426,37 @@ final class MonthlyEmploymentIncomeTaxCalculator
 
         $taxpayer = isset($kinds[TaxCreditKind::Taxpayer->value]);
         $other = 0;
+        // Rozpad po druzích slevy potřebuje JMHZ (atributy 10299-10302), kde se
+        // každá sleva vykazuje samostatně. Úhrn sám o sobě je nerozložitelný.
+        $breakdown = [];
         foreach ($active as $claim) {
-            $other = TaxIntegerMath::add($other, match ($claim->kind) {
-                TaxCreditKind::Taxpayer => 0,
+            $claimAmount = match ($claim->kind) {
+                TaxCreditKind::Taxpayer
+                    => $policy->money('credit.taxpayer.monthly'),
                 TaxCreditKind::DisabilityBasic
                     => $policy->money('credit.disability.basic.monthly'),
                 TaxCreditKind::DisabilityExtended
                     => $policy->money('credit.disability.extended.monthly'),
                 TaxCreditKind::ZtpP => $policy->money('credit.ztp_p.monthly'),
-            });
+            };
+            $breakdown[$claim->kind->value] = TaxIntegerMath::add(
+                $breakdown[$claim->kind->value] ?? 0,
+                $claimAmount,
+            );
+            if ($claim->kind !== TaxCreditKind::Taxpayer) {
+                $other = TaxIntegerMath::add($other, $claimAmount);
+            }
         }
         $amount = TaxIntegerMath::add($other, $taxpayer
             ? $policy->money('credit.taxpayer.monthly')
             : 0);
+        ksort($breakdown, SORT_STRING);
 
         return [
             'amount' => $amount,
             'other' => $other,
             'taxpayer' => $taxpayer,
+            'breakdown' => $breakdown,
             'issues' => array_values(array_unique($issues)),
         ];
     }

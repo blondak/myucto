@@ -12,6 +12,8 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
     /**
      * @param list<RelationshipTaxResult> $relationships
      * @param list<WithholdingTaxGroupResult> $withholdingGroups
+     * @param array<string,int> $claimedNonRefundableCreditBreakdown nárokovaná
+     *        částka po druzích slevy; JMHZ ji vykazuje samostatně (10299-10302)
      * @param list<string> $issues
      */
     public function __construct(
@@ -26,6 +28,7 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
         public int $withholdingTaxMinorUnits,
         public int $claimedNonRefundableCreditsMinorUnits,
         public int $appliedNonRefundableCreditsMinorUnits,
+        public array $claimedNonRefundableCreditBreakdown,
         public int $claimedChildCreditMinorUnits,
         public int $appliedChildCreditMinorUnits,
         public AnnualTaxAccumulatorResult $annualAccumulator,
@@ -57,6 +60,7 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
             'withholding_tax_minor_units' => $this->withholdingTaxMinorUnits,
             'claimed_non_refundable_credits_minor_units' => $this->claimedNonRefundableCreditsMinorUnits,
             'applied_non_refundable_credits_minor_units' => $this->appliedNonRefundableCreditsMinorUnits,
+            'claimed_non_refundable_credit_breakdown' => $this->claimedNonRefundableCreditBreakdown,
             'claimed_child_credit_minor_units' => $this->claimedChildCreditMinorUnits,
             'applied_child_credit_minor_units' => $this->appliedChildCreditMinorUnits,
             'annual_accumulator' => $this->annualAccumulator->jsonSerialize(),
