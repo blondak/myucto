@@ -8,10 +8,11 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
-use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorUnavailableException;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
@@ -21,6 +22,8 @@ use PDO;
 
 final class PayrollRunSnapshotBuilder
 {
+    private readonly PayrollRunSnapshotBatchLoader $batch;
+
     /**
      * `$rulesets` je POVINNÝ. Jako volitelný parametr s defaultem ho PHP-DI
      * nevyplňovalo a snapshot běhu si tiše bral výchozí sadu z kódu, takže
@@ -36,7 +39,12 @@ final class PayrollRunSnapshotBuilder
         private readonly ?PayrollEmployerSettingsRepository $employerSettings = null,
         private readonly ?PayrollEmployerPolicyRepository $employerPolicies = null,
         private readonly ?JmhzExternalCodebookCatalog $jmhzExternalCodebooks = null,
-    ) {}
+    ) {
+        // Loader je čistý SQL pomocník nad týmž spojením — vědomě se nedává do
+        // konstruktoru, aby nepřibyl další volitelný parametr, který by PHP-DI
+        // nevyplnilo a který by se pak tiše nahradil defaultem.
+        $this->batch = new PayrollRunSnapshotBatchLoader($db);
+    }
 
     public function build(
         int $supplierId,
@@ -97,6 +105,65 @@ final class PayrollRunSnapshotBuilder
             );
         }
 
+        // Zmrazená množina ID — od tohohle bodu se podklady načítají MNOŽINOVĚ.
+        // Dřív tady běžel dotaz na osobu a na vztah, takže běh nad ~300 osobami
+        // vygeneroval tisíce round-tripů uvnitř jedné transakce a nedoběhl.
+        $employmentIds = [];
+        $employeeIds = [];
+        foreach ($employments as $row) {
+            $employmentIds[] = (int) $row['employment_id'];
+            $employeeIds[(int) $row['employee_id']] = true;
+        }
+        $employeeIds = array_keys($employeeIds);
+
+        $timeMonthRows = $this->batch->timeMonths(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+        );
+        $draftInputCounts = $this->batch->draftInputCounts(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+        );
+        $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $absenceRows = $this->batch->absences(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+        );
+        $enforcementEvidence = $this->enforcement === null
+            ? []
+            : $this->enforcementEvidence(
+                $supplierId,
+                $employeeIds,
+                $period->format('Y-m'),
+                $paymentDate,
+            );
+        $statutoryEvidence = $this->statutoryEvidence?->snapshotMany(
+            $supplierId,
+            $employeeIds,
+            $statutoryPeriod->taxCalculationDate,
+        ) ?? [];
+        $accumulatorStates = $this->statutoryAccumulatorStates(
+            $supplierId,
+            $employeeIds,
+            (int) $period->format('Y'),
+            $periodStart,
+        );
+        $deductionAgreementRows = $this->batch->deductionAgreements(
+            $supplierId,
+            $employeeIds,
+            $periodEnd,
+        );
+        $payoutRuleRows = $this->batch->payoutRules($supplierId, $employeeIds);
+        $payoutAccountRows = $this->batch->payoutAccounts(
+            $supplierId,
+            $employeeIds,
+            $paymentDate,
+        );
+
         /** @var array<int,array{employee:array<string,mixed>,employments:list<array<string,mixed>>}> $people */
         $people = [];
         foreach ($employments as $row) {
@@ -112,7 +179,9 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/employees/{$employeeId}",
                 );
             }
-            $timeMonth = $this->timeMonth($supplierId, $employmentId, $periodStart);
+            $timeMonth = isset($timeMonthRows[$employmentId])
+                ? $this->timeMonth($timeMonthRows[$employmentId])
+                : null;
             if ($timeMonth !== null && $timeMonth['status'] !== 'approved') {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
@@ -123,11 +192,7 @@ final class PayrollRunSnapshotBuilder
                     '/payroll/time',
                 );
             }
-            $draftCount = $this->draftInputCount(
-                $supplierId,
-                $employmentId,
-                $periodStart,
-            );
+            $draftCount = $draftInputCounts[$employmentId] ?? 0;
             if ($draftCount > 0) {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
@@ -138,7 +203,7 @@ final class PayrollRunSnapshotBuilder
                     '/payroll/components',
                 );
             }
-            $inputs = $this->inputs($supplierId, $employmentId, $periodStart);
+            $inputs = $this->inputs($inputRows[$employmentId] ?? []);
             if ($inputs === []) {
                 $validations[] = new PayrollRunValidation(
                     'warning',
@@ -150,12 +215,7 @@ final class PayrollRunSnapshotBuilder
                     true,
                 );
             }
-            $absences = $this->absences(
-                $supplierId,
-                $employmentId,
-                $periodStart,
-                $periodEnd,
-            );
+            $absences = $this->absences($absenceRows[$employmentId] ?? []);
 
             $people[$employeeId] ??= [
                 'employee' => [
@@ -166,33 +226,19 @@ final class PayrollRunSnapshotBuilder
                 ],
                 'enforcement_evidence' => $this->enforcement === null
                     ? null
-                    : $this->enforcement->evidenceFor(
-                        $supplierId,
-                        $employeeId,
-                        $period->format('Y-m'),
-                        $paymentDate,
-                    )->toCanonicalArray(),
-                'statutory_evidence' => $this->statutoryEvidence?->snapshot(
-                    $supplierId,
-                    $employeeId,
-                    $statutoryPeriod->taxCalculationDate,
-                ),
-                'statutory_accumulators' => $this->statutoryAccumulatorSnapshot(
-                    $supplierId,
-                    $employeeId,
-                    (int) $period->format('Y'),
-                    $periodStart,
-                ),
+                    : $enforcementEvidence[$employeeId],
+                'statutory_evidence' => $this->statutoryEvidence === null
+                    ? null
+                    : ($statutoryEvidence[$employeeId] ?? null),
+                'statutory_accumulators' => $accumulatorStates[$employeeId],
                 'deduction_agreements' => $this->deductionAgreements(
-                    $supplierId,
-                    $employeeId,
-                    $periodEnd,
+                    $deductionAgreementRows[$employeeId] ?? [],
                 ),
-                'payout_rules' => $this->payoutRules($supplierId, $employeeId),
+                'payout_rules' => $this->payoutRules(
+                    $payoutRuleRows[$employeeId] ?? [],
+                ),
                 'payout_accounts' => $this->payoutAccounts(
-                    $supplierId,
-                    $employeeId,
-                    $paymentDate,
+                    $payoutAccountRows[$employeeId] ?? [],
                 ),
                 'employments' => [],
             ];
@@ -564,47 +610,97 @@ final class PayrollRunSnapshotBuilder
         ];
     }
 
-    /** @return array<string,mixed> */
-    private function statutoryAccumulatorSnapshot(
+    /**
+     * Exekuční evidence celé zmrazené množiny osob v kanonickém tvaru.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function enforcementEvidence(
         int $supplierId,
-        int $employeeId,
+        array $employeeIds,
+        string $period,
+        string $paymentDate,
+    ): array {
+        $source = $this->enforcement;
+        if ($source === null) {
+            return [];
+        }
+        if ($source instanceof PayrollEnforcementRepository) {
+            return array_map(
+                static fn (EnforcementPersonMonthEvidence $evidence): array =>
+                    $evidence->toCanonicalArray(),
+                $source->evidenceForMany(
+                    $supplierId,
+                    $employeeIds,
+                    $period,
+                    $paymentDate,
+                ),
+            );
+        }
+
+        // Cizí implementace rozhraní (testovací dvojníci) dávkové rozhraní nemají.
+        $result = [];
+        foreach ($employeeIds as $employeeId) {
+            $result[$employeeId] = $source->evidenceFor(
+                $supplierId,
+                $employeeId,
+                $period,
+                $paymentDate,
+            )->toCanonicalArray();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Zákonné roční kumulace celé zmrazené množiny osob.
+     *
+     * Osoba bez doloženého opening balance chybí ve výsledku dávkového dotazu —
+     * a dostane tady tutéž hlášku `unverified`, jakou dřív vyrobila zachycená
+     * PayrollStatutoryAccumulatorUnavailableException.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function statutoryAccumulatorStates(
+        int $supplierId,
+        array $employeeIds,
         int $year,
         string $periodStart,
     ): array {
-        $result = [
-            'schema_version' => 'payroll-person-statutory-accumulators.v1',
+        $unverified = [
+            'status' => 'unverified',
+            'issue_code' => 'annual_accumulator_missing',
+            'state' => null,
         ];
-        foreach ([
-            'social_insurance' => 'social_insurance',
-            'income_tax' => 'income_tax',
-        ] as $key => $calculationKind) {
-            if ($this->statutoryAccumulators === null) {
-                $result[$key] = [
-                    'status' => 'unverified',
-                    'issue_code' => 'annual_accumulator_missing',
-                    'state' => null,
-                ];
-                continue;
+        $states = [];
+        foreach (['social_insurance', 'income_tax'] as $calculationKind) {
+            $states[$calculationKind] = $this->statutoryAccumulators?->statesBeforePeriod(
+                $supplierId,
+                $employeeIds,
+                $year,
+                $periodStart,
+                $calculationKind,
+            ) ?? [];
+        }
+
+        $result = [];
+        foreach ($employeeIds as $employeeId) {
+            $snapshot = [
+                'schema_version' => 'payroll-person-statutory-accumulators.v1',
+            ];
+            foreach ($states as $calculationKind => $byEmployee) {
+                $state = $byEmployee[$employeeId] ?? null;
+                $snapshot[$calculationKind] = $state === null
+                    ? $unverified
+                    : [
+                        'status' => 'verified',
+                        'issue_code' => null,
+                        'state' => $state,
+                    ];
             }
-            try {
-                $result[$key] = [
-                    'status' => 'verified',
-                    'issue_code' => null,
-                    'state' => $this->statutoryAccumulators->stateBeforePeriod(
-                        $supplierId,
-                        $employeeId,
-                        $year,
-                        $periodStart,
-                        $calculationKind,
-                    ),
-                ];
-            } catch (PayrollStatutoryAccumulatorUnavailableException) {
-                $result[$key] = [
-                    'status' => 'unverified',
-                    'issue_code' => 'annual_accumulator_missing',
-                    'state' => null,
-                ];
-            }
+            $result[$employeeId] = $snapshot;
         }
 
         return $result;
@@ -666,61 +762,12 @@ final class PayrollRunSnapshotBuilder
         ];
     }
 
-    /** @return array<string,mixed>|null */
-    private function timeMonth(
-        int $supplierId,
-        int $employmentId,
-        string $periodStart,
-    ): ?array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT month_row.id, month_row.status, month_row.revision_no,
-                    month_row.row_version, month_row.approved_at,
-                    summary.id AS summary_id,
-                    spec.package_key AS spec_package_key,
-                    spec.manifest_sha256 AS stored_spec_manifest_sha256,
-                    summary.spec_manifest_sha256,
-                    summary.scenario_catalog_key,
-                    summary.scenario_manifest_sha256,
-                    summary.control_catalog_key,
-                    summary.control_manifest_sha256,
-                    summary.derivation_version,
-                    summary.source_snapshot_json,
-                    summary.source_snapshot_sha256,
-                    summary.standard_fund_millihours,
-                    summary.agreed_fund_millihours,
-                    summary.weekly_work_centihours,
-                    summary.evidence_days,
-                    summary.worked_millihours,
-                    summary.conditional_blocks_confirmed,
-                    summary.unworked_hours_occurred,
-                    summary.work_obstacles_occurred,
-                    summary.unworked_total_millihours,
-                    summary.unworked_paid_millihours,
-                    summary.dpn_without_employer_compensation_millihours,
-                    summary.dpn_with_employer_compensation_millihours,
-                    summary.vacation_millihours,
-                    summary.care_millihours,
-                    summary.employee_obstacle_paid_millihours,
-                    summary.employer_obstacle_millihours,
-                    summary.confirmation_note,
-                    summary.provenance_json,
-                    summary.summary_sha256
-               FROM payroll_time_months month_row
-               LEFT JOIN payroll_jmhz_work_month_revisions summary
-                 ON summary.supplier_id = month_row.supplier_id
-                AND summary.time_month_id = month_row.id
-                AND summary.time_month_revision_no = month_row.revision_no
-               LEFT JOIN payroll_jmhz_spec_packages spec
-                 ON spec.id = summary.spec_package_id
-              WHERE month_row.supplier_id = ?
-                AND month_row.employment_id = ?
-                AND month_row.period_start = ?'
-        );
-        $stmt->execute([$supplierId, $employmentId, $periodStart]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return null;
-        }
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function timeMonth(array $row): array
+    {
         $summary = null;
         if ($row['summary_id'] !== null) {
             if (!hash_equals(
@@ -830,39 +877,14 @@ final class PayrollRunSnapshotBuilder
         ];
     }
 
-    private function draftInputCount(
-        int $supplierId,
-        int $employmentId,
-        string $periodStart,
-    ): int {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*)
-               FROM payroll_inputs
-              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
-                AND status = "draft"'
-        );
-        $stmt->execute([$supplierId, $employmentId, $periodStart]);
-        return (int) $stmt->fetchColumn();
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function inputs(
-        int $supplierId,
-        int $employmentId,
-        string $periodStart,
-    ): array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, amount_minor, quantity_milliunits, source_kind,
-                    source_period_start, component_snapshot_json,
-                    HEX(component_snapshot_hash) AS component_snapshot_hash
-               FROM payroll_inputs
-              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
-                AND status IN ("approved", "locked")
-              ORDER BY id'
-        );
-        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function inputs(array $rows): array
+    {
         $result = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $component = json_decode(
                 (string) $row['component_snapshot_json'],
                 true,
@@ -887,26 +909,13 @@ final class PayrollRunSnapshotBuilder
         return $result;
     }
 
-    /** @return list<array<string,mixed>> */
-    private function absences(
-        int $supplierId,
-        int $employmentId,
-        string $periodStart,
-        string $periodEnd,
-    ): array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, absence_type, date_from, date_to,
-                    partial_first_minutes, partial_last_minutes, timezone_name,
-                    compensation_policy, average_snapshot_id, decided_at
-               FROM payroll_absences
-              WHERE supplier_id = ? AND employment_id = ?
-                AND status = "approved"
-                AND date_from <= ?
-                AND date_to >= ?
-              ORDER BY date_from, id'
-        );
-        $stmt->execute([$supplierId, $employmentId, $periodEnd, $periodStart]);
-        return array_values(array_map(
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function absences(array $rows): array
+    {
+        return array_map(
             static fn (array $row): array => [
                 'id' => (int) $row['id'],
                 'absence_type' => (string) $row['absence_type'],
@@ -925,29 +934,17 @@ final class PayrollRunSnapshotBuilder
                     : (int) $row['average_snapshot_id'],
                 'decided_at' => $row['decided_at'],
             ],
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+            $rows,
+        );
     }
 
-    /** @return list<array<string,mixed>> */
-    private function deductionAgreements(
-        int $supplierId,
-        int $employeeId,
-        string $effectiveOn,
-    ): array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, agreement_reference, title, deduction_kind, priority_no,
-                    requested_minor, total_limit_minor, withheld_total_minor,
-                    valid_from, valid_to, row_version
-               FROM payroll_deduction_agreements
-              WHERE supplier_id = ? AND employee_id = ?
-                AND status = "active"
-                AND valid_from <= ?
-                AND (valid_to IS NULL OR valid_to >= ?)
-              ORDER BY priority_no, id'
-        );
-        $stmt->execute([$supplierId, $employeeId, $effectiveOn, $effectiveOn]);
-        return array_values(array_map(
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function deductionAgreements(array $rows): array
+    {
+        return array_map(
             static fn (array $row): array => [
                 'id' => (int) $row['id'],
                 'agreement_reference' => (string) $row['agreement_reference'],
@@ -963,24 +960,17 @@ final class PayrollRunSnapshotBuilder
                 'valid_to' => $row['valid_to'],
                 'row_version' => (int) $row['row_version'],
             ],
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+            $rows,
+        );
     }
 
-    /** @return list<array<string,mixed>> */
-    private function payoutRules(int $supplierId, int $employeeId): array
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function payoutRules(array $rows): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, allocation_reference, destination_kind,
-                    destination_reference, allocation_kind, amount_minor,
-                    basis_points, priority_no, row_version
-               FROM payroll_payout_rules
-              WHERE supplier_id = ? AND employee_id = ? AND is_active = 1
-              ORDER BY priority_no, id
-              FOR UPDATE'
-        );
-        $stmt->execute([$supplierId, $employeeId]);
-        return array_values(array_map(
+        return array_map(
             static fn (array $row): array => [
                 'id' => (int) $row['id'],
                 'allocation_reference' => (string) $row['allocation_reference'],
@@ -996,38 +986,17 @@ final class PayrollRunSnapshotBuilder
                 'priority_no' => (int) $row['priority_no'],
                 'row_version' => (int) $row['row_version'],
             ],
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+            $rows,
+        );
     }
 
-    /** @return list<array<string,mixed>> */
-    private function payoutAccounts(
-        int $supplierId,
-        int $employeeId,
-        string $paymentDate,
-    ): array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, label, LOWER(HEX(bank_account_hash)) AS bank_account_hash,
-                    bank_account_masked, allocation_basis_points,
-                    effective_from, effective_to, row_version,
-                    verification_source, verified_on, verified_by
-               FROM payroll_person_accounts
-              WHERE supplier_id = ?
-                AND employee_id = ?
-                AND is_active = 1
-                AND effective_from <= ?
-                AND (effective_to IS NULL OR effective_to >= ?)
-              ORDER BY id
-              FOR UPDATE'
-        );
-        $stmt->execute([
-            $supplierId,
-            $employeeId,
-            $paymentDate,
-            $paymentDate,
-        ]);
-
-        return array_values(array_map(
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function payoutAccounts(array $rows): array
+    {
+        return array_map(
             static fn (array $row): array => [
                 'id' => (int) $row['id'],
                 'label' => (string) $row['label'],
@@ -1044,7 +1013,7 @@ final class PayrollRunSnapshotBuilder
                     ? null
                     : (int) $row['verified_by'],
             ],
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+            $rows,
+        );
     }
 }

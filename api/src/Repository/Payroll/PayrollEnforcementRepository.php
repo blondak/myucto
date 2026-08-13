@@ -33,6 +33,12 @@ final class PayrollEnforcementRepository implements
 {
     private const INSOLVENCY_ALLOCATION_KEY = 'insolvency-administrator';
 
+    /** Velikost dávky pro množinové načtení nad zmrazenou sadou osob. */
+    private const CHUNK_SIZE = 500;
+
+    /** Alias skupinového klíče; po seskupení se z řádku zase odstraní. */
+    private const GROUP_KEY = 'snapshot_group_employee_id';
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return list<array<string,mixed>> */
@@ -705,86 +711,66 @@ final class PayrollEnforcementRepository implements
         string $period,
         string $paymentDate,
     ): EnforcementPersonMonthEvidence {
+        return $this->evidenceForMany(
+            $supplierId,
+            [$employeeId],
+            $period,
+            $paymentDate,
+        )[$employeeId];
+    }
+
+    /**
+     * Exekuční evidence pro celou množinu osob — tři dotazy místo tří na osobu.
+     *
+     * Jediná cesta k evidenci: evidenceFor() volá tuhle metodu s jednoprvkovým
+     * polem, takže se dávkový a jednotlivý výsledek nemůžou rozejít. Ve výsledku
+     * je záznam pro KAŽDÉ požadované ID; osoba bez podkladů dostane tutéž prázdnou
+     * evidenci, jakou vracela dotazovaná cesta.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,EnforcementPersonMonthEvidence>
+     */
+    public function evidenceForMany(
+        int $supplierId,
+        array $employeeIds,
+        string $period,
+        string $paymentDate,
+    ): array {
         $periodStart = self::periodStart($period);
         self::assertDate($paymentDate, 'payment_date');
-        $evidence = $this->monthEvidenceRow($supplierId, $employeeId, $periodStart);
-        $claimStmt = $this->db->pdo()->prepare(
-            "SELECT cl.id, cl.supplier_id, cl.case_id, cl.claim_key,
-                    cl.enforcement_order_key, cl.legal_basis, cl.category,
-                    GREATEST(
-                        0,
-                        cl.outstanding_minor_units - COALESCE((
-                            SELECT SUM(
-                                CASE
-                                    WHEN ledger.entry_kind = 'withheld'
-                                        THEN ledger.amount_minor_units
-                                    WHEN ledger.entry_kind = 'released_to_employee'
-                                        THEN -ledger.amount_minor_units
-                                    WHEN ledger.entry_kind = 'adjustment'
-                                        THEN ledger.amount_minor_units
-                                    ELSE 0
-                                END
-                            )
-                              FROM payroll_enforcement_ledger ledger
-                              JOIN payroll_enforcement_month_results prior_result
-                                ON prior_result.supplier_id = ledger.supplier_id
-                               AND prior_result.id = ledger.month_result_id
-                         LEFT JOIN payroll_run_revisions prior_revision
-                                ON prior_revision.supplier_id = prior_result.supplier_id
-                               AND prior_revision.id = prior_result.revision_id
-                             WHERE ledger.supplier_id = cl.supplier_id
-                               AND ledger.claim_id = cl.id
-                               AND ledger.entry_kind IN (
-                                   'withheld',
-                                   'released_to_employee',
-                                   'adjustment'
-                               )
-                               AND prior_result.period_start < ?
-                               AND (
-                                   prior_result.revision_id IS NULL
-                                   OR prior_result.revision_id = (
-                                       SELECT approved_revision.id
-                                         FROM payroll_run_revisions approved_revision
-                                        WHERE approved_revision.supplier_id =
-                                              prior_result.supplier_id
-                                          AND approved_revision.run_id =
-                                              prior_revision.run_id
-                                          AND approved_revision.status = 'approved'
-                                        ORDER BY approved_revision.revision_no DESC
-                                        LIMIT 1
-                                   )
-                               )
-                        ), 0)
-                    ) AS outstanding_minor_units,
-                    cl.maintenance_weight_minor_units, cl.priority_date,
-                    cl.order_issued_on, cl.legal_title_verified,
-                    cl.order_or_notice_delivered,
-                    cl.priority_classification_verified,
-                    cl.agreement_verified, cl.due_monetary_claim_verified,
-                    cl.is_active, cl.row_version, cl.created_at, cl.updated_at,
-                    c.evidence_complete AS case_evidence_complete
-               FROM payroll_enforcement_claims cl
-               JOIN payroll_enforcement_cases c
-                 ON c.supplier_id = cl.supplier_id AND c.id = cl.case_id
-              WHERE cl.supplier_id = ? AND c.employee_id = ? AND cl.is_active = 1
-                AND c.status IN ('withhold_and_hold', 'remit', 'deferred_hold')
-                AND c.effective_from <= ?
-                AND (c.effective_to IS NULL OR c.effective_to >= ?)
-              ORDER BY cl.priority_date, cl.id"
-        );
-        $claimStmt->execute([
-            $periodStart,
-            $supplierId,
-            $employeeId,
-            $paymentDate,
-            $paymentDate,
-        ]);
+        $unique = array_values(array_unique($employeeIds));
+        if ($unique === []) {
+            return [];
+        }
+        $evidenceRows = $this->monthEvidenceRows($supplierId, $unique, $periodStart);
+        $claimRows = $this->activeClaimRows($supplierId, $unique, $periodStart, $paymentDate);
+        $dependantRows = $this->dependantRows($supplierId, $unique, $paymentDate);
+
+        $result = [];
+        foreach ($unique as $employeeId) {
+            $result[$employeeId] = self::assembleEvidence(
+                $evidenceRows[$employeeId] ?? null,
+                $claimRows[$employeeId] ?? [],
+                $dependantRows[$employeeId] ?? [],
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string,mixed>|null $evidence
+     * @param list<array<string,mixed>> $claimRows
+     * @param list<array<string,mixed>> $dependantRows
+     */
+    private static function assembleEvidence(
+        ?array $evidence,
+        array $claimRows,
+        array $dependantRows,
+    ): EnforcementPersonMonthEvidence {
         $claims = [];
         $activeCaseEvidenceComplete = true;
-        foreach (PayrollTimeValue::rows(
-            $claimStmt->fetchAll(PDO::FETCH_ASSOC),
-            'enforcement_claims',
-        ) as $row) {
+        foreach ($claimRows as $row) {
             $activeCaseEvidenceComplete = $activeCaseEvidenceComplete
                 && PayrollTimeValue::bool(
                     $row['case_evidence_complete'] ?? null,
@@ -792,19 +778,9 @@ final class PayrollEnforcementRepository implements
                 );
             $claims[] = self::claimFromRow($row);
         }
-        $dependantStmt = $this->db->pdo()->prepare(
-            'SELECT dependant_kind, eligibility_verified, excluded_for_maintenance
-              FROM payroll_enforcement_dependants
-              WHERE supplier_id = ? AND employee_id = ?
-                AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)'
-        );
-        $dependantStmt->execute([$supplierId, $employeeId, $paymentDate, $paymentDate]);
         $dependants = 0;
         $spouse = false;
-        foreach (PayrollTimeValue::rows(
-            $dependantStmt->fetchAll(PDO::FETCH_ASSOC),
-            'enforcement_dependants',
-        ) as $row) {
+        foreach ($dependantRows as $row) {
             if (
                 !PayrollTimeValue::bool(
                     $row['eligibility_verified'] ?? null,
@@ -887,6 +863,149 @@ final class PayrollEnforcementRepository implements
                 self::nullableIntValue($evidence['court_determined_amount_minor_units'] ?? null),
             ),
         );
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function activeClaimRows(
+        int $supplierId,
+        array $employeeIds,
+        string $periodStart,
+        string $paymentDate,
+    ): array {
+        $grouped = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $claimStmt = $this->db->pdo()->prepare(sprintf(
+            "SELECT cl.id, cl.supplier_id, cl.case_id, cl.claim_key,
+                    cl.enforcement_order_key, cl.legal_basis, cl.category,
+                    GREATEST(
+                        0,
+                        cl.outstanding_minor_units - COALESCE((
+                            SELECT SUM(
+                                CASE
+                                    WHEN ledger.entry_kind = 'withheld'
+                                        THEN ledger.amount_minor_units
+                                    WHEN ledger.entry_kind = 'released_to_employee'
+                                        THEN -ledger.amount_minor_units
+                                    WHEN ledger.entry_kind = 'adjustment'
+                                        THEN ledger.amount_minor_units
+                                    ELSE 0
+                                END
+                            )
+                              FROM payroll_enforcement_ledger ledger
+                              JOIN payroll_enforcement_month_results prior_result
+                                ON prior_result.supplier_id = ledger.supplier_id
+                               AND prior_result.id = ledger.month_result_id
+                         LEFT JOIN payroll_run_revisions prior_revision
+                                ON prior_revision.supplier_id = prior_result.supplier_id
+                               AND prior_revision.id = prior_result.revision_id
+                             WHERE ledger.supplier_id = cl.supplier_id
+                               AND ledger.claim_id = cl.id
+                               AND ledger.entry_kind IN (
+                                   'withheld',
+                                   'released_to_employee',
+                                   'adjustment'
+                               )
+                               AND prior_result.period_start < ?
+                               AND (
+                                   prior_result.revision_id IS NULL
+                                   OR prior_result.revision_id = (
+                                       SELECT approved_revision.id
+                                         FROM payroll_run_revisions approved_revision
+                                        WHERE approved_revision.supplier_id =
+                                              prior_result.supplier_id
+                                          AND approved_revision.run_id =
+                                              prior_revision.run_id
+                                          AND approved_revision.status = 'approved'
+                                        ORDER BY approved_revision.revision_no DESC
+                                        LIMIT 1
+                                   )
+                               )
+                        ), 0)
+                    ) AS outstanding_minor_units,
+                    cl.maintenance_weight_minor_units, cl.priority_date,
+                    cl.order_issued_on, cl.legal_title_verified,
+                    cl.order_or_notice_delivered,
+                    cl.priority_classification_verified,
+                    cl.agreement_verified, cl.due_monetary_claim_verified,
+                    cl.is_active, cl.row_version, cl.created_at, cl.updated_at,
+                    c.evidence_complete AS case_evidence_complete,
+                    c.employee_id AS " . self::GROUP_KEY . "
+               FROM payroll_enforcement_claims cl
+               JOIN payroll_enforcement_cases c
+                 ON c.supplier_id = cl.supplier_id AND c.id = cl.case_id
+              WHERE cl.supplier_id = ? AND c.employee_id IN (%s) AND cl.is_active = 1
+                AND c.status IN ('withhold_and_hold', 'remit', 'deferred_hold')
+                AND c.effective_from <= ?
+                AND (c.effective_to IS NULL OR c.effective_to >= ?)
+              ORDER BY cl.priority_date, cl.id",
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $claimStmt->execute([
+                $periodStart,
+                $supplierId,
+                ...$chunk,
+                $paymentDate,
+                $paymentDate,
+            ]);
+            foreach (PayrollTimeValue::rows(
+                $claimStmt->fetchAll(PDO::FETCH_ASSOC),
+                'enforcement_claims',
+            ) as $row) {
+                $key = PayrollTimeValue::int(
+                    $row[self::GROUP_KEY] ?? null,
+                    self::GROUP_KEY,
+                );
+                unset($row[self::GROUP_KEY]);
+                $grouped[$key][] = $row;
+            }
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function dependantRows(
+        int $supplierId,
+        array $employeeIds,
+        string $paymentDate,
+    ): array {
+        $grouped = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $dependantStmt = $this->db->pdo()->prepare(sprintf(
+                'SELECT dependant_kind, eligibility_verified, excluded_for_maintenance,
+                        employee_id AS %s
+                  FROM payroll_enforcement_dependants
+                  WHERE supplier_id = ? AND employee_id IN (%s)
+                    AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)',
+                self::GROUP_KEY,
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $dependantStmt->execute([
+                $supplierId,
+                ...$chunk,
+                $paymentDate,
+                $paymentDate,
+            ]);
+            foreach (PayrollTimeValue::rows(
+                $dependantStmt->fetchAll(PDO::FETCH_ASSOC),
+                'enforcement_dependants',
+            ) as $row) {
+                $key = PayrollTimeValue::int(
+                    $row[self::GROUP_KEY] ?? null,
+                    self::GROUP_KEY,
+                );
+                unset($row[self::GROUP_KEY]);
+                $grouped[$key][] = $row;
+            }
+        }
+
+        return $grouped;
     }
 
     public function store(
@@ -1251,26 +1370,50 @@ final class PayrollEnforcementRepository implements
         int $employeeId,
         string $periodStart,
     ): ?array {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_enforcement_person_month_evidence
-              WHERE supplier_id = ? AND employee_id = ? AND period_start = ?'
-        );
-        $stmt->execute([$supplierId, $employeeId, $periodStart]);
-        $value = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($value === false) {
-            return null;
+        return $this->monthEvidenceRows($supplierId, [$employeeId], $periodStart)[$employeeId]
+            ?? null;
+    }
+
+    /**
+     * Měsíční evidence pro celou množinu osob.
+     *
+     * `payroll_enforcement_person_month_evidence` má UNIQUE (supplier_id,
+     * employee_id, period_start), takže na osobu připadá nejvýš jeden řádek —
+     * stejně jako u původního fetch().
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function monthEvidenceRows(
+        int $supplierId,
+        array $employeeIds,
+        string $periodStart,
+    ): array {
+        $rows = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                'SELECT * FROM payroll_enforcement_person_month_evidence
+                  WHERE supplier_id = ? AND employee_id IN (%s) AND period_start = ?',
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([$supplierId, ...$chunk, $periodStart]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $value) {
+                $row = PayrollTimeValue::row($value, 'enforcement_month_evidence');
+                unset($row['updated_by']);
+                $cast = self::castBooleansAndIntegers(
+                    $row,
+                    ['id', 'employee_id', 'protected_amount_override_minor_units',
+                        'court_determined_amount_minor_units', 'row_version'],
+                    ['claim_register_evidence_complete', 'dependants_evidence_complete',
+                        'spouse_evidence_complete', 'has_multiple_payers',
+                        'protected_amount_override_verified',
+                        'insolvency_decision_verified', 'insolvency_recipient_verified'],
+                );
+                $rows[(int) $cast['employee_id']] ??= $cast;
+            }
         }
-        $row = PayrollTimeValue::row($value, 'enforcement_month_evidence');
-        unset($row['updated_by']);
-        return self::castBooleansAndIntegers(
-            $row,
-            ['id', 'employee_id', 'protected_amount_override_minor_units',
-                'court_determined_amount_minor_units', 'row_version'],
-            ['claim_register_evidence_complete', 'dependants_evidence_complete',
-                'spouse_evidence_complete', 'has_multiple_payers',
-                'protected_amount_override_verified',
-                'insolvency_decision_verified', 'insolvency_recipient_verified'],
-        );
+
+        return $rows;
     }
 
     /** @param array<string,mixed> $row */

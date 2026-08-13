@@ -13,6 +13,9 @@ final class PayrollStatutoryAccumulatorRepository
 {
     private const SAVEPOINT = 'payroll_statutory_accumulators';
 
+    /** Velikost dávky pro množinové načtení nad zmrazenou sadou osob. */
+    private const CHUNK_SIZE = 500;
+
     /** @var array<string,list<string>> */
     private const VALUE_FIELDS = [
         'social_insurance' => [
@@ -354,6 +357,75 @@ final class PayrollStatutoryAccumulatorRepository
         );
     }
 
+    /**
+     * Dávkový protějšek stateBeforePeriod(): pět dotazů na CELOU množinu osob
+     * místo tří na každou z nich.
+     *
+     * Osoba, které chybí doložený opening balance (nebo jejíž daňová kumulace
+     * přeteče jedenáct uzavřených měsíců), ve výsledku CHYBÍ — je to táž informace,
+     * jakou stateBeforePeriod() sděluje výjimkou
+     * PayrollStatutoryAccumulatorUnavailableException. Osoba, která firmě nepatří,
+     * naopak shodí celé volání DomainException, stejně jako u jedné osoby.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function statesBeforePeriod(
+        int $supplierId,
+        array $employeeIds,
+        int $year,
+        string $periodStart,
+        string $calculationKind,
+    ): array {
+        $unique = array_values(array_unique($employeeIds));
+        if ($unique === []) {
+            return [];
+        }
+        foreach ($unique as $employeeId) {
+            $this->assertIdentityArguments($supplierId, $employeeId, $year);
+        }
+        $this->normalizeValues(
+            $calculationKind,
+            array_fill_keys(self::VALUE_FIELDS[$calculationKind] ?? [], 0),
+            true,
+        );
+        $this->assertPeriodStart($periodStart, $year);
+        $this->assertEmployeesBelongToSupplier($supplierId, $unique);
+
+        $openings = $this->currentOpenings($supplierId, $unique, $year, $calculationKind);
+        $entries = $this->entriesBeforePeriod(
+            $supplierId,
+            array_keys($openings),
+            $year,
+            $calculationKind,
+            $periodStart,
+        );
+
+        $states = [];
+        foreach ($unique as $employeeId) {
+            $opening = $openings[$employeeId] ?? null;
+            if ($opening === null) {
+                continue;
+            }
+            try {
+                $states[$employeeId] = $this->assembleState(
+                    $supplierId,
+                    $employeeId,
+                    $year,
+                    $periodStart,
+                    $calculationKind,
+                    null,
+                    $opening,
+                    $entries[$employeeId] ?? [],
+                );
+            } catch (PayrollStatutoryAccumulatorUnavailableException) {
+                continue;
+            }
+        }
+
+        return $states;
+    }
+
     /** @return array<string,mixed> */
     public function stateBeforeRevision(
         int $supplierId,
@@ -411,16 +483,7 @@ final class PayrollStatutoryAccumulatorRepository
             array_fill_keys(self::VALUE_FIELDS[$calculationKind] ?? [], 0),
             true,
         );
-        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
-        if ($date === false
-            || $date->format('Y-m-d') !== $periodStart
-            || $date->format('d') !== '01'
-            || (int) $date->format('Y') !== $year
-        ) {
-            throw new \InvalidArgumentException(
-                'Období kumulace musí být první den zadaného roku.',
-            );
-        }
+        $this->assertPeriodStart($periodStart, $year);
 
         $opening = $this->currentOpening(
             $supplierId,
@@ -458,11 +521,43 @@ final class PayrollStatutoryAccumulatorRepository
             $calculationKind,
             $periodStart,
         ]);
-        $entries = array_map(
+        $entries = array_values(array_map(
             fn (array $row): array => $this->castEntry($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
-        );
+        ));
 
+        return $this->assembleState(
+            $supplierId,
+            $employeeId,
+            $year,
+            $periodStart,
+            $calculationKind,
+            $beforeRevisionId,
+            $opening,
+            $entries,
+        );
+    }
+
+    /**
+     * Sečte kumulaci a zapečetí ji otiskem.
+     *
+     * Sdílené jádro dotazované i dávkové cesty — kdyby existovalo dvakrát, mohly
+     * by se rozejít otisky, které se porovnávají při přehrání běhu.
+     *
+     * @param array<string,mixed> $opening
+     * @param list<array<string,mixed>> $entries
+     * @return array<string,mixed>
+     */
+    private function assembleState(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+        string $periodStart,
+        string $calculationKind,
+        ?int $beforeRevisionId,
+        array $opening,
+        array $entries,
+    ): array {
         $totals = $opening['values'];
         foreach ($entries as $entry) {
             foreach ($entry['values'] as $field => $value) {
@@ -502,11 +597,7 @@ final class PayrollStatutoryAccumulatorRepository
 
     private function validateIdentity(int $supplierId, int $employeeId, int $year): void
     {
-        if ($supplierId <= 0 || $employeeId <= 0 || $year < 2000 || $year > 2200) {
-            throw new \InvalidArgumentException(
-                'Firma, zaměstnanec nebo rok zákonné kumulace nejsou platné.',
-            );
-        }
+        $this->assertIdentityArguments($supplierId, $employeeId, $year);
         $stmt = $this->db->pdo()->prepare(
             'SELECT 1
                FROM payroll_employees
@@ -518,6 +609,148 @@ final class PayrollStatutoryAccumulatorRepository
                 'Zaměstnanec nepatří zadané firmě.',
             );
         }
+    }
+
+    private function assertIdentityArguments(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+    ): void {
+        if ($supplierId <= 0 || $employeeId <= 0 || $year < 2000 || $year > 2200) {
+            throw new \InvalidArgumentException(
+                'Firma, zaměstnanec nebo rok zákonné kumulace nejsou platné.',
+            );
+        }
+    }
+
+    private function assertPeriodStart(string $periodStart, int $year): void
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($date === false
+            || $date->format('Y-m-d') !== $periodStart
+            || $date->format('d') !== '01'
+            || (int) $date->format('Y') !== $year
+        ) {
+            throw new \InvalidArgumentException(
+                'Období kumulace musí být první den zadaného roku.',
+            );
+        }
+    }
+
+    /** @param list<int> $employeeIds */
+    private function assertEmployeesBelongToSupplier(
+        int $supplierId,
+        array $employeeIds,
+    ): void {
+        $found = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                'SELECT id FROM payroll_employees
+                  WHERE supplier_id = ? AND id IN (%s)',
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $found[(int) $row['id']] = true;
+            }
+        }
+        foreach ($employeeIds as $employeeId) {
+            if (!isset($found[$employeeId])) {
+                throw new \DomainException(
+                    'Zaměstnanec nepatří zadané firmě.',
+                );
+            }
+        }
+    }
+
+    /**
+     * Aktuální (nenahrazené) opening balance pro celou množinu osob.
+     *
+     * Řetěz oprav je díky UNIQUE (supplier_id, employee_id, tax_year,
+     * calculation_kind, predecessor_scope_id) lineární, takže na scope připadá
+     * právě jeden nenahrazený řádek — dávkový dotaz tedy nemůže vybrat jiný
+     * řádek než dotaz za jednu osobu.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function currentOpenings(
+        int $supplierId,
+        array $employeeIds,
+        int $year,
+        string $calculationKind,
+    ): array {
+        $openings = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                'SELECT opening.*
+                   FROM payroll_statutory_accumulator_openings opening
+                  WHERE opening.supplier_id = ?
+                    AND opening.employee_id IN (%s)
+                    AND opening.tax_year = ?
+                    AND opening.calculation_kind = ?
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_statutory_accumulator_openings successor
+                       WHERE successor.supplier_id = opening.supplier_id
+                         AND successor.replaces_opening_id = opening.id
+                    )',
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([$supplierId, ...$chunk, $year, $calculationKind]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $openings[(int) $row['employee_id']] ??= $this->castOpening($row);
+            }
+        }
+
+        return $openings;
+    }
+
+    /**
+     * Nenahrazené záznamy kumulace před obdobím pro celou množinu osob.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function entriesBeforePeriod(
+        int $supplierId,
+        array $employeeIds,
+        int $year,
+        string $calculationKind,
+        string $periodStart,
+    ): array {
+        $entries = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                'SELECT entry.*
+                   FROM payroll_statutory_accumulator_entries entry
+                  WHERE entry.supplier_id = ?
+                    AND entry.employee_id IN (%s)
+                    AND entry.tax_year = ?
+                    AND entry.calculation_kind = ?
+                    AND entry.period_start < ?
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_statutory_accumulator_entries successor
+                       WHERE successor.supplier_id = entry.supplier_id
+                         AND successor.replaces_entry_id = entry.id
+                    )
+                  ORDER BY entry.period_start, entry.id',
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([
+                $supplierId,
+                ...$chunk,
+                $year,
+                $calculationKind,
+                $periodStart,
+            ]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $entries[(int) $row['employee_id']][] = $this->castEntry($row);
+            }
+        }
+
+        return $entries;
     }
 
     /**
