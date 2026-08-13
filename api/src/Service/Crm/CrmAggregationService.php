@@ -1279,7 +1279,7 @@ final class CrmAggregationService
                         continue;
                     }
                     $integrityTotal += $cnt;
-                    $link = $this->journalIntegrityLink($cnt, $row['detail']);
+                    $link = $this->journalIntegrityLink($cnt, $row['detail'], (string) $row['finding_type']);
                     $singleLink = $link;
                     $intBreakdown[] = [
                         'key'   => (string) $row['finding_type'],
@@ -2370,17 +2370,25 @@ final class CrmAggregationService
      * Odkaz na konkrétní nález integrity deníku. `journal_integrity_findings.detail`
      * nese JSON vzorek nálezů (viz migrace 1034) — u JEDINÉHO nálezu z něj složíme
      * deep-link, aby uživatel neskončil na nefiltrovaném seznamu celého deníku.
-     * U více nálezů se odkazuje na deník bez filtru (stránka umí jen jedno ID).
      *
      * Volba parametru je daná typem nálezu:
      *   - `entry_id` (preferováno — Journal.vue rovnou rozbalí detail zápisu). Chybí
      *     u `booked_without_entry`, kde zápis z definice neexistuje.
      *   - `source_type` + `source_id` jako fallback. NEPOUŽITELNÉ u `orphan_entry`,
      *     kde `source_id` ukazuje na neexistující doklad — tam ale `entry_id` je.
+     *
+     * U VÍC nálezů `amount_mismatch` míří odkaz na filtr `?integrity=amount_mismatch`
+     * (JournalAction si seznam zápisů dopočítá naživo) — deník umí filtrovat jen na
+     * jedno ID, takže bez toho uživatel skončil na nefiltrovaném seznamu a neměl jak
+     * zjistit, které zápisy nesedí. Ostatní typy takový filtr zatím nemají a padají
+     * na nefiltrovaný deník jako dřív.
      */
-    private function journalIntegrityLink(int $count, mixed $detailJson): string
+    private function journalIntegrityLink(int $count, mixed $detailJson, string $findingType = ''): string
     {
         $base = '/accounting/journal';
+        if ($count > 1 && $findingType === JournalIntegrityService::TYPE_AMOUNT_MISMATCH) {
+            return $base . '?integrity=' . JournalIntegrityService::TYPE_AMOUNT_MISMATCH;
+        }
         if ($count !== 1 || !is_string($detailJson) || $detailJson === '') {
             return $base;
         }

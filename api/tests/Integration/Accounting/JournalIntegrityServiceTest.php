@@ -252,6 +252,108 @@ final class JournalIntegrityServiceTest extends TestCase
         );
     }
 
+    private function amountMismatchCount(): int
+    {
+        return $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_AMOUNT_MISMATCH]['count'];
+    }
+
+    /**
+     * Saldokonto rozpadlé na základ + DPH (starší zaúčtování, ruční zápisy, import):
+     * ŽÁDNÝ jednotlivý řádek se celkové částce dokladu nerovná, ale součet řádků
+     * téhož účtu na téže straně ano → není to nekonzistence. Dřív takový zápis
+     * padal jako falešný nález (na ostrých datech jich to dělalo stovky).
+     */
+    public function testSplitBalanceLinesSummingToDocumentTotalAreNotAmountMismatch(): void
+    {
+        $before = $this->amountMismatchCount();
+
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 121.00);
+        $entry = $this->insertEntry('invoice', $invoiceId, true);
+        $this->insertLine($entry, 'debit', 100.00, 1);
+        $this->insertLine($entry, 'debit', 21.00, 2);
+        $this->insertLine($entry, 'credit', 100.00, 3);
+        $this->insertLine($entry, 'credit', 21.00, 4);
+
+        self::assertSame($before, $this->amountMismatchCount(),
+            'Saldokonto rozpadlé na základ + DPH dává v součtu celkovou částku dokladu.');
+    }
+
+    /**
+     * Protizápis na TÉMŽE účtu (haléřové vyrovnání, sleva zaúčtovaná opačnou stranou):
+     * sedět musí saldo účtu, ne jednotlivý řádek.
+     */
+    public function testNettedBalanceOnSameAccountIsNotAmountMismatch(): void
+    {
+        $pdo = $this->db->pdo();
+        $other = (int) ($pdo->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId}
+              AND id <> {$this->accountId} ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        if ($other === 0) {
+            self::markTestSkipped('Osnova má jen jeden účet — protistranu není kam dát.');
+        }
+        $line = $pdo->prepare(
+            "INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, line_no)
+             VALUES (?, ?, ?, ?, ?, ?)"
+        );
+
+        $before = $this->amountMismatchCount();
+
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 121.00);
+        $entry = $this->insertEntry('invoice', $invoiceId, true);
+        // Saldokontní účet: 131 MD − 10 D = 121,00 (protizápis na tomtéž účtu).
+        $this->insertLine($entry, 'debit', 131.00, 1);
+        $this->insertLine($entry, 'credit', 10.00, 2);
+        $line->execute([$entry, $this->supplierId, $other, 'credit', 131.00, 3]);
+        $line->execute([$entry, $this->supplierId, $other, 'debit', 10.00, 4]);
+
+        self::assertSame($before, $this->amountMismatchCount(),
+            'Saldo účtu (MD − D) odpovídá celkové částce dokladu.');
+    }
+
+    /** Zaokrouhlení dokladu se do tolerance přičítá — jinak firuje každý zaokrouhlený doklad. */
+    public function testDocumentRoundingWidensTolerance(): void
+    {
+        $before = $this->amountMismatchCount();
+
+        // Zaokrouhlení 2 Kč je nad základní tolerancí (1 Kč) schválně — bez jeho
+        // připočtení by zápis spadl jako nález.
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 121.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET rounding = 2.00 WHERE id = ?')->execute([$invoiceId]);
+        $this->insertBalancedEntry('invoice', $invoiceId, 123.00);
+
+        self::assertSame($before, $this->amountMismatchCount(),
+            'Zápis se od hlavičky liší přesně o zaokrouhlení dokladu.');
+    }
+
+    /**
+     * Doklad plně krytý zálohou: závazek/pohledávka vůbec nevzniká (uzavírá se proti
+     * 314/324), takže celková částka dokladu v zápisu být nemá.
+     */
+    public function testFullyAdvanceSettledDocumentIsSkipped(): void
+    {
+        $before = $this->amountMismatchCount();
+
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 121.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET advance_paid_amount = 121.00 WHERE id = ?')->execute([$invoiceId]);
+        $this->insertBalancedEntry('invoice', $invoiceId, 100.00);
+
+        self::assertSame($before, $this->amountMismatchCount(),
+            'Doklad zúčtovaný zálohou v plné výši se nekontroluje.');
+    }
+
+    /** Filtr deníku (`?integrity=amount_mismatch`) musí vracet TYTÉŽ zápisy jako kontrola. */
+    public function testAmountMismatchEntryIdsMatchTheFinding(): void
+    {
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 121.00);
+        $entry = $this->insertBalancedEntry('invoice', $invoiceId, 999.00);
+
+        $ids = $this->service->amountMismatchEntryIds($this->supplierId);
+
+        self::assertContains($entry, $ids, 'Nález se musí objevit i ve filtru deníku.');
+        self::assertCount($this->amountMismatchCount(), $ids, 'Filtr a počet na dashboardu se nesmí rozejít.');
+    }
+
     /**
      * N-003: `booked_without_entry` hlásil i doklady, u kterých je „booked_at bez zápisu"
      * korektní stav.
