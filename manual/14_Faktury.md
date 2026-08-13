@@ -38,7 +38,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Neuhrazené k datu | Datum — vypíše doklady vystavené do zvoleného dne, u kterých k tomu dni nebyla uhrazena celá částka |
 | Kategorie tržby | Výběr několika kategorií najednou + přepínač **Zobrazit jen vybrané / Skrýt vybrané** — viz níže |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
-| Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.4](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss). Filtr je vidět, i když OSS zapnuté nemáš. |
+| Místo plnění (OSS) | Vše / Nejisté místo plnění (OSS) / Nejisté — v OSS podání / Nejisté — v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění — viz [§ 35.5](35_Fakturujeme.md#355-zahranicni-fakturace-eu-oss-a-treti-zeme). Filtr je vidět, i když OSS zapnuté nemáš. |
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených

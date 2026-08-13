@@ -14,7 +14,7 @@ OSS vzniká, co se dělá s plněními, u kterých si systém není jistý, jak 
 [import zahraničních dokladů](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss),
 [hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss),
 [sazby a číselníky](73_Nastaveni.md#7312-sazby-dph) a
-[daňový průvodce](35_Fakturujeme.md#354-zahranicni-fakturace-limitace-a-oss).
+[daňový průvodce](35_Fakturujeme.md#355-zahranicni-fakturace-eu-oss-a-treti-zeme).
 
 > [!NOTE]
 > MyÚčto podporuje **režim EU** (plnění z ČR spotřebitelům v jiných členských
