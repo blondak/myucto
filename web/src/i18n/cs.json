@@ -1155,6 +1155,31 @@
                 "edit": "Upravit verzi složky",
                 "saved": "Mzdová složka byla uložena."
             },
+            "jmhz": {
+                "title": "Mapování složky do JMHZ",
+                "target": "Cílový atribut měsíčního hlášení",
+                "configure": "Nastavit JMHZ",
+                "target_required": "Vyberte cílový atribut JMHZ.",
+                "saved": "Mapování JMHZ bylo uloženo.",
+                "save_failed": "Mapování JMHZ se nepodařilo uložit.",
+                "load_failed": "Konfiguraci mapování JMHZ se nepodařilo načíst; ostatní mzdové funkce zůstávají dostupné.",
+                "remove": "Zrušit mapování",
+                "remove_confirm": "Opravdu chcete deaktivovat toto mapování JMHZ?",
+                "removed": "Mapování JMHZ bylo deaktivováno.",
+                "remove_failed": "Mapování JMHZ se nepodařilo deaktivovat.",
+                "catch_all_warning": "Tento cíl je celková částka pro případy, které nelze přesně zařadit do detailního rozpadu. Při přípravě JMHZ se s detaily nesmí započítat dvakrát.",
+                "legacy_mapping": "Mapování pochází ze staršího balíku specifikace JMHZ. Nejprve je deaktivujte a potom zvolte cíl z aktuálního balíku.",
+                "status": {
+                    "configured": "Namapováno",
+                    "missing": "Chybí mapování",
+                    "excluded": "Vyloučeno",
+                    "manual_review": "Ruční posouzení"
+                },
+                "role": {
+                    "detail": "Detailní položka",
+                    "catch_all_total": "Celková částka"
+                }
+            },
             "recurring": {
                 "title": "Pravidelné předpisy",
                 "hint": "Opakované složky jsou navázané na pracovní vztah a jejich účinnost. Materializace vytvoří idempotentní měsíční vstupy.",

@@ -1155,6 +1155,31 @@
                 "edit": "Edit component version",
                 "saved": "The payroll component was saved."
             },
+            "jmhz": {
+                "title": "Map component to JMHZ",
+                "target": "Monthly report target attribute",
+                "configure": "Configure JMHZ",
+                "target_required": "Select a JMHZ target attribute.",
+                "saved": "The JMHZ mapping was saved.",
+                "save_failed": "The JMHZ mapping could not be saved.",
+                "load_failed": "The JMHZ mapping configuration could not be loaded; other payroll features remain available.",
+                "remove": "Remove mapping",
+                "remove_confirm": "Do you really want to deactivate this JMHZ mapping?",
+                "removed": "The JMHZ mapping was deactivated.",
+                "remove_failed": "The JMHZ mapping could not be deactivated.",
+                "catch_all_warning": "This target is a total for amounts that cannot be classified into the detailed breakdown. JMHZ preparation must not count it twice with details.",
+                "legacy_mapping": "This mapping comes from an older JMHZ specification package. Deactivate it before selecting a target from the current package.",
+                "status": {
+                    "configured": "Mapped",
+                    "missing": "Mapping missing",
+                    "excluded": "Excluded",
+                    "manual_review": "Manual review"
+                },
+                "role": {
+                    "detail": "Detail item",
+                    "catch_all_total": "Total amount"
+                }
+            },
             "recurring": {
                 "title": "Recurring assignments",
                 "hint": "Recurring components are tied to an employment and an effective interval. Materialization creates idempotent monthly inputs.",

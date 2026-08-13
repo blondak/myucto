@@ -1,0 +1,180 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Component;
+
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+
+final class PayrollComponentJmhzTargetCatalog
+{
+    public const PACKAGE_KEY = JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY;
+    public const MANIFEST_SHA256 = JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256;
+
+    private const TARGETS = [
+        ['attribute_id' => '10328', 'parent' => null, 'role' => 'catch_all_total'],
+        ['attribute_id' => '10329', 'parent' => '10328', 'role' => 'detail'],
+        ['attribute_id' => '10330', 'parent' => '10328', 'role' => 'detail'],
+        ['attribute_id' => '10331', 'parent' => '10328', 'role' => 'detail'],
+        ['attribute_id' => '10332', 'parent' => '10328', 'role' => 'catch_all_total'],
+        ['attribute_id' => '10333', 'parent' => '10332', 'role' => 'detail'],
+        ['attribute_id' => '10334', 'parent' => '10332', 'role' => 'detail'],
+        ['attribute_id' => '10335', 'parent' => '10332', 'role' => 'detail'],
+        ['attribute_id' => '10336', 'parent' => '10332', 'role' => 'detail'],
+        ['attribute_id' => '10337', 'parent' => null, 'role' => 'catch_all_total'],
+        ['attribute_id' => '10338', 'parent' => '10337', 'role' => 'detail'],
+        ['attribute_id' => '10339', 'parent' => '10337', 'role' => 'detail'],
+        ['attribute_id' => '10340', 'parent' => '10337', 'role' => 'detail'],
+        ['attribute_id' => '10341', 'parent' => '10337', 'role' => 'detail'],
+        ['attribute_id' => '10342', 'parent' => '10337', 'role' => 'detail'],
+        ['attribute_id' => '10343', 'parent' => null, 'role' => 'detail'],
+        ['attribute_id' => '10417', 'parent' => null, 'role' => 'detail'],
+    ];
+
+    /** @var list<array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string}>|null */
+    private ?array $targets = null;
+
+    public function __construct(private readonly JmhzSpecPackageCatalog $specCatalog) {}
+
+    /** @return list<array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string}> */
+    public function targets(): array
+    {
+        return $this->targets ??= $this->buildTargets();
+    }
+
+    /** @return array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string} */
+    public function requireTarget(string $attributeId): array
+    {
+        foreach ($this->targets() as $target) {
+            if (hash_equals($target['attribute_id'], $attributeId)) {
+                return $target;
+            }
+        }
+
+        throw new \InvalidArgumentException('Cílový atribut JMHZ není pro mzdovou složku podporován.');
+    }
+
+    /** @return array{manifest_sha256:string,payload:array<string, mixed>} */
+    public function specManifest(): array
+    {
+        return $this->specCatalog->load(self::PACKAGE_KEY, self::MANIFEST_SHA256);
+    }
+
+    /** @return list<string> */
+    public function rollupAttributeIds(string $attributeId): array
+    {
+        return $this->requireTarget($attributeId)['ancestor_attribute_ids'];
+    }
+
+    public function topologyHash(): string
+    {
+        return hash('sha256', CanonicalJson::encode([
+            'targets' => array_map(
+                fn (array $definition): array => [
+                    ...$definition,
+                    'aggregation_scope' => $this->aggregationScope(
+                        $definition['attribute_id'],
+                    ),
+                ],
+                self::TARGETS,
+            ),
+        ]));
+    }
+
+    /** @return list<array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string}> */
+    private function buildTargets(): array
+    {
+        $manifest = $this->specManifest();
+        $rows = $manifest['payload']['dictionary_attributes'] ?? null;
+        if (!is_array($rows) || !array_is_list($rows)) {
+            throw new \UnexpectedValueException('Slovník JMHZ neobsahuje atributy.');
+        }
+        $targets = [];
+        foreach (self::TARGETS as $definition) {
+            $source = null;
+            foreach ($rows as $row) {
+                if (is_array($row) && ($row['attribute_id'] ?? null) === $definition['attribute_id']) {
+                    $source = $row;
+                    break;
+                }
+            }
+            if ($source === null) {
+                throw new \UnexpectedValueException(
+                    "Slovník JMHZ neobsahuje cílový atribut {$definition['attribute_id']}.",
+                );
+            }
+            $targets[] = $this->target($definition, $source);
+        }
+
+        return $targets;
+    }
+
+    /**
+     * @param array{attribute_id:string,parent:?string,role:string} $definition
+     * @param array<string,mixed> $source
+     * @return array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string}
+     */
+    private function target(array $definition, array $source): array
+    {
+        $name = $source['name'] ?? null;
+        $mapping = $source['xsd_mapping'] ?? null;
+        if (!is_string($name) || $name === '' || !is_string($mapping) || $mapping === ''
+            || ($source['data_type'] ?? null) !== 'číslo'
+            || ($source['monthly_marker'] ?? null) !== 'x'
+        ) {
+            throw new \UnexpectedValueException(
+                "Cílový atribut JMHZ {$definition['attribute_id']} není úplný.",
+            );
+        }
+
+        return [
+            'attribute_id' => $definition['attribute_id'],
+            'name' => $name,
+            'xsd_mapping' => $mapping,
+            'data_type' => 'číslo',
+            'monthly_marker' => 'x',
+            'parent_attribute_id' => $definition['parent'],
+            'ancestor_attribute_ids' => $this->ancestors($definition['attribute_id']),
+            'aggregation_role' => $definition['role'],
+            'aggregation_scope' => $this->aggregationScope($definition['attribute_id']),
+        ];
+    }
+
+    /** @return list<string> */
+    private function ancestors(string $attributeId): array
+    {
+        $ancestors = [];
+        $current = $attributeId;
+        for ($depth = 0; $depth < count(self::TARGETS); ++$depth) {
+            $definition = $this->definition($current);
+            if ($definition['parent'] === null) {
+                return $ancestors;
+            }
+            if (in_array($definition['parent'], $ancestors, true)) {
+                throw new \LogicException('Topologie cílových atributů JMHZ obsahuje cyklus.');
+            }
+            $ancestors[] = $definition['parent'];
+            $current = $definition['parent'];
+        }
+
+        throw new \LogicException('Topologie cílových atributů JMHZ obsahuje cyklus.');
+    }
+
+    /** @return array{attribute_id:string,parent:?string,role:string} */
+    private function definition(string $attributeId): array
+    {
+        foreach (self::TARGETS as $definition) {
+            if (hash_equals($definition['attribute_id'], $attributeId)) {
+                return $definition;
+            }
+        }
+
+        throw new \LogicException("Topologie JMHZ odkazuje na neznámý atribut {$attributeId}.");
+    }
+
+    private function aggregationScope(string $attributeId): string
+    {
+        return $attributeId === '10417' ? 'employee_summary' : 'employment';
+    }
+}

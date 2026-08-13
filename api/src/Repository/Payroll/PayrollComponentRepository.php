@@ -188,6 +188,11 @@ final class PayrollComponentRepository
             );
         }
         $this->assertNotUsedByApprovedInput($supplierId, $id);
+        $this->assertJmhzMappingCompatible(
+            $supplierId,
+            $id,
+            PayrollTimeValue::string($data['jmhz_treatment'] ?? null, 'jmhz_treatment'),
+        );
         $currentVersion = PayrollTimeValue::int(
             $current['row_version'] ?? null,
             'row_version',
@@ -280,6 +285,27 @@ final class PayrollComponentRepository
                 $row[10],
                 $row[11],
             ]);
+        }
+    }
+
+    private function assertJmhzMappingCompatible(
+        int $supplierId,
+        int $componentId,
+        string $jmhzTreatment,
+    ): void {
+        if ($jmhzTreatment === 'included') {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_component_jmhz_mappings
+              WHERE supplier_id = ? AND component_definition_id = ? AND is_active = 1
+              LIMIT 1',
+        );
+        $stmt->execute([$supplierId, $componentId]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new \DomainException(
+                'Před vyřazením složky z JMHZ nejprve zrušte její aktivní mapování.',
+            );
         }
     }
 

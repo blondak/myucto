@@ -70,6 +70,7 @@ use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
+use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
@@ -630,8 +631,13 @@ final class Routes
         // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
         $app->group('/api/payroll', function ($g) {
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
+            $g->get('/components/jmhz-targets', [PayrollComponentJmhzMappingsAction::class, 'targets']);
+            $g->get('/components/jmhz-mappings', [PayrollComponentJmhzMappingsAction::class, 'list']);
             $g->get('/components', [PayrollComponentsAction::class, 'list']);
             $g->post('/components', [PayrollComponentsAction::class, 'create']);
+            $g->get('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'get']);
+            $g->put('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'put']);
+            $g->delete('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'remove']);
             $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
             $g->get('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'list']);
             $g->post('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'create']);

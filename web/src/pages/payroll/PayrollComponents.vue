@@ -5,6 +5,8 @@ import {
   payrollApi,
   type PayrollAccountOption,
   type PayrollComponent,
+  type PayrollComponentJmhzMappingState,
+  type PayrollComponentJmhzTarget,
   type PayrollComponentFrequency,
   type PayrollComponentInclusion,
   type PayrollComponentKind,
@@ -87,12 +89,19 @@ const inputs = ref<PayrollInput[]>([])
 const employments = ref<PayrollEmploymentOption[]>([])
 const chartAccounts = ref<PayrollAccountOption[]>([])
 const componentError = ref('')
+const jmhzError = ref('')
 const recurringError = ref('')
 const inputError = ref('')
 const importApiError = ref('')
 
 const componentEditorOpen = ref(false)
+const jmhzEditorOpen = ref(false)
 const editingComponent = ref<PayrollComponent | null>(null)
+const editingJmhzComponent = ref<PayrollComponent | null>(null)
+const jmhzTargets = ref<PayrollComponentJmhzTarget[]>([])
+const jmhzMappings = ref<Record<number, PayrollComponentJmhzMappingState>>({})
+const jmhzTargetId = ref<string | null>(null)
+const jmhzLoading = ref(true)
 const componentForm = ref<ComponentForm>(newComponentForm())
 const recurringEditorOpen = ref(false)
 const editingRecurring = ref<PayrollRecurringComponent | null>(null)
@@ -201,6 +210,14 @@ const valueKindOptions = computed(() => selectOptions(valueKinds, 'payroll.compo
 const frequencyOptions = computed(() => selectOptions(frequencies, 'payroll.components.frequency'))
 const taxTreatmentOptions = computed(() => selectOptions(taxTreatments, 'payroll.components.tax'))
 const inclusionTreatmentOptions = computed(() => selectOptions(inclusionTreatments, 'payroll.components.inclusion'))
+const jmhzTargetOptions = computed(() => jmhzTargets.value.map(target => ({
+  value: target.attribute_id,
+  label: `${target.attribute_id} · ${target.name}`,
+  secondary: t(`payroll.components.jmhz.role.${target.aggregation_role}`),
+})))
+const selectedJmhzTarget = computed(() =>
+  jmhzTargets.value.find(target => target.attribute_id === jmhzTargetId.value) ?? null,
+)
 const calculationKindOptions = computed(() => selectOptions(calculationKinds, 'payroll.components.calculation'))
 const allocationRuleOptions = computed(() => selectOptions(allocationRules, 'payroll.components.allocation'))
 
@@ -337,6 +354,18 @@ async function loadEmploymentOptions() {
 
 async function load() {
   loading.value = true
+  jmhzLoading.value = true
+  void Promise.all([
+    payrollApi.componentJmhzTargets(),
+    payrollApi.componentJmhzMappings(),
+  ]).then((jmhz) => {
+    jmhzTargets.value = jmhz[0].targets
+    setJmhzMappings(jmhz[1])
+  }).catch((error: any) => {
+    toast.error(apiErrorMessage(error, t('payroll.components.jmhz.load_failed')))
+  }).finally(() => {
+    jmhzLoading.value = false
+  })
   try {
     const [catalog, recurringItems, periodInputs, , accounts] = await Promise.all([
       payrollApi.components(),
@@ -353,6 +382,87 @@ async function load() {
     toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
     loading.value = false
+  }
+}
+
+function setJmhzMappings(states: PayrollComponentJmhzMappingState[]) {
+  jmhzMappings.value = Object.fromEntries(states.map(state => [state.component_id, state]))
+}
+
+function jmhzState(component: PayrollComponent): PayrollComponentJmhzMappingState {
+  return jmhzMappings.value[component.id] ?? {
+    component_id: component.id,
+    jmhz_treatment: component.jmhz_treatment,
+    status: component.jmhz_treatment === 'included'
+      ? 'missing'
+      : component.jmhz_treatment === 'manual_review' ? 'manual_review' : 'excluded',
+    mapping: null,
+  }
+}
+
+function jmhzBadgeClass(component: PayrollComponent): string {
+  return {
+    configured: 'bg-success-50 text-success-600',
+    missing: 'bg-warning-50 text-warning-700',
+    excluded: 'bg-neutral-100 text-neutral-600',
+    manual_review: 'bg-warning-50 text-warning-700',
+  }[jmhzState(component).status]
+}
+
+function openJmhzMapping(component: PayrollComponent) {
+  editingJmhzComponent.value = component
+  jmhzTargetId.value = jmhzState(component).mapping?.is_active
+    ? jmhzState(component).mapping?.target_attribute_id ?? null
+    : null
+  jmhzError.value = ''
+  jmhzEditorOpen.value = true
+}
+
+async function saveJmhzMapping() {
+  const component = editingJmhzComponent.value
+  const current = component ? jmhzState(component).mapping : null
+  if (current?.is_active && !current.is_current_package) {
+    jmhzError.value = t('payroll.components.jmhz.legacy_mapping')
+    return
+  }
+  if (!component || !jmhzTargetId.value) {
+    jmhzError.value = t('payroll.components.jmhz.target_required')
+    return
+  }
+  saving.value = true
+  jmhzError.value = ''
+  try {
+    const state = await payrollApi.saveComponentJmhzMapping(
+      component.id,
+      jmhzTargetId.value,
+      current?.row_version ?? null,
+    )
+    jmhzMappings.value = { ...jmhzMappings.value, [component.id]: state }
+    jmhzEditorOpen.value = false
+    toast.success(t('payroll.components.jmhz.saved'))
+  } catch (error: any) {
+    jmhzError.value = apiErrorMessage(error, t('payroll.components.jmhz.save_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeJmhzMapping() {
+  const component = editingJmhzComponent.value
+  const mapping = component ? jmhzState(component).mapping : null
+  if (!component || !mapping?.is_active) return
+  if (!window.confirm(t('payroll.components.jmhz.remove_confirm'))) return
+  saving.value = true
+  jmhzError.value = ''
+  try {
+    await payrollApi.removeComponentJmhzMapping(component.id, mapping.row_version)
+    setJmhzMappings(await payrollApi.componentJmhzMappings())
+    jmhzEditorOpen.value = false
+    toast.success(t('payroll.components.jmhz.removed'))
+  } catch (error: any) {
+    jmhzError.value = apiErrorMessage(error, t('payroll.components.jmhz.remove_failed'))
+  } finally {
+    saving.value = false
   }
 }
 
@@ -456,6 +566,7 @@ async function saveComponent() {
       await payrollApi.createComponent(payload)
     }
     components.value = await payrollApi.components()
+    setJmhzMappings(await payrollApi.componentJmhzMappings())
     componentEditorOpen.value = false
     toast.success(t('payroll.components.catalog.saved'))
   } catch (error: any) {
@@ -822,18 +933,51 @@ onMounted(load)
           </div>
         </section>
 
+        <section v-if="jmhzEditorOpen && editingJmhzComponent" data-testid="payroll-jmhz-mapping-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.components.jmhz.title') }}</h3>
+              <p class="mt-1 text-sm text-neutral-600">{{ editingJmhzComponent.code }} · {{ editingJmhzComponent.name }}</p>
+            </div>
+            <button :class="btnOutline('neutral')" @click="jmhzEditorOpen = false">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+          <div class="mt-4 max-w-3xl">
+            <label class="block">
+              <span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.jmhz.target') }}</span>
+              <SearchableSelect :model-value="jmhzTargetId" :options="jmhzTargetOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="jmhzTargetId = $event" />
+            </label>
+            <p v-if="selectedJmhzTarget" class="mt-2 break-all font-mono text-xs text-neutral-500">{{ selectedJmhzTarget.xsd_mapping }}</p>
+            <p v-if="selectedJmhzTarget?.aggregation_role === 'catch_all_total'" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">{{ t('payroll.components.jmhz.catch_all_warning') }}</p>
+            <p v-if="jmhzState(editingJmhzComponent).mapping?.is_active && !jmhzState(editingJmhzComponent).mapping?.is_current_package" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">{{ t('payroll.components.jmhz.legacy_mapping') }}</p>
+          </div>
+          <p v-if="jmhzError" role="alert" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ jmhzError }}</p>
+          <div class="mt-5 flex flex-wrap justify-end gap-2">
+            <button v-if="jmhzState(editingJmhzComponent).mapping?.is_active" :class="btnOutline('danger')" :disabled="saving" @click="removeJmhzMapping">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
+              {{ t('payroll.components.jmhz.remove') }}
+            </button>
+            <button :class="btnFilled('primary')" :disabled="saving || !jmhzTargetId || (jmhzState(editingJmhzComponent).mapping?.is_active && !jmhzState(editingJmhzComponent).mapping?.is_current_package)" @click="saveJmhzMapping">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
+        </section>
+
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div data-layout="desktop" class="hidden overflow-x-auto md:block">
             <table class="min-w-full divide-y divide-neutral-200 text-sm">
-              <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.code') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.name') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.kind') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.frequency') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead>
-              <tbody class="divide-y divide-neutral-100"><tr v-for="component in components" :key="component.id"><td class="px-4 py-3 font-mono text-xs font-semibold text-neutral-900">{{ component.code }}</td><td class="px-4 py-3">{{ component.name }}</td><td class="px-4 py-3">{{ t(`payroll.components.kind.${component.component_kind}`) }}</td><td class="px-4 py-3">{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</td><td class="px-4 py-3 text-xs">{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody>
+              <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.code') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.name') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.kind') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.frequency') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.jmhz_treatment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead>
+              <tbody class="divide-y divide-neutral-100"><tr v-for="component in components" :key="component.id"><td class="px-4 py-3 font-mono text-xs font-semibold text-neutral-900">{{ component.code }}</td><td class="px-4 py-3">{{ component.name }}</td><td class="px-4 py-3">{{ t(`payroll.components.kind.${component.component_kind}`) }}</td><td class="px-4 py-3">{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="jmhzBadgeClass(component)">{{ t(`payroll.components.jmhz.status.${jmhzState(component).status}`) }}</span><p v-if="jmhzState(component).mapping?.is_active" class="mt-1 font-mono text-xs text-neutral-500">{{ jmhzState(component).mapping?.target_attribute_id }}</p></td><td class="px-4 py-3 text-xs">{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody>
             </table>
           </div>
           <div data-layout="mobile" class="space-y-3 p-4 md:hidden">
             <article v-for="component in components" :key="component.id" class="rounded-lg border border-neutral-200 p-4">
               <div class="flex flex-wrap items-start justify-between gap-2"><div><p class="font-mono text-xs font-semibold text-payroll-700">{{ component.code }}</p><h3 class="mt-1 font-semibold text-neutral-900">{{ component.name }}</h3></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div>
-              <dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.kind') }}</dt><dd>{{ t(`payroll.components.kind.${component.component_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.frequency') }}</dt><dd>{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl>
-              <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div>
+              <dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.kind') }}</dt><dd>{{ t(`payroll.components.kind.${component.component_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.frequency') }}</dt><dd>{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.jmhz_treatment') }}</dt><dd><span class="rounded-full px-2 py-1 text-xs font-medium" :class="jmhzBadgeClass(component)">{{ t(`payroll.components.jmhz.status.${jmhzState(component).status}`) }}</span><span v-if="jmhzState(component).mapping?.is_active" class="ml-2 font-mono text-xs">{{ jmhzState(component).mapping?.target_attribute_id }}</span></dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl>
+              <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button v-if="component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div>
             </article>
           </div>
         </section>

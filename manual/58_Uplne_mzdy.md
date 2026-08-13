@@ -309,6 +309,14 @@ pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
 změna katalogu proto nepřepíše již zpracované období.
 
+U složky zahrnuté do JMHZ nastav také konkrétní cílový atribut měsíčního
+hlášení. Stav **Chybí mapování** nebrání výpočtu mzdy, ale znamená, že složku
+zatím nelze bezpečně převést do úplného JMHZ. Celkové cíle používej jen pro
+částky, které nelze přesně zařadit do detailního rozpadu; aplikace je proto
+viditelně odlišuje. Mapování lze auditovatelně deaktivovat a teprve potom lze
+složku z JMHZ vyloučit nebo převést do ručního posouzení. Samotné mapování
+nevytváří XML ani nic neodesílá na ČSSZ.
+
 Pravidelný předpis má vlastní interval platnosti a lze jej zadat pevnou částkou
 nebo procentem. Účty MD/D se vybírají našeptáváním z aktivního účtového rozvrhu;
 formulář nezadává interní identifikátory. Procentní sazbu zadávej jako běžné

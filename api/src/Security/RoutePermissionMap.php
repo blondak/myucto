@@ -179,6 +179,8 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/rulesets(?:/|$)#', 'payroll.rulesets', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/capabilities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/components$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/components/(?:jmhz-targets|jmhz-mappings|[0-9]+/jmhz-mapping)$#', 'payroll', AccessLevel::READ],
+        ['*', '#^/api/payroll/components/[0-9]+/jmhz-mapping$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/travel/trips(?:/[0-9]+/calculation)?$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize)$#', 'payroll.approve', AccessLevel::WRITE],

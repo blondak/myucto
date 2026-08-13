@@ -531,6 +531,50 @@ export type PayrollComponentPayload = Omit<
   'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
 >
 
+export interface PayrollComponentJmhzTarget {
+  attribute_id: string
+  name: string
+  xsd_mapping: string
+  data_type: string
+  monthly_marker: string
+  parent_attribute_id: string | null
+  ancestor_attribute_ids: string[]
+  aggregation_role: 'detail' | 'catch_all_total'
+  aggregation_scope: 'employment' | 'employee_summary'
+}
+
+export interface PayrollComponentJmhzMapping {
+  id: number
+  component_definition_id: number
+  package_key: string
+  spec_manifest_sha256: string
+  target_attribute_id: string
+  target_attribute_name: string
+  target_xsd_mapping: string
+  is_active: boolean
+  disabled_at: string | null
+  row_version: number
+  parent_attribute_id: string | null
+  ancestor_attribute_ids: string[]
+  aggregation_role: 'detail' | 'catch_all_total' | null
+  aggregation_scope: 'employment' | 'employee_summary' | null
+  topology_hash: string | null
+  is_current_package: boolean
+}
+
+export type PayrollComponentJmhzMappingStatus =
+  | 'configured'
+  | 'missing'
+  | 'excluded'
+  | 'manual_review'
+
+export interface PayrollComponentJmhzMappingState {
+  component_id: number
+  jmhz_treatment: PayrollComponentInclusion
+  status: PayrollComponentJmhzMappingStatus
+  mapping: PayrollComponentJmhzMapping | null
+}
+
 export type PayrollRecurringCalculationKind =
   | 'fixed_amount'
   | 'employment_gross_basis_points'
@@ -2182,6 +2226,28 @@ export const payrollApi = {
       ...payload,
       row_version: rowVersion,
     }).then(response => response.data.component),
+  componentJmhzTargets: () =>
+    api.get<{
+      package_key: string
+      manifest_sha256: string
+      topology_hash: string
+      targets: PayrollComponentJmhzTarget[]
+    }>('/payroll/components/jmhz-targets').then(response => response.data),
+  componentJmhzMappings: () =>
+    api.get<{ items: PayrollComponentJmhzMappingState[] }>('/payroll/components/jmhz-mappings')
+      .then(response => response.data.items),
+  saveComponentJmhzMapping: (
+    componentId: number,
+    targetAttributeId: string,
+    rowVersion: number | null,
+  ) => api.put<PayrollComponentJmhzMappingState>(
+    `/payroll/components/${componentId}/jmhz-mapping`,
+    { target_attribute_id: targetAttributeId, row_version: rowVersion },
+  ).then(response => response.data),
+  removeComponentJmhzMapping: (componentId: number, rowVersion: number) =>
+    api.delete(`/payroll/components/${componentId}/jmhz-mapping`, {
+      data: { row_version: rowVersion },
+    }),
   recurringComponents: (employmentId?: number) =>
     api.get<{ recurring_components: PayrollRecurringComponent[] }>('/payroll/recurring-components', {
       params: employmentId ? { employment_id: employmentId } : undefined,

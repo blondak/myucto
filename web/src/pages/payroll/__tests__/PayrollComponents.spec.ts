@@ -9,6 +9,10 @@ const m = vi.hoisted(() => ({
   people: vi.fn(),
   person: vi.fn(),
   accountOptions: vi.fn(),
+  componentJmhzTargets: vi.fn(),
+  componentJmhzMappings: vi.fn(),
+  saveComponentJmhzMapping: vi.fn(),
+  removeComponentJmhzMapping: vi.fn(),
   createComponent: vi.fn(),
   createRecurringComponent: vi.fn(),
   createInput: vi.fn(),
@@ -29,6 +33,10 @@ vi.mock('@/api/payroll', () => ({
     people: m.people,
     person: m.person,
     accountOptions: m.accountOptions,
+    componentJmhzTargets: m.componentJmhzTargets,
+    componentJmhzMappings: m.componentJmhzMappings,
+    saveComponentJmhzMapping: m.saveComponentJmhzMapping,
+    removeComponentJmhzMapping: m.removeComponentJmhzMapping,
     previewInputImport: m.previewInputImport,
     applyInputImport: m.applyInputImport,
     createComponent: m.createComponent,
@@ -146,6 +154,52 @@ describe('PayrollComponents', () => {
         is_active: true,
       },
     ])
+    m.componentJmhzTargets.mockResolvedValue({
+      package_key: 'synthetic-package',
+      manifest_sha256: 'a'.repeat(64),
+      topology_hash: 'b'.repeat(64),
+      targets: [{
+        attribute_id: '10330',
+        name: 'Pravidelné prémie a odměny',
+        xsd_mapping: 'mzda.mzdaRozpad.odmenyPravidelne',
+        data_type: 'číslo',
+        monthly_marker: 'x',
+        parent_attribute_id: '10328',
+        ancestor_attribute_ids: ['10328'],
+        aggregation_role: 'detail',
+        aggregation_scope: 'employment',
+      }],
+    })
+    m.componentJmhzMappings.mockResolvedValue([{
+      component_id: 5,
+      jmhz_treatment: 'included',
+      status: 'missing',
+      mapping: null,
+    }])
+    m.saveComponentJmhzMapping.mockResolvedValue({
+      component_id: 5,
+      jmhz_treatment: 'included',
+      status: 'configured',
+      mapping: {
+        id: 1,
+        component_definition_id: 5,
+        package_key: 'synthetic-package',
+        spec_manifest_sha256: 'a'.repeat(64),
+        target_attribute_id: '10330',
+        target_attribute_name: 'Pravidelné prémie a odměny',
+        target_xsd_mapping: 'mzda.mzdaRozpad.odmenyPravidelne',
+        is_active: true,
+        disabled_at: null,
+        row_version: 1,
+        parent_attribute_id: '10328',
+        ancestor_attribute_ids: ['10328'],
+        aggregation_role: 'detail',
+        aggregation_scope: 'employment',
+        topology_hash: 'b'.repeat(64),
+        is_current_package: true,
+      },
+    })
+    m.removeComponentJmhzMapping.mockResolvedValue(undefined)
     m.person.mockResolvedValue({
       id: 8,
       full_name: 'Syntetická osoba',
@@ -344,6 +398,59 @@ describe('PayrollComponents', () => {
     const credit = editor.get('[data-testid="payroll-component-credit"]')
     await credit.get('input').trigger('focus')
     expect(wrapper.text()).toContain('Zaměstnanci')
+    wrapper.unmount()
+  })
+
+  it('configures an explicit JMHZ target for an included component', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.jmhz.configure')!
+      .trigger('click')
+
+    const editor = wrapper.get('[data-testid="payroll-jmhz-mapping-editor"]')
+    await editor.get('[role="combobox"]').trigger('focus')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text().includes('10330'))!
+      .trigger('click')
+    await editor.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveComponentJmhzMapping).toHaveBeenCalledWith(5, '10330', null)
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.jmhz.saved')
+    wrapper.unmount()
+  })
+
+  it('keeps the payroll catalogue usable when JMHZ configuration cannot load', async () => {
+    m.componentJmhzTargets.mockRejectedValue(new Error('synthetic JMHZ failure'))
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+
+    expect(wrapper.text()).toContain('Syntetická odměna')
+    expect(m.toastError).toHaveBeenCalledWith('synthetic JMHZ failure')
+    wrapper.unmount()
+  })
+
+  it('does not keep the payroll page loading while JMHZ configuration is pending', async () => {
+    m.componentJmhzTargets.mockReturnValue(new Promise(() => undefined))
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+
+    expect(wrapper.text()).toContain('Syntetická odměna')
+    expect(wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.jmhz.configure')!
+      .attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 
