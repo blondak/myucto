@@ -10,6 +10,8 @@ final class JmhzSpecPackageCatalog
 {
     public const DEFAULT_PACKAGE_KEY =
         'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1';
+    public const DEFAULT_MANIFEST_SHA256 =
+        'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b';
 
     private const PACKAGE_DIRECTORIES = [
         self::DEFAULT_PACKAGE_KEY => 'dictionary-1.4.1.6',

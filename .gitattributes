@@ -16,3 +16,4 @@
 *.xsd -text
 *.xlsx -text
 api/xsd/jmhz/SHA256SUMS text eol=lf
+api/resources/payroll/jmhz/**/*.json text eol=lf
