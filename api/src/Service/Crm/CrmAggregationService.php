@@ -1280,6 +1280,8 @@ final class CrmAggregationService
                     }
                     $integrityTotal += $cnt;
                     $link = $this->journalIntegrityLink($cnt, $row['detail'], (string) $row['finding_type']);
+                    // Odkaz posledního NENULOVÉHO typu. Když je nenulový právě jeden
+                    // (běžný případ), použije ho i hlavní odkaz karty.
                     $singleLink = $link;
                     $intBreakdown[] = [
                         'key'   => (string) $row['finding_type'],
@@ -1294,8 +1296,14 @@ final class CrmAggregationService
                         'title'     => 'Zkontroluj integritu deníku',
                         'hint'      => sprintf('%d %s konzistence doklad ↔ deník', $integrityTotal,
                             $integrityTotal === 1 ? 'nález' : ($integrityTotal < 5 ? 'nálezy' : 'nálezů')),
-                        // Jediný nález napříč všemi typy → hlavní odkaz míří rovnou na něj.
-                        'link'      => (count($intRows) === 1 && $integrityTotal === 1 && $singleLink !== null)
+                        // Hlavní odkaz karty vede tam, kde nález uvidíš: u jediného
+                        // nenulového typu na jeho deep-link (jeden zápis), resp. na
+                        // filtr deníku (víc nálezů). Podmínka SMÍ koukat jen na
+                        // $intBreakdown, ne na $intRows — ty nesou VŠECHNY typy
+                        // posledního běhu včetně nulových (jeden řádek per typ), takže
+                        // count($intRows) === 1 nebylo nikdy splněno a karta mířila na
+                        // nefiltrovaný deník i u jediného nálezu.
+                        'link'      => (count($intBreakdown) === 1 && $singleLink !== null)
                             ? $singleLink
                             : '/accounting/journal',
                         'count'     => $integrityTotal,
