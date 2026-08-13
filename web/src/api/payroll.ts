@@ -1303,6 +1303,28 @@ export interface PayrollJmhzPvpojPreview {
   filename: string
 }
 
+export interface PayrollJmhzOrdinaryEvidenceFacts {
+  reportable_wage_deductions_recorded: false
+  employee_social_discount_claimed: false
+  specific_legal_fact_occurred: false
+  ozp_employment_support_claimed: false
+  deep_mining_work_occurred: false
+}
+
+export interface PayrollJmhzOrdinaryEvidence {
+  id: number
+  run_id: number
+  revision_id: number
+  revision_no: number
+  period_start: string
+  schema_reference: 'payroll-jmhz-ordinary-evidence.v1'
+  source_manifest_sha256: string
+  facts: PayrollJmhzOrdinaryEvidenceFacts
+  confirmed_at: string
+  created_at: string
+  created: boolean
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
@@ -2064,6 +2086,27 @@ export const payrollApi = {
     api.get<PayrollJmhzPvpojPreview>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}`,
     ).then(response => response.data),
+  jmhzOrdinaryEvidence: (revisionId: number) =>
+    api.get<{ evidence: PayrollJmhzOrdinaryEvidence | null }>(
+      `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
+    ).then(response => response.data.evidence),
+  confirmJmhzOrdinaryEvidence: (
+    revisionId: number,
+    idempotencyKey: string,
+  ) => api.post<PayrollJmhzOrdinaryEvidence>(
+    `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
+    {
+      facts: {
+        reportable_wage_deductions_recorded: false,
+        employee_social_discount_claimed: false,
+        specific_legal_fact_occurred: false,
+        ozp_employment_support_claimed: false,
+        deep_mining_work_occurred: false,
+      },
+      evidence_confirmed: true,
+    },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
     preview: PayrollJmhzPvpojPreview,
   ): Promise<void> => {

@@ -11,7 +11,10 @@ final class JmhzScenario1DocumentResolver
         ?JmhzPvpojPreview $pvpoj,
         ?string $pvpojFailureCode = null,
     ): JmhzScenario1Resolution {
-        if ($preparation->builderVersion !== JmhzPreparationSnapshotBuilder::BUILDER_VERSION) {
+        if (!in_array($preparation->builderVersion, [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+        ], true)) {
             return new JmhzScenario1Resolution(null, [
                 $this->blocker(
                     'jmhz_scenario1_source_version_unsupported',
@@ -53,6 +56,10 @@ final class JmhzScenario1DocumentResolver
         $sourceRevision = $this->object(
             $preparation->payload['source_revision'] ?? null,
         );
+        $ordinaryEvidence = $preparation->builderVersion
+            === JmhzPreparationSnapshotBuilder::BUILDER_VERSION
+            ? $this->object($preparation->payload['ordinary_evidence'] ?? null)
+            : [];
         $people = $this->rows($preparation->payload['people'] ?? null);
         if (count($people) > 1500) {
             $blockers[] = $this->blocker(
@@ -228,7 +235,9 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
-                    'deductions_recorded' => null,
+                    'deductions_recorded' => $ordinaryEvidence === []
+                        ? null
+                        : ($ordinaryEvidence['attribute_values']['10116'] ?? null),
                 ],
                 'employments' => $normalizedEmployments,
             ];
@@ -269,36 +278,38 @@ final class JmhzScenario1DocumentResolver
             ];
         }
 
-        $blockers[] = $this->blocker(
-            'jmhz_attribute_10116_unresolved',
-            'revision',
-            $preparation->sourceRevisionId,
-            ['10116'],
-        );
-        $blockers[] = $this->blocker(
-            'jmhz_attribute_10546_unresolved',
-            'revision',
-            $preparation->sourceRevisionId,
-            ['10546', '10547'],
-        );
-        $blockers[] = $this->blocker(
-            'jmhz_interaction_in13_unresolved',
-            'revision',
-            $preparation->sourceRevisionId,
-            ['10408', '10409', '10410'],
-        );
-        $blockers[] = $this->blocker(
-            'jmhz_interaction_in28_unresolved',
-            'revision',
-            $preparation->sourceRevisionId,
-            ['10347', '10348', '10349'],
-        );
-        $blockers[] = $this->blocker(
-            'jmhz_interaction_in30_unresolved',
-            'revision',
-            $preparation->sourceRevisionId,
-            ['10270', '10271', '10272'],
-        );
+        if ($ordinaryEvidence === []) {
+            $blockers[] = $this->blocker(
+                'jmhz_attribute_10116_unresolved',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10116'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_attribute_10546_unresolved',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10546', '10547'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_interaction_in13_unresolved',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10408', '10409', '10410'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_interaction_in28_unresolved',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10347', '10348', '10349'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_interaction_in30_unresolved',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10270', '10271', '10272'],
+            );
+        }
         $blockers = $this->normalizeBlockers($blockers);
 
         $candidate = new JmhzScenario1NormalizedDocument([
@@ -315,6 +326,7 @@ final class JmhzScenario1DocumentResolver
                 'snapshot_fingerprint' => $preparation->snapshotFingerprint,
                 'source_revision' => $sourceRevision,
                 'pvpoj_preview_sha256' => $pvpoj?->sha256(),
+                'ordinary_evidence' => $preparation->payload['source_versions']['ordinary_evidence'] ?? null,
             ],
             'header' => [
                 'type' => 'R',
@@ -330,9 +342,10 @@ final class JmhzScenario1DocumentResolver
             ],
             'people' => $normalizedPeople,
             'interactions' => [
-                'IN13' => null,
-                'IN28' => null,
-                'IN30' => null,
+                'IN13' => $ordinaryEvidence === [] ? null : false,
+                'IN28' => $ordinaryEvidence === [] ? null : false,
+                'IN30' => $ordinaryEvidence === [] ? null : false,
+                'IN36' => $ordinaryEvidence === [] ? null : false,
             ],
         ]);
 

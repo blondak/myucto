@@ -1,0 +1,339 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Submission\Jmhz;
+
+use MyInvoice\Repository\Payroll\JmhzOrdinaryEvidenceRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use Psr\Clock\ClockInterface;
+
+final readonly class JmhzOrdinaryEvidenceService
+{
+    private const MANIFEST_SCHEMA = 'payroll-jmhz-ordinary-evidence-manifest.v1';
+    private const REQUEST_SCHEMA = 'payroll-jmhz-ordinary-evidence-request.v1';
+
+    public function __construct(
+        private JmhzOrdinaryEvidenceRepository $repository,
+        private JmhzOrdinaryEvidenceBuilder $builder,
+        private PayrollSensitiveData $sensitiveData,
+        private SecretEncryption $encryption,
+        private ClockInterface $clock,
+        private ActivityLogger $logger,
+    ) {}
+
+    /** @return array<string,mixed>|null */
+    public function evidence(int $supplierId, int $revisionId): ?array
+    {
+        if ($supplierId <= 0 || $revisionId <= 0) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_not_found', 'Ordinary evidence nebyla nalezena.');
+        }
+        return $this->repository->transaction(function () use ($supplierId, $revisionId): ?array {
+            if ($this->repository->lockSource($supplierId, $revisionId) === null) {
+                throw new JmhzOrdinaryEvidenceException(
+                    'jmhz_ordinary_evidence_not_found',
+                    'Zdrojová revize nebyla nalezena.',
+                );
+            }
+            $stored = $this->repository->findByRevision($supplierId, $revisionId);
+            if ($stored === null) {
+                return null;
+            }
+            return $this->publicResult($stored, $this->verifyStored($stored), false);
+        });
+    }
+
+    /**
+     * @param array<string,mixed> $facts
+     * @return array<string,mixed>
+     */
+    public function confirm(
+        int $supplierId,
+        int $revisionId,
+        array $facts,
+        string $idempotencyKey,
+        int $confirmedBy,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0) {
+            throw new \InvalidArgumentException('Firma, revize a potvrzující uživatel musí být kladná čísla.');
+        }
+        $idempotencyKey = trim($idempotencyKey);
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 190) {
+            throw new \InvalidArgumentException('Idempotency-Key musí mít 1 až 190 bajtů.');
+        }
+        $facts = JmhzOrdinaryEvidenceBuilder::normalizeFacts($facts);
+        $idempotencyHash = hash('sha256', $idempotencyKey, true);
+        $confirmationFingerprint = $this->sensitiveData->keyedFingerprint(
+            CanonicalJson::encode([
+                'schema_reference' => self::REQUEST_SCHEMA,
+                'supplier_id' => $supplierId,
+                'source_revision_id' => $revisionId,
+                'facts' => $facts,
+            ]),
+            'jmhz-ordinary-confirmation',
+            $supplierId,
+        );
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $revisionId,
+            $facts,
+            $idempotencyHash,
+            $confirmationFingerprint,
+            $confirmedBy,
+            $ip,
+            $userAgent,
+        ): array {
+            $source = $this->repository->lockSource($supplierId, $revisionId);
+            if ($source === null) {
+                throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_not_found', 'Zdrojová revize nebyla nalezena.');
+            }
+            $preview = $this->builder->build(
+                $supplierId,
+                $source,
+                $facts,
+                $confirmedBy,
+                '2000-01-01T00:00:00Z',
+            );
+            $scope = $preview->payload['scope'];
+            if (!is_array($scope) || array_is_list($scope)) {
+                throw new \UnexpectedValueException('Scope ordinary evidence není objekt.');
+            }
+            $employeeId = (int) ($scope['employee_id'] ?? 0);
+            $employmentId = (int) ($scope['employment_id'] ?? 0);
+            $inserted = $this->repository->insertClaim(
+                $supplierId,
+                $idempotencyHash,
+                $revisionId,
+                $employeeId,
+                $employmentId,
+                $confirmationFingerprint,
+                $confirmedBy,
+            );
+            if (!$inserted) {
+                $claim = $this->repository->findClaimForUpdate($supplierId, $idempotencyHash);
+                if ($claim === null
+                    || ($claim['source_revision_id'] ?? null) !== $revisionId
+                    || ($claim['employee_id'] ?? null) !== $employeeId
+                    || ($claim['employment_id'] ?? null) !== $employmentId
+                ) {
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_idempotency_scope_mismatch', 'Idempotentní opakování má jiný rozsah.');
+                }
+                if (!hash_equals((string) ($claim['confirmation_fingerprint'] ?? ''), $confirmationFingerprint)) {
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_idempotency_payload_mismatch', 'Idempotentní opakování má jiný obsah.');
+                }
+                $snapshotId = $claim['evidence_snapshot_id'] ?? null;
+                if (!is_int($snapshotId)) {
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_idempotency_incomplete', 'Idempotentní ordinary evidence není dokončená.');
+                }
+                $stored = $this->repository->find($supplierId, $snapshotId);
+                if ($stored === null) {
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_idempotency_incomplete', 'Idempotentní ordinary evidence chybí.');
+                }
+                return $this->publicResult($stored, $this->verifyStored($stored), false);
+            }
+
+            $confirmedAt = $this->clock->now()->setTimezone(new \DateTimeZone('UTC'))
+                ->format('Y-m-d\TH:i:s.u\Z');
+            $snapshot = $this->builder->build(
+                $supplierId,
+                $source,
+                $facts,
+                $confirmedBy,
+                $confirmedAt,
+            );
+            $plaintext = $snapshot->canonicalJson();
+            $fingerprint = $this->sensitiveData->keyedFingerprint(
+                $plaintext,
+                'jmhz-ordinary-evidence',
+                $supplierId,
+            );
+            $scope = $snapshot->payload['scope'];
+            $manifestJson = CanonicalJson::encode([
+                'schema_reference' => self::MANIFEST_SCHEMA,
+                'builder_version' => JmhzOrdinaryEvidenceBuilder::BUILDER_VERSION,
+                'scope' => $scope,
+                'specification' => $snapshot->payload['specification'],
+                'source_revision' => $snapshot->payload['source_revision'],
+                'snapshot_fingerprint' => $fingerprint,
+            ]);
+            $manifestHash = hash('sha256', $manifestJson);
+            $requestFingerprint = hash('sha256', CanonicalJson::encode([
+                'schema_reference' => self::REQUEST_SCHEMA,
+                'supplier_id' => $supplierId,
+                'source_revision_id' => $revisionId,
+                'source_manifest_sha256' => $manifestHash,
+            ]));
+            $existing = $this->repository->findByRevisionForUpdate($supplierId, $revisionId);
+            if ($existing !== null) {
+                $existingPayload = $this->verifyStored($existing);
+                if (!hash_equals((string) $existing['request_fingerprint'], $requestFingerprint)) {
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_scope_already_frozen', 'Revize už má jiné immutable ordinary evidence.');
+                }
+                $this->repository->bindClaim($supplierId, $idempotencyHash, (int) $existing['id']);
+                return $this->publicResult($existing, $existingPayload, false);
+            }
+            $ciphertext = $this->encryption->encryptFor(
+                $plaintext,
+                $this->encryptionContext($supplierId, $revisionId, $employmentId, $fingerprint, $manifestHash),
+            );
+            $id = $this->repository->insert([
+                'supplier_id' => $supplierId,
+                'run_id' => $scope['run_id'],
+                'source_revision_id' => $revisionId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'period_start' => $scope['period_start'],
+                'schema_reference' => JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE,
+                'source_manifest_json' => $manifestJson,
+                'source_manifest_sha256' => $manifestHash,
+                'snapshot_ciphertext' => $ciphertext,
+                'snapshot_fingerprint' => $fingerprint,
+                'request_fingerprint' => $requestFingerprint,
+                'idempotency_key_hash' => $idempotencyHash,
+                'confirmed_by' => $confirmedBy,
+                'confirmed_at' => str_replace(['T', 'Z'], [' ', ''], $confirmedAt),
+            ]);
+            $this->repository->bindClaim($supplierId, $idempotencyHash, $id);
+            $this->logger->log(
+                'payroll.jmhz_ordinary_evidence.confirmed',
+                $confirmedBy,
+                'payroll_jmhz_ordinary_evidence_snapshots',
+                $id,
+                [
+                    'source_revision_id' => $revisionId,
+                    'source_manifest_sha256' => $manifestHash,
+                ],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+            $stored = $this->repository->find($supplierId, $id);
+            if ($stored === null) {
+                throw new \RuntimeException('Uloženou ordinary evidence nelze načíst.');
+            }
+            return $this->publicResult($stored, $this->verifyStored($stored), true);
+        });
+    }
+
+    /** @return array<string,mixed>|null */
+    public function snapshotForPreparation(int $supplierId, int $revisionId): ?array
+    {
+        $stored = $this->repository->findByRevision($supplierId, $revisionId);
+        if ($stored === null) {
+            return null;
+        }
+        return [
+            'id' => $stored['id'],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+            'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
+            'payload' => $this->verifyStored($stored),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array<string,mixed>
+     */
+    private function verifyStored(array $stored): array
+    {
+        $manifestJson = $stored['source_manifest_json'] ?? null;
+        $manifestHash = $stored['source_manifest_sha256'] ?? null;
+        if (!is_string($manifestJson) || !is_string($manifestHash)
+            || !hash_equals($manifestHash, hash('sha256', $manifestJson))
+        ) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_hash_mismatch', 'Otisk manifestu ordinary evidence nesouhlasí.');
+        }
+        $manifest = json_decode($manifestJson, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($manifest) || array_is_list($manifest)
+            || CanonicalJson::encode($manifest) !== $manifestJson
+            || ($manifest['schema_reference'] ?? null) !== self::MANIFEST_SCHEMA
+            || ($manifest['builder_version'] ?? null) !== JmhzOrdinaryEvidenceBuilder::BUILDER_VERSION
+            || ($manifest['snapshot_fingerprint'] ?? null) !== ($stored['snapshot_fingerprint'] ?? null)
+            || ($stored['schema_reference'] ?? null) !== JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE
+        ) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_hash_mismatch', 'Manifest ordinary evidence není kanonický nebo úplný.');
+        }
+        $scope = $manifest['scope'] ?? null;
+        if (!is_array($scope) || array_is_list($scope)
+            || ($scope['supplier_id'] ?? null) !== ($stored['supplier_id'] ?? null)
+            || ($scope['run_id'] ?? null) !== ($stored['run_id'] ?? null)
+            || ($scope['source_revision_id'] ?? null) !== ($stored['source_revision_id'] ?? null)
+            || ($scope['employee_id'] ?? null) !== ($stored['employee_id'] ?? null)
+            || ($scope['employment_id'] ?? null) !== ($stored['employment_id'] ?? null)
+            || ($scope['period_start'] ?? null) !== ($stored['period_start'] ?? null)
+        ) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_hash_mismatch', 'Scope ordinary evidence nesouhlasí.');
+        }
+        $plaintext = $this->encryption->decryptFor(
+            (string) $stored['snapshot_ciphertext'],
+            $this->encryptionContext(
+                (int) $stored['supplier_id'],
+                (int) $stored['source_revision_id'],
+                (int) $stored['employment_id'],
+                (string) $stored['snapshot_fingerprint'],
+                (string) $stored['source_manifest_sha256'],
+            ),
+        );
+        if (!hash_equals(
+            (string) $stored['snapshot_fingerprint'],
+            $this->sensitiveData->keyedFingerprint($plaintext, 'jmhz-ordinary-evidence', (int) $stored['supplier_id']),
+        )) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_hash_mismatch', 'Citlivý ordinary snapshot má jiný otisk.');
+        }
+        $payload = json_decode($plaintext, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload) || array_is_list($payload)
+            || CanonicalJson::encode($payload) !== $plaintext
+            || ($payload['schema_reference'] ?? null) !== JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE
+            || CanonicalJson::encode($payload['scope'] ?? null) !== CanonicalJson::encode($scope)
+            || CanonicalJson::encode($payload['specification'] ?? null) !== CanonicalJson::encode($manifest['specification'] ?? null)
+            || CanonicalJson::encode($payload['source_revision'] ?? null) !== CanonicalJson::encode($manifest['source_revision'] ?? null)
+        ) {
+            throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_hash_mismatch', 'Citlivý ordinary snapshot neodpovídá manifestu.');
+        }
+        return $payload;
+    }
+
+    private function encryptionContext(
+        int $supplierId,
+        int $revisionId,
+        int $employmentId,
+        string $fingerprint,
+        string $manifestHash,
+    ): string {
+        return "payroll:jmhz-ordinary:{$supplierId}:{$revisionId}:{$employmentId}:{$fingerprint}:{$manifestHash}";
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function publicResult(array $stored, array $payload, bool $created): array
+    {
+        return [
+            'id' => $stored['id'],
+            'run_id' => $stored['run_id'],
+            'revision_id' => $stored['source_revision_id'],
+            'revision_no' => $payload['scope']['revision_no'],
+            'period_start' => $stored['period_start'],
+            'schema_reference' => $stored['schema_reference'],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+            'facts' => [
+                'reportable_wage_deductions_recorded' => false,
+                'employee_social_discount_claimed' => false,
+                'specific_legal_fact_occurred' => false,
+                'ozp_employment_support_claimed' => false,
+                'deep_mining_work_occurred' => false,
+            ],
+            'confirmed_at' => $payload['confirmation']['confirmed_at'],
+            'created_at' => $stored['created_at'],
+            'created' => $created,
+        ];
+    }
+}

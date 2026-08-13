@@ -12,5 +12,6 @@ final readonly class JmhzFieldRequirement
         public JmhzFieldRequirementKind $requirement,
         public ?string $conditionNoteRaw,
         public JmhzFieldEffect $effect,
+        public string $rowHash,
     ) {}
 }

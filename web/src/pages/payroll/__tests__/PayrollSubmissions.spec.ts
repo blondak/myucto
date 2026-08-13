@@ -12,6 +12,8 @@ const m = vi.hoisted(() => ({
   downloadSubmissionArtifact: vi.fn(),
   runs: vi.fn(),
   jmhzPreview: vi.fn(),
+  jmhzOrdinaryEvidence: vi.fn(),
+  confirmJmhzOrdinaryEvidence: vi.fn(),
   downloadJmhzPreview: vi.fn(),
   healthOverviews: vi.fn(),
   downloadHealthOverview: vi.fn(),
@@ -32,6 +34,8 @@ vi.mock('@/api/payroll', () => ({
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
     runs: m.runs,
     jmhzPvpojPreview: m.jmhzPreview,
+    jmhzOrdinaryEvidence: m.jmhzOrdinaryEvidence,
+    confirmJmhzOrdinaryEvidence: m.confirmJmhzOrdinaryEvidence,
     downloadJmhzPvpojPreview: m.downloadJmhzPreview,
     healthPaymentOverviews: m.healthOverviews,
     downloadHealthPaymentOverview: m.downloadHealthOverview,
@@ -134,12 +138,16 @@ function setup() {
   m.runs.mockResolvedValue([{
     id: 8,
     status: 'approved',
+    period_start: '2026-08-01',
     revision_id: 18,
+    revision_no: 1,
     revision_status: 'approved',
   }, {
     id: 9,
     status: 'posted',
+    period_start: '2026-08-01',
     revision_id: 19,
+    revision_no: 2,
     revision_status: 'approved',
   }])
   m.healthOverviews.mockImplementation(async (revisionId: number) => ({
@@ -229,6 +237,7 @@ function setup() {
     sha256: 'e'.repeat(64),
     filename: `jmhz-pvpoj-preview-2026-08-revize-${revisionId}.json`,
   }))
+  m.jmhzOrdinaryEvidence.mockResolvedValue(null)
   m.prepare.mockResolvedValue({
     id: 9,
     environment: 'production',
@@ -407,7 +416,10 @@ describe('PayrollSubmissions', () => {
 
     expect(m.jmhzPreview).toHaveBeenCalledWith(18)
     expect(m.jmhzPreview).toHaveBeenCalledWith(19)
+    expect(m.jmhzOrdinaryEvidence).toHaveBeenCalledWith(18)
+    expect(m.jmhzOrdinaryEvidence).toHaveBeenCalledWith(19)
     expect(wrapper.findAll('[data-test="jmhz-pvpoj-previews"] article')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="jmhz-ordinary-evidence"] article')).toHaveLength(2)
     expect(wrapper.get('[data-test="jmhz-pvpoj-previews"]').text())
       .toContain('payroll.submissions.overview.jmhz_preview_only')
 

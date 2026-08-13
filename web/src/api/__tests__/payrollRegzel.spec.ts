@@ -135,6 +135,31 @@ describe('payroll REGZEL API', () => {
     )
   })
 
+  it('načte a potvrdí ordinary evidence s přesnými false fakty', async () => {
+    m.get.mockResolvedValueOnce({ data: { evidence: null } })
+    expect(await payrollApi.jmhzOrdinaryEvidence(18)).toBeNull()
+    expect(m.get).toHaveBeenCalledWith(
+      '/payroll/submissions/jmhz-ordinary-evidence/18',
+    )
+
+    m.post.mockResolvedValueOnce({ data: { id: 31, created: true } })
+    await payrollApi.confirmJmhzOrdinaryEvidence(18, 'synthetic-idempotency-key')
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/submissions/jmhz-ordinary-evidence/18',
+      {
+        facts: {
+          reportable_wage_deductions_recorded: false,
+          employee_social_discount_claimed: false,
+          specific_legal_fact_occurred: false,
+          ozp_employment_support_claimed: false,
+          deep_mining_work_occurred: false,
+        },
+        evidence_confirmed: true,
+      },
+      { headers: { 'Idempotency-Key': 'synthetic-idempotency-key' } },
+    )
+  })
+
   it('načte bezpečný detail posledního podání bez parametrů prostředí v URL', async () => {
     m.get.mockResolvedValueOnce({
       data: {

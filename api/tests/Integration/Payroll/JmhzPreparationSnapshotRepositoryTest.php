@@ -315,6 +315,12 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
             'payroll-jmhz-preparation-source-manifest.v3',
             'payroll-jmhz-preparation-request.v3',
         ];
+        yield 'v4' => [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
+            JmhzPreparationSnapshot::PREVIOUS_V4_SCHEMA_REFERENCE,
+            'payroll-jmhz-preparation-source-manifest.v4',
+            'payroll-jmhz-preparation-request.v4',
+        ];
     }
 
     #[DataProvider('historicalPreparationContracts')]

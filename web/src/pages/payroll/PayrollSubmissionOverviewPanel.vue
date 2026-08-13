@@ -7,10 +7,12 @@ import {
   type PayrollHealthPaymentOverview,
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
+  type PayrollRun,
   type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{
@@ -26,6 +28,7 @@ const environment = ref<PayrollRegzelEnvironment>('production')
 const allItems = ref<PayrollSubmissionOverviewItem[]>([])
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
+const jmhzApprovedRuns = ref<PayrollRun[]>([])
 const downloadingHealthKey = ref<string | null>(null)
 const downloadingJmhzRevision = ref<number | null>(null)
 const jmhzError = ref('')
@@ -210,6 +213,7 @@ async function loadHealthOverviews() {
 
 async function loadJmhzPreviews() {
   jmhzPreviews.value = []
+  jmhzApprovedRuns.value = []
   jmhzError.value = ''
   if (props.mode !== 'jmhz') return
   try {
@@ -217,6 +221,7 @@ async function loadJmhzPreviews() {
     const approved = runs.filter(run =>
       run.revision_status === 'approved' && run.revision_id !== null,
     )
+    jmhzApprovedRuns.value = approved
     const responses = await Promise.allSettled(approved.map(run =>
       payrollApi.jmhzPvpojPreview(run.revision_id!),
     ))
@@ -288,6 +293,7 @@ async function load() {
     allItems.value = []
     healthOverviews.value = []
     jmhzPreviews.value = []
+    jmhzApprovedRuns.value = []
     error.value = apiErrorMessage(
       exception,
       t('payroll.submissions.overview.load_failed'),
@@ -760,6 +766,11 @@ onMounted(load)
           </article>
         </div>
       </section>
+
+      <PayrollJmhzOrdinaryEvidencePanel
+        v-if="mode === 'jmhz'"
+        :runs="jmhzApprovedRuns"
+      />
 
       <section
         v-if="mode === 'health'"

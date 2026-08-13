@@ -12,5 +12,6 @@ final readonly class JmhzInteractionDefinition
         public ?string $portalText,
         public ?string $noteRaw,
         public JmhzInteractionTriggerKind $triggerKind,
+        public string $rowHash,
     ) {}
 }

@@ -22,12 +22,16 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v4',
+            'payroll-jmhz-preparation-source.v5',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
         self::assertContains(
             'jmhz_eldp_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_ordinary_evidence_missing',
             $snapshot->payload['readiness_issue_codes'],
         );
         self::assertNotContains('scenario_selector_not_frozen', $snapshot->payload['readiness_issue_codes']);
@@ -63,7 +67,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 ['average_earning_input_hash'],
         );
         $public = CanonicalJson::encode($snapshot->readiness());
-        self::assertStringNotContainsString('101', $public);
+        self::assertStringNotContainsString('"entity_id"', $public);
         self::assertStringNotContainsString('Synthetic Person', $public);
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
     }

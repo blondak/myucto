@@ -39,7 +39,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             ),
         );
         self::assertSame(
-            ['IN13' => null, 'IN28' => null, 'IN30' => null],
+            ['IN13' => null, 'IN28' => null, 'IN30' => null, 'IN36' => null],
             $resolution->candidate->payload['interactions'],
         );
         self::assertSame(
@@ -52,6 +52,55 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             (new JmhzScenario1DocumentResolver())
                 ->resolve($this->preparation(), $this->pvpoj())
                 ->candidate?->sha256(),
+        );
+    }
+
+    public function testV5UsesImmutableOrdinaryEvidenceWithoutUnresolvedBlockers(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v5';
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        $payload['ordinary_evidence'] = [
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'] = [
+            'id' => 601,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('5', 64),
+        ];
+        $preparation = new JmhzVerifiedPreparationSnapshot(
+            $preparation->id,
+            $preparation->supplierId,
+            $preparation->environment,
+            $preparation->runId,
+            $preparation->sourceRevisionId,
+            $preparation->revisionNo,
+            $preparation->periodStart,
+            $preparation->periodEnd,
+            $preparation->scenarioKey,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $preparation->sourceManifestSha256,
+            $preparation->readinessSha256,
+            $preparation->snapshotFingerprint,
+            $preparation->manifest,
+            $preparation->readiness,
+            $payload,
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+        );
+
+        self::assertSame('resolved', $resolution->status());
+        self::assertSame([], $resolution->blockers);
+        self::assertSame(
+            ['IN13' => false, 'IN28' => false, 'IN30' => false, 'IN36' => false],
+            $resolution->candidate?->payload['interactions'],
+        );
+        self::assertFalse(
+            $resolution->candidate?->payload['people'][0]['summary']['deductions_recorded'],
         );
     }
 
@@ -203,7 +252,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     {
         $payload = [
             'schema_reference' => 'payroll-jmhz-preparation-source.v4',
-            'builder_version' => JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            'builder_version' => JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
             'scope' => [
                 'supplier_id' => 7,
                 'environment' => 'test',
@@ -311,7 +360,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             '2026-07-01',
             '2026-07-31',
             'scenario_1',
-            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
             str_repeat('1', 64),
             str_repeat('2', 64),
             str_repeat('3', 64),

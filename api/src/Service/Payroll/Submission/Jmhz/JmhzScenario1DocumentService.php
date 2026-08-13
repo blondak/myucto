@@ -22,7 +22,10 @@ final readonly class JmhzScenario1DocumentService
             $environment,
             $preparationId,
         );
-        if ($preparation->builderVersion !== JmhzPreparationSnapshotBuilder::BUILDER_VERSION) {
+        if (!in_array($preparation->builderVersion, [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+        ], true)) {
             return $this->resolver->resolve($preparation, null);
         }
         try {

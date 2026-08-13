@@ -85,6 +85,7 @@ final class JmhzScenarioRequirementSourceCatalog
                 self::nullableString($row, 'portal_text'),
                 self::nullableString($row, 'note_raw'),
                 JmhzInteractionTriggerKind::from(self::string($row, 'trigger_kind')),
+                self::string($row, 'row_hash'),
             );
         }
         foreach (self::rows($manifest['payload'], 'matrices') as $matrix) {
@@ -103,6 +104,7 @@ final class JmhzScenarioRequirementSourceCatalog
                     JmhzFieldRequirementKind::from(self::string($row, 'requirement_kind')),
                     self::nullableString($row, 'condition_note_raw'),
                     JmhzFieldEffect::from(self::string($row, 'effect_kind')),
+                    self::string($row, 'row_hash'),
                 );
             }
             $this->requirements[$matrixKey] = $requirements;

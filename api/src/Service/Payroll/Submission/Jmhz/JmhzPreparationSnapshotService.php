@@ -17,11 +17,13 @@ final readonly class JmhzPreparationSnapshotService
     private const LEGACY_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v1';
     private const PREVIOUS_V2_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v2';
     private const PREVIOUS_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v3';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v4';
+    private const PREVIOUS_V4_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v4';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v5';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v4';
+    private const PREVIOUS_V4_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v4';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v5';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -31,6 +33,7 @@ final readonly class JmhzPreparationSnapshotService
         private PayrollSensitiveData $sensitiveData,
         private SecretEncryption $encryption,
         private JmhzEldpEvidenceSnapshotService $eldpEvidence,
+        private JmhzOrdinaryEvidenceService $ordinaryEvidence,
     ) {}
 
     public function loadVerified(
@@ -207,6 +210,10 @@ final readonly class JmhzPreparationSnapshotService
                 $periodEnd,
                 $input,
             );
+            $ordinaryEvidence = $this->ordinaryEvidence->snapshotForPreparation(
+                $supplierId,
+                $sourceRevisionId,
+            );
             $snapshot = $this->builder->build(
                 $supplierId,
                 $environment,
@@ -215,6 +222,7 @@ final readonly class JmhzPreparationSnapshotService
                 $mappingSources,
                 $sourceIssues,
                 $eldpSources,
+                $ordinaryEvidence,
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -602,6 +610,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V4_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V4_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V4_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

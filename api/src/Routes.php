@@ -86,6 +86,7 @@ use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
+use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
@@ -877,6 +878,14 @@ final class Routes
             $g->get(
                 '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}/download',
                 [PayrollJmhzPvpojPreviewAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}',
+                [PayrollJmhzOrdinaryEvidenceAction::class, 'get'],
+            );
+            $g->post(
+                '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}',
+                [PayrollJmhzOrdinaryEvidenceAction::class, 'confirm'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',
