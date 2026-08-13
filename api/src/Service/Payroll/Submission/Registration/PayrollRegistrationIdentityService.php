@@ -198,6 +198,119 @@ final readonly class PayrollRegistrationIdentityService
 
     /**
      * @return array{
+     *   environment:string,
+     *   person_external_identifier:array{
+     *     id:int,identifier_type:string,value:string,valid_from:string,
+     *     valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *     source_reference_hash:string,row_version:int
+     *   },
+     *   employment_external_identifier:array{
+     *     id:int,identifier_type:string,value:string,valid_from:string,
+     *     valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *     source_reference_hash:string,row_version:int
+     *   }
+     * }
+     */
+    public function sensitiveJmhzIdentityAt(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($onDate, 'Rozhodné datum');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $environment,
+            $onDate,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null || $employment['employee_id'] !== $employeeId) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_employment_scope_mismatch',
+                    'Pracovní vztah nepatří stejné firmě a osobě.',
+                );
+            }
+            if ($onDate < $employment['start_date']
+                || ($employment['end_date'] !== null && $onDate > $employment['end_date'])
+            ) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_employment_scope_mismatch',
+                    'Pracovní vztah není účinný k rozhodnému datu.',
+                );
+            }
+            if ($this->repository->activeResolutionTaskKinds(
+                $supplierId,
+                $employmentId,
+                $environment,
+                true,
+            ) !== []) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_unresolved',
+                    'Identita JMHZ má otevřený úkol ztotožnění.',
+                );
+            }
+            $person = $this->repository->personExternalIdAt(
+                $supplierId,
+                $employeeId,
+                $environment,
+                'ik_mpsv',
+                $onDate,
+                true,
+            );
+            if ($person === null) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_oic_missing',
+                    'Pro osobu chybí k rozhodnému datu OIČ / IK MPSV.',
+                );
+            }
+            $employmentExternal = $this->repository->externalIdAt(
+                $supplierId,
+                $employmentId,
+                $environment,
+                'id_ppv',
+                $onDate,
+                true,
+            );
+            if ($employmentExternal === null) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_id_ppv_missing',
+                    'Pro pracovní vztah chybí k rozhodnému datu ID PPV.',
+                );
+            }
+            $personIdentifier = $this->revealExternalIdentifier(
+                $person,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            $employmentIdentifier = $this->revealExternalIdentifier(
+                $employmentExternal,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            self::oic($personIdentifier['value']);
+            self::idPpv($employmentIdentifier['value']);
+
+            return [
+                'environment' => $environment,
+                'person_external_identifier' => $personIdentifier,
+                'employment_external_identifier' => $employmentIdentifier,
+            ];
+        });
+    }
+
+    /**
+     * @return array{
      *   identity:array<string,mixed>,
      *   identifiers:array{
      *     birth_number:?string,ecp:?string,vcp:?string,
@@ -347,6 +460,156 @@ final readonly class PayrollRegistrationIdentityService
 
     /**
      * @return array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_masked:string,valid_from:string,row_version:int,created:bool
+     * }
+     */
+    public function assignPersonExternalId(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $value,
+        string $validFrom,
+        string $sourceKind,
+        string $sourceReference,
+        ?int $sourceReceiptId,
+        ?int $createdBy,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->environment($environment);
+        $this->date($validFrom, 'Platnost OIČ');
+        $this->allowed($sourceKind, self::SOURCE_KINDS, 'Zdroj OIČ');
+        $this->optionalPositive($sourceReceiptId, 'Protokol');
+        $this->optionalPositive($createdBy, 'Uživatel');
+        if (($sourceKind === 'trusted_receipt') !== ($sourceReceiptId !== null)) {
+            throw new \InvalidArgumentException(
+                'Trusted OIČ musí odkazovat na ověřený protokol.',
+            );
+        }
+        $normalizedValue = self::oic($value);
+        $sourceHash = $this->sensitiveData->keyedFingerprint(
+            $this->evidenceReference($sourceReference),
+            'person-external-id-source',
+            $supplierId,
+        );
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $environment,
+            $normalizedValue,
+            $validFrom,
+            $sourceKind,
+            $sourceReceiptId,
+            $sourceHash,
+            $createdBy,
+        ): array {
+            if (!$this->repository->lockEmployee($supplierId, $employeeId)) {
+                throw new \DomainException('Osoba nebyla nalezena ve stejné firmě.');
+            }
+            if ($sourceReceiptId !== null
+                && !$this->repository->hasTrustedReceipt(
+                    $supplierId,
+                    $environment,
+                    $sourceReceiptId,
+                )
+            ) {
+                throw new \DomainException(
+                    'Zdrojový protokol není důvěryhodný nebo patří jinému prostředí.',
+                );
+            }
+            $existing = $this->repository->activePersonExternalId(
+                $supplierId,
+                $employeeId,
+                $environment,
+                'ik_mpsv',
+            );
+            if ($existing !== null) {
+                $plaintext = $this->sensitiveData->reveal(
+                    $existing['value_ciphertext'],
+                    PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                    $existing['id'],
+                );
+                $storedHash = $this->sensitiveData->lookupHash(
+                    $plaintext,
+                    PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                );
+                if (!hash_equals($existing['value_hash'], $storedHash)) {
+                    throw new \RuntimeException('Otisk OIČ neodpovídá ciphertextu.');
+                }
+                $inputHash = $this->sensitiveData->lookupHash(
+                    $normalizedValue,
+                    PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                    $supplierId,
+                );
+                if (!hash_equals($existing['value_hash'], $inputHash)) {
+                    throw new \DomainException('Osoba už má jiné aktivní OIČ.');
+                }
+                if ($existing['valid_from'] !== $validFrom
+                    || $existing['source_kind'] !== $sourceKind
+                    || $existing['source_receipt_id'] !== $sourceReceiptId
+                    || !hash_equals($existing['source_reference_hash'], $sourceHash)
+                ) {
+                    throw new \DomainException(
+                        'Opakované uložení OIČ neodpovídá původnímu datu nebo důkazu.',
+                    );
+                }
+
+                return [
+                    'id' => $existing['id'],
+                    'employee_id' => $existing['employee_id'],
+                    'environment' => $existing['environment'],
+                    'identifier_type' => $existing['identifier_type'],
+                    'value_masked' => $existing['value_masked'],
+                    'valid_from' => $existing['valid_from'],
+                    'row_version' => $existing['row_version'],
+                    'created' => false,
+                ];
+            }
+
+            $id = $this->repository->insertPersonExternalIdPlaceholder(
+                $supplierId,
+                $employeeId,
+                $environment,
+                'ik_mpsv',
+                $validFrom,
+                $sourceKind,
+                $sourceReceiptId,
+                $sourceHash,
+                $createdBy,
+            );
+            $sealed = $this->sensitiveData->seal(
+                $normalizedValue,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $id,
+            );
+            $this->repository->sealPersonExternalId(
+                $supplierId,
+                $id,
+                $sealed->ciphertext,
+                $sealed->lookupHash,
+                $sealed->masked,
+            );
+
+            return [
+                'id' => $id,
+                'employee_id' => $employeeId,
+                'environment' => $environment,
+                'identifier_type' => 'ik_mpsv',
+                'value_masked' => $sealed->masked,
+                'valid_from' => $validFrom,
+                'row_version' => 1,
+                'created' => true,
+            ];
+        });
+    }
+
+    /**
+     * @return array{
      *   id:int,employment_id:int,employee_id:int,environment:string,
      *   identifier_type:string,value_masked:string,valid_from:string,
      *   row_version:int,created:bool
@@ -377,6 +640,7 @@ final readonly class PayrollRegistrationIdentityService
                 'Trusted externí ID musí odkazovat na ověřený protokol.',
             );
         }
+        $value = self::idPpv($value);
         $sourceHash = $this->sensitiveData->keyedFingerprint(
             $this->evidenceReference($sourceReference),
             'employment-external-id-source',
@@ -453,6 +717,15 @@ final readonly class PayrollRegistrationIdentityService
                 if (!hash_equals($existing['value_hash'], $inputHash)) {
                     throw new \DomainException(
                         'Pracovní vztah už má jiné aktivní ID PPV.',
+                    );
+                }
+                if ($existing['valid_from'] !== $validFrom
+                    || $existing['source_kind'] !== $sourceKind
+                    || $existing['source_receipt_id'] !== $sourceReceiptId
+                    || !hash_equals($existing['source_reference_hash'], $sourceHash)
+                ) {
+                    throw new \DomainException(
+                        'Opakované uložení ID PPV neodpovídá původnímu datu nebo důkazu.',
                     );
                 }
 
@@ -665,6 +938,90 @@ final readonly class PayrollRegistrationIdentityService
                 $resolvedBy,
             );
         });
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array{
+     *   id:int,identifier_type:string,value:string,valid_from:string,
+     *   valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * }
+     */
+    private function revealExternalIdentifier(
+        array $stored,
+        PayrollSensitiveField $field,
+        int $supplierId,
+    ): array {
+        $plaintext = $this->sensitiveData->reveal(
+            (string) $stored['value_ciphertext'],
+            $field,
+            $supplierId,
+            (int) $stored['id'],
+        );
+        $hash = $this->sensitiveData->lookupHash(
+            $plaintext,
+            $field,
+            $supplierId,
+        );
+        if (!hash_equals((string) $stored['value_hash'], $hash)) {
+            throw new \RuntimeException(
+                'Otisk externího identifikátoru neodpovídá ciphertextu.',
+            );
+        }
+
+        return [
+            'id' => (int) $stored['id'],
+            'identifier_type' => (string) $stored['identifier_type'],
+            'value' => $plaintext,
+            'valid_from' => (string) $stored['valid_from'],
+            'valid_to' => $stored['valid_to'] === null
+                ? null
+                : (string) $stored['valid_to'],
+            'source_kind' => (string) $stored['source_kind'],
+            'source_receipt_id' => $stored['source_receipt_id'] === null
+                ? null
+                : (int) $stored['source_receipt_id'],
+            'source_reference_hash' => (string) $stored['source_reference_hash'],
+            'row_version' => (int) $stored['row_version'],
+        ];
+    }
+
+    private static function oic(string $value): string
+    {
+        $normalized = preg_replace('/\s+/u', '', trim($value));
+        if (!is_string($normalized)
+            || preg_match('/^[0-9]{10}$/D', $normalized) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'OIČ / IK MPSV musí obsahovat přesně 10 číslic.',
+            );
+        }
+        $remainder = 0;
+        for ($index = 0; $index < 9; $index++) {
+            $remainder = (($remainder * 10) + (int) $normalized[$index]) % 11;
+        }
+        if ($remainder > 9 || $remainder !== (int) $normalized[9]) {
+            throw new \InvalidArgumentException(
+                'OIČ / IK MPSV nemá platnou kontrolní číslici.',
+            );
+        }
+
+        return $normalized;
+    }
+
+    private static function idPpv(string $value): string
+    {
+        $normalized = preg_replace('/\s+/u', '', trim($value));
+        if (!is_string($normalized)
+            || preg_match('/^[0-9]{1,22}$/D', $normalized) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'ID PPV musí obsahovat 1 až 22 číslic.',
+            );
+        }
+
+        return $normalized;
     }
 
     /** @param array<string,mixed> $source */

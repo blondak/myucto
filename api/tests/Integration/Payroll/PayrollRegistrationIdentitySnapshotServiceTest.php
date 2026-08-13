@@ -99,7 +99,7 @@ final class PayrollRegistrationIdentitySnapshotServiceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             'production',
-            'ID-PPV-SYNTHETIC-SNAPSHOT-001',
+            '500000000000000000005',
             '2026-08-01',
             'verified_manual_import',
             'synthetic:snapshot-source',
@@ -175,7 +175,7 @@ final class PayrollRegistrationIdentitySnapshotServiceTest extends TestCase
             $identity['first_name'],
         );
         self::assertSame(
-            'ID-PPV-SYNTHETIC-SNAPSHOT-001',
+            '500000000000000000005',
             $external['value'],
         );
 
@@ -191,7 +191,7 @@ final class PayrollRegistrationIdentitySnapshotServiceTest extends TestCase
             $databaseRow,
         );
         self::assertStringNotContainsString(
-            'ID-PPV-SYNTHETIC-SNAPSHOT-001',
+            '500000000000000000005',
             $databaseRow,
         );
 
@@ -852,4 +852,3 @@ final class PayrollRegistrationIdentitySnapshotServiceTest extends TestCase
         }
     }
 }
-

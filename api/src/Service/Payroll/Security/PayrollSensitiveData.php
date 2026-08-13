@@ -98,6 +98,7 @@ final class PayrollSensitiveData
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
             PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER =>
                 preg_replace('/[\s\/.\-]+/u', '', $value),
+            PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
             PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER =>
                 preg_replace('/\s+/u', '', $value),
             PayrollSensitiveField::BANK_ACCOUNT =>

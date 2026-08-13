@@ -195,6 +195,19 @@ final class PayrollRegistrationIdentityRepository
         ];
     }
 
+    public function lockEmployee(int $supplierId, int $employeeId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_employees
+              WHERE supplier_id = ? AND id = ?
+              FOR UPDATE'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
     public function hasTrustedReceipt(
         int $supplierId,
         string $environment,
@@ -251,6 +264,99 @@ final class PayrollRegistrationIdentityRepository
         $raw = $statement->fetch(PDO::FETCH_ASSOC);
 
         return $raw === false ? null : $this->externalId($this->row($raw));
+    }
+
+    /**
+     * @return array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_ciphertext:string,value_hash:string,value_masked:string,
+     *   valid_from:string,valid_to:?string,source_kind:string,
+     *   source_receipt_id:?int,source_reference_hash:string,row_version:int
+     * }|null
+     */
+    public function activePersonExternalId(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $identifierType,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, environment, identifier_type,
+                    value_ciphertext, value_hash, value_masked,
+                    valid_from, valid_to, source_kind, source_receipt_id,
+                    source_reference_hash, row_version
+               FROM payroll_person_external_ids
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND environment = ?
+                AND identifier_type = ?
+                AND valid_to IS NULL
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $environment,
+            $identifierType,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $raw === false
+            ? null
+            : $this->personExternalId($this->row($raw));
+    }
+
+    /**
+     * @return array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_ciphertext:string,value_hash:string,value_masked:string,
+     *   valid_from:string,valid_to:?string,source_kind:string,
+     *   source_receipt_id:?int,source_reference_hash:string,row_version:int
+     * }|null
+     */
+    public function personExternalIdAt(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $identifierType,
+        string $onDate,
+        bool $forUpdate = false,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, environment, identifier_type,
+                    value_ciphertext, value_hash, value_masked,
+                    valid_from, valid_to, source_kind, source_receipt_id,
+                    source_reference_hash, row_version
+               FROM payroll_person_external_ids
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND environment = ?
+                AND identifier_type = ?
+                AND valid_from <= ?
+                AND (valid_to IS NULL OR valid_to >= ?)
+              ORDER BY valid_from DESC, id DESC
+              LIMIT 2'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $environment,
+            $identifierType,
+            $onDate,
+            $onDate,
+        ]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        if (count($rows) > 1) {
+            throw new \DomainException(
+                'Historie OIČ se k rozhodnému datu překrývá.',
+            );
+        }
+        if ($rows === []) {
+            return null;
+        }
+
+        return $this->personExternalId($this->row($rows[0]));
     }
 
     /**
@@ -375,6 +481,41 @@ final class PayrollRegistrationIdentityRepository
         return (int) $this->db->pdo()->lastInsertId();
     }
 
+    public function insertPersonExternalIdPlaceholder(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $identifierType,
+        string $validFrom,
+        string $sourceKind,
+        ?int $sourceReceiptId,
+        string $sourceReferenceHash,
+        ?int $createdBy,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_person_external_ids
+                (supplier_id, employee_id, environment, identifier_type,
+                 value_ciphertext, value_hash, value_masked, valid_from,
+                 source_kind, source_receipt_id, source_reference_hash,
+                 created_by)
+             VALUES (?, ?, ?, ?, 'enc:v2:pending', ?, '••••', ?, ?, ?, ?, ?)"
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $environment,
+            $identifierType,
+            random_bytes(32),
+            $validFrom,
+            $sourceKind,
+            $sourceReceiptId,
+            $sourceReferenceHash,
+            $createdBy,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
     public function sealExternalId(
         int $supplierId,
         int $id,
@@ -396,6 +537,30 @@ final class PayrollRegistrationIdentityRepository
         ]);
         if ($statement->rowCount() !== 1) {
             throw new \DomainException('Externí identifikátor vztahu nelze uložit.');
+        }
+    }
+
+    public function sealPersonExternalId(
+        int $supplierId,
+        int $id,
+        string $ciphertext,
+        string $hash,
+        string $masked,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_person_external_ids
+                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([
+            $ciphertext,
+            $hash,
+            $masked,
+            $supplierId,
+            $id,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException('Externí identifikátor osoby nelze uložit.');
         }
     }
 
@@ -588,6 +753,40 @@ final class PayrollRegistrationIdentityRepository
             'id' => $this->positiveInt($row, 'id'),
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'employment_id' => $this->positiveInt($row, 'employment_id'),
+            'environment' => $this->string($row, 'environment'),
+            'identifier_type' => $this->string($row, 'identifier_type'),
+            'value_ciphertext' => $this->string($row, 'value_ciphertext'),
+            'value_hash' => $this->string($row, 'value_hash'),
+            'value_masked' => $this->string($row, 'value_masked'),
+            'valid_from' => $this->string($row, 'valid_from'),
+            'valid_to' => $this->nullableString($row, 'valid_to'),
+            'source_kind' => $this->string($row, 'source_kind'),
+            'source_receipt_id' => $this->nullablePositiveInt(
+                $row,
+                'source_receipt_id',
+            ),
+            'source_reference_hash' => $this->string(
+                $row,
+                'source_reference_hash',
+            ),
+            'row_version' => $this->positiveInt($row, 'row_version'),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_ciphertext:string,value_hash:string,value_masked:string,
+     *   valid_from:string,valid_to:?string,source_kind:string,
+     *   source_receipt_id:?int,source_reference_hash:string,row_version:int
+     * }
+     */
+    private function personExternalId(array $row): array
+    {
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
             'environment' => $this->string($row, 'environment'),
             'identifier_type' => $this->string($row, 'identifier_type'),
             'value_ciphertext' => $this->string($row, 'value_ciphertext'),

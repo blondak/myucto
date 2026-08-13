@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOStatement;
@@ -145,7 +146,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             'production',
-            'id-ppv-synthetic-001',
+            '100000000000000000001',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:production',
@@ -156,7 +157,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             'production',
-            'ID-PPV-SYNTHETIC-001',
+            '100000000000000000001',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:production',
@@ -167,7 +168,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             'test',
-            'ID-PPV-SYNTHETIC-001',
+            '100000000000000000001',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:test',
@@ -182,7 +183,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->otherSupplierId,
             $otherEmploymentId,
             'production',
-            'ID-PPV-SYNTHETIC-001',
+            '100000000000000000001',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:other-tenant',
@@ -210,7 +211,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->databaseString($stored, 'value_ciphertext'),
         );
         self::assertStringNotContainsString(
-            'ID-PPV-SYNTHETIC-001',
+            '100000000000000000001',
             $this->scalarRow($stored),
         );
         self::assertSame(
@@ -223,13 +224,232 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
         );
     }
 
+    public function testJmhzPersonIdentityIsEncryptedEnvironmentScopedAndSnapshotReady(): void
+    {
+        $production = $this->service->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'production',
+            '1000000001',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-oic-evidence:production',
+            null,
+            null,
+        );
+        $replay = $this->service->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'production',
+            '100 000 000 1',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-oic-evidence:production',
+            null,
+            null,
+        );
+        $test = $this->service->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'test',
+            '1000000001',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-oic-evidence:test',
+            null,
+            null,
+        );
+        $idPpv = $this->service->assignEmploymentExternalId(
+            $this->supplierId,
+            $this->employmentId,
+            'production',
+            '200000000000000000002',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-id-ppv-evidence:jmhz',
+            null,
+            null,
+        );
+
+        self::assertTrue($production['created']);
+        self::assertFalse($replay['created']);
+        self::assertSame($production['id'], $replay['id']);
+        self::assertNotSame($production['id'], $test['id']);
+
+        $snapshot = $this->service->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'production',
+            '2026-08-04',
+        );
+        self::assertSame('1000000001', $snapshot['person_external_identifier']['value']);
+        self::assertSame($production['id'], $snapshot['person_external_identifier']['id']);
+        self::assertSame('200000000000000000002', $snapshot['employment_external_identifier']['value']);
+        self::assertSame($idPpv['id'], $snapshot['employment_external_identifier']['id']);
+        self::assertSame('production', $snapshot['environment']);
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT value_ciphertext, value_hash, value_masked, source_reference_hash
+               FROM payroll_person_external_ids
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$this->supplierId, $production['id']]);
+        $stored = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($stored);
+        self::assertStringStartsWith(
+            'enc:v2:',
+            $this->databaseString($stored, 'value_ciphertext'),
+        );
+        self::assertStringNotContainsString('1000000001', $this->scalarRow($stored));
+        self::assertSame(32, strlen($this->databaseString($stored, 'value_hash')));
+        self::assertMatchesRegularExpression(
+            '/^[a-f0-9]{64}$/D',
+            $this->databaseString($stored, 'source_reference_hash'),
+        );
+    }
+
+    public function testJmhzPersonIdentityRejectsInvalidOicAndMissingPair(): void
+    {
+        try {
+            $this->service->assignPersonExternalId(
+                $this->supplierId,
+                $this->employeeId,
+                'production',
+                '1000000002',
+                '2026-08-01',
+                'verified_manual_import',
+                'synthetic-invalid-oic',
+                null,
+                null,
+            );
+            self::fail('Neplatná kontrolní číslice OIČ musí být odmítnuta.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('OIČ', $exception->getMessage());
+        }
+
+        $this->service->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'production',
+            '1000000001',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-valid-oic-without-id-ppv',
+            null,
+            null,
+        );
+
+        $this->expectException(PayrollRegistrationIdentitySnapshotException::class);
+        $this->expectExceptionMessage('ID PPV');
+        $this->service->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'production',
+            '2026-08-04',
+        );
+    }
+
+    public function testExternalIdentifierReplayAndEnvironmentAreImmutable(): void
+    {
+        $person = $this->service->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'production',
+            '1000000001',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-immutable-oic-evidence',
+            null,
+            null,
+        );
+        $employment = $this->service->assignEmploymentExternalId(
+            $this->supplierId,
+            $this->employmentId,
+            'production',
+            '600000000000000000006',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-immutable-id-ppv-evidence',
+            null,
+            null,
+        );
+
+        try {
+            $this->service->assignPersonExternalId(
+                $this->supplierId,
+                $this->employeeId,
+                'production',
+                '1000000001',
+                '2026-08-02',
+                'verified_manual_import',
+                'synthetic-different-oic-evidence',
+                null,
+                null,
+            );
+            self::fail('Replay OIČ s jinou provenance musí být odmítnut.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('datu nebo důkazu', $exception->getMessage());
+        }
+
+        try {
+            $this->service->assignEmploymentExternalId(
+                $this->supplierId,
+                $this->employmentId,
+                'production',
+                '600000000000000000006',
+                '2026-08-01',
+                'verified_manual_import',
+                'synthetic-different-id-ppv-evidence',
+                null,
+                null,
+            );
+            self::fail('Replay ID PPV s jinou provenance musí být odmítnut.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('datu nebo důkazu', $exception->getMessage());
+        }
+
+        foreach ([
+            ['payroll_person_external_ids', $person['id']],
+            ['payroll_employment_external_ids', $employment['id']],
+        ] as [$table, $id]) {
+            try {
+                $this->db->pdo()->prepare(
+                    "UPDATE {$table} SET environment = 'test'
+                      WHERE supplier_id = ? AND id = ?"
+                )->execute([$this->supplierId, $id]);
+                self::fail("{$table}: prostředí musí být databázově neměnné.");
+            } catch (\PDOException $exception) {
+                self::assertStringContainsString('environment is immutable', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testEmploymentExternalIdRejectsNonNumericJmhzValue(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('ID PPV');
+        $this->service->assignEmploymentExternalId(
+            $this->supplierId,
+            $this->employmentId,
+            'production',
+            'ID-PPV-NOT-XSD-VALID',
+            '2026-08-01',
+            'verified_manual_import',
+            'synthetic-invalid-id-ppv',
+            null,
+            null,
+        );
+    }
+
     public function testResolutionStoresOnlyKeyedEvidenceHash(): void
     {
         $external = $this->service->assignEmploymentExternalId(
             $this->supplierId,
             $this->employmentId,
             'production',
-            'ID-PPV-SYNTHETIC-RESOLVED',
+            '300000000000000000003',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:resolved-external',
@@ -292,7 +512,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             'production',
-            'ID-PPV-SYNTHETIC-RESOLUTION',
+            '400000000000000000004',
             '2026-08-01',
             'verified_manual_import',
             'synthetic-evidence:resolution',

@@ -73,7 +73,7 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
         );
         self::assertNotNull($snapshot->employmentExternalIdentifier);
         self::assertSame(
-            'ID-PPV-SYNTHETIC-001',
+            '100000000000000000001',
             $snapshot->employmentExternalIdentifier['value'],
         );
         $serialized = $snapshot->toArray();
@@ -298,7 +298,7 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
                 'employment_id' => 101,
                 'environment' => 'production',
                 'identifier_type' => 'id_ppv',
-                'value' => 'ID-PPV-SYNTHETIC-001',
+                'value' => '100000000000000000001',
                 'valid_from' => '2026-08-01',
                 'valid_to' => null,
                 'source_kind' => 'verified_manual_import',
@@ -324,4 +324,3 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
         }
     }
 }
-
