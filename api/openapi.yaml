@@ -187,6 +187,11 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/BrandingProfile' }
+        '400':
+          description: "Není zvolená firma (`no_supplier`) — pošli hlavičku `X-Supplier-Id`."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/health:
     get:
@@ -721,7 +726,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
         '400':
-          $ref: '#/components/responses/ValidationFailed'
+          description: |
+            Validace neprošla (`validation_failed`, detaily v `error.fields`), klient
+            neexistuje (`client_not_found`), odkaz míří na cizí firmu
+            (`invalid_reference`) nebo by zápis porušil integritu (`integrity_violation`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Doklad by spadl do uzamčeného období a role na to nedosáhne (Epic F6)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Uzamčené období u účetní role (`document_locked`), nebo by vznikl duplicitní
+            variabilní symbol (`varsymbol_duplicate`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/invoices/preview-varsymbol:
     get:
@@ -1001,12 +1024,55 @@ paths:
       description: |
         Přidělí číslo dle nastavení supplier-a, archivuje PDF snapshot. Po vystavení
         nelze měnit položky/částky.
+
+        Vystavení je poslední místo, kde se doklad kontroluje jako celek — koncept
+        smí být neúplný, vystavený daňový doklad ne. Proto odsud vede řada zákonných
+        odmítnutí (chybějící DIČ u přenesené daňové povinnosti, rozpis u platebního
+        kalendáře, zjednodušený doklad nad limit) i zámek účetního období.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
+        '403':
+          description: |
+            Doklad je v uzamčeném období a role na jeho vystavení nedosáhne
+            (Epic F6; účetní dostane `409`, admin může obejít přes `?force=1`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Doklad není koncept (`not_draft`), nemá kladnou částku k úhradě
+            (`invalid_amount`), k zálohové faktuře už existuje finální doklad
+            (`final_exists`), varsymbol by kolidoval (`varsymbol_duplicate`),
+            nebo se doklad mezitím změnil (`race_condition`). Zamčené období
+            u účetní role hlásí `document_locked`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: |
+            Doklad neprošel zákonnou kontrolou — bez položek (`no_items`), storno
+            se nevystavuje (`invalid_type`), chybí DIČ odběratele u přenesené daňové
+            povinnosti (`reverse_charge_dic_missing`, § 29/2 ZDPH), zjednodušený doklad
+            nesplňuje podmínky (`simplified_document_not_allowed`, § 30 ZDPH), nebo
+            platební kalendář nemá rozpis plateb (`payment_schedule_missing`)
+            či jeho součet nesedí na doklad (`payment_schedule_mismatch`, § 31 ZDPH).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: "Nepodařilo se přidělit varsymbol (`varsymbol_failed`) nebo uložit snapshot (`snapshot_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/invoices/{id}/mark-paid:
     parameters:
@@ -1034,6 +1100,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
+        '400':
+          description: "Neplatné datum platby (`invalid_date`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Fakturu nelze označit za uhrazenou — není vystavená ani odeslaná
+            (`invalid_state`), nemá kladnou částku k úhradě (`invalid_amount`),
+            nebo platbu odmítla evidence úhrad (`invalid_payment`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/invoices/{id}/payments:
     parameters:
@@ -2889,6 +2973,8 @@ paths:
         Automatizace (mini-epic). Zaúčtuje nespárovanou transakci na zvolené účty
         (2 řádky, ABS(amount)). Saldokontní účty na ne-bankovní straně jsou zakázané
         (H2). Volitelný `create_rule` založí pravidlo (vždy mode=suggest) v téže transakci.
+        Pro rozúčtování na víc řádků pošli `lines` — protiúčty z `debit_account_code`
+        a `credit_account_code` se pak neuplatní.
       requestBody:
         required: true
         content:
@@ -2900,6 +2986,12 @@ paths:
                 debit_account_code: { type: string }
                 credit_account_code: { type: string }
                 description: { type: [string, "null"] }
+                lines:
+                  type: array
+                  description: |
+                    Rozúčtování jedné transakce na víc řádků. Prázdné pole se ignoruje
+                    (zaúčtuje se běžně na dvojici účtů); tvar řádků validuje až služba.
+                  items: { type: object }
                 create_rule: { type: [object, "null"] }
       responses:
         '200':
@@ -4711,8 +4803,8 @@ paths:
                   type: boolean
                   description: "Označit zařazené faktury jako předané k úhradě."
       responses:
-        '200':
-          description: OK
+        '201':
+          description: Příkaz vytvořen
           content:
             application/json:
               schema:
@@ -4730,8 +4822,13 @@ paths:
                     type: array
                     items: { type: object }
                     description: "Faktury vynechané z příkazu (s důvodem)."
+        '403':
+          description: "Role na vystavení platebního příkazu nedosáhne (`forbidden`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: Validace selhala
+          description: "Validace selhala (`validation_failed`) — např. prázdný výběr faktur"
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5349,8 +5446,24 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
           name: force
-          description: Admin override pro received status (booked/paid/cancelled neumožněno).
+          description: |
+            Admin override pro nedraftové doklady — dovolí upravit `received`,
+            `booked` i `paid`. Nedotknutelný zůstává jen `cancelled`: storno je
+            auditní stopa a needituje se.
           schema: { type: boolean }
+        - in: query
+          name: force_mode
+          schema: { type: string, enum: [reconcile, notes_only] }
+          description: |
+            **Povinné** (lze poslat i v těle), když admin s `force=1` upravuje doklad,
+            který má aktivní zaúčtovaný zápis v uzavřeném období — jinak `422
+            force_mode_required`. Bez volby by se doklad rozešel s deníkem.
+
+            - `reconcile` — doklad se opraví, původní zápis se stornuje a doklad se
+              přeúčtuje do aktuálního otevřeného období.
+            - `notes_only` — smí se změnit jen neúčetní pole (poznámky, jazyk).
+              Dotkne-li se payload účetních, částkových nebo DPH polí, vrátí se
+              `422 financial_change_not_allowed` se seznamem těch polí.
       requestBody:
         required: true
         content:
@@ -5362,9 +5475,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseInvoice' }
-        '409': { description: Not editable }
+        '400':
+          description: "Validace selhala (`validation_failed`) — chybná pole v `error.fields`"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Doklad je v uzamčeném období a role na jeho úpravu nedosáhne (Epic F6)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Přijatá faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Doklad není editovatelný (`not_editable`) — nedraftový bez `force=1`,
+            nebo stornovaný. Uzamčené období u účetní role hlásí `document_locked`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
+          description: |
+            `items: []` by doklad připravilo o všechny položky (`no_items`), chybí
+            `force_mode` u zaúčtovaného dokladu v uzavřeném období (`force_mode_required`),
+            nebo `force_mode=notes_only` narazil na změnu účetního pole
+            (`financial_change_not_allowed`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -17018,6 +17156,12 @@ components:
 
     BankPostingRuleWrite:
       type: object
+      required: [direction, debit_account_code, credit_account_code]
+      description: |
+        Kromě povinných polí musí být vyplněné **aspoň jedno kritérium**, podle kterého
+        pravidlo pohyb pozná: `counterparty_account`, `counterparty_bank`,
+        `counterparty_prefix`, `variable_symbol` nebo `message_contains`. Pravidlo bez
+        kritéria by sedělo na všechno — server ho odmítne `422 rule_criteria_missing`.
       properties:
         name: { type: string }
         direction: { type: string, enum: [incoming, outgoing] }
