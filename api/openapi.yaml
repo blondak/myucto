@@ -5227,7 +5227,7 @@ paths:
           schema: { type: string, enum: [draft, received, booked, paid, cancelled] }
         - in: query
           name: filter[document_kind]
-          schema: { type: string, enum: [invoice, receipt, credit_note, advance] }
+          schema: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         - in: query
           name: filter[vendor_id]
           schema: { type: integer }
@@ -6844,7 +6844,7 @@ paths:
               type: object
               required: [entity_type, entity_id]
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -6861,7 +6861,7 @@ paths:
             schema:
               type: object
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -6872,7 +6872,7 @@ paths:
       summary: Dokumenty navázané na entitu (oboustranné párování)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
-        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project] } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Navázané dokumenty, content: { application/json: { schema: { type: object, properties: { documents: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } } }
@@ -8211,7 +8211,7 @@ paths:
         - { in: query, name: period_id, schema: { type: integer } }
         - { in: query, name: date_from, schema: { type: string, format: date } }
         - { in: query, name: date_to, schema: { type: string, format: date } }
-        - { in: query, name: source_type, schema: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, stock, provision, income_tax, profit_distribution] } }
+        - { in: query, name: source_type, schema: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing] } }
         - { in: query, name: source_id, schema: { type: integer } }
         - { in: query, name: posted, description: "true = jen zaúčtované, false = jen koncepty", schema: { type: boolean } }
         - { in: query, name: automation, description: Původ zápisu, schema: { type: string, enum: [auto, approved, manual] } }
@@ -9445,7 +9445,7 @@ paths:
         - { in: query, name: period_id, schema: { type: integer } }
         - { in: query, name: date_from, schema: { type: string, format: date } }
         - { in: query, name: date_to, schema: { type: string, format: date } }
-        - { in: query, name: source_type, schema: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, stock, provision, income_tax, profit_distribution] } }
+        - { in: query, name: source_type, schema: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing] } }
         - { in: query, name: source_id, schema: { type: integer } }
         - { in: query, name: posted, schema: { type: boolean } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
@@ -17411,7 +17411,10 @@ components:
         document_date: { type: [string, "null"], format: date }
         document_no: { type: [string, "null"] }
         description: { type: [string, "null"] }
-        source_type: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, stock] }
+        source_type:
+          type: string
+          enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing]
+          description: "Původ zápisu. Doména odpovídá sloupci `journal_entries.source_type` (migrace 1324)."
         source_id: { type: [integer, "null"], description: Drill-down na zdrojový doklad }
         posted_at: { type: [string, "null"], description: "NULL = koncept" }
         posted_by: { type: [integer, "null"] }
@@ -17850,13 +17853,13 @@ components:
     DocumentLink:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
         entity_id: { type: integer }
         label: { type: string }
     DocumentLinkCandidate:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
         entity_id: { type: integer }
         label: { type: string }
         sublabel: { type: string }
@@ -18250,8 +18253,13 @@ components:
         varsymbol: { type: [string, "null"], description: "Variabilní symbol = číslo faktury. Přiděluje se při issue (u draft je null nebo manuální override)." }
         invoice_type:
           type: string
-          enum: [invoice, proforma, credit_note, cancellation, tax_document]
-          description: "tax_document = daňový doklad k přijaté platbě zálohy (§ 28/2 ZDPH); DUZP = datum platby, parent_invoice_id = proforma."
+          enum: [invoice, proforma, credit_note, cancellation, tax_document, penalty, payment_calendar]
+          description: |
+            Druh dokladu (doména sloupce `invoices.invoice_type`, migrace 1170).
+            `tax_document` = daňový doklad k přijaté platbě zálohy (§ 28/2 ZDPH);
+            DUZP = datum platby, `parent_invoice_id` = proforma.
+            `penalty` = penalizační faktura, `payment_calendar` = platební kalendář
+            (§ 31 ZDPH). Vytvořit přímo lze jen podmnožinu — viz `InvoiceInput`.
         status:
           type: string
           enum: [draft, issued, sent, reminded, paid, cancelled]
@@ -18419,8 +18427,13 @@ components:
         parent_invoice_id: { type: [integer, "null"], description: "Jen při create (credit_note / final-z-proformy). Na UPDATE se ignoruje." }
         invoice_type:
           type: string
-          enum: [invoice, proforma, credit_note, cancellation]
+          enum: [invoice, proforma, credit_note, payment_calendar]
           default: invoice
+          description: |
+            Druhy, které lze zadat přímo. `cancellation` a `tax_document` sem
+            nepatří — vznikají vlastními cestami (`POST /invoices/{id}/cancel`,
+            resp. úhradou zálohové faktury), aby s nimi vznikly i navazující vazby.
+            Úprava dokladu (`PUT`) přijímá tutéž čtveřici.
         issue_date: { type: string, format: date, description: "Default = dnes" }
         due_date: { type: string, format: date, description: "Default = issue_date + payment_due_days (z projektu/klienta/supplier)" }
         tax_date: { type: [string, "null"], format: date, description: "DUZP. U proform se ignoruje (uloží se null)." }
@@ -19853,7 +19866,7 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"], description: "Naše interní číslo PF-YYYYMM-NNNN" }
         vendor_invoice_number: { type: string }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance] }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date, description: "DUZP" }
         due_date: { type: string, format: date }
@@ -19871,7 +19884,7 @@ components:
         booked_at: { type: [string, "null"], format: date-time }
         paid_at: { type: [string, "null"], format: date }
         cancelled_at: { type: [string, "null"], format: date-time }
-        vat_deduction: { type: string, enum: [full, none, proportional] }
+        vat_deduction: { type: string, enum: [full, none, proportional, reduced] }
         vat_deduction_percent: { type: number, format: float }
         tax_deductible: { type: boolean }
         extraction_warning: { type: [string, "null"] }
@@ -20020,7 +20033,7 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"] }
         vendor_invoice_number: { type: string }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance] }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy)" }
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }
         issue_date: { type: string, format: date }
@@ -20062,7 +20075,7 @@ components:
             a faktura přejde na `paid`; NULL doklad zase zruší. Koncept se nevyrovnává.
         vat_deduction:
           type: string
-          enum: [full, none, proportional]
+          enum: [full, none, proportional, reduced]
           default: full
           description: |
             Nárok na odpočet DPH. `none` = faktura NEvstupuje do Knihy DPH ani do
@@ -20245,7 +20258,7 @@ components:
         vendor_id: { type: integer }
         vendor_invoice_number: { type: string, maxLength: 50 }
         varsymbol: { type: [string, "null"], maxLength: 20 }
-        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance], default: invoice }
+        document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document], default: invoice }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
         due_date: { type: string, format: date }
