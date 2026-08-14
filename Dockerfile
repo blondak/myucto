@@ -50,7 +50,7 @@ ARG INSTALL_RSVG=1
 COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensions /usr/local/bin/
 
 RUN install-php-extensions \
-        pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium \
+        pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium soap \
  && apt-get update \
  && apt-get install -y --no-install-recommends tini cron mariadb-client \
  && if [ "$INSTALL_RSVG" = "1" ]; then \
@@ -68,8 +68,8 @@ RUN install-php-extensions \
 # PHP runtime config
 RUN { \
         echo 'memory_limit = 256M'; \
-        echo 'upload_max_filesize = 20M'; \
-        echo 'post_max_size = 25M'; \
+        echo 'upload_max_filesize = 50M'; \
+        echo 'post_max_size = 55M'; \
         echo 'max_execution_time = 60'; \
         echo 'date.timezone = Europe/Prague'; \
         echo 'expose_php = Off'; \

@@ -76,6 +76,9 @@ services:
       - --performance-schema=OFF
       - --innodb-buffer-pool-size=${DB_INNODB_BUFFER_POOL:-128M}
       - --innodb-log-file-size=${DB_INNODB_LOG_SIZE:-48M}
+      # Default 16 MB nestačí na dump ani obnovu s přílohami do 50 MB
+      # (documents.max_file_bytes) — kontrola prostředí to hlásí jako varování.
+      - --max-allowed-packet=${DB_MAX_ALLOWED_PACKET:-64M}
     environment:
       # Fail-closed: bez .env se stack nespustí (žádný předvídatelný default).
       # docker-install.{sh,ps1} vygeneruje .env s náhodnými hesly před `up`.
