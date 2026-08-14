@@ -334,7 +334,7 @@ const STATUS_BADGE: Record<string, string> = {
                     </td>
                     <td class="px-3 py-2 text-right font-mono">{{ l.expected_qty }}</td>
                     <td class="px-3 py-2 text-right">
-                      <input v-if="auth.canWrite('stock.take')" v-model="l.counted_qty" type="number" step="0.001"
+                      <input v-if="auth.canWrite('stock.take')" v-model="l.counted_qty" type="number" step="0.001" min="0"
                         class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
                     </td>
                     <td class="px-3 py-2 text-right font-mono"

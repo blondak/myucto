@@ -28,6 +28,7 @@ import {
   type StockItemSearchResult,
 } from '@/api/stock'
 import { clientsApi } from '@/api/clients'
+import { codebooksApi, type Currency } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
@@ -44,6 +45,19 @@ const auth = useAuthStore()
 const toast = useToast()
 
 const AVAILABILITY: VendorAvailabilityState[] = ['in_stock', 'on_order', 'unavailable', 'unknown']
+
+// Měna z číselníku firmy, ne volný text — překlep („Kč", malá písmena) jinak
+// projde až do nabídky a rozbije porovnání cen mezi dodavateli.
+const currencies = ref<Currency[]>([])
+const defaultCurrency = computed(() =>
+  currencies.value.find(c => c.is_default)?.code ?? currencies.value[0]?.code ?? '')
+/** Doplní uloženou měnu, která v číselníku není — jinak by select vypadal prázdně. */
+function currencyOptions(current: string | boolean | undefined): string[] {
+  const codes = currencies.value.map(c => c.code)
+  const cur = typeof current === 'string' ? current : ''
+  return cur && !codes.includes(cur) ? [cur, ...codes] : codes
+}
+
 const PER_PAGE = 50
 const MAX_IMPORT_SIZE = 2 * 1024 * 1024
 const IMPORT_COLUMNS = [
@@ -88,6 +102,9 @@ async function load() {
   }
 }
 onMounted(load)
+onMounted(async () => {
+  currencies.value = await codebooksApi.currencies().catch(() => [] as Currency[])
+})
 watch(page, load)
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
@@ -228,7 +245,7 @@ async function searchVendors(q: string) {
 
 function openCreate() {
   Object.assign(form, {
-    stock_item_id: 0, client_id: 0, vendor_sku: '', purchase_price: '', currency_code: 'CZK',
+    stock_item_id: 0, client_id: 0, vendor_sku: '', purchase_price: '', currency_code: defaultCurrency.value,
     delivery_days: null, stock_qty: '', availability_state: 'unknown', min_order_qty: '',
     package_qty: '', price_valid_to: '', is_preferred: false, is_active: true, note: '',
   })
@@ -549,7 +566,9 @@ const actions = computed<ActionItem[]>(() => [
                 <td class="px-3 py-2 align-top">
                   <div class="flex items-center gap-1 justify-end">
                     <input v-model="draft.purchase_price" type="text" inputmode="decimal" class="w-24 text-right rounded-md border border-neutral-300 h-8 px-2 text-sm" />
-                    <input v-model="draft.currency_code" type="text" maxlength="3" class="w-14 uppercase rounded-md border border-neutral-300 h-8 px-2 text-sm" />
+                    <select v-model="draft.currency_code" class="w-20 rounded-md border border-neutral-300 bg-surface h-8 px-1 text-sm font-mono">
+                      <option v-for="c in currencyOptions(draft.currency_code)" :key="c" :value="c">{{ c }}</option>
+                    </select>
                   </div>
                   <input v-model="draft.price_valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 h-8 px-2 text-xs" :title="t('stock.vendor_offers.field_valid_to')" />
                 </td>
@@ -627,7 +646,10 @@ const actions = computed<ActionItem[]>(() => [
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('stock.vendor_offers.field_currency') }}</label>
-              <input v-model="form.currency_code" type="text" maxlength="3" class="w-full uppercase rounded-md border border-neutral-300 h-9 px-3 text-sm" />
+              <select v-model="form.currency_code" class="w-full rounded-md border border-neutral-300 bg-surface h-9 px-2 text-sm font-mono">
+                <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                <option v-for="c in currencyOptions(form.currency_code)" :key="c" :value="c">{{ c }}</option>
+              </select>
             </div>
           </div>
           <div>
@@ -642,7 +664,7 @@ const actions = computed<ActionItem[]>(() => [
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('stock.vendor_offers.col_delivery') }}</label>
-            <input v-model="form.delivery_days" type="number" min="0" class="w-full rounded-md border border-neutral-300 h-9 px-3 text-sm" />
+            <input v-model="form.delivery_days" type="number" min="0" step="1" class="w-full rounded-md border border-neutral-300 h-9 px-3 text-sm" />
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>

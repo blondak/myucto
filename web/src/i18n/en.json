@@ -3576,7 +3576,8 @@
             "print_pdf": "Print PDF",
             "counting_warning": "A stock take is in progress in this warehouse — movements are temporarily blocked.",
             "insufficient_stock_title": "Insufficient stock",
-            "insufficient_stock_line": "{sku} — {name}: requested {requested}, available {available}"
+            "insufficient_stock_line": "{sku} — {name}: requested {requested}, available {available}",
+            "extra_cost_allocated": "Allocated landed costs"
         },
         "takes": {
             "title": "Stock takes",

@@ -3576,7 +3576,8 @@
             "print_pdf": "Tisk PDF",
             "counting_warning": "Ve skladu právě probíhá inventura — pohyby jsou dočasně zablokované.",
             "insufficient_stock_title": "Nedostatek zásob",
-            "insufficient_stock_line": "{sku} — {name}: požadováno {requested}, skladem {available}"
+            "insufficient_stock_line": "{sku} — {name}: požadováno {requested}, skladem {available}",
+            "extra_cost_allocated": "Rozpuštěné vedlejší náklady"
         },
         "takes": {
             "title": "Inventury",
