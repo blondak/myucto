@@ -63,7 +63,7 @@ final class JmhzZeroReportProfile
     /** Uvede se nula jen tehdy, když kód ELDP existuje. */
     public const RULE_ZERO_WITH_ELDP_CODE = 'zero_with_eldp_code';
 
-    /** @var array<string, array<string, string>> */
+    /** @var array<string, array<array-key, string>> */
     private const TABLES = [
         self::SITUATION_AMENDMENT_UNREPORTABLE_MONTH => [
             '10286' => self::RULE_ZERO,
@@ -166,7 +166,10 @@ final class JmhzZeroReportProfile
      * Předpis pro danou situaci. Situace se předává výslovně; odvodit ji z dat
      * nelze, protože rozdíl je v tom, co se stalo, ne v tom, co je v evidenci.
      *
-     * @return array<string, string> atribut => pravidlo
+     * ID atributů jsou číselná, takže je PHP jako klíče pole normalizuje na
+     * `int`; typ klíče proto musí být `array-key`.
+     *
+     * @return array<array-key, string> atribut => pravidlo
      */
     public static function table(string $situation): array
     {

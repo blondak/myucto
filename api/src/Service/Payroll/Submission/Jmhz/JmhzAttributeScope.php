@@ -163,8 +163,12 @@ final class JmhzAttributeScope
      * s odečítanými dobami by pak nikdy neměla obě hodnoty pohromadě
      * a tiše by prošla.
      *
+     * ID atributů jsou číselná, takže je PHP jako klíče pole normalizuje na
+     * `int` — na zápisu i na čtení stejně, takže `$section['10240']` funguje.
+     * Typ proto musí být `array-key`, ne `string`.
+     *
      * @param list<string> $attributeIds
-     * @return list<array<string, string>>
+     * @return list<array<array-key, string>>
      */
     public function groupedBy(array $attributeIds, ?int $ancestorDepth = null): array
     {

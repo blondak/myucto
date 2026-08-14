@@ -1155,7 +1155,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->againstCodebook(
             $projection,
-            fn (JmhzAttributeProjection $p): array => $this->rawworkplaceMunicipality($p),
+            fn (JmhzAttributeProjection $p): array => $this->checkWorkplaceMunicipality($p),
         );
     }
 
@@ -1164,7 +1164,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->againstCodebook(
             $projection,
-            fn (JmhzAttributeProjection $p): array => $this->rawworkplaceCountry($p),
+            fn (JmhzAttributeProjection $p): array => $this->checkWorkplaceCountry($p),
         );
     }
 
@@ -1173,7 +1173,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->againstCodebook(
             $projection,
-            fn (JmhzAttributeProjection $p): array => $this->rawactivePolicyInstrument($p),
+            fn (JmhzAttributeProjection $p): array => $this->checkActivePolicyInstrument($p),
         );
     }
 
@@ -1182,12 +1182,12 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->againstCodebook(
             $projection,
-            fn (JmhzAttributeProjection $p): array => $this->raweldpCodeFromCodebook($p),
+            fn (JmhzAttributeProjection $p): array => $this->checkEldpCodeFromCodebook($p),
         );
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function rawworkplaceMunicipality(JmhzAttributeProjection $projection): array
+    private function checkWorkplaceMunicipality(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
@@ -1213,7 +1213,7 @@ final class JmhzScenario1ControlEvaluator
                 // odmítalo správně vyplněná podání.
                 $found = $catalog->searchMunicipalities($code, $validOn, 5);
                 foreach ($found as $entry) {
-                    if (($entry['code'] ?? null) === $code) {
+                    if ($entry['code'] === $code) {
                         return null;
                     }
                 }
@@ -1224,7 +1224,7 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function rawworkplaceCountry(JmhzAttributeProjection $projection): array
+    private function checkWorkplaceCountry(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
@@ -1255,7 +1255,7 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function rawactivePolicyInstrument(JmhzAttributeProjection $projection): array
+    private function checkActivePolicyInstrument(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
@@ -1460,18 +1460,6 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
-    }
-
-    /**
-     * Obecná strukturální integrita. Že sem běh vůbec došel, znamená, že XML
-     * prošlo XSD a že se každý vypsaný element podařilo přiřadit atributu
-     * připnutého slovníku — promítnutí je fail-closed a na neznámé cestě padá.
-     *
-     * @return list<JmhzControlVerdict>
-     */
-    private function structuralIntegrity(JmhzControlContext $context): array
-    {
-        return $this->schemaValidated($context);
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -2124,7 +2112,7 @@ final class JmhzScenario1ControlEvaluator
     // --- kód ELDP ---------------------------------------------------------
 
     /** @return list<JmhzControlVerdict> */
-    private function raweldpCodeFromCodebook(JmhzAttributeProjection $projection): array
+    private function checkEldpCodeFromCodebook(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
@@ -2213,35 +2201,6 @@ final class JmhzScenario1ControlEvaluator
                 return null;
             },
         );
-    }
-
-    /**
-     * Zaměstnání malého rozsahu se neslučuje s dohodami o provedení práce ani
-     * s vybranými pozicemi kódu ELDP.
-     *
-     * @return list<JmhzControlVerdict>
-     */
-    private function eldpCodeAgainstSmallScale(JmhzAttributeProjection $projection): array
-    {
-        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
-            if ($form->value('10243') !== 'A') {
-                return null;
-            }
-            foreach ($form->all('10240') as $occurrence) {
-                $code = $occurrence->value;
-                $first = self::eldpPosition($code, 1);
-                $second = self::eldpPosition($code, 2);
-                $third = self::eldpPosition($code, 3);
-                if (in_array($first, ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'], true)
-                    || in_array($third, ['B', 'F', 'J', 'V', 'T'], true)
-                    || $second === 'P'
-                ) {
-                    return "Kód ELDP {$code} se neslučuje se zaměstnáním malého rozsahu.";
-                }
-            }
-
-            return null;
-        });
     }
 
     /**
