@@ -14,10 +14,28 @@ final class JmhzAttributeScope
     /** @var array<string, list<JmhzAttributeOccurrence>> */
     private array $occurrences = [];
 
+    /** @var list<string> */
+    private array $bodies = [];
+
     public function __construct(
         public readonly string $part,
         public readonly int $ordinal = 0,
     ) {}
+
+    /**
+     * Zvolený typ formuláře součásti. `xs:choice` z osmi typů dovoluje právě
+     * jeden; víc jich znamená vadnou strukturu, žádný prázdnou součást.
+     */
+    public function noteBody(string $localName): void
+    {
+        $this->bodies[] = $localName;
+    }
+
+    /** @return list<string> */
+    public function bodies(): array
+    {
+        return $this->bodies;
+    }
 
     public function add(JmhzAttributeOccurrence $occurrence): void
     {

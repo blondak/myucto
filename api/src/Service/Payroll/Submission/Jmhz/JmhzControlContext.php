@@ -17,14 +17,22 @@ final readonly class JmhzControlContext
     public function __construct(
         public string $evaluatedOn,
         public ?string $govTalkVariableSymbol = null,
+        /**
+         * Prošlo XML připnutým XSD? Kontroly 61 a 62 nic jiného nedělají, ale
+         * vykonat je smí jen ten, kdo validaci opravdu provedl. Volající, který
+         * si tuhle vrstvu zavolá nad cizím XML, je nesmí vydat za splněné.
+         */
+        public bool $schemaValidated = false,
     ) {
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $evaluatedOn) !== 1) {
             throw new \InvalidArgumentException('Den vyhodnocení kontrol musí být ve tvaru RRRR-MM-DD.');
         }
     }
 
-    public static function today(?string $govTalkVariableSymbol = null): self
-    {
-        return new self(gmdate('Y-m-d'), $govTalkVariableSymbol);
+    public static function today(
+        ?string $govTalkVariableSymbol = null,
+        bool $schemaValidated = false,
+    ): self {
+        return new self(gmdate('Y-m-d'), $govTalkVariableSymbol, $schemaValidated);
     }
 }

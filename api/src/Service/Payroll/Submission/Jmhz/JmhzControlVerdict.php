@@ -32,4 +32,9 @@ final readonly class JmhzControlVerdict
     {
         return new self(JmhzControlOutcome::NotEvaluable, $part, null, $message);
     }
+
+    public static function unimplemented(string $part, string $message): self
+    {
+        return new self(JmhzControlOutcome::Unimplemented, $part, null, $message);
+    }
 }

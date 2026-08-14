@@ -341,6 +341,212 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         );
     }
 
+    /**
+     * Jediná kontrola, která spojí souhrn za zaměstnavatele s individualizovanými
+     * součástmi. Bez ní projde podání, kde se odvod a jeho rozpad rozcházejí.
+     */
+    public function testEmployeeInsuranceMustMatchTheSumOfForms(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:socialniPojisteni>71</form:socialniPojisteni>',
+            '<form:socialniPojisteni>60</form:socialniPojisteni>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(12, $this->failedIds($report));
+    }
+
+    public function testCreditsWithoutSignedDeclarationAreRefused(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>'
+                . "\n<form:prohlaseniPoplatnikaDane><form:zakladniSleva>2570</form:zakladniSleva>"
+                . '</form:prohlaseniPoplatnikaDane>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(244, $this->failedIds($report));
+    }
+
+    /**
+     * Vykázaná nula slevu neuplatňuje. Katalog zakazuje „nabývat hodnot",
+     * ne uvést nulu — jinak by neprošel ani zaměstnanec bez prohlášení.
+     */
+    public function testZeroTaxBonusWithoutDeclarationIsAccepted(): void
+    {
+        $report = $this->validate(JmhzXmlSample::minimal());
+
+        self::assertNotContains(244, $this->failedIds($report));
+    }
+
+    public function testSummaryDataOnNonPrimaryEmploymentIsRefused(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001')
+                . JmhzXmlSample::form('1000000012', '2000000000000000000002', primary: false),
+            formCount: 4,
+        ));
+
+        self::assertContains(248, $this->failedIds($report));
+    }
+
+    public function testDeclaredFormCountMustMatchReality(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001'),
+            formCount: 9,
+        ));
+
+        self::assertContains(235, $this->failedIds($report));
+        self::assertContains(227, $this->failedIds($report));
+    }
+
+    public function testPackageOrdinalBeyondPackageCountFails(): void
+    {
+        $report = $this->validate(str_replace(
+            '<balikPoradi>1</balikPoradi>',
+            '<balikPoradi>3</balikPoradi>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(84, $this->failedIds($report));
+    }
+
+    public function testEldpCodeMustComeFromThePinnedCodebook(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:kod>1++</form:kod>',
+            '<form:kod>9ZZ</form:kod>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(157, $this->failedIds($report));
+    }
+
+    /**
+     * Kód ELDP je tří- až čtyřznakový a první pozice je druh činnosti o jednom
+     * nebo dvou znacích. Pozice se proto počítají od konce, ne od začátku.
+     */
+    public function testFourCharacterEldpCodePositionsAreReadFromTheEnd(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:kod>1++</form:kod>',
+            '<form:kod>ZCV+</form:kod>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertNotContains(157, $this->failedIds($report));
+        // Druhá pozice V omezuje započtené dny délkou intervalu, ne nulou.
+        self::assertNotContains(135, $this->failedIds($report));
+    }
+
+    public function testWageBreakdownWithZeroWageIsRefused(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:mzdaZuctovana>1000</form:mzdaZuctovana>',
+            '<form:mzdaZuctovana>0</form:mzdaZuctovana>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(267, $this->failedIds($report));
+    }
+
+    public function testFormGuidMustBeUniqueWithinSubmission(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001')
+                . JmhzXmlSample::form('1000000012', '2000000000000000000002', primary: false),
+            formCount: 4,
+        ));
+
+        self::assertContains(306, $this->failedIds($report));
+    }
+
+    public function testMissingSummaryLayerBreaksRegularStructure(): void
+    {
+        $xml = (string) preg_replace(
+            '~<so:souhrn>.*?</so:souhrn>~s',
+            '',
+            JmhzXmlSample::minimal(),
+        );
+        $report = $this->validate($xml);
+
+        self::assertContains(232, $this->failedIds($report));
+    }
+
+    /**
+     * Kontroly mimo profil se nesmí vypnout natvrdo. Jakmile se rozhodný
+     * atribut v podání objeví, musí se z nich stát viditelná mezera v pokrytí,
+     * ne tichá výjimka.
+     */
+    public function testOutOfProfileControlBecomesACoverageGapWhenItsTriggerAppears(): void
+    {
+        $clean = $this->validate(JmhzXmlSample::minimal());
+        self::assertSame(
+            JmhzControlOutcome::NotApplicable,
+            $this->finding($clean, 293)->outcome,
+        );
+
+        $withStudy = $this->validate(str_replace(
+            '</form:mzda>',
+            '</form:mzda>'
+                . "\n<form:teoretickaPraktickaPriprava><form:obdobi>"
+                . '<form:datumOd>2026-07-01</form:datumOd>'
+                . '</form:obdobi></form:teoretickaPraktickaPriprava>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertSame(
+            JmhzControlOutcome::Unimplemented,
+            $this->finding($withStudy, 293)->outcome,
+        );
+    }
+
+    /**
+     * Kontroly 61 a 62 nedělají nic jiného než validaci proti XSD. Vykázat je
+     * jako splněné smí jen ten, kdo ji opravdu provedl.
+     */
+    public function testSchemaControlsNeedProofThatSchemaValidationRan(): void
+    {
+        $without = $this->validate(JmhzXmlSample::minimal());
+        self::assertSame(
+            JmhzControlOutcome::NotEvaluable,
+            $this->finding($without, 61)->outcome,
+        );
+
+        $with = $this->validate(
+            JmhzXmlSample::minimal(),
+            new JmhzControlContext('2026-08-14', null, true),
+        );
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($with, 61)->outcome);
+    }
+
+    public function testCleanSubmissionIsSubmittableOnceSchemaValidationIsProven(): void
+    {
+        $report = $this->validate(
+            JmhzXmlSample::minimal(),
+            new JmhzControlContext('2026-08-14', null, true),
+        );
+
+        self::assertSame([], $report->blocking());
+        self::assertSame([], $report->coverageGaps());
+        self::assertTrue($report->submittable());
+    }
+
+    /** @return list<int> */
+    private function failedIds(JmhzControlEvaluationReport $report): array
+    {
+        return array_map(
+            static fn (JmhzControlFinding $finding): int => $finding->controlId,
+            array_values(array_filter(
+                $report->findings,
+                static fn (JmhzControlFinding $finding): bool
+                    => $finding->outcome === JmhzControlOutcome::Failed,
+            )),
+        );
+    }
+
     private function validate(
         string $xml,
         ?JmhzControlContext $context = null,

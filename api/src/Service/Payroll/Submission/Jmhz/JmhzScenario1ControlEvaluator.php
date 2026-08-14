@@ -32,16 +32,148 @@ final class JmhzScenario1ControlEvaluator
      * v pokrytí — rozhodne o nich až protokol o zpracování.
      */
     private const NOT_EVALUABLE = [
+        7 => 'Úhrn se skládá z vyměřovacích základů zaměstnance (10477, 10478)'
+            . ' rozlišených druhem činnosti (10239), které první profil nevykazuje.',
+        59 => 'Podmínky vyměřovacího základu se opírají o vyloučené a odečtené'
+            . ' doby (10357, 10375), které první profil nevykazuje; předpoklad'
+            . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
+        118 => 'Sazba se počítá z vyměřovacího základu zaměstnance (10477),'
+            . ' který první profil nevykazuje.',
         143 => 'Tvar variabilního symbolu vynucuje serializér; shodu s registrem'
             . ' zaměstnavatelů ČSSZ lokálně ověřit nelze.',
+        164 => 'Lhůta splatnosti se odvozuje od data přijetí podání (10006),'
+            . ' které přiděluje až ČSSZ.',
+        217 => 'Odkaz na GUID jiného podání ověří jen evidence ČSSZ.',
+        218 => 'Existenci GUID stornovaného podání ověří jen evidence ČSSZ.',
+        220 => 'Existenci GUID stornované součásti ověří jen evidence ČSSZ.',
+        221 => 'O zamítnutí celého podání rozhoduje výsledek zpracování všech'
+            . ' součástí na straně ČSSZ.',
         226 => 'Porovnání počtu součástí s registrem ČSSZ je možné až na straně'
             . ' ČSSZ; nesoulad vede k částečnému přijetí a formální výzvě.',
+        225 => 'Chybějící první dílčí podání se pozná až porovnáním došlých'
+            . ' balíků na straně ČSSZ.',
+        228 => 'Počet skutečně došlých dílčích podání zná jen ČSSZ.',
+        238 => 'Shodu klíčů s předchozím řádným podáním drží evidence ČSSZ.',
+        241 => 'Shodu metaatributů se stornovaným podáním drží evidence ČSSZ.',
+        242 => 'Rozlišení rezidenta a nerezidenta stojí na atributu 10068,'
+            . ' který první profil nevykazuje.',
+        243 => 'Rozlišení rezidenta a nerezidenta stojí na atributu 10068,'
+            . ' který první profil nevykazuje.',
+        245 => 'Prahy pro srážkovou daň se počítají přes druh činnosti (10239)'
+            . ' napříč všemi mzdovými účtárnami zaměstnavatele.',
         261 => 'Shodu ID PPV a variabilního symbolu drží evidence ČSSZ.',
         262 => 'Existenci ID PPV ověřuje pouze registr ČSSZ.',
         263 => 'Existenci IK MPSV ověřuje pouze registr ČSSZ.',
         264 => 'Existenci dvojice IK MPSV a ID PPV ověřuje pouze registr ČSSZ.',
+        290 => 'Porovnání se slevou z posledního včas podaného hlášení vyžaduje'
+            . ' historii podání, kterou drží ČSSZ.',
+        291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ.',
+        305 => 'Jedinečnost GUID podání vůči období a variabilnímu symbolu se'
+            . ' rozhoduje nad evidencí podání, ne nad jedním XML.',
+        311 => 'Jedinost ročního zúčtování v rámci roku se pozná až porovnáním'
+            . ' více měsíčních hlášení.',
+        315 => 'Sazby se počítají z vyměřovacích základů zaměstnance'
+            . ' (10477–10480), které první profil nevykazuje.',
+        321 => 'Pozitivní výčet povinných atributů souhrnné vrstvy je v katalogu'
+            . ' popsaný odkazem na oblast, ne výčtem; bez doloženého seznamu by'
+            . ' šlo o odhad.',
+        325 => 'Prahy pro zálohovou daň se počítají přes druh činnosti (10239)'
+            . ' napříč všemi mzdovými účtárnami zaměstnavatele.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
+        333 => 'Časové omezení slevy se odvozuje od data přijetí podání (10006),'
+            . ' které přiděluje až ČSSZ.',
+        334 => 'Ztotožnění osoby provádí kmenová evidence ČSSZ.',
+        354 => 'Jedinečnost GUID formuláře napříč podáními drží evidence DIS.',
+    ];
+
+    /**
+     * Kontroly, jejichž předpoklad v tomhle podání nenastal — pravidla pro
+     * opravné a stornující hlášení, pro odložený příjem a pro roční atributy.
+     *
+     * Není to allowlist: u každé je uvedený atribut nebo typ podání, který ten
+     * předpoklad zakládá. Jakmile se v podání objeví, kontrola přestane být
+     * mimo profil a stane se z ní viditelná mezera v pokrytí. Kdyby se
+     * vynechání zapsalo natvrdo, rozšíření serializéru by kontrolu tiše vypnulo.
+     *
+     * @var array<int, array{reason:string,absent:list<string>,not_type:list<string>}>
+     */
+    private const OUT_OF_PROFILE = [
+        103 => [
+            'reason' => 'Dočasné přidělení není v podání evidované.',
+            'absent' => ['10252', '10457', '10492', '10493', '10494'],
+            'not_type' => [],
+        ],
+        190 => [
+            'reason' => 'Lhůta pro storno celého podání se týká jen podání typu S.',
+            'absent' => [],
+            'not_type' => ['S'],
+        ],
+        204 => [
+            'reason' => 'Lhůta pro storno součásti se týká jen podání typu S.',
+            'absent' => [],
+            'not_type' => ['S'],
+        ],
+        233 => [
+            'reason' => 'Struktura opravného hlášení se týká jen podání typu O.',
+            'absent' => [],
+            'not_type' => ['O'],
+        ],
+        237 => [
+            'reason' => 'Pravidlo pro stornující formuláře se týká jen podání typu O.',
+            'absent' => [],
+            'not_type' => ['O'],
+        ],
+        273 => [
+            'reason' => 'Sleva pro ovocnářství a pěstování zeleniny se nevykazuje.',
+            'absent' => ['10546', '10547'],
+            'not_type' => [],
+        ],
+        275 => [
+            'reason' => 'Ani jedna z výlučných slev se nevykazuje.',
+            'absent' => ['10490', '10546'],
+            'not_type' => [],
+        ],
+        278 => [
+            'reason' => 'Roční atributy slevy na manžela se nevykazují.',
+            'absent' => ['10541', '10542'],
+            'not_type' => [],
+        ],
+        292 => [
+            'reason' => 'Roční atributy slevy na manžela se nevykazují.',
+            'absent' => ['10426', '10541', '10542'],
+            'not_type' => [],
+        ],
+        293 => [
+            'reason' => 'Průběh studia se v podání nevykazuje.',
+            'absent' => ['10263', '10264'],
+            'not_type' => [],
+        ],
+        308 => [
+            'reason' => 'Omezení částí se týká jen podání typu S.',
+            'absent' => [],
+            'not_type' => ['S'],
+        ],
+        336 => [
+            'reason' => 'Podání neobsahuje formulář odloženého příjmu.',
+            'absent' => ['10548'],
+            'not_type' => [],
+        ],
+        337 => [
+            'reason' => 'Podání neobsahuje formulář odloženého příjmu.',
+            'absent' => ['10548'],
+            'not_type' => [],
+        ],
+        338 => [
+            'reason' => 'Podání neobsahuje formulář odloženého příjmu.',
+            'absent' => ['10548'],
+            'not_type' => [],
+        ],
+        339 => [
+            'reason' => 'Podání neobsahuje formulář odloženého příjmu.',
+            'absent' => ['10548'],
+            'not_type' => [],
+        ],
     ];
 
     public function __construct(
@@ -55,9 +187,12 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 10, 11, 13, 23, 31, 37, 50, 72, 74, 90, 94, 95, 96, 100,
-            129, 131, 132, 134, 144, 145, 152, 153, 154, 159, 162, 167, 168,
-            253, 255, 260, 286, 299, 304, 335, 355,
+            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 50, 56, 57, 58,
+            60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
+            109, 129, 131, 132, 133, 134, 135, 144, 145, 152, 153, 154, 157,
+            159, 162, 167, 168, 211, 227, 232, 235, 236, 240, 244, 248, 251,
+            253, 255, 260, 267, 282, 283, 286, 299, 300, 301, 303, 304, 306,
+            307, 309, 323, 330, 332, 335, 341, 342, 348, 355,
         ];
     }
 
@@ -70,6 +205,7 @@ final class JmhzScenario1ControlEvaluator
     public function handles(int $controlId): bool
     {
         return isset(self::NOT_EVALUABLE[$controlId])
+            || isset(self::OUT_OF_PROFILE[$controlId])
             || in_array($controlId, $this->implementedControlIds(), true);
     }
 
@@ -108,6 +244,10 @@ final class JmhzScenario1ControlEvaluator
                 $reason,
             )];
         }
+        $outOfProfile = $this->outOfProfile($controlId, $projection);
+        if ($outOfProfile !== null) {
+            return [$outOfProfile];
+        }
 
         return match ($controlId) {
             1 => $this->employerDiscountHeadcount($projection),
@@ -116,8 +256,48 @@ final class JmhzScenario1ControlEvaluator
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
             10 => $this->employerInsuranceRate($projection, '10026', '10025', 'source_row_4'),
             11 => $this->employerInsuranceTotal($projection),
+            12 => $this->employeeInsuranceMatchesForms($projection),
             13 => $this->insuranceTotal($projection),
+            20 => $this->workedHoursCoverOvertime($projection),
             23 => $this->unworkedHoursCoverVacation($projection),
+            43, 44 => $this->insuranceIntervalOrderedAndFilled($projection),
+            56 => $this->dateNotAfterFilling($projection, '10272'),
+            57 => $this->riskyHoursWithinWorkedHours($projection),
+            58 => $this->insuranceDaysWithinMonth($projection),
+            60 => $this->summaryDateBeforeFilling($projection),
+            61, 62 => $this->schemaValidated($context),
+            84 => $this->packageOrdinalWithinCount($projection),
+            87 => $this->eldpCodeMatchesActivity($projection),
+            88 => $this->filledAtNotInFuture($projection, $context),
+            93 => $this->packageFormCountWithinTotal($projection),
+            97 => $this->atMostIncome($projection, '10289'),
+            98 => $this->dayCountsWithinMonth($projection),
+            99 => $this->eldpValidityWithinPeriod($projection),
+            109 => $this->atMostIncome($projection, '10416'),
+            133 => $this->eldpCodeAgainstSmallScale($projection),
+            135 => $this->insuranceDaysAgainstEldpCode($projection),
+            157 => $this->eldpCodeFromCodebook($projection),
+            211 => $this->cancelledFormsLeaveAtLeastOne($projection),
+            232 => $this->regularStructureComplete($projection),
+            235 => $this->declaredFormCountMatchesReality($projection),
+            227 => $this->totalFormCountMatchesReality($projection),
+            236 => $this->regularSubmissionHasOnlyRegularForms($projection),
+            240 => $this->packageMetadataPresent($projection),
+            341, 342 => $this->schemaValidated($context),
+            244 => $this->noCreditsWithoutDeclaration($projection),
+            248 => $this->summaryDataOnlyOnPrimary($projection),
+            251 => $this->employmentIdentifierUnique($projection),
+            267 => $this->wageBreakdownEmptyWhenWageZero($projection),
+            282 => $this->riskyHoursEmptyWhenNoWorkedHours($projection),
+            283 => $this->incomeBreakdownEmptyWhenIncomeZero($projection),
+            300, 301 => $this->packageFormLimit($projection),
+            303 => $this->formHasExactlyOneBody($projection),
+            306 => $this->formGuidUniqueWithinSubmission($projection),
+            307 => $this->eldpDetailEmptyWithoutCode($projection),
+            309 => $this->insuranceDaysAgainstDeductedTime($projection),
+            323, 348 => $this->structuralIntegrity($context),
+            330 => $this->eldpCodeRequiredWithDays($projection),
+            332 => $this->primaryFlagRequired($projection),
             31, 131 => $this->periodNotBeforeStart($projection),
             37 => $this->personIdentifierChecksum($projection),
             50 => $this->assessmentBaseNotNegative($projection),
@@ -147,9 +327,18 @@ final class JmhzScenario1ControlEvaluator
             299 => $this->insuranceIntervalWithinPeriod($projection),
             304 => $this->taxBaseNotNegative($projection),
             355 => $this->govTalkVariableSymbol($projection, $context),
-            default => throw new \OutOfBoundsException(
-                "Kontrola JMHZ {$controlId} nemá vykonávací implementaci.",
-            ),
+            // Kontrola mimo profil, jejíž rozhodný atribut se v podání objevil.
+            // Výjimka by tady byla horší než přiznaná mezera — podání se má
+            // zastavit na neúplném pokrytí, ne spadnout uprostřed nácviku.
+            default => isset(self::OUT_OF_PROFILE[$controlId])
+                ? [JmhzControlVerdict::unimplemented(
+                    JmhzAttributeProjection::PART_SUBMISSION,
+                    'Podání nově obsahuje údaje, kterých se kontrola týká,'
+                        . ' ale vykonávací implementaci zatím nemá.',
+                )]
+                : throw new \OutOfBoundsException(
+                    "Kontrola JMHZ {$controlId} nemá vykonávací implementaci.",
+                ),
         };
     }
 
@@ -234,6 +423,47 @@ final class JmhzScenario1ControlEvaluator
                 JmhzAttributeProjection::PART_PVPOJ,
                 null,
                 "Pojistné celkem {$total} Kč neodpovídá součtu {$employer} + {$employee} Kč.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
+     * Pojistná část musí sedět na součet součástí. Je to jediná kontrola, která
+     * spojí souhrn za zaměstnavatele s individualizovanými formuláři — bez ní
+     * projde podání, kde se odvod a rozpad rozcházejí.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeInsuranceMatchesForms(JmhzAttributeProjection $projection): array
+    {
+        $total = $projection->pvpoj()->integer('10028');
+        if ($total === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        $sum = 0;
+        $seen = false;
+        foreach ($projection->forms() as $form) {
+            $value = $form->integer('10370');
+            if ($value === null) {
+                continue;
+            }
+            $seen = true;
+            $sum += $value;
+        }
+        if (!$seen) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_PVPOJ,
+                'Žádná součást nevykazuje sociální pojištění zaměstnance.',
+            )];
+        }
+        if ($total !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Pojistné za zaměstnance {$total} Kč neodpovídá součtu za jednotlivé"
+                    . " součásti {$sum} Kč.",
             )];
         }
 
@@ -907,7 +1137,9 @@ final class JmhzScenario1ControlEvaluator
         $duplicates = [];
         foreach ($projection->forms() as $form) {
             $identifier = $form->value('10228');
-            if ($identifier === null) {
+            // Formuláře odloženého příjmu se do jedinečnosti nezapočítávají —
+            // k jednomu aktivnímu vztahu smí být v podání dvě řádné součásti.
+            if ($identifier === null || in_array('odlozenyPrijem', $form->bodies(), true)) {
                 continue;
             }
             if (isset($seen[$identifier])) {
@@ -992,7 +1224,1005 @@ final class JmhzScenario1ControlEvaluator
             : $verdicts;
     }
 
+    // --- metadata balíku a struktura --------------------------------------
+
+    /** @return list<JmhzControlVerdict> */
+    private function schemaValidated(JmhzControlContext $context): array
+    {
+        if (!$context->schemaValidated) {
+            return [JmhzControlVerdict::notEvaluable(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                'Volající neprovedl validaci proti připnutému XSD, takže ji'
+                    . ' nelze vykázat jako splněnou.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * Obecná strukturální integrita. Že sem běh vůbec došel, znamená, že XML
+     * prošlo XSD a že se každý vypsaný element podařilo přiřadit atributu
+     * připnutého slovníku — promítnutí je fail-closed a na neznámé cestě padá.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function structuralIntegrity(JmhzControlContext $context): array
+    {
+        return $this->schemaValidated($context);
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function packageOrdinalWithinCount(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        $ordinal = $submission->integer('10002');
+        $count = $submission->integer('10003');
+        if ($ordinal === null || $count === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if ($ordinal > $count) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Pořadí balíku {$ordinal} je vyšší než počet balíků {$count}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function packageFormCountWithinTotal(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        $inPackage = $submission->integer('10015');
+        $total = $submission->integer('10488');
+        if ($inPackage === null || $total === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if ($inPackage > $total) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Počet formulářů v balíku {$inPackage} je vyšší než počet celkem {$total}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * První dílčí podání pojme navíc pojistnou a souhrnnou část, další už jen
+     * součásti individualizované části.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function packageFormLimit(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        $inPackage = $submission->integer('10015');
+        $ordinal = $submission->integer('10002');
+        if ($inPackage === null || $ordinal === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        $limit = $ordinal === 1 ? 1502 : 1500;
+        if ($inPackage > $limit) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Balík {$ordinal} obsahuje {$inPackage} formulářů, povoleno je {$limit}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function packageMetadataPresent(JmhzAttributeProjection $projection): array
+    {
+        $type = $projection->submission()->value('10007');
+        if ($type !== 'R' && $type !== 'O') {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        $missing = [];
+        foreach (['10002', '10003', '10015', '10488'] as $attributeId) {
+            if ($projection->submission()->value($attributeId) === null) {
+                $missing[] = $attributeId;
+            }
+        }
+        if ($missing !== []) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                'Podání typu ' . $type . ' musí uvádět metaatributy balíku; chybí '
+                    . implode(', ', $missing) . '.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * První dílčí podání řádného hlášení musí nést souhrnnou i pojistnou část
+     * a alespoň jednu součást. Serializér zatím staví jediný balík, takže se
+     * kontrola vyhodnocuje jen pro něj.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function regularStructureComplete(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        if ($submission->value('10007') !== 'R') {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if (($submission->integer('10002') ?? 1) !== 1) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                'Povinné vrstvy se vyžadují jen v prvním dílčím podání.',
+            )];
+        }
+        $missing = [];
+        if ($projection->summary()->attributeIds() === []) {
+            $missing[] = 'souhrnná část';
+        }
+        if ($projection->pvpoj()->attributeIds() === []) {
+            $missing[] = 'pojistná část';
+        }
+        if ($projection->forms() === []) {
+            $missing[] = 'individualizovaná součást';
+        }
+        if ($missing !== []) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                'Prvnímu dílčímu podání řádného hlášení chybí: '
+                    . implode(', ', $missing) . '.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * Deklarovaný počet formulářů v balíku musí sedět na skutečnost. V prvním
+     * balíku se do počtu započítává i souhrnná a pojistná část.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function declaredFormCountMatchesReality(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        $declared = $submission->integer('10015');
+        $type = $submission->value('10007');
+        if ($declared === null || ($type !== 'R' && $type !== 'O')) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        $ordinal = $submission->integer('10002') ?? 1;
+        $layers = 0;
+        if ($ordinal === 1) {
+            $layers += $projection->summary()->attributeIds() === [] ? 0 : 1;
+            $layers += $projection->pvpoj()->attributeIds() === [] ? 0 : 1;
+        }
+        $expected = count($projection->forms()) + $layers;
+        if ($declared !== $expected) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Uvedený počet formulářů v balíku {$declared} neodpovídá skutečnému"
+                    . " počtu {$expected}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /**
+     * Celkový počet formulářů se skládá ze všech dílčích podání. Ověřit ho lze
+     * jen tehdy, když je podání jediné — jinak o něm rozhoduje až ČSSZ, která
+     * vidí všechny došlé balíky.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function totalFormCountMatchesReality(JmhzAttributeProjection $projection): array
+    {
+        $submission = $projection->submission();
+        $total = $submission->integer('10488');
+        $packages = $submission->integer('10003');
+        $type = $submission->value('10007');
+        if ($total === null || ($type !== 'R' && $type !== 'O')) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if ($packages !== 1) {
+            return [JmhzControlVerdict::notEvaluable(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                'Celkový počet formulářů se skládá z více dílčích podání, která'
+                    . ' vidí až ČSSZ.',
+            )];
+        }
+        $layers = ($projection->summary()->attributeIds() === [] ? 0 : 1)
+            + ($projection->pvpoj()->attributeIds() === [] ? 0 : 1);
+        $expected = count($projection->forms()) + $layers;
+        if ($total !== $expected) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Celkový počet formulářů {$total} neodpovídá skutečnému počtu {$expected}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function regularSubmissionHasOnlyRegularForms(
+        JmhzAttributeProjection $projection,
+    ): array {
+        if ($projection->submission()->value('10007') !== 'R') {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $type = $form->value('10016');
+            if ($type === null || $type === 'R') {
+                return null;
+            }
+
+            return "Řádné hlášení nesmí obsahovat formulář typu {$type}.";
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function cancelledFormsLeaveAtLeastOne(JmhzAttributeProjection $projection): array
+    {
+        $types = [];
+        foreach ($projection->forms() as $form) {
+            $type = $form->value('10016');
+            if ($type !== null) {
+                $types[] = $type;
+            }
+        }
+        if ($types === [] || !in_array('S', $types, true)) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+        $remaining = array_filter($types, static fn (string $type): bool => $type !== 'S');
+        if ($remaining === []) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_FORM,
+                null,
+                'Po stornu součástí nezbyla v hlášení žádná platná součást.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function formHasExactlyOneBody(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $bodies = $form->bodies();
+            if (count($bodies) === 1) {
+                return null;
+            }
+            if ($bodies === []) {
+                return 'Součást individualizované části neobsahuje žádný typ formuláře.';
+            }
+
+            return 'Součást individualizované části obsahuje více typů formuláře: '
+                . implode(', ', $bodies) . '.';
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function formGuidUniqueWithinSubmission(JmhzAttributeProjection $projection): array
+    {
+        $seen = [];
+        $duplicates = [];
+        foreach ($projection->forms() as $form) {
+            $guid = $form->value('10012');
+            if ($guid === null) {
+                continue;
+            }
+            $key = strtoupper($guid);
+            if (isset($seen[$key])) {
+                $duplicates[$key] = $form->ordinal;
+            }
+            $seen[$key] = true;
+        }
+        if ($seen === []) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+        $verdicts = [];
+        foreach ($duplicates as $guid => $ordinal) {
+            $verdicts[] = JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_FORM,
+                $ordinal,
+                "GUID formuláře {$guid} je v podání použit více než jednou.",
+            );
+        }
+
+        return $verdicts === []
+            ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)]
+            : $verdicts;
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function primaryFlagRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->value('10495') !== null) {
+                return null;
+            }
+            // Nepovinný je jen u scénáře pro druh činnosti 10 a u stornujícího
+            // formuláře; jinde je příznak primárního vztahu povinný.
+            if ($form->value('10016') === 'S' || in_array('ozpTpp', $form->bodies(), true)) {
+                return null;
+            }
+
+            return 'Součást neuvádí příznak primárního pracovněprávního vztahu.';
+        });
+    }
+
+    // --- data a lhůty -----------------------------------------------------
+
+    /** @return list<JmhzControlVerdict> */
+    private function filledAtNotInFuture(
+        JmhzAttributeProjection $projection,
+        JmhzControlContext $context,
+    ): array {
+        $filledAt = $this->filledOn($projection);
+        if ($filledAt === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if (strcmp($filledAt, $context->evaluatedOn) > 0) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Datum vyplnění podání {$filledAt} je v budoucnosti.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function insuranceIntervalOrderedAndFilled(JmhzAttributeProjection $projection): array
+    {
+        $filledOn = $this->filledOn($projection);
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($filledOn): ?string {
+                $from = $form->value('10354');
+                $to = $form->value('10355');
+                if ($from === null || $to === null) {
+                    return null;
+                }
+                if (strcmp($from, $to) > 0) {
+                    return "Pojištění od {$from} je po datu do {$to}.";
+                }
+                if ($filledOn !== null && strcmp($to, $filledOn) > 0) {
+                    return "Pojištění do {$to} je po datu vyplnění podání {$filledOn}.";
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function dateNotAfterFilling(
+        JmhzAttributeProjection $projection,
+        string $attributeId,
+    ): array {
+        $filledOn = $this->filledOn($projection);
+        if ($filledOn === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($attributeId, $filledOn): ?string {
+                $value = $form->value($attributeId);
+                if ($value === null || strcmp($value, $filledOn) <= 0) {
+                    return null;
+                }
+
+                return "Datum {$attributeId} = {$value} je po datu vyplnění podání {$filledOn}.";
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function summaryDateBeforeFilling(JmhzAttributeProjection $projection): array
+    {
+        $value = $projection->summary()->value('10409');
+        $filledOn = $this->filledOn($projection);
+        if ($value === null || $filledOn === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+        if (strcmp($value, $filledOn) >= 0) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUMMARY,
+                null,
+                "Datum specifické právní skutečnosti {$value} není před datem"
+                    . " vyplnění podání {$filledOn}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUMMARY)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function insuranceDaysWithinMonth(JmhzAttributeProjection $projection): array
+    {
+        $days = $this->daysInReportedMonth($projection);
+        if ($days === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($days): ?string {
+                foreach ($form->all('10356') as $occurrence) {
+                    if ((int) $occurrence->value > $days) {
+                        return "Počet dnů pojištění {$occurrence->value} překračuje"
+                            . " počet dnů v měsíci ({$days}).";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Sada denních atributů ELDP nesmí přesáhnout počet dnů v hlášeném měsíci.
+     * Kontroluje se jen to, co je v podání — nepřítomný atribut není nula.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function dayCountsWithinMonth(JmhzAttributeProjection $projection): array
+    {
+        $days = $this->daysInReportedMonth($projection);
+        if ($days === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+        $attributeIds = [
+            '10357', '10358', '10359', '10360', '10362', '10536', '10366',
+            '10473', '10474', '10475', '10375', '10462', '10463', '10464',
+            '10465', '10466', '10468', '10469',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($attributeIds, $days): ?string {
+                foreach ($attributeIds as $attributeId) {
+                    foreach ($form->all($attributeId) as $occurrence) {
+                        if ((int) $occurrence->value > $days) {
+                            return "Atribut {$attributeId} = {$occurrence->value}"
+                                . " překračuje počet dnů v měsíci ({$days}).";
+                        }
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpValidityWithinPeriod(JmhzAttributeProjection $projection): array
+    {
+        $period = $this->period($projection);
+        if ($period === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+        $prefix = sprintf('%04d-%02d-', $period[0], $period[1]);
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($prefix): ?string {
+                foreach (['10241', '10242'] as $attributeId) {
+                    foreach ($form->all($attributeId) as $occurrence) {
+                        if (!str_starts_with($occurrence->value, $prefix)) {
+                            return "Platnost kódu ELDP ({$attributeId}) ="
+                                . " {$occurrence->value} leží mimo hlášený měsíc.";
+                        }
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    // --- hodiny a příjmy --------------------------------------------------
+
+    /** @return list<JmhzControlVerdict> */
+    private function workedHoursCoverOvertime(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $worked = $form->scaled('10268');
+            $overtime = $form->scaled('10269');
+            if ($worked === null || $overtime === null) {
+                return null;
+            }
+            if (self::compareScaled($worked, $overtime) < 0) {
+                return 'Počet odpracovaných hodin je nižší než počet přesčasových hodin.';
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function riskyHoursWithinWorkedHours(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $risky = $form->scaled('10273');
+            $worked = $form->scaled('10268');
+            if ($risky === null || $worked === null) {
+                return null;
+            }
+            if (self::compareScaled($risky, $worked) > 0) {
+                return 'Hodiny v rizikové práci překračují počet odpracovaných hodin.';
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function riskyHoursEmptyWhenNoWorkedHours(JmhzAttributeProjection $projection): array
+    {
+        return $this->emptyWhenZero(
+            $projection,
+            '10268',
+            ['10269', '10270', '10271', '10272', '10273', '10274'],
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function wageBreakdownEmptyWhenWageZero(JmhzAttributeProjection $projection): array
+    {
+        return $this->emptyWhenZero(
+            $projection,
+            '10328',
+            ['10329', '10330', '10331', '10332', '10333', '10334', '10335', '10336'],
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function incomeBreakdownEmptyWhenIncomeZero(JmhzAttributeProjection $projection): array
+    {
+        return $this->emptyWhenZero(
+            $projection,
+            '10286',
+            [
+                '10289', '10417', '10292', '10293', '10294', '10295', '10296',
+                '10418', '10308', '10309', '10310', '10416',
+            ],
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function atMostIncome(JmhzAttributeProjection $projection, string $attributeId): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($attributeId): ?string {
+                $part = $form->integer($attributeId);
+                $total = $form->integer('10286');
+                if ($part === null || $total === null || $part <= $total) {
+                    return null;
+                }
+
+                return "Atribut {$attributeId} = {$part} překračuje zúčtovaný"
+                    . " příjem celkem {$total}.";
+            },
+        );
+    }
+
+    // --- daňové slevy a souhrnná data -------------------------------------
+
+    /**
+     * Bez podepsaného prohlášení poplatníka nelze uplatnit žádnou slevu ani
+     * daňové zvýhodnění. Je to nejčastější systémová chyba, protože rozpad
+     * slev vzniká ve výpočtu nezávisle na tom, jestli prohlášení existuje.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function noCreditsWithoutDeclaration(JmhzAttributeProjection $projection): array
+    {
+        $forbidden = [
+            '10299', '10300', '10301', '10302', '10303', '10453', '10431',
+            '10432', '10433', '10434', '10435', '10436', '10437', '10438',
+            '10439', '10440', '10304', '10306',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($forbidden): ?string {
+                if ($form->boolean('10419') !== false) {
+                    return null;
+                }
+                foreach ($forbidden as $attributeId) {
+                    $value = $form->value($attributeId);
+                    // Vykázaná nula slevu neuplatňuje, a katalog zakazuje
+                    // „nabývat hodnot", ne uvést nulu.
+                    if ($value !== null && $value !== '0' && $value !== 'false') {
+                        return 'Bez podepsaného prohlášení poplatníka nesmí být'
+                            . " uplatněna sleva ani zvýhodnění ({$attributeId}).";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function summaryDataOnlyOnPrimary(JmhzAttributeProjection $projection): array
+    {
+        $summaryAttributes = [
+            '10286', '10416', '10289', '10417', '10292', '10293', '10294',
+            '10295', '10296', '10418', '10419', '10297', '10298', '10299',
+            '10300', '10301', '10302', '10303', '10453', '10431', '10432',
+            '10433', '10434', '10435', '10436', '10437', '10438', '10439',
+            '10440', '10304', '10305', '10306', '10307', '10308', '10309',
+            '10310', '10313', '10317', '10316', '10318', '10311', '10312',
+            '10319', '10320', '10321', '10322', '10323', '10420', '10421',
+            '10422', '10423', '10424', '10425', '10426', '10430', '10539',
+            '10540', '10541', '10542', '10454', '10455', '10441', '10442',
+            '10443', '10444', '10445', '10446', '10447', '10448', '10449',
+            '10450', '10451', '10344', '10116', '10348', '10349', '10347',
+            '10350', '10351', '10352', '10353', '10482', '10371',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($summaryAttributes): ?string {
+                if ($form->boolean('10495') !== false) {
+                    return null;
+                }
+                foreach ($summaryAttributes as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return 'Souhrnná data zaměstnance patří jen k primárnímu'
+                            . " pracovněprávnímu vztahu; vykázán atribut {$attributeId}.";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    // --- kód ELDP ---------------------------------------------------------
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpCodeFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        $catalog = $this->codebooks;
+        if ($catalog === null) {
+            return [JmhzControlVerdict::notEvaluable(
+                JmhzAttributeProjection::PART_FORM,
+                'Číselník kódů ELDP není k dispozici.',
+            )];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($catalog): ?string {
+                foreach ($form->all('10240') as $occurrence) {
+                    try {
+                        $catalog->requireValue('kod_eldp', $occurrence->value);
+                    } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                        return $exception->getMessage();
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpCodeMatchesActivity(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $activity = $form->value('10239');
+            if ($activity === null) {
+                return null;
+            }
+            foreach ($form->all('10240') as $occurrence) {
+                if (self::eldpPosition($occurrence->value, 1) !== $activity) {
+                    return "První pozice kódu ELDP {$occurrence->value} neodpovídá"
+                        . " druhu činnosti {$activity}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpCodeRequiredWithDays(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach ($form->groupedBy(['10356', '10240']) as $section) {
+                $days = $section['10356'] ?? null;
+                if ($days === null || (int) $days <= 0) {
+                    continue;
+                }
+                if (($section['10240'] ?? null) === null) {
+                    return 'Započtené dny důchodového pojištění vyžadují uvedený kód ELDP.';
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpDetailEmptyWithoutCode(JmhzAttributeProjection $projection): array
+    {
+        $detail = [
+            '10241', '10242', '10245', '10357', '10358', '10359', '10360',
+            '10362', '10536', '10375', '10462', '10463', '10464', '10465',
+            '10466', '10468', '10469',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($detail): ?string {
+                foreach ($form->groupedBy([...$detail, '10240']) as $section) {
+                    if (($section['10240'] ?? null) !== null) {
+                        continue;
+                    }
+                    foreach ($detail as $attributeId) {
+                        if (($section[$attributeId] ?? null) !== null) {
+                            return "Bez kódu ELDP nesmí být vyplněn atribut {$attributeId}.";
+                        }
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Zaměstnání malého rozsahu se neslučuje s dohodami o provedení práce ani
+     * s vybranými pozicemi kódu ELDP.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function eldpCodeAgainstSmallScale(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->value('10243') !== 'A') {
+                return null;
+            }
+            foreach ($form->all('10240') as $occurrence) {
+                $code = $occurrence->value;
+                $first = self::eldpPosition($code, 1);
+                $second = self::eldpPosition($code, 2);
+                $third = self::eldpPosition($code, 3);
+                if (in_array($first, ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'], true)
+                    || in_array($third, ['B', 'F', 'J', 'V', 'T'], true)
+                    || $second === 'P'
+                ) {
+                    return "Kód ELDP {$code} se neslučuje se zaměstnáním malého rozsahu.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Započtené dny podle druhé pozice kódu ELDP. Interval se počítá včetně
+     * krajních dnů — ze stejného důvodu jako u kontroly 134.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function insuranceDaysAgainstEldpCode(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $span = self::intervalDays($form->value('10354'), $form->value('10355'));
+            foreach ($form->groupedBy(['10240', '10356']) as $section) {
+                $code = $section['10240'] ?? null;
+                $days = $section['10356'] ?? null;
+                if ($code === null || $days === null) {
+                    continue;
+                }
+                $second = self::eldpPosition($code, 2);
+                if ($second === 'P' && (int) $days !== 0) {
+                    return "Kód ELDP {$code} vyžaduje nulové započtené dny, uvedeno {$days}.";
+                }
+                if ($second === 'V' && $span !== null && (int) $days > $span) {
+                    return "Kód ELDP {$code} připouští nejvýš {$span} započtených dnů,"
+                        . " uvedeno {$days}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function insuranceDaysAgainstDeductedTime(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $span = self::intervalDays($form->value('10354'), $form->value('10355'));
+            if ($span === null) {
+                return null;
+            }
+            $smallScale = $form->value('10243') === 'A';
+            foreach ($form->groupedBy(['10240', '10356', '10375']) as $section) {
+                $code = $section['10240'] ?? null;
+                $days = $section['10356'] ?? null;
+                $deducted = $section['10375'] ?? null;
+                if ($code === null || $days === null || $deducted === null) {
+                    continue;
+                }
+                $second = self::eldpPosition($code, 2);
+                $third = self::eldpPosition($code, 3);
+                $first = self::eldpPosition($code, 1);
+                if ($second === 'P' || $second === 'V' || $third === 'T') {
+                    continue;
+                }
+                if (!$smallScale
+                    && !in_array($first, ['T', 'U', 'V', 'W', 'X', 'Y', 'Z'], true)
+                ) {
+                    continue;
+                }
+                $expected = $span - (int) $deducted;
+                if ((int) $days !== $expected) {
+                    return "Započtené dny {$days} neodpovídají intervalu zmenšenému"
+                        . " o odečtené doby ({$expected}).";
+                }
+            }
+
+            return null;
+        });
+    }
+
     // --- pomocné ----------------------------------------------------------
+
+    /**
+     * Kontroly, jejichž předpoklad v podání nenastal. Fail-closed: jakmile se
+     * rozhodný atribut nebo typ podání objeví, vrací se `null` a kontrola
+     * propadne do neimplementovaných, tedy do viditelné mezery v pokrytí.
+     */
+    private function outOfProfile(
+        int $controlId,
+        JmhzAttributeProjection $projection,
+    ): ?JmhzControlVerdict {
+        $rule = self::OUT_OF_PROFILE[$controlId] ?? null;
+        if ($rule === null) {
+            return null;
+        }
+        foreach ($rule['absent'] as $attributeId) {
+            if ($projection->has($attributeId)) {
+                return null;
+            }
+        }
+        if ($rule['not_type'] !== []) {
+            $type = $projection->submission()->value('10007');
+            if ($type === null || in_array($type, $rule['not_type'], true)) {
+                return null;
+            }
+        }
+
+        return JmhzControlVerdict::notApplicable(
+            JmhzAttributeProjection::PART_SUBMISSION,
+            $rule['reason'],
+        );
+    }
+
+    /**
+     * „Je-li X nula, nesmí být vyplněné Y." Vykázaná nula hodnotou není —
+     * katalog zakazuje nabývat hodnot, ne uvést nulu.
+     *
+     * @param list<string> $dependents
+     * @return list<JmhzControlVerdict>
+     */
+    private function emptyWhenZero(
+        JmhzAttributeProjection $projection,
+        string $triggerId,
+        array $dependents,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($triggerId, $dependents): ?string {
+                $trigger = $form->scaled($triggerId);
+                if ($trigger === null || $trigger[0] !== 0) {
+                    return null;
+                }
+                foreach ($dependents as $attributeId) {
+                    if (!$form->has($attributeId)) {
+                        continue;
+                    }
+                    $value = $form->scaled($attributeId);
+                    if ($value === null || $value[0] !== 0) {
+                        return "Atribut {$triggerId} je nula, ale {$attributeId}"
+                            . ' je vyplněný.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Pozice kódu ELDP. Kód je tří- až čtyřznakový: první pozice je druh
+     * činnosti o jednom nebo dvou znacích (`1`, `ZC`), druhá a třetí jsou
+     * vždy jednoznakové. Počítá se proto od konce.
+     */
+    private static function eldpPosition(string $code, int $position): string
+    {
+        $length = strlen($code);
+        if ($length < 3) {
+            return '';
+        }
+
+        return match ($position) {
+            1 => substr($code, 0, $length - 2),
+            2 => $code[$length - 2],
+            3 => $code[$length - 1],
+            default => '',
+        };
+    }
+
+    /** Počet dnů intervalu včetně krajních dnů. */
+    private static function intervalDays(?string $from, ?string $to): ?int
+    {
+        if ($from === null || $to === null) {
+            return null;
+        }
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $from, new \DateTimeZone('UTC'));
+        $end = \DateTimeImmutable::createFromFormat('!Y-m-d', $to, new \DateTimeZone('UTC'));
+        if (!$start instanceof \DateTimeImmutable || !$end instanceof \DateTimeImmutable) {
+            return null;
+        }
+
+        return (int) $start->diff($end)->format('%r%a') + 1;
+    }
+
+    /** Datum vyplnění podání (10005) jako kalendářní den. */
+    private function filledOn(JmhzAttributeProjection $projection): ?string
+    {
+        $value = $projection->submission()->value('10005');
+        if ($value === null || strlen($value) < 10) {
+            return null;
+        }
+
+        return substr($value, 0, 10);
+    }
+
+    private function daysInReportedMonth(JmhzAttributeProjection $projection): ?int
+    {
+        $period = $this->period($projection);
+        if ($period === null) {
+            return null;
+        }
+        [$year, $month] = $period;
+        if ($month < 1 || $month > 12) {
+            return null;
+        }
+        $first = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            sprintf('%04d-%02d-01', $year, $month),
+            new \DateTimeZone('UTC'),
+        );
+
+        return $first instanceof \DateTimeImmutable ? (int) $first->format('t') : null;
+    }
+
 
     /**
      * Projde všechny součásti podání. Nález se váže na konkrétní součást,

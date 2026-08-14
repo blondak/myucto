@@ -175,7 +175,17 @@ final class JmhzAttributeProjection
         string $prefix,
         string $name,
     ): array {
-        if (in_array($name, ['souhrn', 'PVPOJ', 'formularOsoby', 'bezPriznaku'], true)) {
+        if (in_array($name, ['souhrn', 'PVPOJ', 'formularOsoby'], true)) {
+            return [$child, ''];
+        }
+        // Součást individualizované části je `xs:choice` z osmi typů formuláře.
+        // Kořenem cest slovníku je vždy ten zvolený typ, ne jeho jméno — proto
+        // se rozpoznává podle umístění a jmenného prostoru, ne podle výčtu.
+        if (($root->localName ?? '') === 'formularOsoby'
+            && $child->namespaceURI === JmhzSchemaCatalog::NS_FORM
+        ) {
+            $this->formScope($child)->noteBody($name);
+
             return [$child, ''];
         }
         if ($name === 'formulareOsob') {
@@ -232,13 +242,20 @@ final class JmhzAttributeProjection
     private function scopeFor(DOMElement $root): JmhzAttributeScope
     {
         $name = $root->localName ?? '';
+        if ($name === 'souhrn') {
+            return $this->summary;
+        }
+        if ($name === 'PVPOJ') {
+            return $this->pvpoj;
+        }
+        $parent = $root->parentNode;
+        if ($name === 'formularOsoby'
+            || ($parent instanceof DOMElement && ($parent->localName ?? '') === 'formularOsoby')
+        ) {
+            return $this->formScope($root);
+        }
 
-        return match ($name) {
-            'souhrn' => $this->summary,
-            'PVPOJ' => $this->pvpoj,
-            'formularOsoby', 'bezPriznaku' => $this->formScope($root),
-            default => $this->submission,
-        };
+        return $this->submission;
     }
 
     /**
