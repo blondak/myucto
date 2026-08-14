@@ -211,7 +211,21 @@ final class JmhzAttributeProjection
         if ($path === '' || in_array($path, self::IGNORED_ROOT_LEAVES, true)) {
             return;
         }
-        $attributeId = $this->resolveAttributeId($path);
+        // Prázdný kontejner (`<eldpSeznam/>`, `<zalohaNaDan/>`) vypadá jako list,
+        // ale žádnou hodnotu nenese. Přeskakuje se jen tehdy, když je opravdu
+        // prázdný A jeho cesta ve slovníku není — vypsaná hodnota na neznámé
+        // cestě dál padá, jinak by překlep v názvu tiše vypnul kontroly.
+        $attributeId = $this->pathToAttributeOrNull($path);
+        if ($attributeId === null) {
+            if (trim($leaf->textContent) === '') {
+                return;
+            }
+
+            throw new JmhzXmlException(
+                'jmhz_projection_path_unknown',
+                "Element {$path} nemá ve slovníku JMHZ 1.4.1.6 protějšek.",
+            );
+        }
         $this->scopeFor($root)->add(new JmhzAttributeOccurrence(
             $attributeId,
             $leaf->textContent,
@@ -228,7 +242,7 @@ final class JmhzAttributeProjection
      * takže delší shoda vždy vyhrává nad kratší a záměna dvou stejnojmenných
      * listů s různým rodičem (10371 vs 10482) nehrozí.
      */
-    private function resolveAttributeId(string $path): string
+    private function pathToAttributeOrNull(string $path): ?string
     {
         $segments = explode('.', $path);
         for ($offset = 0; $offset < count($segments); ++$offset) {
@@ -239,10 +253,7 @@ final class JmhzAttributeProjection
             }
         }
 
-        throw new JmhzXmlException(
-            'jmhz_projection_path_unknown',
-            "Element {$path} nemá ve slovníku JMHZ 1.4.1.6 protějšek.",
-        );
+        return null;
     }
 
     private function scopeFor(DOMElement $root): JmhzAttributeScope

@@ -714,6 +714,95 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertContains(135, $this->failedIds($report));
     }
 
+    /**
+     * Ověřeno proti oficiálním příkladům ČSSZ: u nulového vyměřovacího základu
+     * se odpovídající pojistné neuvádí vůbec. Trvat na dvojici by odmítalo
+     * podání, která ČSSZ sama rozesílá jako vzor.
+     */
+    public function testZeroBaseMayOmitTheMatchingInsuranceAmount(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withPvpoj(<<<'XML'
+                <pvpoj:pojistne>
+                  <pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleA>248</pvpoj:pojistneZamestnavateleA>
+                  <pvpoj:zakladZamestnavateleB>0</pvpoj:zakladZamestnavateleB>
+                  <pvpoj:zakladZamestnavateleC>0</pvpoj:zakladZamestnavateleC>
+                  <pvpoj:pojistneZamestnavateleCelkem>248</pvpoj:pojistneZamestnavateleCelkem>
+                  <pvpoj:pojistneZamestnance>71</pvpoj:pojistneZamestnance>
+                  <pvpoj:pojistneCelkem>319</pvpoj:pojistneCelkem>
+                </pvpoj:pojistne>
+                <pvpoj:pojistneUhrada>319</pvpoj:pojistneUhrada>
+            XML));
+
+        self::assertNotContains(10, $this->failedIds($report));
+        self::assertNotContains(167, $this->failedIds($report));
+    }
+
+    /**
+     * Nenulový základ bez pojistného je naopak vada — dopočítat ho nulou by
+     * zakrylo neodvedené pojistné.
+     */
+    public function testNonZeroBaseWithoutInsuranceStillFails(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withPvpoj(<<<'XML'
+                <pvpoj:pojistne>
+                  <pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleA>248</pvpoj:pojistneZamestnavateleA>
+                  <pvpoj:zakladZamestnavateleB>5000</pvpoj:zakladZamestnavateleB>
+                  <pvpoj:pojistneZamestnavateleCelkem>248</pvpoj:pojistneZamestnavateleCelkem>
+                  <pvpoj:pojistneZamestnance>71</pvpoj:pojistneZamestnance>
+                  <pvpoj:pojistneCelkem>319</pvpoj:pojistneCelkem>
+                </pvpoj:pojistne>
+                <pvpoj:pojistneUhrada>319</pvpoj:pojistneUhrada>
+            XML));
+
+        self::assertContains(10, $this->failedIds($report));
+    }
+
+    /**
+     * Katalog žádá, aby hodnota byla z číselníku CISOB, ne aby se název shodoval
+     * na bajt: ČSSZ ve vlastním příkladu píše u kódu 554782 „Praha", zatímco
+     * číselník má „Hlavní město Praha".
+     */
+    public function testMunicipalityIsCheckedByCodeNotByLiteralName(): void
+    {
+        $report = $this->validate(str_replace(
+            ['<form:obec>Brno</form:obec>', '<form:kodObce>582786</form:kodObce>'],
+            ['<form:obec>Praha</form:obec>', '<form:kodObce>554782</form:kodObce>'],
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertNotContains(152, $this->failedIds($report));
+        self::assertNotContains(335, $this->failedIds($report));
+    }
+
+    public function testUnknownMunicipalityCodeStillFails(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:kodObce>582786</form:kodObce>',
+            '<form:kodObce>999999</form:kodObce>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(152, $this->failedIds($report));
+    }
+
+    /**
+     * Prázdný kontejner není hodnota. Bez tohohle rozlišení shodil
+     * `<form:zalohaNaDan/>` celé promítnutí — a přitom se v oficiálních
+     * příkladech ČSSZ běžně vyskytuje.
+     */
+    public function testEmptyContainerDoesNotBreakTheProjection(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:odpracovaneDny>',
+            '<form:odpracovaneHodiny/><form:odpracovaneDny>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertNotSame([], $report->findings);
+    }
+
     /** @return list<int> */
     private function failedIds(JmhzControlEvaluationReport $report): array
     {

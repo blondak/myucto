@@ -97,8 +97,23 @@ final class JmhzScenario1ControlValidator
             )];
         }
 
+        // Kontrola, pro kterou katalog nemá sazbu účinnou k vykazovanému období,
+        // se nedá vyhodnotit — ale nesmí strhnout celý report. Podání za období
+        // mimo účinnost JMHZ má hlásit kontrola 31, ne výjimka uprostřed běhu.
+        try {
+            $verdicts = $this->evaluator->evaluate($controlId, $projection, $context);
+        } catch (\OutOfBoundsException $exception) {
+            return [$this->finding(
+                $definition,
+                JmhzControlOutcome::Unverifiable,
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                $exception->getMessage(),
+            )];
+        }
+
         $findings = [];
-        foreach ($this->evaluator->evaluate($controlId, $projection, $context) as $verdict) {
+        foreach ($verdicts as $verdict) {
             $findings[] = $this->finding(
                 $definition,
                 $verdict->outcome,

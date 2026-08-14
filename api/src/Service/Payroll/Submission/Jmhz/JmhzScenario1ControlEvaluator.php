@@ -418,8 +418,13 @@ final class JmhzScenario1ControlEvaluator
         if ($insurance === null && $base === null) {
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
         }
-        // Chybějící protějšek není nula: vykázané pojistné bez vyměřovacího
-        // základu (a naopak) je samo o sobě vada, ne důvod dopočítat nulu.
+        // U nulového základu ČSSZ ve vlastních příkladech pojistné neuvádí —
+        // sazba z nuly je nula, takže vynechání nic neztrácí. U nenulového
+        // základu je chybějící pojistné vada; dopočítat ho nulou by zakrylo
+        // neodvedené pojistné.
+        if ($insurance === null && $base === 0) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+        }
         if ($insurance === null || $base === null) {
             return [JmhzControlVerdict::failed(
                 JmhzAttributeProjection::PART_PVPOJ,
@@ -1124,8 +1129,67 @@ final class JmhzScenario1ControlEvaluator
         );
     }
 
+    /**
+     * Číselníková kontrola. Nedostupný nebo nepokrytý číselník není vada dat,
+     * ale mezera na naší straně: neznamená, že je hodnota špatně, jen že ji
+     * nemáme proti čemu ověřit. Vydávat to za nález by uživatele poslalo
+     * opravovat správně vyplněné podání.
+     *
+     * @param callable(JmhzAttributeProjection):list<JmhzControlVerdict> $check
+     * @return list<JmhzControlVerdict>
+     */
+    private function againstCodebook(
+        JmhzAttributeProjection $projection,
+        callable $check,
+    ): array {
+        try {
+            return $check($projection);
+        } catch (JmhzCodebookUnavailableException $exception) {
+            return [JmhzControlVerdict::unverifiable(
+                JmhzAttributeProjection::PART_FORM,
+                $exception->getMessage(),
+            )];
+        }
+    }
+
     /** @return list<JmhzControlVerdict> */
     private function workplaceMunicipality(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->rawworkplaceMunicipality($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function workplaceCountry(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->rawworkplaceCountry($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function activePolicyInstrument(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->rawactivePolicyInstrument($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function eldpCodeFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->raweldpCodeFromCodebook($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function rawworkplaceMunicipality(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
@@ -1141,23 +1205,28 @@ final class JmhzScenario1ControlEvaluator
             $projection,
             static function (JmhzAttributeScope $form) use ($catalog, $validOn): ?string {
                 $code = $form->value('10230');
-                $name = $form->value('10229');
                 if ($code === null) {
                     return null;
                 }
-                try {
-                    $catalog->requireMunicipality($code, $name ?? '', $validOn);
-                } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
-                    return $exception->getMessage();
+                // Porovnává se KÓD, ne název. Katalog žádá, aby hodnota byla
+                // z číselníku CISOB, ne aby se název shodoval na bajt — a ČSSZ
+                // ve vlastním příkladu píše u kódu 554782 „Praha", zatímco
+                // číselník má „Hlavní město Praha". Trvat na doslovné shodě by
+                // odmítalo správně vyplněná podání.
+                $found = $catalog->searchMunicipalities($code, $validOn, 5);
+                foreach ($found as $entry) {
+                    if (($entry['code'] ?? null) === $code) {
+                        return null;
+                    }
                 }
 
-                return null;
+                return "Kód obce {$code} není v připnutém číselníku CISOB platný.";
             },
         );
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function workplaceCountry(JmhzAttributeProjection $projection): array
+    private function rawworkplaceCountry(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
@@ -1178,7 +1247,7 @@ final class JmhzScenario1ControlEvaluator
                 }
                 try {
                     $catalog->requireCountry($code, $validOn);
-                } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                } catch (JmhzCodebookValueException $exception) {
                     return $exception->getMessage();
                 }
 
@@ -1188,7 +1257,7 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function activePolicyInstrument(JmhzAttributeProjection $projection): array
+    private function rawactivePolicyInstrument(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
@@ -1207,7 +1276,7 @@ final class JmhzScenario1ControlEvaluator
                 }
                 try {
                     $catalog->requireValue('nastroj_opatreni', $code);
-                } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                } catch (JmhzCodebookValueException $exception) {
                     return $exception->getMessage();
                 }
 
@@ -2057,7 +2126,7 @@ final class JmhzScenario1ControlEvaluator
     // --- kód ELDP ---------------------------------------------------------
 
     /** @return list<JmhzControlVerdict> */
-    private function eldpCodeFromCodebook(JmhzAttributeProjection $projection): array
+    private function raweldpCodeFromCodebook(JmhzAttributeProjection $projection): array
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
