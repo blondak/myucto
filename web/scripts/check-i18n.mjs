@@ -24,8 +24,9 @@
 // nic — ani jako chybějící, ani jako použitý klíč.
 //
 // Výstup je rozdělený do tří sekcí:
-//   (A) chybí v cs.json      — jediná věc, která shazuje exit code (reálná chyba)
-//   (B) parita cs.json/en.json (celý slovník, nejen použité klíče) — varování
+//   (A) chybí v cs.json      — shazuje exit code (reálná chyba)
+//   (B) parita cs.json/en.json (celý slovník včetně délek polí, nejen použité
+//       klíče) — shazuje exit code taky
 //   (C) dynamické klíče (prefix i opaque) — informativní, nikdy neshazuje exit code
 //
 // Spouští se z `npm run build`; samostatně `npm run check:i18n`.
@@ -38,18 +39,40 @@ const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const srcDir = join(webRoot, 'src')
 const locales = ['cs', 'en']
 
+// Pole se indexují jako `klic.0`, `klic.1`, … a zároveň zůstávají pod `klic`.
+// Bez toho by `t('roles.levels.' + i)` vypadalo jako chybějící namespace, protože
+// samotné `roles.levels` je list, ne uzel — falešný poplach, který snižoval
+// důvěryhodnost celé sekce C.
 const flatten = (node, prefix = '', out = new Set()) => {
   for (const [key, value] of Object.entries(node)) {
     const path = prefix + key
-    if (value && typeof value === 'object' && !Array.isArray(value)) flatten(value, path + '.', out)
-    else out.add(path)
+    if (Array.isArray(value)) {
+      out.add(path)
+      value.forEach((_, i) => out.add(`${path}.${i}`))
+    } else if (value && typeof value === 'object') {
+      flatten(value, path + '.', out)
+    } else {
+      out.add(path)
+    }
   }
   return out
 }
 
-const messages = Object.fromEntries(
-  locales.map((l) => [l, flatten(JSON.parse(readFileSync(join(srcDir, 'i18n', `${l}.json`), 'utf8')))]),
+/** Délky polí musí sedět napříč jazyky — jinak `t('klic.4')` v jednom jazyce chybí. */
+const arrayLengths = (node, prefix = '', out = new Map()) => {
+  for (const [key, value] of Object.entries(node)) {
+    const path = prefix + key
+    if (Array.isArray(value)) out.set(path, value.length)
+    else if (value && typeof value === 'object') arrayLengths(value, path + '.', out)
+  }
+  return out
+}
+
+const raw = Object.fromEntries(
+  locales.map((l) => [l, JSON.parse(readFileSync(join(srcDir, 'i18n', `${l}.json`), 'utf8'))]),
 )
+const messages = Object.fromEntries(locales.map((l) => [l, flatten(raw[l])]))
+const arrays = Object.fromEntries(locales.map((l) => [l, arrayLengths(raw[l])]))
 
 const walk = (dir, files = []) => {
   for (const name of readdirSync(dir)) {
@@ -210,6 +233,12 @@ for (const [a, b] of [['cs', 'en'], ['en', 'cs']]) {
     if (!messages[b].has(key)) parityIssues.push(`${key} — je v ${a}.json, chybí v ${b}.json`)
   }
 }
+for (const [key, len] of arrays.cs) {
+  const other = arrays.en.get(key)
+  if (other !== undefined && other !== len) {
+    parityIssues.push(`${key} — pole má ${len} položek v cs.json, ale ${other} v en.json`)
+  }
+}
 
 // (C) — dynamické prefixy: varuj jen když pod prefixem NENÍ ani jeden klíč (celý
 // namespace pravděpodobně chybí — konkrétní chybějící list uvnitř existujícího
@@ -264,5 +293,13 @@ console.log(`\nSouhrn: A=${missingInCs.length} (reálné chyby) · B=${parityIss
 
 if (missingInCs.length) {
   console.error(`\ni18n: ${missingInCs.length} staticky použit${missingInCs.length === 1 ? 'ý klíč chybí' : 'ých klíčů chybí'} v cs.json (viz sekce A výše)`)
+  process.exit(1)
+}
+
+// Parita je dnes úplná (0 rozdílů), takže ji zamykáme — je levnější ji držet, než
+// ji po čase dohánět. Anglický uživatel jinak dostane syrový klíč tam, kde do en.json
+// klíč nepřibyl spolu s českým.
+if (parityIssues.length) {
+  console.error(`\ni18n: ${parityIssues.length} rozdíl${parityIssues.length === 1 ? '' : 'ů'} mezi cs.json a en.json (viz sekce B, detail přes --verbose)`)
   process.exit(1)
 }

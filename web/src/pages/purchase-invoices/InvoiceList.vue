@@ -116,7 +116,7 @@ const activeFilterCount = computed(() => {
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
   if (statusFilter.value) chips.push({ key: 'status', value: t(`purchase_invoice.status.${statusFilter.value}`) })
-  if (kindFilter.value) chips.push({ key: 'kind', value: t(`purchase_invoice.kind.${kindFilter.value}`) })
+  if (kindFilter.value) chips.push({ key: 'kind', value: t(`purchase_invoice.document_kind.${kindFilter.value}`) })
   if (vendorFilter.value !== '') {
     const v = vendors.value.find(x => x.id === vendorFilter.value)
     if (v) chips.push({ key: 'vendor', value: v.company_name })
@@ -884,6 +884,7 @@ async function bulkSetKind() {
           <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
           <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
           <option value="advance">{{ t('purchase_invoice.document_kind.advance') }}</option>
+          <option value="tax_document">{{ t('purchase_invoice.document_kind.tax_document') }}</option>
         </select>
         <div class="min-w-48 flex-1 max-w-xs">
           <SearchableSelect
