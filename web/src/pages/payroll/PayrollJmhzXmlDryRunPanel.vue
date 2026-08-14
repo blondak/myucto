@@ -182,6 +182,17 @@ async function copyXml(payrollRun: PayrollRun) {
               {{ state(payrollRun)!.result!.xml_sha256?.slice(0, 16) }}…
             </p>
 
+            <p
+              v-if="state(payrollRun)!.result!.deadline"
+              class="mt-2 text-xs text-neutral-600"
+              data-test="jmhz-dry-run-deadline"
+            >
+              {{ t('payroll.submissions.overview.jmhz_deadline', {
+                from: state(payrollRun)!.result!.deadline!.earliest_submission_on,
+                to: state(payrollRun)!.result!.deadline!.due_on,
+              }) }}
+            </p>
+
             <div
               v-if="state(payrollRun)!.result!.controls"
               class="mt-3 space-y-3"

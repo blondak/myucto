@@ -1393,6 +1393,13 @@ export interface PayrollJmhzXmlDryRun {
   preparation_id: number
   blockers: PayrollJmhzXmlDryRunBlocker[]
   controls?: PayrollJmhzControlReport
+  deadline?: {
+    period_start: string
+    earliest_submission_on: string
+    due_on: string
+    calendar_basis: string
+    ruleset_id: string
+  } | null
   xml?: string
   xml_sha256?: string
   schema?: {

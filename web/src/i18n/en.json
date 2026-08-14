@@ -2189,6 +2189,8 @@
                 "jmhz_controls_warnings": "Passable defects ({count}) — the submission goes through with wrong data",
 
                 "jmhz_controls_form": "component {ordinal}",
+
+                "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "The report sources are incomplete.",

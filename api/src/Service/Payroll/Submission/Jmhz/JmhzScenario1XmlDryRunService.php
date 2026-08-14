@@ -24,6 +24,7 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzScenario1XmlValidator $validator,
         private JmhzSubmissionGuidFactory $guids,
         private JmhzScenario1ControlValidator $controls,
+        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
     /** @return array<string,mixed> */
@@ -75,6 +76,7 @@ final readonly class JmhzScenario1XmlDryRunService
             'preparation_id' => $preparationId,
             'blockers' => [],
             'controls' => $controls->toArray(),
+            'deadline' => $this->deadline($document),
             'xml' => $result['xml'],
             'xml_sha256' => $result['sha256'],
             'schema' => $result['schema'],
@@ -83,6 +85,32 @@ final readonly class JmhzScenario1XmlDryRunService
                 'note' => 'GUIDy náhledu se pro ostré podání nepoužijí; to si vyžádá vlastní a zmrazí je.',
             ],
             'official_submission' => $this->officialSubmission(),
+        ];
+    }
+
+    /**
+     * Lhůta pro podání za vykazované období. Do nácviku patří proto, že „XML je
+     * v pořádku" a „ještě to stihnu" jsou dvě různé otázky a uživatel se ptá na
+     * obě naráz. Termín se posouvá na nejbližší pracovní den, takže odhadnout
+     * ho od dvacátého v měsíci nejde.
+     *
+     * @return array<string,string>|null
+     */
+    private function deadline(JmhzScenario1NormalizedDocument $document): ?array
+    {
+        $scope = $document->payload['scope'] ?? null;
+        $periodStart = is_array($scope) ? ($scope['period_start'] ?? null) : null;
+        if (!is_string($periodStart)) {
+            return null;
+        }
+        $window = $this->deadlines->forPeriod($periodStart);
+
+        return [
+            'period_start' => $periodStart,
+            'earliest_submission_on' => $window->earliestSubmissionOn,
+            'due_on' => $window->dueOn,
+            'calendar_basis' => $window->calendarBasis,
+            'ruleset_id' => $window->rulesetId,
         ];
     }
 

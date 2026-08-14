@@ -2189,6 +2189,8 @@
                 "jmhz_controls_warnings": "Propustné vady ({count}) — podání projde, data budou chybná",
 
                 "jmhz_controls_form": "součást {ordinal}",
+
+                "jmhz_deadline": "Lhůta pro podání: od {from} do {to} (posunuto na pracovní den).",
                 "jmhz_dry_run_failed": "Nácvik měsíčního hlášení se nepodařilo spustit.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "Zdroje hlášení nejsou úplné.",
