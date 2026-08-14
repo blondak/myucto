@@ -580,7 +580,8 @@
         "reports_oss": "OSS return",
         "section_finance": "Finance",
         "mcp_server": "MCP server",
-        "eshop_locales": "Languages"
+        "eshop_locales": "Languages",
+        "eshop_currencies": "Currencies"
     },
     "payroll": {
         "rulesets": {
@@ -4035,7 +4036,10 @@
             "unknown_locale": "This language is not in the language list.",
             "locale_in_use": "The language has saved translations and cannot be deleted.",
             "locale_code_taken": "A language with this code already exists.",
-            "locale_code_locked": "The language code cannot be changed — translations are already linked to it."
+            "locale_code_locked": "The language code cannot be changed — translations are already linked to it.",
+            "currency_code_taken": "A currency with this code already exists.",
+            "currency_code_locked": "The currency code cannot be changed — prices already use it.",
+            "currency_in_use": "The currency cannot be deleted — products are priced in it."
         },
         "locales": {
             "title": "Languages",
@@ -4058,6 +4062,32 @@
             "default_badge": "Default",
             "col_code": "Code",
             "col_name": "Name",
+            "col_default": "Default",
+            "col_active": "Active"
+        },
+        "currencies": {
+            "title": "Currencies",
+            "subtitle": "Selling currencies you use for product prices in the e-shop",
+            "empty_title": "No currencies yet",
+            "empty_hint": "Add the currencies you want to price in. The product price list will then offer exactly those. This is unrelated to bank accounts — you can price in a currency you hold no account in.",
+            "new": "New currency",
+            "edit": "Edit currency",
+            "delete_confirm": "Really delete the currency '{name}'?",
+            "in_use_hint": "This currency already has prices and cannot be deleted. Archive it instead.",
+            "field_suggestion": "Quick pick",
+            "field_code": "Code",
+            "field_name": "Name",
+            "field_symbol": "Symbol",
+            "field_display_order": "Order",
+            "field_active": "Active",
+            "field_default": "Default currency",
+            "code_hint": "A three-letter ISO 4217 code such as “CZK”. It can no longer be changed once prices exist.",
+            "code_invalid": "The currency code must be a three-letter ISO 4217 code, such as “CZK”.",
+            "name_required": "Enter the currency name.",
+            "default_badge": "Default",
+            "col_code": "Code",
+            "col_name": "Name",
+            "col_symbol": "Symbol",
             "col_default": "Default",
             "col_active": "Active"
         }

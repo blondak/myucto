@@ -11484,6 +11484,93 @@ paths:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Jazyk má uložené překlady }
+  /api/v1/eshop/currencies:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Seznam prodejních měn e-shopu
+      description: >-
+        Číselník měn, ve kterých firma uvádí ceny zboží. Kódy odpovídají poli
+        `currency_code` u cen, akčních cen a poplatků.
+
+
+        Nejde o měnové účty z `/settings/currencies` — prodejní měna je prezentace
+        ceny zákazníkovi a s bankovním účtem nesouvisí. Zboží lze nacenit v GBP
+        i bez britského účtu; zákazník zaplatí kartou třeba na eurový účet.
+      parameters:
+        - in: query
+          name: active
+          schema: { type: boolean }
+          description: Jen aktivní (nearchivované) měny.
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Eshop]
+      summary: Přidá měnu
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string, minLength: 3, maxLength: 3, pattern: '^[A-Z]{3}$', description: 'ISO 4217, např. CZK. Malá písmena se převedou na velká.' }
+                name: { type: string, maxLength: 100 }
+                symbol: { type: [string, "null"], maxLength: 8, description: 'Zobrazovaný symbol (Kč, €, £). Prázdný řetězec se uloží jako null.' }
+                display_order: { type: integer, default: 0 }
+                is_default: { type: boolean, default: false, description: 'Předvyplněná měna nového cenového řádku; nejvýš jedna na firmu.' }
+                archived: { type: boolean, default: false, description: 'Archivovaná měna nemůže být zároveň výchozí — server ji v takovém případě z výchozí shodí.' }
+      responses:
+        '201': { description: Vytvořeno }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { description: Měna s tímto kódem už existuje (`currency_code_taken`) }
+  /api/v1/eshop/currencies/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Detail měny
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Upraví měnu
+      description: >-
+        Kód měny, ve které už jsou zadané ceny, změnit nelze — vazba
+        `stock_item_prices.currency_code` je hodnota, ne FK (409 `currency_code_locked`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string, minLength: 3, maxLength: 3, pattern: '^[A-Z]{3}$' }
+                name: { type: string, maxLength: 100 }
+                symbol: { type: [string, "null"], maxLength: 8 }
+                display_order: { type: integer }
+                is_default: { type: boolean }
+                archived: { type: boolean }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Kód už existuje, nebo v měně existují ceny }
+    delete:
+      tags: [Eshop]
+      summary: Smaže měnu
+      description: Měnu se zadanými cenami smazat nelze (409 `currency_in_use`) — archivujte ji.
+      responses:
+        '200': { description: Smazáno }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: V měně existují ceny zboží }
   /api/v1/eshop/tags:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

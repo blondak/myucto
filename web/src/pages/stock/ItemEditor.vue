@@ -24,9 +24,10 @@ import {
   type PromoQtyMode,
   type PromoState,
   type EshopLocale,
+  type EshopCurrency,
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
-import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
+import { codebooksApi, type VatRate, type Unit } from '@/api/codebooks'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -51,7 +52,7 @@ watch(tab, (v) => {
 
 // ── Číselníky ───────────────────────────────────────────────────────────
 const vatRates = ref<VatRate[]>([])
-const currencies = ref<Currency[]>([])
+const currencies = ref<EshopCurrency[]>([])
 const units = ref<Unit[]>([])
 const locales = ref<EshopLocale[]>([])
 const manufacturers = ref<Manufacturer[]>([])
@@ -172,9 +173,10 @@ const prices = ref<PriceRow[]>([])
 const recomputing = ref(false)
 
 /**
- * Měny bere karta z číselníku měn firmy (/codebooks/currencies) — tedy z těch,
- * ve kterých firma reálně účtuje. Prázdný řetězec znamená „vyber měnu"; na
- * neznámou měnu se dřív dalo napsat cokoliv a přepočet pak neměl kurz.
+ * Měny bere karta z číselníku PRODEJNÍCH měn e-shopu (/eshop/currencies), ne
+ * z měnových účtů dodavatele: prodejní měna je prezentace ceny zákazníkovi
+ * a s tím, kam přistanou peníze, nesouvisí — zboží se dá nacenit v GBP
+ * a zákazník zaplatí kartou na eurový účet. Prázdný řetězec znamená „vyber měnu".
  */
 const defaultCurrency = computed(() =>
   currencies.value.find(c => c.is_default)?.code ?? currencies.value[0]?.code ?? '')
@@ -442,7 +444,7 @@ function numOrNull(v: number | null | string): number | null {
 async function loadCodebooks() {
   const [vr, cur, un, loc, mf, cat, tg, attr, vc] = await Promise.all([
     codebooksApi.vatRates('CZ').catch(() => []),
-    codebooksApi.currencies().catch(() => [] as Currency[]),
+    eshopApi.listCurrencies({ active: 1 }).catch(() => [] as EshopCurrency[]),
     codebooksApi.units().catch(() => [] as Unit[]),
     eshopApi.listLocales().catch(() => [] as EshopLocale[]),
     eshopApi.listManufacturers().catch(() => []),

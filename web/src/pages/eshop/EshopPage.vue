@@ -9,13 +9,14 @@ import AttributesPage from './Attributes.vue'
 import TagsPage from './Tags.vue'
 import FeeTypesPage from './FeeTypes.vue'
 import LocalesPage from './Locales.vue'
+import CurrenciesPage from './Currencies.vue'
 import ProductImportPage from './ProductImport.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-type Tab = 'manufacturers' | 'categories' | 'attributes' | 'tags' | 'fees' | 'locales' | 'warehouses' | 'import'
+type Tab = 'manufacturers' | 'categories' | 'attributes' | 'tags' | 'fees' | 'locales' | 'currencies' | 'warehouses' | 'import'
 const tabs: { key: Tab; label: string }[] = [
   { key: 'manufacturers', label: t('nav.eshop_manufacturers') },
   { key: 'categories',   label: t('nav.eshop_categories') },
@@ -23,6 +24,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'tags',         label: t('nav.eshop_tags') },
   { key: 'fees',         label: t('nav.eshop_fee_types') },
   { key: 'locales',      label: t('nav.eshop_locales') },
+  { key: 'currencies',   label: t('nav.eshop_currencies') },
   { key: 'warehouses',   label: t('nav.stock_warehouses') },
   { key: 'import',       label: t('nav.eshop_import') },
 ]
@@ -63,6 +65,7 @@ watch(() => route.query.tab, (v) => {
       <TagsPage v-else-if="tab === 'tags'" />
       <FeeTypesPage v-else-if="tab === 'fees'" />
       <LocalesPage v-else-if="tab === 'locales'" />
+      <CurrenciesPage v-else-if="tab === 'currencies'" />
       <ProductImportPage v-else />
     </KeepAlive>
   </div>

@@ -580,7 +580,8 @@
         "reports_oss": "OSS přiznání",
         "section_finance": "Finance",
         "mcp_server": "MCP server",
-        "eshop_locales": "Jazyky"
+        "eshop_locales": "Jazyky",
+        "eshop_currencies": "Měny"
     },
     "payroll": {
         "rulesets": {
@@ -4035,7 +4036,10 @@
             "unknown_locale": "Tento jazyk není v číselníku jazyků.",
             "locale_in_use": "Jazyk má uložené překlady a nelze ho smazat.",
             "locale_code_taken": "Jazyk s tímto kódem už existuje.",
-            "locale_code_locked": "Kód jazyka nelze změnit — už jsou na něj navázané překlady."
+            "locale_code_locked": "Kód jazyka nelze změnit — už jsou na něj navázané překlady.",
+            "currency_code_taken": "Měna s tímto kódem už existuje.",
+            "currency_code_locked": "Kód měny nelze změnit — už jsou v ní zadané ceny.",
+            "currency_in_use": "Měnu nelze smazat — existují v ní ceny zboží."
         },
         "locales": {
             "title": "Jazyky",
@@ -4058,6 +4062,32 @@
             "default_badge": "Výchozí",
             "col_code": "Kód",
             "col_name": "Název",
+            "col_default": "Výchozí",
+            "col_active": "Aktivní"
+        },
+        "currencies": {
+            "title": "Měny",
+            "subtitle": "Prodejní měny, ve kterých uvádíte ceny zboží v e-shopu",
+            "empty_title": "Zatím žádná měna",
+            "empty_hint": "Přidejte měny, ve kterých chcete uvádět ceny. Ceník na kartě zboží pak nabídne právě je. S bankovními účty to nesouvisí — nacenit lze i měnu, ve které účet nemáte.",
+            "new": "Nová měna",
+            "edit": "Upravit měnu",
+            "delete_confirm": "Opravdu smazat měnu '{name}'?",
+            "in_use_hint": "V měně už jsou zadané ceny, smazat ji nelze. Archivujte ji.",
+            "field_suggestion": "Rychlá volba",
+            "field_code": "Kód",
+            "field_name": "Název",
+            "field_symbol": "Symbol",
+            "field_display_order": "Pořadí",
+            "field_active": "Aktivní",
+            "field_default": "Výchozí měna",
+            "code_hint": "Trojpísmenný kód ISO 4217, například „CZK“. U měny se zadanými cenami už ho nelze změnit.",
+            "code_invalid": "Kód měny musí být trojpísmenný kód ISO 4217, například „CZK“.",
+            "name_required": "Vyplňte název měny.",
+            "default_badge": "Výchozí",
+            "col_code": "Kód",
+            "col_name": "Název",
+            "col_symbol": "Symbol",
             "col_default": "Výchozí",
             "col_active": "Aktivní"
         }

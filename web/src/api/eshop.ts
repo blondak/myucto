@@ -40,6 +40,26 @@ export interface EshopLocalePayload {
   archived: boolean
 }
 
+/** Prodejní měna e-shopu — číselník cen, nezávislý na měnových účtech dodavatele. */
+export interface EshopCurrency {
+  id: number
+  code: string
+  name: string
+  symbol: string | null
+  display_order: number
+  is_default: boolean
+  archived: boolean
+}
+
+export interface EshopCurrencyPayload {
+  code: string
+  name: string
+  symbol?: string | null
+  display_order?: number
+  is_default?: boolean
+  archived: boolean
+}
+
 export interface Tag {
   id: number
   code: string
@@ -406,6 +426,14 @@ export const eshopApi = {
   createLocale: (payload: EshopLocalePayload) => api.post<EshopLocale>('/eshop/locales', payload).then(r => r.data),
   updateLocale: (id: number, payload: EshopLocalePayload) => api.put<EshopLocale>(`/eshop/locales/${id}`, payload).then(r => r.data),
   deleteLocale: (id: number) => api.delete<{ deleted: true }>(`/eshop/locales/${id}`).then(r => r.data),
+
+  // ── Prodejní měny (Currencies) ───────────────────────────────────────────
+  listCurrencies: (filters?: any) =>
+    api.get<EshopCurrency[]>('/eshop/currencies', { params: toParams(filters) }).then(r => r.data),
+  getCurrency: (id: number) => api.get<EshopCurrency>(`/eshop/currencies/${id}`).then(r => r.data),
+  createCurrency: (payload: EshopCurrencyPayload) => api.post<EshopCurrency>('/eshop/currencies', payload).then(r => r.data),
+  updateCurrency: (id: number, payload: EshopCurrencyPayload) => api.put<EshopCurrency>(`/eshop/currencies/${id}`, payload).then(r => r.data),
+  deleteCurrency: (id: number) => api.delete<{ deleted: true }>(`/eshop/currencies/${id}`).then(r => r.data),
 
   // ── Tagy (Tags) ─────────────────────────────────────────────────────────
   listTags: (filters?: any) =>

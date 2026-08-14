@@ -1885,6 +1885,13 @@ final class Routes
             $g->put   ('/locales/{id:[0-9]+}',           [\MyInvoice\Action\Eshop\LocaleAction::class, 'update']);
             $g->delete('/locales/{id:[0-9]+}',           [\MyInvoice\Action\Eshop\LocaleAction::class, 'delete']);
 
+            // Prodejní měny (číselník cen a akčních cen; NE měnové účty z /settings/currencies)
+            $g->get   ('/currencies',                    [\MyInvoice\Action\Eshop\CurrencyAction::class, 'list']);
+            $g->post  ('/currencies',                    [\MyInvoice\Action\Eshop\CurrencyAction::class, 'create']);
+            $g->get   ('/currencies/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CurrencyAction::class, 'get']);
+            $g->put   ('/currencies/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CurrencyAction::class, 'update']);
+            $g->delete('/currencies/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CurrencyAction::class, 'delete']);
+
             // Štítky
             $g->get   ('/tags',                          [\MyInvoice\Action\Eshop\StockTagAction::class, 'list']);
             $g->post  ('/tags',                          [\MyInvoice\Action\Eshop\StockTagAction::class, 'create']);
