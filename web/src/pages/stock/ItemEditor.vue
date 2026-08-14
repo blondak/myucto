@@ -23,9 +23,10 @@ import {
   type ProductPromoPricePayload,
   type PromoQtyMode,
   type PromoState,
+  type EshopLocale,
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
-import { codebooksApi, type VatRate } from '@/api/codebooks'
+import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -50,6 +51,9 @@ watch(tab, (v) => {
 
 // ── Číselníky ───────────────────────────────────────────────────────────
 const vatRates = ref<VatRate[]>([])
+const currencies = ref<Currency[]>([])
+const units = ref<Unit[]>([])
+const locales = ref<EshopLocale[]>([])
 const manufacturers = ref<Manufacturer[]>([])
 const categories = ref<Category[]>([])
 const tags = ref<Tag[]>([])
@@ -87,10 +91,16 @@ const eshop = ref({
 })
 
 // ── Jazyky ──────────────────────────────────────────────────────────────
-const AVAILABLE_LOCALES = ['cs', 'en', 'sk', 'de', 'pl']
+// Nabídku vede číselník jazyků e-shopu (stock_locales, migrace 1370), ne pevný
+// seznam v kódu. Archivovaný jazyk se nenabízí, ale už uložený překlad v něm
+// zůstává editovatelný — proto se do popisků sahá přes localeLabel().
 const i18nRows = ref<ProductI18nRow[]>([])
 const newLocale = ref('')
-const freeLocales = computed(() => AVAILABLE_LOCALES.filter(l => !i18nRows.value.some(r => r.locale === l)))
+const freeLocales = computed(() =>
+  locales.value.filter(l => !l.archived && !i18nRows.value.some(r => r.locale === l.code)))
+function localeLabel(code: string): string {
+  return locales.value.find(l => l.code === code)?.name ?? code.toUpperCase()
+}
 function addLocale() {
   const l = newLocale.value
   if (!l || i18nRows.value.some(r => r.locale === l)) return
@@ -161,6 +171,33 @@ const ROUNDING_MODES: PriceRounding[] = ['none', '0.01', '0.10', '0.50', '1', '9
 const prices = ref<PriceRow[]>([])
 const recomputing = ref(false)
 
+/**
+ * Měny bere karta z číselníku měn firmy (/codebooks/currencies) — tedy z těch,
+ * ve kterých firma reálně účtuje. Prázdný řetězec znamená „vyber měnu"; na
+ * neznámou měnu se dřív dalo napsat cokoliv a přepočet pak neměl kurz.
+ */
+const defaultCurrency = computed(() =>
+  currencies.value.find(c => c.is_default)?.code ?? currencies.value[0]?.code ?? '')
+/**
+ * Volby měny pro jeden řádek. Uloženou měnu, která v číselníku není (dřív šlo
+ * napsat cokoliv), do nabídky přidáme — jinak by se select tvářil prázdně
+ * a uložení by hodnotu tiše přepsalo.
+ */
+function currencyOptions(current: string): { code: string; known: boolean }[] {
+  const opts = currencies.value.map(c => ({ code: c.code, known: true }))
+  if (current && !opts.some(o => o.code === current)) opts.unshift({ code: current, known: false })
+  return opts
+}
+/** Měny už použité na jiném řádku cen — jedna měna smí být na kartě jen jednou. */
+function currencyTaken(code: string, selfIdx: number): boolean {
+  return prices.value.some((p, i) => i !== selfIdx && p.currency_code === code)
+}
+function nextFreeCurrency(): string {
+  const used = new Set(prices.value.map(p => p.currency_code))
+  if (defaultCurrency.value && !used.has(defaultCurrency.value)) return defaultCurrency.value
+  return currencies.value.find(c => !used.has(c.code))?.code ?? ''
+}
+
 function priceRowFrom(p: ProductPrice): PriceRow {
   return {
     id: p.id,
@@ -179,7 +216,7 @@ function priceRowFrom(p: ProductPrice): PriceRow {
 function addPriceRow() {
   prices.value.push({
     id: null,
-    currency_code: prices.value.length === 0 ? 'CZK' : '',
+    currency_code: nextFreeCurrency(),
     price_mode: 'markup',
     markup_pct: null,
     fixed_price: null,
@@ -261,7 +298,7 @@ function promoRowFrom(p: ProductPromoPrice): PromoRow {
 function addPromoRow() {
   promos.value.push({
     id: null,
-    currency_code: prices.value[0]?.currency_code?.trim().toUpperCase() || 'CZK',
+    currency_code: prices.value[0]?.currency_code || defaultCurrency.value,
     promo_price: '',
     label: null,
     valid_from: null,
@@ -280,7 +317,7 @@ function removePromoRow(idx: number) {
 function promoPayloadFrom(r: PromoRow): ProductPromoPricePayload {
   return {
     id: r.id,
-    currency_code: r.currency_code.trim().toUpperCase() || 'CZK',
+    currency_code: r.currency_code.trim().toUpperCase() || defaultCurrency.value,
     promo_price: String(r.promo_price ?? '').trim(),
     label: r.label === '' ? null : r.label,
     valid_from: r.valid_from === '' ? null : r.valid_from,
@@ -337,7 +374,7 @@ function addVendorRow() {
     client_id: null,
     vendor_sku: null,
     purchase_price: null,
-    currency_code: 'CZK',
+    currency_code: defaultCurrency.value,
     delivery_days: null,
     stock_qty: null,
     is_preferred: vendors.value.length === 0,
@@ -403,8 +440,11 @@ function numOrNull(v: number | null | string): number | null {
 }
 
 async function loadCodebooks() {
-  const [vr, mf, cat, tg, attr, vc] = await Promise.all([
+  const [vr, cur, un, loc, mf, cat, tg, attr, vc] = await Promise.all([
     codebooksApi.vatRates('CZ').catch(() => []),
+    codebooksApi.currencies().catch(() => [] as Currency[]),
+    codebooksApi.units().catch(() => [] as Unit[]),
+    eshopApi.listLocales().catch(() => [] as EshopLocale[]),
     eshopApi.listManufacturers().catch(() => []),
     eshopApi.listCategories().catch(() => []),
     eshopApi.listTags().catch(() => []),
@@ -412,6 +452,9 @@ async function loadCodebooks() {
     clientsApi.list({ role: 'vendors', per_page: 500, sort: 'name' }).then(r => r.data).catch(() => [] as Client[]),
   ])
   vatRates.value = vr
+  currencies.value = cur
+  units.value = un
+  locales.value = loc
   manufacturers.value = mf
   categories.value = cat
   tags.value = tg
@@ -539,10 +582,29 @@ function buildProductPayload(): ProductUpdatePayload {
   }
 }
 
+/**
+ * Řádek bez měny by backend odmítl 400 za celý PUT — tedy včetně už vyplněných
+ * jazyků a kategorií. Chytáme to dřív a rovnou přepneme na tab, kde chyba je.
+ */
+function validateBeforeSubmit(): boolean {
+  if (prices.value.some(p => !p.currency_code) || promos.value.some(p => !p.currency_code)) {
+    error.value = t('eshop.prices.currency_required')
+    tab.value = 'prices'
+    return false
+  }
+  if (vendors.value.some(v => !v.client_id)) {
+    error.value = t('eshop.vendors.client_required')
+    tab.value = 'vendors'
+    return false
+  }
+  return true
+}
+
 async function submit() {
-  submitting.value = true
   error.value = ''
   errors.value = {}
+  if (isEdit.value && !validateBeforeSubmit()) return
+  submitting.value = true
   try {
     if (isEdit.value && itemId.value) {
       await stockApi.updateItem(itemId.value, form.value)
@@ -688,7 +750,11 @@ function onImgError(e: Event) {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_unit') }}</label>
-              <input v-model="form.unit" maxlength="20" class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <input v-model="form.unit" maxlength="20" list="stock-item-units"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <datalist id="stock-item-units">
+                <option v-for="u in units" :key="u.id" :value="u.code" />
+              </datalist>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_ean') }}</label>
@@ -779,23 +845,30 @@ function onImgError(e: Event) {
       <!-- ═══════════ TAB: JAZYKY ═══════════ -->
       <div v-if="isEdit" v-show="tab === 'languages'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
-          <div class="flex items-center gap-2">
-            <select v-model="newLocale" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
-              <option value="">—</option>
-              <option v-for="l in freeLocales" :key="l" :value="l">{{ l.toUpperCase() }}</option>
+          <div class="flex flex-wrap items-center gap-2">
+            <select v-model="newLocale" :disabled="freeLocales.length === 0"
+              class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100 disabled:text-neutral-500">
+              <option value="">{{ t('eshop.languages.select_locale') }}</option>
+              <option v-for="l in freeLocales" :key="l.code" :value="l.code">{{ l.name }} ({{ l.code.toUpperCase() }})</option>
             </select>
-            <button type="button" @click="addLocale" :disabled="!newLocale" :class="btnOutline('primary')">
+            <button type="button" @click="addLocale" :disabled="!newLocale" :class="btnOutline('primary')" class="whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
               {{ t('eshop.languages.add_locale') }}
             </button>
+            <RouterLink to="/eshop?tab=locales" :class="btnOutline('neutral')" class="whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              {{ t('eshop.languages.manage_locales') }}
+            </RouterLink>
           </div>
 
-          <EmptyState v-if="i18nRows.length === 0" dense accent="neutral" icon="doc"
+          <EmptyState v-if="locales.length === 0" dense accent="neutral" icon="doc"
+            :title="t('eshop.languages.no_codebook')" :message="t('eshop.languages.no_codebook_hint')" />
+          <EmptyState v-else-if="i18nRows.length === 0" dense accent="neutral" icon="doc"
             :title="t('eshop.languages.empty')" />
 
           <div v-for="row in i18nRows" :key="row.locale" class="border border-neutral-200 rounded-md p-4 space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-semibold uppercase">{{ row.locale }}</span>
+              <span class="text-sm font-semibold">{{ localeLabel(row.locale) }} <span class="text-neutral-400 font-mono font-normal uppercase">{{ row.locale }}</span></span>
               <button type="button" @click="removeLocale(row.locale)" :title="t('eshop.languages.remove_locale')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
                 <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
               </button>
@@ -943,8 +1016,11 @@ function onImgError(e: Event) {
               <tbody>
                 <tr v-for="(p, idx) in prices" :key="p.id ?? `new-${idx}`" class="border-b border-neutral-100 align-top">
                   <td class="py-2 pr-3">
-                    <input v-model="p.currency_code" maxlength="3" placeholder="CZK"
-                      class="w-20 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                    <select v-model="p.currency_code" required
+                      class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
+                      <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                      <option v-for="c in currencyOptions(p.currency_code)" :key="c.code" :value="c.code" :disabled="currencyTaken(c.code, idx)">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
+                    </select>
                   </td>
                   <td class="py-2 pr-3">
                     <select v-model="p.price_mode" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -1020,8 +1096,11 @@ function onImgError(e: Event) {
                         class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                     </td>
                     <td class="py-2 pr-3">
-                      <input v-model="p.currency_code" maxlength="3" placeholder="CZK"
-                        class="w-20 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                      <select v-model="p.currency_code" required
+                        class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
+                        <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                        <option v-for="c in currencyOptions(p.currency_code)" :key="c.code" :value="c.code">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
+                      </select>
                     </td>
                     <td class="py-2 pr-3">
                       <input v-model="p.promo_price" type="text" inputmode="decimal" :placeholder="t('eshop.prices.fixed_ph')"
@@ -1107,7 +1186,10 @@ function onImgError(e: Event) {
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.vendors.field_currency') }}</label>
-                <input v-model="v.currency_code" maxlength="3" placeholder="CZK" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+                <select v-model="v.currency_code" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
+                  <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                  <option v-for="c in currencyOptions(v.currency_code)" :key="c.code" :value="c.code">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
+                </select>
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.vendors.field_delivery_days') }}</label>

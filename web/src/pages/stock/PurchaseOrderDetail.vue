@@ -7,7 +7,7 @@ import {
   type PurchaseOrderPayload, type PurchaseOrderLine,
 } from '@/api/purchaseOrders'
 import { stockApi, type Warehouse, type StockItemSearchResult } from '@/api/stock'
-import { codebooksApi, type Currency, type VatRate } from '@/api/codebooks'
+import { codebooksApi, type Currency, type VatRate, type Unit } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -37,6 +37,7 @@ const acting = ref(false)
 const warehouses = ref<Warehouse[]>([])
 const currencies = ref<Currency[]>([])
 const vatRates = ref<VatRate[]>([])
+const units = ref<Unit[]>([])
 
 const form = reactive({
   vendor_id: null as number | null,
@@ -90,14 +91,16 @@ const currencyCode = computed(() => currencies.value.find(c => c.id === form.cur
 
 async function loadRefData() {
   try {
-    const [whs, curr, vat] = await Promise.all([
+    const [whs, curr, vat, un] = await Promise.all([
       stockApi.listWarehouses(true),
       codebooksApi.currencies(),
       codebooksApi.vatRates(),
+      codebooksApi.units(),
     ])
     warehouses.value = whs
     currencies.value = curr
     vatRates.value = vat
+    units.value = un
   } catch { /* ignore — selecty zůstanou prázdné */ }
 }
 
@@ -523,7 +526,7 @@ onMounted(async () => {
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.orders.col_qty') }}</label>
               <input v-model="row.qty_ordered" type="number" step="0.001" min="0"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
-              <input v-model="row.unit" type="text" :placeholder="t('stock.orders.col_unit')"
+              <input v-model="row.unit" type="text" :placeholder="t('stock.orders.col_unit')" list="po-line-units"
                 class="mt-1 w-full h-8 px-2 border border-neutral-300 rounded-md text-xs text-right" />
             </div>
             <div class="sm:col-span-2">
@@ -549,6 +552,9 @@ onMounted(async () => {
               </button>
             </div>
           </div>
+          <datalist id="po-line-units">
+            <option v-for="u in units" :key="u.id" :value="u.code" />
+          </datalist>
         </div>
 
         <!-- Read-only zobrazení s plněním -->
@@ -627,7 +633,7 @@ onMounted(async () => {
                 class="w-24 h-8 px-2 border border-neutral-300 rounded-md text-right font-mono text-xs" />
             </div>
           </div>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-wrap justify-end gap-2">
             <button @click="confirmModalOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
             <button @click="submitConfirm" :disabled="acting" :class="btnFilled('primary')">
               {{ acting ? t('common.saving') : t('stock.orders.confirm') }}
@@ -647,7 +653,7 @@ onMounted(async () => {
             {{ reasonModalMode === 'cancel' ? t('stock.orders.cancel_reason') : t('stock.orders.close_reason') }}
           </label>
           <textarea v-model="reasonText" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm mb-3"></textarea>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-wrap justify-end gap-2">
             <button @click="reasonModalOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
             <button @click="submitReason" :disabled="acting" :class="btnFilled(reasonModalMode === 'cancel' ? 'danger' : 'warning')">
               {{ acting ? t('common.saving') : (reasonModalMode === 'cancel' ? t('stock.orders.cancel') : t('stock.orders.close_remainder')) }}

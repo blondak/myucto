@@ -498,6 +498,12 @@ onMounted(async () => {
               <input v-if="isReceipt" v-model="row.unit_cost" type="number" step="0.000001" min="0" :readonly="readOnly"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm disabled:bg-neutral-50" :disabled="readOnly" />
               <div v-else class="h-10 flex items-center justify-end text-xs text-neutral-400 italic">{{ t('stock.documents.price_computed_hint') }}</div>
+              <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce
+                   níž se při načtení dokladu neplní. Bez tohohle řádku uživatel
+                   nevidí, že tam nějaká částka je, a další náklad přičte navrch. -->
+              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500 font-mono">
+                {{ t('stock.documents.extra_cost_allocated') }}: {{ row.extra_cost }}
+              </p>
             </div>
             <div class="sm:col-span-3">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.field_description') }}</label>
@@ -534,7 +540,8 @@ onMounted(async () => {
               <option value="by_value">{{ t('stock.documents.allocation_by_value') }}</option>
               <option value="by_qty">{{ t('stock.documents.allocation_by_qty') }}</option>
             </select>
-            <button type="button" @click="removeLandedCost(i)" class="sm:col-span-1 cursor-pointer text-danger-500 hover:text-danger-600 justify-self-end">
+            <button type="button" @click="removeLandedCost(i)" :title="t('common.delete')"
+              class="sm:col-span-1 justify-self-end cursor-pointer w-9 h-9 inline-flex items-center justify-center text-danger-500 hover:bg-danger-50 rounded-md">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             </button>
           </div>
@@ -550,7 +557,7 @@ onMounted(async () => {
           <p class="text-sm text-neutral-500 mb-3">{{ doc?.doc_number }}</p>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.documents.cancel_reason') }}</label>
           <textarea v-model="reverseReason" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm mb-3"></textarea>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-wrap justify-end gap-2">
             <button @click="reverseOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
             <button @click="reverse" :disabled="reversing" :class="btnFilled('danger')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>

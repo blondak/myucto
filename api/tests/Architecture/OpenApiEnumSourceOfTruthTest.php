@@ -129,7 +129,8 @@ final class OpenApiEnumSourceOfTruthTest extends TestCase
             'additionalProperties', 'in', 'content', 'enum',
         ];
 
-        $lines = explode("\n", $this->read('api/openapi.yaml'));
+        // \R kvůli CRLF v pracovním stromu (git autocrlf na Windows).
+        $lines = preg_split('/\R/', $this->read('api/openapi.yaml')) ?: [];
         $out = [];
         $lastKey = '';
 
@@ -174,7 +175,8 @@ final class OpenApiEnumSourceOfTruthTest extends TestCase
      */
     private function enumAfter(string $schemaLine, string $property): array
     {
-        $lines = explode("\n", $this->read('api/openapi.yaml'));
+        // \R kvůli CRLF v pracovním stromu (git autocrlf na Windows).
+        $lines = preg_split('/\R/', $this->read('api/openapi.yaml')) ?: [];
         $inSchema = false;
         $inProperty = false;
         foreach ($lines as $line) {

@@ -116,6 +116,12 @@ final class StockEshopTenantReferenceIdorTest extends TestCase
         $this->supplierB = $this->createIsolatedSupplier($this->pdo, $this->supplierA);
         $this->pdo->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id IN (?, ?)')
             ->execute([$this->supplierA, $this->supplierB]);
+        // Jazyk, ve kterém testy zapisují i18n, musí být v číselníku (1370) —
+        // jinak by zápis skončil 400 `unknown_locale` a test by neověřil scope.
+        $this->pdo->prepare(
+            "INSERT IGNORE INTO stock_locales (supplier_id, code, name, is_default)
+             VALUES (?, 'en', 'English', 1), (?, 'en', 'English', 1)"
+        )->execute([$this->supplierA, $this->supplierB]);
     }
 
     protected function tearDown(): void

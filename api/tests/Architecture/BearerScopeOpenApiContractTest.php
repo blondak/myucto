@@ -120,7 +120,9 @@ final class BearerScopeOpenApiContractTest extends TestCase
      */
     private function operations(): array
     {
-        $lines = explode("\n", $this->read('api/openapi.yaml'));
+        // Dělíme přes \R, ne přes "\n": pracovní strom může mít CRLF (git autocrlf
+        // na Windows), a zbylý \r by rozbil porovnání řádku na přesnou shodu.
+        $lines = preg_split('/\R/', $this->read('api/openapi.yaml')) ?: [];
         $methods = implode('|', self::METHODS);
 
         $out = [];

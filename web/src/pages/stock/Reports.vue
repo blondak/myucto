@@ -95,7 +95,7 @@ onMounted(async () => {
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_date') }}</label>
           <input v-model="filters.date" type="date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div class="flex gap-2 ml-auto">
+        <div class="flex flex-wrap gap-2 ml-auto">
           <button :disabled="loading" @click="exportFile('pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('stock.reports.export_pdf') }}

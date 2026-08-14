@@ -16,7 +16,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
-import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -423,10 +423,9 @@ onMounted(async () => {
     </div>
 
     <div v-if="!loading && items.length > 0 && page < pages" class="text-center mt-3">
-      <button @click="load(false)" :disabled="loadingMore"
-        class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
+      <button type="button" @click="load(false)" :disabled="loadingMore" :class="btnOutline('neutral')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
         {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
       </button>
     </div>
   </div>

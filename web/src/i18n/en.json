@@ -579,7 +579,8 @@
         "quick_stock_item": "New stock item",
         "reports_oss": "OSS return",
         "section_finance": "Finance",
-        "mcp_server": "MCP server"
+        "mcp_server": "MCP server",
+        "eshop_locales": "Languages"
     },
     "payroll": {
         "rulesets": {
@@ -3575,7 +3576,8 @@
             "print_pdf": "Print PDF",
             "counting_warning": "A stock take is in progress in this warehouse — movements are temporarily blocked.",
             "insufficient_stock_title": "Insufficient stock",
-            "insufficient_stock_line": "{sku} — {name}: requested {requested}, available {available}"
+            "insufficient_stock_line": "{sku} — {name}: requested {requested}, available {available}",
+            "extra_cost_allocated": "Allocated landed costs"
         },
         "takes": {
             "title": "Stock takes",
@@ -3880,7 +3882,11 @@
             "field_description": "Description",
             "field_seo_title": "SEO title",
             "field_seo_description": "SEO description",
-            "field_seo_slug": "SEO slug"
+            "field_seo_slug": "SEO slug",
+            "select_locale": "Select a language",
+            "manage_locales": "Manage languages",
+            "no_codebook": "The language list is empty",
+            "no_codebook_hint": "Define the languages you want to describe your products in first, under E-shop."
         },
         "product_categories": {
             "categories_title": "Categories",
@@ -3914,7 +3920,9 @@
             "rounding_0_10": "To 0.10",
             "rounding_0_50": "To 0.50",
             "rounding_1": "To whole (1)",
-            "rounding_9_ending": "To .9 ending"
+            "rounding_9_ending": "To .9 ending",
+            "select_currency": "Select a currency",
+            "currency_required": "Pick a currency for every price."
         },
         "promo": {
             "title": "Promotional prices",
@@ -3956,7 +3964,8 @@
             "field_delivery_days": "Delivery (days)",
             "field_stock_qty": "In stock (pcs)",
             "field_preferred": "Preferred",
-            "field_note": "Note"
+            "field_note": "Note",
+            "client_required": "Pick a contact for every vendor."
         },
         "attachments": {
             "title": "Attachments",
@@ -4022,7 +4031,35 @@
             "category_has_children": "Category has subcategories — move or delete them first.",
             "validation_failed": "Check the entered prices — some values are invalid.",
             "vendor_invalid": "Invalid vendor — the client must have the vendor role.",
-            "multiple_preferred_vendors": "Only one vendor can be preferred."
+            "multiple_preferred_vendors": "Only one vendor can be preferred.",
+            "unknown_locale": "This language is not in the language list.",
+            "locale_in_use": "The language has saved translations and cannot be deleted.",
+            "locale_code_taken": "A language with this code already exists.",
+            "locale_code_locked": "The language code cannot be changed — translations are already linked to it."
+        },
+        "locales": {
+            "title": "Languages",
+            "subtitle": "Language versions you maintain product and category texts in",
+            "empty_title": "No languages yet",
+            "empty_hint": "Add the languages you want to describe your products in. The product card will then offer exactly those — no more, no less.",
+            "new": "New language",
+            "edit": "Edit language",
+            "delete_confirm": "Really delete the language '{name}'?",
+            "in_use_hint": "This language has saved translations and cannot be deleted. Archive it instead.",
+            "field_suggestion": "Quick pick",
+            "field_code": "Code",
+            "field_name": "Name",
+            "field_display_order": "Order",
+            "field_active": "Active",
+            "field_default": "Default language",
+            "code_hint": "Use a code such as “cs” or “pt-BR”. It can no longer be changed once translations exist.",
+            "code_invalid": "The language code must look like “cs” or “pt-BR”.",
+            "name_required": "Enter the language name.",
+            "default_badge": "Default",
+            "col_code": "Code",
+            "col_name": "Name",
+            "col_default": "Default",
+            "col_active": "Active"
         }
     },
     "accounting": {
