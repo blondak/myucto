@@ -259,6 +259,101 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
+    /**
+     * Daňová přiznání byla přes token nedostupná omylem: `#^/api/tax(/|$)#`
+     * vyžaduje po „tax" lomítko, takže `/api/tax-return/...` nikdy nechytil.
+     * Čtení přiznání je přitom to, kvůli čemu se integrace staví.
+     */
+    public function testBearerCanReadTaxReturns(): void
+    {
+        foreach ([
+            '/api/tax-return/advances/upcoming',
+            '/api/tax-return/dppo/2026',
+            '/api/tax-return/dppo/2026/xml',
+            '/api/tax-return/dppo/2026/advances',
+            '/api/tax-return/dpfo/2026/insurance',
+        ] as $path) {
+            $r = $this->middleware()->process(
+                $this->bearer('GET', $path, 'read'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $r->getStatusCode(), "bearer GET $path");
+        }
+    }
+
+    /** Podat přiznání, znovuotevřít ho ani přepsat zálohy token nesmí — to dělá člověk. */
+    public function testBearerCannotWriteTaxReturns(): void
+    {
+        foreach ([
+            ['POST', '/api/tax-return/dppo/2026/finalize'],
+            ['POST', '/api/tax-return/dppo/2026/reopen'],
+            ['PUT', '/api/tax-return/dppo/2026/inputs'],
+            ['POST', '/api/tax-return/dppo/2026/advances/generate'],
+            ['DELETE', '/api/tax-return/dppo/2026/advances/overrides/7'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process(
+                $this->bearer($method, $path, 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(403, $r->getStatusCode(), "bearer $method $path");
+            self::assertSame('token_write_forbidden', $this->errorCode($r), "bearer $method $path");
+        }
+    }
+
+    /** Přehledy automatizace čtou tatáž data jako /api/accounting; pravidla mění člověk. */
+    public function testBearerCanReadAutomationButNotApplyWizard(): void
+    {
+        foreach (['/api/automation/overview', '/api/automation/feed', '/api/automation/counts'] as $path) {
+            $r = $this->middleware()->process($this->bearer('GET', $path, 'read'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer GET $path");
+        }
+        $r = $this->middleware()->process(
+            $this->bearer('POST', '/api/automation/wizard/apply', 'read_write'),
+            $this->okHandler(),
+        );
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('token_write_forbidden', $this->errorCode($r));
+    }
+
+    public function testBearerCanReachDocumentRequestsAndHelpers(): void
+    {
+        foreach ([
+            ['GET', '/api/document-requests'],
+            ['GET', '/api/slug'],
+            ['GET', '/api/bank-ai-suggestion-availability'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer $method $path");
+        }
+    }
+
+    /**
+     * Hranice zůstává úzká. Klientský portál je pohled webového rozhraní, uživatelské
+     * filtry a předvolby jsou stav UI, a přijetí AI návrhu je zaúčtování (permission
+     * `accounting.journal.post`) — to token nesmí ani se `read_write`.
+     */
+    public function testBearerStaysBlockedFromSessionOnlySurface(): void
+    {
+        foreach ([
+            ['GET', '/api/portal/summary'],
+            ['GET', '/api/portal/document-requests'],
+            ['POST', '/api/portal/document-requests/7/upload'],
+            ['GET', '/api/user/filters'],
+            ['GET', '/api/user/preferences'],
+            ['DELETE', '/api/user/preferences/theme'],
+            ['POST', '/api/ai/suggestions/7/accept'],
+            ['POST', '/api/ai/suggestions/7/reject'],
+            ['GET', '/api/settings/ai-assist'],
+            ['GET', '/api/settings/accounting-activation/status'],
+            ['GET', '/api/settings/mode-switch-preview'],
+            ['GET', '/api/admin/bank-rule-templates'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $r->getStatusCode(), "bearer $method $path");
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($r), "bearer $method $path");
+        }
+    }
+
     private function middleware(): ApiScopeMiddleware
     {
         return new ApiScopeMiddleware(new ResponseFactory());

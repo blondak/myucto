@@ -66,7 +66,12 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/logbook(/|$)#',
         '#^/api/documents(/|$)#',
         '#^/api/document-folders(/|$)#',
+        // Vyžádání podkladů od klienta — sesterský zdroj k /documents (stejná
+        // agenda, jen z druhé strany). Klientský pohled /portal/* sem nepatří:
+        // ten je součástí webového rozhraní, ne veřejného API.
+        '#^/api/document-requests(/|$)#',
         '#^/api/suppliers(/|$)#',
+        '#^/api/slug$#',
         // Sklad a e-shop — MCP server nad nimi staví nástroje pro zboží, ceny
         // a dostupnost. Moduly jsou opt-in (`stock_enabled`) a PermissionMiddleware
         // nad `^/api/(stock|eshop)` platí dál, takže se tím nic neotevírá plošně.
@@ -80,7 +85,19 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
         '#^/api/tax-evidence(/|$)#',
+        // Daňová přiznání. Vlastní vzor je nutnost: `#^/api/tax(/|$)#` po „tax"
+        // vyžaduje lomítko, takže `/api/tax-return/...` nikdy nechytil a celá
+        // agenda byla přes token nedostupná — v rozporu se záměrem níže, kde je
+        // čtení daňové vrstvy výslovně žádoucí. Zápis blokuje BEARER_READ_ONLY.
+        '#^/api/tax-return(/|$)#',
         '#^/api/accounting(/|$)#',
+        // Přehledy automatizace čtou tatáž účetní data jako /api/accounting.
+        // Zápis (wizard/apply) drží BEARER_READ_ONLY.
+        '#^/api/automation(/|$)#',
+        // Dostupnost AI návrhů k bankovním pohybům — jen GET, patří k bank doméně.
+        // Samotné přijetí návrhu (/api/ai/suggestions/…) je zaúčtování, a to
+        // zůstává mimo token vědomě.
+        '#^/api/bank-ai-suggestion-availability$#',
         '#^/api/search$#',
         '#^/api/branding-profiles$#',
         // Číselníky
@@ -120,6 +137,13 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
         '#^/api/tax-evidence(/|$)#',
+        // Přiznání: podat, znovuotevřít nebo přepsat zálohy smí jen člověk
+        // v aplikaci — čtení (výpočet, XML náhled, přehled záloh) je naopak to,
+        // kvůli čemu se integrace staví.
+        '#^/api/tax-return(/|$)#',
+        // Průvodce automatizací zapisuje pravidla zaúčtování — čtení přehledů ano,
+        // změnu pravidel dělá člověk.
+        '#^/api/automation(/|$)#',
     ];
 
     public function __construct(
