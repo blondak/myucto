@@ -104,6 +104,26 @@ final class JmhzReceiptVerifierTest extends TestCase
         }
     }
 
+    /**
+     * Protokol bez CorrelationID se nesmí propašovat jako protokol očekávaného
+     * podání. Vzít z něj stav by znamenalo přijmout rozhodnutí o dokumentu,
+     * u kterého nevíme, ke kterému podání patří.
+     */
+    public function testProtocolWithoutCorrelationCannotClaimAnExpectedSubmission(): void
+    {
+        try {
+            (new JmhzReceiptVerifier($this->signatures()))->verify(
+                JmhzTransportSample::partialProtocol(correlationId: ''),
+                'vrep_apep',
+                'test',
+                'CID0000000001',
+            );
+            self::fail('Protokol bez CorrelationID musí padnout.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_protocol_correlation_missing', $e->errorCode);
+        }
+    }
+
     public function testForeignFormGuidIsRefusedWhenAMapIsDeclared(): void
     {
         $verifier = (new JmhzReceiptVerifier($this->signatures()))->withFormPartIds([

@@ -71,14 +71,24 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
         }
         $xml = $this->signatures->verifiedProtocolXml($bytes, $environment);
         $report = $this->parser->parse($xml, $this->packageCount);
-        if ($expectedCorrelationReference !== null
-            && $report->correlationReference !== null
-            && !hash_equals($expectedCorrelationReference, $report->correlationReference)
-        ) {
-            throw new JmhzTransportException(
-                'jmhz_protocol_correlation_mismatch',
-                'Ověřený protokol patří jinému podání.',
-            );
+        if ($expectedCorrelationReference !== null) {
+            // Protokol bez CorrelationID nelze k podání přiřadit. Propustit ho
+            // by znamenalo vzít stav z dokumentu, o kterém nevíme, že k tomuhle
+            // podání patří — a `remote_status` je jediný údaj, který v platformě
+            // rozhoduje o přijetí.
+            if ($report->correlationReference === null) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_correlation_missing',
+                    'Ověřený protokol neuvádí CorrelationID, takže ho k podání'
+                        . ' nelze přiřadit.',
+                );
+            }
+            if (!hash_equals($expectedCorrelationReference, $report->correlationReference)) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_correlation_mismatch',
+                    'Ověřený protokol patří jinému podání.',
+                );
+            }
         }
 
         return new PayrollVerifiedReceipt(
