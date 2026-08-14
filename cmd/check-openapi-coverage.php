@@ -129,6 +129,11 @@ $skipPrefixes = [
     '/api/auth/change-password',
     '/api/auth/totp/',
     '/api/auth/tokens',            // session-only, nelze volat bearer-em
+    // ApiVersionRewriteMiddleware pro ně vrací pod /api/v1 tvrdě 404 — do veřejné
+    // spec nepatří a hlásit je jako mezeru je falešný poplach (byla to pětina reportu).
+    '/api/auth/webauthn/',
+    '/api/auth/mfa/',
+    '/api/auth/session/',
     '/api/payroll/',               // interní session-only mzdový bounded context
     '/api/settings/email-branding/', // admin UI tooling (logo upload, preview)
     '/api/maintenance/',           // správa sample dat, admin-only (RoleMiddleware)

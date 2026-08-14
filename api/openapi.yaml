@@ -2563,40 +2563,6 @@ paths:
                         invoice_id: { type: integer }
                         reason: { type: string }
 
-  /api/v1/invoices/export.csv:
-    parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-    get:
-      tags: [Reports]
-      summary: CSV export faktur
-      description: |
-        Stejné filtry jako `GET /api/v1/invoices`, ale vrátí CSV stream
-        místo JSON. Vhodné pro BI / Google Sheets / Excel import.
-
-        Sloupce: `id`, `number`, `client`, `issue_date`, `due_date`, `taxable_date`,
-        `currency`, `total_excl_vat`, `total_vat`, `total_incl_vat`, `status`, `paid_at`.
-      parameters:
-        - in: query
-          name: status
-          schema:
-            type: string
-            enum: [draft, issued, sent, reminded, paid, cancelled]
-        - in: query
-          name: from
-          schema: { type: string, format: date }
-        - in: query
-          name: to
-          schema: { type: string, format: date }
-        - in: query
-          name: client_id
-          schema: { type: integer }
-      responses:
-        '200':
-          description: CSV stream
-          content:
-            text/csv:
-              schema: { type: string }
-
   /api/v1/dashboard/summary:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16303,48 +16269,6 @@ paths:
         '400': { description: Neplatný typ/rok }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Předpisy pro rok už existují, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-
-  /api/v1/tax-return/{type}/{year}/advances/override:
-    parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - { in: path, name: type, required: true, schema: { type: string, enum: [fo, po] } }
-      - { in: path, name: year, required: true, schema: { type: integer } }
-    get:
-      tags: [TaxReturn]
-      summary: Aktivní rozhodnutí FÚ (§174) platné pro tento rok
-      responses:
-        '200': { description: "OK {amount, valid_from, valid_to}", content: { application/json: { schema: { type: object } } } }
-        '400': { description: Neplatný typ/rok }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    put:
-      tags: [TaxReturn]
-      summary: Uloží rozhodnutí FÚ (§174) a přepočítá předpisy
-      description: "#43 — ruční potvrzení rozhodnutí o výši záloh."
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [amount, valid_from, valid_to]
-              properties:
-                amount: { type: number }
-                valid_from: { type: string, format: date }
-                valid_to: { type: string, format: date }
-                reason: { type: [string, "null"] }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
-        '400': { description: Neplatný typ/rok }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Kolize s existujícím rozhodnutím, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    delete:
-      tags: [TaxReturn]
-      summary: Smaže rozhodnutí FÚ (§174), vrátí zálohy na predikci
-      responses:
-        '200': { description: "OK {deleted: true}", content: { application/json: { schema: { type: object } } } }
-        '400': { description: Neplatný typ/rok }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/tax-return/{type}/{year}/advances/overrides:
     parameters:
