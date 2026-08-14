@@ -552,7 +552,7 @@
         "section_stock_compact": "Sklad",
         "stock_items": "Skladové karty",
         "stock_documents": "Příjemky a výdejky",
-        "stock_purchase_orders": "Objednávky dodavatelům",
+        "stock_purchase_orders": "Objednávky",
         "stock_takes": "Inventury",
         "stock_warehouses": "Sklady",
         "stock_vendor_offers": "U dodavatele",
