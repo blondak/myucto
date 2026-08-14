@@ -348,6 +348,42 @@ final class RoutePermissionMap
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];
 
+    /**
+     * Výjimky ze superadmin fallbacku pro `/api/admin/*` — routy, které jsou prací
+     * s daty firmy, ne konfigurací systému, a jejichž Action vrstva už oprávnění
+     * sama deklaruje (`RequestAuthorization::allows`). Bez tohoto seznamu je
+     * fallback níže zkratoval dřív, než se guard v akci vůbec dostal ke slovu:
+     * `utilities.import` byl fakticky mrtvý klíč, protože ho nešlo uplatnit.
+     *
+     * Klíč i úroveň musí odpovídat guardu v příslušné akci — jinak by middleware
+     * pustil dál request, který akce stejně odmítne (nebo naopak).
+     *
+     * Fail-closed: co se sem netrefí, spadne dál na SUPERADMIN jako dosud.
+     * Vědomě sem nepatří konfigurace samotného systému (`/api/maintenance/*`,
+     * uživatelé, role, licence) ani zbytek `/api/admin/*`.
+     *
+     * @var list<array{0:string,1:string,2:string,3:AccessLevel}>
+     */
+    private const ADMIN_RULES = [
+        // Import dokladů (Pohoda XML / ISDOC, iDoklad, Fakturoid) — ImportAction,
+        // Start{Idoklad,Fakturoid}ImportAction, ImportJobStatus/Cancel/DeleteImportJobAction.
+        ['POST',   '#^/api/admin/import$#', 'utilities.import', AccessLevel::WRITE],
+        ['POST',   '#^/api/admin/imports/(idoklad|fakturoid)/start$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::READ],
+        ['POST',   '#^/api/admin/imports/[0-9]+/cancel$#', 'utilities.import', AccessLevel::WRITE],
+        ['DELETE', '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::WRITE],
+        // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají
+        // WRITE i u `status` (odpověď prozrazuje, že je integrace nastavená).
+        ['*', '#^/api/admin/imports/(idoklad|fakturoid)/credentials$#', 'utilities.import', AccessLevel::WRITE],
+        // AI extrakce z PDF — sdílí oprávnění s tou stranou dokladů, do které zapisuje
+        // (AiExtractPdfAction = přijaté, AiExtractPdfIssuedAction = vystavené).
+        ['POST', '#^/api/admin/imports/ai-extract-pdf$#', 'purchase_invoices.scan', AccessLevel::WRITE],
+        ['POST', '#^/api/admin/imports/ai-extract-pdf-issued$#', 'invoices.create', AccessLevel::WRITE],
+        // Klíče k AI poskytovatelům sem vědomě NEPATŘÍ — zůstávají superadmin-only
+        // (F7, viz F7NestedRbacTest). Guard `settings.ai_provider` v akcích je druhá
+        // vrstva pro volání mimo middleware, ne pozvánka pustit sem účetní.
+    ];
+
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
@@ -366,6 +402,11 @@ final class RoutePermissionMap
             return new RoutePermission(self::SUPERADMIN);
         }
         if (str_starts_with($path, '/api/admin/') || str_starts_with($path, '/api/maintenance/')) {
+            foreach (self::ADMIN_RULES as [$ruleMethod, $pattern, $key, $level]) {
+                if (($ruleMethod === '*' || $ruleMethod === $method) && preg_match($pattern, $path) === 1) {
+                    return new RoutePermission(self::PERMISSION, $key, $level);
+                }
+            }
             return new RoutePermission(self::SUPERADMIN);
         }
         // Licencování a aktivace (E4) — admin only.

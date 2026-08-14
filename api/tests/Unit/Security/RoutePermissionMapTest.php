@@ -158,6 +158,91 @@ final class RoutePermissionMapTest extends TestCase
         self::assertNull((new RoutePermissionMap())->match('GET', '/api/future-dangerous-feature'));
     }
 
+    /**
+     * Import dokladů je práce s daty firmy, ne konfigurace systému — Action vrstva
+     * u něj oprávnění deklaruje sama a middleware ji musí nechat rozhodnout. Dokud
+     * všechno pod `/api/admin/` padalo rovnou na superadmina, byl `utilities.import`
+     * mrtvý klíč: nešlo ho v rolích uplatnit, protože se guard nikdy nespustil.
+     */
+    public function testAdminImportRoutesAreResolvedByPermission(): void
+    {
+        $map = new RoutePermissionMap();
+        foreach ([
+            ['POST', '/api/admin/import', 'utilities.import', AccessLevel::WRITE],
+            ['POST', '/api/admin/imports/idoklad/start', 'utilities.import', AccessLevel::WRITE],
+            ['POST', '/api/admin/imports/fakturoid/start', 'utilities.import', AccessLevel::WRITE],
+            ['GET', '/api/admin/imports/42', 'utilities.import', AccessLevel::READ],
+            ['POST', '/api/admin/imports/42/cancel', 'utilities.import', AccessLevel::WRITE],
+            ['DELETE', '/api/admin/imports/42', 'utilities.import', AccessLevel::WRITE],
+            ['GET', '/api/admin/imports/idoklad/credentials', 'utilities.import', AccessLevel::WRITE],
+            ['PUT', '/api/admin/imports/fakturoid/credentials', 'utilities.import', AccessLevel::WRITE],
+            ['DELETE', '/api/admin/imports/idoklad/credentials', 'utilities.import', AccessLevel::WRITE],
+            ['POST', '/api/admin/imports/ai-extract-pdf', 'purchase_invoices.scan', AccessLevel::WRITE],
+            ['POST', '/api/admin/imports/ai-extract-pdf-issued', 'invoices.create', AccessLevel::WRITE],
+        ] as [$method, $path, $key, $level]) {
+            $match = $map->match($method, $path);
+            self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind, "$method $path");
+            self::assertSame($key, $match?->key, "$method $path");
+            self::assertSame($level, $match?->minimum, "$method $path");
+        }
+    }
+
+    /** Klíče z admin výjimek musí existovat v katalogu — jinak by je nešlo v rolích nastavit. */
+    public function testAdminImportPermissionKeysExistInCatalog(): void
+    {
+        $map = new RoutePermissionMap();
+        $catalog = new PermissionCatalog();
+        foreach ([
+            ['POST', '/api/admin/import'],
+            ['POST', '/api/admin/imports/idoklad/start'],
+            ['GET', '/api/admin/imports/42'],
+            ['POST', '/api/admin/imports/ai-extract-pdf'],
+            ['POST', '/api/admin/imports/ai-extract-pdf-issued'],
+        ] as [$method, $path]) {
+            $key = (string) $map->match($method, $path)?->key;
+            self::assertTrue($catalog->has($key), "$method $path → $key");
+        }
+    }
+
+    /**
+     * Výjimka je úzká a fail-closed: cokoli mimo vyjmenované importní routy zůstává
+     * superadmin-only. Hlídá hlavně to, aby regex na `/imports/…` neuklouzl na
+     * konfiguraci systému nebo na sousední admin agendy.
+     */
+    public function testOtherAdminRoutesStaySuperadminOnly(): void
+    {
+        $map = new RoutePermissionMap();
+        foreach ([
+            ['GET', '/api/admin/users'],
+            ['POST', '/api/admin/users'],
+            ['GET', '/api/admin/roles'],
+            ['GET', '/api/admin/export'],
+            ['GET', '/api/admin/invoices-zip'],
+            ['GET', '/api/admin/approvals'],
+            ['GET', '/api/admin/imports'],
+            ['POST', '/api/admin/imports/idoklad/credentials/rotate'],
+            ['GET', '/api/admin/imports/42/download'],
+            ['POST', '/api/maintenance/reindex'],
+            // Klíče k AI poskytovatelům zůstávají superadmin-only (F7).
+            ['GET', '/api/admin/imports/ai/credentials'],
+            ['PUT', '/api/admin/imports/ai/credentials'],
+            ['DELETE', '/api/admin/imports/anthropic/credentials'],
+            ['POST', '/api/admin/imports/ai/credentials/test'],
+        ] as [$method, $path]) {
+            self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match($method, $path)?->kind, "$method $path");
+        }
+    }
+
+    /** Metoda mimo pravidlo nesmí propadnout na permission větev (GET nespouští import). */
+    public function testAdminImportRulesRespectMethod(): void
+    {
+        $map = new RoutePermissionMap();
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/admin/import')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/admin/imports/idoklad/start')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('PUT', '/api/admin/imports/42')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/admin/imports/ai-extract-pdf')?->kind);
+    }
+
     public function testAdminAndSelfServiceAreFixedClasses(): void
     {
         $map = new RoutePermissionMap();
